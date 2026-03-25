@@ -1,15 +1,17 @@
 import { Database } from "bun:sqlite"
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  DaemonBackedIssueStore,
   DEFAULT_TTL_MS,
   type GitHubClient,
   ghListToRestFallback,
   IssueStore,
   type IssueStoreReader,
   replayPendingMutations,
+  resetDaemonBackedStore,
   syncUpstreamState,
   tryRestFallback,
 } from "./issue-store.ts"
@@ -1276,6 +1278,31 @@ describe("IssueStoreReader", () => {
       const issue = await reader.getIssue<{ title: string }>("test/repo", 1)
       expect(issue?.title).toBe("Issue A")
 
+      store.upsertPullRequests("test/repo", [{ number: 10, title: "PR X", headRefName: "feat/x" }])
+      store.upsertCiStatuses("test/repo", [
+        { sha: "deadbeef", run_id: 99, status: "completed", conclusion: "success", url: "u" },
+      ])
+      store.upsertCiBranchRuns("test/repo", "main", [
+        { databaseId: 1, status: "completed", conclusion: "success", workflowName: "CI" },
+      ])
+      store.upsertPrBranchDetail("test/repo", "feat/x", {
+        reviewDecision: "REVIEW_REQUIRED",
+        commentCount: 2,
+      })
+
+      const pr = await reader.getPullRequest<{ title: string }>("test/repo", 10)
+      expect(pr?.title).toBe("PR X")
+
+      const ci = await reader.getCiStatus<{ conclusion: string }>("test/repo", "deadbeef")
+      expect(ci?.conclusion).toBe("success")
+
+      const runs = await reader.getCiBranchRuns<{ workflowName: string }>("test/repo", "main")
+      expect(runs).toHaveLength(1)
+      expect(runs![0]!.workflowName).toBe("CI")
+
+      const detail = await reader.getPrBranchDetail<{ commentCount: number }>("test/repo", "feat/x")
+      expect(detail?.commentCount).toBe(2)
+
       const missing = await reader.getIssue("test/repo", 999)
       expect(missing).toBeNull()
     } finally {
@@ -1290,6 +1317,10 @@ describe("IssueStoreReader", () => {
       listPullRequests: async <T = unknown>() => [] as T[],
       getIssue: async <T = unknown>(_repo: string, num: number) =>
         (num === 42 ? data[0] : null) as T | null,
+      getPullRequest: async () => null,
+      getCiStatus: async () => null,
+      getCiBranchRuns: async () => null,
+      getPrBranchDetail: async () => null,
     }
 
     const issues = await mockReader.listIssues("any/repo")
@@ -1350,6 +1381,78 @@ describe("IssueStoreReader", () => {
     } finally {
       store.close()
     }
+  })
+})
+
+describe("DaemonBackedIssueStore", () => {
+  afterEach(() => {
+    resetDaemonBackedStore()
+  })
+
+  test("getPullRequest maps gh-query JSON array to a single object", async () => {
+    const fetchMock = (async () =>
+      Response.json({ value: [{ number: 9, title: "T" }], hit: false })) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    const pr = await store.getPullRequest<{ number: number; title: string }>("owner/repo", 9)
+    expect(pr).toEqual({ number: 9, title: "T" })
+  })
+
+  test("getCiStatus maps first workflow run to upsertCiStatuses-compatible shape", async () => {
+    const fetchMock = (async () =>
+      Response.json({
+        value: [
+          {
+            databaseId: 42,
+            status: "completed",
+            conclusion: "success",
+            url: "https://example.com/run",
+            headSha: "abc123",
+          },
+        ],
+        hit: false,
+      })) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    const st = await store.getCiStatus("owner/repo", "abc123")
+    expect(st).toMatchObject({
+      sha: "abc123",
+      run_id: 42,
+      status: "completed",
+      conclusion: "success",
+      url: "https://example.com/run",
+    })
+  })
+
+  test("getCiBranchRuns returns workflow rows from gh-query", async () => {
+    const rows = [{ databaseId: 1, workflowName: "CI" }]
+    const fetchMock = (async () =>
+      Response.json({ value: rows, hit: false })) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    const runs = await store.getCiBranchRuns("owner/repo", "main")
+    expect(runs).toEqual(rows)
+  })
+
+  test("getPrBranchDetail maps reviewDecision and comment count", async () => {
+    const fetchMock = (async () =>
+      Response.json({
+        value: [{ reviewDecision: "APPROVED", comments: [{ id: 1 }, { id: 2 }] }],
+        hit: false,
+      })) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    const d = await store.getPrBranchDetail<{ reviewDecision: string; commentCount: number }>(
+      "owner/repo",
+      "feature/foo"
+    )
+    expect(d).toEqual({ reviewDecision: "APPROVED", commentCount: 2 })
+  })
+
+  test("returns null from read helpers when gh-query value is null", async () => {
+    const fetchMock = (async () =>
+      Response.json({ value: null, hit: false })) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    expect(await store.getPullRequest("owner/repo", 1)).toBeNull()
+    expect(await store.getCiStatus("owner/repo", "sha")).toBeNull()
+    expect(await store.getCiBranchRuns("owner/repo", "main")).toBeNull()
+    expect(await store.getPrBranchDetail("owner/repo", "b")).toBeNull()
   })
 })
 

@@ -182,48 +182,6 @@ async function getOpenRouterModel(modelId?: string): Promise<LanguageModel> {
   )
 }
 
-// ─── Claude Code provider ─────────────────────────────────────────────────────
-
-async function promptClaudeText(prompt: string, options?: PromptOptions): Promise<string> {
-  return runText(await getClaudeModel(options?.model), prompt, options)
-}
-
-async function promptClaudeStreamText(
-  prompt: string,
-  options?: PromptStreamOptions
-): Promise<string> {
-  return runStreamText(await getClaudeModel(options?.model), prompt, options)
-}
-
-async function promptClaudeObject<T>(
-  prompt: string,
-  schema: ZodType<T>,
-  options?: PromptOptions
-): Promise<T> {
-  return runObject(await getClaudeModel(options?.model), prompt, schema, options)
-}
-
-// ─── OpenRouter provider ──────────────────────────────────────────────────────
-
-async function promptOpenRouterText(prompt: string, options?: PromptOptions): Promise<string> {
-  return runText(await getOpenRouterModel(options?.model), prompt, options)
-}
-
-async function promptOpenRouterStreamText(
-  prompt: string,
-  options?: PromptStreamOptions
-): Promise<string> {
-  return runStreamText(await getOpenRouterModel(options?.model), prompt, options)
-}
-
-async function promptOpenRouterObject<T>(
-  prompt: string,
-  schema: ZodType<T>,
-  options?: PromptOptions
-): Promise<T> {
-  return runObject(await getOpenRouterModel(options?.model), prompt, schema, options)
-}
-
 // ─── Provider capability registry ────────────────────────────────────────────
 
 interface ProviderCapabilities {
@@ -231,6 +189,18 @@ interface ProviderCapabilities {
   streamText: (prompt: string, options?: PromptStreamOptions) => Promise<string>
   // ZodType<unknown> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
   object: (prompt: string, schema: ZodType<unknown>, options?: PromptOptions) => Promise<unknown>
+}
+
+function makeProviderCapabilities(
+  getModel: (modelId?: string) => Promise<LanguageModel>
+): ProviderCapabilities {
+  return {
+    text: (prompt, options) => getModel(options?.model).then((m) => runText(m, prompt, options)),
+    streamText: (prompt, options) =>
+      getModel(options?.model).then((m) => runStreamText(m, prompt, options)),
+    object: (prompt, schema, options) =>
+      getModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
+  }
 }
 
 /**
@@ -245,16 +215,8 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     object: (prompt, schema, options) =>
       promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
   },
-  claude: {
-    text: promptClaudeText,
-    streamText: promptClaudeStreamText,
-    object: promptClaudeObject,
-  },
-  openrouter: {
-    text: promptOpenRouterText,
-    streamText: promptOpenRouterStreamText,
-    object: promptOpenRouterObject,
-  },
+  claude: makeProviderCapabilities(getClaudeModel),
+  openrouter: makeProviderCapabilities(getOpenRouterModel),
 }
 
 // ─── Provider selection ───────────────────────────────────────────────────────

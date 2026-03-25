@@ -86,6 +86,13 @@ export interface IssueStoreReader {
   listIssues<T = unknown>(repo: string): Promise<T[]>
   listPullRequests<T = unknown>(repo: string): Promise<T[]>
   getIssue<T = unknown>(repo: string, number: number): Promise<T | null>
+  getPullRequest<T = unknown>(repo: string, number: number): Promise<T | null>
+  /** CI status for a commit SHA (shape matches `upsertCiStatuses` records). */
+  getCiStatus<T = unknown>(repo: string, sha: string): Promise<T | null>
+  /** Workflow runs for a branch, or `null` when unavailable (matches sync IssueStore TTL semantics). */
+  getCiBranchRuns<T = unknown>(repo: string, branch: string): Promise<T[] | null>
+  /** PR review/comment summary for a branch head (shape matches `upsertPrBranchDetail`). */
+  getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null>
 }
 
 // ─── GitHubClient ────────────────────────────────────────────────────────────
@@ -503,6 +510,14 @@ export class IssueStore {
         Promise.resolve(this.listPullRequests<T>(repo)),
       getIssue: <T = unknown>(repo: string, number: number) =>
         Promise.resolve(this.getIssue<T>(repo, number)),
+      getPullRequest: <T = unknown>(repo: string, number: number) =>
+        Promise.resolve(this.getPullRequest<T>(repo, number)),
+      getCiStatus: <T = unknown>(repo: string, sha: string) =>
+        Promise.resolve(this.getCiStatus<T>(repo, sha)),
+      getCiBranchRuns: <T = unknown>(repo: string, branch: string) =>
+        Promise.resolve(this.getCiBranchRuns<T>(repo, branch)),
+      getPrBranchDetail: <T = unknown>(repo: string, branch: string) =>
+        Promise.resolve(this.getPrBranchDetail<T>(repo, branch)),
     }
   }
 }
@@ -901,48 +916,31 @@ export interface UpstreamSyncResult {
  * Fetches open issues, open PRs, and recent workflow runs, then upserts
  * into the shared store. Safe to call on a cadence from the daemon.
  */
-function syncIssues(
-  s: IssueStore,
-  repo: string,
-  issues: { number: number }[] | null,
-  closedIssues: { number: number }[] | null,
-  result: UpstreamSyncResult
-): void {
-  if (issues) {
-    if (issues.length > 0) s.upsertIssues(repo, issues)
-    result.issues.removed = s.removeClosedIssues(repo, new Set(issues.map((i) => i.number)))
-    result.issues.upserted = issues.length
-  }
-  if (closedIssues?.length) {
-    s.removeIssues(
-      repo,
-      closedIssues.map((ci) => ci.number)
-    )
-    result.issues.removed += closedIssues.length
-  }
+
+interface EntitySyncOps {
+  upsert: (repo: string, items: { number: number }[]) => void
+  removeClosed: (repo: string, openNumbers: Set<number>) => number
+  remove: (repo: string, numbers: number[]) => void
 }
 
-function syncPullRequests(
-  s: IssueStore,
+function syncEntityGroup(
   repo: string,
-  prs: { number: number }[] | null,
-  closedPrs: { number: number }[] | null,
-  result: UpstreamSyncResult
+  open: { number: number }[] | null,
+  closed: { number: number }[] | null,
+  ops: EntitySyncOps,
+  bucket: { upserted: number; removed: number }
 ): void {
-  if (prs) {
-    if (prs.length > 0) s.upsertPullRequests(repo, prs)
-    result.pullRequests.removed = s.removeClosedPullRequests(
-      repo,
-      new Set(prs.map((p) => p.number))
-    )
-    result.pullRequests.upserted = prs.length
+  if (open) {
+    if (open.length > 0) ops.upsert(repo, open)
+    bucket.removed = ops.removeClosed(repo, new Set(open.map((i) => i.number)))
+    bucket.upserted = open.length
   }
-  if (closedPrs?.length) {
-    s.removePullRequests(
+  if (closed?.length) {
+    ops.remove(
       repo,
-      closedPrs.map((cp) => cp.number)
+      closed.map((c) => c.number)
     )
-    result.pullRequests.removed += closedPrs.length
+    bucket.removed += closed.length
   }
 }
 
@@ -989,8 +987,28 @@ export async function syncUpstreamState(
     gh.listPullRequests(cwd, "closed"),
   ])
 
-  syncIssues(s, repo, issues, closedIssues, result)
-  syncPullRequests(s, repo, prs, closedPrs, result)
+  syncEntityGroup(
+    repo,
+    issues,
+    closedIssues,
+    {
+      upsert: (r, items) => s.upsertIssues(r, items),
+      removeClosed: (r, nums) => s.removeClosedIssues(r, nums),
+      remove: (r, nums) => s.removeIssues(r, nums),
+    },
+    result.issues
+  )
+  syncEntityGroup(
+    repo,
+    prs,
+    closedPrs,
+    {
+      upsert: (r, items) => s.upsertPullRequests(r, items),
+      removeClosed: (r, nums) => s.removeClosedPullRequests(r, nums),
+      remove: (r, nums) => s.removePullRequests(r, nums),
+    },
+    result.pullRequests
+  )
   syncCiRuns(s, repo, runs, result)
 
   return result
@@ -1599,12 +1617,12 @@ function createNoOpStore(): IssueStore {
   const noop = {} as IssueStore
   let warnedOnce = false
   let suppressedOps = 0
-  const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiBranchRuns"])
+  const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiStatuses"])
   const READ_GET_METHODS = new Set([
     "getIssue",
     "getPullRequest",
     "getCiStatus",
-    "getCiBranchRun",
+    "getCiBranchRuns",
     "getPrBranchDetail",
   ])
 
@@ -1684,13 +1702,25 @@ const DAEMON_FALLBACK_TIMEOUT_MS = 2_000
  *   const store = getDaemonBackedStore()
  *   const issues = await store.listIssues<Issue>(repo)
  */
+/** `gh ... --json` for `issue view` / `pr view` returns a one-element array; normalize to a single object. */
+function unwrapGhViewJson<T>(value: T | T[] | null | undefined): T | null {
+  if (value == null) return null
+  if (Array.isArray(value)) return (value[0] ?? null) as T | null
+  return value as T
+}
+
 export class DaemonBackedIssueStore implements IssueStoreReader {
   private daemonAvailable: boolean | null = null
+
+  constructor(
+    /** @internal Override for tests — avoids mutating `globalThis.fetch` under concurrent test runs. */
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
+  ) {}
 
   private async query<T>(args: string[]): Promise<T | null> {
     if (this.daemonAvailable === false) return null
     try {
-      const resp = await fetch(`http://127.0.0.1:${DAEMON_FALLBACK_PORT}/gh-query`, {
+      const resp = await this.fetchImpl(`http://127.0.0.1:${DAEMON_FALLBACK_PORT}/gh-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args, cwd: ".", ttlMs: 300_000 }),
@@ -1738,7 +1768,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
   }
 
   async getIssue<T = unknown>(repo: string, number: number): Promise<T | null> {
-    const result = await this.query<T[]>([
+    const result = await this.query<T | T[]>([
       "issue",
       "view",
       "--repo",
@@ -1747,7 +1777,88 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       "--json",
       "number,title,labels,author,assignees,body,state",
     ])
-    return Array.isArray(result) ? (result[0] ?? null) : result
+    return unwrapGhViewJson(result) as T | null
+  }
+
+  async getPullRequest<T = unknown>(repo: string, number: number): Promise<T | null> {
+    const result = await this.query<T | T[]>([
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      repo,
+      "--json",
+      "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt,body",
+    ])
+    return unwrapGhViewJson(result) as T | null
+  }
+
+  async getCiStatus<T = unknown>(repo: string, sha: string): Promise<T | null> {
+    const runs = await this.query<
+      {
+        databaseId: number
+        status: string
+        conclusion: string
+        url: string
+        headSha?: string
+      }[]
+    >([
+      "run",
+      "list",
+      "--repo",
+      repo,
+      "--commit",
+      sha,
+      "--json",
+      "databaseId,status,conclusion,url,headSha",
+      "--limit",
+      "5",
+    ])
+    if (!runs?.length) return null
+    const r = runs[0]!
+    const mapped = {
+      sha: r.headSha ?? sha,
+      run_id: r.databaseId,
+      status: r.status,
+      conclusion: r.conclusion,
+      url: r.url,
+    }
+    return mapped as T
+  }
+
+  async getCiBranchRuns<T = unknown>(repo: string, branch: string): Promise<T[] | null> {
+    const runs = await this.query<T[]>([
+      "run",
+      "list",
+      "--repo",
+      repo,
+      "--branch",
+      branch,
+      "--limit",
+      "10",
+      "--json",
+      "databaseId,status,conclusion,workflowName,createdAt,event",
+    ])
+    return runs ?? null
+  }
+
+  async getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null> {
+    const raw = await this.query<{ reviewDecision?: string; comments?: unknown[] } | null>([
+      "pr",
+      "view",
+      branch,
+      "--repo",
+      repo,
+      "--json",
+      "reviewDecision,comments",
+    ])
+    const fresh = unwrapGhViewJson(raw)
+    if (!fresh) return null
+    const detail = {
+      reviewDecision: fresh.reviewDecision ?? "",
+      commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
+    }
+    return detail as T
   }
 
   get isDaemonAvailable(): boolean | null {
