@@ -41,7 +41,7 @@ function usage(): string {
     "  --dir      Project root for --project / --local (default: cwd)",
     "",
     "Runtime precedence (Claude Code): ANTHROPIC_MODEL env, then merged settings (local > project > user).",
-    "Aliases (also accepts full model IDs, ARNs, etc.): " + CLAUDE_MODEL_ALIASES.join(", "),
+    `Aliases (also accepts full model IDs, ARNs, etc.): ${CLAUDE_MODEL_ALIASES.join(", ")}`,
   ].join("\n")
 }
 

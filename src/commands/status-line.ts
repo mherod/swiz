@@ -4,6 +4,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { detectCiProviders } from "../detect.ts"
 import {
   ensureGitExclude,
   type GitBranchStatus,
@@ -682,10 +683,11 @@ export async function computeWarmStatusLineSnapshot(
   sessionId: string | null | undefined
 ): Promise<WarmStatusLineSnapshot> {
   const shortCwd = shortenPath(cwd)
-  const [gitResult, swizSettings, projectSettings] = await Promise.all([
+  const [gitResult, swizSettings, projectSettings, ciProviders] = await Promise.all([
     getGitBranchAndInfo(cwd),
     readSwizSettings().catch(() => null),
     readProjectSettings(cwd).catch(() => null),
+    detectCiProviders(cwd).catch(() => new Set()),
   ])
 
   const effective = swizSettings
@@ -693,6 +695,7 @@ export async function computeWarmStatusLineSnapshot(
     : null
   const activeSegments = activeSegmentsFromEffective(effective)
   const needs = computeSegmentNeeds(activeSegments)
+  if (!ciProviders.has("github-actions")) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective)
 }

@@ -1,6 +1,6 @@
-import { AGENTS, type AgentDef } from "./agents.ts"
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { AGENTS, type AgentDef } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
 
 // ─── Terminal & shell detection ──────────────────────────────────────────────
