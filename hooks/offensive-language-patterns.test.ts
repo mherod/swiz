@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { findAllLazyPatterns, findLazyPattern } from "./offensive-language-patterns.ts"
+import {
+  findAllLazyPatterns,
+  findLazyPattern,
+  stripQuotedText,
+} from "./offensive-language-patterns.ts"
 
 describe("offensive-language-patterns", () => {
   // ── Hedging ────────────────────────────────────────────────────────────────
@@ -191,6 +195,26 @@ describe("offensive-language-patterns", () => {
     })
     test("matches 'a separate concern'", () => {
       const m = findLazyPattern("That's a separate concern from what I'm working on.")
+      expect(m?.category).toBe("scope_limitation")
+    })
+    test("matches 'these remaining tasks are follow-up scope'", () => {
+      const m = findLazyPattern("These remaining tasks are follow-up scope.")
+      expect(m?.category).toBe("scope_limitation")
+    })
+    test("matches 'those' and two-word 'follow up scope'", () => {
+      const m = findLazyPattern("Those remaining tasks are follow up scope.")
+      expect(m?.category).toBe("scope_limitation")
+    })
+    test("matches singular 'the remaining task is follow-up scope'", () => {
+      const m = findLazyPattern("The remaining task is follow-up scope.")
+      expect(m?.category).toBe("scope_limitation")
+    })
+    test("matches 'remaining items' variant", () => {
+      const m = findLazyPattern("These remaining items are follow-up scope.")
+      expect(m?.category).toBe("scope_limitation")
+    })
+    test("matches with irregular whitespace between tokens", () => {
+      const m = findLazyPattern("These  remaining  tasks  are  follow-up  scope.")
       expect(m?.category).toBe("scope_limitation")
     })
   })
@@ -415,6 +439,21 @@ describe("offensive-language-patterns", () => {
     })
   })
 
+  // ── Input hygiene & edge cases (stripQuotedText, empty input) ───────────────
+  describe("findLazyPattern input edge cases", () => {
+    test("returns null for empty string", () => {
+      expect(findLazyPattern("")).toBeNull()
+    })
+    test("returns null when evasion appears only inside stripped double quotes", () => {
+      expect(findLazyPattern('User wrote: "These remaining tasks are follow-up scope."')).toBeNull()
+    })
+    test("stripQuotedText removes double-quoted spans before matching", () => {
+      expect(stripQuotedText('Prefix "These remaining tasks are follow-up scope." suffix')).toBe(
+        "Prefix  suffix"
+      )
+    })
+  })
+
   // ── Non-matches ────────────────────────────────────────────────────────────
   describe("non-matches", () => {
     test("returns null for straightforward fix commitment", () => {
@@ -427,6 +466,13 @@ describe("offensive-language-patterns", () => {
     })
     test("returns null for factual status report", () => {
       expect(findLazyPattern("All 47 tests pass. Typecheck clean.")).toBeNull()
+    })
+    test("returns null for descriptive prose with 'remaining tasks' and 'follow-up scope' non-adjacent", () => {
+      expect(
+        findLazyPattern(
+          "The remaining tasks in the follow-up scope section are documented in REQUIREMENTS.md."
+        )
+      ).toBeNull()
     })
   })
 

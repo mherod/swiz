@@ -895,6 +895,15 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "The hook expanded your scope. Accept it. " +
       "When a hook blocks you, its requirement becomes part of your current task.",
   },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:these|those|the)\s+remaining\s+(?:tasks?|items?)\s+(?:are|is)\s+follow[- ]?up\s+scope\b/i,
+    response:
+      "Calling remaining tasks 'follow-up scope' is scope evasion. " +
+      "If they are still open in this session, they are your current work — not a label that postpones them. " +
+      "Do them now.",
+  },
 
   // ── Performative compliance patterns ──────────────────────────────────
   // The agent appears to comply while doing the minimum or nothing
@@ -1532,6 +1541,8 @@ function matchesWithoutNegation(entry: LazyPattern, cleaned: string): boolean {
   if (!entry.negationPattern) return entry.pattern.test(cleaned)
   let offset = 0
   while (offset < cleaned.length) {
+    // Avoid stale lastIndex if a pattern ever uses the `g` flag.
+    entry.pattern.lastIndex = 0
     const match = entry.pattern.exec(cleaned.slice(offset))
     if (!match) return false
     const matchIndex = match.index + offset
