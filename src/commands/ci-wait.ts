@@ -188,7 +188,7 @@ export const ciWaitCommand: Command = {
   async run(args) {
     const settings = await readSwizSettings()
     if (settings.ignoreCi) {
-      console.error("ignore-ci is enabled — skipping CI wait.")
+      stderrLog("ignore-ci", "ignore-ci is enabled — skipping CI wait.")
       return
     }
 
