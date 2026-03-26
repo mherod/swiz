@@ -39,6 +39,9 @@ import {
 
 export { missingRefinementCategories, needsRefinement }
 
+/** Labels whose block reason should be reviewed when no ready issues remain. */
+const REVIEWABLE_BLOCK_LABELS = new Set(["blocked", "upstream", "on-hold", "waiting"])
+
 /** Labels that indicate an issue is not actionable right now. */
 const SKIP_LABELS = new Set([
   "blocked",
@@ -182,6 +185,7 @@ async function updateCooldown(sessionId: string | null, cwd: string): Promise<vo
 }
 
 // Pre-compute normalised lookups so source tables stay human-readable.
+const REVIEWABLE_BLOCK_NORM = new Set([...REVIEWABLE_BLOCK_LABELS].map(normaliseLabel))
 const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
 const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
@@ -309,37 +313,46 @@ async function readCachedIssues(repoSlug: string): Promise<Issue[]> {
   }
 }
 
-function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
-  const userFiltered = filterUser
+function filterByUser(issues: Issue[], filterUser?: string): Issue[] {
+  return filterUser
     ? issues.filter(
         (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
       )
     : issues
-  return userFiltered.filter(
+}
+
+function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
+  return filterByUser(issues, filterUser).filter(
     (i) => !(i.labels ?? []).some((l) => SKIP_NORM.has(normaliseLabel(l.name)))
   )
 }
 
-export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
+/** Issues with reviewable block labels (blocked, upstream, on-hold, waiting). */
+function filterBlockedIssues(issues: Issue[], filterUser?: string): Issue[] {
+  return filterByUser(issues, filterUser).filter((i) =>
+    (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name)))
+  )
+}
+
+async function getAllOpenIssues(
+  cwd: string
+): Promise<{ issues: Issue[]; repoSlug: string | null }> {
   const repoSlug = await getRepoSlug(cwd)
-  if (!repoSlug) return []
+  if (!repoSlug) return { issues: [], repoSlug: null }
 
   // Store-first: use cached data if fresh
   const cached = await readCachedIssues(repoSlug)
-  if (cached.length > 0) {
-    return filterVisibleIssues(cached, filterUser)
-  }
+  if (cached.length > 0) return { issues: cached, repoSlug }
 
   // Daemon-backed store: try daemon HTTP API directly when SQLite is empty
   const daemonIssues = await getDaemonBackedStore().listIssues<Issue>(repoSlug)
   if (daemonIssues.length > 0) {
-    // Populate the local SQLite store so subsequent reads (within TTL) are fast
     try {
       getIssueStore().upsertIssues(repoSlug, daemonIssues)
     } catch {
       // Non-fatal: local cache write failure shouldn't block the hook
     }
-    return filterVisibleIssues(daemonIssues, filterUser)
+    return { issues: daemonIssues, repoSlug }
   }
 
   // Final fallback: direct gh CLI
@@ -353,7 +366,12 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
     await cacheIssuesAndReplayMutations(repoSlug, liveIssues, cwd)
   }
 
-  return filterVisibleIssues(liveIssues ?? [], filterUser)
+  return { issues: liveIssues ?? [], repoSlug }
+}
+
+export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
+  const { issues } = await getAllOpenIssues(cwd)
+  return filterVisibleIssues(issues, filterUser)
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
@@ -414,6 +432,7 @@ interface StopContext {
   conflictingPRs: PR[]
   sortedRefinement: Issue[]
   sortedIssues: Issue[]
+  blockedIssues: Issue[]
   firstRefinementNum?: number
   firstIssueNum?: number
 }
@@ -527,6 +546,26 @@ function buildIssueSection(ctx: StopContext): string[] {
   return lines
 }
 
+function buildBlockedIssueSection(ctx: StopContext): string[] {
+  const lines: string[] = []
+  lines.push(
+    `No ready issues remain, but ${ctx.blockedIssues.length} issue(s) are blocked and may be unblockable now:`
+  )
+  const shownBlocked = ctx.blockedIssues.slice(0, MAX_SHOWN_ISSUES)
+  const hiddenBlocked = ctx.blockedIssues.length - shownBlocked.length
+  for (const issue of shownBlocked) {
+    const blockLabel = (issue.labels ?? []).find((l) =>
+      REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))
+    )
+    const tag = blockLabel ? ` [${blockLabel.name}]` : ""
+    lines.push(`  #${issue.number} ${issue.title}${tag}`)
+  }
+  if (hiddenBlocked > 0) {
+    lines.push(`  …and ${hiddenBlocked} more blocked issue(s)`)
+  }
+  return lines
+}
+
 function appendSection(lines: string[], section: string[]): void {
   if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("")
   lines.push(...section)
@@ -549,6 +588,9 @@ function buildStopReasonLines(ctx: StopContext): string[] {
   }
   if (ctx.sortedIssues.length > 0) {
     appendSection(reasonLines, buildIssueSection(ctx))
+  }
+  if (ctx.blockedIssues.length > 0) {
+    appendSection(reasonLines, buildBlockedIssueSection(ctx))
   }
 
   return reasonLines
@@ -603,11 +645,29 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   return [`Pick up and resolve issue #${issueNum} before stopping:`, subSteps]
 }
 
+function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
+  const firstBlocked = ctx.blockedIssues[0]
+  const blockedNum = firstBlocked?.number ?? "<number>"
+  const subSteps: ActionPlanItem[] = []
+  subSteps.push(
+    `Read the latest comments on #${blockedNum} to understand the block reason — dependencies, upstream issues, or missing information`,
+    `Check if the blocking condition has been resolved (e.g., dependency issue closed, upstream fix merged)`,
+    `If unblockable: remove the block label and add a readiness label: gh issue edit ${blockedNum} --remove-label "blocked" --add-label "ready"`,
+    `If still blocked: document current status in a comment and move to the next blocked issue`
+  )
+  if (skillExists("refine-issue"))
+    subSteps.push(`/refine-issue ${blockedNum} — Refine and re-label the unblocked issue`)
+  if (skillExists("triage-issues"))
+    subSteps.push("/triage-issues — Run the full grooming workflow across the backlog")
+  return ["Review blocked issues — dependencies may have been resolved:", subSteps]
+}
+
 function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
   if (feedbackPrCount(ctx) > 0) planSteps.push(...buildPrFeedbackSteps(ctx))
   if (ctx.sortedRefinement.length > 0) planSteps.push(...buildRefinementSteps(ctx))
   if (ctx.sortedIssues.length > 0) planSteps.push(...buildIssuePickupSteps(ctx))
+  if (ctx.blockedIssues.length > 0) planSteps.push(...buildBlockedIssueReviewSteps(ctx))
   return planSteps
 }
 
@@ -619,22 +679,34 @@ async function gatherStopContext(
 ): Promise<{
   sortedRefinement: Issue[]
   sortedIssues: Issue[]
+  blockedIssues: Issue[]
   firstRefinementNum?: number
   firstIssueNum?: number
 }> {
-  const allIssues = hasChangesRequested
-    ? []
-    : await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
+  if (hasChangesRequested) {
+    return { sortedRefinement: [], sortedIssues: [], blockedIssues: [] }
+  }
 
-  const refinementIssues = allIssues.filter((i) => needsRefinement(i))
-  const actionableIssues = allIssues.filter((i) => !needsRefinement(i))
+  const { issues: rawIssues } = await getAllOpenIssues(cwd)
+  const filterUser = isPersonalRepo ? undefined : currentUser
+  const actionable = filterVisibleIssues(rawIssues, filterUser)
+
+  const refinementIssues = actionable.filter((i) => needsRefinement(i))
+  const readyIssues = actionable.filter((i) => !needsRefinement(i))
 
   const sortedRefinement = sortIssuesByScoreAndNumber(refinementIssues)
-  const sortedIssues = sortIssuesByScoreAndNumber(actionableIssues)
+  const sortedIssues = sortIssuesByScoreAndNumber(readyIssues)
+
+  // Only surface blocked issues when there are no ready issues to work on
+  const blockedIssues =
+    sortedIssues.length === 0
+      ? sortIssuesByScoreAndNumber(filterBlockedIssues(rawIssues, filterUser))
+      : []
 
   return {
     sortedRefinement,
     sortedIssues,
+    blockedIssues,
     firstRefinementNum: sortedRefinement[0]?.number,
     firstIssueNum: sortedIssues[0]?.number,
   }
@@ -701,6 +773,7 @@ function buildStopContext(
   const total =
     gathered.sortedIssues.length +
     gathered.sortedRefinement.length +
+    gathered.blockedIssues.length +
     changesRequestedPRs.length +
     reviewRequiredPRs.length +
     conflictingPRs.length
@@ -715,6 +788,7 @@ function buildStopContext(
     conflictingPRs,
     sortedRefinement: gathered.sortedRefinement,
     sortedIssues: gathered.sortedIssues,
+    blockedIssues: gathered.blockedIssues,
     firstRefinementNum: gathered.sortedRefinement[0]?.number,
     firstIssueNum: gathered.sortedIssues[0]?.number,
   }
