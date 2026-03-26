@@ -227,6 +227,29 @@ describe("stop-auto-continue", () => {
         expect(names).toContain(`stop-suggestions-cap-${i}.json`)
       }
     })
+
+    test("does not remove non-suggestion files under .swiz", async () => {
+      const homeDir = await createTempDir()
+      const swizDir = join(homeDir, ".swiz")
+      await mkdir(swizDir, { recursive: true })
+      const otherPath = join(swizDir, "settings.json")
+      await writeFile(otherPath, "{}\n")
+      const stalePath = join(swizDir, "stop-suggestions-only-stale.json")
+      await writeFile(stalePath, '{"seen":{}}')
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+      await utimes(stalePath, eightDaysAgo, eightDaysAgo)
+
+      const prevHome = process.env.HOME
+      process.env.HOME = homeDir
+      try {
+        await __testOnly_pruneOldSuggestionLogs()
+      } finally {
+        process.env.HOME = prevHome
+      }
+
+      expect(await Bun.file(otherPath).exists()).toBe(true)
+      expect(await Bun.file(stalePath).exists()).toBe(false)
+    })
   })
 
   test("blocks with AI suggestion for a substantive session", async () => {
