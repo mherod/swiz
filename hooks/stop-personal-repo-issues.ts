@@ -359,19 +359,24 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
   const repoSlug = await getRepoSlug(cwd)
 
-  // Store-first: try to read PRs from the IssueStore
+  // Store-first: try to read PRs from the IssueStore.
+  // Only use cached data if some entries have author info — PRs stored without
+  // author (e.g. from older gh CLI fetches that omitted the field) would be
+  // silently filtered out, causing the function to return an empty list even
+  // when the user has open PRs needing attention.
   if (repoSlug) {
     const store = getIssueStore()
     const cachedPrs = store.listPullRequests<PR & { author?: { login: string } }>(repoSlug)
-    if (cachedPrs.length > 0) {
+    const hasAuthorData = cachedPrs.some((pr) => pr.author?.login != null)
+    if (hasAuthorData) {
       // Filter locally: authored by or assigned to current user
       const relevant = cachedPrs.filter((pr) => pr.author?.login === currentUser)
       return relevant.filter(openPrNeedsStopAttention)
     }
   }
 
-  // Fallback: direct gh CLI calls
-  const jsonFields = "number,title,url,reviewDecision,mergeable,createdAt"
+  // Fallback: direct gh CLI calls (include author so cached entries support store-first filtering)
+  const jsonFields = "number,title,url,reviewDecision,mergeable,createdAt,author"
   const [authoredPrs, reviewerPrs] = await Promise.all([
     ghJson<PR[]>(
       ["pr", "list", "--state", "open", "--author", currentUser, "--json", jsonFields],

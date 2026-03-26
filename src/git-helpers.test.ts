@@ -139,6 +139,8 @@ describe("getGitBranchStatus", () => {
     expect(typeof status.conflicts).toBe("number")
     expect(typeof status.stash).toBe("number")
     expect(typeof status.changedFallback).toBe("number")
+    expect(status.upstream === null || typeof status.upstream === "string").toBe(true)
+    expect(typeof status.upstreamGone).toBe("boolean")
   })
 
   test("counts are non-negative integers", async () => {

@@ -422,6 +422,10 @@ export interface GitBranchStatus {
   stash: number
   /** Non-zero only when `git status --porcelain=2` is unavailable (fallback). */
   changedFallback: number
+  /** Remote tracking branch name, or null when no upstream is configured. */
+  upstream: string | null
+  /** True when upstream is set but the remote branch no longer exists (gone). */
+  upstreamGone: boolean
 }
 
 /**
@@ -442,6 +446,8 @@ interface StatusCounts {
   unstaged: number
   untracked: number
   conflicts: number
+  upstream: string | null
+  upstreamAbSeen: boolean
 }
 
 function parseBranchAbLine(line: string, counts: StatusCounts): void {
@@ -449,6 +455,7 @@ function parseBranchAbLine(line: string, counts: StatusCounts): void {
   if (match) {
     counts.ahead = Number(match[1] ?? "0")
     counts.behind = Number(match[2] ?? "0")
+    counts.upstreamAbSeen = true
   }
 }
 
@@ -466,9 +473,13 @@ function parseStatusV2Lines(out: string): StatusCounts {
     unstaged: 0,
     untracked: 0,
     conflicts: 0,
+    upstream: null,
+    upstreamAbSeen: false,
   }
   for (const line of out ? out.split("\n") : []) {
     if (line.startsWith("# branch.ab ")) parseBranchAbLine(line, counts)
+    else if (line.startsWith("# branch.upstream "))
+      counts.upstream = line.slice("# branch.upstream ".length).trim()
     else if (line.startsWith("1 ") || line.startsWith("2 ")) parseChangedEntry(line, counts)
     else if (line.startsWith("u ")) counts.conflicts++
     else if (line.startsWith("? ")) counts.untracked++
@@ -509,15 +520,32 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
   if (statusOut) {
     counts = parseStatusV2Lines(statusOut)
   } else {
-    counts = { ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0, conflicts: 0 }
+    counts = {
+      ahead: 0,
+      behind: 0,
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflicts: 0,
+      upstream: null,
+      upstreamAbSeen: false,
+    }
     const fallbackOut = gitSpawnSyncLines(["status", "--porcelain"], gitPaths.workTree)
     changedFallback = fallbackOut ? fallbackOut.split("\n").length : 0
   }
 
   const stashOut = gitSpawnSyncLines(["stash", "list", "--format=%gd"], gitPaths.workTree)
   const stash = stashOut ? stashOut.split("\n").length : 0
+  const { upstreamAbSeen, upstream, ...restCounts } = counts
 
-  return { branch, ...counts, stash, changedFallback }
+  return {
+    branch,
+    ...restCounts,
+    stash,
+    changedFallback,
+    upstream,
+    upstreamGone: upstream !== null && !upstreamAbSeen,
+  }
 }
 
 // ─── Branch-policy classification helpers ────────────────────────────────────

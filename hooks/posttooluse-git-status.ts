@@ -6,6 +6,58 @@ import { toolHookInputSchema } from "./schemas.ts"
 import type { GitStatusV2 } from "./utils/git-utils.ts"
 import { emitContext, getGitStatusV2, isGitRepo } from "./utils/hook-utils.ts"
 
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+
+function numField(s: Record<string, unknown>, key: string): number {
+  const v = s[key]
+  return typeof v === "number" ? v : 0
+}
+
+/** Map a daemon /git/state response body to a GitStatusV2-compatible object. */
+function parseDaemonGitState(s: Record<string, unknown>): GitStatusV2 | null {
+  if (typeof s.branch !== "string") return null
+  const staged = numField(s, "staged")
+  const unstaged = numField(s, "unstaged")
+  const untracked = numField(s, "untracked")
+  const upstream = typeof s.upstream === "string" ? s.upstream : null
+  const upstreamGone = typeof s.upstreamGone === "boolean" ? s.upstreamGone : false
+  return {
+    branch: s.branch,
+    // staged + unstaged may double-count files with mixed staging; acceptable for display
+    total: staged + unstaged + untracked,
+    modified: staged + unstaged,
+    added: 0,
+    deleted: 0,
+    untracked,
+    lines: [],
+    ahead: numField(s, "ahead"),
+    behind: numField(s, "behind"),
+    upstream,
+    upstreamGone,
+  }
+}
+
+/**
+ * Try to fetch git status from the daemon's cached /git/state endpoint.
+ * Returns a GitStatusV2-compatible object on success, or null if the daemon
+ * is unavailable or the response is missing required fields.
+ */
+async function fetchGitStatusFromDaemon(cwd: string): Promise<GitStatusV2 | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/git/state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd }),
+      signal: AbortSignal.timeout(500),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { status?: Record<string, unknown> } | null
+    return data?.status ? parseDaemonGitState(data.status) : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Build the context line from git status data.
  * Exported for unit testing.
@@ -47,9 +99,9 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  // Single subprocess replaces: branch --show-current, status --porcelain,
-  // rev-parse @{upstream}, rev-list x2
-  const gitStatus = await getGitStatusV2(cwd)
+  // Try daemon cache first to avoid spawning git on every tool call.
+  // Falls back to a direct git subprocess when the daemon is unavailable.
+  const gitStatus = (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
   if (!gitStatus) return
 
   // Prefer dispatcher-provided effective settings; fall back to computing locally.

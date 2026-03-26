@@ -88,6 +88,7 @@ async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResu
   const { user = "testuser", prs = [], issues = [] } = opts
 
   const binDir = await createTempDir("-bin")
+  const homeDir = await createTempDir("-home")
   await writeMockGh(binDir)
 
   const payload = JSON.stringify({ cwd: repoDir, session_id: "e2e-test" })
@@ -99,6 +100,10 @@ async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResu
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      HOME: homeDir,
+      // Redirect daemon to an unused port so DaemonBackedIssueStore fails fast
+      // and the hook falls back to the mock gh CLI.
+      SWIZ_DAEMON_PORT: "19999",
       GH_MOCK_USER: user,
       GH_MOCK_PRS: JSON.stringify(prs),
       GH_MOCK_ISSUES: JSON.stringify(issues),
