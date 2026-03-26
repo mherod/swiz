@@ -3,6 +3,8 @@ import {
   type Issue,
   missingRefinementCategories,
   needsRefinement,
+  planSectionOrderForProjectState,
+  sectionOrderForProjectState,
 } from "./stop-personal-repo-issues.ts"
 import { extractOwnerFromUrl } from "./utils/hook-utils.ts"
 
@@ -1125,5 +1127,52 @@ describe("needsRefinement — edge case: needs-refinement overrides readiness", 
 
   test("needs-refinement + triaged: explicit refinement label wins", () => {
     expect(needsRefinement(issue(["needs-refinement", "triaged"]))).toBe(true)
+  })
+})
+
+describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => {
+  test("null matches legacy default order", () => {
+    expect(sectionOrderForProjectState(null)).toEqual([
+      "feedbackPr",
+      "conflict",
+      "refinement",
+      "readyIssues",
+      "blocked",
+    ])
+    expect(planSectionOrderForProjectState(null)).toEqual([
+      "feedbackPr",
+      "refinement",
+      "readyIssues",
+      "blocked",
+    ])
+  })
+
+  test("planning prioritises refinement and blocked triage before ready PR/issue pickup", () => {
+    expect(sectionOrderForProjectState("planning")).toEqual([
+      "refinement",
+      "blocked",
+      "conflict",
+      "feedbackPr",
+      "readyIssues",
+    ])
+  })
+
+  test("developing surfaces ready issues before refinement backlog", () => {
+    expect(sectionOrderForProjectState("developing")).toEqual([
+      "conflict",
+      "feedbackPr",
+      "readyIssues",
+      "refinement",
+      "blocked",
+    ])
+    expect(planSectionOrderForProjectState("developing").indexOf("readyIssues")).toBeLessThan(
+      planSectionOrderForProjectState("developing").indexOf("refinement")
+    )
+  })
+
+  test("addressing-feedback: ready issues before refinement in plan", () => {
+    const plan = planSectionOrderForProjectState("addressing-feedback")
+    expect(plan.indexOf("feedbackPr")).toBeLessThan(plan.indexOf("readyIssues"))
+    expect(plan.indexOf("readyIssues")).toBeLessThan(plan.indexOf("refinement"))
   })
 })

@@ -10,7 +10,7 @@
  * but kept self-contained so the tests never hit the network.
  */
 import { describe, expect, test } from "bun:test"
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { useTempDir } from "./utils/test-utils.ts"
 
@@ -140,6 +140,18 @@ function makeIssue(
 }
 
 /** Minimal PR factory. */
+async function writeSwizProjectState(
+  repoDir: string,
+  state: "planning" | "developing" | "reviewing" | "addressing-feedback"
+): Promise<void> {
+  const swizDir = join(repoDir, ".swiz")
+  await mkdir(swizDir, { recursive: true })
+  await writeFile(
+    join(swizDir, "state.json"),
+    `${JSON.stringify({ state, stateHistory: [] }, null, 2)}\n`
+  )
+}
+
 function makePR(
   number: number,
   title: string,
@@ -287,7 +299,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     const result = await runHook(dir, {
       user: "testuser",
       issues: [
-        makeIssue(10, "Blocked feature", ["blocked"]),
+        makeIssue(10, "Duplicate report", ["duplicate"]),
         makeIssue(11, "Stale request", ["stale"]),
         makeIssue(12, "Invalid report", ["invalid"]),
       ],
@@ -304,12 +316,12 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     expect(result.blocked).toBe(false)
   })
 
-  test("skip + actionable mix: only actionable issues appear in reason", async () => {
+  test("skip + actionable mix: skipped issues omitted from refinement/ready lists", async () => {
     const dir = await createGitRepoWithGitHubRemote("-skipmix", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
       issues: [
-        makeIssue(1, "Blocked issue", ["blocked", "priority:high"]),
+        makeIssue(1, "Stale deprioritised", ["stale", "priority:high"]),
         makeIssue(2, "Real bug", ["bug"]),
       ],
     })
@@ -421,6 +433,45 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
     const result = await runHook(dir, { user: "testuser", issues })
     expect(result.blocked).toBe(true)
     expect(result.reason).not.toContain("more lower-priority")
+  })
+})
+
+// ─── Project state (.swiz/state.json) section ordering ───────────────────────
+
+describe("E2E stop-personal-repo-issues: project state ordering", () => {
+  test("developing surfaces ready issues before refinement sections", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-state-dev", "testuser", "myrepo")
+    await writeSwizProjectState(dir, "developing")
+    const result = await runHook(dir, {
+      user: "testuser",
+      issues: [
+        makeIssue(1, "Missing labels", ["bug"]),
+        makeIssue(2, "Ready work", ["bug", "ready", "priority:high"]),
+      ],
+    })
+    expect(result.blocked).toBe(true)
+    const r = result.reason!
+    const posReady = r.indexOf("open issue(s)")
+    const posRefine = r.indexOf("need refinement")
+    expect(posReady).not.toBe(-1)
+    expect(posRefine).not.toBe(-1)
+    expect(posReady).toBeLessThan(posRefine)
+  })
+
+  test("unset state keeps refinement before ready issues (legacy order)", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-state-null", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      issues: [
+        makeIssue(1, "Missing labels", ["bug"]),
+        makeIssue(2, "Ready work", ["bug", "ready", "priority:high"]),
+      ],
+    })
+    expect(result.blocked).toBe(true)
+    const r = result.reason!
+    const posReady = r.indexOf("open issue(s)")
+    const posRefine = r.indexOf("need refinement")
+    expect(posRefine).toBeLessThan(posReady)
   })
 })
 
@@ -593,12 +644,14 @@ describe("E2E stop-personal-repo-issues: normalisation survives real-world label
     expect(result.blocked).toBe(false)
   })
 
-  test("on/hold (slash variant) is treated as a skip label", async () => {
+  test("on/hold (slash variant) normalises like on-hold — reviewable block triage when no ready work", async () => {
     const dir = await createGitRepoWithGitHubRemote("-slashskip", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
       issues: [makeIssue(1, "On hold issue", ["on/hold"])],
     })
-    expect(result.blocked).toBe(false)
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toMatch(/on hold/i)
+    expect(result.reason).toContain("blocked and may be unblockable")
   })
 })

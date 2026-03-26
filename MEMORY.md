@@ -16,6 +16,8 @@
 - When hooks report ACTION REQUIRED for `/commit` or `/push`, resolve that workflow before continuing feature iteration.
 - Validate labels with `gh label list` before creating issues and only use labels that exist in the repo.
 - Prefer stable issue-body workflows (`--body-file` or straightforward shell-safe bodies) over deeply escaped inline scripts when creating multiple GitHub issues.
+- When hook E2E tests fail after a change, read the hook’s emitted `reason` and reconcile fixture labels with `SKIP_LABELS` vs reviewable block labels in the hook source before treating the failure as a product regression.
+- After adding `switch`/multi-branch section dispatch in hooks, run `bun run lint` on that file immediately; extract a `Record` or helpers if complexity or max-lines warnings fire.
 
 ## DON'T
 
@@ -27,3 +29,5 @@
 - Do not use a subagent for one-step browser actions when direct browser MCP tools are available.
 - Do not defer commit/push gate requirements across multiple turns after an ACTION REQUIRED stop block.
 - Do not build large `gh issue create` payloads through brittle escaped `bun -e` strings that can fail on quoting.
+- Do not assume failing hook E2E tests imply incorrect hook logic when the fixture uses labels that are both skipped from actionable work and reviewable-block triage (for example `on/hold` vs `on-hold`).
+- Do not ship hook changes that leave eslint complexity warnings on the edited file; refactor dispatch into a lookup table or small functions first.

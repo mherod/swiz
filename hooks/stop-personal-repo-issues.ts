@@ -20,6 +20,8 @@ import {
   getIssueStoreReader,
   replayPendingMutations,
 } from "../src/issue-store.ts"
+import { readProjectState } from "../src/settings/persistence.ts"
+import type { ProjectState } from "../src/settings/types.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
@@ -38,6 +40,56 @@ import {
 } from "./utils/hook-utils.ts"
 
 export { missingRefinementCategories, needsRefinement }
+
+/** Ordered stop-hook sections; `conflict` embeds its own mini action plan in the reason text. */
+export type StopSection = "feedbackPr" | "conflict" | "refinement" | "readyIssues" | "blocked"
+
+const DEFAULT_STOP_SECTION_ORDER: StopSection[] = [
+  "feedbackPr",
+  "conflict",
+  "refinement",
+  "readyIssues",
+  "blocked",
+]
+
+/** One-line hint after the opening sentence when a project state is set. */
+const STATE_PRIORITY_HINT: Record<ProjectState, string> = {
+  planning:
+    "Project state: planning — prioritise refining and triaging the backlog before picking up ready work.",
+  developing:
+    "Project state: developing — prioritise merge conflicts, PR feedback, and ready issues before grooming refinement backlog.",
+  reviewing:
+    "Project state: reviewing — prioritise open PRs, conflicts, and review feedback before new issue work.",
+  "addressing-feedback":
+    "Project state: addressing-feedback — prioritise PR feedback and conflicts before new issues or backlog refinement.",
+}
+
+/**
+ * Full section order for reason text (and conflict mini-plan position).
+ * `null` preserves the legacy order used before state-aware ordering.
+ */
+export function sectionOrderForProjectState(state: ProjectState | null): StopSection[] {
+  if (state === null) return [...DEFAULT_STOP_SECTION_ORDER]
+  switch (state) {
+    case "planning":
+      // Refinement + triage (blocked) before suggesting new ready work; PR hygiene before pickup
+      return ["refinement", "blocked", "conflict", "feedbackPr", "readyIssues"]
+    case "reviewing":
+      return ["feedbackPr", "conflict", "refinement", "readyIssues", "blocked"]
+    case "developing":
+      // Unblock and ship; defer refinement grooming until active work is moving
+      return ["conflict", "feedbackPr", "readyIssues", "refinement", "blocked"]
+    case "addressing-feedback":
+      return ["feedbackPr", "conflict", "readyIssues", "refinement", "blocked"]
+    default:
+      return [...DEFAULT_STOP_SECTION_ORDER]
+  }
+}
+
+/** Top-level action plan steps (excludes `conflict` — handled inside the conflict reason section). */
+export function planSectionOrderForProjectState(state: ProjectState | null): StopSection[] {
+  return sectionOrderForProjectState(state).filter((s) => s !== "conflict")
+}
 
 /** Labels whose block reason should be reviewed when no ready issues remain. */
 const REVIEWABLE_BLOCK_LABELS = new Set(["blocked", "upstream", "on-hold", "waiting"])
@@ -427,6 +479,8 @@ interface StopContext {
   cwd: string
   sessionId: string | null
   isPersonalRepo: boolean
+  /** From `.swiz/state.json`; `null` when unset or unreadable — use legacy section order. */
+  projectState: ProjectState | null
   changesRequestedPRs: PR[]
   reviewRequiredPRs: PR[]
   conflictingPRs: PR[]
@@ -571,26 +625,42 @@ function appendSection(lines: string[], section: string[]): void {
   lines.push(...section)
 }
 
+const appendStopSectionByKey: Record<
+  StopSection,
+  (ctx: StopContext, reasonLines: string[]) => void
+> = {
+  feedbackPr: (ctx, lines) => {
+    if (feedbackPrCount(ctx) > 0) appendSection(lines, buildFeedbackPRSection(ctx))
+  },
+  conflict: (ctx, lines) => {
+    if (ctx.conflictingPRs.length > 0) appendSection(lines, buildConflictSection(ctx))
+  },
+  refinement: (ctx, lines) => {
+    if (ctx.sortedRefinement.length > 0) appendSection(lines, buildRefinementSection(ctx))
+  },
+  readyIssues: (ctx, lines) => {
+    if (ctx.sortedIssues.length > 0) appendSection(lines, buildIssueSection(ctx))
+  },
+  blocked: (ctx, lines) => {
+    if (ctx.blockedIssues.length > 0) appendSection(lines, buildBlockedIssueSection(ctx))
+  },
+}
+
+function appendStopSection(key: StopSection, ctx: StopContext, reasonLines: string[]): void {
+  appendStopSectionByKey[key](ctx, reasonLines)
+}
+
 function buildStopReasonLines(ctx: StopContext): string[] {
   const reasonLines: string[] = [
     "There are open issues and PRs that need your attention before we can finish the session.",
-    "",
   ]
+  if (ctx.projectState != null) {
+    reasonLines.push(STATE_PRIORITY_HINT[ctx.projectState])
+  }
+  reasonLines.push("")
 
-  if (feedbackPrCount(ctx) > 0) {
-    appendSection(reasonLines, buildFeedbackPRSection(ctx))
-  }
-  if (ctx.conflictingPRs.length > 0) {
-    appendSection(reasonLines, buildConflictSection(ctx))
-  }
-  if (ctx.sortedRefinement.length > 0) {
-    appendSection(reasonLines, buildRefinementSection(ctx))
-  }
-  if (ctx.sortedIssues.length > 0) {
-    appendSection(reasonLines, buildIssueSection(ctx))
-  }
-  if (ctx.blockedIssues.length > 0) {
-    appendSection(reasonLines, buildBlockedIssueSection(ctx))
+  for (const key of sectionOrderForProjectState(ctx.projectState)) {
+    appendStopSection(key, ctx, reasonLines)
   }
 
   return reasonLines
@@ -664,10 +734,24 @@ function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
 
 function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
-  if (feedbackPrCount(ctx) > 0) planSteps.push(...buildPrFeedbackSteps(ctx))
-  if (ctx.sortedRefinement.length > 0) planSteps.push(...buildRefinementSteps(ctx))
-  if (ctx.sortedIssues.length > 0) planSteps.push(...buildIssuePickupSteps(ctx))
-  if (ctx.blockedIssues.length > 0) planSteps.push(...buildBlockedIssueReviewSteps(ctx))
+  for (const key of planSectionOrderForProjectState(ctx.projectState)) {
+    switch (key) {
+      case "feedbackPr":
+        if (feedbackPrCount(ctx) > 0) planSteps.push(...buildPrFeedbackSteps(ctx))
+        break
+      case "refinement":
+        if (ctx.sortedRefinement.length > 0) planSteps.push(...buildRefinementSteps(ctx))
+        break
+      case "readyIssues":
+        if (ctx.sortedIssues.length > 0) planSteps.push(...buildIssuePickupSteps(ctx))
+        break
+      case "blocked":
+        if (ctx.blockedIssues.length > 0) planSteps.push(...buildBlockedIssueReviewSteps(ctx))
+        break
+      default:
+        break
+    }
+  }
   return planSteps
 }
 
@@ -766,7 +850,8 @@ function partitionPRsForStop(
 function buildStopContext(
   ctx: RepoContext,
   prs: PR[],
-  gathered: Awaited<ReturnType<typeof gatherStopContext>>
+  gathered: Awaited<ReturnType<typeof gatherStopContext>>,
+  projectState: ProjectState | null
 ): StopContext | null {
   const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(prs)
 
@@ -783,6 +868,7 @@ function buildStopContext(
     cwd: ctx.cwd,
     sessionId: ctx.sessionId,
     isPersonalRepo: ctx.isPersonalRepo,
+    projectState,
     changesRequestedPRs,
     reviewRequiredPRs,
     conflictingPRs,
@@ -809,7 +895,8 @@ async function main(): Promise<void> {
       hasChangesRequested
     )
 
-    const stopCtx = buildStopContext(ctx, prs, gathered)
+    const projectState = await readProjectState(ctx.cwd)
+    const stopCtx = buildStopContext(ctx, prs, gathered, projectState)
     if (!stopCtx) return
 
     const reasonLines = buildStopReasonLines(stopCtx)
