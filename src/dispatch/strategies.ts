@@ -155,12 +155,11 @@ class PreToolUseStrategy implements HookExecutionStrategy {
   }
 }
 
-/** Process all blocking hook results, mutating executions and finalResponse in place. */
+/** Process blocking hook results, short-circuiting on first block. */
 function processBlockingResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
   executions: HookExecution[],
-  finalResponse: Record<string, unknown>,
-  runAllHooks: boolean
+  finalResponse: Record<string, unknown>
 ): void {
   for (const { execution, parsed: resp } of results) {
     if (execution.status === "skipped" || execution.status === "aborted") {
@@ -173,8 +172,7 @@ function processBlockingResults(
       executions.push(execution)
       // Keep the first block response exactly as produced.
       if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
-      if (!runAllHooks) break
-      continue
+      break
     }
     log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
     executions.push(execution)
@@ -182,8 +180,8 @@ function processBlockingResults(
 }
 
 /**
- * Blocking strategy: forwards first block; stop runs all hooks,
- * postToolUse short-circuits.
+ * Blocking strategy: forwards first block and aborts remaining hooks.
+ * Used for stop and postToolUse events.
  */
 async function resolveAutoSteerEnabled(
   payload: Record<string, unknown>,
@@ -224,14 +222,12 @@ class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
 
-    const runAllHooks = canonicalEvent === "stop"
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
 
     // Fan out all sync hooks concurrently with async hooks; scan results in declaration order.
-    // For non-stop events, use AbortController to kill remaining hooks on first block.
-    // Stop hooks always run all hooks (no abort on first-block) but still respect
-    // dispatch-level abort for timeout enforcement.
+    // AbortController kills remaining hooks on first block (including stop events)
+    // and also fires on dispatch-level timeout.
     const entries = flatSyncHooks(filteredGroups)
     const controller = new AbortController()
     const { signal } = controller
@@ -246,7 +242,7 @@ class BlockingStrategy implements HookExecutionStrategy {
           // For stop events, only abort on dispatch-level timeout (not first-block).
           // For other blocking events, also abort on first block.
           const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
-          if (!runAllHooks && result.parsed && isBlock(result.parsed)) {
+          if (result.parsed && isBlock(result.parsed)) {
             controller.abort()
           }
           return result
@@ -257,7 +253,7 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
-    processBlockingResults(results, executions, finalResponse, runAllHooks)
+    processBlockingResults(results, executions, finalResponse)
 
     if (canonicalEvent === "stop" && isBlock(finalResponse)) {
       await tryAutoSteerStopBlock(finalResponse, enrichedPayloadStr)
