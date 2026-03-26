@@ -64,7 +64,3 @@ export function swizEmergencyBypassPath(repoKey: string): string {
 export function stopAutoContSuggestionsPath(safeSession: string): string {
   return `${TMP_ROOT}/swiz-stop-suggestions-${safeSession}.json`
 }
-
-export function autoSteerRequestPath(safeSession: string): string {
-  return `${TMP_ROOT}/swiz-auto-steer-${safeSession}.request`
-}

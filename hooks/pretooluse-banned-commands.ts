@@ -94,16 +94,18 @@ function isDestructiveDelete(c: string): boolean {
  * Extract the target file path from a plain `>` or `>>` redirect.
  * Returns the resolved absolute path, or null if no redirect target is found.
  */
+function expandTilde(p: string): string {
+  if (!p.startsWith("~/") && p !== "~") return p
+  const home = process.env.HOME ?? ""
+  return p === "~" ? home : `${home}${p.slice(1)}`
+}
+
 export function extractPlainRedirectTarget(c: string, cwd: string): string | null {
   const m = c.match(/(?<![0-9&])>>?\s+(\S+)/)
   if (!m?.[1]) return null
   let target = m[1]
   if (target.startsWith("/dev/") || target.startsWith("&") || target.startsWith(">(")) return null
-  target = target.replace(/^['"]|['"]$/g, "")
-  if (target.startsWith("~/") || target === "~") {
-    const home = process.env.HOME ?? ""
-    target = target === "~" ? home : `${home}${target.slice(1)}`
-  }
+  target = expandTilde(target.replace(/^['"]|['"]$/g, ""))
   if (!target.startsWith("/")) {
     target = `${cwd}/${target}`
   }
@@ -324,6 +326,30 @@ function evaluateRules(rules: Rule[], command: string, strippedCommand: string):
   return warnings
 }
 
+async function isRedirectExempt(
+  strippedCommand: string,
+  cwd: string,
+  transcriptPath: string
+): Promise<boolean> {
+  if (!isShellFileWrite(strippedCommand) || !isPlainRedirectOnly(strippedCommand)) return false
+  const target = extractPlainRedirectTarget(strippedCommand, cwd)
+  if (!target || !transcriptPath) return false
+  const readPaths = await extractReadFilePaths(transcriptPath)
+  return readPaths.has(target)
+}
+
+function parseHookInput(input: Record<string, unknown>): {
+  command: string
+  transcriptPath: string
+  cwd: string
+} {
+  return {
+    command: ((input?.tool_input as Record<string, unknown>)?.command as string) ?? "",
+    transcriptPath: (input?.transcript_path as string) ?? "",
+    cwd: (input?.cwd as string) ?? process.cwd(),
+  }
+}
+
 async function main() {
   const PM = await detectPackageManager()
   const RUNTIME: "bun" | "node" = PM === "bun" ? "bun" : "node"
@@ -332,29 +358,12 @@ async function main() {
   const input = await Bun.stdin.json()
   if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
-  const command: string = input?.tool_input?.command ?? ""
-  const transcriptPath: string = input?.transcript_path ?? ""
-  const cwd: string = input?.cwd ?? process.cwd()
-
-  // Strip quoted string contents once before any rule matching so that banned
-  // patterns embedded inside commit messages, evidence args, or other quoted
-  // flag values never trigger a false positive.  The original `command` is kept
-  // for reporter correction output which must reference the real command text.
+  const { command, transcriptPath, cwd } = parseHookInput(input)
   const strippedCommand = stripQuotedStrings(command)
 
-  // Exempt plain `>` / `>>` redirects when the target file was Read this session.
-  let exemptRedirect = false
-  if (isShellFileWrite(strippedCommand) && isPlainRedirectOnly(strippedCommand)) {
-    const target = extractPlainRedirectTarget(strippedCommand, cwd)
-    if (target && transcriptPath) {
-      const readPaths = await extractReadFilePaths(transcriptPath)
-      if (readPaths.has(target)) {
-        exemptRedirect = true
-      }
-    }
-  }
-
-  const effectiveRules = exemptRedirect ? RULES.filter((r) => r.match !== isShellFileWrite) : RULES
+  const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))
+    ? RULES.filter((r) => r.match !== isShellFileWrite)
+    : RULES
 
   const warnings = evaluateRules(effectiveRules, command, strippedCommand)
 

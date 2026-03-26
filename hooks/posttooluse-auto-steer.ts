@@ -10,8 +10,8 @@
  * (the CLI process has the terminal env vars; the daemon does not).
  */
 
+import { getAutoSteerStore } from "../src/auto-steer-store.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
-import { autoSteerRequestPath } from "../src/temp-paths.ts"
 import {
   consumeAutoSteerRequest,
   sendAutoSteer,
@@ -28,7 +28,9 @@ if (!sessionId) process.exit(0)
 
 const safeSession = sanitizeSessionId(sessionId)
 if (!safeSession) process.exit(0)
-if (!(await Bun.file(autoSteerRequestPath(safeSession)).exists())) process.exit(0)
+
+const store = getAutoSteerStore()
+if (!store.hasPending(safeSession, "next_turn")) process.exit(0)
 if (await shouldDeferAutoSteerForForegroundChatApp()) process.exit(0)
 
 const request = await consumeAutoSteerRequest(sessionId)

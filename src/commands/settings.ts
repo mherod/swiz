@@ -272,6 +272,12 @@ const GLOBAL_BOOL_ROWS: BoolSettingRow[] = SETTINGS_REGISTRY.filter(
 ).map((d) => [`${d.aliases[0]}:`, d.key as keyof EffectiveSwizSettings, "global"])
 
 /** Derive global numeric/string display from SETTINGS_REGISTRY. */
+function formatNumericDisplay(numVal: number, placeholder: string | undefined): string {
+  if (placeholder === "minutes") return numVal > 0 ? `${numVal} minutes` : "disabled"
+  if (placeholder === "wpm") return numVal > 0 ? `${numVal} wpm` : "system default"
+  return String(numVal)
+}
+
 function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
   for (const def of SETTINGS_REGISTRY) {
     if (def.kind !== "numeric" && def.kind !== "string") continue
@@ -280,18 +286,7 @@ function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
     const value = effective[key]
     const label = def.aliases[0] ?? def.key
     if (def.kind === "numeric") {
-      const numVal = value as number
-      const placeholder = def.docs?.valuePlaceholder
-      const display =
-        placeholder === "minutes"
-          ? numVal > 0
-            ? `${numVal} minutes`
-            : "disabled"
-          : placeholder === "wpm"
-            ? numVal > 0
-              ? `${numVal} wpm`
-              : "system default"
-            : String(numVal)
+      const display = formatNumericDisplay(value as number, def.docs?.valuePlaceholder)
       console.log(`  ${label}: ${display} (global)`)
     } else {
       const strVal = value as string
@@ -534,19 +529,14 @@ function printSettingChange(opts: {
   console.log(`  Saved: ${path}\n`)
 }
 
-async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
-  const key = parseSetting(parsed.settingArg)
-  if (isNumericSetting(key) || isStringSetting(key)) {
-    throw new Error(
-      `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
-    )
-  }
-  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
-
+async function enforceBooleanSettingConflicts(
+  key: string,
+  enabled: boolean,
+  parsed: ParsedSettingsArgs
+): Promise<void> {
   if (key === "strictNoDirectMain" && enabled) {
     await enforceStrictNoDirectMainConflicts(parsed)
   }
-
   if (key === "trunkMode" && enabled) {
     const projectSettings = await readProjectSettings(parsed.targetDir)
     if (projectSettings?.strictNoDirectMain && !parsed.force) {
@@ -557,6 +547,17 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
       )
     }
   }
+}
+
+async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
+  const key = parseSetting(parsed.settingArg)
+  if (isNumericSetting(key) || isStringSetting(key)) {
+    throw new Error(
+      `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
+    )
+  }
+  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
+  await enforceBooleanSettingConflicts(key, enabled, parsed)
 
   const path = await writeSettingToScope(parsed, key, enabled)
   const verb = enabled ? "Enabled" : "Disabled"

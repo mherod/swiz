@@ -1294,6 +1294,7 @@ export function resolveEditDelta(
 export interface AutoSteerRequest {
   message: string
   timestamp: number
+  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
@@ -1484,7 +1485,11 @@ export async function sendAutoSteer(
  * or the terminal doesn't support AppleScript. Callers should fall back to
  * their normal deny/block behavior when this returns false.
  */
-export async function scheduleAutoSteer(sessionId: string, message = "Continue"): Promise<boolean> {
+export async function scheduleAutoSteer(
+  sessionId: string,
+  message = "Continue",
+  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
+): Promise<boolean> {
   // Check terminal support first (cheap, no I/O)
   const { detectTerminal } = await import("./terminal-detection.ts")
   const terminal = detectTerminal()
@@ -1498,9 +1503,10 @@ export async function scheduleAutoSteer(sessionId: string, message = "Continue")
   const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
   const safeSession = sanitize(sessionId)
   if (!safeSession) return false
-  const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
-  const request: AutoSteerRequest = { message, timestamp: Date.now() }
-  await Bun.write(autoSteerRequestPath(safeSession), JSON.stringify(request))
+
+  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  store.enqueue(safeSession, message, trigger ?? "next_turn")
   return true
 }
 
@@ -1508,25 +1514,20 @@ export async function scheduleAutoSteer(sessionId: string, message = "Continue")
  * Check whether an auto-steer request is pending for this session.
  * Atomically consumes the request — returns the steering message if pending, null otherwise.
  */
-export async function consumeAutoSteerRequest(sessionId: string): Promise<AutoSteerRequest | null> {
+export async function consumeAutoSteerRequest(
+  sessionId: string,
+  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
+): Promise<AutoSteerRequest | null> {
   const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
   const safeSession = sanitize(sessionId)
   if (!safeSession) return null
-  const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
-  const requestFile = autoSteerRequestPath(safeSession)
-  const file = Bun.file(requestFile)
-  if (!(await file.exists())) return null
-  let content: string
-  try {
-    content = await file.text()
-    await file.delete()
-  } catch {
-    return null
-  }
-  try {
-    return JSON.parse(content) as AutoSteerRequest
-  } catch {
-    // Legacy format (plain timestamp) — treat as "Continue"
-    return { message: "Continue", timestamp: Number(content) || Date.now() }
-  }
+
+  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  const requests = store.consume(safeSession, trigger ?? "next_turn")
+  if (requests.length === 0) return null
+
+  // Return the first request for backward compat; all are marked delivered
+  const first = requests[0]!
+  return { message: first.message, timestamp: first.createdAt }
 }
