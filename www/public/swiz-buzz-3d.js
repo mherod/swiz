@@ -70,20 +70,21 @@ const antennaTipMat = new THREE.MeshStandardMaterial({
 
 /** @returns {THREE.Mesh} */
 function buildBody() {
+  // Gem shape: wide crown at eye level, tapering to a point
   const profile = [
-    [0, 1.05],
-    [0.5, 0.95],
-    [0.78, 0.7],
-    [0.85, 0.45],
-    [0.7, 0.2],
-    [0.65, 0.0],
-    [0.68, -0.2],
-    [0.78, -0.4],
-    [0.85, -0.65],
-    [0.8, -0.85],
-    [0.6, -1.0],
-    [0.3, -1.1],
-    [0, -1.15],
+    [0, 1.0],
+    [0.35, 0.95],
+    [0.65, 0.82],
+    [0.88, 0.55], // widest — eye level
+    [0.92, 0.35], // crown plateau
+    [0.88, 0.15],
+    [0.78, -0.05], // begins tapering
+    [0.65, -0.25],
+    [0.52, -0.5],
+    [0.38, -0.72],
+    [0.25, -0.9],
+    [0.12, -1.05],
+    [0, -1.12], // bottom point
   ]
   const pts = profile.map(([x, y]) => new THREE.Vector2(x, y))
   return new THREE.Mesh(new THREE.LatheGeometry(pts, 32), bodyMat)
@@ -100,7 +101,7 @@ function buildEye(x) {
   const inner = new THREE.Mesh(innerGeo, eyeInnerMat)
   inner.position.z = 0.09
   g.add(inner)
-  g.position.set(x, 0.25, 0.62)
+  g.position.set(x, 0.3, 0.68)
   return g
 }
 
@@ -110,7 +111,7 @@ function buildMouth() {
   shape.moveTo(-0.25, 0)
   shape.quadraticCurveTo(0, -0.12, 0.25, 0)
   const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), mouthMat)
-  m.position.set(0, -0.18, 0.78)
+  m.position.set(0, -0.12, 0.72)
   return m
 }
 
@@ -134,7 +135,7 @@ function buildWing(side) {
   lobe.position.z = -0.01
   g.add(lobe)
 
-  g.position.set(s * 0.55, 0.4, 0.05)
+  g.position.set(s * 0.6, 0.35, 0.05)
   return g
 }
 
@@ -175,11 +176,11 @@ function buildSideMarking(side) {
   const s = side === "left" ? -1 : 1
   const g = new THREE.Group()
   const m1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.04), stripeMat)
-  m1.position.set(s * 0.72, 0.05, 0.3)
+  m1.position.set(s * 0.76, 0.1, 0.3)
   m1.rotation.y = s * 0.4
   g.add(m1)
   const m2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.04), stripeMat)
-  m2.position.set(s * 0.68, -0.18, 0.35)
+  m2.position.set(s * 0.62, -0.15, 0.35)
   m2.rotation.y = s * 0.35
   g.add(m2)
   return g
@@ -188,8 +189,8 @@ function buildSideMarking(side) {
 /** @param {THREE.Group} bee */
 function assembleBee(bee) {
   bee.add(buildBody())
-  bee.add(buildEye(-0.44))
-  bee.add(buildEye(0.44))
+  bee.add(buildEye(-0.48))
+  bee.add(buildEye(0.48))
   bee.add(buildMouth())
   const lw = buildWing("left")
   const rw = buildWing("right")
@@ -202,12 +203,12 @@ function assembleBee(bee) {
   bee.userData = { leftWing: lw, rightWing: rw, leftAntenna: la, rightAntenna: ra }
 
   const hexPositions = [
-    [-0.22, -0.8, 0.5, 1.0],
-    [0.0, -0.8, 0.55, 1.0],
-    [0.22, -0.8, 0.5, 1.0],
-    [-0.11, -0.95, 0.4, 0.85],
-    [0.11, -0.95, 0.4, 0.85],
-    [0.0, -1.07, 0.3, 0.65],
+    [-0.18, -0.65, 0.42, 0.9],
+    [0.0, -0.65, 0.46, 0.9],
+    [0.18, -0.65, 0.42, 0.9],
+    [-0.1, -0.8, 0.32, 0.75],
+    [0.1, -0.8, 0.32, 0.75],
+    [0.0, -0.92, 0.2, 0.6],
   ]
   for (const [x, y, z, s] of hexPositions) bee.add(buildHexCell(x, y, z, s))
 
@@ -220,7 +221,7 @@ function assembleBee(bee) {
 export function createBeeScene(container) {
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100)
-  camera.position.set(0, 0, 6)
+  camera.position.set(0, 0, 8)
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
