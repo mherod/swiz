@@ -1488,7 +1488,8 @@ export async function sendAutoSteer(
 export async function scheduleAutoSteer(
   sessionId: string,
   message = "Continue",
-  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
+  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger,
+  cwd?: string
 ): Promise<boolean> {
   // Check terminal support first (cheap, no I/O)
   const { detectTerminal } = await import("./terminal-detection.ts")
@@ -1506,7 +1507,7 @@ export async function scheduleAutoSteer(
 
   const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
   const store = getAutoSteerStore()
-  store.enqueue(safeSession, message, trigger ?? "next_turn")
+  store.enqueue(safeSession, message, trigger ?? "next_turn", { cwd })
   return true
 }
 

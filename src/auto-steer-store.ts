@@ -1,23 +1,31 @@
 /**
- * SQLite-backed auto-steer queue with two-layer deduplication.
+ * SQLite-backed auto-steer queue with two-layer deduplication and optional TTL.
  *
  * Supports multiple pending messages per session and delivery triggers
  * (next_turn, after_commit, after_all_tasks_complete, on_session_stop).
  *
+ * ## TTL (time-to-live)
+ *
+ * Each message can carry an optional `ttlMs`. When present, the message
+ * expires if not consumed within `created_at + ttlMs`. Expired messages
+ * are silently skipped during `consume()` / `hasPending()` and do NOT
+ * count as "delivered" for dedup purposes — they are treated as if they
+ * never existed. Delivered messages (actually sent) retain their dedup
+ * effect regardless of their original TTL.
+ *
  * ## Dedup architecture
  *
  * **Enqueue-side** (`enqueue()`): Rejects if an identical message (same
- * session + trigger + text) is already pending OR was delivered within the
- * dedup window (60 s). This is the primary defense against hooks that fire
- * every dispatch cycle and re-schedule the same guidance.
+ * session + trigger + text) is already pending (and not expired) OR was
+ * delivered within the dedup window (60 s).
  *
  * **Send-side** (consumer hooks): Deduplicates within a single consume batch
  * so the same text isn't typed into the terminal twice in one cycle. The
  * `wasRecentlyDelivered()` helper is available for direct-send paths that
  * bypass the queue (e.g. stop-block auto-steer).
  *
- * **Retention**: Delivered rows are kept for the duration of the dedup window,
- * then pruned by `prune()` to prevent unbounded growth.
+ * **Retention**: Delivered rows are kept for the duration of the dedup window.
+ * Expired undelivered rows and old delivered rows are cleaned up by `prune()`.
  *
  * Uses Bun's built-in bun:sqlite — no external dependencies.
  */
@@ -27,6 +35,9 @@ import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { getHomeDirWithFallback } from "./home.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
+
+export { projectKeyFromCwd }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -105,9 +116,19 @@ export class AutoSteerStore {
         message TEXT NOT NULL,
         trigger_type TEXT NOT NULL DEFAULT 'next_turn',
         created_at INTEGER NOT NULL,
-        delivered_at INTEGER
+        delivered_at INTEGER,
+        ttl_ms INTEGER,
+        project_key TEXT
       )
     `)
+    // Migrations: add columns if missing (existing DBs)
+    for (const col of ["ttl_ms INTEGER", "project_key TEXT"]) {
+      try {
+        this.db.run(`ALTER TABLE auto_steer_queue ADD COLUMN ${col}`)
+      } catch {
+        // Column already exists — ignore
+      }
+    }
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_auto_steer_pending
         ON auto_steer_queue (session_id, trigger_type, delivered_at)
@@ -117,67 +138,107 @@ export class AutoSteerStore {
 
   private prepareStatements(): void {
     this._stmtEnqueue = this.db.prepare(
-      "INSERT INTO auto_steer_queue (session_id, message, trigger_type, created_at) VALUES (?, ?, ?, ?)"
+      "INSERT INTO auto_steer_queue (session_id, message, trigger_type, created_at, ttl_ms, project_key) VALUES (?, ?, ?, ?, ?, ?)"
     )
+    // Consume: select undelivered rows that haven't expired — scoped by session_id (delivery is per-session).
     this._stmtConsume = this.db.prepare(
       `SELECT id, session_id, message, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE session_id = ? AND trigger_type = ? AND delivered_at IS NULL
+         AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
        ORDER BY id ASC`
     )
     this._stmtMarkDelivered = this.db.prepare(
       "UPDATE auto_steer_queue SET delivered_at = ? WHERE id = ?"
     )
-    // Dedup: check if an identical message is already pending (not yet delivered)
+    // Dedup: check if an identical message is already pending for this PROJECT (not expired, not delivered).
+    // Uses project_key so the same steer across sessions on the same repo is deduped.
+    // Falls back to session_id when project_key is NULL (legacy rows).
     this._stmtPendingDuplicate = this.db.prepare(
       `SELECT 1 FROM auto_steer_queue
-       WHERE session_id = ? AND trigger_type = ? AND message = ? AND delivered_at IS NULL
+       WHERE trigger_type = ? AND message = ? AND delivered_at IS NULL
+         AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
+         AND (
+           (project_key IS NOT NULL AND project_key = ?)
+           OR (project_key IS NULL AND session_id = ?)
+         )
        LIMIT 1`
     )
-    // Dedup: check if an identical message was recently delivered within the dedup window
+    // Dedup: check if an identical message was recently delivered for this PROJECT.
+    // Delivered rows retain dedup effect regardless of their original TTL.
     this._stmtRecentlyDelivered = this.db.prepare(
       `SELECT 1 FROM auto_steer_queue
-       WHERE session_id = ? AND trigger_type = ? AND message = ? AND delivered_at >= ?
+       WHERE trigger_type = ? AND message = ? AND delivered_at >= ?
+         AND (
+           (project_key IS NOT NULL AND project_key = ?)
+           OR (project_key IS NULL AND session_id = ?)
+         )
        LIMIT 1`
     )
-    // Prune: remove delivered rows older than retention window to prevent unbounded growth
+    // Prune: remove old delivered rows AND expired undelivered rows
     this._stmtPruneOld = this.db.prepare(
-      "DELETE FROM auto_steer_queue WHERE delivered_at IS NOT NULL AND delivered_at < ?"
+      `DELETE FROM auto_steer_queue WHERE
+         (delivered_at IS NOT NULL AND delivered_at < ?)
+         OR (delivered_at IS NULL AND ttl_ms IS NOT NULL AND created_at + ttl_ms < ?)`
     )
+    // Pending: select undelivered, non-expired rows across all triggers
     this._stmtPending = this.db.prepare(
       `SELECT id, session_id, message, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE session_id = ? AND delivered_at IS NULL
+         AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
        ORDER BY id ASC`
     )
   }
 
   /**
    * Enqueue a steering message for a session with a given trigger.
-   * Dedup: skips if an identical message is already pending or was delivered within the dedup window.
+   * @param opts.ttlMs Optional TTL in milliseconds — message expires if not consumed in time.
+   * @param opts.cwd   Optional working directory — used to derive project_key for cross-session dedup.
+   * Dedup: skips if an identical message is already pending for this project (not expired)
+   * or was delivered to any session on this project within the dedup window.
    * Returns true if enqueued, false if skipped as duplicate.
    */
-  enqueue(sessionId: string, message: string, trigger: AutoSteerTrigger = "next_turn"): boolean {
-    // Skip if identical message is already pending
-    const pendingDup = this._stmtPendingDuplicate.get(sessionId, trigger, message)
+  enqueue(
+    sessionId: string,
+    message: string,
+    trigger: AutoSteerTrigger = "next_turn",
+    opts?: { ttlMs?: number; cwd?: string }
+  ): boolean {
+    const now = Date.now()
+    const projKey = opts?.cwd ? projectKeyFromCwd(opts.cwd) : null
+
+    // Skip if identical message is already pending for this project (and not expired)
+    const pendingDup = this._stmtPendingDuplicate.get(
+      trigger,
+      message,
+      now,
+      projKey ?? sessionId,
+      sessionId
+    )
     if (pendingDup) return false
 
-    // Skip if identical message was recently delivered
-    const recentCutoff = Date.now() - DEDUP_WINDOW_MS
-    const recentDup = this._stmtRecentlyDelivered.get(sessionId, trigger, message, recentCutoff)
+    // Skip if identical message was recently delivered to any session on this project
+    const recentCutoff = now - DEDUP_WINDOW_MS
+    const recentDup = this._stmtRecentlyDelivered.get(
+      trigger,
+      message,
+      recentCutoff,
+      projKey ?? sessionId,
+      sessionId
+    )
     if (recentDup) return false
 
-    this._stmtEnqueue.run(sessionId, message, trigger, Date.now())
+    this._stmtEnqueue.run(sessionId, message, trigger, now, opts?.ttlMs ?? null, projKey)
     return true
   }
 
   /**
-   * Consume all pending messages for a session+trigger in FIFO order.
-   * Marks each as delivered atomically.
-   * Returns the consumed messages (empty array if none pending).
+   * Consume all pending, non-expired messages for a session+trigger in FIFO order.
+   * Scoped by session_id — delivery is per-session.
    */
   consume(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): QueuedAutoSteerRequest[] {
-    const rows = this._stmtConsume.all(sessionId, trigger) as Array<{
+    const rows = this._stmtConsume.all(sessionId, trigger, Date.now()) as Array<{
       id: number
       session_id: string
       message: string
@@ -201,23 +262,35 @@ export class AutoSteerStore {
   }
 
   /**
-   * Check if a message was recently delivered (within the dedup window).
-   * Used by send-side dedup to avoid re-sending an identical message.
+   * Check if a message was recently delivered on this project (within the dedup window).
+   * Delivered messages retain their dedup effect regardless of their original TTL.
    */
-  wasRecentlyDelivered(sessionId: string, message: string, trigger: AutoSteerTrigger): boolean {
+  wasRecentlyDelivered(
+    sessionId: string,
+    message: string,
+    trigger: AutoSteerTrigger,
+    cwd?: string
+  ): boolean {
     const recentCutoff = Date.now() - DEDUP_WINDOW_MS
-    return !!this._stmtRecentlyDelivered.get(sessionId, trigger, message, recentCutoff)
+    const projKey = cwd ? projectKeyFromCwd(cwd) : null
+    return !!this._stmtRecentlyDelivered.get(
+      trigger,
+      message,
+      recentCutoff,
+      projKey ?? sessionId,
+      sessionId
+    )
   }
 
-  /** Check if any pending messages exist for a session+trigger without consuming. */
+  /** Check if any pending, non-expired messages exist for a session+trigger. */
   hasPending(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): boolean {
-    const rows = this._stmtConsume.all(sessionId, trigger)
+    const rows = this._stmtConsume.all(sessionId, trigger, Date.now())
     return rows.length > 0
   }
 
-  /** List all pending (undelivered) messages for a session across all triggers. */
+  /** List all pending, non-expired messages for a session across all triggers. */
   listPending(sessionId: string): QueuedAutoSteerRequest[] {
-    const rows = this._stmtPending.all(sessionId) as Array<{
+    const rows = this._stmtPending.all(sessionId, Date.now()) as Array<{
       id: number
       session_id: string
       message: string
@@ -234,10 +307,10 @@ export class AutoSteerStore {
     }))
   }
 
-  /** Prune delivered rows older than the dedup window to prevent unbounded growth. */
+  /** Prune old delivered rows and expired undelivered rows. */
   prune(): number {
     const cutoff = Date.now() - DEDUP_WINDOW_MS
-    return this._stmtPruneOld.run(cutoff).changes
+    return this._stmtPruneOld.run(cutoff, cutoff).changes
   }
 
   close(): void {

@@ -229,4 +229,102 @@ describe("AutoSteerStore", () => {
     expect(result).toBe(true)
     store.close()
   })
+
+  // ─── TTL tests ───────────────────────────────────────────────────────
+
+  it("message with TTL is consumed before expiry", () => {
+    const store = createStore()
+    store.enqueue("sess1", "ephemeral", "next_turn", { ttlMs: 30_000 })
+    const results = store.consume("sess1")
+    expect(results).toHaveLength(1)
+    expect(results[0]!.message).toBe("ephemeral")
+    store.close()
+  })
+
+  it("message with TTL is skipped after expiry", () => {
+    const store = createStore()
+    store.enqueue("sess1", "expired msg", "next_turn", { ttlMs: 1000 })
+    // Backdate created_at to simulate expiry
+    // biome-ignore lint/complexity/useLiteralKeys: accessing private field for test
+    store["db"].run("UPDATE auto_steer_queue SET created_at = created_at - 5000")
+    const results = store.consume("sess1")
+    expect(results).toHaveLength(0)
+    expect(store.hasPending("sess1")).toBe(false)
+    store.close()
+  })
+
+  it("expired message does not block dedup re-enqueue", () => {
+    const store = createStore()
+    store.enqueue("sess1", "transient", "next_turn", { ttlMs: 1000 })
+    // Expire it
+    // biome-ignore lint/complexity/useLiteralKeys: accessing private field for test
+    store["db"].run("UPDATE auto_steer_queue SET created_at = created_at - 5000")
+    // Re-enqueue same message — should succeed since the pending one expired
+    const result = store.enqueue("sess1", "transient")
+    expect(result).toBe(true)
+    store.close()
+  })
+
+  it("delivered message blocks dedup even after its TTL would have expired", () => {
+    const store = createStore()
+    store.enqueue("sess1", "was sent", "next_turn", { ttlMs: 1000 })
+    store.consume("sess1") // marks as delivered
+    // Re-enqueue same message — should be blocked by delivery dedup, not TTL
+    const result = store.enqueue("sess1", "was sent")
+    expect(result).toBe(false)
+    store.close()
+  })
+
+  it("prune removes expired undelivered rows older than dedup window", () => {
+    const store = createStore()
+    store.enqueue("sess1", "will expire", "next_turn", { ttlMs: 1000 })
+    // Backdate created_at well past dedup window so created_at + ttl_ms < cutoff
+    // biome-ignore lint/complexity/useLiteralKeys: accessing private field for test
+    store["db"].run("UPDATE auto_steer_queue SET created_at = created_at - 120000")
+    const pruned = store.prune()
+    expect(pruned).toBe(1)
+    store.close()
+  })
+
+  // ─── Project-scoped dedup tests ──────────────────────────────────────
+
+  it("same message from two sessions on same project is deduped", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "fix tests", "next_turn", { cwd: "/repo/project-a" })
+    const second = store.enqueue("sess2", "fix tests", "next_turn", { cwd: "/repo/project-a" })
+    expect(first).toBe(true)
+    expect(second).toBe(false)
+    store.close()
+  })
+
+  it("same message from two sessions on different projects is not deduped", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "fix tests", "next_turn", { cwd: "/repo/project-a" })
+    const second = store.enqueue("sess2", "fix tests", "next_turn", { cwd: "/repo/project-b" })
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    store.close()
+  })
+
+  it("delivered message on same project blocks re-enqueue from different session", () => {
+    const store = createStore()
+    store.enqueue("sess1", "reminder", "next_turn", { cwd: "/repo/myapp" })
+    store.consume("sess1") // delivered
+    // Different session, same project — should be blocked
+    const result = store.enqueue("sess2", "reminder", "next_turn", { cwd: "/repo/myapp" })
+    expect(result).toBe(false)
+    store.close()
+  })
+
+  it("consume is still scoped by session_id", () => {
+    const store = createStore()
+    store.enqueue("sess1", "for sess1", "next_turn", { cwd: "/repo/shared" })
+    // sess2 cannot consume sess1's messages
+    const results = store.consume("sess2")
+    expect(results).toHaveLength(0)
+    // sess1 can
+    const r1 = store.consume("sess1")
+    expect(r1).toHaveLength(1)
+    store.close()
+  })
 })

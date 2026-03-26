@@ -79,7 +79,7 @@ alwaysApply: false
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` on a manifest entry skips re-runs within the window (per hook+cwd).
-- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message)` in `hook-utils.ts` returns `Promise<boolean>`. **DO**: Always `await` and branch: `if (await scheduleAutoSteer(id, reason)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget with `void`. Consumed by `posttooluse-auto-steer.ts`. Gated by `requiredSettings: ["autoSteer"]`. Stop-hook auto-steer handled in `BlockingStrategy` (`src/dispatch/strategies.ts`) — reads `_terminal` and `_effectiveSettings.autoSteer` from payload. `sendAutoSteer` writes text and sends submit keystroke as separate AppleScript commands.
+- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project-scoped dedup; `await` and branch: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget with `void`; omit `cwd` (falls back to session-only scope). Consumed by `posttooluse-auto-steer.ts`. Gated by `requiredSettings: ["autoSteer"]`. SQLite queue `~/.swiz/auto-steer.db` (`src/auto-steer-store.ts`): two-layer dedup, optional TTL, `project_key` column. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Stop auto-steer in `BlockingStrategy` (`src/dispatch/strategies.ts`). `sendAutoSteer` types text via AppleScript.
 - **DO**: All three memory-threshold checkpoints must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
 - **DO**: Use `computeProjectedContent()` from `hook-utils.ts` for content validation — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
@@ -103,11 +103,11 @@ alwaysApply: false
 - Completion requires evidence: `swiz tasks complete <id> --evidence "..."`.
 
 - First action: `TaskCreate`/`TaskUpdate`; required after compaction.
-- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Ensure ≥1 `in_progress` + ≥1 `pending` before Edit/Write/Bash.
-- Prior-session task blocks: recreate and set `in_progress` before retrying.
+- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
+- Prior-session task blocks: recreate as `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
-- Keep at least one `pending`/`in_progress` task before `git add` or `git commit`; mark commit task complete after commit success.
+- Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark commit task complete after success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.

@@ -59,11 +59,13 @@ function emitStalenessWarning(
 }
 
 let _sessionId = ""
+let _cwd: string | undefined
 
 async function main(): Promise<void> {
   const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = toolHookInputSchema.parse(hookRaw)
   _sessionId = (input.session_id as string) ?? ""
+  _cwd = input.cwd
   const transcript = input.transcript_path
   if (!transcript) return
 
@@ -87,7 +89,7 @@ async function main(): Promise<void> {
 }
 
 async function emit(context: string): Promise<never> {
-  if (_sessionId) await scheduleAutoSteer(_sessionId, context)
+  if (_sessionId) await scheduleAutoSteer(_sessionId, context, undefined, _cwd)
   return emitContext("PostToolUse", context)
 }
 

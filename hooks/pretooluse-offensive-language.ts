@@ -39,7 +39,7 @@ async function main() {
     const sessionId = (input.session_id as string) ?? ""
     // Auto-steer delivers the message — allow silently to avoid duplicate guidance.
     // If auto-steer unavailable, deny as usual.
-    if (sessionId && (await scheduleAutoSteer(sessionId, reason))) {
+    if (sessionId && (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd))) {
       allowPreToolUse("")
     }
     denyPreToolUse(reason)

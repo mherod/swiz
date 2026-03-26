@@ -14,6 +14,7 @@ import { type SessionTaskTipContext, sessionTaskToolPatterns } from "./utils/tra
 
 // Only enforce in agent/Claude Code context
 const isClaudeCode = isRunningInAgent() || process.env.CLAUDECODE === "1"
+let _cwd: string | undefined
 
 interface SwizTasksRule {
   /** Regex to match this swiz tasks subcommand */
@@ -74,7 +75,7 @@ async function emitWarnAndAllow(
 ): Promise<never> {
   const skipTip = rule.skipTipIf?.(tipContext) ?? false
   const message = skipTip ? "" : rule.message
-  if (sessionId && message) await scheduleAutoSteer(sessionId, message)
+  if (sessionId && message) await scheduleAutoSteer(sessionId, message, undefined, _cwd)
   allowPreToolUse(message)
 }
 
@@ -95,7 +96,7 @@ async function checkRules(
       await emitWarnAndAllow(rule, sessionId, tipContext)
     } else {
       // For deny rules: if auto-steer can handle it, allow + steer instead
-      if (sessionId && (await scheduleAutoSteer(sessionId, rule.message))) {
+      if (sessionId && (await scheduleAutoSteer(sessionId, rule.message, undefined, _cwd))) {
         allowPreToolUse(rule.message)
       }
       denyPreToolUse(rule.message)
@@ -110,6 +111,7 @@ async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<
   const command = String((input.tool_input as Record<string, unknown> | undefined)?.command ?? "")
   const sessionId = String(input.session_id ?? "")
   const transcriptPath = String(input.transcript_path ?? "")
+  _cwd = (input.cwd as string) ?? undefined
   const tipContext = await sessionTaskToolPatterns(transcriptPath)
   await checkRules(command, buildSwizTasksRules(), sessionId, tipContext)
 }

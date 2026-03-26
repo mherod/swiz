@@ -44,10 +44,11 @@ import {
 // message and ALLOW the tool call — the guidance will be typed into the
 // terminal on the next PostToolUse cycle. When unavailable, deny as before.
 let _autoSteerSessionId: string | null = null
+let _cwd: string | undefined
 
 async function deny(reason: string): Promise<never> {
   if (_autoSteerSessionId) {
-    if (await scheduleAutoSteer(_autoSteerSessionId, reason)) {
+    if (await scheduleAutoSteer(_autoSteerSessionId, reason, undefined, _cwd)) {
       // Auto-steer will deliver the message — allow silently to avoid duplicate guidance.
       allowPreToolUse("")
     }
@@ -449,6 +450,7 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
   // Enable auto-steer: if the setting is on, deny() will schedule a
   // steering message and allow the tool call instead of hard-blocking.
   _autoSteerSessionId = sessionId
+  _cwd = cwd
 
   const allTasks = await readSessionTasks(sessionId)
   const activeTasks = allTasks
