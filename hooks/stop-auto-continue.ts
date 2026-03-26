@@ -4,8 +4,8 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir, readdir } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import { uniq } from "lodash-es"
 import { z } from "zod"
 import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
@@ -1053,6 +1053,10 @@ function getSuggestionsPath(sessionId: string): string {
   return join(home, ".swiz", `stop-suggestions-${safe}.json`)
 }
 
+export function __testOnly_getSuggestionsPath(sessionId: string): string {
+  return getSuggestionsPath(sessionId)
+}
+
 async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
   try {
     const raw = await Bun.file(getSuggestionsPath(sessionId)).json()
@@ -1073,13 +1077,15 @@ async function recordSuggestion(sessionId: string, key: string): Promise<number>
   const log = await loadSuggestionLog(sessionId)
   log.seen[key] = (log.seen[key] ?? 0) + 1
   const path = getSuggestionsPath(sessionId)
-  const { mkdirSync } = await import("node:fs")
-  const { dirname } = await import("node:path")
   try {
-    mkdirSync(dirname(path), { recursive: true })
+    await mkdir(dirname(path), { recursive: true })
   } catch {}
   await Bun.write(path, JSON.stringify(log))
   return log.seen[key]!
+}
+
+export async function __testOnly_recordSuggestion(sessionId: string, key: string): Promise<number> {
+  return recordSuggestion(sessionId, key)
 }
 
 /** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */

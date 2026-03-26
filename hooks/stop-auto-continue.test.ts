@@ -1,7 +1,12 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { checkChangelogStaleness, normalizeTerminateArgs } from "./stop-auto-continue.ts"
+import {
+  __testOnly_getSuggestionsPath,
+  __testOnly_recordSuggestion,
+  checkChangelogStaleness,
+  normalizeTerminateArgs,
+} from "./stop-auto-continue.ts"
 import { getSessionTasksDir } from "./utils/hook-utils.ts"
 import { commitFile, makeTempGitRepo, useTempDir } from "./utils/test-utils.ts"
 
@@ -138,6 +143,31 @@ async function runHook({
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("stop-auto-continue", () => {
+  test("recordSuggestion creates missing parent directory (no sync fs)", async () => {
+    const homeDir = await createTempDir()
+    // HOME is not read by recordSuggestion, but getSuggestionsPath uses getHomeDirOrNull() which
+    // derives from process.env.HOME — set it for this isolated unit test.
+    const prevHome = process.env.HOME
+    process.env.HOME = homeDir
+    try {
+      const sessionId = `test-session-suggestions-${Date.now()}`
+      const path = __testOnly_getSuggestionsPath(sessionId)
+
+      // Ensure parent dir doesn't exist beforehand.
+      const parent = join(homeDir, ".swiz")
+      expect(await Bun.file(parent).exists()).toBe(false)
+
+      const count = await __testOnly_recordSuggestion(sessionId, "hello")
+
+      expect(count).toBe(1)
+      expect(await Bun.file(path).exists()).toBe(true)
+      const parsed = await Bun.file(path).json()
+      expect(parsed).toEqual({ seen: { hello: 1 } })
+    } finally {
+      process.env.HOME = prevHome
+    }
+  })
+
   test("blocks with AI suggestion for a substantive session", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
