@@ -6,5 +6,5 @@
   "strictNoDirectMain": false,
   "ambitionMode": "aggressive",
   "trunkMode": true,
-  "autoContinue": false
+  "autoContinue": true
 }
