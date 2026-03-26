@@ -1,9 +1,9 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
+import { checkChangelogStaleness, normalizeTerminateArgs } from "./stop-auto-continue.ts"
 import { getSessionTasksDir } from "./utils/hook-utils.ts"
-import { useTempDir } from "./utils/test-utils.ts"
+import { commitFile, makeTempGitRepo, useTempDir } from "./utils/test-utils.ts"
 
 // Subprocess-based tests spawn `bun hooks/stop-auto-continue.ts` which is
 // slower on CI runners (Ubuntu) than locally. Bump from the default 10s.
@@ -1786,5 +1786,50 @@ describe("normalizeTerminateArgs", () => {
     const { safeAction, normalizedArgs } = normalizeTerminateArgs("invalid", ["some reason"])
     expect(safeAction).toBe("block")
     expect(normalizedArgs[0]).toBe("some reason")
+  })
+})
+
+// ─── checkChangelogStaleness ─────────────────────────────────────────────────
+
+describe("checkChangelogStaleness", () => {
+  const tmp = useTempDir()
+
+  test("detects CHANGELOG.md when cwd is a subdirectory of the repo", async () => {
+    const repoDir = await makeTempGitRepo(tmp)
+
+    // Commit CHANGELOG.md with a backdated committer timestamp so it appears stale
+    await writeFile(join(repoDir, "CHANGELOG.md"), "# Changelog\n")
+    const addCl = Bun.spawn(["git", "add", "CHANGELOG.md"], {
+      cwd: repoDir,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await addCl.exited
+    const commitCl = Bun.spawn(["git", "commit", "-m", "add changelog"], {
+      cwd: repoDir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, GIT_COMMITTER_DATE: "2020-01-01T00:00:00Z" },
+    })
+    await commitCl.exited
+
+    // Add a recent commit to make changelog stale
+    await commitFile(repoDir, "file.txt", "hello\n")
+
+    // Create a subdirectory and call from there
+    const subdir = join(repoDir, "subdir")
+    await mkdir(subdir, { recursive: true })
+
+    // Should detect staleness even from nested cwd
+    const result = await checkChangelogStaleness(subdir)
+    expect(result).not.toBe("")
+    expect(result).toContain("CHANGELOG")
+  })
+
+  test("returns empty string for repo without CHANGELOG.md", async () => {
+    const repoDir = await makeTempGitRepo(tmp)
+
+    const result = await checkChangelogStaleness(repoDir)
+    expect(result).toBe("")
   })
 })

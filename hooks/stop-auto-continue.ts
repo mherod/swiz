@@ -312,7 +312,7 @@ const ONE_DAY = 86400
  * Check if CHANGELOG.md is stale (last updated > 1 day before the latest commit).
  * Returns a human-readable status string, or "" if not stale or not applicable.
  */
-async function checkChangelogStaleness(cwd: string): Promise<string> {
+export async function checkChangelogStaleness(cwd: string): Promise<string> {
   if (!(await isGitRepo(cwd))) return ""
 
   const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
@@ -323,18 +323,18 @@ async function checkChangelogStaleness(cwd: string): Promise<string> {
   if (await Bun.file(`${repoRoot}/CHANGELOG.md`).exists()) {
     changelogPath = "CHANGELOG.md"
   } else {
-    const lsFiles = await git(["ls-files", repoRoot], cwd)
+    const lsFiles = await git(["ls-files"], repoRoot)
     const match = lsFiles.split("\n").find((f) => /^CHANGELOG\.md$/i.test(f))
     if (match) changelogPath = match
   }
 
   if (!changelogPath) return ""
 
-  const lastCommitTime = parseInt(await git(["log", "-1", "--format=%ct"], cwd), 10)
+  const lastCommitTime = parseInt(await git(["log", "-1", "--format=%ct"], repoRoot), 10)
   if (Number.isNaN(lastCommitTime)) return ""
 
   const changelogTime = parseInt(
-    await git(["log", "-1", "--format=%ct", "--", changelogPath], cwd),
+    await git(["log", "-1", "--format=%ct", "--", changelogPath], repoRoot),
     10
   )
   if (Number.isNaN(changelogTime)) return ""
