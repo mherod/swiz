@@ -50,11 +50,13 @@ function emitStalenessWarning(
   }
   if (staleRemaining <= 2) {
     void emit(
-      `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`
+      `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`,
+      { skipAutoSteer: true }
     )
   } else if (staleRemaining <= 4) {
     void emit(
-      `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`
+      `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`,
+      { skipAutoSteer: true }
     )
   }
 }
