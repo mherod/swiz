@@ -35,10 +35,9 @@ export interface AgentDef {
 // Codex hooks engine (v0.116.0+) ships user-facing hook events in hooks.json:
 //   SessionStart, Stop, UserPromptSubmit (see openai/codex#13276).
 // Rust-side identifiers (BeforeToolUse, AfterToolUse, …) still exist internally
-// but are not those JSON keys. `hooksConfigurable` stays false until Codex
-// documents a stable user settings path for hooks; eventMap values below match
-// shipped names where applicable and keep internal names for other canonical
-// events until they appear in the user schema.
+// but are not in the user-facing hooks.json schema yet. eventMap values below
+// match shipped names where applicable and keep internal names for other
+// canonical events until they appear in the user schema.
 
 export const AGENTS: AgentDef[] = [
   {
@@ -143,7 +142,7 @@ export const AGENTS: AgentDef[] = [
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
-    hooksConfigurable: false,
+    hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
     toolAliases: {
       Bash: "shell_command",
@@ -167,6 +166,7 @@ export const AGENTS: AgentDef[] = [
       sessionEnd: "SessionEnd",
       preCompact: "PreCompress",
     },
+    unsupportedEvents: ["subagentStart", "subagentStop", "notification"],
   },
 ]
 

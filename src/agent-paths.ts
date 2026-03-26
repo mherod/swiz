@@ -20,7 +20,7 @@ export function getAgentSettingsPath(
     case "gemini":
       return join(homeDir, ".gemini", "settings.json")
     case "codex":
-      return join(homeDir, ".codex", "config.toml")
+      return join(homeDir, ".codex", "hooks.json")
   }
 }
 

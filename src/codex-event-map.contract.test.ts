@@ -27,7 +27,7 @@ describe("Codex eventMap contract (hooks.json)", () => {
     expect(codex.eventMap.postToolUse).toBe("AfterToolUse")
   })
 
-  it("does not install hooks until Codex exposes a stable settings path", () => {
-    expect(codex.hooksConfigurable).toBe(false)
+  it("installs hooks now that Codex ships a stable hooks.json format", () => {
+    expect(codex.hooksConfigurable).toBe(true)
   })
 })

@@ -68,9 +68,9 @@ describe("agents.ts", () => {
       })
     })
 
-    it("excludes codex since it has hooksConfigurable false", () => {
+    it("includes codex now that it has hooksConfigurable true", () => {
       const hasCodex = CONFIGURABLE_AGENTS.some((a) => a.id === "codex")
-      expect(hasCodex).toBe(false)
+      expect(hasCodex).toBe(true)
     })
 
     it("includes agents with true hooks configuration", () => {
