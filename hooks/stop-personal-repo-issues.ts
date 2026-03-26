@@ -590,6 +590,7 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   if (skillExists("work-on-issue"))
     subSteps.push(`/work-on-issue${issueArg} — Start working on the next issue`)
   subSteps.push(
+    `Read the full issue body AND all comments for #${issueNum} before planning — comments contain refinements, automation output, and acceptance criteria updates`,
     `Check for existing work: search for linked PRs and git fetch origin --prune`,
     `If an open PR for #${issueNum} exists with passing checks → merge it; if checks failing → fix them; if no PR → implement`,
     `Claim ownership: gh issue edit ${issueNum} --add-assignee @me`,
