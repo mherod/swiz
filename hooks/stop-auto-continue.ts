@@ -125,35 +125,46 @@ function hasMarkup(text: string): boolean {
  * These suggestions violate the ABSOLUTE PROHIBITIONS in the prompt but the AI
  * backend doesn't always comply — this is the deterministic backstop.
  */
-const WORKFLOW_PATTERNS = [
-  /\bgit\s+(commit|add|push|pull|fetch|rebase|merge|stash|checkout|switch)\b/i,
-  /\bgit\s+workflow\b/i,
-  /\bfeature\s+branch\b/i,
-  /\bpull\s+request\b/i,
-  /\b(push|commit|pr)\s+skill\b/i,
-  /\b(pre-?push|pre-?commit|stop)\s+hook/i,
-  /\bhook\s+(script|implementation|behaviour|behavior|filtering)\b/i,
-  /\bhook-\w+\b.*\b(filtering|output|suggestion)\b/i,
+const WORKFLOW_PATTERNS: Array<{ id: string; re: RegExp }> = [
+  {
+    id: "git_command",
+    re: /\bgit\s+(commit|add|push|pull|fetch|rebase|merge|stash|checkout|switch)\b/i,
+  },
+  { id: "git_workflow", re: /\bgit\s+workflow\b/i },
+  { id: "feature_branch", re: /\bfeature\s+branch\b/i },
+  { id: "pull_request", re: /\bpull\s+request\b/i },
+  { id: "skill_workflow", re: /\b(push|commit|pr)\s+skill\b/i },
+  { id: "hook_event", re: /\b(pre-?push|pre-?commit|stop)\s+hook/i },
+  { id: "hook_script", re: /\bhook\s+(script|implementation|behaviour|behavior|filtering)\b/i },
+  { id: "hook_filtering", re: /\bhook-\w+\b.*\b(filtering|output|suggestion)\b/i },
   // Match only when a specific hook filename (e.g. stop-auto-continue.ts, pretooluse-foo.ts)
   // is referenced — prevents false positives on product suggestions about "the hook system/framework".
-  /\b(implement|modify|wire|add|fix|update)\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*(?:\.ts)?\s+hook\b/i,
-  /\b(implement|modify|wire|add|fix|update)\b.*\bhook\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*/i,
-  /\bcollaboration\s+(signal|guard|detection|check)\b/i,
-  /\bbranch\s+(policy|protection|enforcement)\b/i,
-  /\b(push|commit)\s+guard\b/i,
-  /\b(push|git)\s+orchestration\b/i,
-  /\bguard-?aware\b/i,
-  /\b(implement|add|fix|build|extend|wire(?:\s+up)?|update)\b.*\bin\s+[a-z0-9]+-[a-z0-9-]+\b/i,
+  {
+    id: "specific_hook_filename",
+    re: /\b(implement|modify|wire|add|fix|update)\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*(?:\.ts)?\s+hook\b/i,
+  },
+  {
+    id: "specific_hook_reference",
+    re: /\b(implement|modify|wire|add|fix|update)\b.*\bhook\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*/i,
+  },
+  { id: "collaboration_signal", re: /\bcollaboration\s+(signal|guard|detection|check)\b/i },
+  { id: "branch_policy", re: /\bbranch\s+(policy|protection|enforcement)\b/i },
+  { id: "push_guard", re: /\b(push|commit)\s+guard\b/i },
+  { id: "push_orchestration", re: /\b(push|git)\s+orchestration\b/i },
+  { id: "guard_aware", re: /\bguard-?aware\b/i },
+  {
+    id: "project_specific_module",
+    re: /\b(implement|add|fix|build|extend|wire(?:\s+up)?|update)\b.*\bin\s+[a-z0-9]+-[a-z0-9-]+\b/i,
+  },
 ]
 
 export function isWorkflowSuggestion(
   text: string,
   opts: { skipPrPattern?: boolean } = {}
 ): boolean {
-  return WORKFLOW_PATTERNS.some((re, i) => {
-    // Index 3 is the /\bpull\s+request\b/i pattern — exempt it in reviewing state
-    if (opts.skipPrPattern && i === 3) return false
-    return re.test(text)
+  return WORKFLOW_PATTERNS.some((pattern) => {
+    if (opts.skipPrPattern && pattern.id === "pull_request") return false
+    return pattern.re.test(text)
   })
 }
 

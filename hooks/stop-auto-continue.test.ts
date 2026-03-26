@@ -1705,6 +1705,18 @@ describe("isWorkflowSuggestion", () => {
       })
     }
   })
+
+  describe("skipPrPattern behavior", () => {
+    test("exempts pull-request phrase when skipPrPattern is enabled", () => {
+      expect(
+        isWorkflowSuggestion("Open a pull request for this fix", { skipPrPattern: true })
+      ).toBe(false)
+    })
+
+    test("still blocks other workflow suggestions when skipPrPattern is enabled", () => {
+      expect(isWorkflowSuggestion("Run git push origin main", { skipPrPattern: true })).toBe(true)
+    })
+  })
 })
 
 // ─── normalizeTerminateArgs unit tests ────────────────────────────────────────
