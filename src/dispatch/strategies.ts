@@ -193,6 +193,58 @@ async function resolveAutoSteerEnabled(
   return (await isAutoSteerAvailable(sessionId)) !== null
 }
 
+/** Resolved auto-steer context from an enriched payload. */
+interface StopAutoSteerContext {
+  sessionId: string
+  safeSession: string
+  terminalApp: string
+}
+
+/** Extract and validate auto-steer prerequisites from a stop payload. */
+async function resolveStopAutoSteerContext(
+  enrichedPayloadStr: string
+): Promise<StopAutoSteerContext | null> {
+  const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
+  const sessionId = (payload.session_id as string) ?? ""
+  if (!sessionId) return null
+
+  const autoSteerEnabled = await resolveAutoSteerEnabled(payload, sessionId)
+  if (!autoSteerEnabled) return null
+
+  const { sanitizeSessionId } = await import("../../src/session-id.ts")
+  const safeSession = sanitizeSessionId(sessionId)
+  if (!safeSession) return null
+
+  const terminalApp = (payload._terminal as { app: string } | undefined)?.app ?? null
+  if (!terminalApp) return null
+
+  return { sessionId, safeSession, terminalApp }
+}
+
+/**
+ * Short-circuit stop hooks when on_session_stop auto-steer messages are queued.
+ * Delivers all pending messages and returns true to skip the full hook chain.
+ */
+async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boolean> {
+  const ctx = await resolveStopAutoSteerContext(enrichedPayloadStr)
+  if (!ctx) return false
+
+  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  if (!store.hasPending(ctx.safeSession, "on_session_stop")) return false
+
+  const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
+  const requests = store.consume(ctx.safeSession, "on_session_stop")
+  for (const req of requests) {
+    const sent = await sendAutoSteer(req.message, ctx.terminalApp)
+    if (sent) {
+      log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
+    }
+  }
+  log(`   on_session_stop: short-circuited ${requests.length} message(s) — skipping stop hooks`)
+  return true
+}
+
 async function tryAutoSteerStopBlock(
   finalResponse: Record<string, unknown>,
   enrichedPayloadStr: string
@@ -200,20 +252,15 @@ async function tryAutoSteerStopBlock(
   const blockReason = (finalResponse as { reason?: string }).reason ?? ""
   if (!blockReason) return
 
-  const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
-  const sessionId = (payload.session_id as string) ?? ""
-  if (!sessionId) return
-
-  const autoSteerEnabled = await resolveAutoSteerEnabled(payload, sessionId)
-  if (!autoSteerEnabled) return
-
-  const terminalApp = (payload._terminal as { app: string } | undefined)?.app ?? null
-  if (!terminalApp) return
+  const ctx = await resolveStopAutoSteerContext(enrichedPayloadStr)
+  if (!ctx) return
 
   const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
-  const sent = await sendAutoSteer(blockReason, terminalApp)
+  const sent = await sendAutoSteer(blockReason, ctx.terminalApp)
   if (!sent) return
-  log(`   auto-steer: sent stop block reason to terminal (${terminalApp}) — converting to allow`)
+  log(
+    `   auto-steer: sent stop block reason to terminal (${ctx.terminalApp}) — converting to allow`
+  )
   delete finalResponse.decision
   delete finalResponse.reason
 }
@@ -221,6 +268,18 @@ async function tryAutoSteerStopBlock(
 class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
+
+    // on_session_stop: short-circuit all stop hooks if pending messages exist.
+    // Deliver queued messages and return immediately — stop won't actually happen,
+    // so running the full hook chain is unnecessary.
+    if (canonicalEvent === "stop") {
+      const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
+      if (shortCircuited) {
+        const response: Record<string, unknown> = {}
+        writeResponse(response)
+        return response
+      }
+    }
 
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []

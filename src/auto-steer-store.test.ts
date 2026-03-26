@@ -105,4 +105,47 @@ describe("AutoSteerStore", () => {
     expect(results[0]!.trigger).toBe("next_turn")
     store.close()
   })
+
+  it("consumes after_all_tasks_complete independently", () => {
+    const store = createStore()
+    store.enqueue("sess1", "task advice", "next_turn")
+    store.enqueue("sess1", "all done message", "after_all_tasks_complete")
+    store.enqueue("sess1", "commit reminder", "after_commit")
+
+    // Consuming after_all_tasks_complete leaves others untouched
+    const results = store.consume("sess1", "after_all_tasks_complete")
+    expect(results).toHaveLength(1)
+    expect(results[0]!.message).toBe("all done message")
+    expect(store.hasPending("sess1", "next_turn")).toBe(true)
+    expect(store.hasPending("sess1", "after_commit")).toBe(true)
+    expect(store.hasPending("sess1", "after_all_tasks_complete")).toBe(false)
+    store.close()
+  })
+
+  it("on_session_stop consumed separately from stop block auto-steer", () => {
+    const store = createStore()
+    store.enqueue("sess1", "stop message 1", "on_session_stop")
+    store.enqueue("sess1", "stop message 2", "on_session_stop")
+    store.enqueue("sess1", "next turn", "next_turn")
+
+    const stopResults = store.consume("sess1", "on_session_stop")
+    expect(stopResults).toHaveLength(2)
+    expect(stopResults.map((r) => r.message)).toEqual(["stop message 1", "stop message 2"])
+    // next_turn unaffected
+    expect(store.hasPending("sess1", "next_turn")).toBe(true)
+    store.close()
+  })
+
+  it("after_commit FIFO with multiple enqueues", () => {
+    const store = createStore()
+    store.enqueue("sess1", "commit msg 1", "after_commit")
+    store.enqueue("sess1", "commit msg 2", "after_commit")
+    store.enqueue("sess1", "commit msg 3", "after_commit")
+
+    const results = store.consume("sess1", "after_commit")
+    expect(results).toHaveLength(3)
+    expect(results.map((r) => r.message)).toEqual(["commit msg 1", "commit msg 2", "commit msg 3"])
+    expect(store.hasPending("sess1", "after_commit")).toBe(false)
+    store.close()
+  })
 })
