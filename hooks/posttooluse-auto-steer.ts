@@ -77,15 +77,17 @@ if (await shouldDeferAutoSteerForForegroundChatApp()) process.exit(0)
 const terminal = input._terminal as { app: TerminalApp; name: string } | undefined
 const app = terminal?.app ?? detectTerminal().app
 
-// Consume and deliver all eligible triggers in FIFO order.
+// Consume and deliver ONE message per trigger type.
+// Each hook invocation dequeues exactly one message (FIFO per trigger).
+// This prevents message clustering and ensures atomic transaction-protected dequeue.
 // Two dedup layers:
 //   1. Enqueue-side (in store.enqueue): skips if identical pending or recently delivered
-//   2. Send-side (here): deduplicates within the current batch
+//   2. Send-side (here): deduplicates within the current batch (same trigger_type)
 const sent = new Set<string>()
 for (const trigger of triggersToDeliver) {
-  const requests = store.consume(safeSession, trigger)
-  for (const req of requests) {
-    if (sent.has(req.message)) continue
+  const requests = store.consumeOne(safeSession, trigger)
+  const req = requests[0]
+  if (req && !sent.has(req.message)) {
     await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
     sent.add(req.message)
   }

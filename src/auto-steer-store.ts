@@ -86,7 +86,7 @@ const DEDUP_WINDOW_MS = 60_000
 export class AutoSteerStore {
   private db: Database
   private _stmtEnqueue!: Statement
-  private _stmtConsume!: Statement
+  private _stmtConsumeOne!: Statement
   private _stmtMarkDelivered!: Statement
   private _stmtPendingDuplicate!: Statement
   private _stmtRecentlyDelivered!: Statement
@@ -140,13 +140,16 @@ export class AutoSteerStore {
     this._stmtEnqueue = this.db.prepare(
       "INSERT INTO auto_steer_queue (session_id, message, trigger_type, created_at, ttl_ms, project_key) VALUES (?, ?, ?, ?, ?, ?)"
     )
-    // Consume: select undelivered rows that haven't expired — scoped by session_id (delivery is per-session).
-    this._stmtConsume = this.db.prepare(
+    // ConsumeOne: select the next undelivered row (FIFO by id) that hasn't expired.
+    // Scoped by session_id (delivery is per-session).
+    // Returns exactly one row per call to ensure atomic transaction-protected dequeue.
+    this._stmtConsumeOne = this.db.prepare(
       `SELECT id, session_id, message, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE session_id = ? AND trigger_type = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
-       ORDER BY id ASC`
+       ORDER BY id ASC
+       LIMIT 1`
     )
     this._stmtMarkDelivered = this.db.prepare(
       "UPDATE auto_steer_queue SET delivered_at = ? WHERE id = ?"
@@ -234,29 +237,69 @@ export class AutoSteerStore {
   }
 
   /**
-   * Consume all pending, non-expired messages for a session+trigger in FIFO order.
+   * Consume the next undelivered message for a session+trigger in FIFO order.
+   * Uses a SQLite transaction for atomic SELECT + UPDATE — ensures only one
+   * process/hook invocation dequeues each message, preventing duplicate sends.
+   *
    * Scoped by session_id — delivery is per-session.
+   * Returns an array with 0 or 1 message.
    */
-  consume(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): QueuedAutoSteerRequest[] {
-    const rows = this._stmtConsume.all(sessionId, trigger, Date.now()) as Array<{
-      id: number
-      session_id: string
-      message: string
-      trigger: string
-      created_at: number
-    }>
+  consumeOne(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): QueuedAutoSteerRequest[] {
     const now = Date.now()
     const results: QueuedAutoSteerRequest[] = []
-    for (const row of rows) {
-      this._stmtMarkDelivered.run(now, row.id)
-      results.push({
-        id: row.id,
-        sessionId: row.session_id,
-        message: row.message,
-        trigger: row.trigger as AutoSteerTrigger,
-        createdAt: row.created_at,
-        deliveredAt: now,
-      })
+
+    // Use a transaction to atomically SELECT and UPDATE.
+    // This prevents race conditions where multiple processes dequeue the same message.
+    try {
+      this.db.run("BEGIN IMMEDIATE")
+
+      const row = this._stmtConsumeOne.get(sessionId, trigger, now) as
+        | {
+            id: number
+            session_id: string
+            message: string
+            trigger: string
+            created_at: number
+          }
+        | undefined
+
+      if (row) {
+        this._stmtMarkDelivered.run(now, row.id)
+        results.push({
+          id: row.id,
+          sessionId: row.session_id,
+          message: row.message,
+          trigger: row.trigger as AutoSteerTrigger,
+          createdAt: row.created_at,
+          deliveredAt: now,
+        })
+      }
+
+      this.db.run("COMMIT")
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK")
+      } catch {
+        // Ignore rollback errors
+      }
+      throw e
+    }
+
+    return results
+  }
+
+  /**
+   * Consume all pending, non-expired messages for a session+trigger in FIFO order.
+   * Scoped by session_id — delivery is per-session.
+   * @deprecated Use consumeOne() instead for thread-safe dequeue.
+   */
+  consume(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): QueuedAutoSteerRequest[] {
+    const results: QueuedAutoSteerRequest[] = []
+    // Repeatedly call consumeOne until no more messages for this trigger
+    while (true) {
+      const batch = this.consumeOne(sessionId, trigger)
+      if (batch.length === 0) break
+      results.push(...batch)
     }
     return results
   }
@@ -284,7 +327,7 @@ export class AutoSteerStore {
 
   /** Check if any pending, non-expired messages exist for a session+trigger. */
   hasPending(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): boolean {
-    const rows = this._stmtConsume.all(sessionId, trigger, Date.now())
+    const rows = this._stmtConsumeOne.all(sessionId, trigger, Date.now())
     return rows.length > 0
   }
 
