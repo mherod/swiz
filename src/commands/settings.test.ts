@@ -602,7 +602,7 @@ describe("swiz settings", () => {
       join(configDir, "settings.json"),
       JSON.stringify({ autoContinue: false, speak: true })
     )
-    const result = await runSwiz(["settings"], home)
+    const result = await runSwiz(["settings", "--dir", home], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("auto-continue:   disabled")
     expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
@@ -918,6 +918,7 @@ describe("SETTINGS_REGISTRY", () => {
       "changesRequestedGate",
       "personalRepoIssuesGate",
       "issueCloseGate",
+      "memoryUpdateReminder",
       "qualityChecksGate",
       "prAgeGateMinutes",
       "pushCooldownMinutes",
@@ -1097,6 +1098,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1136,6 +1138,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1176,6 +1179,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1221,6 +1225,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1264,6 +1269,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1303,6 +1309,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1342,6 +1349,7 @@ describe("collaborationMode settings", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,
@@ -1623,6 +1631,7 @@ describe("strictNoDirectMain setting", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: true,
       trunkMode: false,
@@ -1662,6 +1671,7 @@ describe("strictNoDirectMain setting", () => {
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
+      memoryUpdateReminder: false,
       qualityChecksGate: true,
       strictNoDirectMain: false,
       trunkMode: false,

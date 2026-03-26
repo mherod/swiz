@@ -176,6 +176,8 @@ export interface SwizSettings {
   personalRepoIssuesGate: boolean
   /** When true, blocks issue close commands unless explicitly allowed. */
   issueCloseGate: boolean
+  /** When true, prompt to update memory files when session stops. */
+  memoryUpdateReminder: boolean
   /** When true, runs lint and typecheck quality checks before allowing session stop. */
   qualityChecksGate: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */

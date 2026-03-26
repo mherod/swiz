@@ -58,6 +58,16 @@ describe("offensive-language-patterns", () => {
       )
       expect(m?.category).toBe("dismissal")
     })
+    test("exempts negated phrase 'no pre-existing issues'", () => {
+      const m = findLazyPattern("There are no pre-existing issues in this output.")
+      expect(m?.category).not.toBe("dismissal")
+    })
+    test("exempts negated phrase but still catches later genuine dismissal", () => {
+      const m = findLazyPattern(
+        "There are no pre-existing issues in this module. But these failures are pre-existing issues and not caused by my changes."
+      )
+      expect(m?.category).toBe("dismissal")
+    })
   })
 
   // ── Compliance gaming ──────────────────────────────────────────────────────

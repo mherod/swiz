@@ -190,6 +190,8 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "dismissal",
     pattern: re(`pre-?existing (?:\\w+ )*${ISSUES}`),
+    negationPattern:
+      /(?:no|not|without|don't|do not|isn't|is not|aren't|are not|can't|cannot)\s+(?:\w+\s+){0,3}pre-?existing(?:\s+\w+){0,3}\s+(?:error|warning|issue|failure|bug|problem)s?\b/i,
     response:
       "There is no such thing as a 'pre-existing issue' that isn't your problem. " +
       "If it's in the output, it's blocking the workflow. Own it and fix it.",

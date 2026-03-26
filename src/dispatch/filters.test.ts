@@ -27,6 +27,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     changesRequestedGate: true,
     personalRepoIssuesGate: true,
     issueCloseGate: false,
+    memoryUpdateReminder: false,
     qualityChecksGate: true,
     strictNoDirectMain: false,
     trunkMode: false,

@@ -166,6 +166,22 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "memoryUpdateReminder",
+    aliases: [
+      "memory-update-reminder",
+      "memoryupdatereminder",
+      "memory_update_reminder",
+      "memory-reminder",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      enableDescription: "Prompt to update memory files when session stops",
+      disableDescription: "Skip memory update reminder on session stop",
+    },
+  },
+  {
     key: "qualityChecksGate",
     aliases: [
       "quality-checks-gate",

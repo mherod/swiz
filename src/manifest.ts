@@ -157,7 +157,12 @@ export const manifest: HookGroup[] = [
       { file: "stop-memory-size.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-dependabot-prs.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-gdpr-data-models.ts", timeout: 10 },
-      { file: "stop-memory-update-reminder.ts", timeout: 10, cooldownSeconds: 600 },
+      {
+        file: "stop-memory-update-reminder.ts",
+        timeout: 10,
+        cooldownSeconds: 600,
+        requiredSettings: ["memoryUpdateReminder"],
+      },
       { file: "stop-auto-continue.ts", timeout: 120 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],

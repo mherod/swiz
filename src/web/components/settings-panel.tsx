@@ -23,6 +23,7 @@ interface GlobalSettingsForm {
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
   issueCloseGate: boolean
+  memoryUpdateReminder: boolean
   qualityChecksGate: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
@@ -49,6 +50,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
   issueCloseGate: false,
+  memoryUpdateReminder: false,
   qualityChecksGate: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
@@ -125,6 +127,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     changesRequestedGate: settings.changesRequestedGate !== false,
     personalRepoIssuesGate: settings.personalRepoIssuesGate !== false,
     issueCloseGate: !!settings.issueCloseGate,
+    memoryUpdateReminder: !!settings.memoryUpdateReminder,
     qualityChecksGate: settings.qualityChecksGate !== false,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
@@ -325,6 +328,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "issueCloseGate",
     label: "Issue close gate",
     desc: "Block issue close commands unless explicitly allowed or required by a skill.",
+  },
+  {
+    key: "memoryUpdateReminder",
+    label: "Memory update reminder",
+    desc: "Prompt to update memory files (CLAUDE.md / MEMORY.md) when session stops.",
   },
   {
     key: "qualityChecksGate",

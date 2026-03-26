@@ -166,6 +166,7 @@ function buildBaseSettings(
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     issueCloseGate: settings.issueCloseGate,
+    memoryUpdateReminder: settings.memoryUpdateReminder,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
     statusLineSegments: settings.statusLineSegments,
