@@ -10,9 +10,8 @@ import {
   type GitBranchStatus,
   getGitBranchStatus,
   getRepoSlug,
-  ghJson,
 } from "../git-helpers.ts"
-import { getIssueStore } from "../issue-store.ts"
+import { getIssueStoreReader } from "../issue-store.ts"
 import {
   DEFAULT_SETTINGS,
   type EffectiveSwizSettings,
@@ -442,90 +441,34 @@ interface FetchResult<T> {
   status: FetchStatus
 }
 
-async function fetchIssuesViaStore(repo: string, cwd: string): Promise<FetchResult<unknown>> {
-  const store = getIssueStore()
-  const cached = store.listIssues(repo)
-  if (cached.length > 0) return { data: cached, status: "ok" }
-  const fresh = await ghJson<{ number: number }[]>(
-    ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
-    cwd
-  )
-  if (fresh && fresh.length > 0) {
-    store.upsertIssues(repo, fresh)
-    return { data: fresh, status: "ok" }
-  }
-  if (fresh) return { data: [], status: "ok" }
-  // API failed — serve stale data rather than empty
-  const stale = store.listIssues(repo, STALE_TTL_MS)
-  return { data: stale, status: stale.length > 0 ? "stale" : "error" }
+async function fetchIssuesViaStore(repo: string, _cwd: string): Promise<FetchResult<unknown>> {
+  const reader = getIssueStoreReader()
+  const cached = await reader.listIssues(repo, STALE_TTL_MS)
+  return { data: cached, status: "ok" }
 }
 
-async function fetchPrsViaStore(repo: string, cwd: string): Promise<FetchResult<unknown>> {
-  const store = getIssueStore()
-  const cached = store.listPullRequests(repo)
-  if (cached.length > 0) return { data: cached, status: "ok" }
-  const fresh = await ghJson<{ number: number }[]>(
-    ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
-    cwd
-  )
-  if (fresh && fresh.length > 0) {
-    store.upsertPullRequests(repo, fresh)
-    return { data: fresh, status: "ok" }
-  }
-  if (fresh) return { data: [], status: "ok" }
-  const stale = store.listPullRequests(repo, STALE_TTL_MS)
-  return { data: stale, status: stale.length > 0 ? "stale" : "error" }
+async function fetchPrsViaStore(repo: string, _cwd: string): Promise<FetchResult<unknown>> {
+  const reader = getIssueStoreReader()
+  const cached = await reader.listPullRequests(repo, STALE_TTL_MS)
+  return { data: cached, status: "ok" }
 }
 
 async function fetchPrDetailViaStore(
   repo: string,
   branch: string,
-  cwd: string
+  _cwd: string
 ): Promise<PrBranchDetail | null> {
-  const store = getIssueStore()
-  const cached = store.getPrBranchDetail<PrBranchDetail>(repo, branch)
-  if (cached) return cached
-  const fresh = await ghJson<{ reviewDecision?: string; comments?: unknown[] }>(
-    ["pr", "view", branch, "--json", "reviewDecision,comments"],
-    cwd
-  )
-  if (!fresh) {
-    return store.getPrBranchDetail<PrBranchDetail>(repo, branch, STALE_TTL_MS)
-  }
-  const detail: PrBranchDetail = {
-    reviewDecision: fresh.reviewDecision ?? "",
-    commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
-  }
-  store.upsertPrBranchDetail(repo, branch, detail)
-  return detail
+  const reader = getIssueStoreReader()
+  return reader.getPrBranchDetail<PrBranchDetail>(repo, branch)
 }
 
 async function fetchCiRunsViaStore(
   repo: string,
   branch: string,
-  cwd: string
+  _cwd: string
 ): Promise<GitHubCiRun[] | null> {
-  const store = getIssueStore()
-  const cached = store.getCiBranchRuns<GitHubCiRun>(repo, branch)
-  if (cached) return cached
-  const fresh = await ghJson<GitHubCiRun[]>(
-    [
-      "run",
-      "list",
-      "--branch",
-      branch,
-      "--limit",
-      "10",
-      "--json",
-      "databaseId,status,conclusion,workflowName,createdAt,event",
-    ],
-    cwd
-  )
-  if (fresh) {
-    store.upsertCiBranchRuns(repo, branch, fresh)
-    return fresh
-  }
-  return store.getCiBranchRuns<GitHubCiRun>(repo, branch, STALE_TTL_MS)
+  const reader = getIssueStoreReader()
+  return reader.getCiBranchRuns<GitHubCiRun>(repo, branch)
 }
 
 // ── Per-project context usage extremes ─────────────────────────────────────
@@ -750,8 +693,15 @@ function buildContextSegment(
   return `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
 }
 
+const LIVENESS_EMOJI: Record<FetchStatus, string> = {
+  ok: "💚",
+  stale: "🟡",
+  error: "🔴",
+}
+
 function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
-  if (snapshot.fetchStatus === "error") return `\x1b[91m⚠ fetch failed${R}`
+  const liveness = LIVENESS_EMOJI[snapshot.fetchStatus] ?? ""
+  if (snapshot.fetchStatus === "error") return `${liveness} ${DIM}no data${R}`
   const staleMark = snapshot.fetchStatus === "stale" ? ` ${DIM}(stale)${R}` : ""
   const issueSeg =
     snapshot.issueCount !== null
@@ -763,7 +713,7 @@ function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
     snapshot.issueCount !== null || snapshot.prCount !== null
       ? [issueSeg, prSeg].filter(Boolean).join("  ")
       : ""
-  return counts ? `${counts}${staleMark}` : ""
+  return counts ? `${liveness} ${counts}${staleMark}` : liveness
 }
 
 function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {
