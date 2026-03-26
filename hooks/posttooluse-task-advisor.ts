@@ -42,7 +42,8 @@ function emitStalenessWarning(
       void emit(
         `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
           `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
-          `or create new tasks for the work underway.`
+          `or create new tasks for the work underway.`,
+        { skipAutoSteer: true }
       )
     }
     return
@@ -88,8 +89,10 @@ async function main(): Promise<void> {
   emitStalenessWarning(callsSinceTask, staleRemaining, (input.tool_name ?? "") as string)
 }
 
-async function emit(context: string): Promise<never> {
-  if (_sessionId) await scheduleAutoSteer(_sessionId, context, undefined, _cwd)
+async function emit(context: string, opts?: { skipAutoSteer?: boolean }): Promise<never> {
+  if (_sessionId && !opts?.skipAutoSteer) {
+    await scheduleAutoSteer(_sessionId, context, undefined, _cwd)
+  }
   return emitContext("PostToolUse", context)
 }
 
