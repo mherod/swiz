@@ -56,6 +56,11 @@ async function deny(reason: string): Promise<never> {
   denyPreToolUse(reason)
 }
 
+async function denyRequiredTasks(reason: string): Promise<never> {
+  // Required-task enforcement must hard-block immediately.
+  denyPreToolUse(reason)
+}
+
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
@@ -161,7 +166,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      await deny(
+      await denyRequiredTasks(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -176,7 +181,7 @@ function checkNoTasks(
       )
     }
 
-    await deny(
+    await denyRequiredTasks(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
@@ -219,7 +224,7 @@ async function checkTaskMinimums(
     actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
   }
 
-  await deny(
+  await denyRequiredTasks(
     `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
       `Current:\n` +
       `  • Incomplete tasks: ${incompleteTasks.length}\n` +

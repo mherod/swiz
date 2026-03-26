@@ -197,17 +197,48 @@ function checkAsAny(oldString: string, newString: string): void {
   }
 }
 
-// ─── eslint-disable check ────────────────────────────────────────────────────
+// ─── lint-disable check ──────────────────────────────────────────────────────
 
-function checkEslintDisable(content: string): void {
-  // Keyword split across array to avoid self-triggering when editing this hook.
-  const kw = ["eslint", "disable"].join("-")
-  if (new RegExp(`(?://|/\\*)\\s*${kw}`).test(content)) {
+function checkLintDisables(content: string): void {
+  // Keywords split across arrays to avoid self-triggering when editing this hook.
+  const eslintKw = ["eslint", "disable"].join("-")
+  const biomeKw = ["biome", "ignore"].join("-")
+  const oxlintKw = ["oxlint", "disable"].join("-")
+  const denoLintIgnoreKw = ["deno", "lint", "ignore"].join("-")
+  const denoLintIgnoreFileKw = ["deno", "lint", "ignore", "file"].join("-")
+  const stylelintKw = ["stylelint", "disable"].join("-")
+  const markdownlintKw = ["markdownlint", "disable"].join("-")
+  const tslintName = "tslint"
+  const tslintAction = "disable"
+  const pylintName = "pylint"
+  const pylintAction = "disable"
+
+  const patterns: Array<{ label: string; re: RegExp }> = [
+    { label: eslintKw, re: new RegExp(`(?://|/\\*)\\s*${eslintKw}`) },
+    { label: biomeKw, re: new RegExp(`(?://|/\\*)\\s*${biomeKw}`) },
+    { label: oxlintKw, re: new RegExp(`(?://|/\\*)\\s*${oxlintKw}`) },
+    { label: denoLintIgnoreKw, re: new RegExp(`(?://|/\\*)\\s*${denoLintIgnoreKw}`) },
+    { label: denoLintIgnoreFileKw, re: new RegExp(`(?://|/\\*)\\s*${denoLintIgnoreFileKw}`) },
+    { label: stylelintKw, re: new RegExp(`(?://|/\\*)\\s*${stylelintKw}`) },
+    { label: markdownlintKw, re: new RegExp(`(?://|/\\*)\\s*${markdownlintKw}`) },
+    {
+      label: `${tslintName}:${tslintAction}`,
+      re: new RegExp(`(?://|/\\*)\\s*${tslintName}\\s*:\\s*${tslintAction}`),
+    },
+    {
+      label: `${pylintName}: ${pylintAction}`,
+      re: new RegExp(`(?://|/\\*)\\s*${pylintName}\\s*:\\s*${pylintAction}`),
+    },
+  ]
+
+  const matched = patterns.find((pattern) => pattern.re.test(content))
+  if (matched) {
     denyPreToolUse(
       [
         "ESLint is the authority. Do not bypass, ignore, or argue with it.",
         "",
-        "You cannot add `eslint-disable` comments. The linter has identified a problem in your code.",
+        `Matched forbidden lint suppression pattern: \`${matched.label}\`.`,
+        "The linter has identified a problem in your code.",
         "",
         formatActionPlan(
           [
@@ -364,7 +395,7 @@ async function main() {
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   checkAsAny(oldString, newString)
-  checkEslintDisable(newString)
+  checkLintDisables(newString)
   checkTsIgnore(newString)
 
   allowPreToolUse("")
