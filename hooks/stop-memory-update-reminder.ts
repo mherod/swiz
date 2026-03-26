@@ -8,7 +8,7 @@ import { getHomeDirOrNull } from "../src/home.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import { blockStop, isGitRepo, skillAdvice } from "./utils/hook-utils.ts"
 
-const MEMORY_RECENCY_WINDOW_MS = 10 * 60 * 1000
+const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 
 async function memoryRecentlyUpdated(cwd: string): Promise<boolean> {
   const home = getHomeDirOrNull()
