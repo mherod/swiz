@@ -255,12 +255,30 @@ function resolveScopeLabel(source: string | undefined, fallback: string): string
   return fallback
 }
 
-function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSettings): void {
-  const maxLen = Math.max(...rows.map(([label]) => label.length))
-  for (const [label, key, scope] of rows) {
-    const value = effective[key] ? "enabled" : "disabled"
-    console.log(`  ${label.padEnd(maxLen)} ${value} (${scope})`)
+type SettingsRow = { label: string; value: string; scope?: string }
+
+function printAlignedRows(rows: SettingsRow[]): void {
+  if (rows.length === 0) return
+  const maxLabelLen = Math.max(...rows.map((r) => r.label.length))
+  for (const row of rows) {
+    const suffix = row.scope ? ` (${row.scope})` : ""
+    console.log(`  ${row.label.padEnd(maxLabelLen)} ${row.value}${suffix}`)
   }
+}
+
+function boolToEnabledDisabled(v: boolean): "enabled" | "disabled" {
+  return v ? "enabled" : "disabled"
+}
+
+function booleanRowsToSettingsRows(
+  rows: BoolSettingRow[],
+  effective: EffectiveSwizSettings
+): SettingsRow[] {
+  return rows.map(([label, key, scope]) => ({
+    label,
+    value: boolToEnabledDisabled(Boolean(effective[key])),
+    scope,
+  }))
 }
 
 /** Excluded from auto-generated boolean rows — these have custom scope labels or positioning. */
@@ -278,7 +296,8 @@ function formatNumericDisplay(numVal: number, placeholder: string | undefined): 
   return String(numVal)
 }
 
-function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
+function numericGlobalSettingsRows(effective: EffectiveSwizSettings): SettingsRow[] {
+  const out: SettingsRow[] = []
   for (const def of SETTINGS_REGISTRY) {
     if (def.kind !== "numeric" && def.kind !== "string") continue
     if (!def.scopes.includes("global")) continue
@@ -287,12 +306,13 @@ function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
     const label = def.aliases[0] ?? def.key
     if (def.kind === "numeric") {
       const display = formatNumericDisplay(value as number, def.docs?.valuePlaceholder)
-      console.log(`  ${label}: ${display} (global)`)
+      out.push({ label: `${label}:`, value: display, scope: "global" })
     } else {
       const strVal = value as string
-      console.log(`  ${label}: ${strVal || "system default"} (global)`)
+      out.push({ label: `${label}:`, value: strVal || "system default", scope: "global" })
     }
   }
+  return out
 }
 
 function printGlobalSettings(
@@ -304,55 +324,79 @@ function printGlobalSettings(
   const ambitionScopeLabel = resolveScopeLabel(ambitionSource, "global/default")
   const strictLabel = strictNoDirectMainSource === "project" ? "project override" : "global"
 
-  console.log(
-    `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
-  )
-  console.log(`  ambition-mode:   ${effective.ambitionMode} (${ambitionScopeLabel})`)
-  console.log(
-    `  collaboration:   ${effective.collaborationMode} (${effective.collaborationMode === "auto" ? "default" : scopeLabel})`
-  )
-
-  printBooleanSettings(GLOBAL_BOOL_ROWS, effective)
-
-  console.log(
-    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictLabel})`
-  )
-
-  printNumericGlobalSettings(effective)
+  const rows: SettingsRow[] = [
+    {
+      label: "auto-continue:",
+      value: boolToEnabledDisabled(effective.autoContinue),
+      scope: scopeLabel,
+    },
+    { label: "ambition-mode:", value: effective.ambitionMode, scope: ambitionScopeLabel },
+    {
+      label: "collaboration:",
+      value: effective.collaborationMode,
+      scope: effective.collaborationMode === "auto" ? "default" : scopeLabel,
+    },
+    ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective),
+    {
+      label: "strict-no-direct-main:",
+      value: boolToEnabledDisabled(effective.strictNoDirectMain),
+      scope: strictLabel,
+    },
+    ...numericGlobalSettingsRows(effective),
+  ]
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
-    console.log(`  disabled-hooks:  ${globalDisabled.join(", ")} (global)`)
+    rows.push({ label: "disabled-hooks:", value: globalDisabled.join(", "), scope: "global" })
   }
+
+  printAlignedRows(rows)
 }
 
 function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks?: string[]): void {
   console.log("\n  project policy")
-  console.log(`  config: ${projectPolicyInfo.configPath} (${projectPolicyInfo.source})`)
   const profileLabel = projectPolicyInfo.profile ?? "none"
-  console.log(`  profile:         ${profileLabel} (${projectPolicyInfo.source})`)
-  console.log(
-    `  trivial-max-files: ${projectPolicyInfo.trivialMaxFiles} (${projectPolicyInfo.source})`
-  )
-  console.log(
-    `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
-  )
-  console.log(
-    `  default-branch: ${projectPolicyInfo.defaultBranch} (${projectPolicyInfo.defaultBranchSource})`
-  )
-  console.log(
-    `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.memoryLineSource})`
-  )
-  console.log(
-    `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.memoryWordSource})`
-  )
-  console.log(
-    `  trunk-mode: ${projectPolicyInfo.trunkMode ? "enabled" : "disabled"} (${projectPolicyInfo.source})`
-  )
+  const rows: SettingsRow[] = [
+    { label: "config:", value: projectPolicyInfo.configPath, scope: projectPolicyInfo.source },
+    { label: "profile:", value: profileLabel, scope: projectPolicyInfo.source },
+    {
+      label: "trivial-max-files:",
+      value: String(projectPolicyInfo.trivialMaxFiles),
+      scope: projectPolicyInfo.source,
+    },
+    {
+      label: "trivial-max-lines:",
+      value: String(projectPolicyInfo.trivialMaxLines),
+      scope: projectPolicyInfo.source,
+    },
+    {
+      label: "default-branch:",
+      value: projectPolicyInfo.defaultBranch,
+      scope: projectPolicyInfo.defaultBranchSource,
+    },
+    {
+      label: "memory-line-threshold:",
+      value: String(projectPolicyInfo.memoryLineThreshold),
+      scope: projectPolicyInfo.memoryLineSource,
+    },
+    {
+      label: "memory-word-threshold:",
+      value: String(projectPolicyInfo.memoryWordThreshold),
+      scope: projectPolicyInfo.memoryWordSource,
+    },
+    {
+      label: "trunk-mode:",
+      value: boolToEnabledDisabled(projectPolicyInfo.trunkMode),
+      scope: projectPolicyInfo.source,
+    },
+  ]
   const projectDisabled = projectPolicyInfo.disabledHooks ?? []
   if (projectDisabled.length > 0) {
-    console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
+    rows.push({ label: "disabled-hooks:", value: projectDisabled.join(", "), scope: "project" })
   }
+
+  printAlignedRows(rows)
+
   if (detectedStacks !== undefined) {
     const stacksLabel = detectedStacks.length > 0 ? detectedStacks.join(", ") : "none detected"
     console.log(`  detected-stacks: ${stacksLabel}`)
