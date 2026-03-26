@@ -71,20 +71,19 @@ const antennaTipMat = new THREE.MeshStandardMaterial({
 /** @returns {THREE.Mesh} */
 function buildBody() {
   const profile = [
-    [0, 1.35],
-    [0.42, 1.2],
-    [0.65, 0.95],
-    [0.72, 0.7],
-    [0.58, 0.4],
-    [0.52, 0.2],
-    [0.55, 0.0],
-    [0.62, -0.2],
-    [0.72, -0.45],
-    [0.74, -0.7],
-    [0.68, -0.95],
-    [0.5, -1.15],
-    [0.25, -1.3],
-    [0, -1.35],
+    [0, 1.05],
+    [0.5, 0.95],
+    [0.78, 0.7],
+    [0.85, 0.45],
+    [0.7, 0.2],
+    [0.65, 0.0],
+    [0.68, -0.2],
+    [0.78, -0.4],
+    [0.85, -0.65],
+    [0.8, -0.85],
+    [0.6, -1.0],
+    [0.3, -1.1],
+    [0, -1.15],
   ]
   const pts = profile.map(([x, y]) => new THREE.Vector2(x, y))
   return new THREE.Mesh(new THREE.LatheGeometry(pts, 32), bodyMat)
@@ -93,15 +92,15 @@ function buildBody() {
 /** @param {number} x @returns {THREE.Group} */
 function buildEye(x) {
   const g = new THREE.Group()
-  const outerGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.12, 6)
+  const outerGeo = new THREE.CylinderGeometry(0.44, 0.44, 0.14, 6)
   outerGeo.rotateX(Math.PI / 2)
   g.add(new THREE.Mesh(outerGeo, eyeOuterMat))
-  const innerGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 6)
+  const innerGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.1, 6)
   innerGeo.rotateX(Math.PI / 2)
   const inner = new THREE.Mesh(innerGeo, eyeInnerMat)
-  inner.position.z = 0.08
+  inner.position.z = 0.09
   g.add(inner)
-  g.position.set(x, 0.35, 0.55)
+  g.position.set(x, 0.25, 0.62)
   return g
 }
 
@@ -111,7 +110,7 @@ function buildMouth() {
   shape.moveTo(-0.25, 0)
   shape.quadraticCurveTo(0, -0.12, 0.25, 0)
   const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), mouthMat)
-  m.position.set(0, -0.15, 0.7)
+  m.position.set(0, -0.18, 0.78)
   return m
 }
 
@@ -123,19 +122,19 @@ function buildWing(side) {
 
   const shape = new THREE.Shape()
   shape.moveTo(0, 0)
-  shape.bezierCurveTo(s * 0.3, 0.6, s * 1.4, 0.9, s * 1.6, 0.3)
-  shape.bezierCurveTo(s * 1.5, -0.1, s * 0.5, -0.15, 0, 0)
+  shape.bezierCurveTo(s * 0.4, 0.75, s * 1.7, 1.1, s * 1.95, 0.35)
+  shape.bezierCurveTo(s * 1.8, -0.12, s * 0.6, -0.18, 0, 0)
   g.add(new THREE.Mesh(new THREE.ExtrudeGeometry(shape, ext), wingMat))
 
   const shape2 = new THREE.Shape()
   shape2.moveTo(0, 0)
-  shape2.bezierCurveTo(s * 0.2, -0.3, s * 1.0, -0.6, s * 1.1, -0.2)
-  shape2.bezierCurveTo(s * 1.0, 0.05, s * 0.3, 0.05, 0, 0)
+  shape2.bezierCurveTo(s * 0.25, -0.38, s * 1.2, -0.75, s * 1.35, -0.25)
+  shape2.bezierCurveTo(s * 1.2, 0.06, s * 0.35, 0.06, 0, 0)
   const lobe = new THREE.Mesh(new THREE.ExtrudeGeometry(shape2, ext), wingAccentMat)
   lobe.position.z = -0.01
   g.add(lobe)
 
-  g.position.set(s * 0.45, 0.55, 0.05)
+  g.position.set(s * 0.55, 0.4, 0.05)
   return g
 }
 
@@ -152,7 +151,7 @@ function buildAntenna(x) {
   const tilt = x > 0 ? -0.25 : 0.25
   tip.position.set(Math.sin(tilt) * 0.55, 0.27 + Math.cos(tilt) * 0.55, 0)
   g.add(tip)
-  g.position.set(x, 1.1, 0.15)
+  g.position.set(x, 0.85, 0.15)
   return g
 }
 
@@ -176,34 +175,39 @@ function buildSideMarking(side) {
   const s = side === "left" ? -1 : 1
   const g = new THREE.Group()
   const m1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.04), stripeMat)
-  m1.position.set(s * 0.62, 0.1, 0.25)
+  m1.position.set(s * 0.72, 0.05, 0.3)
   m1.rotation.y = s * 0.4
   g.add(m1)
   const m2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.04), stripeMat)
-  m2.position.set(s * 0.58, -0.15, 0.3)
+  m2.position.set(s * 0.68, -0.18, 0.35)
   m2.rotation.y = s * 0.35
   g.add(m2)
   return g
 }
 
-/** @param {THREE.Group} bee @returns {void} */
+/** @param {THREE.Group} bee */
 function assembleBee(bee) {
   bee.add(buildBody())
-  bee.add(buildEye(-0.38))
-  bee.add(buildEye(0.38))
+  bee.add(buildEye(-0.44))
+  bee.add(buildEye(0.44))
   bee.add(buildMouth())
-  bee.add(buildWing("left"))
-  bee.add(buildWing("right"))
-  bee.add(buildAntenna(-0.2))
-  bee.add(buildAntenna(0.2))
+  const lw = buildWing("left")
+  const rw = buildWing("right")
+  const la = buildAntenna(-0.2)
+  const ra = buildAntenna(0.2)
+  bee.add(lw)
+  bee.add(rw)
+  bee.add(la)
+  bee.add(ra)
+  bee.userData = { leftWing: lw, rightWing: rw, leftAntenna: la, rightAntenna: ra }
 
   const hexPositions = [
-    [-0.22, -1.0, 0.42, 1.0],
-    [0.0, -1.0, 0.48, 1.0],
-    [0.22, -1.0, 0.42, 1.0],
-    [-0.11, -1.17, 0.35, 0.85],
-    [0.11, -1.17, 0.35, 0.85],
-    [0.0, -1.3, 0.25, 0.65],
+    [-0.22, -0.8, 0.5, 1.0],
+    [0.0, -0.8, 0.55, 1.0],
+    [0.22, -0.8, 0.5, 1.0],
+    [-0.11, -0.95, 0.4, 0.85],
+    [0.11, -0.95, 0.4, 0.85],
+    [0.0, -1.07, 0.3, 0.65],
   ]
   for (const [x, y, z, s] of hexPositions) bee.add(buildHexCell(x, y, z, s))
 
@@ -238,11 +242,7 @@ export function createBeeScene(container) {
   scene.add(bee)
   assembleBee(bee)
 
-  // Named children for animation
-  const leftWing = bee.children[3] // buildWing("left")
-  const rightWing = bee.children[4] // buildWing("right")
-  const leftAntenna = bee.children[5]
-  const rightAntenna = bee.children[6]
+  const { leftWing, rightWing, leftAntenna, rightAntenna } = bee.userData
 
   const mouse = { x: 0, y: 0 }
   const targetRotation = { x: 0, y: 0 }
