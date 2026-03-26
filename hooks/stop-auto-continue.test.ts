@@ -1516,6 +1516,28 @@ describe("stop-auto-continue", () => {
     await run(["git", "remote", "add", "origin", remoteUrl])
   }
 
+  async function runGit(
+    dir: string,
+    args: string[],
+    envOverrides: Record<string, string> = {}
+  ): Promise<void> {
+    const proc = Bun.spawn(["git", ...args], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        ...envOverrides,
+      },
+    })
+    await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
+    }
+  }
+
   /**
    * Creates a fake `gh` bun script that serves fixture responses from env vars.
    * Env vars: GH_MOCK_USER, GH_MOCK_ISSUES, GH_MOCK_PRS.
@@ -1635,6 +1657,46 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Note:")
     expect(result.reason).not.toContain("need refinement")
+  })
+
+  test("includes stale changelog warning when invoked from a nested cwd", async () => {
+    const repoDir = await createTempDir()
+    await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
+    await runGit(repoDir, ["config", "user.name", "Test User"])
+    await runGit(repoDir, ["config", "user.email", "test@example.com"])
+
+    await writeFile(join(repoDir, "CHANGELOG.md"), "# Changelog\n")
+    await runGit(repoDir, ["add", "CHANGELOG.md"])
+    await runGit(repoDir, ["commit", "-m", "Add changelog"], {
+      GIT_AUTHOR_DATE: "2026-03-24T10:00:00Z",
+      GIT_COMMITTER_DATE: "2026-03-24T10:00:00Z",
+    })
+
+    const nestedDir = join(repoDir, "src", "nested")
+    await mkdir(nestedDir, { recursive: true })
+    await writeFile(join(nestedDir, "feature.ts"), "export const value = 1\n")
+    await runGit(repoDir, ["add", "src/nested/feature.ts"])
+    await runGit(repoDir, ["commit", "-m", "Add nested feature"], {
+      GIT_AUTHOR_DATE: "2026-03-26T12:00:00Z",
+      GIT_COMMITTER_DATE: "2026-03-26T12:00:00Z",
+    })
+
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      cwd: nestedDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Continue working"),
+      },
+    })
+
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("=== PROJECT STATUS ===")
+    expect(capturedPrompt).toContain("CHANGELOG.md is stale")
   })
 })
 
