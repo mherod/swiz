@@ -259,13 +259,12 @@ function getIncompleteDetails(allTasks: TaskFile[]): string[] {
 }
 
 function blockIncompleteTasks(incompleteDetails: string[]): void {
-  const currentTaskList = formatActionPlan(incompleteDetails, { header: "Current task list:" })
   blockStop(
-    "Incomplete tasks found:\n\n" +
-      currentTaskList +
-      "\n\n" +
+    "Incomplete tasks found.\n\n" +
       formatActionPlan(
         [
+          "Current task list:",
+          incompleteDetails,
           "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
           "If the work is still needed, complete it before stopping.",
         ],
