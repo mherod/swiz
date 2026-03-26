@@ -78,9 +78,18 @@ const terminal = input._terminal as { app: TerminalApp; name: string } | undefin
 const app = terminal?.app ?? detectTerminal().app
 
 // Consume and deliver all eligible triggers in FIFO order.
+// Two dedup layers:
+//   1. Enqueue-side (in store.enqueue): skips if identical pending or recently delivered
+//   2. Send-side (here): deduplicates within the current batch
+const sent = new Set<string>()
 for (const trigger of triggersToDeliver) {
   const requests = store.consume(safeSession, trigger)
   for (const req of requests) {
+    if (sent.has(req.message)) continue
     await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
+    sent.add(req.message)
   }
 }
+
+// Prune old delivered rows to prevent unbounded DB growth.
+store.prune()

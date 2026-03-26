@@ -235,11 +235,14 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
 
   const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
   const requests = store.consume(ctx.safeSession, "on_session_stop")
+  const sent = new Set<string>()
   for (const req of requests) {
-    const sent = await sendAutoSteer(req.message, ctx.terminalApp)
-    if (sent) {
+    if (sent.has(req.message)) continue
+    const ok = await sendAutoSteer(req.message, ctx.terminalApp)
+    if (ok) {
       log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
     }
+    sent.add(req.message)
   }
   log(`   on_session_stop: short-circuited ${requests.length} message(s) — skipping stop hooks`)
   return true
@@ -254,6 +257,10 @@ async function tryAutoSteerStopBlock(
 
   const ctx = await resolveStopAutoSteerContext(enrichedPayloadStr)
   if (!ctx) return
+
+  // Send-side dedup: skip if this exact block reason was recently delivered
+  const { getAutoSteerStore: getStore } = await import("../../src/auto-steer-store.ts")
+  if (getStore().wasRecentlyDelivered(ctx.safeSession, blockReason, "on_session_stop")) return
 
   const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
   const sent = await sendAutoSteer(blockReason, ctx.terminalApp)

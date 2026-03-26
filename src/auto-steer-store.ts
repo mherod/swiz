@@ -1,9 +1,23 @@
 /**
- * SQLite-backed auto-steer queue.
+ * SQLite-backed auto-steer queue with two-layer deduplication.
  *
- * Replaces the single-file `/tmp/swiz-auto-steer-<session>.request` mechanism
- * with a durable queue that supports multiple pending messages per session and
- * delivery triggers (next_turn, after_commit, after_all_tasks_complete, on_session_stop).
+ * Supports multiple pending messages per session and delivery triggers
+ * (next_turn, after_commit, after_all_tasks_complete, on_session_stop).
+ *
+ * ## Dedup architecture
+ *
+ * **Enqueue-side** (`enqueue()`): Rejects if an identical message (same
+ * session + trigger + text) is already pending OR was delivered within the
+ * dedup window (60 s). This is the primary defense against hooks that fire
+ * every dispatch cycle and re-schedule the same guidance.
+ *
+ * **Send-side** (consumer hooks): Deduplicates within a single consume batch
+ * so the same text isn't typed into the terminal twice in one cycle. The
+ * `wasRecentlyDelivered()` helper is available for direct-send paths that
+ * bypass the queue (e.g. stop-block auto-steer).
+ *
+ * **Retention**: Delivered rows are kept for the duration of the dedup window,
+ * then pruned by `prune()` to prevent unbounded growth.
  *
  * Uses Bun's built-in bun:sqlite — no external dependencies.
  */
@@ -55,11 +69,17 @@ export function resetAutoSteerStore(): void {
   }
 }
 
+/** Default dedup window (ms): skip enqueue/send if identical message was delivered within this period. */
+const DEDUP_WINDOW_MS = 60_000
+
 export class AutoSteerStore {
   private db: Database
   private _stmtEnqueue!: Statement
   private _stmtConsume!: Statement
   private _stmtMarkDelivered!: Statement
+  private _stmtPendingDuplicate!: Statement
+  private _stmtRecentlyDelivered!: Statement
+  private _stmtPruneOld!: Statement
   private _stmtPending!: Statement<{
     id: number
     session_id: string
@@ -108,6 +128,22 @@ export class AutoSteerStore {
     this._stmtMarkDelivered = this.db.prepare(
       "UPDATE auto_steer_queue SET delivered_at = ? WHERE id = ?"
     )
+    // Dedup: check if an identical message is already pending (not yet delivered)
+    this._stmtPendingDuplicate = this.db.prepare(
+      `SELECT 1 FROM auto_steer_queue
+       WHERE session_id = ? AND trigger_type = ? AND message = ? AND delivered_at IS NULL
+       LIMIT 1`
+    )
+    // Dedup: check if an identical message was recently delivered within the dedup window
+    this._stmtRecentlyDelivered = this.db.prepare(
+      `SELECT 1 FROM auto_steer_queue
+       WHERE session_id = ? AND trigger_type = ? AND message = ? AND delivered_at >= ?
+       LIMIT 1`
+    )
+    // Prune: remove delivered rows older than retention window to prevent unbounded growth
+    this._stmtPruneOld = this.db.prepare(
+      "DELETE FROM auto_steer_queue WHERE delivered_at IS NOT NULL AND delivered_at < ?"
+    )
     this._stmtPending = this.db.prepare(
       `SELECT id, session_id, message, trigger_type as trigger, created_at
        FROM auto_steer_queue
@@ -116,9 +152,23 @@ export class AutoSteerStore {
     )
   }
 
-  /** Enqueue a steering message for a session with a given trigger. */
-  enqueue(sessionId: string, message: string, trigger: AutoSteerTrigger = "next_turn"): void {
+  /**
+   * Enqueue a steering message for a session with a given trigger.
+   * Dedup: skips if an identical message is already pending or was delivered within the dedup window.
+   * Returns true if enqueued, false if skipped as duplicate.
+   */
+  enqueue(sessionId: string, message: string, trigger: AutoSteerTrigger = "next_turn"): boolean {
+    // Skip if identical message is already pending
+    const pendingDup = this._stmtPendingDuplicate.get(sessionId, trigger, message)
+    if (pendingDup) return false
+
+    // Skip if identical message was recently delivered
+    const recentCutoff = Date.now() - DEDUP_WINDOW_MS
+    const recentDup = this._stmtRecentlyDelivered.get(sessionId, trigger, message, recentCutoff)
+    if (recentDup) return false
+
     this._stmtEnqueue.run(sessionId, message, trigger, Date.now())
+    return true
   }
 
   /**
@@ -150,6 +200,15 @@ export class AutoSteerStore {
     return results
   }
 
+  /**
+   * Check if a message was recently delivered (within the dedup window).
+   * Used by send-side dedup to avoid re-sending an identical message.
+   */
+  wasRecentlyDelivered(sessionId: string, message: string, trigger: AutoSteerTrigger): boolean {
+    const recentCutoff = Date.now() - DEDUP_WINDOW_MS
+    return !!this._stmtRecentlyDelivered.get(sessionId, trigger, message, recentCutoff)
+  }
+
   /** Check if any pending messages exist for a session+trigger without consuming. */
   hasPending(sessionId: string, trigger: AutoSteerTrigger = "next_turn"): boolean {
     const rows = this._stmtConsume.all(sessionId, trigger)
@@ -173,6 +232,12 @@ export class AutoSteerStore {
       createdAt: row.created_at,
       deliveredAt: null,
     }))
+  }
+
+  /** Prune delivered rows older than the dedup window to prevent unbounded growth. */
+  prune(): number {
+    const cutoff = Date.now() - DEDUP_WINDOW_MS
+    return this._stmtPruneOld.run(cutoff).changes
   }
 
   close(): void {

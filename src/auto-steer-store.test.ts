@@ -148,4 +148,85 @@ describe("AutoSteerStore", () => {
     expect(store.hasPending("sess1", "after_commit")).toBe(false)
     store.close()
   })
+
+  // ─── Deduplication tests ───────────────────────────────────────────────
+
+  it("enqueue skips duplicate when identical message is already pending", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "same message")
+    const second = store.enqueue("sess1", "same message")
+    expect(first).toBe(true)
+    expect(second).toBe(false)
+    expect(store.listPending("sess1")).toHaveLength(1)
+    store.close()
+  })
+
+  it("enqueue allows same message with different trigger", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "same message", "next_turn")
+    const second = store.enqueue("sess1", "same message", "after_commit")
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    expect(store.listPending("sess1")).toHaveLength(2)
+    store.close()
+  })
+
+  it("enqueue allows same message for different session", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "same message")
+    const second = store.enqueue("sess2", "same message")
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    store.close()
+  })
+
+  it("enqueue skips when identical message was recently delivered", () => {
+    const store = createStore()
+    store.enqueue("sess1", "delivered msg")
+    store.consume("sess1") // marks as delivered
+    // Re-enqueue same message — should be skipped (within dedup window)
+    const result = store.enqueue("sess1", "delivered msg")
+    expect(result).toBe(false)
+    expect(store.hasPending("sess1")).toBe(false)
+    store.close()
+  })
+
+  it("enqueue allows different message after consuming prior", () => {
+    const store = createStore()
+    store.enqueue("sess1", "first message")
+    store.consume("sess1")
+    const result = store.enqueue("sess1", "different message")
+    expect(result).toBe(true)
+    expect(store.hasPending("sess1")).toBe(true)
+    store.close()
+  })
+
+  it("wasRecentlyDelivered returns true for recently delivered message", () => {
+    const store = createStore()
+    store.enqueue("sess1", "check this", "next_turn")
+    store.consume("sess1", "next_turn")
+    expect(store.wasRecentlyDelivered("sess1", "check this", "next_turn")).toBe(true)
+    store.close()
+  })
+
+  it("wasRecentlyDelivered returns false for never-delivered message", () => {
+    const store = createStore()
+    expect(store.wasRecentlyDelivered("sess1", "never sent", "next_turn")).toBe(false)
+    store.close()
+  })
+
+  it("prune removes old delivered rows", () => {
+    const store = createStore()
+    store.enqueue("sess1", "old message")
+    store.consume("sess1")
+    // Manually backdate delivered_at to exceed dedup window
+    // biome-ignore lint/complexity/useLiteralKeys: accessing private field for test
+    store["db"].run("UPDATE auto_steer_queue SET delivered_at = delivered_at - 120000")
+    const pruned = store.prune()
+    expect(pruned).toBe(1)
+    // After prune, the old delivery no longer blocks re-enqueue
+    const result = store.enqueue("sess1", "old message")
+    expect(result).toBe(true)
+    store.close()
+  })
 })
