@@ -14,6 +14,8 @@
 - Execute simple browser requests immediately with direct MCP actions (`browser_tabs` + `browser_navigate`/focus), not exploratory detours.
 - Treat explicit user constraints (for example, "not in a subagent") as hard requirements on the very next action.
 - When hooks report ACTION REQUIRED for `/commit` or `/push`, resolve that workflow before continuing feature iteration.
+- Validate labels with `gh label list` before creating issues and only use labels that exist in the repo.
+- Prefer stable issue-body workflows (`--body-file` or straightforward shell-safe bodies) over deeply escaped inline scripts when creating multiple GitHub issues.
 
 ## DON'T
 
@@ -24,3 +26,4 @@
 - Do not postpone lint/style cleanup until stop-hook enforcement catches it.
 - Do not use a subagent for one-step browser actions when direct browser MCP tools are available.
 - Do not defer commit/push gate requirements across multiple turns after an ACTION REQUIRED stop block.
+- Do not build large `gh issue create` payloads through brittle escaped `bun -e` strings that can fail on quoting.
