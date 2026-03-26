@@ -1,8 +1,10 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmod, mkdir, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
+  __testOnly_DEDUP_MAX_FILES,
   __testOnly_getSuggestionsPath,
+  __testOnly_pruneOldSuggestionLogs,
   __testOnly_recordSuggestion,
   checkChangelogStaleness,
   normalizeTerminateArgs,
@@ -166,6 +168,65 @@ describe("stop-auto-continue", () => {
     } finally {
       process.env.HOME = prevHome
     }
+  })
+
+  describe("pruneOldSuggestionLogs", () => {
+    test("deletes stale suggestion files by age (no orphaned empty files)", async () => {
+      const homeDir = await createTempDir()
+      const swizDir = join(homeDir, ".swiz")
+      await mkdir(swizDir, { recursive: true })
+      const stalePath = join(swizDir, "stop-suggestions-stale.json")
+      const freshPath = join(swizDir, "stop-suggestions-fresh.json")
+      await writeFile(stalePath, '{"seen":{}}')
+      await writeFile(freshPath, '{"seen":{}}')
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+      await utimes(stalePath, eightDaysAgo, eightDaysAgo)
+
+      const prevHome = process.env.HOME
+      process.env.HOME = homeDir
+      try {
+        await __testOnly_pruneOldSuggestionLogs()
+      } finally {
+        process.env.HOME = prevHome
+      }
+
+      expect(await Bun.file(stalePath).exists()).toBe(false)
+      expect(await Bun.file(freshPath).exists()).toBe(true)
+    })
+
+    test("cap removes oldest files by mtime; newest DEDUP_MAX_FILES remain", async () => {
+      const homeDir = await createTempDir()
+      const swizDir = join(homeDir, ".swiz")
+      await mkdir(swizDir, { recursive: true })
+      const base = Date.now()
+      const cap = __testOnly_DEDUP_MAX_FILES
+      const extra = 5
+      for (let i = 0; i < cap + extra; i++) {
+        const p = join(swizDir, `stop-suggestions-cap-${i}.json`)
+        await writeFile(p, '{"seen":{}}')
+        const t = new Date(base + i * 60_000)
+        await utimes(p, t, t)
+      }
+
+      const prevHome = process.env.HOME
+      process.env.HOME = homeDir
+      try {
+        await __testOnly_pruneOldSuggestionLogs()
+      } finally {
+        process.env.HOME = prevHome
+      }
+
+      const names = (await readdir(swizDir)).filter(
+        (e) => e.startsWith("stop-suggestions-cap-") && e.endsWith(".json")
+      )
+      expect(names.length).toBe(cap)
+      for (let i = 0; i < extra; i++) {
+        expect(names).not.toContain(`stop-suggestions-cap-${i}.json`)
+      }
+      for (let i = extra; i < cap + extra; i++) {
+        expect(names).toContain(`stop-suggestions-cap-${i}.json`)
+      }
+    })
   })
 
   test("blocks with AI suggestion for a substantive session", async () => {

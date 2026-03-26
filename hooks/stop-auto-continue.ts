@@ -4,7 +4,7 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { mkdir, readdir } from "node:fs/promises"
+import { mkdir, readdir, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { uniq } from "lodash-es"
 import { z } from "zod"
@@ -1090,6 +1090,33 @@ export async function __testOnly_recordSuggestion(sessionId: string, key: string
 
 /** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */
 const DEDUP_MAX_FILES = 50
+export const __testOnly_DEDUP_MAX_FILES = DEDUP_MAX_FILES
+
+async function unlinkBestEffort(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath)
+  } catch {
+    // Best-effort — ignore errors
+  }
+}
+
+/** Returns file info if the entry is a recent suggestion log; deletes and returns null if stale. */
+async function suggestionFileIfRecent(
+  swizDir: string,
+  entry: string,
+  cutoffMs: number
+): Promise<{ path: string; mtime: number } | null> {
+  if (!entry.startsWith("stop-suggestions-") || !entry.endsWith(".json")) return null
+  const filePath = join(swizDir, entry)
+  const file = Bun.file(filePath)
+  if (!(await file.exists())) return null
+  const mtime = file.lastModified
+  if (mtime < cutoffMs) {
+    await unlinkBestEffort(filePath)
+    return null
+  }
+  return { path: filePath, mtime }
+}
 
 async function pruneOldSuggestionLogs(): Promise<void> {
   const home = getHomeDirOrNull()
@@ -1097,30 +1124,27 @@ async function pruneOldSuggestionLogs(): Promise<void> {
   const swizDir = join(home, ".swiz")
   try {
     const entries = await readdir(swizDir)
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000
     const suggestionFiles: { path: string; mtime: number }[] = []
     for (const entry of entries) {
-      if (!entry.startsWith("stop-suggestions-") || !entry.endsWith(".json")) continue
-      const filePath = join(swizDir, entry)
-      const file = Bun.file(filePath)
-      if (!(await file.exists())) continue
-      const mtime = file.lastModified
-      if (mtime < cutoff) {
-        await Bun.write(filePath, "") // Truncate stale files
-      } else {
-        suggestionFiles.push({ path: filePath, mtime })
-      }
+      const row = await suggestionFileIfRecent(swizDir, entry, cutoffMs)
+      if (row) suggestionFiles.push(row)
     }
-    // Cap total files: truncate oldest excess
+    // Cap total files: delete oldest excess (retain newest DEDUP_MAX_FILES)
     if (suggestionFiles.length > DEDUP_MAX_FILES) {
       suggestionFiles.sort((a, b) => a.mtime - b.mtime)
       for (const file of suggestionFiles.slice(0, suggestionFiles.length - DEDUP_MAX_FILES)) {
-        await Bun.write(file.path, "")
+        await unlinkBestEffort(file.path)
       }
     }
   } catch {
     // Best-effort — ignore errors
   }
+}
+
+/** Exposed for tests — runs the same pruning as the hook’s fire-and-forget cleanup. */
+export async function __testOnly_pruneOldSuggestionLogs(): Promise<void> {
+  await pruneOldSuggestionLogs()
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
