@@ -717,7 +717,7 @@
         </div>
       </div>
       <div class="hero-visual">
-        <img class="hero-logo" src="swiz-buzz-animated.svg" alt="swiz logo" />
+        <div id="bee-canvas" style="width:100%;max-width:22rem;aspect-ratio:1/1;position:relative;z-index:1;"></div>
       </div>
     </div>
 
@@ -1040,6 +1040,16 @@
       </div>
     </div>
   </footer>
+
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+  <script type="module">
+    import { createBeeScene } from "./swiz-buzz-3d.js";
+
+    const el = document.getElementById("bee-canvas");
+    if (el) createBeeScene(el);
+  </script>
 
 </body>
 </html>

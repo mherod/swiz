@@ -132,6 +132,17 @@ export default tseslint.config(
     },
   },
   {
+    files: ["www/**/*.js"],
+    rules: {
+      /** Browser-only JS served via CDN importmap — no TypeScript project context. */
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/return-await": "off",
+    },
+  },
+  {
     files: ["**/*.test.{ts,tsx,js,jsx}"],
     rules: {
       complexity: "off",
