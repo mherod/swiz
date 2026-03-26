@@ -62,10 +62,10 @@ alwaysApply: false
   - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, and PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
   - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
 - **DO NOT** write raw `console.log(JSON.stringify(...))` for hook output — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
-- **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual kill timers.
-- **Dispatch abort propagation**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
-- **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into hook payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code — no env vars.
-- **File-path guard factory**: `filePathGuardHook(predicate, denyReason, allowMsg?)` in `hook-utils.ts` for file-path PreToolUse hooks.
+- **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
+- **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
+- **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code.
+- **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` in `hook-utils.ts` for file-path PreToolUse hooks.
 - **Git Utilities Policy** — canonical locations, no duplication:
   - `hooks/utils/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`). Test utils in `hooks/utils/test-utils.ts`.
   - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars (lefthook `GIT_DIR` fix).
@@ -91,16 +91,17 @@ alwaysApply: false
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
-- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; uses `cwd.replace(/[/.]/g, "-")` — DO NOT reimplement with slash-only replacement.
+- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; uses `cwd.replace(/[/.]/g, "-")` — DO NOT reimplement.
 - In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
-- Session-to-project mapping from `~/.claude/projects/` transcript `cwd` fields.
-- Cross-session task checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- Completion requires evidence: `swiz tasks complete <id> --evidence "text"`.
+- Session-to-project mapping from `~/.claude/projects/` transcript `cwd`.
+- Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
+- Completion requires evidence: `swiz tasks complete <id> --evidence "..."`.
+
 - First action: `TaskCreate`/`TaskUpdate`; required after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Ensure ≥1 `in_progress` + ≥1 `pending` before Edit/Write/Bash.
 - Prior-session task blocks: recreate and set `in_progress` before retrying.
@@ -153,7 +154,7 @@ alwaysApply: false
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
-- **DON'T** close as `duplicate`/`wontfix` without file+line evidence for each acceptance criterion.
+- **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
@@ -172,11 +173,12 @@ alwaysApply: false
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
+- Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load — `Bun.spawn` resource exhaustion. Verify by running failing test in isolation; if it passes, retry push.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
-- DO NOT block session waiting for CI. Check once with `gh run view`; `in_progress` is acceptable for session completion since pre-push already ran full test suite.
+- DO NOT block session waiting for CI. Check once with `gh run view`; `in_progress` is acceptable since pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
-- Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
+- Push-command parsing: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
 - DO NOT push to `main`/`master` without running the Step 0 collaboration guard and reading its output.
