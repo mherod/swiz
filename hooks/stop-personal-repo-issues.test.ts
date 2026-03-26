@@ -1157,6 +1157,13 @@ describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => 
     ])
   })
 
+  test("reviewing matches unset-state (legacy) ordering — PR/conflict before backlog grooming", () => {
+    expect(sectionOrderForProjectState("reviewing")).toEqual(sectionOrderForProjectState(null))
+    expect(planSectionOrderForProjectState("reviewing")).toEqual(
+      planSectionOrderForProjectState(null)
+    )
+  })
+
   test("developing surfaces ready issues before refinement backlog", () => {
     expect(sectionOrderForProjectState("developing")).toEqual([
       "conflict",
