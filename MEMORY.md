@@ -18,6 +18,9 @@
 - Prefer stable issue-body workflows (`--body-file` or straightforward shell-safe bodies) over deeply escaped inline scripts when creating multiple GitHub issues.
 - When hook E2E tests fail after a change, read the hook’s emitted `reason` and reconcile fixture labels with `SKIP_LABELS` vs reviewable block labels in the hook source before treating the failure as a product regression.
 - After adding `switch`/multi-branch section dispatch in hooks, run `bun run lint` on that file immediately; extract a `Record` or helpers if complexity or max-lines warnings fire.
+- In hooks, remove obsolete files with `unlink` from `node:fs/promises` (or `Bun.file(path).unlink()`); do not use empty `Bun.write` when the intent is deletion — empty files still occupy the directory and confuse retention logic.
+- After changing enum- or state-driven behavior (for example `ProjectState`), add or extend unit tests so every variant is covered or explicitly asserted equal to a baseline (for example `reviewing` vs `null` order).
+- When resolving a shipped GitHub issue, use `swiz issue resolve <n> --body` with `test:` / `file:` / `commit:` evidence after the fix is on `main`, not only closing from the web UI.
 
 ## DON'T
 
@@ -31,3 +34,5 @@
 - Do not build large `gh issue create` payloads through brittle escaped `bun -e` strings that can fail on quoting.
 - Do not assume failing hook E2E tests imply incorrect hook logic when the fixture uses labels that are both skipped from actionable work and reviewable-block triage (for example `on/hold` vs `on-hold`).
 - Do not ship hook changes that leave eslint complexity warnings on the edited file; refactor dispatch into a lookup table or small functions first.
+- Do not write hook E2E fixtures that mix “skip-only allow stop” expectations with issues labeled `blocked` or other reviewable-block labels — those still trigger blocked triage when there is no ready work.
+- Do not expand `pruneOldSuggestionLogs`-style loops with nested try/catch without checking complexity; extract `unlinkBestEffort` and per-entry classifiers first.
