@@ -33,6 +33,27 @@ import {
 
 export type AiProviderId = "gemini" | "claude" | "openrouter"
 
+// ─── Process shutdown abort ──────────────────────────────────────────────────
+
+/**
+ * Global AbortController that fires when the process receives SIGTERM or SIGINT.
+ * All in-flight AI provider requests are wired to this signal so network
+ * connections close cleanly on shutdown instead of dangling until TCP timeout.
+ */
+let shutdownController = new AbortController()
+
+/** Exposed for tests — resets the global shutdown controller. */
+export function resetShutdownController(): void {
+  shutdownController = new AbortController()
+}
+
+function onShutdownSignal() {
+  shutdownController.abort()
+}
+
+process.on("SIGTERM", onShutdownSignal)
+process.on("SIGINT", onShutdownSignal)
+
 // ─── Provider options ─────────────────────────────────────────────────────────
 
 export interface PromptOptions {
@@ -98,16 +119,48 @@ function hasOpenRouterApiKey(): boolean {
 }
 
 export function resolveSignal(options?: { signal?: AbortSignal; timeout?: number }): {
-  signal: AbortSignal | undefined
+  signal: AbortSignal
   cleanup: () => void
 } {
-  if (options?.signal) return { signal: options.signal, cleanup: () => {} }
-  if (options?.timeout) {
-    const controller = new AbortController()
-    const handle = setTimeout(() => controller.abort(), options.timeout).unref()
-    return { signal: controller.signal, cleanup: () => clearTimeout(handle) }
+  const callerSignal = options?.signal
+  const timeoutMs = options?.timeout
+
+  // No caller signal and no timeout — just use the global shutdown signal.
+  if (!callerSignal && !timeoutMs) {
+    return { signal: shutdownController.signal, cleanup: () => {} }
   }
-  return { signal: undefined, cleanup: () => {} }
+
+  // Compose: abort when ANY of the sources fire (caller signal, timeout, or shutdown).
+  const composed = new AbortController()
+
+  const propagate = () => composed.abort()
+
+  // Wire shutdown signal.
+  if (!shutdownController.signal.aborted) {
+    shutdownController.signal.addEventListener("abort", propagate, { once: true })
+  } else {
+    composed.abort()
+  }
+
+  // Wire caller-provided signal.
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      composed.abort()
+    } else {
+      callerSignal.addEventListener("abort", propagate, { once: true })
+    }
+  }
+
+  // Wire timeout.
+  const handle = timeoutMs ? setTimeout(propagate, timeoutMs).unref() : undefined
+
+  const cleanup = () => {
+    if (handle !== undefined) clearTimeout(handle)
+    shutdownController.signal.removeEventListener("abort", propagate)
+    callerSignal?.removeEventListener("abort", propagate)
+  }
+
+  return { signal: composed.signal, cleanup }
 }
 
 // ─── Shared generation runners ────────────────────────────────────────────────
