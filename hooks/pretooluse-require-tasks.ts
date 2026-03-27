@@ -64,8 +64,17 @@ async function denyRequiredTasks(reason: string): Promise<never> {
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
-const MIN_INCOMPLETE_TASKS = 2
-const MIN_PENDING_TASKS = 1
+
+// Governance thresholds adjusted by auditStrictness setting
+const GOVERNANCE_THRESHOLDS = {
+  strict: { minIncomplete: 2, minPending: 1 },
+  relaxed: { minIncomplete: 1, minPending: 0 },
+  "local-dev": { minIncomplete: 1, minPending: 0 },
+} as const
+
+const MIN_INCOMPLETE_TASKS = GOVERNANCE_THRESHOLDS.strict.minIncomplete
+const MIN_PENDING_TASKS = GOVERNANCE_THRESHOLDS.strict.minPending
+
 const MEMORY_MARKDOWN_RE = /\.(md|json)$/i
 /**
  * Heuristic patterns that indicate intent to merge directly to the default branch,
