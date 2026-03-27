@@ -47,6 +47,7 @@ export function getAgentSettingsSearchPaths(
       paths.push(join(cwd, ".gemini", "settings.json"))
       break
     case "codex":
+      paths.push(join(cwd, ".codex", "hooks.json"))
       break
   }
 

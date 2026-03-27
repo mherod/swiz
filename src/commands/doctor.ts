@@ -1,5 +1,6 @@
 import { chmod, cp, mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
 import { getHomeDir, getHomeDirWithFallback } from "../home.ts"
@@ -725,20 +726,25 @@ function extractScriptPaths(command: string): string[] {
 async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   const paths: string[] = []
   for (const agent of CONFIGURABLE_AGENTS) {
-    const file = Bun.file(agent.settingsPath)
-    if (!(await file.exists())) continue
-    let settings: Record<string, unknown>
-    try {
-      settings = await file.json()
-    } catch {
-      continue
-    }
-    const hooksRaw = agent.wrapsHooks
-      ? ((settings.hooks as Record<string, unknown>) ?? {})
-      : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
-    const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
-    for (const cmd of collectHookCommands(hooks)) {
-      paths.push(...extractScriptPaths(cmd))
+    const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
+    const settingsPaths = getAgentSettingsSearchPaths(agentId)
+
+    for (const settingsPath of settingsPaths) {
+      const file = Bun.file(settingsPath)
+      if (!(await file.exists())) continue
+      let settings: Record<string, unknown>
+      try {
+        settings = await file.json()
+      } catch {
+        continue
+      }
+      const hooksRaw = agent.wrapsHooks
+        ? ((settings.hooks as Record<string, unknown>) ?? {})
+        : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+      const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+      for (const cmd of collectHookCommands(hooks)) {
+        paths.push(...extractScriptPaths(cmd))
+      }
     }
   }
   return [...new Set(paths)]

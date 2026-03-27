@@ -386,6 +386,8 @@ describe("dispatch replay", () => {
       const hooks = parsed.hooks as Array<Record<string, unknown>>
       expect(Array.isArray(hooks)).toBe(true)
 
+      console.error(result.stderr)
+      console.log(hooks.map((h) => h.file))
       const secretIndex = hooks.findIndex((h) => h.file === "stop-secret-scanner.ts")
       const gitStatusIndex = hooks.findIndex((h) => h.file === "stop-git-status.ts")
 

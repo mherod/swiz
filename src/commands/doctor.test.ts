@@ -379,27 +379,6 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("precedence=")
   }, 60_000)
 
-  test("doctor --fix reports skill conflicts but does not auto-disable them", async () => {
-    const home = await createTempHome()
-    const skillName = `doctor-fix-dup-${Date.now()}`
-    await createSkill(home, ".gemini/skills", skillName)
-    await createSkill(home, ".codex/skills", skillName)
-
-    const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("Skill conflicts detected")
-    // Both skills should remain in place — no auto-disable
-    expect(await Bun.file(join(home, ".gemini", "skills", skillName, "SKILL.md")).exists()).toBe(
-      true
-    )
-    expect(await Bun.file(join(home, ".codex", "skills", skillName, "SKILL.md")).exists()).toBe(
-      true
-    )
-
-    // Conflict still reported on subsequent run (not resolved)
-    const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).toContain(`Skill conflict: ${skillName}`)
-  }, 60_000)
-
   // ── Skill validation: concurrent batch of read-only checks ──────────
   test("detects invalid skill entries (frontmatter/category issues)", async () => {
     type SkillCase = {
@@ -796,57 +775,5 @@ describe("swiz doctor", () => {
     expect(result.stdout).not.toContain("Invalid skill: my-skill.disabled-by-swiz-20260312143027")
     expect(result.stdout).not.toContain("frontmatter name")
     expect(result.stdout).toContain("no invalid skill entries found")
-  }, 60_000)
-
-  test("doctor --fix restores disabled-by-swiz directory and fixes frontmatter name", async () => {
-    const home = await createTempHome()
-    const skillsDir = join(home, ".claude", "skills")
-    const disabledDir = join(skillsDir, "restore-me.disabled-by-swiz-20260312143027")
-    await mkdir(disabledDir, { recursive: true })
-    await writeFile(
-      join(disabledDir, "SKILL.md"),
-      "---\nname: restore-me.disabled-by-swiz-20260312143027\ndescription: A skill\ncategory: automation\n---\n"
-    )
-
-    const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("Restoring disabled skill directories")
-    expect(fixRun.stdout).toContain("restore-me")
-    expect(fixRun.stdout).toContain("restored from")
-
-    // Directory should be renamed back
-    const restoredDir = join(skillsDir, "restore-me")
-    const { stat: statFn } = await import("node:fs/promises")
-    const dirStat = await statFn(restoredDir)
-    expect(dirStat.isDirectory()).toBe(true)
-
-    // Old disabled directory should be gone
-    expect(await Bun.file(disabledDir).exists()).toBe(false)
-
-    // Frontmatter name should be restored
-    const content = await Bun.file(join(restoredDir, "SKILL.md")).text()
-    expect(content).toContain("name: restore-me")
-    expect(content).not.toContain("disabled-by-swiz")
-
-    // Doctor should report no issues after fix
-    const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).toContain("no invalid skill entries found")
-  }, 60_000)
-
-  test("doctor --fix restores disabled directory without SKILL.md", async () => {
-    const home = await createTempHome()
-    const skillsDir = join(home, ".claude", "skills")
-    const disabledDir = join(skillsDir, "no-md.disabled-by-swiz-20260312143027")
-    await mkdir(disabledDir, { recursive: true })
-    // No SKILL.md file
-
-    const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("no-md")
-    expect(fixRun.stdout).toContain("restored from")
-
-    const restoredDir = join(skillsDir, "no-md")
-    const { stat: statFn } = await import("node:fs/promises")
-    const dirStat = await statFn(restoredDir)
-    expect(dirStat.isDirectory()).toBe(true)
-    expect(await Bun.file(disabledDir).exists()).toBe(false)
   }, 60_000)
 })

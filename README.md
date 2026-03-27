@@ -51,7 +51,7 @@ swiz supports every agent that has a hook system, with automatic translation of 
 | Cursor IDE | `~/.cursor/hooks.json` | Full support — flat list (`version: 1`), all events |
 | Cursor CLI | `~/.cursor/hooks.json` | Limited — only `beforeShellExecution`/`afterShellExecution` fire ([tracking issue](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)). Use `swiz shim` as workaround. |
 | Gemini CLI | `~/.gemini/settings.json` | Full support — nested matcher groups, all 5 event types |
-| Codex CLI | `~/.codex/config.toml` | Tool mappings tracked, ready when user-configurable hooks ship |
+| Codex CLI | `~/.codex/hooks.json` | Full support — nested matcher groups, shipped event types (`SessionStart`, `Stop`, `UserPromptSubmit`) |
 
 ### Cross-Agent Translation
 
@@ -659,7 +659,7 @@ Hook scripts use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("r
 
 **Cursor CLI** — only `beforeShellExecution` and `afterShellExecution` events fire. All other hook events (`preToolUse`, `postToolUse`, `stop`, `sessionStart`, `beforeSubmitPrompt`, etc.) are silently ignored. This means swiz event hooks only work in the **Cursor IDE**, not when running `cursor` in the terminal. **Workaround**: `swiz shim install` adds shell-level interception that catches banned commands regardless of which agent runs them. Full CLI hook parity is on Cursor's roadmap with no ETA. [Forum thread](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316).
 
-**Codex CLI** — hooks.json (v0.116.0+) uses `SessionStart`, `Stop`, and `UserPromptSubmit`. Tool-use hook types still use internal Rust names (`BeforeToolUse`, `AfterToolUse`) and are not those user-facing keys yet. Swiz keeps `hooksConfigurable: false` until Codex documents a stable settings path for installing hook commands.
+**Codex CLI** — fully configurable via `~/.codex/hooks.json` (global) and `<cwd>/.codex/hooks.json` (per-project). Hooks.json (v0.116.0+) ships `SessionStart`, `Stop`, and `UserPromptSubmit` user-facing events. Tool-use hook types still use internal Rust names (`BeforeToolUse`, `AfterToolUse`) internally but are mapped to canonical names for hook discovery and display.
 
 **Claude Code settings revert** — a running Claude Code process watches `~/.claude/settings.json` and may revert writes within ~1.5 seconds. Close all Claude Code sessions before running `swiz install`, or the changes won't persist.
 

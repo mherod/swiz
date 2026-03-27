@@ -79,7 +79,7 @@ function settingsPaths(agent: AgentDef): string[] {
     case "gemini":
       return getAgentSettingsSearchPaths("gemini")
     case "codex":
-      return [agent.settingsPath]
+      return getAgentSettingsSearchPaths("codex")
     default:
       return [agent.settingsPath]
   }

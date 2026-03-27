@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -76,19 +77,36 @@ function printAgentBinary(agent: AgentDef): void {
 }
 
 async function checkAgent(agent: AgentDef) {
-  const file = Bun.file(agent.settingsPath)
-  const settingsExist = await file.exists()
-
   printAgentBinary(agent)
 
-  if (!settingsExist) {
+  const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
+  const settingsPaths = getAgentSettingsSearchPaths(agentId)
+  const foundPaths: string[] = []
+  const allHooks = new Map<string, Record<string, unknown>>()
+
+  for (const path of settingsPaths) {
+    const file = Bun.file(path)
+    if (!(await file.exists())) continue
+    foundPaths.push(path)
+    try {
+      const json = await file.json()
+      const hooks = json[agent.hooksKey] ?? json.hooks
+      if (hooks && typeof hooks === "object") {
+        allHooks.set(path, hooks as Record<string, unknown>)
+      }
+    } catch {
+      // Ignore parse errors, continue to next path
+    }
+  }
+
+  if (foundPaths.length === 0) {
     console.log(`    Settings: ${DIM}${agent.settingsPath} (not found)${RESET}`)
     console.log(`    Hooks:    ${RED}not installed${RESET}`)
     console.log()
     return
   }
 
-  console.log(`    Settings: ${GREEN}✓${RESET} ${agent.settingsPath}`)
+  console.log(`    Settings: ${GREEN}✓${RESET} ${foundPaths.join(", ")}`)
 
   if (!agent.hooksConfigurable) {
     console.log(`    Hooks:    ${YELLOW}not yet user-configurable${RESET} (tool mappings tracked)`)
@@ -96,38 +114,38 @@ async function checkAgent(agent: AgentDef) {
     return
   }
 
-  try {
-    const json = await file.json()
-    const hooks = json[agent.hooksKey] ?? json.hooks
+  if (allHooks.size === 0) {
+    console.log(`    Hooks:    ${YELLOW}no hooks configured${RESET}`)
+    console.log()
+    return
+  }
 
-    if (!hooks || typeof hooks !== "object") {
-      console.log(`    Hooks:    ${YELLOW}no hooks configured${RESET}`)
-      console.log()
-      return
+  // Aggregate hooks from all paths
+  let totalHooks = 0
+  const allSwizCmds = new Set<string>()
+  const allEvents = new Set<string>()
+
+  for (const hooksObj of allHooks.values()) {
+    totalHooks += countAllHooks(hooksObj)
+    for (const cmd of collectSwizCommands(hooksObj)) {
+      allSwizCmds.add(cmd)
     }
+    forEachHookEntry(hooksObj, (event, entry) => {
+      if (entryContainsSwizCommand(entry)) allEvents.add(event)
+    })
+  }
 
-    const hooksObj = hooks as Record<string, unknown>
-    const totalHooks = countAllHooks(hooksObj)
-    const swizCmds = collectSwizCommands(hooksObj)
-    const swizCount = swizCmds.size
-    const otherCount = totalHooks - swizCount
+  const swizCount = allSwizCmds.size
+  const otherCount = totalHooks - swizCount
 
-    if (swizCount > 0) {
-      console.log(
-        `    Hooks:    ${GREEN}✓ ${swizCount} swiz hook(s)${RESET}` +
-          (otherCount > 0 ? ` + ${CYAN}${otherCount} other${RESET}` : "")
-      )
-
-      const events = new Set<string>()
-      forEachHookEntry(hooksObj, (event, entry) => {
-        if (entryContainsSwizCommand(entry)) events.add(event)
-      })
-      console.log(`    Events:   ${[...events].join(", ")}`)
-    } else {
-      console.log(`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`)
-    }
-  } catch {
-    console.log(`    Hooks:    ${RED}failed to parse settings${RESET}`)
+  if (swizCount > 0) {
+    console.log(
+      `    Hooks:    ${GREEN}✓ ${swizCount} swiz hook(s)${RESET}` +
+        (otherCount > 0 ? ` + ${CYAN}${otherCount} other${RESET}` : "")
+    )
+    console.log(`    Events:   ${[...allEvents].join(", ")}`)
+  } else {
+    console.log(`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`)
   }
 
   console.log()
