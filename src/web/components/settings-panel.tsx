@@ -29,6 +29,7 @@ interface GlobalSettingsForm {
   skipSecretScan: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
+  largeFileSizeBlockKb: number
 }
 
 const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
@@ -58,6 +59,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   skipSecretScan: false,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
+  largeFileSizeBlockKb: 5120,
 }
 
 interface CachedProjectSettingsResponse {
@@ -138,6 +140,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     skipSecretScan: !!settings.skipSecretScan,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
+    largeFileSizeBlockKb: Number(settings.largeFileSizeBlockKb) || 5120,
   }
 }
 
@@ -221,6 +224,7 @@ const GLOBAL_NUMBER_FIELDS: Array<{
   { key: "memoryWordThreshold", label: "Memory word threshold" },
   { key: "taskDurationWarningMinutes", label: "Task duration warning (min)" },
   { key: "largeFileSizeKb", label: "Large file size (KB)" },
+  { key: "largeFileSizeBlockKb", label: "Large file size block (KB)" },
   { key: "pushCooldownMinutes", label: "Push cooldown (min)" },
   { key: "prAgeGateMinutes", label: "PR age gate (min)" },
 ]

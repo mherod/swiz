@@ -171,6 +171,7 @@ function buildBaseSettings(
     memoryUpdateReminder: settings.memoryUpdateReminder,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
+    largeFileSizeBlockKb: settings.largeFileSizeBlockKb,
     statusLineSegments: settings.statusLineSegments,
     ...resolveProjectOverrides(settings, projectSettings),
   }

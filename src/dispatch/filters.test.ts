@@ -37,6 +37,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     memoryLineThreshold: 1400,
     memoryWordThreshold: 5000,
     largeFileSizeKb: 500,
+    largeFileSizeBlockKb: 5120,
     dirtyWorktreeThreshold: 15,
     statusLineSegments: [],
     source: "global",

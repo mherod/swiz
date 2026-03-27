@@ -197,6 +197,8 @@ export interface SwizSettings {
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
+  /** Hard-block threshold for the push-gate large-file check (KB). Default 5120 (5MB). */
+  largeFileSizeBlockKb: number
   /** Dirty-file count threshold for the worktree gate hook. */
   dirtyWorktreeThreshold: number
   /** Which segments to display in the status line. Defaults to all segments. */

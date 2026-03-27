@@ -24,6 +24,7 @@ import {
   formatActionPlan,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
+  git,
   isShellTool,
   PR_CHECK_RE,
   skillAdvice,
@@ -76,12 +77,14 @@ if (!Number.isNaN(behindCount) && behindCount > 0) {
 // to avoid blocking commits that *delete* old secrets.
 // Bypassed when `skipSecretScan` swiz setting is true.
 
-const [diffResult, priorCommandsResult, globalSettings, projectSettings] = await Promise.all([
-  spawnWithTimeout(["git", "diff", "@{upstream}..HEAD"], { cwd, timeoutMs: 10000 }),
-  extractBashCommands(transcriptPath),
-  readSwizSettings(),
-  readProjectSettings(cwd),
-])
+const [diffResult, fileNamesResult, priorCommandsResult, globalSettings, projectSettings] =
+  await Promise.all([
+    spawnWithTimeout(["git", "diff", "@{upstream}..HEAD"], { cwd, timeoutMs: 10000 }),
+    spawnWithTimeout(["git", "diff", "--name-only", "@{upstream}..HEAD"], { cwd, timeoutMs: 5000 }),
+    extractBashCommands(transcriptPath),
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
 
 const effectiveSettingsEarly = getEffectiveSwizSettings(globalSettings, null, projectSettings)
 
@@ -126,6 +129,81 @@ if (!effectiveSettingsEarly.skipSecretScan && diffResult.exitCode === 0 && diffR
   }
 }
 
+// Warn items collected by the large file check — merged into `missing` below.
+const largeFileWarnItems: string[] = []
+
+// ── Large file check ──────────────────────────────────────────────────────────
+// Warn (advisory) or hard-block when outgoing files exceed configured thresholds.
+// Skipped gracefully when no upstream is set (fileNamesResult.exitCode !== 0).
+
+if (fileNamesResult.exitCode === 0 && fileNamesResult.stdout) {
+  const warnThresholdKb = effectiveSettingsEarly.largeFileSizeKb
+  const blockThresholdKb = effectiveSettingsEarly.largeFileSizeBlockKb
+  const allowPatterns: string[] = projectSettings?.largeFileAllowPatterns ?? []
+
+  function globToRegex(pattern: string): RegExp {
+    return new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*/g, "\u2B1B")
+        .replace(/\*/g, "[^/]*")
+        .replace(/\u2B1B/g, ".*")
+        .replace(/\?/g, "[^/]")}$`
+    )
+  }
+
+  function formatSize(bytes: number): string {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    return `${Math.floor(bytes / 1024)} KB`
+  }
+
+  const changedFiles = fileNamesResult.stdout
+    .split("\n")
+    .map((f) => f.trim())
+    .filter(Boolean)
+
+  const blockFiles: string[] = []
+
+  await Promise.all(
+    changedFiles.map(async (filePath) => {
+      // Skip files in allow patterns
+      if (allowPatterns.some((p) => globToRegex(p).test(filePath))) return
+
+      // Get blob hash from HEAD tree — returns empty if file is deleted
+      const treeEntry = await git(["ls-tree", "HEAD", "--", filePath], cwd)
+      if (!treeEntry) return // deleted file — no blob to measure
+
+      const blobHash = treeEntry.split(/\s+/)[2]
+      if (!blobHash || blobHash === "0000000000000000000000000000000000000000") return
+
+      const sizeStr = await git(["cat-file", "-s", blobHash], cwd)
+      const sizeBytes = parseInt(sizeStr ?? "0", 10)
+      if (Number.isNaN(sizeBytes) || sizeBytes === 0) return
+
+      const sizeKb = sizeBytes / 1024
+      const label = `${formatSize(sizeBytes)} — ${filePath}`
+
+      if (sizeKb >= blockThresholdKb) {
+        blockFiles.push(label)
+      } else if (sizeKb >= warnThresholdKb) {
+        largeFileWarnItems.push(`Large file advisory (>${warnThresholdKb} KB): ${label}`)
+      }
+    })
+  )
+
+  if (blockFiles.length > 0) {
+    denyPreToolUse(
+      `Large file(s) in outgoing batch exceed the ${blockThresholdKb} KB block threshold — push blocked.\n\n` +
+        blockFiles.map((f) => `  ${f}`).join("\n") +
+        `\n\nTo resolve:\n` +
+        `  1. Add the file to .gitignore\n` +
+        `  2. Soft-reset to remove it from history: \`git reset --soft HEAD~1\`\n` +
+        `  3. Re-commit without the large file\n\n` +
+        `To change the threshold: \`swiz settings set large-file-size-block-kb <N>\``
+    )
+  }
+}
+
 const priorCommands = priorCommandsResult
 const effectiveSettings = effectiveSettingsEarly
 const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMode)
@@ -153,7 +231,7 @@ if (hasBranchCheck && hasPRCheck && hasCICheck) {
 
 // ── Advise on missing checks ─────────────────────────────────────────────────
 
-const missing: string[] = []
+const missing: string[] = [...largeFileWarnItems]
 if (!hasBranchCheck) {
   missing.push("Branch check (not run yet): `git branch --show-current`")
 }

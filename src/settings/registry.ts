@@ -315,6 +315,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     docs: { valuePlaceholder: "kb" },
   },
   {
+    key: "largeFileSizeBlockKb",
+    aliases: ["large-file-size-block-kb", "largefilesizeblockkb", "large_file_size_block_kb"],
+    kind: "numeric",
+    scopes: ["global"],
+    default: 5120,
+    docs: { valuePlaceholder: "kb" },
+  },
+  {
     key: "defaultBranch",
     aliases: ["default-branch", "defaultbranch", "default_branch"],
     kind: "string",
