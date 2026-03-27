@@ -82,12 +82,24 @@ export function annotateSessionsWithLiveness(
 
 async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
   try {
-    const body = (await req.json().catch(() => null)) as {
-      limitProjects?: number
-      limitSessionsPerProject?: number
-      selectedProjectCwd?: string
-      selectedSessionId?: string
-    } | null
+    const rawBody = (await req.json().catch(() => null)) as Record<string, unknown> | null
+
+    // Compat shim: remap legacy field names to current API contract
+    const body = rawBody
+      ? {
+          limitProjects:
+            (rawBody.limitProjects as number | undefined) ??
+            (rawBody.limits as { projects?: number } | undefined)?.projects,
+          limitSessionsPerProject: rawBody.limitSessionsPerProject as number | undefined,
+          selectedProjectCwd:
+            (rawBody.selectedProjectCwd as string | undefined) ??
+            (rawBody.selectedProject as string | undefined),
+          selectedSessionId:
+            (rawBody.selectedSessionId as string | undefined) ??
+            (rawBody.selectedSession as string | undefined),
+        }
+      : null
+
     const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
     const limitSessions = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))
     const projectCwds = [...new Set(ctx.getKnownProjects())]

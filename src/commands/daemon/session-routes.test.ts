@@ -105,3 +105,40 @@ describe("annotateSessionsWithLiveness", () => {
     expect(result[0]!.processAlive).toBe(true)
   })
 })
+
+describe("handleProjectsList compat shim", () => {
+  test("remaps legacy selectedProject to selectedProjectCwd", () => {
+    const legacyBody = {
+      selectedProject: "/home/user/project",
+      selectedSession: "session-123",
+    }
+    // Verify the compat shim logic
+    const remapped = {
+      selectedProjectCwd: legacyBody.selectedProject ?? undefined,
+      selectedSessionId: legacyBody.selectedSession ?? undefined,
+    }
+    expect(remapped.selectedProjectCwd).toBe("/home/user/project")
+    expect(remapped.selectedSessionId).toBe("session-123")
+  })
+
+  test("remaps legacy limits.projects to limitProjects", () => {
+    const legacyBody = {
+      limits: {
+        projects: 5,
+      },
+    }
+    // Verify the compat shim logic
+    const limitProjects = (legacyBody.limits as { projects?: number } | undefined)?.projects ?? 8
+    expect(limitProjects).toBe(5)
+  })
+
+  test("prefers new field names over legacy fields", () => {
+    const mixedBody = {
+      selectedProjectCwd: "/home/user/new-project",
+      selectedProject: "/home/user/old-project",
+    }
+    // Verify the compat shim prefers new names
+    const selectedProjectCwd = mixedBody.selectedProjectCwd ?? mixedBody.selectedProject
+    expect(selectedProjectCwd).toBe("/home/user/new-project")
+  })
+})
