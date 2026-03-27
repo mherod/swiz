@@ -391,6 +391,26 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     await rm(d, { recursive: true, force: true })
   })
 
+  it("only reads tool names from the current session after the last system boundary", async () => {
+    const d = await makeTmpDir()
+    const filePath = join(d, "current-session-only.jsonl")
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read" }] },
+      }),
+      JSON.stringify({ type: "system", content: "compacted" }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Edit" }] },
+      }),
+    ]
+    await writeFile(filePath, lines.join("\n"))
+    const result = await extractToolNamesFromTranscript(filePath)
+    expect(result).toEqual(["Edit"])
+    await rm(d, { recursive: true, force: true })
+  })
+
   it("handles mixed valid and invalid lines", async () => {
     const d = await makeTmpDir()
     const filePath = join(d, "mixed.jsonl")

@@ -14,6 +14,7 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../../settings.ts"
+import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import { type CiWatchRegistry, verifyWebhookSignature } from "./ci-watch-registry.ts"
 import {
@@ -41,7 +42,14 @@ import { type AgentProcessSnapshot, handleSessionRoutes } from "./session-routes
 import type { CachedSnapshot } from "./snapshot.ts"
 import type { ActiveHookDispatch } from "./types.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
-import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
+import {
+  type CapturedToolCall,
+  captureSessionToolCall,
+  captureSessionToolUsage,
+  type SessionToolUsageState,
+  seedSessionToolUsage,
+  stripAnsi,
+} from "./utils.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
 type DaemonWebServerHandle = ReturnType<typeof Bun.serve>
@@ -187,6 +195,7 @@ export interface DaemonWebServerContext {
   registerProjectWatchers: (cwd: string) => void
   sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
   sessionToolCalls: Map<string, CapturedToolCall[]>
+  sessionToolUsage: Map<string, SessionToolUsageState>
   activeHookDispatches: Map<string, ActiveHookDispatch>
   projectMetrics: Map<string, DaemonMetrics>
   ghCache: GhQueryCache
@@ -434,7 +443,38 @@ async function updateParsedPayloadMetrics(
         parsed.toolInput,
         nowMs
       )
+      captureSessionToolUsage(
+        ctx.sessionToolUsage,
+        parsed.sessionId,
+        parsed.toolName,
+        parsed.toolInput,
+        nowMs
+      )
     }
+  }
+}
+
+async function getCurrentSessionToolUsageFromDaemon(
+  ctx: DaemonWebServerContext,
+  sessionId: string,
+  transcriptPath?: string
+): Promise<CurrentSessionToolUsage | null> {
+  const cached = ctx.sessionToolUsage.get(sessionId)
+  if (cached) {
+    cached.lastSeen = Date.now()
+    return {
+      toolNames: [...cached.toolNames],
+      skillInvocations: [...cached.skillInvocations],
+    }
+  }
+
+  if (!transcriptPath) return null
+  const index = await ctx.transcriptIndex.get(transcriptPath)
+  if (!index) return null
+  const seeded = seedSessionToolUsage(ctx.sessionToolUsage, sessionId, index.summary, Date.now())
+  return {
+    toolNames: [...seeded.toolNames],
+    skillInvocations: [...seeded.skillInvocations],
   }
 }
 
@@ -471,10 +511,9 @@ async function handleDispatchRoute(
       payloadStr,
       daemonContext: true,
       signal: requestAbort.signal,
-      transcriptSummaryProvider: async (path) => {
-        const index = await ctx.transcriptIndex.get(path)
-        return index?.summary ?? null
-      },
+      currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
+        getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
+      disableTranscriptSummaryFallback: true,
       manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
       onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
     }),
@@ -860,10 +899,9 @@ async function handlePrPollRoute(req: Request, ctx: DaemonWebServerContext): Pro
       hookEventName: "prPoll",
       payloadStr,
       daemonContext: true,
-      transcriptSummaryProvider: async (path) => {
-        const index = await ctx.transcriptIndex.get(path)
-        return index?.summary ?? null
-      },
+      currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
+        getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
+      disableTranscriptSummaryFallback: true,
       manifestProvider: async (projectCwd) => ctx.manifestCache.get(projectCwd),
     })
     const durationMs = performance.now() - start

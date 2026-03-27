@@ -6,7 +6,7 @@
 
 import { gitSubcommandRe } from "../hooks/utils/shell-patterns.ts"
 import { normalizeCommand } from "./command-utils.ts"
-import { isShellTool } from "./tool-matchers.ts"
+import { isShellTool, isTaskTool } from "./tool-matchers.ts"
 
 /**
  * Session scope classification based on change magnitude and type.
@@ -44,6 +44,23 @@ export interface TranscriptSummary {
   lastVerificationTime: string | null
   /** Session scope classification for governance decision-making. */
   sessionScope: SessionScope
+}
+
+/**
+ * Lightweight current-session usage data that can be injected by dispatch
+ * without requiring a full transcript summary.
+ */
+export interface CurrentSessionToolUsage {
+  toolNames: string[]
+  skillInvocations: string[]
+}
+
+export interface CurrentSessionTaskToolStats {
+  toolNames: string[]
+  totalToolCalls: number
+  taskToolUsed: boolean
+  lastTaskToolCallIndex: number
+  callsSinceLastTaskTool: number
 }
 
 const GIT_PUSH_PATTERN = gitSubcommandRe("push\\b")
@@ -191,6 +208,15 @@ interface SummaryAccumulator {
   hasGitPush: boolean
 }
 
+function createEmptySummaryAccumulator(): SummaryAccumulator {
+  return {
+    toolNames: [],
+    bashCommands: [],
+    skillInvocations: [],
+    hasGitPush: false,
+  }
+}
+
 function extractToolName(block: ToolBlock): string {
   return block?.name ?? ""
 }
@@ -218,21 +244,128 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   }
 }
 
-export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
-  const acc: SummaryAccumulator = {
-    toolNames: [],
-    bashCommands: [],
-    skillInvocations: [],
-    hasGitPush: false,
-  }
-  const sessionLines = extractSessionLines(jsonlText)
-
+function collectSessionToolUsage(sessionLines: string[]): SummaryAccumulator {
+  const acc = createEmptySummaryAccumulator()
   for (const line of sessionLines) {
     if (!line.trim()) continue
     for (const block of parseAssistantToolBlocks(line)) {
       processToolBlock(block, acc)
     }
   }
+  return acc
+}
+
+async function readSessionToolUsage(transcriptPath: string): Promise<SummaryAccumulator> {
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return collectSessionToolUsage(extractSessionLines(text))
+  } catch {
+    return createEmptySummaryAccumulator()
+  }
+}
+
+function transcriptPathFromUsageSource(source: string | Record<string, unknown>): string {
+  if (typeof source === "string") return source
+  return typeof source.transcript_path === "string" ? source.transcript_path : ""
+}
+
+export function getCurrentSessionToolUsage(
+  input: Record<string, unknown>
+): CurrentSessionToolUsage | null {
+  const usage = input?._currentSessionToolUsage
+  if (usage && typeof usage === "object") {
+    const candidate = usage as Record<string, unknown>
+    if (Array.isArray(candidate.toolNames) && Array.isArray(candidate.skillInvocations)) {
+      return {
+        toolNames: candidate.toolNames.filter((v): v is string => typeof v === "string"),
+        skillInvocations: candidate.skillInvocations.filter(
+          (v): v is string => typeof v === "string"
+        ),
+      }
+    }
+  }
+
+  const summary = getTranscriptSummary(input)
+  return summary
+    ? {
+        toolNames: summary.toolNames,
+        skillInvocations: summary.skillInvocations,
+      }
+    : null
+}
+
+export function findLastTaskToolCallIndex(toolNames: string[]): number {
+  for (let i = toolNames.length - 1; i >= 0; i--) {
+    const name = toolNames[i]
+    if (name && isTaskTool(name)) return i
+  }
+  return -1
+}
+
+export function deriveCurrentSessionTaskToolStats(
+  toolNames: string[]
+): CurrentSessionTaskToolStats {
+  const totalToolCalls = toolNames.length
+  const lastTaskToolCallIndex = findLastTaskToolCallIndex(toolNames)
+  return {
+    toolNames,
+    totalToolCalls,
+    taskToolUsed: lastTaskToolCallIndex >= 0,
+    lastTaskToolCallIndex,
+    callsSinceLastTaskTool:
+      lastTaskToolCallIndex >= 0 ? totalToolCalls - 1 - lastTaskToolCallIndex : totalToolCalls,
+  }
+}
+
+/**
+ * Read the current session transcript and return every assistant tool name in order.
+ * Only lines after the last compaction boundary are considered.
+ */
+export async function getToolsUsedForCurrentSession(
+  source: string | Record<string, unknown>
+): Promise<string[]> {
+  if (typeof source !== "string") {
+    const usage = getCurrentSessionToolUsage(source)
+    if (usage) return usage.toolNames
+  }
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  return transcriptPath ? (await readSessionToolUsage(transcriptPath)).toolNames : []
+}
+
+/**
+ * Read the current session transcript and return every skill invoked via the Skill tool.
+ * Only lines after the last compaction boundary are considered.
+ */
+export async function getSkillsUsedForCurrentSession(
+  source: string | Record<string, unknown>
+): Promise<string[]> {
+  if (typeof source !== "string") {
+    const usage = getCurrentSessionToolUsage(source)
+    if (usage) return usage.skillInvocations
+  }
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  return transcriptPath ? (await readSessionToolUsage(transcriptPath)).skillInvocations : []
+}
+
+export async function getCurrentSessionTaskToolStats(
+  source: string | Record<string, unknown>
+): Promise<CurrentSessionTaskToolStats> {
+  return deriveCurrentSessionTaskToolStats(await getToolsUsedForCurrentSession(source))
+}
+
+/**
+ * Read the current session transcript and return normalised Bash/Shell commands.
+ * Only lines after the last compaction boundary are considered.
+ */
+export async function getBashCommandsUsedForCurrentSession(
+  transcriptPath: string
+): Promise<string[]> {
+  return (await readSessionToolUsage(transcriptPath)).bashCommands
+}
+
+export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
+  const sessionLines = extractSessionLines(jsonlText)
+  const acc = collectSessionToolUsage(sessionLines)
 
   const sessionDurationMs = computeSessionDuration(sessionLines)
   const successfulTestRuns = countSuccessfulTests(acc.bashCommands)

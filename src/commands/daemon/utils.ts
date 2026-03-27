@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { getHomeDir } from "../../home.ts"
+import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
 export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
@@ -155,6 +156,10 @@ export interface CapturedToolCall {
   timestamp: string
 }
 
+export interface SessionToolUsageState extends CurrentSessionToolUsage {
+  lastSeen: number
+}
+
 export interface SessionTaskPreview {
   id: string
   subject: string
@@ -236,6 +241,49 @@ export function captureSessionToolCall(
     list.splice(0, list.length - MAX_CAPTURED_TOOL_CALLS_PER_SESSION)
   }
   sessionToolCalls.set(sessionId, list)
+}
+
+export function seedSessionToolUsage(
+  sessionToolUsage: Map<string, SessionToolUsageState>,
+  sessionId: string,
+  usage: CurrentSessionToolUsage,
+  nowMs: number
+): SessionToolUsageState {
+  const entry: SessionToolUsageState = {
+    toolNames: [...usage.toolNames],
+    skillInvocations: [...usage.skillInvocations],
+    lastSeen: nowMs,
+  }
+  sessionToolUsage.set(sessionId, entry)
+  return entry
+}
+
+export function captureSessionToolUsage(
+  sessionToolUsage: Map<string, SessionToolUsageState>,
+  sessionId: string,
+  toolName: string,
+  toolInput: Record<string, unknown> | undefined,
+  nowMs: number
+): SessionToolUsageState {
+  const existing = sessionToolUsage.get(sessionId)
+  const entry: SessionToolUsageState = existing
+    ? {
+        toolNames: existing.toolNames,
+        skillInvocations: existing.skillInvocations,
+        lastSeen: nowMs,
+      }
+    : {
+        toolNames: [],
+        skillInvocations: [],
+        lastSeen: nowMs,
+      }
+
+  entry.toolNames.push(toolName)
+  if (toolName === "Skill" && typeof toolInput?.skill === "string" && toolInput.skill) {
+    entry.skillInvocations.push(toolInput.skill)
+  }
+  sessionToolUsage.set(sessionId, entry)
+  return entry
 }
 
 export function mergeToolStats(

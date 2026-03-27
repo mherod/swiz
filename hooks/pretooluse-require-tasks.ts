@@ -18,14 +18,12 @@ import {
   allowPreToolUse,
   allowPreToolUseWithContext,
   denyPreToolUse,
-  extractToolNamesFromTranscript,
-  findLastTaskToolCallIndex,
   findPriorSessionTasks,
   formatActionPlan,
   formatTaskCompleteCommands,
   formatTaskList,
   formatTaskSubjectsForDisplay,
-  getTranscriptSummary,
+  getCurrentSessionTaskToolStats,
   hasFileInTree,
   isEditTool,
   isGitRepo,
@@ -344,18 +342,15 @@ function shouldSkipStalenessCheck(opts: {
 
 async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const { toolName, input, transcriptPath, allTasks, activeTasks, allTasksDone, cwd } = opts
-  const summary = getTranscriptSummary(input)
-  const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcriptPath))
-  const total = toolNames.length
-  const lastTaskIndex = findLastTaskToolCallIndex(toolNames)
-  const callsSinceTask = total - 1 - lastTaskIndex
+  const { lastTaskToolCallIndex, callsSinceLastTaskTool } =
+    await getCurrentSessionTaskToolStats(input)
 
   if (
     shouldSkipStalenessCheck({
       transcriptPath,
-      lastTaskIndex,
+      lastTaskIndex: lastTaskToolCallIndex,
       allTasksDone,
-      callsSinceTask,
+      callsSinceTask: callsSinceLastTaskTool,
       toolName,
       input,
     })
@@ -368,7 +363,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
     ? `Check project state (\`swiz state show\`): currently \`${projectState}\`. Run \`swiz state set <state>\` if the work phase has changed.`
     : `Set a project state to reflect the current phase: \`swiz state set <state>\` (\`swiz state list\` for options).`
   await deny(
-    `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
+    `STOP. Tasks have gone stale. ${callsSinceLastTaskTool} tool calls since last task update. ` +
       `${toolName} is BLOCKED.\n\n` +
       `We currently have these tasks in progress:\n${taskList}\n\n` +
       `However, it's been a while since we've updated the task list. Good task hygiene means the list should stay fully reflective of what we're currently doing.\n\n` +

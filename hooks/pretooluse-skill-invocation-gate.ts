@@ -13,11 +13,11 @@
 import {
   allowPreToolUse,
   denyPreToolUse,
-  extractSkillInvocations,
   formatActionPlan,
   GIT_COMMIT_RE,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
+  getSkillsUsedForCurrentSession,
   isShellTool,
   skillExists,
   type ToolHookInput,
@@ -47,7 +47,9 @@ if (!skillExists(requiredSkill)) process.exit(0)
 const transcriptPath: string = input?.transcript_path ?? ""
 if (!transcriptPath) process.exit(0)
 
-const invokedSkills = await extractSkillInvocations(transcriptPath)
+const invokedSkills = await getSkillsUsedForCurrentSession(
+  input as unknown as Record<string, unknown>
+)
 
 if (invokedSkills.includes(requiredSkill)) {
   allowPreToolUse(`/${requiredSkill} skill was invoked in this session`)

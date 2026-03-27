@@ -100,6 +100,39 @@ describe("transcriptSummaryProvider", () => {
   })
 })
 
+describe("currentSessionToolUsageProvider", () => {
+  it("injects daemon-backed current-session usage without requiring transcript reads", async () => {
+    let providerCalled = false
+    let providerSessionId = ""
+    let providerTranscriptPath = ""
+    const req: DispatchRequest = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      payloadStr: JSON.stringify({
+        cwd: process.cwd(),
+        session_id: "usage-session",
+        transcript_path: "/nonexistent/transcript.jsonl",
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+      }),
+      currentSessionToolUsageProvider: async (sessionId, transcriptPath) => {
+        providerCalled = true
+        providerSessionId = sessionId
+        providerTranscriptPath = transcriptPath ?? ""
+        return {
+          toolNames: ["Skill", "Bash"],
+          skillInvocations: ["commit"],
+        }
+      },
+      disableTranscriptSummaryFallback: true,
+    }
+    await executeDispatch(req)
+    expect(providerCalled).toBe(true)
+    expect(providerSessionId).toBe("usage-session")
+    expect(providerTranscriptPath).toBe("/nonexistent/transcript.jsonl")
+  })
+})
+
 describe("manifestProvider", () => {
   it("uses cached manifest provider instead of loading from disk", async () => {
     let providerCalled = false

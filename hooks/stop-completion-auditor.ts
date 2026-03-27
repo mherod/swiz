@@ -12,14 +12,14 @@ import {
   blockStop,
   computeSubjectFingerprint,
   computeTranscriptSummary,
-  extractToolNamesFromTranscript,
+  deriveCurrentSessionTaskToolStats,
   formatActionPlan,
+  getCurrentSessionTaskToolStats,
   getSessionTasksDir,
   getTasksRoot,
   getTranscriptSummary,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  isTaskCreateTool,
   normalizeSubject,
   readSessionTasks,
   type SessionTask,
@@ -210,19 +210,20 @@ function deriveToolCallStats(summary: TranscriptSummary): {
   total: number
   taskToolUsed: boolean
 } {
+  const stats = deriveCurrentSessionTaskToolStats(summary.toolNames)
   return {
-    total: summary.toolCallCount,
-    taskToolUsed: summary.toolNames.some((n) => n === "TaskUpdate" || isTaskCreateTool(n)),
+    total: stats.totalToolCalls,
+    taskToolUsed: stats.taskToolUsed,
   }
 }
 
 async function countToolCalls(
-  transcriptPath: string
+  source: string | Record<string, unknown>
 ): Promise<{ total: number; taskToolUsed: boolean }> {
-  const toolNames = await extractToolNamesFromTranscript(transcriptPath)
+  const stats = await getCurrentSessionTaskToolStats(source)
   return {
-    total: toolNames.length,
-    taskToolUsed: toolNames.some((n) => n === "TaskUpdate" || isTaskCreateTool(n)),
+    total: stats.totalToolCalls,
+    taskToolUsed: stats.taskToolUsed,
   }
 }
 
@@ -305,11 +306,12 @@ async function enforceCiEvidence(
 }
 
 async function resolveToolCallStats(
+  raw: Record<string, unknown>,
   summary: TranscriptSummary | null,
   transcript: string
 ): Promise<{ total: number; taskToolUsed: boolean }> {
   if (summary) return deriveToolCallStats(summary)
-  if (transcript) return await countToolCalls(transcript)
+  if (transcript) return await countToolCalls(raw)
   return { total: 0, taskToolUsed: false }
 }
 
@@ -354,7 +356,11 @@ async function runStopCompletionWhenTasksDirReady(opts: {
 }): Promise<void> {
   const { raw, input, sessionId, transcript, home, tasksDir } = opts
   const summary = getTranscriptSummary(raw)
-  const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(summary, transcript)
+  const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(
+    raw,
+    summary,
+    transcript
+  )
 
   const allTasks = await readSessionTasks(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))

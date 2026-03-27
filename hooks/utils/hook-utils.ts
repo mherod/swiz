@@ -122,7 +122,6 @@ export {
 import {
   isEditTool as _isEditTool,
   isNotebookTool as _isNotebookTool,
-  TASK_TOOLS,
 } from "../../src/tool-matchers.ts"
 
 // ─── Subprocess timeout enforcement ─────────────────────────────────────────
@@ -922,18 +921,6 @@ export function isTerminalTaskStatus(status: string): boolean {
 }
 
 /**
- * Find the most recent index in `toolNames` that corresponds to any task tool.
- * Returns -1 when no task tool is present.
- */
-export function findLastTaskToolCallIndex(toolNames: string[]): number {
-  for (let i = toolNames.length - 1; i >= 0; i--) {
-    const name = toolNames[i]
-    if (name && TASK_TOOLS.has(name)) return i
-  }
-  return -1
-}
-
-/**
  * Format task subjects for denial messages.
  * Uses active task lines when present; otherwise falls back to all tasks.
  */
@@ -1103,7 +1090,14 @@ export async function createSessionTask(
 export { normalizeCommand, stripHeredocs } from "../../src/command-utils.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
 export {
+  type CurrentSessionTaskToolStats,
   computeTranscriptSummary,
+  deriveCurrentSessionTaskToolStats,
+  findLastTaskToolCallIndex,
+  getBashCommandsUsedForCurrentSession,
+  getCurrentSessionTaskToolStats,
+  getSkillsUsedForCurrentSession,
+  getToolsUsedForCurrentSession,
   getTranscriptSummary,
   parseTranscriptSummary,
   type TranscriptSummary,

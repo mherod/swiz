@@ -2,15 +2,13 @@
 
 // PostToolUse hook: Remind agents to create/update tasks regularly
 // Provides countdown hints showing remaining calls until mandatory enforcement
-// Uses transcript scan (no external state) to determine position
+// Uses current-session tool history (daemon-injected when available) to determine position
 
 import { toolHookInputSchema } from "./schemas.ts"
 import {
   emitContext,
-  extractToolNamesFromTranscript,
-  getTranscriptSummary,
+  getCurrentSessionTaskToolStats,
   isEditTool,
-  isTaskTool,
   isWriteTool,
   scheduleAutoSteer,
   toolNameForCurrentAgent,
@@ -69,26 +67,19 @@ async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(hookRaw)
   _sessionId = (input.session_id as string) ?? ""
   _cwd = input.cwd
-  const transcript = input.transcript_path
-  if (!transcript) return
-
-  const summary = getTranscriptSummary(hookRaw)
-  const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcript))
-  const total = toolNames.length
+  const { totalToolCalls, callsSinceLastTaskTool } = await getCurrentSessionTaskToolStats(hookRaw)
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-  const lastTaskIdx = toolNames.reduce((acc, name, i) => (isTaskTool(name) ? i : acc), -1)
-  const callsSinceTask = total - 1 - lastTaskIdx
 
   const CREATION_THRESHOLD = 5
   const STALENESS_THRESHOLD = 10
 
-  if (callsSinceTask >= total) {
-    emitCreationCountdown(total, CREATION_THRESHOLD, taskCreateName)
+  if (callsSinceLastTaskTool >= totalToolCalls) {
+    emitCreationCountdown(totalToolCalls, CREATION_THRESHOLD, taskCreateName)
     return
   }
 
-  const staleRemaining = STALENESS_THRESHOLD - callsSinceTask
-  emitStalenessWarning(callsSinceTask, staleRemaining, (input.tool_name ?? "") as string)
+  const staleRemaining = STALENESS_THRESHOLD - callsSinceLastTaskTool
+  emitStalenessWarning(callsSinceLastTaskTool, staleRemaining, (input.tool_name ?? "") as string)
 }
 
 async function emit(context: string, opts?: { skipAutoSteer?: boolean }): Promise<never> {

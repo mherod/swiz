@@ -21,7 +21,11 @@ import {
   readSwizSettings,
   resolveProjectHooks,
 } from "../settings.ts"
-import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
+import {
+  type CurrentSessionToolUsage,
+  computeTranscriptSummary,
+  type TranscriptSummary,
+} from "../transcript-summary.ts"
 import type { HookExecution } from "./engine.ts"
 import {
   applyHookSettingFilters,
@@ -175,22 +179,47 @@ async function enrichPayloadForHooks(
   payload: Record<string, unknown>,
   parseError: boolean,
   fallbackPayloadStr: string,
-  summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
+  summaryProvider?: (path: string) => Promise<TranscriptSummary | null>,
+  currentSessionToolUsageProvider?: (
+    sessionId: string,
+    transcriptPath?: string
+  ) => Promise<CurrentSessionToolUsage | null>,
+  disableTranscriptSummaryFallback?: boolean
 ): Promise<string> {
   if (parseError) return fallbackPayloadStr
 
+  let enriched = payload
+  let changed = false
   const transcriptPath = payload.transcript_path as string | undefined
-  if (!transcriptPath) return fallbackPayloadStr
+  const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
 
-  const summary = summaryProvider
-    ? await summaryProvider(transcriptPath)
-    : await computeTranscriptSummary(transcriptPath)
-  if (!summary) return fallbackPayloadStr
+  if (currentSessionToolUsageProvider && sessionId) {
+    const usage = await currentSessionToolUsageProvider(sessionId, transcriptPath)
+    if (usage) {
+      enriched = merge({}, enriched, { _currentSessionToolUsage: usage }) as Record<string, unknown>
+      changed = true
+      log(
+        `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
+      )
+    }
+  }
 
-  const enriched = merge({}, payload, { _transcriptSummary: summary }) as Record<string, unknown>
-  const enrichedPayloadStr = JSON.stringify(enriched)
-  log(`   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
-  return enrichedPayloadStr
+  if (transcriptPath) {
+    const summary = summaryProvider
+      ? await summaryProvider(transcriptPath)
+      : disableTranscriptSummaryFallback
+        ? null
+        : await computeTranscriptSummary(transcriptPath)
+    if (summary) {
+      enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, unknown>
+      changed = true
+      log(
+        `   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`
+      )
+    }
+  }
+
+  return changed ? JSON.stringify(enriched) : fallbackPayloadStr
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -203,6 +232,13 @@ export interface DispatchRequest {
   daemonContext?: boolean
   /** Optional cached transcript summary provider (injected by daemon). */
   transcriptSummaryProvider?: (path: string) => Promise<TranscriptSummary | null>
+  /** Optional daemon-backed provider for current-session tool/skill usage. */
+  currentSessionToolUsageProvider?: (
+    sessionId: string,
+    transcriptPath?: string
+  ) => Promise<CurrentSessionToolUsage | null>
+  /** When true, skip the default file-backed transcript summary enrichment. */
+  disableTranscriptSummaryFallback?: boolean
   /** Optional cached manifest provider (injected by daemon to skip cold manifest rebuild). */
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>
   /** Optional lifecycle callback for in-flight dispatch tracking. */
@@ -520,7 +556,9 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     ctx.payload,
     ctx.parseError,
     JSON.stringify(ctx.payload),
-    req.transcriptSummaryProvider
+    req.transcriptSummaryProvider,
+    req.currentSessionToolUsageProvider,
+    req.disableTranscriptSummaryFallback
   )
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
 

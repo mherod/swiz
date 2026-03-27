@@ -16,9 +16,8 @@ import { toolHookInputSchema } from "./schemas.ts"
 import {
   denyPreToolUse as deny,
   formatActionPlan,
-  getTranscriptSummary,
+  getToolsUsedForCurrentSession,
 } from "./utils/hook-utils.ts"
-import { extractToolNamesFromTranscript } from "./utils/transcript.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
 const STALL_THRESHOLD = 30
@@ -33,14 +32,10 @@ async function getToolNamesAndValidate(
   const parsed = toolHookInputSchema.safeParse(raw)
   if (!parsed.success) return null
 
-  const { tool_name: toolName, transcript_path: transcriptPath } = parsed.data
+  const { tool_name: toolName } = parsed.data
   if (!toolName || !isReadOrSearchTool(toolName)) return null
 
-  // Prefer pre-computed summary from dispatch; fall back to direct read
-  const summary = getTranscriptSummary(raw as Record<string, unknown>)
-  const toolNames =
-    summary?.toolNames ??
-    (transcriptPath ? await extractToolNamesFromTranscript(transcriptPath) : [])
+  const toolNames = await getToolsUsedForCurrentSession(raw as Record<string, unknown>)
 
   if (toolNames.length === 0) return null
 

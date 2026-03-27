@@ -31,6 +31,7 @@ import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
   type CapturedToolCall,
   restartDaemon,
+  type SessionToolUsageState,
   transcriptWatchPathsForProject,
 } from "./daemon/utils.ts"
 import { startDaemonWebServer } from "./daemon/web-server.ts"
@@ -78,6 +79,7 @@ function createDaemonState() {
   const projectLastSeen = new Map<string, number>()
   const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
   const sessionToolCalls = new Map<string, CapturedToolCall[]>()
+  const sessionToolUsage = new Map<string, SessionToolUsageState>()
   const activeHookDispatches = new Map<string, ActiveHookDispatch>()
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {
@@ -98,6 +100,7 @@ function createDaemonState() {
     projectLastSeen,
     sessionActivity,
     sessionToolCalls,
+    sessionToolUsage,
     activeHookDispatches,
     getProjectMetrics,
     touchProject,
@@ -288,6 +291,9 @@ function createPruner(
       }
       if (recent.length !== toolCalls.length) state.sessionToolCalls.set(sessionId, recent)
     }
+    for (const [sessionId, usage] of state.sessionToolUsage) {
+      if (usage.lastSeen < cutoffMs) state.sessionToolUsage.delete(sessionId)
+    }
 
     evictIdleProjects(now, state, caches, registeredProjects)
   }
@@ -313,6 +319,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     registerProjectWatchers,
     sessionActivity: state.sessionActivity,
     sessionToolCalls: state.sessionToolCalls,
+    sessionToolUsage: state.sessionToolUsage,
     activeHookDispatches: state.activeHookDispatches,
     projectMetrics: state.projectMetrics,
     ghCache: caches.ghCache,

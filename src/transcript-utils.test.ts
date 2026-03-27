@@ -1,14 +1,23 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   contentBlockSchema,
   countToolCalls,
+  deriveCurrentSessionTaskToolStats,
   extractEditedFilePaths,
   extractLastAssistantText,
   extractPlainTurns,
   extractText,
   extractToolResultText,
   extractTranscriptData,
+  findLastTaskToolCallIndex,
   formatTurnsAsContext,
+  getCurrentSessionTaskToolStats,
+  getCurrentSessionToolUsage,
+  getSkillsUsedForCurrentSession,
+  getToolsUsedForCurrentSession,
   getUnsupportedTranscriptFormatMessage,
   isContentBlock,
   isDocsOnlySession,
@@ -160,6 +169,112 @@ describe("transcript-utils.ts", () => {
       expect(result).not.toContain(":")
       // C + : + \ each become -, so "C:\" → "C--"
       expect(result).toBe("C--Users-test")
+    })
+  })
+
+  describe("current-session tool usage", () => {
+    async function writeTranscriptFile(name: string, lines: string[]): Promise<string> {
+      const dir = await mkdtemp(join(tmpdir(), "swiz-session-tools-"))
+      const path = join(dir, name)
+      await writeFile(path, `${lines.join("\n")}\n`)
+      return path
+    }
+
+    it("getToolsUsedForCurrentSession ignores tool_use entries before the last system boundary", async () => {
+      const transcriptPath = await writeTranscriptFile("tools.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Read" }] },
+        }),
+        JSON.stringify({ type: "system", content: "compacted" }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Skill", input: { skill: "commit" } },
+              { type: "tool_use", name: "Edit", input: { file_path: "/repo/file.ts" } },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getToolsUsedForCurrentSession(transcriptPath)).toEqual(["Skill", "Edit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("getSkillsUsedForCurrentSession only returns Skill invocations from the current session", async () => {
+      const transcriptPath = await writeTranscriptFile("skills.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "commit" } }] },
+        }),
+        JSON.stringify({ type: "system", content: "compacted" }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Skill", input: { skill: "push" } },
+              { type: "tool_use", name: "Read", input: { file_path: "/repo/file.ts" } },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["push"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("reads current-session tool usage from enriched payload without touching transcript files", async () => {
+      const payload = {
+        transcript_path: "/nonexistent/transcript.jsonl",
+        _currentSessionToolUsage: {
+          toolNames: ["TaskCreate", "Read", "Edit"],
+          skillInvocations: ["commit"],
+        },
+      }
+
+      expect(getCurrentSessionToolUsage(payload)?.toolNames).toEqual(["TaskCreate", "Read", "Edit"])
+      expect(await getToolsUsedForCurrentSession(payload)).toEqual(["TaskCreate", "Read", "Edit"])
+      expect(await getSkillsUsedForCurrentSession(payload)).toEqual(["commit"])
+    })
+
+    it("deriveCurrentSessionTaskToolStats tracks the latest task tool call", () => {
+      expect(findLastTaskToolCallIndex(["Read", "TaskCreate", "Edit", "TaskUpdate", "Bash"])).toBe(
+        3
+      )
+      expect(
+        deriveCurrentSessionTaskToolStats(["Read", "TaskCreate", "Edit", "TaskUpdate", "Bash"])
+      ).toEqual({
+        toolNames: ["Read", "TaskCreate", "Edit", "TaskUpdate", "Bash"],
+        totalToolCalls: 5,
+        taskToolUsed: true,
+        lastTaskToolCallIndex: 3,
+        callsSinceLastTaskTool: 1,
+      })
+    })
+
+    it("getCurrentSessionTaskToolStats treats sessions with no task tool as fully stale", async () => {
+      const payload = {
+        transcript_path: "/nonexistent/transcript.jsonl",
+        _currentSessionToolUsage: {
+          toolNames: ["Read", "Grep", "Edit"],
+          skillInvocations: [],
+        },
+      }
+
+      expect(await getCurrentSessionTaskToolStats(payload)).toEqual({
+        toolNames: ["Read", "Grep", "Edit"],
+        totalToolCalls: 3,
+        taskToolUsed: false,
+        lastTaskToolCallIndex: -1,
+        callsSinceLastTaskTool: 3,
+      })
     })
   })
 

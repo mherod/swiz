@@ -8,6 +8,7 @@ function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload
   const parsed = JSON.parse(payloadStr) as {
     cwd?: string
     session_id?: string
+    transcript_path?: string
     tool_name?: string
     toolName?: string
     tool_input?: Record<string, unknown>
@@ -29,6 +30,7 @@ function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload
   return {
     cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
     sessionId: typeof parsed.session_id === "string" ? parsed.session_id : null,
+    transcriptPath: typeof parsed.transcript_path === "string" ? parsed.transcript_path : null,
     toolName,
     toolInput,
   }

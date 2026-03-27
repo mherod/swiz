@@ -124,6 +124,7 @@ describe("DaemonWorkerRuntime", () => {
           return {
             cwd: "/repo",
             sessionId: "session-1",
+            transcriptPath: null,
             toolName: "Shell",
             toolInput: { command: "ls" },
           }
@@ -136,6 +137,7 @@ describe("DaemonWorkerRuntime", () => {
     expect(result).toEqual({
       cwd: "/repo",
       sessionId: "session-1",
+      transcriptPath: null,
       toolName: "Shell",
       toolInput: { command: "ls" },
     })
@@ -162,6 +164,7 @@ describe("DaemonWorkerRuntime", () => {
     expect(result).toEqual({
       cwd: "/repo",
       sessionId: "abc",
+      transcriptPath: null,
       toolName: "Shell",
       toolInput: { command: "echo hi" },
     })
@@ -189,6 +192,7 @@ describe("DaemonWorkerRuntime", () => {
     expect(result).toEqual({
       cwd: "/repo",
       sessionId: "abc",
+      transcriptPath: null,
       toolName: "ReadFile",
       toolInput: { path: "/tmp/file.ts" },
     })

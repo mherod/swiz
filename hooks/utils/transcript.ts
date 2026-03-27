@@ -1,8 +1,13 @@
 // Transcript parsing utilities for hook scripts.
 // Reads Claude Code JSONL transcripts to extract tool calls, commands, and session boundaries.
 
-import { normalizeCommand } from "../../src/command-utils.ts"
-import { isShellTool } from "../../src/tool-matchers.ts"
+import {
+  computeTranscriptSummary,
+  extractSessionLines,
+  getBashCommandsUsedForCurrentSession,
+  getSkillsUsedForCurrentSession,
+  getToolsUsedForCurrentSession,
+} from "../../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../../src/transcript-utils.ts"
 
 // ── ANSI stripping ────────────────────────────────────────────────────────────
@@ -44,57 +49,33 @@ function collectToolBlocksFromLines(lines: string[]): Array<Record<string, unkno
   return blocks
 }
 
-function bashCommandsFromBlocks(blocks: Array<Record<string, unknown>>): string[] {
-  const commands: string[] = []
-  for (const block of blocks) {
-    if (!isShellTool(String(block.name ?? ""))) continue
-    const cmd = String((block.input as Record<string, unknown>)?.command ?? "")
-    if (cmd) commands.push(normalizeCommand(cmd))
-  }
-  return commands
-}
-
 async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
-  try {
-    const text = await Bun.file(path).text()
-    return collectToolBlocksFromLines(text.split("\n"))
-  } catch {
-    return []
-  }
+  const lines = await readSessionLines(path)
+  return collectToolBlocksFromLines(lines)
 }
 
 // ── Extractors ────────────────────────────────────────────────────────────────
 
 /**
- * Parse a Claude Code JSONL transcript and return every tool name called by
- * the assistant, in order. Returns [] if the file is missing or unreadable.
+ * Return every tool name used by the assistant in the current session.
+ * Returns [] if the file is missing or unreadable.
  */
 export async function extractToolNamesFromTranscript(transcriptPath: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(transcriptPath)
-  return blocks.flatMap((b) => (b.name ? [String(b.name)] : []))
+  return getToolsUsedForCurrentSession(transcriptPath)
 }
 
 /**
- * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
- * Each command is normalised (backslash-newline continuations collapsed).
+ * Extract all shell commands from assistant Bash tool_use blocks in the current session.
  */
 export async function extractBashCommands(path: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(path)
-  return bashCommandsFromBlocks(blocks)
+  return getBashCommandsUsedForCurrentSession(path)
 }
 
 /**
- * Extract the names of all skills invoked via the Skill tool in a transcript.
+ * Extract the names of all skills invoked via the Skill tool in the current session.
  */
 export async function extractSkillInvocations(path: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(path)
-  const skills: string[] = []
-  for (const block of blocks) {
-    if (block.name !== "Skill") continue
-    const skill = String((block.input as Record<string, unknown>)?.skill ?? "")
-    if (skill) skills.push(skill)
-  }
-  return skills
+  return getSkillsUsedForCurrentSession(path)
 }
 
 /**
@@ -165,28 +146,11 @@ export function collectBlockedToolUseIds(lines: string[]): Set<string> {
  * Returns all non-empty lines when no boundary is found.
  */
 export async function readSessionLines(transcriptPath: string): Promise<string[]> {
-  let text = ""
   try {
-    text = await Bun.file(transcriptPath).text()
+    return extractSessionLines(await Bun.file(transcriptPath).text())
   } catch {
     return []
   }
-  const allLines = text.split("\n")
-  let sessionStartIdx = 0
-  for (let i = allLines.length - 1; i >= 0; i--) {
-    const raw = allLines[i]
-    if (!raw?.trim()) continue
-    try {
-      const parsed = JSON.parse(raw)
-      if (parsed?.type === "system") {
-        sessionStartIdx = i + 1
-        break
-      }
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
 }
 
 /** Signals from the current session transcript for suppressing redundant PreToolUse tips. */
@@ -217,26 +181,8 @@ function mergeShellCommandIntoSessionTaskTip(norm: string, acc: SessionTaskTipCo
   if (isSwizTasksAddCreateOrStartCommand(norm)) acc.usedSwizTasksAddCreateStart = true
 }
 
-function mergeToolBlockIntoSessionTaskTip(
-  block: Record<string, unknown>,
-  acc: SessionTaskTipContext
-): void {
-  const name = String(block.name ?? "")
+function mergeToolNameIntoSessionTaskTip(name: string, acc: SessionTaskTipContext): void {
   if (NATIVE_TASK_QUERY_TOOLS.has(name)) acc.usedNativeTaskListOrGet = true
-  if (!isShellTool(name)) return
-  const raw = String((block.input as Record<string, unknown>)?.command ?? "")
-  if (!raw) return
-  mergeShellCommandIntoSessionTaskTip(normalizeCommand(raw), acc)
-}
-
-function foldBlocksToSessionTaskTip(blocks: Array<Record<string, unknown>>): SessionTaskTipContext {
-  const acc: SessionTaskTipContext = {
-    hasSwizCompleteWithEvidence: false,
-    usedNativeTaskListOrGet: false,
-    usedSwizTasksAddCreateStart: false,
-  }
-  for (const block of blocks) mergeToolBlockIntoSessionTaskTip(block, acc)
-  return acc
 }
 
 /**
@@ -252,8 +198,13 @@ export async function sessionTaskToolPatterns(
     usedSwizTasksAddCreateStart: false,
   }
   if (!transcriptPath) return empty
-  const lines = await readSessionLines(transcriptPath)
-  return foldBlocksToSessionTaskTip(collectToolBlocksFromLines(lines))
+  const summary = await computeTranscriptSummary(transcriptPath)
+  if (!summary) return empty
+
+  const acc: SessionTaskTipContext = { ...empty }
+  for (const name of summary.toolNames) mergeToolNameIntoSessionTaskTip(name, acc)
+  for (const command of summary.bashCommands) mergeShellCommandIntoSessionTaskTip(command, acc)
+  return acc
 }
 
 /**
