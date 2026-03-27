@@ -9,6 +9,12 @@ import { normalizeCommand } from "./command-utils.ts"
 import { isShellTool } from "./tool-matchers.ts"
 
 /**
+ * Session scope classification based on change magnitude and type.
+ * Used for governance decisions: what strictness applies to this session?
+ */
+export type SessionScope = "docs-only" | "trivial" | "small-fix" | "large"
+
+/**
  * Pre-parsed transcript summary injected by dispatch.ts into hook payloads.
  * Hooks should prefer consuming this over re-reading transcript_path.
  */
@@ -30,9 +36,104 @@ export interface TranscriptSummary {
    * should consume this field instead to avoid redundant I/O.
    */
   sessionLines: string[]
+  /** Milliseconds elapsed from first to last message in session (0 if single message). */
+  sessionDurationMs: number
+  /** Count of successful test/build runs detected from bash output patterns. */
+  successfulTestRuns: number
+  /** ISO timestamp of last successful verification (test/lint/typecheck) or null. */
+  lastVerificationTime: string | null
+  /** Session scope classification for governance decision-making. */
+  sessionScope: SessionScope
 }
 
 const GIT_PUSH_PATTERN = gitSubcommandRe("push\\b")
+
+/** Patterns indicating successful test or build runs. */
+const SUCCESSFUL_TEST_PATTERNS = [
+  /\bpassed\b/i,
+  /\bsucceeded?\b/i,
+  /\bgreen\b/i,
+  /✅.*passed/,
+  /all\s+tests?.*passed/i,
+  /test\s+run.*success/i,
+]
+
+/** Patterns indicating docs-only changes. */
+const DOCS_ONLY_PATTERNS = [/\.md$/i, /README/i, /CHANGELOG/i, /docs\//i, /\.mdx$/i]
+
+/** Extract ISO timestamp from transcript JSONL entry. */
+function extractTimestamp(line: string): string | null {
+  try {
+    const entry = JSON.parse(line) as { timestamp?: string }
+    return entry?.timestamp ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Count successful test/build runs in bash output. */
+function countSuccessfulTests(bashCommands: string[]): number {
+  let count = 0
+  for (const cmd of bashCommands) {
+    for (const pattern of SUCCESSFUL_TEST_PATTERNS) {
+      if (pattern.test(cmd)) {
+        count++
+        break
+      }
+    }
+  }
+  return count
+}
+
+/** Extract the last successful verification timestamp from session lines. */
+function extractLastVerificationTime(sessionLines: string[]): string | null {
+  for (let i = sessionLines.length - 1; i >= 0; i--) {
+    const timestamp = extractTimestamp(sessionLines[i]!)
+    if (timestamp) return timestamp
+  }
+  return null
+}
+
+/** Classify session scope based on changes and bash commands. */
+function classifySessionScope(bashCommands: string[]): SessionScope {
+  // Check for docs-only changes
+  const docsOnlyCount = bashCommands.filter((cmd) =>
+    DOCS_ONLY_PATTERNS.some((p) => p.test(cmd))
+  ).length
+
+  const totalRelevant = bashCommands.length
+  if (docsOnlyCount === totalRelevant) return "docs-only"
+
+  // Check for test-heavy sessions (many successful test runs)
+  const testCount = countSuccessfulTests(bashCommands)
+  if (testCount >= 5) return "large"
+  if (testCount >= 2) return "small-fix"
+
+  // Check for edit-heavy sessions
+  const editCommands = bashCommands.filter((cmd) =>
+    /edit|commit|add|write|modify/i.test(cmd)
+  ).length
+
+  if (editCommands <= 2) return "trivial"
+  if (editCommands <= 5) return "small-fix"
+  return "large"
+}
+
+/** Compute session duration from timestamps in session lines. */
+function computeSessionDuration(sessionLines: string[]): number {
+  const firstTime = extractTimestamp(sessionLines[0] ?? "")
+  const lastTime = extractTimestamp(sessionLines[sessionLines.length - 1] ?? "")
+
+  if (!firstTime || !lastTime) return 0
+
+  try {
+    const firstMs = new Date(firstTime).getTime()
+    const lastMs = new Date(lastTime).getTime()
+    return Math.max(0, lastMs - firstMs)
+  } catch {
+    return 0
+  }
+}
 
 /**
  * Extract session-boundary-aware lines from a full transcript text.
@@ -133,10 +234,19 @@ export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
     }
   }
 
+  const sessionDurationMs = computeSessionDuration(sessionLines)
+  const successfulTestRuns = countSuccessfulTests(acc.bashCommands)
+  const lastVerificationTime = extractLastVerificationTime(sessionLines)
+  const sessionScope = classifySessionScope(acc.bashCommands)
+
   return {
     ...acc,
     toolCallCount: acc.toolNames.length,
     sessionLines,
+    sessionDurationMs,
+    successfulTestRuns,
+    lastVerificationTime,
+    sessionScope,
   }
 }
 

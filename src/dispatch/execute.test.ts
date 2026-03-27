@@ -72,6 +72,10 @@ describe("transcriptSummaryProvider", () => {
           skillInvocations: [],
           hasGitPush: false,
           sessionLines: [],
+          sessionDurationMs: 0,
+          successfulTestRuns: 0,
+          lastVerificationTime: null,
+          sessionScope: "trivial",
         }
       },
     }
