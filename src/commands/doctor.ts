@@ -1289,6 +1289,22 @@ function lineDiff(aLines: string[], bLines: string[]): { added: string[]; remove
   }
 }
 
+function formatDiffResult(
+  countStr: string,
+  section: string,
+  totalChanged: number,
+  allAdded: string[],
+  allRemoved: string[]
+): string {
+  if (totalChanged <= 4) {
+    const parts: string[] = []
+    for (const l of allRemoved) parts.push(`-${l.trim().slice(0, 60)}`)
+    for (const l of allAdded) parts.push(`+${l.trim().slice(0, 60)}`)
+    return `${countStr} ${section}: ${parts.join(", ")}`
+  }
+  return `${countStr} in ${section}`
+}
+
 async function skillDiffSummary(activePath: string, overriddenPath: string): Promise<string> {
   try {
     const [activeText, overriddenText] = await Promise.all([
@@ -1317,14 +1333,7 @@ async function skillDiffSummary(activePath: string, overriddenPath: string): Pro
 
     const allAdded = [...fmDiff.added, ...bodyDiff.added]
     const allRemoved = [...fmDiff.removed, ...bodyDiff.removed]
-    if (totalAdded + totalRemoved <= 4) {
-      const parts: string[] = []
-      for (const l of allRemoved) parts.push(`-${l.trim().slice(0, 60)}`)
-      for (const l of allAdded) parts.push(`+${l.trim().slice(0, 60)}`)
-      return `${countStr} ${section}: ${parts.join(", ")}`
-    }
-
-    return `${countStr} in ${section}`
+    return formatDiffResult(countStr, section, totalAdded + totalRemoved, allAdded, allRemoved)
   } catch {
     return ""
   }
