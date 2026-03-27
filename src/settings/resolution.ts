@@ -156,6 +156,7 @@ function buildBaseSettings(
     prMergeMode: settings.prMergeMode,
     pushCooldownMinutes: settings.pushCooldownMinutes,
     pushGate: settings.pushGate,
+    skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
     autoSteer: settings.autoSteer,

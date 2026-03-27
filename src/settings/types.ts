@@ -185,6 +185,8 @@ export interface SwizSettings {
   memoryUpdateReminder: boolean
   /** When true, runs lint and typecheck quality checks before allowing session stop. */
   qualityChecksGate: boolean
+  /** When true, skips the secret/credential pattern scan in the push-checks-gate hook. */
+  skipSecretScan: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */
   strictNoDirectMain: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */

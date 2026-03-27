@@ -70,13 +70,64 @@ if (!Number.isNaN(behindCount) && behindCount > 0) {
   )
 }
 
-const [priorCommands, globalSettings, projectSettings] = await Promise.all([
+// ── Secret / credential pattern scan ─────────────────────────────────────────
+// Scan the outgoing diff for high-confidence credential patterns before any
+// bytes leave the local machine. Removed lines (diff `-` prefix) are skipped
+// to avoid blocking commits that *delete* old secrets.
+// Bypassed when `skipSecretScan` swiz setting is true.
+
+const [diffResult, priorCommandsResult, globalSettings, projectSettings] = await Promise.all([
+  spawnWithTimeout(["git", "diff", "@{upstream}..HEAD"], { cwd, timeoutMs: 10000 }),
   extractBashCommands(transcriptPath),
   readSwizSettings(),
   readProjectSettings(cwd),
 ])
 
-const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+const effectiveSettingsEarly = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+
+if (!effectiveSettingsEarly.skipSecretScan && diffResult.exitCode === 0 && diffResult.stdout) {
+  // Only inspect added/context lines — skip lines starting with '-'
+  const addedLines = diffResult.stdout
+    .split("\n")
+    .filter((l) => !l.startsWith("-") || l.startsWith("---"))
+
+  // High-confidence patterns: PEM block headers and well-known API key prefixes.
+  const PEM_HEADER = /-----BEGIN\s+(?:RSA |EC |DSA |OPENSSH |)PRIVATE KEY-----/
+  const API_KEY_PREFIXES = new RegExp(
+    [
+      "sk-live-[A-Za-z0-9]{20,}",
+      "sk-proj-[A-Za-z0-9]{20,}",
+      "ghp_[A-Za-z0-9]{36,}",
+      "gho_[A-Za-z0-9]{36,}",
+      "ghs_[A-Za-z0-9]{36,}",
+      "AKIA[0-9A-Z]{16}",
+    ].join("|")
+  )
+
+  const secretMatches: string[] = []
+  for (const line of addedLines) {
+    if (PEM_HEADER.test(line) || API_KEY_PREFIXES.test(line)) {
+      // Truncate to avoid echoing the actual secret in the block message
+      secretMatches.push(line.slice(0, 80) + (line.length > 80 ? "…" : ""))
+    }
+  }
+
+  if (secretMatches.length > 0) {
+    denyPreToolUse(
+      `Potential secret or credential detected in outgoing diff — push blocked.\n\n` +
+        `Matching lines (truncated):\n` +
+        secretMatches.map((l) => `  ${l}`).join("\n") +
+        `\n\nInspect with \`git diff @{upstream}..HEAD\`, then:\n` +
+        `  1. Remove the secret from the file\n` +
+        `  2. Soft-reset to amend: \`git reset --soft HEAD~1\`\n` +
+        `  3. Rotate the credential immediately — treat it as compromised\n\n` +
+        `To disable this check: \`swiz settings enable skip-secret-scan\``
+    )
+  }
+}
+
+const priorCommands = priorCommandsResult
+const effectiveSettings = effectiveSettingsEarly
 const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMode)
 
 // Check 1: branch check — must use `git branch --show-current` explicitly.

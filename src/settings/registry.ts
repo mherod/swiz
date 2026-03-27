@@ -44,6 +44,17 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     default: false,
   },
   {
+    key: "skipSecretScan",
+    aliases: ["skip-secret-scan", "skipsecretscan", "skip_secret_scan"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      enableDescription: "Skip credential/secret pattern scan in push-checks-gate hook",
+      disableDescription: "Scan outgoing diff for secrets and credentials before push",
+    },
+  },
+  {
     key: "sandboxedEdits",
     aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
     kind: "boolean",

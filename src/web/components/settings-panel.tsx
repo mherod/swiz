@@ -26,6 +26,7 @@ interface GlobalSettingsForm {
   issueCloseGate: boolean
   memoryUpdateReminder: boolean
   qualityChecksGate: boolean
+  skipSecretScan: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
 }
@@ -54,6 +55,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   issueCloseGate: false,
   memoryUpdateReminder: false,
   qualityChecksGate: true,
+  skipSecretScan: false,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
 }
@@ -133,6 +135,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     issueCloseGate: !!settings.issueCloseGate,
     memoryUpdateReminder: !!settings.memoryUpdateReminder,
     qualityChecksGate: settings.qualityChecksGate !== false,
+    skipSecretScan: !!settings.skipSecretScan,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
   }
@@ -342,6 +345,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "qualityChecksGate",
     label: "Quality checks gate",
     desc: "Run lint and typecheck quality checks before allowing session stop.",
+  },
+  {
+    key: "skipSecretScan",
+    label: "Skip secret scan",
+    desc: "Disable credential/secret pattern detection in the push-checks-gate hook.",
   },
 ]
 
