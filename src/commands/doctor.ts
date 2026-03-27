@@ -1272,6 +1272,64 @@ async function areSkillsSame(
   return activeNormalized === normalizeSkillContent(converted)
 }
 
+function splitFrontmatter(content: string): { frontmatter: string[]; body: string[] } {
+  const lines = content.split("\n")
+  if (lines[0] !== "---") return { frontmatter: [], body: lines }
+  const closeIdx = lines.indexOf("---", 1)
+  if (closeIdx === -1) return { frontmatter: [], body: lines }
+  return { frontmatter: lines.slice(1, closeIdx), body: lines.slice(closeIdx + 1) }
+}
+
+function lineDiff(aLines: string[], bLines: string[]): { added: string[]; removed: string[] } {
+  const aSet = new Set(aLines)
+  const bSet = new Set(bLines)
+  return {
+    added: aLines.filter((l) => !bSet.has(l)),
+    removed: bLines.filter((l) => !aSet.has(l)),
+  }
+}
+
+async function skillDiffSummary(activePath: string, overriddenPath: string): Promise<string> {
+  try {
+    const [activeText, overriddenText] = await Promise.all([
+      Bun.file(activePath).text(),
+      Bun.file(overriddenPath).text(),
+    ])
+    const active = splitFrontmatter(activeText)
+    const overridden = splitFrontmatter(overriddenText)
+
+    const fmDiff = lineDiff(active.frontmatter, overridden.frontmatter)
+    const bodyDiff = lineDiff(active.body, overridden.body)
+
+    const fmChanged = fmDiff.added.length > 0 || fmDiff.removed.length > 0
+    const bodyChanged = bodyDiff.added.length > 0 || bodyDiff.removed.length > 0
+
+    const totalAdded = fmDiff.added.length + bodyDiff.added.length
+    const totalRemoved = fmDiff.removed.length + bodyDiff.removed.length
+    const countStr = `+${totalAdded}/-${totalRemoved}`
+
+    const section =
+      fmChanged && !bodyChanged
+        ? "frontmatter"
+        : !fmChanged && bodyChanged
+          ? "body"
+          : "frontmatter+body"
+
+    const allAdded = [...fmDiff.added, ...bodyDiff.added]
+    const allRemoved = [...fmDiff.removed, ...bodyDiff.removed]
+    if (totalAdded + totalRemoved <= 4) {
+      const parts: string[] = []
+      for (const l of allRemoved) parts.push(`-${l.trim().slice(0, 60)}`)
+      for (const l of allAdded) parts.push(`+${l.trim().slice(0, 60)}`)
+      return `${countStr} ${section}: ${parts.join(", ")}`
+    }
+
+    return `${countStr} in ${section}`
+  } catch {
+    return ""
+  }
+}
+
 async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
   if (conflicts.length === 0) return
   console.log(`  ${BOLD}Auto-resolving skill conflicts...${RESET}\n`)
@@ -1294,8 +1352,10 @@ async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
           )
         }
       } else {
+        const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
+        const diffSuffix = diffStats ? ` (${diffStats})` : ""
         console.log(
-          `  ${YELLOW}!${RESET} ${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version — resolve manually`
+          `  ${YELLOW}!${RESET} ${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version${diffSuffix} — resolve manually`
         )
       }
     }
