@@ -123,6 +123,31 @@ async function checkFork(workDir: string): Promise<void> {
 
 await checkFork(cwd)
 
+// ── WIP / fixup / squash commit check ───────────────────────────────────────
+// Block push when outgoing commits have temporary subjects that should be
+// rebased/squashed before reaching the remote.
+
+const WIP_SUBJECT_RE = /^(wip[:\s]|fixup!|squash!)/i
+
+const subjectsResult = await spawnWithTimeout(["git", "log", "@{upstream}..HEAD", "--format=%s"], {
+  cwd,
+  timeoutMs: 5000,
+})
+
+if (subjectsResult.exitCode === 0 && subjectsResult.stdout.trim()) {
+  const subjects = subjectsResult.stdout.trim().split("\n")
+  const offending = subjects.filter((s) => WIP_SUBJECT_RE.test(s))
+
+  if (offending.length > 0) {
+    denyPreToolUse(
+      `Push blocked — outgoing commits contain temporary subjects that must be squashed first.\n\n` +
+        `Offending commits:\n` +
+        offending.map((s) => `  • ${s}`).join("\n") +
+        `\n\nRun: \`git rebase -i --autosquash @{upstream}\` to clean up before pushing.`
+    )
+  }
+}
+
 // ── Secret / credential pattern scan ─────────────────────────────────────────
 // Scan the outgoing diff for high-confidence credential patterns before any
 // bytes leave the local machine. Removed lines (diff `-` prefix) are skipped
