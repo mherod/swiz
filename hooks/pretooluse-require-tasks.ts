@@ -72,9 +72,6 @@ const GOVERNANCE_THRESHOLDS = {
   "local-dev": { minIncomplete: 1, minPending: 0 },
 } as const
 
-const MIN_INCOMPLETE_TASKS = GOVERNANCE_THRESHOLDS.strict.minIncomplete
-const MIN_PENDING_TASKS = GOVERNANCE_THRESHOLDS.strict.minPending
-
 interface GovernanceThresholds {
   minIncomplete: number
   minPending: number
@@ -478,15 +475,29 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
   _autoSteerSessionId = sessionId
   _cwd = cwd
 
+  // Resolve governance thresholds from effective settings
+  let thresholds = GOVERNANCE_THRESHOLDS.strict
+  try {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
+    thresholds = resolveGovernanceThresholds(effectiveSettings.auditStrictness)
+  } catch {
+    // Settings read failure → use strict thresholds as default
+  }
+
+
   const allTasks = await readSessionTasks(sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
-  await checkNoTasks(toolName, cwd, sessionId)(allTasks)
+  await checkNoTasks(toolName, cwd, sessionId, thresholds)(allTasks)
 
   const summary = buildIncompleteTaskSummary(allTasks)
-  await checkTaskMinimums(toolName, summary)
+  await checkTaskMinimums(toolName, summary, thresholds)
   await checkInProgressCap(toolName, allTasks)
   await checkDirectMergeIntent(toolName, summary.incompleteTasks)
   await checkTaskStaleness({
