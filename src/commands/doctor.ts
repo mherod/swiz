@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
@@ -13,6 +13,7 @@ import {
 } from "../launch-agents.ts"
 import { manifest } from "../manifest.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { listProviderAdapters } from "../provider-adapters.ts"
 import { defaultTrashPath } from "../session-data-delete.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import {
@@ -20,12 +21,14 @@ import {
   parseFrontmatterField,
   SKILL_PRECEDENCE,
   type SkillConflict,
+  type SkillConflictEntry,
 } from "../skill-utils.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
 import type { CheckResult } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
+import { convertSkillContent } from "./skill.ts"
 
 /**
  * Built-in allowed values for the `category:` frontmatter field in SKILL.md files.
@@ -326,7 +329,7 @@ function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResult[] {
     detail:
       `active=${displayPath(conflict.active.path)}; overridden=` +
       `${conflict.overridden.map((entry) => displayPath(entry.path)).join(", ")}; ` +
-      `precedence=${precedence}`,
+      `precedence=${precedence} — run: swiz doctor --fix`,
   }))
 }
 
@@ -483,11 +486,6 @@ interface InvalidSkillFixFailure {
   originalDir: string
   error: string
 }
-interface DisabledSkillRestore {
-  name: string
-  oldDir: string
-  newDir: string
-}
 
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
@@ -564,53 +562,10 @@ async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
 }
 
 /** Scan all skill dirs for .disabled-by-swiz-* directories that need restoring. */
-async function findDisabledSkillDirs(): Promise<DisabledSkillRestore[]> {
-  const restores: DisabledSkillRestore[] = []
-  for (const skillDir of SKILL_PRECEDENCE) {
-    let entries: import("node:fs").Dirent[]
-    try {
-      entries = await readdir(skillDir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (!DISABLED_BY_SWIZ_RE.test(entry.name)) continue
-      const baseName = entry.name.replace(DISABLED_BY_SWIZ_RE, "")
-      restores.push({
-        name: baseName,
-        oldDir: join(skillDir, entry.name),
-        newDir: join(skillDir, baseName),
-      })
-    }
-  }
-  return restores
-}
 
 /** Restore a disabled skill directory: rename dir back and fix frontmatter name.
  *  If the target directory already exists, the disabled directory is removed
  *  (the existing non-disabled version is kept). */
-async function restoreDisabledSkillDir(restore: DisabledSkillRestore): Promise<boolean> {
-  try {
-    // If target already exists, just remove the disabled directory
-    const targetExists = await Bun.file(join(restore.newDir, "SKILL.md")).exists()
-    if (targetExists) {
-      await rm(restore.oldDir, { recursive: true, force: true })
-      return true
-    }
-    await rename(restore.oldDir, restore.newDir)
-    const skillPath = join(restore.newDir, "SKILL.md")
-    const file = Bun.file(skillPath)
-    if (await file.exists()) {
-      const content = await file.text()
-      const updated = content.replace(/^(name:\s*)["']?[^"'\n]+["']?/m, `$1${restore.name}`)
-      await Bun.write(skillPath, updated)
-    }
-    return true
-  } catch {
-    return false
-  }
-}
 
 /** Repair invalid skill entries in-place.
  *  - missing SKILL.md    → generate a default stub
@@ -1190,6 +1145,7 @@ interface AutoFixContext {
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
   pluginCacheInfos: PluginCacheInfo[]
+  orphanedScripts: string[]
 }
 
 async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
@@ -1254,18 +1210,105 @@ async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
   }
 }
 
-async function fixDisabledSkills(): Promise<void> {
-  const disabledDirs = await findDisabledSkillDirs()
-  if (disabledDirs.length === 0) return
-  console.log(`  ${BOLD}Restoring disabled skill directories...${RESET}\n`)
-  for (const restore of disabledDirs) {
-    if (await restoreDisabledSkillDir(restore)) {
+function getAgentIdForDir(dir: string): string | null {
+  const home = getHomeDir()
+  const expandedDir = dir.startsWith("~/") ? join(home, dir.slice(2)) : dir
+
+  for (const adapter of listProviderAdapters()) {
+    const expandedSkillDirs = adapter
+      .getSkillDirs()
+      .map((d) => (d.startsWith("~/") ? join(home, d.slice(2)) : d))
+    if (expandedSkillDirs.includes(expandedDir)) return adapter.id
+  }
+  return null
+}
+
+function normalizeSkillContent(content: string): string {
+  const withoutFrontmatter = content.replace(/^---[\s\S]*?^---[ \t]*\n?/m, "")
+  return (
+    withoutFrontmatter
+      .replace(/\r\n/g, "\n")
+      // Remove "Related Skills" section which often varies in local vs global versions
+      .replace(/\n## Related Skills[\s\S]*?(?=\n#|\n##|$)/, "")
+      // Remove "Task Completion Evidence Fields" footer if present
+      .replace(/\n## Task Completion Evidence Fields[\s\S]*$/, "")
+      .trim()
+  )
+}
+
+async function areSkillsSame(
+  active: SkillConflictEntry,
+  overridden: SkillConflictEntry
+): Promise<boolean> {
+  const activeRaw = await Bun.file(active.path).text()
+  const overriddenRaw = await Bun.file(overridden.path).text()
+
+  const activeNormalized = normalizeSkillContent(activeRaw)
+  const overriddenNormalized = normalizeSkillContent(overriddenRaw)
+
+  if (activeNormalized === overriddenNormalized) {
+    return true
+  }
+
+  const activeAgentId = getAgentIdForDir(active.dir) ?? "claude"
+  const overriddenAgentId = getAgentIdForDir(overridden.dir) ?? "claude"
+
+  // If the overridden version matches the active version after conversion, they are redundant
+  const { content: converted } = convertSkillContent(
+    overriddenRaw,
+    overriddenAgentId,
+    activeAgentId
+  )
+
+  return activeNormalized === normalizeSkillContent(converted)
+}
+
+async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
+  if (conflicts.length === 0) return
+  console.log(`  ${BOLD}Auto-resolving skill conflicts...${RESET}\n`)
+
+  const timestamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)
+
+  for (const conflict of conflicts) {
+    for (const overridden of conflict.overridden) {
+      if (await areSkillsSame(conflict.active, overridden)) {
+        const skillDir = dirname(overridden.path)
+        const newDir = `${skillDir}.disabled-by-swiz-${timestamp}`
+        try {
+          await rename(skillDir, newDir)
+          console.log(
+            `  ${GREEN}✓${RESET} ${conflict.name}: disabled redundant version at ${displayPath(skillDir)}`
+          )
+        } catch (err: unknown) {
+          console.log(
+            `  ${RED}✗${RESET} ${conflict.name}: failed to disable redundant version: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      } else {
+        console.log(
+          `  ${YELLOW}!${RESET} ${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version — resolve manually`
+        )
+      }
+    }
+  }
+  console.log()
+}
+
+async function fixOrphanedHookScripts(scripts: string[]): Promise<void> {
+  if (scripts.length === 0) return
+  console.log(`  ${BOLD}Auto-disabling orphaned hook scripts...${RESET}\n`)
+
+  const timestamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)
+
+  for (const script of scripts) {
+    const oldPath = join(HOOKS_DIR, script)
+    const newPath = `${oldPath}.disabled-by-swiz-${timestamp}`
+    try {
+      await rename(oldPath, newPath)
+      console.log(`  ${GREEN}✓${RESET} ${script}: moved to ${displayPath(newPath)}`)
+    } catch (err: unknown) {
       console.log(
-        `  ${GREEN}✓${RESET} ${restore.name}: restored from ${displayPath(restore.oldDir)}`
-      )
-    } else {
-      console.log(
-        `  ${RED}✗${RESET} ${restore.name}: could not restore ${displayPath(restore.oldDir)}`
+        `  ${RED}✗${RESET} ${script}: failed to move: ${err instanceof Error ? err.message : String(err)}`
       )
     }
   }
@@ -1292,7 +1335,8 @@ async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<void> {
 }
 
 async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
-  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
+  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts } =
+    ctx
   const hasStaleConfigs = results.some(
     (r) =>
       r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
@@ -1300,21 +1344,23 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
   if (fix) {
     await fixStaleConfigs(results)
     await fixMissingConfigs()
-    if (skillConflicts.length > 0) {
-      console.log(
-        `  ${YELLOW}Skill conflicts detected — resolve manually by removing duplicate skill directories.${RESET}\n`
-      )
-    }
+    await fixOrphanedHookScripts(orphanedScripts)
+    await fixSkillConflicts(skillConflicts)
     await fixInvalidSkills(invalidSkillEntries)
-    await fixDisabledSkills()
     await fixStalePluginCache(pluginCacheInfos)
     return
   }
-  if (hasStaleConfigs || invalidSkillEntries.length > 0 || pluginCacheInfos.length > 0) {
+  if (
+    hasStaleConfigs ||
+    invalidSkillEntries.length > 0 ||
+    pluginCacheInfos.length > 0 ||
+    orphanedScripts.length > 0
+  ) {
     const fixables = [
       hasStaleConfigs ? "stale configs" : null,
       invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
       pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
+      orphanedScripts.length > 0 ? "orphaned hook scripts" : null,
     ]
       .filter(Boolean)
       .join(" and ")
@@ -1329,6 +1375,7 @@ interface DoctorCheckResults {
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
   pluginCacheInfos: PluginCacheInfo[]
+  orphanedScripts: string[]
 }
 
 async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
@@ -1370,7 +1417,7 @@ async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   const pluginCacheInfos = await checkPluginCacheStaleness()
   results.push(...buildPluginCacheResults(pluginCacheInfos))
   results.push(await checkSwizSettings())
-  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos }
+  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts }
 }
 
 // ─── Runner ─────────────────────────────────────────────────────────────────
@@ -1385,7 +1432,7 @@ async function runDoctorChecks(args: string[]): Promise<void> {
   const fix = args.includes("--fix")
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
-  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } =
+  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts } =
     await collectDoctorChecks(fix)
 
   for (const result of results) {
@@ -1410,6 +1457,7 @@ async function runDoctorChecks(args: string[]): Promise<void> {
     skillConflicts,
     invalidSkillEntries,
     pluginCacheInfos,
+    orphanedScripts,
   })
 
   if (failures.length > 0) {
