@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-03-27
+
+### New Features
+
+- **Multi-layer Codex hooks discovery** — Codex CLI now discovers hooks from both
+  global (`~/.codex/hooks.json`) and per-project (`<cwd>/.codex/hooks.json`) layers,
+  matching the behavior of Claude Code, Cursor, and Gemini. `swiz hooks`, `swiz status`,
+  and `swiz doctor` now aggregate and report all active hook layers (#405).
+
+### Fixes
+
+- Fixed daemon session API drift by adding a compat shim that remaps legacy field names
+  (`selectedProject`, `selectedSession`, `limits`) to current API contract names
+  (`selectedProjectCwd`, `selectedSessionId`, `limitProjects`). Old clients continue to
+  work without requiring updates (#404).
+
 ## 2026-03-25
 
 ### Fixes
