@@ -202,6 +202,12 @@ export interface SwizSettings {
   sessions: Record<string, SessionSwizSettings>
   /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
+  /**
+   * Optional HMAC secret used to verify `X-Hub-Signature-256` on incoming GitHub webhook payloads
+   * for the `POST /ci-watch/webhook` daemon endpoint. Leave unset to skip signature verification
+   * (useful during local development when no public webhook URL is available).
+   */
+  githubWebhookSecret?: string
 }
 
 type EffectiveSettingsBase = Omit<SwizSettings, "sessions" | "disabledHooks">

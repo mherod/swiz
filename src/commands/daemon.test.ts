@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CiWatchRegistry } from "./daemon/ci-watch-registry.ts"
+import { CiWatchRegistry, verifyWebhookSignature } from "./daemon/ci-watch-registry.ts"
 import {
   CooldownRegistry,
   createMetrics,
@@ -761,5 +761,107 @@ describe("ManifestCache", () => {
     expect(second).not.toBe(first)
     // But same content
     expect(second.length).toBe(first.length)
+  })
+})
+
+// ── Webhook support ─────────────────────────────────────────────────────────
+
+async function makeSignature(secret: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+  const hex = Array.from(new Uint8Array(mac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  return `sha256=${hex}`
+}
+
+describe("verifyWebhookSignature", () => {
+  const SECRET = "test-webhook-secret"
+  const BODY = JSON.stringify({ action: "completed", workflow_run: { head_sha: "abc123" } })
+
+  it("returns true for a valid HMAC-SHA256 signature", async () => {
+    const sig = await makeSignature(SECRET, BODY)
+    const result = await verifyWebhookSignature(SECRET, new TextEncoder().encode(BODY).buffer, sig)
+    expect(result).toBeTrue()
+  })
+
+  it("returns false for a tampered body", async () => {
+    const sig = await makeSignature(SECRET, BODY)
+    const tampered = `${BODY} `
+    const result = await verifyWebhookSignature(
+      SECRET,
+      new TextEncoder().encode(tampered).buffer,
+      sig
+    )
+    expect(result).toBeFalse()
+  })
+
+  it("returns false for a wrong secret", async () => {
+    const sig = await makeSignature("wrong-secret", BODY)
+    const result = await verifyWebhookSignature(SECRET, new TextEncoder().encode(BODY).buffer, sig)
+    expect(result).toBeFalse()
+  })
+
+  it("returns false when signature header is missing", async () => {
+    const result = await verifyWebhookSignature(SECRET, new TextEncoder().encode(BODY).buffer, null)
+    expect(result).toBeFalse()
+  })
+
+  it("returns false when signature header has wrong prefix", async () => {
+    const sig = await makeSignature(SECRET, BODY)
+    const result = await verifyWebhookSignature(
+      SECRET,
+      new TextEncoder().encode(BODY).buffer,
+      sig.replace("sha256=", "sha1=")
+    )
+    expect(result).toBeFalse()
+  })
+})
+
+describe("CiWatchRegistry.handleWebhookConclusion", () => {
+  it("resolves an active watch and calls notify when sha matches", async () => {
+    const notifications: Array<{ sha: string; conclusion: string; runId: number | null }> = []
+    const registry = new CiWatchRegistry({
+      pollMs: 60_000,
+      timeoutMs: 300_000,
+      fetchRun: async () => null,
+      notify: async (w) => {
+        notifications.push({ sha: w.sha, conclusion: w.conclusion, runId: w.runId })
+      },
+    })
+
+    registry.start("/repo", "deadbeef")
+    expect(registry.listActive()).toHaveLength(1)
+
+    const resolved = await registry.handleWebhookConclusion("deadbeef", "success", 42)
+    expect(resolved).toBe(1)
+    expect(registry.listActive()).toHaveLength(0)
+    expect(notifications).toEqual([{ sha: "deadbeef", conclusion: "success", runId: 42 }])
+    registry.close()
+  })
+
+  it("returns 0 and fires no notification when sha does not match", async () => {
+    const notifications: string[] = []
+    const registry = new CiWatchRegistry({
+      pollMs: 60_000,
+      timeoutMs: 300_000,
+      fetchRun: async () => null,
+      notify: async (w) => {
+        notifications.push(w.sha)
+      },
+    })
+
+    registry.start("/repo", "deadbeef")
+    const resolved = await registry.handleWebhookConclusion("unknown-sha", "success", 99)
+    expect(resolved).toBe(0)
+    expect(registry.listActive()).toHaveLength(1)
+    expect(notifications).toHaveLength(0)
+    registry.close()
   })
 })

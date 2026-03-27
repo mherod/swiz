@@ -15,7 +15,7 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
-import type { CiWatchRegistry } from "./ci-watch-registry.ts"
+import { type CiWatchRegistry, verifyWebhookSignature } from "./ci-watch-registry.ts"
 import {
   type CooldownRegistry,
   createMetrics,
@@ -757,6 +757,69 @@ async function handleCiWatchPost(req: Request, ctx: DaemonWebServerContext): Pro
   return Response.json(started)
 }
 
+type WebhookWorkflowRun = {
+  head_sha?: string
+  conclusion?: string | null
+  id?: number
+  status?: string
+}
+
+function parseWebhookPayload(
+  rawBody: ArrayBuffer
+): { run: WebhookWorkflowRun } | { error: string } {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(rawBody)) as {
+      workflow_run?: WebhookWorkflowRun
+    }
+    const run = parsed.workflow_run
+    if (!run) return { error: "no workflow_run in payload" }
+    return { run }
+  } catch {
+    return { error: "Invalid JSON payload" }
+  }
+}
+
+async function checkWebhookSignature(req: Request, rawBody: ArrayBuffer): Promise<Response | null> {
+  const webhookSecret = (await readSwizSettings()).githubWebhookSecret
+  if (!webhookSecret) return null
+  const sig = req.headers.get("X-Hub-Signature-256")
+  const valid = await verifyWebhookSignature(webhookSecret, rawBody, sig)
+  return valid ? null : Response.json({ error: "Invalid signature" }, { status: 401 })
+}
+
+async function handleCiWebhookPost(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+  const event = req.headers.get("X-GitHub-Event")
+  if (event !== "workflow_run") {
+    return Response.json({ ignored: true, reason: "not a workflow_run event" })
+  }
+
+  const rawBody = await req.arrayBuffer()
+  const sigError = await checkWebhookSignature(req, rawBody)
+  if (sigError) return sigError
+
+  const parsed = parseWebhookPayload(rawBody)
+  if ("error" in parsed) {
+    const status = parsed.error === "Invalid JSON payload" ? 400 : 200
+    return Response.json(
+      status === 400 ? { error: parsed.error } : { ignored: true, reason: parsed.error },
+      { status }
+    )
+  }
+
+  const { run } = parsed
+  const sha = run.head_sha
+  const status = (run.status ?? "").toLowerCase()
+  const conclusion = (run.conclusion ?? "").toLowerCase()
+  const runId = run.id ?? 0
+
+  if (!sha || status !== "completed" || !conclusion) {
+    return Response.json({ ignored: true, reason: "run not yet completed" })
+  }
+
+  const resolved = await ctx.ciWatchRegistry.handleWebhookConclusion(sha, conclusion, runId)
+  return Response.json({ resolved, sha, conclusion, runId })
+}
+
 async function handleCiRoutes(
   req: Request,
   url: URL,
@@ -764,6 +827,9 @@ async function handleCiRoutes(
 ): Promise<Response | null> {
   if (url.pathname === "/ci-watch" && req.method === "POST") {
     return handleCiWatchPost(req, ctx)
+  }
+  if (url.pathname === "/ci-watch/webhook" && req.method === "POST") {
+    return handleCiWebhookPost(req, ctx)
   }
   if (url.pathname === "/ci-watches" && req.method === "GET") {
     const cwd = url.searchParams.get("cwd")

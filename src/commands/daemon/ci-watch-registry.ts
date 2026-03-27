@@ -2,6 +2,41 @@ import { basename } from "node:path"
 import { ghJson } from "../../git-helpers.ts"
 import { appendHookLog } from "../../hook-log.ts"
 
+/**
+ * Verify a GitHub webhook HMAC-SHA256 signature.
+ *
+ * @param secret  The webhook secret configured in GitHub
+ * @param body    Raw request body bytes
+ * @param sigHeader  Value of the `X-Hub-Signature-256` header (e.g. "sha256=abc...")
+ * @returns true if the signature is valid, false otherwise
+ */
+export async function verifyWebhookSignature(
+  secret: string,
+  body: ArrayBuffer,
+  sigHeader: string | null
+): Promise<boolean> {
+  if (!sigHeader?.startsWith("sha256=")) return false
+  const expected = sigHeader.slice("sha256=".length)
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const mac = await crypto.subtle.sign("HMAC", key, body)
+  const actual = Array.from(new Uint8Array(mac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+  // Constant-time comparison
+  if (actual.length !== expected.length) return false
+  let diff = 0
+  for (let i = 0; i < actual.length; i++) {
+    diff |= actual.charCodeAt(i) ^ expected.charCodeAt(i)
+  }
+  return diff === 0
+}
+
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
 const MIN_POLL_INTERVAL_MS = 1_000
@@ -116,6 +151,28 @@ export class CiWatchRegistry {
         runUrl: watch.runUrl,
       },
     }
+  }
+
+  /**
+   * Handle a webhook-delivered conclusion for a given commit SHA.
+   *
+   * Finds any active watch matching the SHA (across all cwds), cancels its
+   * poll timer, and calls the notify callback immediately. Returns the number
+   * of watches that were resolved.
+   */
+  async handleWebhookConclusion(sha: string, conclusion: string, runId: number): Promise<number> {
+    let resolved = 0
+    for (const [key, watch] of this.watches) {
+      if (watch.sha !== sha) continue
+      if (watch.timer) clearTimeout(watch.timer)
+      watch.timer = null
+      watch.runId = runId
+      watch.lastCheckedAt = Date.now()
+      this.watches.delete(key)
+      await this.notify({ ...watch, conclusion })
+      resolved++
+    }
+    return resolved
   }
 
   close(): void {
