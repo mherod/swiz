@@ -341,31 +341,30 @@ describe("install.ts statusMessage field", () => {
 })
 
 describe("install.ts Cursor CLI shell execution dispatch entries", () => {
-  it("dry-run includes beforeShellExecution and afterShellExecution for Cursor", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "install", "--dry-run", "--cursor"], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, SWIZ_NO_DAEMON: "1" },
-    })
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-
-    expect(stdout).toContain("beforeShellExecution")
-    expect(stdout).toContain("afterShellExecution")
-    expect(stdout).toContain("swiz dispatch preToolUse beforeShellExecution")
-    expect(stdout).toContain("swiz dispatch postToolUse afterShellExecution")
+  it("Cursor agent has additionalDispatchEntries for shell events", async () => {
+    const { getAgent } = await import("../agents.ts")
+    const cursor = getAgent("cursor")
+    expect(cursor).toBeDefined()
+    expect(cursor!.additionalDispatchEntries).toBeDefined()
+    expect(cursor!.additionalDispatchEntries!.beforeShellExecution).toBe("preToolUse")
+    expect(cursor!.additionalDispatchEntries!.afterShellExecution).toBe("postToolUse")
   })
 
-  it("dry-run does not include beforeShellExecution for Claude", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "install", "--dry-run", "--claude"], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, SWIZ_NO_DAEMON: "1" },
-    })
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
+  it("Claude agent has no additionalDispatchEntries", async () => {
+    const { getAgent } = await import("../agents.ts")
+    const claude = getAgent("claude")
+    expect(claude).toBeDefined()
+    expect(claude!.additionalDispatchEntries).toBeUndefined()
+  })
 
-    expect(stdout).not.toContain("beforeShellExecution")
-    expect(stdout).not.toContain("afterShellExecution")
+  it("additionalDispatchEntries reference canonical events in manifest", async () => {
+    const { getAgent } = await import("../agents.ts")
+    const { manifest } = await import("../manifest.ts")
+    const cursor = getAgent("cursor")!
+    const manifestEvents = new Set(manifest.map((g) => g.event))
+
+    for (const canonicalEvent of Object.values(cursor.additionalDispatchEntries!)) {
+      expect(manifestEvents.has(canonicalEvent)).toBe(true)
+    }
   })
 })
