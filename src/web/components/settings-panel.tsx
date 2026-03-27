@@ -12,6 +12,7 @@ interface GlobalSettingsForm {
   autoSteer: boolean
   gitStatusGate: boolean
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective"
+  auditStrictness: "strict" | "relaxed" | "local-dev"
   memoryWordThreshold: number
   memoryLineThreshold: number
   pushCooldownMinutes: number
@@ -39,6 +40,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   autoSteer: false,
   gitStatusGate: true,
   ambitionMode: "standard",
+  auditStrictness: "strict",
   memoryWordThreshold: 5000,
   memoryLineThreshold: 1000,
   pushCooldownMinutes: 10,
@@ -116,6 +118,8 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     autoSteer: !!settings.autoSteer,
     gitStatusGate: settings.gitStatusGate !== false,
     ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
+    auditStrictness:
+      (settings.auditStrictness as GlobalSettingsForm["auditStrictness"]) ?? "strict",
     memoryWordThreshold: Number(settings.memoryWordThreshold) || 5000,
     memoryLineThreshold: Number(settings.memoryLineThreshold) || 1000,
     pushCooldownMinutes: Number(settings.pushCooldownMinutes) || 10,
@@ -669,6 +673,25 @@ function GlobalSettingsColumn({
             { label: "aggressive", value: "aggressive" },
             { label: "creative", value: "creative" },
             { label: "reflective", value: "reflective" },
+          ]}
+        />
+      </label>
+      <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="global-audit-strictness">
+        <span>Audit strictness</span>
+        <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+          Control task/evidence governance enforcement. "strict" always enforces. "relaxed" relaxes
+          for exploratory sessions. "local-dev" relaxes locally but enforces for push/CI.
+        </p>
+        <Select
+          id="global-audit-strictness"
+          value={form.auditStrictness}
+          onChange={(e) =>
+            set({ auditStrictness: e.target.value as GlobalSettingsForm["auditStrictness"] })
+          }
+          options={[
+            { label: "strict", value: "strict" },
+            { label: "relaxed", value: "relaxed" },
+            { label: "local-dev", value: "local-dev" },
           ]}
         />
       </label>
