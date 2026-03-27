@@ -6,9 +6,8 @@ import {
   __testOnly_getSuggestionsPath,
   __testOnly_pruneOldSuggestionLogs,
   __testOnly_recordSuggestion,
-  checkChangelogStaleness,
-  normalizeTerminateArgs,
-} from "./stop-auto-continue.ts"
+} from "./stop-auto-continue/suggestion-log.ts"
+import { checkChangelogStaleness, normalizeTerminateArgs } from "./stop-auto-continue.ts"
 import { getSessionTasksDir } from "./utils/hook-utils.ts"
 import { commitFile, makeTempGitRepo, useTempDir } from "./utils/test-utils.ts"
 
