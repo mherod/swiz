@@ -46,7 +46,7 @@ alwaysApply: false
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
 - `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth.
-- In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` — without `SWIZ_DIRECT=1`, the global-link check blocks execution.
+- In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
@@ -54,7 +54,7 @@ alwaysApply: false
   1. `### <EventName> (N)` heading count matches section table rows.
   2. README intro `**N hooks**` (line 7) matches manifest total.
   3. Every README hook filename exists on disk.
-- For each new hook: increment section count, add table row, increment intro `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
+- Per new hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, and exit `0`.
 - Output helpers (all return `never`, call `process.exit(0)`, never write stdout after them):
   - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with optional hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
@@ -74,7 +74,7 @@ alwaysApply: false
 - **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr rolling window. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
-- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, and recovery commands (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). Verify deny-message commands are task-exempt. **DON'T** add broad patterns (e.g., `cat`) to `RECOVERY_CMD_RE`.
+- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns (e.g., `cat`) to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
@@ -84,7 +84,7 @@ alwaysApply: false
 - **DO**: Use `computeProjectedContent()` from `hook-utils.ts` for content validation — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
-- DO NOT test external repo code in this repo; file issue in owning repo instead.
+- DO NOT test external repo code here; file issue in owning repo.
 - Track current diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
 - Use `sanitizeSessionId()` for `/tmp` names.
 - DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
@@ -185,7 +185,7 @@ alwaysApply: false
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
-- DO NOT use destructive git: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
+- DO NOT use destructive git: `git revert`, `git restore`, `git stash` (mutations), `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery. Exception: `git stash list`/`git stash show` are allowed (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
@@ -232,8 +232,8 @@ alwaysApply: false
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backups first.
-- Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, before transcript.
-- Stop-memory prompts must include `Cause to capture: <specific cause>`.
+- Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
+- Stop-memory prompts must include `Cause to capture: <cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume work.
 - Do not defer memory capture requested by stop hooks.
 - When unblocking a gated session: mark prior task complete with evidence first, then create an `in_progress` task in the current session before executing tool calls; do not attempt tool calls while memory enforcement is active.
@@ -249,8 +249,8 @@ alwaysApply: false
 - Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
 - DO NOT edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are external repos. For cross-repo bugs, file issues with: error, root cause, fix, criteria.
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
-- Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
-- Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
+- Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
+- Cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
