@@ -24,7 +24,10 @@ import {
   formatActionPlan,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
+  getRepoSlug,
+  ghJson,
   git,
+  hasGhCli,
   isShellTool,
   PR_CHECK_RE,
   skillAdvice,
@@ -70,6 +73,55 @@ if (!Number.isNaN(behindCount) && behindCount > 0) {
       conflictAdvice
   )
 }
+
+// ── Fork detection ──────────────────────────────────────────────────────────
+// Block push when origin resolves to a GitHub fork. Work pushed to a fork
+// lands somewhere the team will never see.
+
+const forkCache = new Map<string, { fork: boolean; parent: string | null }>()
+
+async function checkFork(workDir: string): Promise<void> {
+  if (!hasGhCli()) return // no gh → skip gracefully
+
+  const slug = await getRepoSlug(workDir)
+  if (!slug) return
+
+  if (forkCache.has(slug)) {
+    const cached = forkCache.get(slug)!
+    if (cached.fork) {
+      denyPreToolUse(
+        `Push blocked — \`origin\` points to a GitHub fork (\`${slug}\`).\n\n` +
+          `Canonical upstream: \`${cached.parent}\`\n\n` +
+          `Fix with:\n  git remote set-url origin https://github.com/${cached.parent}.git`
+      )
+    }
+    return
+  }
+
+  try {
+    // --jq flattens parent to a string: {"fork":true,"parent":"owner/repo"}
+    const repoInfo = await ghJson<{ fork: boolean; parent: string | null }>(
+      ["api", `repos/${slug}`, "--jq", "{fork,parent:.parent.full_name}"],
+      workDir
+    )
+    const isFork = repoInfo?.fork === true
+    const parentName = repoInfo?.parent ?? null
+
+    forkCache.set(slug, { fork: isFork, parent: parentName })
+
+    if (isFork) {
+      denyPreToolUse(
+        `Push blocked — \`origin\` points to a GitHub fork (\`${slug}\`).\n\n` +
+          `Canonical upstream: \`${parentName}\`\n\n` +
+          `Fix with:\n  git remote set-url origin https://github.com/${parentName}.git`
+      )
+    }
+  } catch {
+    // gh call failed — skip gracefully
+  }
+}
+
+await checkFork(cwd)
 
 // ── Secret / credential pattern scan ─────────────────────────────────────────
 // Scan the outgoing diff for high-confidence credential patterns before any
