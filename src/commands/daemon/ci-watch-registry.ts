@@ -172,6 +172,23 @@ export class CiWatchRegistry {
       await this.notify({ ...watch, conclusion })
       resolved++
     }
+    if (resolved === 0) {
+      // No active watch matched this SHA — log for daemon observability so operators
+      // can detect misconfigured webhooks or stale payloads.
+      void appendHookLog({
+        ts: new Date().toISOString(),
+        event: "ciWatch",
+        hookEventName: "CiWatch",
+        hook: "ci-webhook",
+        status: "ok",
+        durationMs: 0,
+        exitCode: null,
+        kind: "dispatch",
+        hookCount: 0,
+        cwd: "",
+        stdoutSnippet: `webhook: no active watch for sha=${sha} runId=${runId} conclusion=${conclusion}`,
+      })
+    }
     return resolved
   }
 
