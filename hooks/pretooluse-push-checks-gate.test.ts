@@ -723,3 +723,136 @@ describe("large file check", () => {
     expect(result.reason).toContain("soft HEAD~1")
   })
 })
+
+// ─── Fork detection check ────────────────────────────────────────────────────
+
+describe("fork detection check", () => {
+  async function makeRepo(): Promise<string> {
+    const repoDir = await mkdtemp(join(tmpDir, "fork-work-"))
+    const bareDir = await mkdtemp(join(tmpDir, "fork-bare-"))
+    await makeGitRepoWithUpstream(repoDir, bareDir)
+    return repoDir
+  }
+
+  test("non-GitHub remote skips fork check gracefully", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "f.txt"), "content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat: normal commit"], repoDir)
+
+    // Local bare remote is not a GitHub URL — getRepoSlug returns null,
+    // fork check skips, and push proceeds to advisory checks.
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked, `hook blocked unexpectedly: ${result.reason}`).toBe(false)
+    // Should not mention "fork" in the reason
+    expect(result.reason).not.toContain("fork")
+  })
+})
+
+// ─── WIP / fixup / squash commit subject check ──────────────────────────────
+
+describe("wip/fixup/squash commit subject check", () => {
+  async function makeRepo(): Promise<string> {
+    const repoDir = await mkdtemp(join(tmpDir, "wip-work-"))
+    const bareDir = await mkdtemp(join(tmpDir, "wip-bare-"))
+    await makeGitRepoWithUpstream(repoDir, bareDir)
+    return repoDir
+  }
+
+  test("wip: commit blocks push", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "a.txt"), "wip content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "wip: half-done refactor"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("wip: half-done refactor")
+    expect(result.reason).toContain("rebase")
+  })
+
+  test("fixup! commit blocks push", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "b.txt"), "fixup content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "fixup! fix the thing"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("fixup! fix the thing")
+  })
+
+  test("squash! commit blocks push", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "c.txt"), "squash content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "squash! merge these"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("squash! merge these")
+  })
+
+  test("normal commit subjects do not block push", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "d.txt"), "normal content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat(api): add new endpoint"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked, `hook blocked unexpectedly: ${result.reason}`).toBe(false)
+  })
+
+  test("WIP in uppercase also blocks", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "e.txt"), "upper wip")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "WIP: uppercase variant"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("WIP: uppercase variant")
+  })
+})
