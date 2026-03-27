@@ -579,6 +579,21 @@ describe("agents.ts", () => {
       expect(cursor.processPattern!.test("GEMINI_CLI=1")).toBe(false)
     })
 
+    it("cursor has additionalDispatchEntries for CLI shell events", () => {
+      const cursor = getAgent("cursor")!
+      expect(cursor.additionalDispatchEntries).toBeDefined()
+      expect(cursor.additionalDispatchEntries!.beforeShellExecution).toBe("preToolUse")
+      expect(cursor.additionalDispatchEntries!.afterShellExecution).toBe("postToolUse")
+    })
+
+    it("non-cursor agents have no additionalDispatchEntries", () => {
+      for (const agent of AGENTS) {
+        if (agent.id !== "cursor") {
+          expect(agent.additionalDispatchEntries).toBeUndefined()
+        }
+      }
+    })
+
     it("agents with envVars have at least one entry", () => {
       for (const agent of AGENTS) {
         if (agent.envVars !== undefined) {
