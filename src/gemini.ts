@@ -9,7 +9,7 @@
 import { generateText, Output, streamText } from "ai"
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
-import { resolveSignal } from "./ai-providers.ts"
+import { resolveSignal } from "./ai-signal.ts"
 
 const DEFAULT_MODEL = "gemini-flash-latest"
 
@@ -78,7 +78,7 @@ function createProvider() {
   return createGeminiProvider({ authType: "oauth-personal" })
 }
 
-// resolveSignal imported from ai-providers.ts
+// resolveSignal from ai-signal.ts (shared with ai-providers; avoids circular import)
 
 function getGeminiTestResponseForText(): string | undefined {
   return (

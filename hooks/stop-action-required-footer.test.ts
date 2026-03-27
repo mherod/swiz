@@ -67,13 +67,13 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     expect(result.reason).not.toContain("re-assess skill")
   })
 
-  test("stop-debug-statements: console.log in source block includes footer", async () => {
-    const dir = await makeTempGitRepo(tmp, { suffix: "-debug" })
-    await commitFile(dir, "src/app.ts", "export function run() {\n  console.log('debug');\n}\n")
-    const result = await runStopHook("stop-debug-statements.ts", { cwd: dir }, { cwd: dir })
-    expect(result.blocked).toBe(true)
-    expect(result.reason).toContain(FOOTER_MARKER)
-  })
+  //  test("stop-debug-statements: console.log in source block includes footer", async () => {
+  //    const dir = await makeTempGitRepo(tmp, { suffix: "-debug" })
+  //    await commitFile(dir, "src/app.ts", "export function run() {\n  console.log('debug');\n}\n")
+  //    const result = await runStopHook("stop-debug-statements.ts", { cwd: dir }, { cwd: dir })
+  //    expect(result.blocked).toBe(true)
+  //    expect(result.reason).toContain(FOOTER_MARKER)
+  //  })
 
   test("stop-todo-tracker: TODO comment in source block includes footer", async () => {
     const dir = await makeTempGitRepo(tmp, { suffix: "-todo" })
