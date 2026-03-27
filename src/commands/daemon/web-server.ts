@@ -779,12 +779,29 @@ function parseWebhookPayload(
   }
 }
 
+function webhookPayloadErrorResponse(error: string): Response {
+  if (error === "Invalid JSON payload") {
+    return Response.json({ error }, { status: 400 })
+  }
+  return Response.json({ ignored: true, reason: error })
+}
+
 async function checkWebhookSignature(req: Request, rawBody: ArrayBuffer): Promise<Response | null> {
   const webhookSecret = (await readSwizSettings()).githubWebhookSecret
   if (!webhookSecret) return null
   const sig = req.headers.get("X-Hub-Signature-256")
   const valid = await verifyWebhookSignature(webhookSecret, rawBody, sig)
   return valid ? null : Response.json({ error: "Invalid signature" }, { status: 401 })
+}
+
+function extractCompletedRun(
+  run: WebhookWorkflowRun
+): { sha: string; conclusion: string; runId: number } | null {
+  const sha = run.head_sha
+  const status = (run.status ?? "").toLowerCase()
+  const conclusion = (run.conclusion ?? "").toLowerCase()
+  if (!sha || status !== "completed" || !conclusion) return null
+  return { sha, conclusion, runId: run.id ?? 0 }
 }
 
 async function handleCiWebhookPost(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
@@ -798,24 +815,12 @@ async function handleCiWebhookPost(req: Request, ctx: DaemonWebServerContext): P
   if (sigError) return sigError
 
   const parsed = parseWebhookPayload(rawBody)
-  if ("error" in parsed) {
-    const status = parsed.error === "Invalid JSON payload" ? 400 : 200
-    return Response.json(
-      status === 400 ? { error: parsed.error } : { ignored: true, reason: parsed.error },
-      { status }
-    )
-  }
+  if ("error" in parsed) return webhookPayloadErrorResponse(parsed.error)
 
-  const { run } = parsed
-  const sha = run.head_sha
-  const status = (run.status ?? "").toLowerCase()
-  const conclusion = (run.conclusion ?? "").toLowerCase()
-  const runId = run.id ?? 0
+  const completed = extractCompletedRun(parsed.run)
+  if (!completed) return Response.json({ ignored: true, reason: "run not yet completed" })
 
-  if (!sha || status !== "completed" || !conclusion) {
-    return Response.json({ ignored: true, reason: "run not yet completed" })
-  }
-
+  const { sha, conclusion, runId } = completed
   const resolved = await ctx.ciWatchRegistry.handleWebhookConclusion(sha, conclusion, runId)
   return Response.json({ resolved, sha, conclusion, runId })
 }
