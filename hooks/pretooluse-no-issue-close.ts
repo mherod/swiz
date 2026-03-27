@@ -1,0 +1,44 @@
+#!/usr/bin/env bun
+// PreToolUse hook: Block closing issues via Bash commands.
+// Issues must only be closed by pushing commits with "Fixes #N" in the message.
+
+import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
+
+const input = await Bun.stdin.json().catch(() => null)
+if (!input) process.exit(0)
+if (!isShellTool(input.tool_name ?? "")) process.exit(0)
+
+const command: string = input.tool_input?.command ?? ""
+
+// Match gh issue close (with any flags/args)
+const GH_ISSUE_CLOSE_RE = /gh\s+issue\s+close\b/
+// Match swiz issue close
+const SWIZ_ISSUE_CLOSE_RE = /swiz\s+issue\s+close\b/
+// Match swiz issue resolve (closes after commenting)
+const SWIZ_ISSUE_RESOLVE_RE = /swiz\s+issue\s+resolve\b/
+// Match gh api PATCH to set state=closed on issues
+const GH_API_ISSUE_CLOSE_RE = /gh\s+api\b.*issues\/\d+.*state[=\s]+closed/
+// Match gh api with -f state=closed for issues
+const GH_API_STATE_CLOSED_RE = /gh\s+api\b.*-f\s+state=closed/
+
+if (
+  GH_ISSUE_CLOSE_RE.test(command) ||
+  SWIZ_ISSUE_CLOSE_RE.test(command) ||
+  SWIZ_ISSUE_RESOLVE_RE.test(command) ||
+  GH_API_ISSUE_CLOSE_RE.test(command) ||
+  GH_API_STATE_CLOSED_RE.test(command)
+) {
+  denyPreToolUse(
+    [
+      "Do not close issues via CLI commands.",
+      "",
+      "Issues must only be closed by pushing a commit whose message references the issue:",
+      '  git commit -m "fix(scope): description\\n\\nFixes #123"',
+      "",
+      "GitHub automatically closes the issue when the commit lands on the default branch.",
+      "This ensures every issue closure is backed by a code change.",
+    ].join("\n")
+  )
+}
+
+allowPreToolUse("No issue-closing command detected")

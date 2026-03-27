@@ -267,6 +267,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
       { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
       { file: "pretooluse-no-ready-to-backlog.ts", timeout: 5 },
+      { file: "pretooluse-no-issue-close.ts", timeout: 5 },
     ],
   },
   {
