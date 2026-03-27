@@ -3,30 +3,37 @@
 // Issues must only be closed by pushing commits with "Fixes #N" in the message.
 
 import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
+import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
+
+/**
+ * Strip quoted string contents so patterns inside evidence args, commit
+ * messages, or other flag values don't trigger false positives.
+ */
+function stripQuotedStrings(cmd: string): string {
+  return cmd.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
+}
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
 if (!isShellTool(input.tool_name ?? "")) process.exit(0)
 
 const command: string = input.tool_input?.command ?? ""
+const stripped = stripQuotedStrings(command)
 
-// Match gh issue close (with any flags/args)
-const GH_ISSUE_CLOSE_RE = /gh\s+issue\s+close\b/
-// Match swiz issue close
-const SWIZ_ISSUE_CLOSE_RE = /swiz\s+issue\s+close\b/
-// Match swiz issue resolve (closes after commenting)
-const SWIZ_ISSUE_RESOLVE_RE = /swiz\s+issue\s+resolve\b/
+// Match at command boundaries so patterns inside quoted strings don't match
+const GH_ISSUE_CLOSE_RE = shellSegmentCommandRe("gh\\s+issue\\s+close\\b")
+const SWIZ_ISSUE_CLOSE_RE = shellSegmentCommandRe("swiz\\s+issue\\s+close\\b")
+const SWIZ_ISSUE_RESOLVE_RE = shellSegmentCommandRe("swiz\\s+issue\\s+resolve\\b")
 // Match gh api PATCH to set state=closed on issues
 const GH_API_ISSUE_CLOSE_RE = /gh\s+api\b.*issues\/\d+.*state[=\s]+closed/
-// Match gh api with -f state=closed for issues
 const GH_API_STATE_CLOSED_RE = /gh\s+api\b.*-f\s+state=closed/
 
 if (
-  GH_ISSUE_CLOSE_RE.test(command) ||
-  SWIZ_ISSUE_CLOSE_RE.test(command) ||
-  SWIZ_ISSUE_RESOLVE_RE.test(command) ||
-  GH_API_ISSUE_CLOSE_RE.test(command) ||
-  GH_API_STATE_CLOSED_RE.test(command)
+  GH_ISSUE_CLOSE_RE.test(stripped) ||
+  SWIZ_ISSUE_CLOSE_RE.test(stripped) ||
+  SWIZ_ISSUE_RESOLVE_RE.test(stripped) ||
+  GH_API_ISSUE_CLOSE_RE.test(stripped) ||
+  GH_API_STATE_CLOSED_RE.test(stripped)
 ) {
   denyPreToolUse(
     [
