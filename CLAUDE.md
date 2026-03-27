@@ -157,12 +157,15 @@ alwaysApply: false
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
-- Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
+- Repo is solo (`mherod/swiz`); push to `main`.
+- **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
+- **DO**: Treat `/Users/matthewherod/Development/swiz/.swiz/config.json` and `swiz settings` as authoritative for `collaboration-mode`, `trunk-mode`, `default-branch`, and `strict-no-direct-main`.
+- **DON'T**: Let `gh api repos/:owner/:repo/commits`, `gh pr list`, or random contributors override local policy when `swiz settings` shows `collaboration-mode: solo` and project `trunk-mode: enabled`.
+- **DO**: Stay on `main` when `swiz settings` shows `collaboration-mode: solo` and `trunk-mode: enabled`; branch only if the user or repo rules require it.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
-- If collaboration guard errors, fix and re-run guard checks before pushing.
 - CI workflow `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip CI; markdown triggers CI.
 - Pre-push checklist:
-  0. **Run Step 0 collaboration guard** (`/push` skill) before every push to `main`/`master` — execute and read signal checks, never assume repo type.
+  0. **Run Step 0 collaboration guard** (`/push`) before every push to `main`/`master`; read output and never assume repo type.
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
@@ -181,7 +184,7 @@ alwaysApply: false
 - Push-command parsing: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
-- DO NOT push to `main`/`master` without running the Step 0 collaboration guard and reading its output.
+- DO NOT push to `main`/`master` without the Step 0 collaboration guard.
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
@@ -234,10 +237,9 @@ alwaysApply: false
 - Settings writes must create `.bak` backups first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
 - Stop-memory prompts must include `Cause to capture: <cause>`.
-- On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume work.
-- Do not defer memory capture requested by stop hooks.
-- When unblocking a gated session: mark prior task complete with evidence first, then create an `in_progress` task in the current session before executing tool calls; do not attempt tool calls while memory enforcement is active.
-- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or missing `CLAUDE.md`; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
+- On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, and resolve it immediately.
+- When unblocking a gated session: mark the prior task complete with evidence, then create an `in_progress` task in the current session before tool calls; do not work through memory enforcement.
+- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic in your workflow output — never label warnings as "pre-existing" or "unrelated to my changes". If it appears in `bun run lint` output, fix it in this session.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
@@ -247,17 +249,16 @@ alwaysApply: false
 - `awk > file`/`awk | tee -i` blocked; `awk '{print}'` allowed. Prefer `bun -e`, `cut`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
-- DO NOT edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are external repos. For cross-repo bugs, file issues with: error, root cause, fix, criteria.
+- DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; they are external repos. For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
 - Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
 - Cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
-- In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
+- In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DON'T**: Edit files outside session sandbox — file a GitHub issue instead.
-- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
-- **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
+- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop; use `/push` for unpushed commits.
+- **DON'T**: Rely on `git status` alone for unpush detection; use `git log origin/main..HEAD --oneline`.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls when Codex/Gemini is installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
