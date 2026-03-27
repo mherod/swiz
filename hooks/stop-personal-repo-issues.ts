@@ -258,6 +258,7 @@ export interface PR {
   reviewDecision: string
   mergeable: string
   createdAt?: string
+  closingIssuesReferences?: Array<{ number: number }>
 }
 
 /** Open PRs that should surface in stop messaging (feedback pending or merge conflicts). */
@@ -441,12 +442,13 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
     if (hasAuthorData) {
       // Filter locally: authored by or assigned to current user
       const relevant = cachedPrs.filter((pr) => pr.author?.login === currentUser)
-      return relevant.filter(openPrNeedsStopAttention)
+      return relevant
     }
   }
 
   // Fallback: direct gh CLI calls (include author so cached entries support store-first filtering)
-  const jsonFields = "number,title,url,reviewDecision,mergeable,createdAt,author"
+  const jsonFields =
+    "number,title,url,reviewDecision,mergeable,createdAt,author,closingIssuesReferences"
   const [authoredPrs, reviewerPrs] = await Promise.all([
     ghJson<PR[]>(
       ["pr", "list", "--state", "open", "--author", currentUser, "--json", jsonFields],
@@ -472,7 +474,7 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
     }
   }
 
-  return [...byNumber.values()].filter(openPrNeedsStopAttention)
+  return [...byNumber.values()]
 }
 
 interface StopContext {
@@ -489,6 +491,8 @@ interface StopContext {
   blockedIssues: Issue[]
   firstRefinementNum?: number
   firstIssueNum?: number
+  /** When true, omit "merge existing PR" guidance from issue-pickup steps. */
+  strictNoDirectMain: boolean
 }
 
 function feedbackPrCount(
@@ -703,8 +707,14 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
     subSteps.push(`/work-on-issue${issueArg} — Start working on the next issue`)
   subSteps.push(
     `Read the full issue body AND all comments for #${issueNum} before planning — comments contain refinements, automation output, and acceptance criteria updates`,
-    `Check for existing work: search for linked PRs and git fetch origin --prune`,
-    `If an open PR for #${issueNum} exists with passing checks → merge it; if checks failing → fix them; if no PR → implement`,
+    `Check for existing work: search for linked PRs and git fetch origin --prune`
+  )
+  if (!ctx.strictNoDirectMain) {
+    subSteps.push(
+      `If an open PR for #${issueNum} exists with passing checks → merge it; if checks failing → fix them; if no PR → implement`
+    )
+  }
+  subSteps.push(
     `Claim ownership: gh issue edit ${issueNum} --add-assignee @me`,
     "Verify branch starting point: git branch --show-current (must be main), git pull --rebase --autostash",
     `Plan with TaskCreate before touching any code for issue #${issueNum}`,
@@ -759,7 +769,8 @@ async function gatherStopContext(
   cwd: string,
   isPersonalRepo: boolean,
   currentUser: string,
-  hasChangesRequested: boolean
+  hasChangesRequested: boolean,
+  allOpenPRIssueNumbers: Set<number>
 ): Promise<{
   sortedRefinement: Issue[]
   sortedIssues: Issue[]
@@ -776,7 +787,10 @@ async function gatherStopContext(
   const actionable = filterVisibleIssues(rawIssues, filterUser)
 
   const refinementIssues = actionable.filter((i) => needsRefinement(i))
-  const readyIssues = actionable.filter((i) => !needsRefinement(i))
+  // Prefer issues that do not already have an open PR representing started work
+  const allReadyIssues = actionable.filter((i) => !needsRefinement(i))
+  const readyWithoutPR = allReadyIssues.filter((i) => !allOpenPRIssueNumbers.has(i.number))
+  const readyIssues = readyWithoutPR.length > 0 ? readyWithoutPR : allReadyIssues
 
   const sortedRefinement = sortIssuesByScoreAndNumber(refinementIssues)
   const sortedIssues = sortIssuesByScoreAndNumber(readyIssues)
@@ -834,12 +848,12 @@ async function resolveRepoContext(input: {
 }
 
 function partitionPRsForStop(
-  prs: PR[]
+  allPrs: PR[]
 ): Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs" | "conflictingPRs"> {
   const changesRequestedPRs: PR[] = []
   const reviewRequiredPRs: PR[] = []
   const conflictingPRs: PR[] = []
-  for (const p of prs) {
+  for (const p of allPrs.filter(openPrNeedsStopAttention)) {
     if (p.reviewDecision === "CHANGES_REQUESTED") changesRequestedPRs.push(p)
     if (p.reviewDecision === "REVIEW_REQUIRED") reviewRequiredPRs.push(p)
     if (p.mergeable === "CONFLICTING") conflictingPRs.push(p)
@@ -851,7 +865,8 @@ function buildStopContext(
   ctx: RepoContext,
   prs: PR[],
   gathered: Awaited<ReturnType<typeof gatherStopContext>>,
-  projectState: ProjectState | null
+  projectState: ProjectState | null,
+  strictNoDirectMain: boolean
 ): StopContext | null {
   const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(prs)
 
@@ -877,7 +892,19 @@ function buildStopContext(
     blockedIssues: gathered.blockedIssues,
     firstRefinementNum: gathered.sortedRefinement[0]?.number,
     firstIssueNum: gathered.sortedIssues[0]?.number,
+    strictNoDirectMain,
   }
+}
+
+/** Extract issue numbers covered by open PRs via their closing references. */
+function extractAllOpenPRIssueNumbers(prs: PR[]): Set<number> {
+  const issueNumbers = new Set<number>()
+  for (const pr of prs) {
+    for (const ref of pr.closingIssuesReferences ?? []) {
+      issueNumbers.add(ref.number)
+    }
+  }
+  return issueNumbers
 }
 
 async function main(): Promise<void> {
@@ -886,17 +913,25 @@ async function main(): Promise<void> {
     const ctx = await resolveRepoContext(input)
     if (!ctx) return
 
+    const { getEffectiveSwizSettings, readSwizSettings } = await import("../src/settings.ts")
+    const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
+    const strictNoDirectMain = settings.strictNoDirectMain
+
     const prs = await getOpenPRsWithFeedback(ctx.cwd, ctx.currentUser)
-    const hasChangesRequested = prs.some((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    const hasChangesRequested = prs.some(
+      (p) => openPrNeedsStopAttention(p) && p.reviewDecision === "CHANGES_REQUESTED"
+    )
+    const allOpenPRIssueNumbers = extractAllOpenPRIssueNumbers(prs)
     const gathered = await gatherStopContext(
       ctx.cwd,
       ctx.isPersonalRepo,
       ctx.currentUser,
-      hasChangesRequested
+      hasChangesRequested,
+      allOpenPRIssueNumbers
     )
 
     const projectState = await readProjectState(ctx.cwd)
-    const stopCtx = buildStopContext(ctx, prs, gathered, projectState)
+    const stopCtx = buildStopContext(ctx, prs, gathered, projectState, strictNoDirectMain)
     if (!stopCtx) return
 
     const reasonLines = buildStopReasonLines(stopCtx)

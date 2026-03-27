@@ -637,25 +637,15 @@ function ProjectFieldsGrid({
 
 // --- Column components ---
 
-function GlobalSettingsColumn({
+function GlobalSelectFields({
   form,
-  setForm,
-  error,
+  set,
 }: {
   form: GlobalSettingsForm
-  setForm: (fn: GlobalSettingsForm | ((prev: GlobalSettingsForm) => GlobalSettingsForm)) => void
-  error: string
+  set: (patch: Partial<GlobalSettingsForm>) => void
 }) {
-  const set = (patch: Partial<GlobalSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
-  const num = (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) =>
-    set({ [key]: Number(e.target.value) })
-
   return (
-    <div className="grid gap-4 mb-4">
-      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
-        Global Settings
-      </h3>
-      {error && <p className="text-[#ff7e7e]">{error}</p>}
+    <>
       <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="global-ambition-mode">
         <span>Ambition mode</span>
         <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
@@ -695,6 +685,30 @@ function GlobalSettingsColumn({
           ]}
         />
       </label>
+    </>
+  )
+}
+
+function GlobalSettingsColumn({
+  form,
+  setForm,
+  error,
+}: {
+  form: GlobalSettingsForm
+  setForm: (fn: GlobalSettingsForm | ((prev: GlobalSettingsForm) => GlobalSettingsForm)) => void
+  error: string
+}) {
+  const set = (patch: Partial<GlobalSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
+  const num = (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) =>
+    set({ [key]: Number(e.target.value) })
+
+  return (
+    <div className="grid gap-4 mb-4">
+      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
+        Global Settings
+      </h3>
+      {error && <p className="text-[#ff7e7e]">{error}</p>}
+      <GlobalSelectFields form={form} set={set} />
       <GlobalNumberFieldsGrid form={form} num={num} />
       {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
         <CheckboxField

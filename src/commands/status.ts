@@ -120,7 +120,12 @@ async function checkAgent(agent: AgentDef) {
     return
   }
 
-  // Aggregate hooks from all paths
+  printAgentHooksInfo(allHooks)
+
+  console.log()
+}
+
+function printAgentHooksInfo(allHooks: Map<string, Record<string, unknown>>): void {
   let totalHooks = 0
   const allSwizCmds = new Set<string>()
   const allEvents = new Set<string>()
@@ -147,8 +152,6 @@ async function checkAgent(agent: AgentDef) {
   } else {
     console.log(`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`)
   }
-
-  console.log()
 }
 
 // ─── Project Health Panel ─────────────────────────────────────────────────────

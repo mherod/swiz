@@ -31,10 +31,6 @@ import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { writeReflections } from "./stop-auto-continue/reflections.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
 import {
-  __testOnly_DEDUP_MAX_FILES,
-  __testOnly_getSuggestionsPath,
-  __testOnly_pruneOldSuggestionLogs,
-  __testOnly_recordSuggestion,
   isUngroundedSuggestion,
   loadSuggestionLog,
   recordSuggestionAndGetCount,

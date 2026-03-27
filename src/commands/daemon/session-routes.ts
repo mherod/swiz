@@ -80,25 +80,24 @@ export function annotateSessionsWithLiveness(
   })
 }
 
+function parseProjectsListBody(raw: Record<string, unknown> | null) {
+  if (!raw) return null
+  return {
+    limitProjects:
+      (raw.limitProjects as number | undefined) ??
+      (raw.limits as { projects?: number } | undefined)?.projects,
+    limitSessionsPerProject: raw.limitSessionsPerProject as number | undefined,
+    selectedProjectCwd:
+      (raw.selectedProjectCwd as string | undefined) ?? (raw.selectedProject as string | undefined),
+    selectedSessionId:
+      (raw.selectedSessionId as string | undefined) ?? (raw.selectedSession as string | undefined),
+  }
+}
+
 async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
   try {
     const rawBody = (await req.json().catch(() => null)) as Record<string, unknown> | null
-
-    // Compat shim: remap legacy field names to current API contract
-    const body = rawBody
-      ? {
-          limitProjects:
-            (rawBody.limitProjects as number | undefined) ??
-            (rawBody.limits as { projects?: number } | undefined)?.projects,
-          limitSessionsPerProject: rawBody.limitSessionsPerProject as number | undefined,
-          selectedProjectCwd:
-            (rawBody.selectedProjectCwd as string | undefined) ??
-            (rawBody.selectedProject as string | undefined),
-          selectedSessionId:
-            (rawBody.selectedSessionId as string | undefined) ??
-            (rawBody.selectedSession as string | undefined),
-        }
-      : null
+    const body = parseProjectsListBody(rawBody)
 
     const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
     const limitSessions = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))

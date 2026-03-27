@@ -722,29 +722,32 @@ function extractScriptPaths(command: string): string[] {
   return paths
 }
 
+async function extractPathsFromSettingsFile(
+  settingsPath: string,
+  agent: (typeof CONFIGURABLE_AGENTS)[number]
+): Promise<string[]> {
+  const file = Bun.file(settingsPath)
+  if (!(await file.exists())) return []
+  let settings: Record<string, unknown>
+  try {
+    settings = await file.json()
+  } catch {
+    return []
+  }
+  const hooksRaw = agent.wrapsHooks
+    ? ((settings.hooks as Record<string, unknown>) ?? {})
+    : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+  const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+  return [...collectHookCommands(hooks)].flatMap((cmd) => extractScriptPaths(cmd))
+}
+
 /** Collect deduplicated script file paths referenced in installed agent hook configs. */
 async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   const paths: string[] = []
   for (const agent of CONFIGURABLE_AGENTS) {
     const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
-    const settingsPaths = getAgentSettingsSearchPaths(agentId)
-
-    for (const settingsPath of settingsPaths) {
-      const file = Bun.file(settingsPath)
-      if (!(await file.exists())) continue
-      let settings: Record<string, unknown>
-      try {
-        settings = await file.json()
-      } catch {
-        continue
-      }
-      const hooksRaw = agent.wrapsHooks
-        ? ((settings.hooks as Record<string, unknown>) ?? {})
-        : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
-      const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
-      for (const cmd of collectHookCommands(hooks)) {
-        paths.push(...extractScriptPaths(cmd))
-      }
+    for (const settingsPath of getAgentSettingsSearchPaths(agentId)) {
+      paths.push(...(await extractPathsFromSettingsFile(settingsPath, agent)))
     }
   }
   return [...new Set(paths)]

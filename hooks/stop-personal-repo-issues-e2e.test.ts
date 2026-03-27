@@ -79,17 +79,25 @@ interface RunOptions {
   prs?: object[]
   /** full open issue list returned by the mock gh */
   issues?: object[]
+  /** swiz settings to inject via ~/.swiz/settings.json */
+  swizSettings?: Record<string, unknown>
 }
 
 /**
  * Run the hook against `repoDir` with mock gh fixtures injected via PATH.
  */
 async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResult> {
-  const { user = "testuser", prs = [], issues = [] } = opts
+  const { user = "testuser", prs = [], issues = [], swizSettings } = opts
 
   const binDir = await createTempDir("-bin")
   const homeDir = await createTempDir("-home")
   await writeMockGh(binDir)
+
+  if (swizSettings) {
+    const swizDir = join(homeDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "settings.json"), JSON.stringify(swizSettings))
+  }
 
   const payload = JSON.stringify({ cwd: repoDir, session_id: "e2e-test" })
 
@@ -156,7 +164,11 @@ function makePR(
   number: number,
   title: string,
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED",
-  opts: { createdAt?: string; mergeable?: "CONFLICTING" | "MERGEABLE" | "UNKNOWN" } = {}
+  opts: {
+    createdAt?: string
+    mergeable?: "CONFLICTING" | "MERGEABLE" | "UNKNOWN"
+    closingIssues?: number[]
+  } = {}
 ) {
   return {
     number,
@@ -165,6 +177,7 @@ function makePR(
     reviewDecision,
     mergeable: opts.mergeable ?? "MERGEABLE",
     createdAt: opts.createdAt,
+    closingIssuesReferences: (opts.closingIssues ?? []).map((n) => ({ number: n })),
   }
 }
 
@@ -520,6 +533,69 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
     const dir = await createGitRepoWithGitHubRemote("-empty", "testuser", "myrepo")
     const result = await runHook(dir, { user: "testuser" })
     expect(result.blocked).toBe(false)
+  })
+
+  test("issue with open PR is skipped; unstarted issue is preferred", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-skipstarted", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [makePR(5, "fix: implement issue 10", "APPROVED", { closingIssues: [10] })],
+      issues: [
+        makeIssue(10, "Started issue", ["bug", "ready", "priority-high"]),
+        makeIssue(20, "Unstarted issue", ["bug", "ready", "priority-medium"]),
+      ],
+    })
+    expect(result.blocked).toBe(true)
+    // Unstarted issue should be surfaced as the pickup target
+    expect(result.reason).toContain("#20")
+    // Started issue should not be the top suggestion
+    expect(result.reason).not.toContain("Pick up and resolve issue #10")
+  })
+
+  test("all ready issues have open PRs — falls back to showing them", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-allstarted", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [
+        makePR(5, "fix: implement issue 10", "APPROVED", { closingIssues: [10] }),
+        makePR(6, "fix: implement issue 20", "APPROVED", { closingIssues: [20] }),
+      ],
+      issues: [
+        makeIssue(10, "Started issue A", ["bug", "ready", "priority-high"]),
+        makeIssue(20, "Started issue B", ["bug", "ready", "priority-medium"]),
+      ],
+    })
+    expect(result.blocked).toBe(true)
+    // When all ready issues are started, at least one is surfaced
+    expect(result.reason).toMatch(/#10|#20/)
+  })
+
+  test("merge-PR step is omitted in strict-no-direct-main mode", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-strictmerge", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [],
+      issues: [makeIssue(30, "Some issue", ["bug", "ready", "priority-high"])],
+      swizSettings: { strictNoDirectMain: true },
+    })
+    expect(result.blocked).toBe(true)
+    // The merge-PR guidance should not appear in strict mode
+    expect(result.reason).not.toContain("merge it")
+    expect(result.reason).toContain("#30")
+  })
+
+  test("merge-PR step is present when strictNoDirectMain is false", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-nonstrict", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [],
+      issues: [makeIssue(30, "Some issue", ["bug", "ready", "priority-high"])],
+      swizSettings: { strictNoDirectMain: false },
+    })
+    expect(result.blocked).toBe(true)
+    // The merge-PR guidance should be present in non-strict mode
+    expect(result.reason).toContain("merge it")
+    expect(result.reason).toContain("#30")
   })
 
   test("conflicting PR suggestions show only the two newest and two oldest", async () => {

@@ -114,6 +114,99 @@ interface TypingAnimationProps extends Omit<MotionProps, "children"> {
   startOnView?: boolean
 }
 
+function useStartTrigger(opts: {
+  hasSequence: boolean
+  itemIndex: number | null
+  sequenceStarted: boolean
+  sequenceActiveIndex: number | null
+  started: boolean
+  startOnView: boolean
+  isInView: boolean
+  delay: number
+  setStarted: (v: boolean) => void
+}): void {
+  const { hasSequence, itemIndex, sequenceStarted, sequenceActiveIndex, started } = opts
+  const { startOnView, isInView, delay, setStarted } = opts
+  useEffect(() => {
+    let startTimeout: ReturnType<typeof setTimeout> | null = null
+    if (hasSequence && itemIndex !== null) {
+      if (sequenceStarted && !started && sequenceActiveIndex === itemIndex) setStarted(true)
+    } else if (!startOnView || isInView) {
+      startTimeout = setTimeout(() => setStarted(true), delay)
+    }
+    return () => {
+      if (startTimeout !== null) clearTimeout(startTimeout)
+    }
+  }, [
+    delay,
+    startOnView,
+    isInView,
+    started,
+    hasSequence,
+    sequenceActiveIndex,
+    sequenceStarted,
+    itemIndex,
+    setStarted,
+  ])
+}
+
+function useTypingEffect(opts: {
+  started: boolean
+  children: string
+  duration: number
+  sequenceCompleteItemRef: React.RefObject<SequenceContextValue["completeItem"] | null>
+  sequenceItemIndexRef: React.RefObject<number | null>
+  setDisplayedText: (v: string) => void
+}): void {
+  const {
+    started,
+    children,
+    duration,
+    sequenceCompleteItemRef,
+    sequenceItemIndexRef,
+    setDisplayedText,
+  } = opts
+  useEffect(() => {
+    let typingEffect: ReturnType<typeof setInterval> | null = null
+    if (started) {
+      let i = 0
+      typingEffect = setInterval(() => {
+        if (i < children.length) {
+          setDisplayedText(children.substring(0, i + 1))
+          i++
+        } else {
+          if (typingEffect !== null) clearInterval(typingEffect)
+          const completeItem = sequenceCompleteItemRef.current
+          const currentItemIndex = sequenceItemIndexRef.current
+          if (completeItem && currentItemIndex !== null) completeItem(currentItemIndex)
+        }
+      }, duration)
+    }
+    return () => {
+      if (typingEffect !== null) clearInterval(typingEffect)
+    }
+  }, [children, duration, started, setDisplayedText, sequenceCompleteItemRef, sequenceItemIndexRef])
+}
+
+function useSequenceRefs() {
+  const sequence = useSequence()
+  const itemIndex = useItemIndex()
+  const completeItemRef = useRef<SequenceContextValue["completeItem"] | null>(null)
+  const itemIndexRef = useRef<number | null>(null)
+  useEffect(() => {
+    completeItemRef.current = sequence?.completeItem ?? null
+    itemIndexRef.current = itemIndex
+  }, [sequence?.completeItem, itemIndex])
+  return {
+    hasSequence: sequence !== null,
+    itemIndex,
+    sequenceStarted: sequence?.sequenceStarted ?? false,
+    sequenceActiveIndex: sequence?.activeIndex ?? null,
+    completeItemRef,
+    itemIndexRef,
+  }
+}
+
 export function TypingAnimation({
   children,
   className,
@@ -132,79 +225,37 @@ export function TypingAnimation({
   const [displayedText, setDisplayedText] = useState<string>("")
   const [started, setStarted] = useState(false)
   const elementRef = useRef<HTMLElement | null>(null)
-  const isInView = useInView(elementRef as React.RefObject<Element>, {
-    amount: 0.3,
-    once: true,
-  })
+  const isInView = useInView(elementRef as React.RefObject<Element>, { amount: 0.3, once: true })
 
-  const sequence = useSequence()
-  const itemIndex = useItemIndex()
-  const hasSequence = sequence !== null
-  const sequenceStarted = sequence?.sequenceStarted ?? false
-  const sequenceActiveIndex = sequence?.activeIndex ?? null
-  const sequenceCompleteItemRef = useRef<SequenceContextValue["completeItem"] | null>(null)
-  const sequenceItemIndexRef = useRef<number | null>(null)
+  const {
+    hasSequence,
+    itemIndex,
+    sequenceStarted,
+    sequenceActiveIndex,
+    completeItemRef,
+    itemIndexRef,
+  } = useSequenceRefs()
 
-  useEffect(() => {
-    sequenceCompleteItemRef.current = sequence?.completeItem ?? null
-    sequenceItemIndexRef.current = itemIndex
-  }, [sequence?.completeItem, itemIndex])
-
-  useEffect(() => {
-    let startTimeout: ReturnType<typeof setTimeout> | null = null
-
-    if (hasSequence && itemIndex !== null) {
-      if (sequenceStarted && !started && sequenceActiveIndex === itemIndex) {
-        setStarted(true)
-      }
-    } else if (!startOnView || isInView) {
-      startTimeout = setTimeout(() => setStarted(true), delay)
-    }
-
-    return () => {
-      if (startTimeout !== null) {
-        clearTimeout(startTimeout)
-      }
-    }
-  }, [
-    delay,
+  useStartTrigger({
+    hasSequence,
+    itemIndex,
+    sequenceStarted,
+    sequenceActiveIndex,
+    started,
     startOnView,
     isInView,
+    delay,
+    setStarted,
+  })
+
+  useTypingEffect({
     started,
-    hasSequence,
-    sequenceActiveIndex,
-    sequenceStarted,
-    itemIndex,
-  ])
-
-  useEffect(() => {
-    let typingEffect: ReturnType<typeof setInterval> | null = null
-
-    if (started) {
-      let i = 0
-      typingEffect = setInterval(() => {
-        if (i < children.length) {
-          setDisplayedText(children.substring(0, i + 1))
-          i++
-        } else {
-          if (typingEffect !== null) {
-            clearInterval(typingEffect)
-          }
-          const completeItem = sequenceCompleteItemRef.current
-          const currentItemIndex = sequenceItemIndexRef.current
-          if (completeItem && currentItemIndex !== null) {
-            completeItem(currentItemIndex)
-          }
-        }
-      }, duration)
-    }
-
-    return () => {
-      if (typingEffect !== null) {
-        clearInterval(typingEffect)
-      }
-    }
-  }, [children, duration, started])
+    children,
+    duration,
+    sequenceCompleteItemRef: completeItemRef,
+    sequenceItemIndexRef: itemIndexRef,
+    setDisplayedText,
+  })
 
   return (
     <MotionComponent
