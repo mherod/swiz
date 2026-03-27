@@ -383,19 +383,42 @@ function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 
-/** Returns true if the issue was updated (e.g. commented on) within the last 24 hours. */
-function recentlyUpdated(issue: Issue): boolean {
+/**
+ * Returns true if the issue has had recent activity (comment or update) within the last 24 hours.
+ * Checks the comment store first (most accurate), then falls back to updatedAt on the issue itself.
+ */
+async function recentlyCommented(issue: Issue, repoSlug: string): Promise<boolean> {
+  // Store-backed check: look for the most recent comment timestamp
+  try {
+    const store = getIssueStore()
+    const latestCommentAt = store.getLatestCommentAt(repoSlug, issue.number)
+    if (latestCommentAt !== null) {
+      return Date.now() - latestCommentAt < TWENTY_FOUR_HOURS_MS
+    }
+  } catch {
+    // Non-fatal: fall through to updatedAt check
+  }
+  // Fallback: updatedAt on the issue covers comments too (GitHub updates it on new comments)
   if (!issue.updatedAt) return false
   return Date.now() - new Date(issue.updatedAt).getTime() < TWENTY_FOUR_HOURS_MS
 }
 
 /** Issues with reviewable block labels (blocked, upstream, on-hold, waiting). */
-function filterBlockedIssues(issues: Issue[], filterUser?: string): Issue[] {
-  return filterByUser(issues, filterUser).filter(
-    (i) =>
-      (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))) &&
-      !recentlyUpdated(i)
+async function filterBlockedIssues(
+  issues: Issue[],
+  repoSlug: string,
+  filterUser?: string
+): Promise<Issue[]> {
+  const candidates = filterByUser(issues, filterUser).filter((i) =>
+    (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name)))
   )
+  const results: Issue[] = []
+  for (const issue of candidates) {
+    if (!(await recentlyCommented(issue, repoSlug))) {
+      results.push(issue)
+    }
+  }
+  return results
 }
 
 async function getAllOpenIssues(
@@ -793,7 +816,7 @@ async function gatherStopContext(
     return { sortedRefinement: [], sortedIssues: [], blockedIssues: [] }
   }
 
-  const { issues: rawIssues } = await getAllOpenIssues(cwd)
+  const { issues: rawIssues, repoSlug } = await getAllOpenIssues(cwd)
   const filterUser = isPersonalRepo ? undefined : currentUser
   const actionable = filterVisibleIssues(rawIssues, filterUser)
 
@@ -809,7 +832,7 @@ async function gatherStopContext(
   // Only surface blocked issues when there are no ready issues to work on
   const blockedIssues =
     sortedIssues.length === 0
-      ? sortIssuesByScoreAndNumber(filterBlockedIssues(rawIssues, filterUser))
+      ? sortIssuesByScoreAndNumber(await filterBlockedIssues(rawIssues, repoSlug ?? "", filterUser))
       : []
 
   return {

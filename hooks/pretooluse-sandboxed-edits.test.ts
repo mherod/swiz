@@ -9,6 +9,9 @@ const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 const tmp = useTempDir("swiz-sandboxed-")
 const createTempDir = () => tmp.create()
 
+/** Capture HOME at module-load time before concurrent tests mutate process.env.HOME. */
+const ORIGINAL_HOME = process.env.HOME ?? tmpdir()
+
 /** HOME-based dirs cannot use useTempDir (it always uses tmpdir()). */
 const outsideDirs: string[] = []
 afterAll(async () => {
@@ -27,7 +30,7 @@ afterAll(async () => {
  * on either macOS or Linux.
  */
 async function createOutsideDir(): Promise<string> {
-  const realHome = process.env.HOME ?? tmpdir()
+  const realHome = ORIGINAL_HOME
   const dir = await mkdtemp(join(realHome, ".swiz-sandboxed-outside-"))
   outsideDirs.push(dir)
   return dir

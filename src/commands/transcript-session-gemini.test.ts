@@ -34,7 +34,7 @@ async function runSwiz(
     }
   }
 
-  const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
+  const proc = Bun.spawn([process.execPath, "run", "index.ts", ...args], {
     cwd: process.cwd(),
     stdin: "pipe",
     stdout: "pipe",

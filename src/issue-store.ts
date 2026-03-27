@@ -56,6 +56,14 @@ export interface CachedCiStatus {
   synced_at: number
 }
 
+export interface CachedComment {
+  repo: string
+  issue_number: number
+  comment_id: number
+  data: string // JSON blob matching gh issue comment output
+  synced_at: number
+}
+
 export type MutationType =
   | "close"
   | "comment"
@@ -99,6 +107,10 @@ export interface IssueStoreReader {
   getCiBranchRuns<T = unknown>(repo: string, branch: string): Promise<T[] | null>
   /** PR review/comment summary for a branch head (shape matches `upsertPrBranchDetail`). */
   getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null>
+  /** Cached comments for an issue, ordered by creation time. Returns null when not yet synced. */
+  listIssueComments<T = unknown>(repo: string, issueNumber: number): Promise<T[] | null>
+  /** Timestamp (ms) of the most recent comment on an issue, or null when not yet synced. */
+  getLatestCommentAt(repo: string, issueNumber: number): Promise<number | null>
 }
 
 // ─── GitHubClient ────────────────────────────────────────────────────────────
@@ -138,6 +150,19 @@ export interface GitHubPullRequestRecord {
   head?: { ref: string }
 }
 
+/** Raw comment shape returned by GitHub issue comment APIs. */
+export interface GitHubCommentRecord {
+  id: number
+  body?: string
+  author?: { login: string }
+  createdAt?: string
+  updatedAt?: string
+  // REST equivalents
+  created_at?: string
+  updated_at?: string
+  user?: { login: string }
+}
+
 /** Raw CI run shape returned by GitHub list APIs. */
 export interface GitHubCiRunRecord {
   headSha: string
@@ -157,6 +182,8 @@ export interface GitHubClient {
   /** When `state` is `"closed"`, implementations may only populate `number`. */
   listPullRequests(cwd: string, state: "open" | "closed"): Promise<GitHubPullRequestRecord[] | null>
   listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null>
+  /** Fetch comments for a single issue. Returns null on error. */
+  listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null>
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -252,6 +279,20 @@ export class IssueStore {
         synced_at INTEGER NOT NULL,
         PRIMARY KEY (repo, branch)
       )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS issue_comments (
+        repo TEXT NOT NULL,
+        issue_number INTEGER NOT NULL,
+        comment_id INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, comment_id)
+      )
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_issue_comments_repo_issue
+      ON issue_comments (repo, issue_number)
     `)
   }
 
@@ -484,6 +525,63 @@ export class IssueStore {
     return row.cnt
   }
 
+  // ─── Issue comment operations ─────────────────────────────────────────
+
+  /** List cached comments for an issue. Returns null if none have been synced yet. */
+  listIssueComments<T = unknown>(repo: string, issueNumber: number): T[] | null {
+    const rows = this.db
+      .query(
+        "SELECT data FROM issue_comments WHERE repo = ? AND issue_number = ? ORDER BY comment_id ASC"
+      )
+      .all(repo, issueNumber) as { data: string }[]
+    if (rows.length === 0) return null
+    return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Timestamp (ms) of the most recent comment on an issue, or null when not yet synced. */
+  getLatestCommentAt(repo: string, issueNumber: number): number | null {
+    const row = this.db
+      .query(
+        "SELECT data FROM issue_comments WHERE repo = ? AND issue_number = ? ORDER BY comment_id DESC LIMIT 1"
+      )
+      .get(repo, issueNumber) as { data: string } | null
+    if (!row) return null
+    const comment = JSON.parse(row.data) as {
+      createdAt?: string
+      updatedAt?: string
+      created_at?: string
+      updated_at?: string
+    }
+    const ts =
+      comment.updatedAt ?? comment.createdAt ?? comment.updated_at ?? comment.created_at ?? null
+    return ts ? new Date(ts).getTime() : null
+  }
+
+  /** Upsert comments for an issue from a successful gh call. Replaces existing entries. */
+  upsertIssueComments<T extends { id: number }>(
+    repo: string,
+    issueNumber: number,
+    comments: T[]
+  ): void {
+    const stmt = this.db.prepare(
+      "INSERT OR REPLACE INTO issue_comments (repo, issue_number, comment_id, data, synced_at) VALUES (?, ?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const comment of comments) {
+        stmt.run(repo, issueNumber, comment.id, JSON.stringify(comment), now)
+      }
+    })
+    tx()
+  }
+
+  /** Remove all cached comments for an issue (e.g., when the issue is closed). */
+  removeIssueComments(repo: string, issueNumber: number): void {
+    this.db
+      .query("DELETE FROM issue_comments WHERE repo = ? AND issue_number = ?")
+      .run(repo, issueNumber)
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
   /** Clear all cached data (issues, PRs, CI) for a repo. Preserves pending mutations. */
@@ -493,6 +591,7 @@ export class IssueStore {
     this.db.query("DELETE FROM ci_status WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM ci_branch_runs WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM pr_branch_detail WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM issue_comments WHERE repo = ?").run(repo)
   }
 
   /** Clear ALL cached data across all repos. Preserves pending mutations. */
@@ -502,6 +601,7 @@ export class IssueStore {
     this.db.query("DELETE FROM ci_status").run()
     this.db.query("DELETE FROM ci_branch_runs").run()
     this.db.query("DELETE FROM pr_branch_detail").run()
+    this.db.query("DELETE FROM issue_comments").run()
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -527,6 +627,10 @@ export class IssueStore {
         Promise.resolve(this.getCiBranchRuns<T>(repo, branch)),
       getPrBranchDetail: <T = unknown>(repo: string, branch: string) =>
         Promise.resolve(this.getPrBranchDetail<T>(repo, branch)),
+      listIssueComments: <T = unknown>(repo: string, issueNumber: number) =>
+        Promise.resolve(this.listIssueComments<T>(repo, issueNumber)),
+      getLatestCommentAt: (repo: string, issueNumber: number) =>
+        Promise.resolve(this.getLatestCommentAt(repo, issueNumber)),
     }
   }
 }
@@ -1331,6 +1435,13 @@ export class GhCliGitHubClient implements GitHubClient {
       cwd
     )
   }
+
+  async listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null> {
+    return fetchGhJson<GitHubCommentRecord[]>(
+      ["issue", "view", String(issueNumber), "--json", "comments", "--jq", ".comments"],
+      cwd
+    )
+  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1429,6 +1540,11 @@ function createNoOpStore(): IssueStore {
             _repo: string,
             _branch: string
           ): Promise<T | null> => null,
+          listIssueComments: async <T = unknown>(
+            _repo: string,
+            _issueNumber: number
+          ): Promise<T[] | null> => null,
+          getLatestCommentAt: async (_repo: string, _issueNumber: number): Promise<null> => null,
         })
       }
       if (READ_LIST_METHODS.has(prop as string)) {
@@ -1643,6 +1759,32 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
     }
     return detail as T
+  }
+
+  async listIssueComments<T = unknown>(repo: string, issueNumber: number): Promise<T[] | null> {
+    const comments = await this.query<T[]>([
+      "issue",
+      "view",
+      "--repo",
+      repo,
+      String(issueNumber),
+      "--json",
+      "comments",
+      "--jq",
+      ".comments",
+    ])
+    return comments ?? null
+  }
+
+  async getLatestCommentAt(repo: string, issueNumber: number): Promise<number | null> {
+    const comments = await this.listIssueComments<{
+      createdAt?: string
+      updatedAt?: string
+    }>(repo, issueNumber)
+    if (!comments?.length) return null
+    const last = comments[comments.length - 1]
+    const ts = last?.updatedAt ?? last?.createdAt ?? null
+    return ts ? new Date(ts).getTime() : null
   }
 
   get isDaemonAvailable(): boolean | null {

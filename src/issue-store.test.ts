@@ -1146,6 +1146,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
         return []
       },
       listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
     }
 
     try {
@@ -1166,6 +1167,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listIssues: async () => null,
       listPullRequests: async () => null,
       listWorkflowRuns: async () => null,
+      listIssueComments: async () => null,
     }
 
     try {
@@ -1200,6 +1202,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
         return [{ number: 20 }] // closed
       },
       listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
     }
 
     try {
@@ -1240,6 +1243,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
           url: "https://example.com/run/888",
         },
       ],
+      listIssueComments: async () => null,
     }
 
     try {
@@ -1267,6 +1271,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listIssues: async (_cwd, state) => (state === "open" ? [] : []),
       listPullRequests: async (_cwd, state) => (state === "open" ? [] : []),
       listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
     }
 
     try {
@@ -1347,6 +1352,8 @@ describe("IssueStoreReader", () => {
       getCiStatus: async () => null,
       getCiBranchRuns: async () => null,
       getPrBranchDetail: async () => null,
+      listIssueComments: async () => null,
+      getLatestCommentAt: async () => null,
     }
 
     const issues = await mockReader.listIssues("any/repo")

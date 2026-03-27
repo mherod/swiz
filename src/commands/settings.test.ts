@@ -134,21 +134,25 @@ describe("swiz settings", () => {
 
     test("shows default auto-continue state", () => {
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain("auto-continue:   enabled")
+      expect(result.stdout).toMatch(/auto-continue:\s+enabled/)
       expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
       expect(result.stdout).toMatch(/update-memory-footer:\s+disabled/)
       expect(result.stdout).toContain("(defaults)")
     })
 
     test("shows default narrator-voice and narrator-speed", () => {
-      expect(result.stdout).toContain("narrator-voice: system default")
-      expect(result.stdout).toContain("narrator-speed: system default")
+      expect(result.stdout).toMatch(/narrator-voice:\s+system default/)
+      expect(result.stdout).toMatch(/narrator-speed:\s+system default/)
     })
 
     test("shows default project policy", () => {
       expect(result.stdout).toContain("project policy")
-      expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
-      expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
+      expect(result.stdout).toMatch(
+        new RegExp(`trivial-max-files:\\s+${DEFAULT_TRIVIAL_MAX_FILES}`)
+      )
+      expect(result.stdout).toMatch(
+        new RegExp(`trivial-max-lines:\\s+${DEFAULT_TRIVIAL_MAX_LINES}`)
+      )
       // Isolated --dir repo has no .swiz/config.json → policy lines use (default)
       expect(result.stdout).toMatch(/trivial-max-(files|lines):.*\(default\)/)
     })
@@ -266,7 +270,7 @@ describe("swiz settings", () => {
     )
     expect(showSession.exitCode).toBe(0)
     expect(showSession.stdout).toContain(`scope: session ${sessionId}`)
-    expect(showSession.stdout).toContain("auto-continue:   disabled (global/default)")
+    expect(showSession.stdout).toMatch(/auto-continue:\s+disabled \(global\/default\)/)
   }, 30_000)
 
   test("session-scoped disable stores override under sessions map", async () => {
@@ -416,8 +420,8 @@ describe("swiz settings", () => {
       runSwiz(["settings"], voiceHome),
       runSwiz(["settings"], speedHome),
     ])
-    expect(voiceResult.stdout).toContain("narrator-voice: Alex")
-    expect(speedResult.stdout).toContain("narrator-speed: 180 wpm")
+    expect(voiceResult.stdout).toMatch(/narrator-voice:\s+Alex/)
+    expect(speedResult.stdout).toMatch(/narrator-speed:\s+180 wpm/)
   }, 30_000)
 
   // ── Rejection tests: run concurrently ─────────────────────────────────
@@ -604,11 +608,11 @@ describe("swiz settings", () => {
     )
     const result = await runSwiz(["settings", "--dir", home], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("auto-continue:   disabled")
+    expect(result.stdout).toMatch(/auto-continue:\s+disabled/)
     expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
     expect(result.stdout).toMatch(/speak:\s+enabled/)
-    expect(result.stdout).toContain("narrator-voice: system default")
-    expect(result.stdout).toContain("narrator-speed: system default")
+    expect(result.stdout).toMatch(/narrator-voice:\s+system default/)
+    expect(result.stdout).toMatch(/narrator-speed:\s+system default/)
   })
 
   test("shows project policy section in settings output", async () => {
@@ -621,9 +625,9 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("project policy")
-    expect(result.stdout).toContain("profile:         strict")
-    expect(result.stdout).toContain("trivial-max-files: 1")
-    expect(result.stdout).toContain("trivial-max-lines: 10")
+    expect(result.stdout).toMatch(/profile:\s+strict/)
+    expect(result.stdout).toMatch(/trivial-max-files:\s+1/)
+    expect(result.stdout).toMatch(/trivial-max-lines:\s+10/)
   })
 
   test("disable-hook adds filename to user-level disabledHooks", async () => {
@@ -677,7 +681,7 @@ describe("swiz settings", () => {
     await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("disabled-hooks:  stop-github-ci.ts (global)")
+    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-github-ci\.ts \(global\)/)
   })
 
   test("settings show lists multiple disabled hooks", async () => {
@@ -729,7 +733,7 @@ describe("swiz settings", () => {
 
     const result = await runSwiz(["settings", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("disabled-hooks:  stop-git-status.ts (project)")
+    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-git-status\.ts \(project\)/)
   })
 })
 
@@ -934,6 +938,7 @@ describe("SETTINGS_REGISTRY", () => {
       "strictNoDirectMain",
       "trunkMode",
       "dirtyWorktreeThreshold",
+      "auditStrictness",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -1611,7 +1616,7 @@ describe("strictNoDirectMain setting", () => {
     )
     expect(setExitCode).toBe(0)
     const { stdout } = await runSwiz(["settings", "show", "--project", "--dir", home], home)
-    expect(stdout).toContain("strict-no-direct-main:   enabled (project override)")
+    expect(stdout).toMatch(/strict-no-direct-main:\s+enabled \(project override\)/)
   })
 
   test("getEffectiveSwizSettings propagates strictNoDirectMain", () => {

@@ -6,7 +6,11 @@ export interface UpstreamSyncResult {
   issues: { upserted: number; removed: number }
   pullRequests: { upserted: number; removed: number }
   ciStatuses: { upserted: number }
+  comments: { upserted: number }
 }
+
+/** Labels that indicate an issue may be blocked/stalled and worth checking for recent comments. */
+const COMMENT_SYNC_LABELS = new Set(["blocked", "upstream", "on-hold", "waiting"])
 
 interface EntitySyncOps {
   upsert: (repo: string, items: { number: number }[]) => void
@@ -73,6 +77,7 @@ export async function syncUpstreamState(
     issues: { upserted: 0, removed: 0 },
     pullRequests: { upserted: 0, removed: 0 },
     ciStatuses: { upserted: 0 },
+    comments: { upserted: 0 },
   }
 
   const [issues, prs, runs, closedIssues, closedPrs] = await Promise.all([
@@ -107,6 +112,23 @@ export async function syncUpstreamState(
     result.pullRequests
   )
   syncCiRuns(s, repo, runs, result)
+
+  // Sync comments for blocked/stalled issues so the stop hook can check recent activity
+  if (issues) {
+    const blockedIssues = issues.filter((i) => {
+      const labels = (i.labels as Array<{ name: string }> | undefined) ?? []
+      return labels.some((l) => COMMENT_SYNC_LABELS.has(l.name.toLowerCase()))
+    })
+    let commentCount = 0
+    for (const issue of blockedIssues) {
+      const comments = await gh.listIssueComments(cwd, issue.number)
+      if (comments && comments.length > 0) {
+        s.upsertIssueComments(repo, issue.number, comments)
+        commentCount += comments.length
+      }
+    }
+    result.comments.upserted = commentCount
+  }
 
   return result
 }
