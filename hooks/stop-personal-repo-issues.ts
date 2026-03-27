@@ -249,6 +249,7 @@ export interface Issue {
   labels: Array<{ name: string }>
   author?: { login: string }
   assignees?: Array<{ login: string }>
+  updatedAt?: string
 }
 
 export interface PR {
@@ -380,10 +381,20 @@ function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
   )
 }
 
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
+
+/** Returns true if the issue was updated (e.g. commented on) within the last 24 hours. */
+function recentlyUpdated(issue: Issue): boolean {
+  if (!issue.updatedAt) return false
+  return Date.now() - new Date(issue.updatedAt).getTime() < TWENTY_FOUR_HOURS_MS
+}
+
 /** Issues with reviewable block labels (blocked, upstream, on-hold, waiting). */
 function filterBlockedIssues(issues: Issue[], filterUser?: string): Issue[] {
-  return filterByUser(issues, filterUser).filter((i) =>
-    (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name)))
+  return filterByUser(issues, filterUser).filter(
+    (i) =>
+      (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))) &&
+      !recentlyUpdated(i)
   )
 }
 
@@ -409,7 +420,7 @@ async function getAllOpenIssues(
   }
 
   // Final fallback: direct gh CLI
-  const jsonFields = "number,title,labels,author,assignees"
+  const jsonFields = "number,title,labels,author,assignees,updatedAt"
   const liveIssues = await ghJson<Issue[]>(
     ["issue", "list", "--state", "open", "--json", jsonFields],
     cwd
