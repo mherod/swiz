@@ -122,6 +122,7 @@ export function resolveMemoryThresholds(
 const PROJECT_OVERRIDABLE_KEYS = [
   "autoContinue",
   "ambitionMode",
+  "auditStrictness",
   "collaborationMode",
   "qualityChecksGate",
   "strictNoDirectMain",

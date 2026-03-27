@@ -221,6 +221,7 @@ interface ProjectPolicyInfo {
   memoryWordThreshold: number
   memoryWordSource: "project" | "user" | "default"
   trunkMode: boolean
+  auditStrictness: string
   source: "project" | "default"
   disabledHooks?: string[]
 }
@@ -389,6 +390,11 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
       value: boolToEnabledDisabled(projectPolicyInfo.trunkMode),
       scope: projectPolicyInfo.source,
     },
+    {
+      label: "audit-strictness:",
+      value: projectPolicyInfo.auditStrictness,
+      scope: projectPolicyInfo.source,
+    },
   ]
   const projectDisabled = projectPolicyInfo.disabledHooks ?? []
   if (projectDisabled.length > 0) {
@@ -451,6 +457,7 @@ function buildProjectPolicyInfo(
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     memoryWordSource: memoryThresholds.memoryWordSource,
     trunkMode: projectSettings?.trunkMode ?? false,
+    auditStrictness: projectSettings?.auditStrictness ?? "strict",
     source: policy.source,
     disabledHooks: projectSettings?.disabledHooks,
   }

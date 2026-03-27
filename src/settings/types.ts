@@ -12,6 +12,9 @@ export type AmbitionMode = z.infer<typeof ambitionModeSchema>
 export const collaborationModeSchema = z.enum(["auto", "solo", "team", "relaxed-collab"])
 export type CollaborationMode = z.infer<typeof collaborationModeSchema>
 
+export const auditStrictnessSchema = z.enum(["strict", "relaxed", "local-dev"])
+export type AuditStrictness = z.infer<typeof auditStrictnessSchema>
+
 export const projectStateSchema = z.enum([
   "planning",
   "developing",
@@ -106,6 +109,8 @@ export interface ProjectSwizSettings {
   strictNoDirectMain?: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
   trunkMode?: boolean
+  /** Control governance strictness: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI). */
+  auditStrictness?: AuditStrictness
   /** Warn when an in-progress task exceeds this runtime. */
   taskDurationWarningMinutes?: number
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
@@ -184,6 +189,8 @@ export interface SwizSettings {
   strictNoDirectMain: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
   trunkMode: boolean
+  /** Control governance strictness: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI). */
+  auditStrictness: AuditStrictness
   taskDurationWarningMinutes: number
   memoryLineThreshold: number
   memoryWordThreshold: number
@@ -235,6 +242,7 @@ export const projectSettingsSchema = z.object({
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
   trunkMode: z.boolean().optional(),
+  auditStrictness: auditStrictnessSchema.optional(),
   taskDurationWarningMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),

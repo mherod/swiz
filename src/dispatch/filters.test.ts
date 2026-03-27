@@ -31,6 +31,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     qualityChecksGate: true,
     strictNoDirectMain: false,
     trunkMode: false,
+    auditStrictness: "strict",
     taskDurationWarningMinutes: 10,
     memoryLineThreshold: 1400,
     memoryWordThreshold: 5000,

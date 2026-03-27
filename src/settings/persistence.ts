@@ -9,6 +9,7 @@ import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   ambitionModeSchema,
+  auditStrictnessSchema,
   collaborationModeSchema,
   type ProjectSwizSettings,
   type SessionSwizSettings,
@@ -197,6 +198,8 @@ function applySchemaFields(obj: Record<string, unknown>, result: ProjectSwizSett
   if (ambitionMode.success) result.ambitionMode = ambitionMode.data
   const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)
   if (collaborationMode.success) result.collaborationMode = collaborationMode.data
+  const auditStrictness = auditStrictnessSchema.safeParse(obj.auditStrictness)
+  if (auditStrictness.success) result.auditStrictness = auditStrictness.data
 }
 
 function applyHooksAndCategories(obj: Record<string, unknown>, result: ProjectSwizSettings): void {

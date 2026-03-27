@@ -1,6 +1,6 @@
 import { z } from "zod"
 import type { SettingDef } from "./types"
-import { ambitionModeSchema, collaborationModeSchema } from "./types"
+import { ambitionModeSchema, auditStrictnessSchema, collaborationModeSchema } from "./types"
 
 export const SETTINGS_REGISTRY: SettingDef[] = [
   {
@@ -362,6 +362,32 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
       collaborationModeSchema.safeParse(v).success
         ? null
         : `Invalid value "${v}" for collaboration-mode. Must be: ${collaborationModeSchema.options.join(" | ")}`,
+  },
+  {
+    key: "auditStrictness",
+    aliases: [
+      "audit-strictness",
+      "auditstrictness",
+      "audit_strictness",
+      "audit-mode",
+      "auditmode",
+      "audit_mode",
+      "governance-mode",
+      "governance",
+    ],
+    kind: "string",
+    scopes: ["global", "project"],
+    default: "strict",
+    zodSchema: auditStrictnessSchema,
+    docs: {
+      valuePlaceholder: "strict|relaxed|local-dev",
+      setDescription:
+        "Control task/evidence governance: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI)",
+    },
+    validate: (v) =>
+      auditStrictnessSchema.safeParse(v).success
+        ? null
+        : `Invalid value "${v}" for audit-strictness. Must be: ${auditStrictnessSchema.options.join(" | ")}`,
   },
 ]
 
