@@ -75,6 +75,16 @@ const GOVERNANCE_THRESHOLDS = {
 const MIN_INCOMPLETE_TASKS = GOVERNANCE_THRESHOLDS.strict.minIncomplete
 const MIN_PENDING_TASKS = GOVERNANCE_THRESHOLDS.strict.minPending
 
+interface GovernanceThresholds {
+  minIncomplete: number
+  minPending: number
+}
+
+function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresholds {
+  const mode = auditStrictness as keyof typeof GOVERNANCE_THRESHOLDS
+  return GOVERNANCE_THRESHOLDS[mode] ?? GOVERNANCE_THRESHOLDS.strict
+}
+
 const MEMORY_MARKDOWN_RE = /\.(md|json)$/i
 /**
  * Heuristic patterns that indicate intent to merge directly to the default branch,
@@ -161,7 +171,8 @@ function buildSlowTaskWarning(
 function checkNoTasks(
   toolName: string,
   cwd: string,
-  sessionId: string
+  sessionId: string,
+  thresholds: GovernanceThresholds
 ): (allTasks: Array<{ id: string; status: string; subject: string }>) => Promise<void> {
   return async (allTasks) => {
     if (allTasks.length !== 0) return
@@ -193,11 +204,11 @@ function checkNoTasks(
     await denyRequiredTasks(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
-        `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
-        `  • At least ${MIN_PENDING_TASKS} pending task for the next intended step\n\n` +
+        `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
+        `  • At least ${thresholds.minPending} pending task for the next intended step\n\n` +
         formatActionPlan(
           [
-            `Use TaskCreate to add at least ${MIN_INCOMPLETE_TASKS} tasks — one in_progress for current work and at least one pending for the next step.`,
+            `Use TaskCreate to add at least ${thresholds.minIncomplete} tasks — one in_progress for current work and at least one pending for the next step.`,
             "Include a concrete description of the current work and next step.",
           ],
           { translateToolNames: true }
@@ -210,15 +221,16 @@ function checkNoTasks(
 
 async function checkTaskMinimums(
   toolName: string,
-  summary: ReturnType<typeof buildIncompleteTaskSummary>
+  summary: ReturnType<typeof buildIncompleteTaskSummary>,
+  thresholds: GovernanceThresholds
 ): Promise<void> {
   const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
   if (allTasksDone) return
-  if (incompleteTasks.length >= MIN_INCOMPLETE_TASKS && pendingTasks.length >= MIN_PENDING_TASKS)
+  if (incompleteTasks.length >= thresholds.minIncomplete && pendingTasks.length >= thresholds.minPending)
     return
 
-  const missingIncomplete = Math.max(0, MIN_INCOMPLETE_TASKS - incompleteTasks.length)
-  const missingPending = Math.max(0, MIN_PENDING_TASKS - pendingTasks.length)
+  const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteTasks.length)
+  const missingPending = Math.max(0, thresholds.minPending - pendingTasks.length)
   const actions: string[] = []
 
   if (missingIncomplete > 0 && missingPending > 0) {
