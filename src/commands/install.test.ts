@@ -339,3 +339,33 @@ describe("install.ts statusMessage field", () => {
     })
   })
 })
+
+describe("install.ts Cursor CLI shell execution dispatch entries", () => {
+  it("dry-run includes beforeShellExecution and afterShellExecution for Cursor", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "install", "--dry-run", "--cursor"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, SWIZ_NO_DAEMON: "1" },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(stdout).toContain("beforeShellExecution")
+    expect(stdout).toContain("afterShellExecution")
+    expect(stdout).toContain("swiz dispatch preToolUse beforeShellExecution")
+    expect(stdout).toContain("swiz dispatch postToolUse afterShellExecution")
+  })
+
+  it("dry-run does not include beforeShellExecution for Claude", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "install", "--dry-run", "--claude"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, SWIZ_NO_DAEMON: "1" },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(stdout).not.toContain("beforeShellExecution")
+    expect(stdout).not.toContain("afterShellExecution")
+  })
+})
