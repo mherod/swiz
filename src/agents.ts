@@ -29,6 +29,13 @@ export interface AgentDef {
   envVars?: string[]
   /** Regex matched against the parent process command to identify this agent's shell */
   processPattern?: RegExp
+  /**
+   * Additional agent event names that should dispatch to existing canonical events.
+   * Map of agent-event-name → canonical-event.  Used to install extra dispatch entries
+   * under alternative event names (e.g. Cursor CLI's `beforeShellExecution` dispatching
+   * to the canonical `preToolUse` pipeline).
+   */
+  additionalDispatchEntries?: Record<string, string>
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
@@ -99,6 +106,13 @@ export const AGENTS: AgentDef[] = [
       notification: "afterAgentResponse",
       subagentStart: "subagentStart",
       subagentStop: "subagentStop",
+    },
+    // Cursor CLI only fires beforeShellExecution/afterShellExecution.
+    // Install additional dispatch entries under these event names so that
+    // Bash-matcher preToolUse/postToolUse hooks fire in CLI mode.
+    additionalDispatchEntries: {
+      beforeShellExecution: "preToolUse",
+      afterShellExecution: "postToolUse",
     },
   },
   {

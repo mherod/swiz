@@ -90,6 +90,28 @@ function addDispatchEntries(
     if (!merged[eventName]) merged[eventName] = []
     merged[eventName]!.push(wrapEntry(cmd, timeout))
   }
+
+  addAdditionalDispatchEntries(agent, merged, wrapEntry, seenEvents)
+}
+
+/**
+ * Install additional dispatch entries for agents that expose alternative
+ * event names (e.g. Cursor CLI's beforeShellExecution → preToolUse).
+ */
+function addAdditionalDispatchEntries(
+  agent: AgentDef,
+  merged: Record<string, unknown[]>,
+  wrapEntry: (cmd: string, timeout: number) => unknown,
+  seenEvents: Set<string>
+): void {
+  if (!agent.additionalDispatchEntries) return
+  for (const [agentEventName, canonicalEvent] of Object.entries(agent.additionalDispatchEntries)) {
+    if (!seenEvents.has(canonicalEvent)) continue
+    const timeout = DISPATCH_TIMEOUTS[canonicalEvent] ?? 30
+    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${canonicalEvent} ${agentEventName}`
+    if (!merged[agentEventName]) merged[agentEventName] = []
+    merged[agentEventName]!.push(wrapEntry(cmd, timeout))
+  }
 }
 
 function mergeNestedConfig(
