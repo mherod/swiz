@@ -225,7 +225,7 @@ const hasCICheck =
     ? true
     : priorCommands.some((c) => CI_WAIT_RE.test(c))
 
-if (hasBranchCheck && hasPRCheck && hasCICheck) {
+if (hasBranchCheck && hasPRCheck && hasCICheck && largeFileWarnItems.length === 0) {
   allowPreToolUse("All pre-push checks found in transcript (branch, PR, CI)")
 }
 

@@ -584,3 +584,142 @@ describe("parametric: git branch --show-current variant regression matrix", () =
     })
   }
 })
+
+// ─── Large file check ─────────────────────────────────────────────────────────
+
+async function gitCmd(args: string[], cwd: string): Promise<void> {
+  const p = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  await p.exited
+}
+
+/**
+ * Set up a working git repo with a local bare remote so @{upstream} resolves.
+ * The bare remote lives at bareDir (must be outside workDir to avoid submodule issues).
+ */
+async function makeGitRepoWithUpstream(workDir: string, bareDir: string): Promise<void> {
+  await mkdir(bareDir, { recursive: true })
+  await gitCmd(["init", "--bare", bareDir], tmpDir)
+  await gitCmd(["init", workDir], tmpDir)
+  for (const [k, v] of [
+    ["user.email", "test@example.com"],
+    ["user.name", "Test"],
+    ["commit.gpgsign", "false"],
+  ] as [string, string][]) {
+    await gitCmd(["config", k, v], workDir)
+  }
+  await Bun.write(join(workDir, "README.md"), "hello")
+  await gitCmd(["add", "."], workDir)
+  await gitCmd(["commit", "-m", "init"], workDir)
+  await gitCmd(["remote", "add", "origin", bareDir], workDir)
+  await gitCmd(["push", "origin", "HEAD:main"], workDir)
+  // Get the current local branch name and set its upstream to origin/main
+  const branchProc = Bun.spawn(["git", "branch", "--show-current"], {
+    cwd: workDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const branchName = (await new Response(branchProc.stdout).text()).trim()
+  await branchProc.exited
+  await gitCmd(["branch", "--set-upstream-to=origin/main", branchName || "main"], workDir)
+}
+
+async function runHookInRepo(opts: {
+  repoDir: string
+  command: string
+  transcriptContent?: string
+}): Promise<HookResult> {
+  const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
+  await Bun.write(tPath, opts.transcriptContent ?? "")
+  const payload = JSON.stringify({
+    tool_name: "Bash",
+    tool_input: { command: opts.command, cwd: opts.repoDir },
+    transcript_path: tPath,
+    session_id: "test",
+  })
+  const fakeHome = await mkdtemp(join(tmpDir, "home-lf-"))
+  const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HOME: fakeHome },
+  })
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  if (!out.trim()) return { blocked: false, reason: "", advisory: false }
+  const parsed = JSON.parse(out.trim())
+  const hso = parsed?.hookSpecificOutput
+  const decision = hso?.permissionDecision ?? parsed?.decision
+  return {
+    blocked: decision === "deny",
+    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
+  }
+}
+
+describe("large file check", () => {
+  async function makeRepo(): Promise<string> {
+    const repoDir = await mkdtemp(join(tmpDir, "lf-work-"))
+    const bareDir = await mkdtemp(join(tmpDir, "lf-bare-"))
+    await makeGitRepoWithUpstream(repoDir, bareDir)
+    return repoDir
+  }
+
+  test("small file does not block or advise", async () => {
+    const repoDir = await makeRepo()
+    await Bun.write(join(repoDir, "small.txt"), "x".repeat(100))
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "add small"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked, `hook blocked unexpectedly: ${result.reason}`).toBe(false)
+    expect(result.reason).not.toContain("Large file")
+  })
+
+  test("file exceeding warn threshold (>500KB) emits advisory", async () => {
+    const repoDir = await makeRepo()
+    // 600KB — above warn threshold (500KB), below block threshold (5120KB)
+    await Bun.write(join(repoDir, "warn-size.bin"), Buffer.alloc(600 * 1024, 0x61))
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "add warn-size"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked, `hook blocked unexpectedly: ${result.reason}`).toBe(false)
+    expect(result.advisory).toBe(true)
+    expect(result.reason).toContain("Large file advisory")
+    expect(result.reason).toContain("warn-size.bin")
+  })
+
+  test("file exceeding block threshold (>5MB) blocks push", async () => {
+    const repoDir = await makeRepo()
+    // 6MB — above block threshold (5120KB)
+    await Bun.write(join(repoDir, "block-size.bin"), Buffer.alloc(6 * 1024 * 1024, 0x62))
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "add block-size"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("block threshold")
+    expect(result.reason).toContain("block-size.bin")
+    expect(result.reason).toContain(".gitignore")
+    expect(result.reason).toContain("soft HEAD~1")
+  })
+})
