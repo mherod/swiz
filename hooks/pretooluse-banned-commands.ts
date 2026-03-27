@@ -198,7 +198,7 @@ function buildGitRules(): Rule[] {
     /gh\s+issue\s+edit\b[\s\S]*\s--body(?:=|\s+)(["'])(?:(?!\1).)*(?:`|\$\(|<[^>]*>)(?:(?!\1).)*\1/
   return [
     {
-      match: (c) => /git\s+stash(\s|$)/.test(c),
+      match: (c) => /git\s+stash(\s|$)/.test(c) && !/git\s+stash\s+(list|show)(\s|$)/.test(c),
       message: [
         "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
         '\nInstead:\n  • Commit work-in-progress: `git commit -m "wip: ..."`',

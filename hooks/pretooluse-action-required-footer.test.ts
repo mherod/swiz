@@ -87,6 +87,14 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     expect(result.reason).toContain(FOOTER_MARKER)
   })
 
+  test("pretooluse-banned-commands: git stash list is allowed (no footer)", async () => {
+    const result = await runHook("pretooluse-banned-commands.ts", {
+      tool_name: "Bash",
+      tool_input: { command: "git stash list" },
+    })
+    expect(result.denied).toBe(false)
+  })
+
   test("pretooluse-no-as-any: adding as any denial includes footer", async () => {
     const result = await runHook("pretooluse-ts-quality.ts", {
       tool_name: "Edit",

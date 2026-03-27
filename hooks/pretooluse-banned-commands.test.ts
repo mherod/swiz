@@ -68,6 +68,36 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("deny")
     })
 
+    test("git stash push is blocked", async () => {
+      const result = await runHook("git stash push")
+      expect(result.decision).toBe("deny")
+    })
+
+    test("git stash pop is blocked", async () => {
+      const result = await runHook("git stash pop")
+      expect(result.decision).toBe("deny")
+    })
+
+    test("git stash drop is blocked", async () => {
+      const result = await runHook("git stash drop")
+      expect(result.decision).toBe("deny")
+    })
+
+    test("git stash list is allowed", async () => {
+      const result = await runHook("git stash list")
+      expect(result.decision).not.toBe("deny")
+    })
+
+    test("git stash show is allowed", async () => {
+      const result = await runHook("git stash show")
+      expect(result.decision).not.toBe("deny")
+    })
+
+    test("git stash show with stash ref is allowed", async () => {
+      const result = await runHook("git stash show stash@{0}")
+      expect(result.decision).not.toBe("deny")
+    })
+
     test("git reset --hard is blocked", async () => {
       const result = await runHook("git reset --hard HEAD~1")
       expect(result.decision).toBe("deny")

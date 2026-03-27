@@ -305,9 +305,16 @@ git() {
   # Block dangerous git subcommands
   case "$1" in
     stash)
-      printf 'swiz: Do not use `git stash`. Stashed changes are easy to lose.\n' >&2
-      printf 'Commit work-in-progress instead: git commit -m "wip: ..."\n' >&2
-      return 1
+      case "$2" in
+        list|show)
+          # Read-only inspection — allow
+          ;;
+        *)
+          printf 'swiz: Do not use `git stash`. Stashed changes are easy to lose.\n' >&2
+          printf 'Commit work-in-progress instead: git commit -m "wip: ..."\n' >&2
+          return 1
+          ;;
+      esac
       ;;
     restore)
       printf 'swiz: Do not use `git restore`. It silently discards uncommitted changes.\n' >&2
