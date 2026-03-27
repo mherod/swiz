@@ -12,7 +12,7 @@ import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { resolveCwd } from "../src/cwd.ts"
 import { ensureGeminiApiKey } from "../src/gemini.ts"
-import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
+import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import {
   type AmbitionMode,
@@ -27,11 +27,11 @@ import {
   extractTranscriptData,
   formatTurnsAsContext,
   isDocsOnlySession,
-  projectKeyFromCwd,
   resolveTranscriptText,
   type TranscriptResolution,
 } from "../src/transcript-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
+import { writeReflections } from "./stop-auto-continue/reflections.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 import {
   buildIssueGuidance,
@@ -50,9 +50,6 @@ const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 120_000
 
 const WORKFLOW_FINDING =
   "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
-
-const HOME = getHomeDir()
-const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 const agentResponseSchema = z.object({
   processCritique: z.string(),
@@ -218,90 +215,6 @@ function normalizeReflectiveNextStep(reflections: string[]): string {
   }
 
   return `Apply this confirmed reflection immediately in code: ${top}`
-}
-
-// ─── Memory file resolution ─────────────────────────────────────────────────
-
-async function findProjectDir(cwd: string): Promise<string | null> {
-  const projectKey = projectKeyFromCwd(cwd)
-  const derived = join(PROJECTS_DIR, projectKey)
-  try {
-    await readdir(derived)
-    return derived
-  } catch {}
-
-  // Fallback: scan project dirs for one that matches this CWD
-  try {
-    const dirs = await readdir(PROJECTS_DIR)
-    for (const dir of dirs) {
-      if (projectKey === dir) return join(PROJECTS_DIR, dir)
-    }
-  } catch {}
-
-  return null
-}
-
-// ─── Memory writing ─────────────────────────────────────────────────────────
-
-/**
- * Write agent-extracted reflections to the project's MEMORY.md file.
- * Deduplicates against existing content and respects a ~200-line cap.
- * Never throws — failures are silently swallowed.
- */
-async function writeReflections(cwd: string, reflections: string[]): Promise<void> {
-  try {
-    const projectDir = await findProjectDir(cwd)
-    if (!projectDir) return
-
-    const memoryDir = join(projectDir, "memory")
-    try {
-      await readdir(memoryDir)
-    } catch {
-      return
-    }
-
-    const memoryFile = join(memoryDir, "MEMORY.md")
-
-    let existing = ""
-    if (await Bun.file(memoryFile).exists()) {
-      existing = await Bun.file(memoryFile).text()
-    }
-
-    // Deduplicate against existing content — strip DO/DON'T prefix before comparing
-    // so "DO: Always use bun" matches "- **DO**: Always use bun" in memory
-    const existingLower = existing.toLowerCase()
-    const newReflections = reflections.filter((r) => {
-      const text = r.replace(/^(DO|DON'T):\s*/i, "")
-      const core = text.toLowerCase().slice(0, 60)
-      return !existingLower.includes(core)
-    })
-
-    if (newReflections.length === 0) return
-
-    // Check line count won't exceed ~200
-    const currentLines = existing.split("\n").length
-    if (currentLines + newReflections.length + 3 > 200) return
-
-    // Append as prescriptive directives
-    let append = "\n\n## Confirmed Patterns\n\n"
-    if (existing.includes("## Confirmed Patterns")) {
-      append = "\n"
-    }
-    for (const r of newReflections) {
-      const match = r.match(/^(DO|DON'T):\s*(.+)/i)
-      if (match) {
-        const prefix = match[1]!.toUpperCase()
-        const text = match[2]!
-        append += `- **${prefix}**: ${text}\n`
-      } else {
-        append += `- **DO**: ${r}\n`
-      }
-    }
-
-    await Bun.write(memoryFile, existing + append)
-  } catch {
-    // Never block on memory write failure
-  }
 }
 
 // ─── Changelog staleness detection ──────────────────────────────────────────

@@ -223,7 +223,10 @@ async function checkTaskMinimums(
 ): Promise<void> {
   const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
   if (allTasksDone) return
-  if (incompleteTasks.length >= thresholds.minIncomplete && pendingTasks.length >= thresholds.minPending)
+  if (
+    incompleteTasks.length >= thresholds.minIncomplete &&
+    pendingTasks.length >= thresholds.minPending
+  )
     return
 
   const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteTasks.length)
@@ -476,7 +479,7 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
   _cwd = cwd
 
   // Resolve governance thresholds from effective settings
-  let thresholds = GOVERNANCE_THRESHOLDS.strict
+  let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
     const [settings, projectSettings] = await Promise.all([
       readSwizSettings(),
@@ -487,7 +490,6 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
   } catch {
     // Settings read failure → use strict thresholds as default
   }
-
 
   const allTasks = await readSessionTasks(sessionId)
   const activeTasks = allTasks
