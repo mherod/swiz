@@ -4,7 +4,9 @@
 
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
+  getEffectiveSwizSettings,
   readProjectSettings,
+  readSwizSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -87,12 +89,22 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
+  // Skip large-file enforcement in collaborative repos unless LFS is already configured
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  if (effective.collaborationMode === "team") {
+    const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
+    if (!gitattributes?.includes("filter=lfs")) return
+  }
+
   const sizeLimitKb = await resolveNumericSetting(
     cwd,
     "largeFileSizeKb",
     DEFAULT_LARGE_FILE_SIZE_KB
   )
-  const projectSettings = await readProjectSettings(cwd)
   const allowPatterns = projectSettings?.largeFileAllowPatterns ?? []
   const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns)
   if (largeFiles.length === 0) return

@@ -10,7 +10,13 @@
 // LFS exemption: reads .gitattributes from disk (not from git history) so
 // uncommitted LFS rules added in the same session are respected.
 
-import { DEFAULT_LARGE_FILE_SIZE_KB, resolveNumericSetting } from "../src/settings.ts"
+import {
+  DEFAULT_LARGE_FILE_SIZE_KB,
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+  resolveNumericSetting,
+} from "../src/settings.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
@@ -20,34 +26,43 @@ import {
   isWriteTool,
 } from "./utils/hook-utils.ts"
 
-/**
- * Returns true if the given file path is covered by a Git LFS rule in
- * the .gitattributes file at the repo root (or the provided cwd).
- */
-async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
-  // Look for .gitattributes in cwd and its parents (up to 5 levels)
+/** Find .gitattributes content searching cwd and up to 5 parent directories. */
+async function findGitattributesLfsLines(cwd: string): Promise<string[]> {
   let dir = cwd
   for (let i = 0; i < 5; i++) {
     const attrPath = `${dir}/.gitattributes`
     const file = Bun.file(attrPath)
     if (await file.exists()) {
       const content = await file.text()
-      // Only care about lines that reference LFS
-      const lfsLines = content.split("\n").filter((l) => l.includes("filter=lfs"))
-      for (const line of lfsLines) {
-        const pattern = line.split(/\s+/)[0]
-        if (!pattern || pattern.startsWith("#")) continue
-        // Convert gitattributes glob to a simple regex:
-        // *.ext → any file ending with .ext
-        // Handles: *.png, **/*.png, path/to/*.bin
-        const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
-        if (new RegExp(escaped).test(filePath)) return true
-      }
-      break
+      return content.split("\n").filter((l) => l.includes("filter=lfs"))
     }
     const parent = dir.split("/").slice(0, -1).join("/")
     if (!parent || parent === dir) break
     dir = parent
+  }
+  return []
+}
+
+/** Returns true if the repo has any Git LFS tracking rules in .gitattributes. */
+async function repoHasLfs(cwd: string): Promise<boolean> {
+  const lfsLines = await findGitattributesLfsLines(cwd)
+  return lfsLines.some((l) => {
+    const pattern = l.split(/\s+/)[0]
+    return pattern && !pattern.startsWith("#")
+  })
+}
+
+/**
+ * Returns true if the given file path is covered by a Git LFS rule in
+ * the .gitattributes file at the repo root (or the provided cwd).
+ */
+async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
+  const lfsLines = await findGitattributesLfsLines(cwd)
+  for (const line of lfsLines) {
+    const pattern = line.split(/\s+/)[0]
+    if (!pattern || pattern.startsWith("#")) continue
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
+    if (new RegExp(escaped).test(filePath)) return true
   }
   return false
 }
@@ -91,6 +106,16 @@ async function main() {
   const toolName = input.tool_name ?? ""
   const filePath = input.tool_input?.file_path ?? ""
   const cwd = input.cwd ?? process.cwd()
+
+  // Skip large-file enforcement in collaborative repos unless LFS is already configured
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  if (effective.collaborationMode === "team" && !(await repoHasLfs(cwd))) {
+    allowPreToolUse("")
+  }
 
   const check = await checkFileSizeAllowed(toolName, filePath, input.tool_input ?? {}, cwd)
 
