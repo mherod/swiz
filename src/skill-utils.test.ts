@@ -6,6 +6,7 @@ import { useTempDir } from "../hooks/utils/test-utils.ts"
 import {
   extractMandatedSkillTools,
   extractStepsFromSkill,
+  filterQualitySteps,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   SKILL_DIRS,
@@ -581,5 +582,70 @@ describe("extractStepsFromSkill", () => {
       expect(step.subject.length).toBeGreaterThan(0)
       expect(step.subject).not.toContain("###")
     }
+  })
+})
+
+// ─── filterQualitySteps ─────────────────────────────────────────────────────
+
+describe("filterQualitySteps", () => {
+  test("rejects single-word subjects", () => {
+    const steps = [{ subject: "Plan" }, { subject: "Finalize" }, { subject: "Retrieve CI Data" }]
+    const filtered = filterQualitySteps(steps)
+    expect(filtered).toEqual([{ subject: "Retrieve CI Data" }])
+  })
+
+  test("rejects subjects starting with backtick-wrapped commands", () => {
+    const steps = [
+      { subject: "`gh run view <run-id>` for the most recent run" },
+      { subject: "`gh run list --limit 5`" },
+      { subject: "Run `pnpm lint` to check for errors" },
+    ]
+    const filtered = filterQualitySteps(steps)
+    expect(filtered).toEqual([{ subject: "Run `pnpm lint` to check for errors" }])
+  })
+
+  test("rejects subjects with fewer than 2 words after stripping backticks", () => {
+    const steps = [
+      { subject: "`gh run view <run-id> --log-failed` if failures exist" },
+      { subject: "Setup" },
+      { subject: "Analyze and Report" },
+    ]
+    const filtered = filterQualitySteps(steps)
+    expect(filtered).toEqual([{ subject: "Analyze and Report" }])
+  })
+
+  test("preserves steps with descriptions", () => {
+    const steps = [
+      { subject: "Prepare the environment", description: "Install tools." },
+      { subject: "Plan", description: "Create tasks." },
+    ]
+    const filtered = filterQualitySteps(steps)
+    expect(filtered.length).toBe(1)
+    expect(filtered[0]?.subject).toBe("Prepare the environment")
+    expect(filtered[0]?.description).toBe("Install tools.")
+  })
+
+  test("returns empty array when all steps are low quality", () => {
+    const steps = [{ subject: "Plan" }, { subject: "Finalize" }]
+    expect(filterQualitySteps(steps)).toEqual([])
+  })
+
+  test("returns all steps when all are high quality", () => {
+    const steps = [{ subject: "Retrieve CI run results" }, { subject: "Analyze primary failures" }]
+    expect(filterQualitySteps(steps)).toEqual(steps)
+  })
+
+  test("filters ci-status skill steps to only quality subjects", async () => {
+    const skillsDir = join(homedir(), ".claude", "skills")
+    const content = await Bun.file(join(skillsDir, "ci-status", "SKILL.md")).text()
+    const allSteps = extractStepsFromSkill(content)
+    const filtered = filterQualitySteps(allSteps)
+
+    for (const step of filtered) {
+      expect(step.subject.split(/\s+/).length).toBeGreaterThanOrEqual(2)
+      expect(step.subject).not.toMatch(/^`/)
+    }
+    expect(filtered.length).toBeGreaterThan(0)
+    expect(filtered.length).toBeLessThan(allSteps.length)
   })
 })

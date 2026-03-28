@@ -291,6 +291,31 @@ export function extractStepsFromSkill(content: string): SkillStep[] {
   return extractFromStepHeadings(stripped)
 }
 
+// ─── Step quality filter ────────────────────────────────────────────────────
+
+/** Backtick-wrapped content dominates the subject (shell command as title). */
+const BACKTICK_DOMINANT_RE = /^`[^`]+`/
+
+/**
+ * Filter out low-quality steps that don't make good task subjects.
+ *
+ * Rejects:
+ * - Single-word subjects (too vague: "Plan", "Finalize")
+ * - Subjects dominated by backtick-wrapped shell commands
+ * - Subjects shorter than 3 words
+ */
+export function filterQualitySteps(steps: SkillStep[]): SkillStep[] {
+  return steps.filter((step) => {
+    const subject = step.subject.trim()
+    // Strip markdown formatting for word counting
+    const plain = subject.replace(/`[^`]*`/g, "").trim()
+    const wordCount = plain.split(/\s+/).filter(Boolean).length
+    if (wordCount < 2) return false
+    if (BACKTICK_DOMINANT_RE.test(subject)) return false
+    return true
+  })
+}
+
 // ─── Skill listing (async) ───────────────────────────────────────────────────
 
 export interface SkillInfo {

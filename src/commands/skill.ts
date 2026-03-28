@@ -44,7 +44,7 @@ async function listSkills() {
   console.log()
 }
 
-async function expandInlineCommands(content: string): Promise<string> {
+export async function expandInlineCommands(content: string): Promise<string> {
   const matches = [...content.matchAll(INLINE_CMD_RE)]
   if (matches.length === 0) return content
 
@@ -73,7 +73,7 @@ async function expandInlineCommands(content: string): Promise<string> {
   return content.replace(INLINE_CMD_RE, () => results[i++]!)
 }
 
-function substituteArgs(content: string, positionalArgs: string[]): string {
+export function substituteArgs(content: string, positionalArgs: string[]): string {
   if (positionalArgs.length === 0) return content
   let result = content
   // $ARGUMENTS → full space-joined remaining args
