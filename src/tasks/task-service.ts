@@ -27,11 +27,20 @@ export { compareTaskIds, parseTaskId, sessionPrefix }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
-export async function createTask(
-  sessionId: string,
-  subject: string,
+export interface CreateTaskOptions {
+  sessionId: string
+  subject: string
   description: string
-): Promise<void> {
+  /** Working directory to associate with the task. Defaults to `process.cwd()`. */
+  cwd?: string
+}
+
+/**
+ * Core in-process task creation — no console output, no side-effects beyond disk writes.
+ * Use this from hooks and services that need to create tasks without subprocess overhead.
+ */
+export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
+  const { sessionId, subject, description, cwd = process.cwd() } = opts
   const tasks = await readTasks(sessionId)
   const prefix = sessionPrefix(sessionId)
   const maxSeq = tasks.reduce((m, t) => {
@@ -55,7 +64,7 @@ export async function createTask(
     blockedBy: [],
   }
 
-  await writeTask(sessionId, task, process.cwd())
+  await writeTask(sessionId, task, cwd)
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
     taskId: id,
@@ -64,8 +73,18 @@ export async function createTask(
     subject,
   })
 
+  return task
+}
+
+/** CLI-facing task creation — wraps `createTaskInProcess` with console output. */
+export async function createTask(
+  sessionId: string,
+  subject: string,
+  description: string
+): Promise<void> {
+  const task = await createTaskInProcess({ sessionId, subject, description })
   const { emoji, color } = STATUS_STYLE.pending
-  console.log(`\n  ${emoji} Created #${id}: ${color}pending${RESET}`)
+  console.log(`\n  ${emoji} Created #${task.id}: ${color}pending${RESET}`)
   console.log(`     ${subject}\n`)
 }
 

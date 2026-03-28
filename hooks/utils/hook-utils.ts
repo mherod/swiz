@@ -1001,6 +1001,7 @@ export function formatTaskCompleteCommands(
  * Executor type for createSessionTask — injectable for testing.
  * Receives the full argv array and returns the process exit code.
  */
+/** @deprecated Use the `executor` parameter on `createSessionTask` for test injection only. */
 export type TaskExecutor = (args: string[]) => Promise<number>
 
 const defaultTaskExecutor: TaskExecutor = async (args) => {
@@ -1017,25 +1018,7 @@ function sanitizePathComponent(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_-]/g, "")
 }
 
-async function executeWithFallback(executor: TaskExecutor, args: string[]): Promise<number> {
-  try {
-    return await executor(args)
-  } catch (err) {
-    console.error(
-      `[swiz] createSessionTask: executor threw (${err instanceof Error ? err.message : String(err)}), falling back to default`
-    )
-  }
-  try {
-    return await defaultTaskExecutor(args)
-  } catch (defaultErr) {
-    console.error(
-      `[swiz] createSessionTask: default executor also threw (${defaultErr instanceof Error ? defaultErr.message : String(defaultErr)}), giving up`
-    )
-    return 1
-  }
-}
-
-/** Create a session task via `swiz tasks create`. Uses a sentinel file to fire only once per session. */
+/** Validate session/sentinel inputs and check dedup sentinel. */
 async function validateCreateTaskInputs(
   sessionId: string | undefined,
   sentinelKey: string
@@ -1051,39 +1034,79 @@ async function validateCreateTaskInputs(
   return { safeSentinel, safeSession, sentinel }
 }
 
+/**
+ * Create a session task in-process with sentinel dedup.
+ *
+ * Calls `createTaskInProcess` directly — no subprocess overhead.
+ * The `executor` parameter exists only for backward-compatible test injection;
+ * when provided, it falls back to the legacy subprocess path.
+ */
 export async function createSessionTask(
   sessionId: string | undefined,
   sentinelKey: string,
   subject: string,
   description: string,
-  executor: TaskExecutor = defaultTaskExecutor
+  executor?: TaskExecutor
 ): Promise<void> {
   const validated = await validateCreateTaskInputs(sessionId, sentinelKey)
   if (!validated) return
   const { sentinel } = validated
 
-  let exec = executor
-  if (typeof exec !== "function") {
-    console.error(
-      `[swiz] createSessionTask: invalid executor (got ${typeof exec}), falling back to default`
-    )
-    exec = defaultTaskExecutor
+  // Legacy path: test-injected executor shells out to swiz CLI
+  if (executor) {
+    const exitCode = await executor([
+      "swiz",
+      "tasks",
+      "create",
+      subject,
+      description,
+      "--session",
+      sessionId ?? "",
+    ])
+    if (exitCode === 0) {
+      try {
+        await Bun.write(sentinel, "")
+      } catch {}
+    }
+    return
   }
 
-  const home = getHomeDirOrNull()
-  if (!home) return
-  const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
-  const args = [swiz, "tasks", "create", subject, description, "--session", sessionId ?? ""]
-  const exitCode = await executeWithFallback(exec, args)
-  if (exitCode === 0) {
+  // In-process path: direct disk write, no subprocess
+  try {
+    const { createTaskInProcess } = await import("../../src/tasks/task-service.ts")
+    await createTaskInProcess({ sessionId: sessionId!, subject, description })
     try {
       await Bun.write(sentinel, "")
     } catch {}
+  } catch (err) {
+    // Fallback to subprocess if import fails (e.g., circular dep edge case)
+    console.error(
+      `[swiz] createSessionTask: in-process creation failed (${err instanceof Error ? err.message : String(err)}), falling back to subprocess`
+    )
+    const home = getHomeDirOrNull()
+    if (!home) return
+    const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
+    const exitCode = await defaultTaskExecutor([
+      swiz,
+      "tasks",
+      "create",
+      subject,
+      description,
+      "--session",
+      sessionId ?? "",
+    ])
+    if (exitCode === 0) {
+      try {
+        await Bun.write(sentinel, "")
+      } catch {}
+    }
   }
 }
 
 // ─── Command normalisation (re-exported from src/) ──────────────────────
 export { normalizeCommand, stripHeredocs } from "../../src/command-utils.ts"
+// ─── Task creation (re-exported from src/) ───────────────────────────────
+export { type CreateTaskOptions, createTaskInProcess } from "../../src/tasks/task-service.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
 export {
   type CurrentSessionTaskToolStats,
