@@ -192,11 +192,6 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "TaskUpdate|TaskGet",
-    hooks: [{ file: "pretooluse-task-recovery.ts", timeout: 5 }],
-  },
-  {
-    event: "preToolUse",
     matcher: "TaskOutput",
     hooks: [{ file: "pretooluse-taskoutput-timeout.ts", timeout: 5 }],
   },
@@ -292,11 +287,6 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "TaskCreate",
     hooks: [{ file: "posttooluse-task-subject-validation.ts", timeout: 5 }],
-  },
-  {
-    event: "postToolUse",
-    matcher: "TaskUpdate|TaskGet",
-    hooks: [{ file: "posttooluse-task-recovery.ts", timeout: 5 }],
   },
   {
     event: "postToolUse",

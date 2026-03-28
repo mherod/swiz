@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**108 hooks. 12 event types. Every agent. Zero compromises.**
+**106 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -119,7 +119,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (55)
+### PreToolUse (54)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -159,7 +159,6 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-taskupdate-schema.ts` | Blocks TaskUpdate calls that include unsupported fields (e.g. `notes`). Lists the allowed schema fields and redirects to `swiz tasks complete --evidence` for task completion with structured evidence. |
 | `pretooluse-require-task-evidence.ts` | Blocks `TaskUpdate status=completed` unless the description contains at least 1 structured evidence field (note, conclusion, run ID, commit SHA, ci_green, pr, no_ci). Prevents hollow task completion that leaves no machine-readable verification record. |
 | `pretooluse-dirty-worktree-gate.ts` | Blocks task updates when the worktree has more than 15 dirty files. Forces a commit boundary before the task plan can be reshaped further. Covers Claude `TaskUpdate` and Codex `update_plan`. |
-| `pretooluse-task-recovery.ts` | Before TaskUpdate or TaskGet, checks whether the referenced task ID exists on disk. If it's missing (lost during context compaction), creates a stub file so the tool call succeeds transparently — the agent never sees "Task not found". |
 | `pretooluse-taskoutput-timeout.ts` | Blocks TaskOutput calls that are missing a `timeout` parameter or have a timeout exceeding 120 seconds. Missing timeouts block the session indefinitely; excessive timeouts waste time. |
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
 | `pretooluse-no-ready-to-backlog.ts` | Blocks `gh issue edit` commands that demote issues from `ready` to `backlog`. Prevents agents from gaming readiness hooks by downgrading triaged work they want to avoid. |
@@ -181,7 +180,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts` | Blocks `swiz tasks update/status` CLI commands in Claude Code and redirects to the native TaskUpdate tool. Guides developers toward native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) instead of CLI equivalents for better integration and auditing. Allows `swiz tasks complete` with helpful guidance on evidence format. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (21)
+### PostToolUse (20)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -196,7 +195,6 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-pr-create-refine.ts` | After `gh pr create`, checks if the new PR has a thin or empty description and suggests the /refine-pr skill via `additionalContext`. Non-blocking — advisory only. |
 | `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits. Runs async so it never slows the agent down. |
 | `posttooluse-task-subject-validation.ts` | Validates task subjects after creation, catching issues that the pre-creation hook might have missed. |
-| `posttooluse-task-recovery.ts` | After a TaskUpdate or TaskGet, re-checks the session task list and recovers any tasks that were lost during context compaction. |
 | `posttooluse-task-list-sync.ts` | After TaskList, synchronizes the internal task model (tool_response) into the file-based task store. Idempotent — only writes when subject or status have changed. Emits a sync summary when tasks are created or updated. |
 | `posttooluse-task-evidence.ts` | After a TaskUpdate with `metadata.evidence`, writes `completionEvidence` to the task JSON file. Bridges the gap between built-in TaskUpdate and CI enforcement that checks task files for evidence. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
