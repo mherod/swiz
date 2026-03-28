@@ -24,17 +24,12 @@ import {
   completeTaskWithAutoTransition,
   createTask,
   ensureFileBackedTask,
-  submitEvidence,
   updateStatus,
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
 import type { Command } from "../types.ts"
 
-export {
-  validateEvidence,
-  verifyCiGreenEvidence,
-  verifyTaskSubject,
-} from "../tasks/evidence-validator.ts"
+export { verifyTaskSubject } from "../tasks/evidence-validator.ts"
 
 export {
   compareTaskIds,
@@ -219,7 +214,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   const [taskId, ...sessionArgs] = rest
   if (!taskId) {
     throw new Error(
-      "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT] [--dry-run]"
+      "Usage: swiz tasks complete <task-id> [--evidence TEXT] [--state STATE] [--verify TEXT] [--subject TEXT] [--dry-run]"
     )
   }
   const dryRun = rest.includes("--dry-run")
@@ -269,27 +264,6 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
 }
 
-async function runEvidenceTask(rest: string[], filterCwd?: string): Promise<void> {
-  const [taskId, evidenceText, ...sessionArgs] = rest
-  if (!taskId || !evidenceText) {
-    throw new Error(
-      'Usage: swiz tasks evidence <task-id> "<evidence>" [--subject TEXT]\n' +
-        "Prefixes: commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:"
-    )
-  }
-  const subjectFlag = extractFlag(rest, "--subject")
-  const sessionId = await resolveSession(sessionArgs)
-
-  await ensureFileBackedTask({
-    sessionId,
-    taskId,
-    filterCwd,
-    subject: subjectFlag,
-  })
-
-  await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
-}
-
 async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> {
   const [taskId, nextStatus, ...sessionArgs] = rest
   const newStatus = nextStatus as Task["status"] | undefined
@@ -335,7 +309,7 @@ const UPDATE_USAGE =
   `  --state STATE        Update the session working phase (independent of task status);\n` +
   `                         valid phases: ${PROJECT_STATES.join(" | ")}\n\n` +
   "At least one of --subject, --description, --active-form, or --status is required.\n" +
-  'To add evidence to a completed task, use: swiz tasks evidence <task-id> "<evidence>"'
+  "At least one field change is required."
 
 interface ParsedUpdateArgs {
   taskIds: string[]
@@ -445,7 +419,6 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
-  evidence: (rest, filterCwd) => runEvidenceTask(rest, filterCwd),
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
   adopt: async (rest) => {
@@ -460,17 +433,12 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|status|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
       flags: "complete <id>",
-      description: "Mark a task completed (requires --evidence)",
-    },
-    {
-      flags: "evidence <id> <text>",
-      description:
-        "Submit evidence to a task (commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:)",
+      description: "Mark a task completed",
     },
     {
       flags: "status <id> <status>",
@@ -496,8 +464,7 @@ export const tasksCommand: Command = {
     },
     {
       flags: "--evidence <text>",
-      description:
-        "Completion evidence (commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:)",
+      description: "Optional completion evidence (free-form text)",
     },
     {
       flags: "--verify <text>",

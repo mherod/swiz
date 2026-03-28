@@ -10,7 +10,7 @@ import {
 } from "../settings.ts"
 import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { validateEvidence, verifyCiGreenEvidence, verifyTaskSubject } from "./evidence-validator.ts"
+import { verifyTaskSubject } from "./evidence-validator.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -364,14 +364,6 @@ export function applyStatusTransition(
   applyTaskTimestamps(task, newStatus, nowIso, nowMs)
 }
 
-async function validateAndVerifyEvidence(evidence: string | undefined): Promise<void> {
-  if (!evidence) return
-  const validationError = validateEvidence(evidence)
-  if (validationError) throw new Error(validationError)
-  const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
-  if (ciError) throw new Error(ciError)
-}
-
 export async function updateStatus(
   sessionId: string,
   taskId: string,
@@ -393,12 +385,6 @@ export async function updateStatus(
     const verifyError = verifyTaskSubject(task.subject, verifyText)
     if (verifyError) throw new Error(verifyError)
   }
-
-  if (newStatus === "completed" && !evidence) {
-    throw new Error("Evidence required when completing a task. Use --evidence.")
-  }
-
-  await validateAndVerifyEvidence(evidence)
 
   const oldStatus = task.status
   const now = new Date().toISOString()
@@ -596,14 +582,6 @@ export async function submitEvidence(
     sessionId,
     filterCwd
   )
-
-  const validationError = validateEvidence(evidence)
-  if (validationError) {
-    throw new Error(validationError)
-  }
-
-  const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
-  if (ciError) throw new Error(ciError)
 
   task.completionEvidence = evidence
   if (!task.completionTimestamp) {

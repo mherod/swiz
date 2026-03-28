@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { countEvidenceFields } from "../tasks/evidence-validator.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import {
   compareTaskIds,
@@ -14,8 +13,6 @@ import {
   resolveTaskById,
   sessionPrefix,
   tasksCommand,
-  validateEvidence,
-  verifyCiGreenEvidence,
   verifyTaskSubject,
 } from "./tasks.ts"
 
@@ -216,152 +213,6 @@ describe("getSessions", () => {
     expect(allSessions).toContain(SESSION_B)
     expect(allSessions).toContain(SESSION_C)
     expect(allSessions.length).toBe(3)
-  })
-})
-
-// ─── validateEvidence ─────────────────────────────────────────────────────────
-
-describe("validateEvidence", () => {
-  it("accepts evidence with 1+ structured fields", () => {
-    expect(validateEvidence("note:CI green — conclusion: success")).toBeNull()
-    expect(validateEvidence("commit:abc123f — note:tests passed")).toBeNull()
-    expect(validateEvidence("note:all checks passed — conclusion: done")).toBeNull()
-    expect(validateEvidence("note:bulk-complete — conclusion: all tasks completed")).toBeNull()
-    // single-field evidence is now valid
-    expect(validateEvidence("note:only one structured field present")).toBeNull()
-    expect(validateEvidence("note:CI green only one field here")).toBeNull()
-  })
-
-  it("accepts commit: with space-separated SHA list", () => {
-    expect(validateEvidence("commit:abc123f def456a")).toBeNull()
-    expect(validateEvidence("commit:abc123f def456a 1234567")).toBeNull()
-  })
-
-  it("rejects commit: with non-hex value", () => {
-    const error = validateEvidence("commit:not-a-sha")
-    expect(error).not.toBeNull()
-    expect(error).toContain("Invalid commit SHA")
-  })
-
-  it("accepts commit:<sha> followed by note: without an explicit delimiter", () => {
-    expect(validateEvidence("commit:02f30fb note:CI passed")).toBeNull()
-  })
-
-  it("counts both commit and note fields when space-delimited without --", () => {
-    const fields = countEvidenceFields("commit:02f30fb note:CI passed")
-    expect(fields).toContain("commit")
-    expect(fields).toContain("note")
-  })
-
-  it("rejects bare commit: with no SHA", () => {
-    const error = validateEvidence("commit:")
-    expect(error).not.toBeNull()
-    expect(error).toContain("requires a hex SHA")
-  })
-
-  it("accepts pr: with a numeric PR number", () => {
-    expect(validateEvidence("pr:#42 -- note:squash merged")).toBeNull()
-    expect(validateEvidence("pr:123 -- note:merged")).toBeNull()
-  })
-
-  it("accepts pr: with a GitHub pull URL", () => {
-    expect(validateEvidence("pr:https://github.com/owner/repo/pull/42 -- note:merged")).toBeNull()
-  })
-
-  it("rejects pr: with non-numeric non-URL value", () => {
-    const error = validateEvidence("pr:some-branch-name")
-    expect(error).not.toBeNull()
-    expect(error).toContain("Invalid PR reference")
-  })
-
-  it("rejects bare pr: with no value", () => {
-    const error = validateEvidence("pr:")
-    expect(error).not.toBeNull()
-    expect(error).toContain("requires a PR number")
-  })
-
-  it("rejects evidence without a recognized prefix", () => {
-    const error = validateEvidence("just some text")
-    expect(error).not.toBeNull()
-    expect(error).toContain("Invalid evidence format")
-    expect(error).toContain("commit:")
-  })
-
-  it("rejects evidence with 0 structured fields (valid prefix but too short value)", () => {
-    // "note:hi" passes prefix check but the note regex requires 5+ chars after note:
-    const error = validateEvidence("note:hi")
-    expect(error).not.toBeNull()
-    expect(error).toContain("at least 1 structured field")
-    expect(error).toContain("found 0")
-  })
-
-  it("does not count embedded text in a field's value as a separate field", () => {
-    // "CI green" appears inside the note value — must NOT be counted as a separate ci_green field;
-    // but with REQUIRED=1 the overall call is valid
-    expect(validateEvidence("note:CI green only one field here")).toBeNull()
-  })
-
-  it("rejects empty-ish evidence without prefix", () => {
-    expect(validateEvidence("CI passed")).not.toBeNull()
-  })
-
-  it("rejects multi-segment evidence where a later segment has an unrecognized prefix", () => {
-    const error = validateEvidence("note:CI green -- bogus:whatever")
-    expect(error).not.toBeNull()
-    expect(error).toContain("bogus:")
-    expect(error).toContain("Invalid evidence prefix")
-  })
-
-  it("accepts ci_green: only when paired with a commit SHA or run ID", () => {
-    // bare ci_green: is rejected — no traceable CI proof
-    expect(validateEvidence("ci_green:")).not.toBeNull()
-    expect(validateEvidence("ci_green: ")).not.toBeNull()
-    expect(validateEvidence("ci_green: -- note:all passed")).not.toBeNull()
-    // paired with commit → valid
-    expect(validateEvidence("ci_green: -- commit:25ec5c7")).toBeNull()
-    expect(validateEvidence("commit:25ec5c7 -- ci_green:")).toBeNull()
-    // paired with run ID → valid
-    expect(validateEvidence("ci_green: -- run 23048000800")).toBeNull()
-    // run ID with trailing non-numeric text → rejected
-    expect(validateEvidence("ci_green: -- run 23048000800abc")).not.toBeNull()
-    expect(validateEvidence("ci_green: -- run 23048000800 extra")).not.toBeNull()
-  })
-
-  it("accepts multi-segment evidence where all segments use recognized prefixes", () => {
-    expect(validateEvidence("commit:abc1234 -- note:all jobs passed")).toBeNull()
-    expect(validateEvidence("pr:#42 -- note:squash merged")).toBeNull()
-    expect(validateEvidence("file:src/foo.ts -- note:updated")).toBeNull()
-    expect(validateEvidence("test:passing -- note:all green")).toBeNull()
-  })
-
-  it("rejects a three-char unknown prefix in a later segment", () => {
-    const error = validateEvidence("note:CI green -- foo:bar")
-    expect(error).not.toBeNull()
-    expect(error).toContain("foo:")
-  })
-})
-
-// ─── verifyCiGreenEvidence ────────────────────────────────────────────────────
-
-describe("verifyCiGreenEvidence", () => {
-  it("returns null for evidence without ci_green", async () => {
-    expect(await verifyCiGreenEvidence("note:all done", process.cwd())).toBeNull()
-    expect(await verifyCiGreenEvidence("commit:abc123f", process.cwd())).toBeNull()
-  })
-
-  it("returns null (fails open) when ci_green has no resolvable run ID", async () => {
-    // ci_green without run or commit — traceability is enforced by validateEvidence, not here
-    expect(await verifyCiGreenEvidence("ci_green:", process.cwd())).toBeNull()
-  })
-
-  it("returns null (fails open) when gh CLI is unavailable", async () => {
-    // Use a nonexistent cwd so gh fails
-    const result = await verifyCiGreenEvidence(
-      "ci_green: -- run 99999999999",
-      "/nonexistent-path-for-gh-test"
-    )
-    // Should fail open — null means no error
-    expect(result).toBeNull()
   })
 })
 
