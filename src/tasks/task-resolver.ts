@@ -13,6 +13,7 @@ import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   compareTaskIds,
+  isIncompleteTaskStatus,
   parseTaskId,
   readSessionMeta,
   readTasks,
@@ -477,7 +478,7 @@ export async function collectIncompleteTasks(
 
     const tasks = await readTasks(sessionId, tasksDir)
     for (const task of tasks) {
-      if (task.status === "pending" || task.status === "in_progress") {
+      if (isIncompleteTaskStatus(task.status)) {
         results.push({ sessionId, task })
       }
     }

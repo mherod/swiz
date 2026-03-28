@@ -28,7 +28,12 @@ async function dispatch(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, SWIZ_NO_DAEMON: "1", ...options.env },
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+        ...options.env,
+      },
     }
   )
   void proc.stdin.write(JSON.stringify(payload))
@@ -215,6 +220,7 @@ describe("dispatch replay", () => {
       env: {
         ...process.env,
         SWIZ_NO_DAEMON: "1",
+        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
         // Keep replay deterministic in CI without contacting external providers.
         AI_TEST_NO_BACKEND: "1",
       },

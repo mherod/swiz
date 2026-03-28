@@ -36,6 +36,11 @@ export interface Task {
   subjectFingerprint?: string
 }
 
+/** Whether a task status represents an incomplete (actionable) task. */
+export function isIncompleteTaskStatus(status: string): boolean {
+  return status === "pending" || status === "in_progress"
+}
+
 export interface AuditEntry {
   timestamp: string
   taskId: string
@@ -143,7 +148,7 @@ async function countOpenTasks(dir: string, files: string[]): Promise<number> {
     if (!f.endsWith(".json") || f.startsWith(".") || f === "compact-snapshot.json") continue
     try {
       const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
-      if (t.status === "pending" || t.status === "in_progress") count++
+      if (t.status && isIncompleteTaskStatus(t.status)) count++
     } catch {}
   }
   return count

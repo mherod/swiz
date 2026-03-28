@@ -6,7 +6,7 @@
 import { format, formatDistanceToNow } from "date-fns"
 import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
-import { readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
+import { isIncompleteTaskStatus, readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
 import { getOrphanSessionIds, getSessions } from "./task-resolver.ts"
 import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
 
@@ -110,7 +110,7 @@ function countTaskStats(tasks: Task[]): { incomplete: number; completed: number 
   let incomplete = 0
   let completed = 0
   for (const t of tasks) {
-    if (t.status === "pending" || t.status === "in_progress") incomplete++
+    if (isIncompleteTaskStatus(t.status)) incomplete++
     else if (t.status === "completed") completed++
   }
   return { incomplete, completed }

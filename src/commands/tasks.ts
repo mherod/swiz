@@ -3,7 +3,13 @@ import { detectCurrentAgent } from "../detect.ts"
 import { PROJECT_STATES } from "../settings.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
-import { compareTaskIds, parseTaskId, readTasks, sessionPrefix } from "../tasks/task-repository.ts"
+import {
+  compareTaskIds,
+  isIncompleteTaskStatus,
+  parseTaskId,
+  readTasks,
+  sessionPrefix,
+} from "../tasks/task-repository.ts"
 import {
   findTaskAcrossSessions,
   getOrphanSessionIds,
@@ -93,13 +99,13 @@ async function printPreviousSessionIncompleteHint(sessionId: string): Promise<vo
   const tasks = await readTasks(sessionId)
   if (tasks.length === 0) return
 
-  const hasIncomplete = tasks.some((t) => t.status === "pending" || t.status === "in_progress")
+  const hasIncomplete = tasks.some((t) => isIncompleteTaskStatus(t.status))
   if (hasIncomplete) return
 
   const sessions = await getSessions(process.cwd())
   for (const prevSessionId of sessions.slice(1)) {
     const prev = await readTasks(prevSessionId)
-    const prevIncomplete = prev.filter((t) => t.status === "pending" || t.status === "in_progress")
+    const prevIncomplete = prev.filter((t) => isIncompleteTaskStatus(t.status))
     if (prevIncomplete.length === 0) continue
 
     console.log(
