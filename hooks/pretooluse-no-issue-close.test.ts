@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
+import { runHook as runHookScript } from "./utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-issue-close.ts")
 
@@ -9,30 +10,15 @@ interface HookResult {
 }
 
 async function runHook(command: string): Promise<HookResult> {
-  const payload = JSON.stringify({
+  const result = await runHookScript(HOOK_PATH, {
     tool_name: "Bash",
     tool_input: { command },
     session_id: "test",
     cwd: "/tmp",
   })
-
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return { blocked: false, reason: "" }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
-  const decision = hso?.permissionDecision ?? parsed?.decision
   return {
-    blocked: decision === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    blocked: result.decision === "deny",
+    reason: result.reason ?? "",
   }
 }
 

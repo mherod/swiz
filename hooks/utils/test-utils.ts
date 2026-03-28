@@ -193,6 +193,7 @@ export async function runFileEditHook(
   script: string,
   opts: {
     filePath?: string
+    oldString?: string
     newString?: string
     content?: string
     toolName?: string
@@ -202,6 +203,7 @@ export async function runFileEditHook(
     tool_name: opts.toolName ?? "Edit",
     tool_input: {
       file_path: opts.filePath ?? "src/app.ts",
+      old_string: opts.oldString,
       new_string: opts.newString,
       content: opts.content,
     },

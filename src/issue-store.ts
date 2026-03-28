@@ -13,7 +13,6 @@ import { Database, type Statement } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { resolveCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import { acquireGhSlot } from "./gh-rate-limit.ts"
 import { getHomeDirWithFallback } from "./home.ts"
@@ -637,14 +636,7 @@ export class IssueStore {
 
 // ─── Replay ─────────────────────────────────────────────────────────────────
 
-/** Maximum attempts before a mutation is discarded. */
-const MAX_ATTEMPTS = 5
-
-export interface ReplayResult {
-  replayed: number
-  failed: number
-  discarded: number
-}
+export type { ReplayResult } from "./issue-store-replay.ts"
 
 /**
  * Replay pending mutations for a repo against live GitHub.
@@ -658,233 +650,11 @@ export async function replayPendingMutations(
   cwd: string,
   store?: IssueStore,
   concurrency = 5
-): Promise<ReplayResult> {
+): Promise<import("./issue-store-replay.ts").ReplayResult> {
   // Implementation delegated to the dedicated replay module.
   // (Issue #378 extraction: keep this file focused on storage + readers.)
   const mod = await import("./issue-store-replay.ts")
   return await mod.replayPendingMutations(repo, cwd, store, concurrency)
-}
-
-/**
- * After a successful mutation, update the local cache to reflect the change.
- * Removes closed issues and merged PRs so local consumers see consistent state.
- */
-function invalidateLocalCache(store: IssueStore, repo: string, mutation: MutationPayload): void {
-  switch (mutation.type) {
-    case "close":
-    case "resolve":
-      store.removeIssue(repo, mutation.number)
-      break
-    case "pr_merge":
-      store.removePullRequest(repo, mutation.number)
-      break
-  }
-}
-
-/** Simple concurrency-limited promise pool. */
-async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[]): Promise<void> {
-  let nextTaskIndex = 0
-  async function worker() {
-    while (nextTaskIndex < tasks.length) {
-      const task = tasks[nextTaskIndex++]
-      if (task) await task()
-    }
-  }
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker)
-  await Promise.all(workers)
-}
-
-/** Execute a single mutation against live GitHub via gh CLI. Returns true on success. */
-async function executeCommentMutation(
-  mutation: MutationPayload,
-  num: string,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (!mutation.body) return true
-  return runGhCommand(["gh", "issue", "comment", num, "--body", mutation.body], cwd, repo, mutation)
-}
-
-async function executeLabelAddMutation(
-  mutation: MutationPayload,
-  num: string,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (!mutation.labels?.length) return true
-  return runGhCommand(
-    ["gh", "issue", "edit", num, ...mutation.labels.flatMap((l) => ["--add-label", l])],
-    cwd,
-    repo,
-    mutation
-  )
-}
-
-async function executeMilestoneSetMutation(
-  mutation: MutationPayload,
-  num: string,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  if (mutation.milestone == null) return true
-  return runGhCommand(
-    ["gh", "issue", "edit", num, "--milestone", String(mutation.milestone)],
-    cwd,
-    repo,
-    mutation
-  )
-}
-
-async function executeMutation(
-  mutation: MutationPayload,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  // Legacy implementation (moved to `issue-store-replay.ts`).
-  // This path is intentionally not exercised by current exports.
-  void mutation
-  void cwd
-  void repo
-  return false
-}
-
-async function executeResolveMutation(
-  mutation: MutationPayload,
-  num: string,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  // Legacy implementation (moved to `issue-store-replay.ts`).
-  void mutation
-  void num
-  void cwd
-  void repo
-  return false
-}
-
-async function executePrMutation(
-  mutation: MutationPayload,
-  num: string,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  // Legacy implementation (moved to `issue-store-replay.ts`).
-  void mutation
-  void num
-  void cwd
-  void repo
-  return false
-}
-
-async function runGhCommand(
-  args: string[],
-  cwd: string,
-  repo: string,
-  mutationForLog: MutationPayload
-): Promise<boolean> {
-  // Legacy implementation (moved to `issue-store-replay.ts`).
-  void args
-  void cwd
-  void repo
-  void mutationForLog
-  return false
-}
-
-async function executeMutationCommand(
-  args: string[],
-  cwd: string,
-  stdin?: Response
-): Promise<boolean> {
-  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
-  void args
-  void cwd
-  void stdin
-  return false
-}
-
-function buildCreateMutationArgs(
-  mutation: MutationPayload,
-  repo: string
-): { args: string[]; stdin: Response } | null {
-  if (!mutation.title) return null
-  const payload: Record<string, unknown> = { title: mutation.title }
-  if (mutation.body) payload.body = mutation.body
-  if (mutation.labels?.length) payload.labels = mutation.labels
-  return {
-    args: [`repos/${repo}/issues`, "-X", "POST", "--input", "-"],
-    stdin: new Response(JSON.stringify(payload)),
-  }
-}
-
-function buildCommentMutationArgs(
-  mutation: MutationPayload,
-  repo: string,
-  num: string
-): { args: string[] } | null {
-  if (!mutation.body) return null
-  return { args: [`repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`] }
-}
-
-function buildMutationArgs(
-  mutation: MutationPayload,
-  repo: string,
-  num: string
-): { args: string[]; stdin?: Response } | null {
-  switch (mutation.type) {
-    case "close":
-      return { args: [`repos/${repo}/issues/${num}`, "-X", "PATCH", "-f", "state=closed"] }
-    case "comment":
-      return buildCommentMutationArgs(mutation, repo, num)
-    case "label_add":
-      if (!mutation.labels?.length) return null
-      return {
-        args: [`repos/${repo}/issues/${num}/labels`, "-X", "POST", "--input", "-"],
-        stdin: new Response(JSON.stringify({ labels: mutation.labels })),
-      }
-    case "milestone_set":
-      if (mutation.milestone == null) return null
-      return {
-        args: [
-          `repos/${repo}/issues/${num}`,
-          "-X",
-          "PATCH",
-          "-f",
-          `milestone=${String(mutation.milestone)}`,
-        ],
-      }
-    case "create":
-      return buildCreateMutationArgs(mutation, repo)
-    default:
-      return null
-  }
-}
-
-/** Attempt REST API fallback for a mutation when GraphQL is rate-limited. */
-async function tryMutationRestFallback(
-  mutation: MutationPayload,
-  cwd: string,
-  repo: string
-): Promise<boolean> {
-  const num = String(mutation.number)
-  debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
-
-  const cmd = buildMutationArgs(mutation, repo, num)
-  if (!cmd) return mutation.type !== "create"
-
-  return executeMutationCommand(cmd.args, cwd, cmd.stdin)
-}
-
-/** Log a structured execution failure for a single mutation replay. */
-function logReplayExecFailed(
-  repo: string,
-  mutation: MutationPayload,
-  exitCode: number,
-  stderr: string
-): void {
-  const detail = stderr.trim().slice(0, 200)
-  debugLog(
-    `[swiz] REPLAY_EXEC_FAILED repo=${repo} issue=#${mutation.number} type=${mutation.type} exit=${exitCode}${detail ? ` detail=${detail}` : ""}`
-  )
 }
 
 /**
@@ -898,71 +668,15 @@ export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
   await mod.tryReplayPendingMutations(cwd)
 }
 
-/** Log the outcome of a replay attempt to stderr with structured error code. */
-function logReplayResult(result: ReplayResult, originalCount: number, repo: string): void {
-  const parts: string[] = []
-  if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
-  if (result.failed > 0) parts.push(`${result.failed} failed`)
-  if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
-  if (parts.length === 0) return
-  debugLog(`[swiz] REPLAY_SUMMARY repo=${repo} pending=${originalCount} ${parts.join(", ")}`)
-}
-
 // ─── Upstream sync ──────────────────────────────────────────────────────────
 
-export interface UpstreamSyncResult {
-  issues: { upserted: number; removed: number }
-  pullRequests: { upserted: number; removed: number }
-  ciStatuses: { upserted: number }
-}
-
-/**
- * Poll upstream GitHub state for a repo and refresh the local store.
- * Fetches open issues, open PRs, and recent workflow runs, then upserts
- * into the shared store. Safe to call on a cadence from the daemon.
- */
-
-interface EntitySyncOps {
-  upsert: (repo: string, items: { number: number }[]) => void
-  removeClosed: (repo: string, openNumbers: Set<number>) => number
-  remove: (repo: string, numbers: number[]) => void
-}
-
-function syncEntityGroup(
-  repo: string,
-  open: { number: number }[] | null,
-  closed: { number: number }[] | null,
-  ops: EntitySyncOps,
-  bucket: { upserted: number; removed: number }
-): void {
-  // Legacy implementation (moved to `issue-store-sync.ts`).
-  void repo
-  void open
-  void closed
-  void ops
-  void bucket
-}
-
-function syncCiRuns(
-  s: IssueStore,
-  repo: string,
-  runs:
-    | { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
-    | null,
-  result: UpstreamSyncResult
-): void {
-  // Legacy implementation (moved to `issue-store-sync.ts`).
-  void s
-  void repo
-  void runs
-  void result
-}
+export type { UpstreamSyncResult } from "./issue-store-sync.ts"
 
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
   opts?: { store?: IssueStore; client?: GitHubClient }
-): Promise<UpstreamSyncResult> {
+): Promise<import("./issue-store-sync.ts").UpstreamSyncResult> {
   // Implementation delegated to the dedicated upstream-sync module.
   const mod = await import("./issue-store-sync.ts")
   return await mod.syncUpstreamState(repo, cwd, opts)
@@ -1359,21 +1073,6 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
 // The extraction refactor delegates exported entrypoints to separate modules.
 // Keep the legacy helper implementations temporarily referenced so TypeScript
 // `noUnusedLocals` does not fail the build while we complete the move/cleanup.
-void resolveCwd
-void MAX_ATTEMPTS
-void invalidateLocalCache
-void runWithLimit
-void executeMutation
-void executeCommentMutation
-void executeLabelAddMutation
-void executeMilestoneSetMutation
-void executeResolveMutation
-void executePrMutation
-void tryMutationRestFallback
-void logReplayExecFailed
-void logReplayResult
-void syncEntityGroup
-void syncCiRuns
 void buildRepoListEndpoint
 void normalizeRestIssues
 void normalizeRestPullRequests

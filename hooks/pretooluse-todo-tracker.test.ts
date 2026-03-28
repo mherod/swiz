@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { countTodoMarkers } from "./pretooluse-todo-tracker.ts"
+import { runFileEditHook } from "./utils/test-utils.ts"
 
 // ─── Unit tests for countTodoMarkers ─────────────────────────────────────────
 
@@ -60,52 +61,14 @@ describe("countTodoMarkers: counts comment-context debt markers", () => {
 
 const HOOK = "hooks/pretooluse-todo-tracker.ts"
 
-interface HookResult {
-  decision?: string
-  reason?: string
-  rawOutput: string
-}
-
 async function runHook(opts: {
   filePath?: string
   newString?: string
   oldString?: string
   content?: string
   toolName?: string
-}): Promise<HookResult> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Edit",
-    tool_input: {
-      file_path: opts.filePath ?? "src/app.ts",
-      old_string: opts.oldString,
-      new_string: opts.newString,
-      content: opts.content,
-    },
-  })
-
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!rawOutput.trim()) return { rawOutput }
-  try {
-    const parsed = JSON.parse(rawOutput.trim())
-    const hso = parsed.hookSpecificOutput
-    return {
-      decision: hso?.permissionDecision ?? parsed.decision,
-      reason: hso?.permissionDecisionReason ?? parsed.reason,
-      rawOutput,
-    }
-  } catch {
-    return { rawOutput }
-  }
+}) {
+  return runFileEditHook(HOOK, opts)
 }
 
 // ─── Integration tests ────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { runHook as runHookScript } from "./utils/test-utils.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -9,35 +10,19 @@ interface HookResult {
 }
 
 async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
-  const payload = JSON.stringify({
+  const result = await runHookScript("hooks/posttooluse-pr-context.ts", {
     tool_name: "Bash",
     tool_input: { command },
     cwd,
   })
-
-  const proc = Bun.spawn(["bun", "hooks/posttooluse-pr-context.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const exitedCleanly = proc.exitCode === 0
-  if (!rawOutput.trim()) return { rawOutput, exitedCleanly }
-
-  try {
-    const parsed = JSON.parse(rawOutput.trim())
-    return {
-      context: parsed.hookSpecificOutput?.additionalContext,
-      rawOutput,
-      exitedCleanly,
-    }
-  } catch {
-    return { rawOutput, exitedCleanly }
+  const hookSpecificOutput = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+  return {
+    context:
+      typeof hookSpecificOutput?.additionalContext === "string"
+        ? hookSpecificOutput.additionalContext
+        : undefined,
+    rawOutput: result.stdout,
+    exitedCleanly: result.exitCode === 0,
   }
 }
 

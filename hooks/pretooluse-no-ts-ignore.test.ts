@@ -1,55 +1,20 @@
 import { describe, expect, test } from "bun:test"
+import { runFileEditHook } from "./utils/test-utils.ts"
 
 // Keywords split to avoid self-triggering the hook when this file is edited.
 const KW_IGNORE = ["ts", "ignore"].join("-")
 const KW_EXPECT = ["ts", "expect", "error"].join("-")
+const HOOK = "hooks/pretooluse-ts-quality.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
-
-interface HookResult {
-  decision?: string
-  reason?: string
-  rawOutput: string
-}
 
 async function runHook(opts: {
   filePath?: string
   newString?: string
   content?: string
   toolName?: string
-}): Promise<HookResult> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Edit",
-    tool_input: {
-      file_path: opts.filePath ?? "src/app.ts",
-      new_string: opts.newString,
-      content: opts.content,
-    },
-  })
-
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!rawOutput.trim()) return { rawOutput }
-  try {
-    const parsed = JSON.parse(rawOutput.trim())
-    const hso = parsed.hookSpecificOutput
-    return {
-      decision: hso?.permissionDecision ?? parsed.decision,
-      reason: hso?.permissionDecisionReason ?? parsed.reason,
-      rawOutput,
-    }
-  } catch {
-    return { rawOutput }
-  }
+}) {
+  return runFileEditHook(HOOK, opts)
 }
 
 // ─── @ts-expect-error blocking ──────────────────────────────────────────────────────

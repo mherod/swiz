@@ -6,6 +6,7 @@
 //   agent: --workspace <tmpdir>  — no project files to read
 
 import { tmpdir } from "node:os"
+import type { PromptOptions } from "./ai-providers.ts"
 
 export type AgentBackend = "agent"
 
@@ -16,19 +17,12 @@ export function detectAgentCli(): AgentBackend | null {
   return Bun.which("agent") ? "agent" : null
 }
 
-export interface PromptAgentOptions {
+export interface PromptAgentOptions extends Pick<PromptOptions, "signal" | "timeout"> {
   /**
    * When true, runs agent with --workspace <tmpdir> so it has no access
    * to the current project's files — prompt-only Q&A mode.
    */
   promptOnly?: boolean
-  /** When provided, kills the spawned process if the signal aborts. */
-  signal?: AbortSignal
-  /**
-   * Per-call timeout in milliseconds. Creates an internal AbortController
-   * that fires after this many ms. Ignored if `signal` is also provided.
-   */
-  timeout?: number
 }
 
 /**

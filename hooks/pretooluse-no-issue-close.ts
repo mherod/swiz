@@ -3,22 +3,14 @@
 // Issues must only be closed by pushing commits with "Fixes #N" in the message.
 
 import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
-import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
-
-/**
- * Strip quoted string contents so patterns inside evidence args, commit
- * messages, or other flag values don't trigger false positives.
- */
-function stripQuotedStrings(cmd: string): string {
-  return cmd.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
-}
+import { shellSegmentCommandRe, stripQuotedShellStrings } from "./utils/shell-patterns.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
 if (!isShellTool(input.tool_name ?? "")) process.exit(0)
 
 const command: string = input.tool_input?.command ?? ""
-const stripped = stripQuotedStrings(command)
+const stripped = stripQuotedShellStrings(command, { preserveQuotePairs: true })
 
 // Match at command boundaries so patterns inside quoted strings don't match
 const GH_ISSUE_CLOSE_RE = shellSegmentCommandRe("gh\\s+issue\\s+close\\b")

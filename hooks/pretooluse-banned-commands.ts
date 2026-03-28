@@ -18,6 +18,7 @@ import {
   SHELL_SEGMENT_BOUNDARY,
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
+  stripQuotedShellStrings,
 } from "./utils/shell-patterns.ts"
 import { extractReadFilePaths } from "./utils/transcript.ts"
 
@@ -35,20 +36,6 @@ interface Rule {
    * positives when banned tokens appear inside string literals.
    */
   useRawCommand?: true
-}
-
-/**
- * Remove quoted string contents from a shell command so that git subcommand
- * patterns (e.g. `git restore`) don't match text embedded inside commit
- * messages (-m "..."), evidence args, or other flag values.
- *
- * Handles double-quoted and single-quoted spans.  Escape sequences inside
- * double-quoted strings are respected (\") so we don't prematurely end a span.
- * The replacement keeps an empty pair of quotes so spacing is preserved and
- * the remaining tokens stay at roughly the right positions.
- */
-function stripQuotedStrings(command: string): string {
-  return command.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
 }
 
 const GREP_CMD_RE = /(?:^|\|\s*)grep\s/
@@ -359,7 +346,7 @@ async function main() {
   if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
   const { command, transcriptPath, cwd } = parseHookInput(input)
-  const strippedCommand = stripQuotedStrings(command)
+  const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
 
   const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))
     ? RULES.filter((r) => r.match !== isShellFileWrite)

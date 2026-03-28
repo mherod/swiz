@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { runHook as runHookScript } from "./utils/test-utils.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -10,38 +11,16 @@ interface HookResult {
 }
 
 async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
-  const payload = JSON.stringify({
+  const result = await runHookScript("hooks/pretooluse-stale-approval-gate.ts", {
     tool_name: "Bash",
     tool_input: { command },
     cwd,
   })
-
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-stale-approval-gate.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const exitedCleanly = proc.exitCode === 0
-  if (!rawOutput.trim()) return { denied: false, rawOutput, exitedCleanly }
-
-  try {
-    const parsed = JSON.parse(rawOutput.trim())
-    const decision = parsed.hookSpecificOutput?.permissionDecision
-    const reason = parsed.hookSpecificOutput?.permissionDecisionReason
-    return {
-      denied: decision === "deny",
-      reason,
-      rawOutput,
-      exitedCleanly,
-    }
-  } catch {
-    return { denied: false, rawOutput, exitedCleanly }
+  return {
+    denied: result.decision === "deny",
+    reason: result.reason,
+    rawOutput: result.stdout,
+    exitedCleanly: result.exitCode === 0,
   }
 }
 

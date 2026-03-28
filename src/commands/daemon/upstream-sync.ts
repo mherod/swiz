@@ -155,6 +155,7 @@ export class UpstreamSyncRegistry {
           issues: { upserted: 0, removed: 0 },
           pullRequests: { upserted: 0, removed: 0 },
           ciStatuses: { upserted: 0 },
+          comments: { upserted: 0 },
         }
       )
     } finally {

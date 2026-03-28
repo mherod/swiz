@@ -46,6 +46,32 @@ export const SHELL_SEGMENT_BOUNDARY = `(?:^|[|;&])`
 /** Matches boundaries suitable for whole-command token checks. */
 export const SHELL_TOKEN_BOUNDARY = String.raw`(?:^|\s|&&|\|\||;)`
 
+/**
+ * Strip quoted shell string contents before pattern matching command tokens.
+ *
+ * By default the quoted spans are removed entirely. Set `preserveQuotePairs`
+ * when callers need to retain empty quotes so token spacing stays stable.
+ */
+export function stripQuotedShellStrings(
+  command: string,
+  options: {
+    preserveQuotePairs?: boolean
+    stripBackticks?: boolean
+  } = {}
+): string {
+  const { preserveQuotePairs = false, stripBackticks = false } = options
+
+  let stripped = preserveQuotePairs
+    ? command.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
+    : command.replace(/"(?:[^"\\]|\\.)*"/g, "").replace(/'[^']*'/g, "")
+
+  if (stripBackticks) {
+    stripped = stripped.replace(/`[^`]*`/g, preserveQuotePairs ? "``" : "")
+  }
+
+  return stripped
+}
+
 /** Escape special regex characters in a literal string for use in `new RegExp()`. */
 export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

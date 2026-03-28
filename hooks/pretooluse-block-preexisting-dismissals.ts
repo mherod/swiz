@@ -33,6 +33,7 @@ import {
   isShellTool,
   readAllTranscriptLines,
 } from "./utils/hook-utils.ts"
+import { stripQuotedShellStrings } from "./utils/shell-patterns.ts"
 
 // ── Dismissal patterns ──────────────────────────────────────────────────────
 
@@ -175,7 +176,7 @@ function processEntry(entry: Record<string, unknown>, state: ScanState): void {
     // can clear hasDiagnosticIssues when clean (but non-diagnostic results won't).
     state.lastToolWasDiagnostic =
       isShellTool(toolUse.toolName) &&
-      DIAGNOSTIC_COMMAND_RE.test(stripQuotedStrings(toolUse.command))
+      DIAGNOSTIC_COMMAND_RE.test(stripQuotedShellStrings(toolUse.command, { stripBackticks: true }))
 
     if (state.dismissalText && isProofCommand(toolUse.toolName, toolUse.command)) {
       state.cleared = true
@@ -219,17 +220,11 @@ function scanTranscript(lines: string[]): ScanState {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-/** Strip quoted strings from a command to get just the command tokens without argument values. */
-function stripQuotedStrings(command: string): string {
-  // Remove double-quoted strings, single-quoted strings, and backtick strings
-  return command.replace(/"[^"]*"|'[^']*'|`[^`]*`/g, "")
-}
-
 function isExemptShellCommand(command: string): boolean {
   // Strip quoted argument values before checking diagnostic patterns.
   // This prevents false exemptions when arguments (e.g. --evidence "tests pass") contain
   // diagnostic keywords like "test", "check", etc.
-  const unquoted = stripQuotedStrings(command)
+  const unquoted = stripQuotedShellStrings(command, { stripBackticks: true })
   if (DIAGNOSTIC_COMMAND_RE.test(unquoted)) return true
   // Scoped verification and baseline evidence need the full command to match flags/paths
   if (SCOPED_VERIFICATION_RE.test(command)) return true
