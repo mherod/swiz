@@ -188,6 +188,59 @@ export function getSkillToolAvailabilityWarning(
   }
 }
 
+// ─── Step extraction ────────────────────────────────────────────────────────
+
+export interface SkillStep {
+  subject: string
+  description?: string
+}
+
+/**
+ * Extract numbered steps from a skill document's `## Steps` section.
+ * Handles both simple numbered lists (`1. Do X`) and sub-headed formats (`### 1. Title`).
+ * Returns structured steps with subject and optional description body.
+ */
+export function extractStepsFromSkill(content: string): SkillStep[] {
+  const stripped = stripFrontmatter(content)
+
+  // Extract everything between `## Steps` and the next `## ` heading (not ###)
+  const stepsMatch = stripped.match(/^## Steps\s*\n([\s\S]*?)(?=\n## (?!#))/m)
+  // Fallback: ## Steps is the last section
+  const body = stepsMatch?.[1] ?? stripped.match(/^## Steps\s*\n([\s\S]*)/m)?.[1]
+  if (!body) return []
+
+  const lines = body.split("\n")
+  const steps: SkillStep[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? ""
+
+    // Match `### N. Title` (sub-headed format)
+    const subHeaded = line.match(/^###\s+\d+\.\s*(.+)/)
+    if (subHeaded?.[1]) {
+      const descLines: string[] = []
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j] ?? ""
+        // Stop at next step heading or numbered item
+        if (next.match(/^###\s+\d+\./) || next.match(/^\d+\.\s+/)) break
+        descLines.push(next)
+        i = j
+      }
+      const desc = descLines.join("\n").trim() || undefined
+      steps.push({ subject: subHeaded[1].trim(), description: desc })
+      continue
+    }
+
+    // Match `N. Step text` at the start of a line (simple numbered)
+    const numbered = line.match(/^\d+\.\s+(.+)/)
+    if (numbered?.[1]) {
+      steps.push({ subject: numbered[1].trim() })
+    }
+  }
+
+  return steps
+}
+
 // ─── Skill listing (async) ───────────────────────────────────────────────────
 
 export interface SkillInfo {

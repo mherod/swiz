@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { useTempDir } from "../hooks/utils/test-utils.ts"
 import {
   extractMandatedSkillTools,
+  extractStepsFromSkill,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   SKILL_DIRS,
@@ -389,5 +391,85 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(occurrences).toBe(1)
     expect(out).toContain("Antigravity skill wins")
     expect(out).not.toContain("Antigravity global loses")
+  })
+})
+
+// ─── extractStepsFromSkill ───────────────────────────────────────────────────
+
+describe("extractStepsFromSkill", () => {
+  const skillsDir = join(homedir(), ".claude", "skills")
+
+  async function readSkill(name: string): Promise<string> {
+    return Bun.file(join(skillsDir, name, "SKILL.md")).text()
+  }
+
+  test("returns empty array for content with no ## Steps section", () => {
+    const content = "---\nname: foo\n---\n\n## Context\n\nSome content.\n"
+    expect(extractStepsFromSkill(content)).toEqual([])
+  })
+
+  test("returns empty array for empty string", () => {
+    expect(extractStepsFromSkill("")).toEqual([])
+  })
+
+  test("extracts simple numbered steps from apply-typography", async () => {
+    const content = await readSkill("apply-typography")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(10)
+    expect(steps[0]?.subject).toStartWith("Read the target file")
+    expect(steps[9]?.subject).toStartWith("Run `pnpm lint`")
+    // Simple numbered steps have no description
+    for (const step of steps) {
+      expect(step.description).toBeUndefined()
+    }
+  })
+
+  test("extracts sub-headed steps from ci-status", async () => {
+    const content = await readSkill("ci-status")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBeGreaterThanOrEqual(3)
+    expect(steps[0]?.subject).toStartWith("Plan")
+    // Sub-headed steps have description body
+    expect(steps[0]?.description).toBeDefined()
+  })
+
+  test("extracts steps from reflect-on-session-mistakes", async () => {
+    const content = await readSkill("reflect-on-session-mistakes")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(6)
+    expect(steps[0]?.subject).toContain("Full session review")
+  })
+
+  test("extracts sub-headed steps from stash-to-branch", async () => {
+    const content = await readSkill("stash-to-branch")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBeGreaterThanOrEqual(6)
+    expect(steps[0]?.subject).toContain("Plan Work (MANDATORY)")
+    expect(steps[0]?.description).toBeDefined()
+  })
+
+  test("steps do not include content from sections after ## Steps", async () => {
+    const content = await readSkill("apply-typography")
+    const steps = extractStepsFromSkill(content)
+
+    for (const step of steps) {
+      expect(step.subject).not.toContain("## Detailed Reference")
+    }
+  })
+
+  test("subject and description are properly separated for sub-headed steps", async () => {
+    const content = await readSkill("prune-branches")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBeGreaterThanOrEqual(2)
+    // Subject is the heading text, description is the body
+    for (const step of steps) {
+      expect(step.subject.length).toBeGreaterThan(0)
+      expect(step.subject).not.toContain("###")
+    }
   })
 })
