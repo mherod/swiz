@@ -925,6 +925,14 @@ export function isIncompleteTaskStatus(status: string): boolean {
   return status === "pending" || status === "in_progress"
 }
 
+/**
+ * Apply the pending → in_progress auto-transition before completing a task object.
+ * Mutates the task in place. Use when bypassing the full updateStatus service (e.g., direct file writes in hooks).
+ */
+export function autoTransitionForComplete(task: { status: string }): void {
+  if (task.status === "pending") task.status = "in_progress"
+}
+
 /** True when a task status counts as terminal work. */
 export function isTerminalTaskStatus(status: string): boolean {
   return status === "completed" || status === "cancelled" || status === "deleted"

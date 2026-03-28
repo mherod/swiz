@@ -370,40 +370,21 @@ export async function updateStatus(
   console.log()
 }
 
-export async function completeAll(
-  targetSessionId: string,
-  filterCwd?: string,
-  evidence?: string
+/**
+ * Complete a task, auto-transitioning through in_progress if it's still pending.
+ * This is the canonical path for "force-complete regardless of current status".
+ */
+export async function completeTaskWithAutoTransition(
+  sessionId: string,
+  taskId: string,
+  options: { evidence?: string; verifyText?: string; filterCwd?: string } = {}
 ): Promise<void> {
-  const resolvedEvidence = evidence ?? "note:bulk-complete — conclusion: all tasks completed"
-  const evidenceError = validateEvidence(resolvedEvidence)
-  if (evidenceError) throw new Error(evidenceError)
-
-  const ciError = await verifyCiGreenEvidence(resolvedEvidence, process.cwd())
-  if (ciError) throw new Error(ciError)
-
-  const incomplete = (await collectIncompleteTasks(filterCwd)).filter(
-    ({ sessionId }) => sessionId === targetSessionId
-  )
-
-  if (incomplete.length === 0) {
-    console.log("\n  No incomplete tasks.\n")
-    return
+  const { filterCwd } = options
+  const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+  if (task.status === "pending") {
+    await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
   }
-
-  console.log(
-    `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
-  )
-  for (const { task } of incomplete) {
-    // Transition through in_progress if still pending
-    if (task.status === "pending") {
-      await updateStatus(targetSessionId, task.id, "in_progress", { filterCwd })
-    }
-    await updateStatus(targetSessionId, task.id, "completed", {
-      evidence: resolvedEvidence,
-      filterCwd,
-    })
-  }
+  await updateStatus(sessionId, taskId, "completed", options)
 }
 
 // ─── Adopt ────────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { orderBy } from "lodash-es"
 import { formatActionPlan } from "../../src/action-plan.ts"
 import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
 import {
+  autoTransitionForComplete,
   getSessionTasksDir,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
@@ -49,7 +50,7 @@ function isTaskDuplicate(
 async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<void> {
   try {
     const taskPath = join(tasksDir, `${stale.id}.json`)
-    if (stale.status === "pending") stale.status = "in_progress"
+    autoTransitionForComplete(stale)
     const updated = {
       ...stale,
       status: "completed" as const,
@@ -92,7 +93,7 @@ function getIncompleteDetails(allTasks: TaskFile[]): string[] {
     incompleteTaskRows,
     [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],
     ["desc", "asc"]
-  ).map((t) => `#${t.id} [${t.status}]: ${t.subject}`)
+  ).map((t) => `#${t.id}: ${t.subject}`)
 }
 
 // ─── Public entry point ─────────────────────────────────────────────────────
@@ -126,16 +127,14 @@ export async function checkIncompleteTasks(
 
   return {
     decision: "block",
-    reason:
-      "Incomplete tasks found.\n\n" +
-      formatActionPlan(
-        [
-          "Current task list:",
-          incompleteDetails,
-          "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
-          "If the work is still needed, complete it before stopping.",
-        ],
-        { translateToolNames: true }
-      ),
+    reason: formatActionPlan(
+      [
+        "Incomplete tasks found:",
+        incompleteDetails,
+        "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
+        "If the work is still needed, complete it before stopping.",
+      ],
+      { translateToolNames: true }
+    ),
   }
 }

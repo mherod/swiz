@@ -21,7 +21,7 @@ import {
 import {
   adoptOrphanedTasks,
   applyStateUpdate,
-  completeAll,
+  completeTaskWithAutoTransition,
   createTask,
   ensureFileBackedTask,
   submitEvidence,
@@ -111,11 +111,6 @@ async function printPreviousSessionIncompleteHint(sessionId: string): Promise<vo
     console.log(
       `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
     )
-    // Fast-path: close all at once
-    console.log(
-      `    ${DIM}swiz tasks complete-all --session ${prevSessionId}  # close all at once${RESET}`
-    )
-    // Per-task commands for selective completion
     for (const task of prevIncomplete) {
       console.log(
         `    ${DIM}swiz tasks complete ${task.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
@@ -206,8 +201,7 @@ async function handleCompleteError(
   const msg = e instanceof Error ? e.message : String(e)
   if (msg.includes("Invalid transition") && msg.includes("pending")) {
     console.log(`  ⚡ Auto-transitioning #${opts.taskId}: pending → in_progress → completed`)
-    await updateStatus(opts.sessionId, opts.taskId, "in_progress", { filterCwd: opts.filterCwd })
-    await updateStatus(opts.sessionId, opts.taskId, "completed", {
+    await completeTaskWithAutoTransition(opts.sessionId, opts.taskId, {
       evidence: opts.evidence,
       verifyText: opts.verify,
       filterCwd: opts.filterCwd,
@@ -216,11 +210,7 @@ async function handleCompleteError(
   }
   if (msg.includes("not found")) {
     const sessionSuffix = opts.sessionId ? ` --session ${opts.sessionId.slice(0, 8)}` : ""
-    throw new Error(
-      `${msg}\n\n` +
-        `To close all incomplete tasks at once (avoids per-task disambiguation):\n` +
-        `  swiz tasks complete-all${sessionSuffix}`
-    )
+    throw new Error(`${msg}\nHint: specify the session with --session ${sessionSuffix.trim()}`)
   }
   throw e
 }
@@ -452,26 +442,12 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
 }
 
-/**
- * `swiz tasks complete-all` — close every incomplete task in the session.
- *
- * Pending tasks are automatically transitioned through in_progress before
- * being marked completed, satisfying the state-machine requirement without
- * requiring per-task manual intervention.
- */
-async function runCompleteAllTasks(rest: string[], filterCwd?: string): Promise<void> {
-  const sessionId = await resolveSession(rest)
-  const evidence = extractFlag(rest, "--evidence")
-  await completeAll(sessionId, filterCwd, evidence ?? undefined)
-}
-
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
   evidence: (rest, filterCwd) => runEvidenceTask(rest, filterCwd),
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
-  "complete-all": (rest, filterCwd) => runCompleteAllTasks(rest, filterCwd),
   adopt: async (rest) => {
     const sessionId = await resolveSession(rest)
     await adoptOrphanedTasks(sessionId, process.cwd())
@@ -484,7 +460,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|evidence|status|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -500,7 +476,6 @@ export const tasksCommand: Command = {
       flags: "status <id> <status>",
       description: "Set status: pending | in_progress | completed | cancelled",
     },
-    { flags: "complete-all", description: "Mark all incomplete tasks in the session completed" },
     {
       flags: "adopt [--recovered]",
       description: "Re-associate orphan (compaction-gap) session tasks to the current session",

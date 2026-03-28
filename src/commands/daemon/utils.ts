@@ -14,7 +14,7 @@ import {
   unloadLaunchAgent,
 } from "../../launch-agents.ts"
 import { projectKeyFromCwd } from "../../project-key.ts"
-import type { Task as StoredTask } from "../../tasks/task-repository.ts"
+import { isIncompleteTaskStatus, type Task as StoredTask } from "../../tasks/task-repository.ts"
 import { extractText } from "../../transcript-utils.ts"
 
 export interface TranscriptWatchPath {
@@ -380,7 +380,7 @@ export function buildSessionTasksView(
 ): { tasks: SessionTaskPreview[]; summary: SessionTaskSummary } {
   const summary: SessionTaskSummary = {
     total: tasks.length,
-    open: tasks.filter((task) => task.status === "pending" || task.status === "in_progress").length,
+    open: tasks.filter((task) => isIncompleteTaskStatus(task.status)).length,
     completed: tasks.filter((task) => task.status === "completed").length,
     cancelled: tasks.filter((task) => task.status === "cancelled").length,
   }
@@ -411,7 +411,7 @@ export function buildProjectTasksView(
 ): { tasks: ProjectTaskPreview[]; summary: SessionTaskSummary } {
   const summary: SessionTaskSummary = {
     total: tasks.length,
-    open: tasks.filter((task) => task.status === "pending" || task.status === "in_progress").length,
+    open: tasks.filter((task) => isIncompleteTaskStatus(task.status)).length,
     completed: tasks.filter((task) => task.status === "completed").length,
     cancelled: tasks.filter((task) => task.status === "cancelled").length,
   }

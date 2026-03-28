@@ -17,6 +17,7 @@ import { join } from "node:path"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
+  autoTransitionForComplete,
   emitContext,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
@@ -50,7 +51,7 @@ async function completeTasks(
 ): Promise<void> {
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
-    if (task.status === "pending") task.status = "in_progress"
+    autoTransitionForComplete(task)
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
   }

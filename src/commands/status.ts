@@ -8,6 +8,7 @@ import { getHomeDir } from "../home.ts"
 import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
 import { HOOKS_DIR, isSwizCommand } from "../swiz-hook-commands.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { isIncompleteTaskStatus } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 
 function forEachHookEntry(
@@ -193,7 +194,7 @@ async function countOpenTasksForSession(sessionId: string, tasksRoot: string): P
     if (!file.endsWith(".json") || file.startsWith(".")) continue
     try {
       const task = (await Bun.file(join(sessionDir, file)).json()) as { status?: string }
-      if (task.status === "pending" || task.status === "in_progress") open++
+      if (isIncompleteTaskStatus(task.status ?? "")) open++
     } catch {}
   }
   return open

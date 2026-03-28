@@ -778,69 +778,6 @@ describe("tasks command regressions (#242)", () => {
       expect(updated.status).toBe("completed")
     })
   })
-
-  it("complete-all --session scopes completion to that session", async () => {
-    await serial(async () => {
-      const home = join(TMP, "issue-242-home-complete-all")
-      const repoCwd = join(TMP, "issue-242-repo-complete-all")
-      const sessionA = "22222222-aaaa-bbbb-cccc-000000000001"
-      const sessionB = "33333333-aaaa-bbbb-cccc-000000000001"
-      const taskAPath = join(home, ".claude", "tasks", sessionA, "1.json")
-      const taskBPath = join(home, ".claude", "tasks", sessionB, "1.json")
-
-      await mkdir(join(home, ".claude", "tasks", sessionA), { recursive: true })
-      await mkdir(join(home, ".claude", "tasks", sessionB), { recursive: true })
-      await mkdir(repoCwd, { recursive: true })
-      await writeFile(
-        taskAPath,
-        JSON.stringify({
-          id: "1",
-          subject: "Session A task",
-          description: "desc",
-          status: "pending",
-          statusChangedAt: new Date().toISOString(),
-          elapsedMs: 0,
-          blocks: [],
-          blockedBy: [],
-        })
-      )
-      await writeFile(
-        taskBPath,
-        JSON.stringify({
-          id: "1",
-          subject: "Session B task",
-          description: "desc",
-          status: "pending",
-          statusChangedAt: new Date().toISOString(),
-          elapsedMs: 0,
-          blocks: [],
-          blockedBy: [],
-        })
-      )
-
-      const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
-      process.env.HOME = home
-      process.chdir(repoCwd)
-      try {
-        await expect(
-          tasksCommand.run(["complete-all", "--session", sessionA, "--evidence", "note:completed"])
-        ).resolves.toBeUndefined()
-      } finally {
-        process.chdir(prevCwd)
-        if (prevHome === undefined) {
-          delete process.env.HOME
-        } else {
-          process.env.HOME = prevHome
-        }
-      }
-
-      const taskA = JSON.parse(await readFile(taskAPath, "utf8")) as { status: string }
-      const taskB = JSON.parse(await readFile(taskBPath, "utf8")) as { status: string }
-      expect(taskA.status).toBe("completed")
-      expect(taskB.status).toBe("pending")
-    })
-  })
 })
 
 describe("task timing fields (#267)", () => {
