@@ -22,31 +22,34 @@ const transcriptPath = input.transcript_path
 
 if (!sessionId || !transcriptPath) process.exit(0)
 
-// Read the last user message from the transcript
-let userMessage = ""
-try {
-  const text = await Bun.file(transcriptPath).text()
-  const lines = text.split("\n").filter(Boolean)
+function extractTextFromContent(content: unknown): string {
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) {
+    const textBlock = content.find((b: { type?: string }) => b.type === "text") as
+      | { text?: string }
+      | undefined
+    return textBlock?.text ?? ""
+  }
+  return ""
+}
+
+function extractLastUserMessage(lines: string[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       const entry = JSON.parse(lines[i]!)
       if (entry?.type !== "user") continue
-      const content = entry?.message?.content
-      if (typeof content === "string") {
-        userMessage = content
-        break
-      }
-      if (Array.isArray(content)) {
-        const textBlock = content.find((b: { type?: string }) => b.type === "text") as
-          | { text?: string }
-          | undefined
-        if (textBlock?.text) {
-          userMessage = textBlock.text
-          break
-        }
-      }
+      const text = extractTextFromContent(entry?.message?.content)
+      if (text) return text
     } catch {}
   }
+  return ""
+}
+
+// Read the last user message from the transcript
+let userMessage = ""
+try {
+  const text = await Bun.file(transcriptPath).text()
+  userMessage = extractLastUserMessage(text.split("\n").filter(Boolean))
 } catch {
   process.exit(0)
 }

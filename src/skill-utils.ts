@@ -199,6 +199,21 @@ export interface SkillStep {
  * Extract steps from a `## Steps` section body.
  * Handles simple numbered lists (`1. Do X`) and sub-headed formats (`### 1. Title`).
  */
+function collectDescriptionLines(
+  lines: string[],
+  startIdx: number,
+  stopRe: RegExp
+): { desc: string | undefined; endIdx: number } {
+  const descLines: string[] = []
+  let endIdx = startIdx
+  for (let j = startIdx; j < lines.length; j++) {
+    if (stopRe.test(lines[j] ?? "")) break
+    descLines.push(lines[j] ?? "")
+    endIdx = j
+  }
+  return { desc: descLines.join("\n").trim() || undefined, endIdx }
+}
+
 function extractFromStepsSection(body: string): SkillStep[] {
   const lines = body.split("\n")
   const steps: SkillStep[] = []
@@ -206,23 +221,14 @@ function extractFromStepsSection(body: string): SkillStep[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ""
 
-    // Match `### N. Title` (sub-headed format)
-    const subHeaded = line.match(/^###\s+\d+\.\s*(.+)/)
+    const subHeaded = line.match(/^###\s+\d+\.\s*(.+)/) // sub-headed step format
     if (subHeaded?.[1]) {
-      const descLines: string[] = []
-      for (let j = i + 1; j < lines.length; j++) {
-        const next = lines[j] ?? ""
-        // Stop at next step heading or numbered item
-        if (next.match(/^###\s+\d+\./) || next.match(/^\d+\.\s+/)) break
-        descLines.push(next)
-        i = j
-      }
-      const desc = descLines.join("\n").trim() || undefined
+      const { desc, endIdx } = collectDescriptionLines(lines, i + 1, /^###\s+\d+\.|^\d+\.\s+/)
+      i = endIdx
       steps.push({ subject: subHeaded[1].trim(), description: desc })
       continue
     }
 
-    // Match `N. Step text` at the start of a line (simple numbered)
     const numbered = line.match(/^\d+\.\s+(.+)/)
     if (numbered?.[1]) {
       steps.push({ subject: numbered[1].trim() })
@@ -244,6 +250,22 @@ const STEP_HEADING_RE = /^(#{2,4})\s+Step\s+\d+\s*[-:—]\s*(.+)/
  * Handles h2, h3, and h4 levels. Collects the body between each step heading
  * and the next heading at the same or higher level as description.
  */
+function collectUntilHeadingAtLevel(
+  lines: string[],
+  startIdx: number,
+  maxLevel: number
+): { desc: string | undefined; endIdx: number } {
+  const descLines: string[] = []
+  let endIdx = startIdx
+  for (let j = startIdx; j < lines.length; j++) {
+    const headingMatch = (lines[j] ?? "").match(/^(#{2,6})\s/)
+    if (headingMatch && headingMatch[1]!.length <= maxLevel) break
+    descLines.push(lines[j] ?? "")
+    endIdx = j
+  }
+  return { desc: descLines.join("\n").trim() || undefined, endIdx }
+}
+
 function extractFromStepHeadings(stripped: string): SkillStep[] {
   const lines = stripped.split("\n")
   const steps: SkillStep[] = []
@@ -253,17 +275,8 @@ function extractFromStepHeadings(stripped: string): SkillStep[] {
     const match = line.match(STEP_HEADING_RE)
     if (!match?.[1] || !match[2]) continue
 
-    const level = match[1].length // number of # characters
-    const descLines: string[] = []
-    for (let j = i + 1; j < lines.length; j++) {
-      const next = lines[j] ?? ""
-      // Stop at next heading at same or higher level
-      const headingMatch = next.match(/^(#{2,6})\s/)
-      if (headingMatch && headingMatch[1]!.length <= level) break
-      descLines.push(next)
-      i = j
-    }
-    const desc = descLines.join("\n").trim() || undefined
+    const { desc, endIdx } = collectUntilHeadingAtLevel(lines, i + 1, match[1].length)
+    i = endIdx
     steps.push({ subject: match[2].trim(), description: desc })
   }
 

@@ -213,21 +213,20 @@ interface CreateTaskBody {
   cwd?: string
 }
 
+function isNonEmptyString(val: unknown): val is string {
+  return typeof val === "string" && val.length > 0
+}
+
 function parseCreateTaskBody(
   body: CreateTaskBody | null
 ): { sessionId: string; subject: string; description: string; cwd?: string } | null {
-  const sessionId = body?.sessionId
-  const subject = body?.subject?.trim()
-  if (typeof sessionId !== "string" || !sessionId || typeof subject !== "string" || !subject) {
-    return null
-  }
-  const cwd = body?.cwd
-  return {
-    sessionId,
-    subject,
-    description: body?.description?.trim() || subject,
-    cwd: typeof cwd === "string" && cwd.length > 0 ? cwd : undefined,
-  }
+  if (!body) return null
+  const sessionId = body.sessionId
+  const subject = (body.subject ?? "").trim()
+  if (!isNonEmptyString(sessionId) || !subject) return null
+  const description = (body.description ?? "").trim() || subject
+  const cwd = isNonEmptyString(body.cwd) ? body.cwd : undefined
+  return { sessionId, subject, description, cwd }
 }
 
 async function handleCreateTask(req: Request): Promise<Response> {
@@ -251,25 +250,21 @@ async function handleCreateTask(req: Request): Promise<Response> {
   }
 }
 
+type RouteHandler = (req: Request, ctx: SessionRoutesContext) => Promise<Response>
+
+const SESSION_ROUTES: Array<{ path: string; method: string; handler: RouteHandler }> = [
+  { path: "/sessions/projects", method: "POST", handler: handleProjectsList },
+  { path: "/sessions/messages", method: "POST", handler: handleSessionMessages },
+  { path: "/sessions/tasks", method: "POST", handler: handleSessionTasks },
+  { path: "/projects/tasks", method: "POST", handler: handleProjectTasks },
+  { path: "/tasks/create", method: "POST", handler: (req) => handleCreateTask(req) },
+]
+
 export async function handleSessionRoutes(
   req: Request,
   url: URL,
   ctx: SessionRoutesContext
 ): Promise<Response | null> {
-  if (url.pathname === "/sessions/projects" && req.method === "POST") {
-    return handleProjectsList(req, ctx)
-  }
-  if (url.pathname === "/sessions/messages" && req.method === "POST") {
-    return handleSessionMessages(req, ctx)
-  }
-  if (url.pathname === "/sessions/tasks" && req.method === "POST") {
-    return handleSessionTasks(req, ctx)
-  }
-  if (url.pathname === "/projects/tasks" && req.method === "POST") {
-    return handleProjectTasks(req, ctx)
-  }
-  if (url.pathname === "/tasks/create" && req.method === "POST") {
-    return handleCreateTask(req)
-  }
-  return null
+  const route = SESSION_ROUTES.find((r) => r.path === url.pathname && r.method === req.method)
+  return route ? route.handler(req, ctx) : null
 }

@@ -175,17 +175,27 @@ async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult
   }
 }
 
-async function enrichPayloadForHooks(
-  payload: Record<string, unknown>,
-  parseError: boolean,
-  fallbackPayloadStr: string,
-  summaryProvider?: (path: string) => Promise<TranscriptSummary | null>,
+interface EnrichPayloadOptions {
+  payload: Record<string, unknown>
+  parseError: boolean
+  fallbackPayloadStr: string
+  summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
   currentSessionToolUsageProvider?: (
     sessionId: string,
     transcriptPath?: string
-  ) => Promise<CurrentSessionToolUsage | null>,
+  ) => Promise<CurrentSessionToolUsage | null>
   disableTranscriptSummaryFallback?: boolean
-): Promise<string> {
+}
+
+async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string> {
+  const {
+    payload,
+    parseError,
+    fallbackPayloadStr,
+    summaryProvider,
+    currentSessionToolUsageProvider,
+    disableTranscriptSummaryFallback,
+  } = opts
   if (parseError) return fallbackPayloadStr
 
   let enriched = payload
@@ -204,22 +214,29 @@ async function enrichPayloadForHooks(
     }
   }
 
-  if (transcriptPath) {
-    const summary = summaryProvider
-      ? await summaryProvider(transcriptPath)
-      : disableTranscriptSummaryFallback
-        ? null
-        : await computeTranscriptSummary(transcriptPath)
-    if (summary) {
-      enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, unknown>
-      changed = true
-      log(
-        `   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`
-      )
-    }
+  const summary = await resolveTranscriptSummary(
+    transcriptPath,
+    summaryProvider,
+    disableTranscriptSummaryFallback
+  )
+  if (summary) {
+    enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, unknown>
+    changed = true
+    log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   }
 
   return changed ? JSON.stringify(enriched) : fallbackPayloadStr
+}
+
+async function resolveTranscriptSummary(
+  transcriptPath: string | undefined,
+  summaryProvider: EnrichPayloadOptions["summaryProvider"],
+  disableFallback: boolean | undefined
+): Promise<TranscriptSummary | null> {
+  if (!transcriptPath) return null
+  if (summaryProvider) return summaryProvider(transcriptPath)
+  if (disableFallback) return null
+  return computeTranscriptSummary(transcriptPath)
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -552,14 +569,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   )
 
   const tEnrich = performance.now()
-  const enrichedPayloadStr = await enrichPayloadForHooks(
-    ctx.payload,
-    ctx.parseError,
-    JSON.stringify(ctx.payload),
-    req.transcriptSummaryProvider,
-    req.currentSessionToolUsageProvider,
-    req.disableTranscriptSummaryFallback
-  )
+  const enrichedPayloadStr = await enrichPayloadForHooks({
+    payload: ctx.payload,
+    parseError: ctx.parseError,
+    fallbackPayloadStr: JSON.stringify(ctx.payload),
+    summaryProvider: req.transcriptSummaryProvider,
+    currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
+    disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
+  })
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
 
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
