@@ -93,10 +93,29 @@ function extractCompleteTaskId(command: string): string | null {
   return m?.[1] ?? null
 }
 
+/** Extract --session value from a `swiz tasks` command */
+function extractTargetSession(command: string): string | null {
+  const m = command.match(/--session\s+(\S+)/)
+  return m?.[1] ?? null
+}
+
 async function checkLastTaskStanding(command: string, sessionId: string): Promise<void> {
   const taskId = extractCompleteTaskId(command)
   if (!taskId) return
+
+  // Skip guard for cross-session completions — the target session is already ended,
+  // so preventing it from reaching zero tasks serves no purpose. (Fixes #420)
+  const targetSession = extractTargetSession(command)
   const safeId = resolveSafeSessionId(sessionId as string | undefined)
+  if (
+    targetSession &&
+    safeId &&
+    !safeId.startsWith(targetSession) &&
+    !targetSession.startsWith(safeId)
+  ) {
+    return
+  }
+
   if (!safeId) return
   const allTasks = await readSessionTasks(safeId)
   const error = validateLastTaskStanding(taskId, allTasks)
