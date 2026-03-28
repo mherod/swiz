@@ -4,7 +4,14 @@
 // record, causing stop hooks to fire repeatedly.  This hook requires >=1 distinct
 // evidence field in the description before allowing completion.
 
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
+import {
+  allowPreToolUse,
+  denyPreToolUse,
+  formatActionPlan,
+  isIncompleteTaskStatus,
+  readSessionTasks,
+  resolveSafeSessionId,
+} from "./utils/hook-utils.ts"
 
 // Evidence patterns — each entry is a named family with a regex.
 // Any 1+ distinct families must match for the call to proceed.
@@ -25,6 +32,33 @@ const toolInput: Record<string, unknown> = input?.tool_input ?? {}
 
 // Only enforce on completion updates.
 if (toolInput.status !== "completed") process.exit(0)
+
+// ── Last-task-standing guard ───────────────────────────────────────────
+// Block completion when it would leave zero incomplete tasks. The agent
+// must plan the next logical step before closing out all remaining work.
+const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+if (sessionId) {
+  const taskId = String(toolInput.taskId ?? "")
+  const allTasks = await readSessionTasks(sessionId)
+  const otherIncomplete = allTasks.filter(
+    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
+  )
+  if (otherIncomplete.length === 0) {
+    denyPreToolUse(
+      `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
+        `You have executive authority to determine the next logical step. ` +
+        `Before completing this task, plan your next steps:\n\n` +
+        formatActionPlan(
+          [
+            "Use TaskCreate to add at least one pending task for the next logical step.",
+            "Then retry this completion — it will succeed once a pending task exists.",
+          ],
+          { translateToolNames: true }
+        ) +
+        `\nThe task list must never be fully complete — there is always a next step to plan.`
+    )
+  }
+}
 
 const description: string = typeof toolInput.description === "string" ? toolInput.description : ""
 

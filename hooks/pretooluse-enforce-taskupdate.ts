@@ -6,8 +6,12 @@
 import {
   allowPreToolUse,
   denyPreToolUse,
+  formatActionPlan,
+  isIncompleteTaskStatus,
   isRunningInAgent,
   isShellTool,
+  readSessionTasks,
+  resolveSafeSessionId,
   scheduleAutoSteer,
 } from "./utils/hook-utils.ts"
 import { type SessionTaskTipContext, sessionTaskToolPatterns } from "./utils/transcript.ts"
@@ -25,6 +29,8 @@ interface SwizTasksRule {
   message: string
   /** When set, omit tip if the current session transcript already shows this pattern */
   skipTipIf?: (ctx: SessionTaskTipContext) => boolean
+  /** When true, block if completing this task would leave zero incomplete tasks */
+  lastTaskGuard?: boolean
 }
 
 /**
@@ -53,6 +59,7 @@ function buildSwizTasksRules(): SwizTasksRule[] {
         "  • swiz tasks complete <id> --evidence 'note:task done'\n" +
         "  • swiz tasks complete <id> --evidence 'commit:abc123'\n\n" +
         "Supported evidence types: commit, pr, file, test, note, ci_green, conclusion, run.",
+      lastTaskGuard: true,
     },
     {
       match: (c) => /swiz\s+tasks\s+(?:list|get)(?:\s|$)/.test(c),
@@ -83,6 +90,38 @@ function shouldInspectShellInput(input: { tool_name?: string }): boolean {
   return isClaudeCode && isShellTool(input?.tool_name ?? "")
 }
 
+/** Extract task ID from `swiz tasks complete <id>` command */
+function extractCompleteTaskId(command: string): string | null {
+  const m = command.match(/swiz\s+tasks\s+complete\s+(\S+)/)
+  return m?.[1] ?? null
+}
+
+async function checkLastTaskStanding(command: string, sessionId: string): Promise<void> {
+  const taskId = extractCompleteTaskId(command)
+  if (!taskId) return
+  const safeId = resolveSafeSessionId(sessionId as string | undefined)
+  if (!safeId) return
+  const allTasks = await readSessionTasks(safeId)
+  const otherIncomplete = allTasks.filter(
+    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
+  )
+  if (otherIncomplete.length === 0) {
+    denyPreToolUse(
+      `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
+        `You have executive authority to determine the next logical step. ` +
+        `Before completing this task, plan your next steps:\n\n` +
+        formatActionPlan(
+          [
+            "Use TaskCreate to add at least one pending task for the next logical step.",
+            "Then retry this completion — it will succeed once a pending task exists.",
+          ],
+          { translateToolNames: true }
+        ) +
+        `\nThe task list must never be fully complete — there is always a next step to plan.`
+    )
+  }
+}
+
 async function checkRules(
   command: string,
   rules: SwizTasksRule[],
@@ -91,6 +130,11 @@ async function checkRules(
 ): Promise<void> {
   for (const rule of rules) {
     if (!rule.match(command)) continue
+
+    // Last-task-standing guard: block if completing would leave zero incomplete tasks
+    if (rule.lastTaskGuard) {
+      await checkLastTaskStanding(command, sessionId)
+    }
 
     if (rule.severity === "warn") {
       await emitWarnAndAllow(rule, sessionId, tipContext)
