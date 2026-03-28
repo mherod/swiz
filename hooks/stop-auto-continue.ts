@@ -353,12 +353,8 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
 }
 
 // ─── Filler suggestion ───────────────────────────────────────────────────────
-
-/**
- * Build a deterministic filler next-step suggestion when all AI backends fail.
- * Uses the session's edited file paths to produce a context-aware suggestion.
- * Returns "" if no useful suggestion can be derived.
- */
+// Deterministic fallback extracted to stop-auto-continue/filler-suggestions.ts.
+// Used in generateAiResponse catch block when AI backends fail.
 
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
@@ -462,6 +458,20 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
       console.error(
         "[stop-auto-continue] Hint: check GEMINI_MODEL env var, API key project, and GEMINI_API_VERSION"
       )
+    }
+    // Try deterministic filler suggestion before giving up
+    const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
+    const filler = await buildFillerSuggestion({
+      cwd: opts.cwd,
+      sessionId: opts.sessionId,
+    }).catch(() => "")
+    if (filler) {
+      return filterAgentResponse({
+        processCritique: "",
+        productCritique: "",
+        next: filler,
+        reflections: [],
+      })
     }
     // Allow stop gracefully — other stop hooks (memory reminder, etc.) handle fallback suggestions.
     terminate("skip", "AI_BACKEND_FAILED", `AI generation failed: ${errMsg}`)
