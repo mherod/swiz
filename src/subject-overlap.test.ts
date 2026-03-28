@@ -173,6 +173,19 @@ describe("stemWord", () => {
     expect(stemWord("stood")).toBe("stand")
   })
 
+  test("strips un- negation prefix", () => {
+    expect(stemWord("uncommitted")).toBe("commit")
+    expect(stemWord("unpushed")).toBe("push")
+    expect(stemWord("uncooked")).toBe("cook")
+    expect(stemWord("undone")).toBe("do") // irregular + prefix
+    expect(stemWord("unpulled")).toBe("pul")
+  })
+
+  test("preserves short words starting with un", () => {
+    expect(stemWord("unit")).toBe("unit")
+    expect(stemWord("unix")).toBe("unix")
+  })
+
   test("stems irregular plural nouns", () => {
     expect(stemWord("indices")).toBe("index")
     expect(stemWord("statuses")).toBe("status")
@@ -354,6 +367,14 @@ describe("computeSubjectFingerprint", () => {
   test("ignores auxiliary verbs (has/have/been)", () => {
     const fp1 = computeSubjectFingerprint("Has been verified CI status")
     const fp2 = computeSubjectFingerprint("Verify CI status")
+    expect(fp1).toBe(fp2)
+  })
+
+  // ── Negation prefix dedup ──────────────────────────────────────────────
+
+  test("matches 'Commit uncommitted changes' with 'Commit changes'", () => {
+    const fp1 = computeSubjectFingerprint("Commit uncommitted changes")
+    const fp2 = computeSubjectFingerprint("Commit changes")
     expect(fp1).toBe(fp2)
   })
 

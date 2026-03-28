@@ -944,14 +944,24 @@ export function autoTransitionForComplete(task: { status: string }): void {
  * Build the standard denial message for the last-task-standing guard.
  * Both pretooluse-enforce-taskupdate and pretooluse-require-task-evidence use this.
  */
+/** Filler suggestions for the next logical step when all tasks are about to complete. */
+const NEXT_STEP_SUGGESTIONS = [
+  "Review and address open GitHub issues",
+  "Run quality checks and fix any warnings",
+  "Verify recent changes work end-to-end",
+  "Check for TODOs or FIXMEs in recently edited files",
+  "Update documentation to reflect recent changes",
+]
+
 export function buildLastTaskStandingDenial(taskId: string): string {
+  const suggestion = NEXT_STEP_SUGGESTIONS[Math.floor(Math.random() * NEXT_STEP_SUGGESTIONS.length)]
   return (
     `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
     `You have executive authority to determine the next logical step. ` +
     `Before completing this task, plan your next steps:\n\n` +
     formatActionPlan(
       [
-        "Use TaskCreate to add at least one pending task for the next logical step.",
+        `Use TaskCreate to add at least one pending task for the next logical step (e.g. "${suggestion}").`,
         "Then retry this completion — it will succeed once a pending task exists.",
       ],
       { translateToolNames: true }
@@ -1585,10 +1595,9 @@ export async function consumeAutoSteerRequest(
 
   const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
   const store = getAutoSteerStore()
-  const requests = store.consume(safeSession, trigger ?? "next_turn")
+  const requests = store.consumeOne(safeSession, trigger ?? "next_turn")
   if (requests.length === 0) return null
 
-  // Return the first request for backward compat; all are marked delivered
   const first = requests[0]!
   return { message: first.message, timestamp: first.createdAt }
 }

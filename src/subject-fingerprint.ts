@@ -157,6 +157,7 @@ const IRREGULAR_STEMS = new Map<string, string>([
   ["gone", "go"],
   ["did", "do"],
   ["done", "do"],
+  ["undone", "do"],
   ["brought", "bring"],
   ["caught", "catch"],
   ["threw", "throw"],
@@ -266,14 +267,28 @@ function collapseDoubledConsonant(stem: string): string {
 }
 
 /**
+ * Strip negation prefix "un" when the remaining stem is a known word root.
+ * "uncommit" → "commit", "unpush" → "push", "uncook" → "cook".
+ * Guards: stem after stripping must be ≥3 chars to avoid mangling
+ * short words like "unit" or "unix".
+ */
+function stripNegationPrefix(stem: string): string {
+  if (stem.length >= 5 && stem.startsWith("un")) {
+    return stem.slice(2)
+  }
+  return stem
+}
+
+/**
  * Lightweight suffix-stripping stemmer for task-domain English.
  * Reduces inflected forms to a common root so "committing" and "commit",
  * "verifying" and "verify", "formatted" and "format" match.
+ * Also strips negation prefixes so "uncommitted" → "commit".
  */
 export function stemWord(word: string): string {
   const irregular = IRREGULAR_STEMS.get(word)
   if (irregular) return irregular
-  return collapseDoubledConsonant(applySuffixRules(word))
+  return stripNegationPrefix(collapseDoubledConsonant(applySuffixRules(word)))
 }
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────
@@ -339,6 +354,6 @@ export function computeSubjectFingerprint(subject: string): string {
       return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(`${stemmed}e`) ?? stemmed
     })
     .sort()
-  const canonical = words.join(" ")
+  const canonical = [...new Set(words)].join(" ")
   return Bun.hash(canonical).toString(16).padStart(16, "0")
 }
