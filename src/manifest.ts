@@ -311,6 +311,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
+    matcher: "Skill",
+    hooks: [{ file: "posttooluse-skill-steps.ts", timeout: 10 }],
+  },
+  {
+    event: "postToolUse",
     matcher: "Bash",
     hooks: [
       { file: "posttooluse-pr-context.ts", timeout: 10 },

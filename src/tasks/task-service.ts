@@ -8,7 +8,7 @@ import {
   STATE_TRANSITIONS,
   writeProjectState,
 } from "../settings.ts"
-import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { validateEvidence, verifyCiGreenEvidence, verifyTaskSubject } from "./evidence-validator.ts"
 import {
@@ -75,6 +75,46 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
   })
 
   return task
+}
+
+// ─── Merge skill steps into tasks ───────────────────────────────────────────
+
+export interface MergeStep {
+  subject: string
+  description?: string
+}
+
+/**
+ * Merge a list of steps into the session's task list, skipping any step whose
+ * subject overlaps with an existing pending or in_progress task.
+ * Returns the tasks that were actually created.
+ */
+export async function mergeIntoTasks(
+  sessionId: string,
+  steps: MergeStep[],
+  cwd = process.cwd()
+): Promise<Task[]> {
+  const existing = await readTasks(sessionId)
+  const incomplete = existing.filter((t) => isIncompleteTaskStatus(t.status))
+
+  const created: Task[] = []
+  for (const step of steps) {
+    const dominated = incomplete.some(
+      (t) =>
+        computeSubjectFingerprint(t.subject) === computeSubjectFingerprint(step.subject) ||
+        subjectsOverlap(t.subject, step.subject)
+    )
+    if (dominated) continue
+
+    const task = await createTaskInProcess({
+      sessionId,
+      subject: step.subject,
+      description: step.description ?? step.subject,
+      cwd,
+    })
+    created.push(task)
+  }
+  return created
 }
 
 /** CLI-facing task creation — wraps `createTaskInProcess` with console output. */

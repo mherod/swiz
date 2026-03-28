@@ -196,19 +196,10 @@ export interface SkillStep {
 }
 
 /**
- * Extract numbered steps from a skill document's `## Steps` section.
- * Handles both simple numbered lists (`1. Do X`) and sub-headed formats (`### 1. Title`).
- * Returns structured steps with subject and optional description body.
+ * Extract steps from a `## Steps` section body.
+ * Handles simple numbered lists (`1. Do X`) and sub-headed formats (`### 1. Title`).
  */
-export function extractStepsFromSkill(content: string): SkillStep[] {
-  const stripped = stripFrontmatter(content)
-
-  // Extract everything between `## Steps` and the next `## ` heading (not ###)
-  const stepsMatch = stripped.match(/^## Steps\s*\n([\s\S]*?)(?=\n## (?!#))/m)
-  // Fallback: ## Steps is the last section
-  const body = stepsMatch?.[1] ?? stripped.match(/^## Steps\s*\n([\s\S]*)/m)?.[1]
-  if (!body) return []
-
+function extractFromStepsSection(body: string): SkillStep[] {
   const lines = body.split("\n")
   const steps: SkillStep[] = []
 
@@ -239,6 +230,58 @@ export function extractStepsFromSkill(content: string): SkillStep[] {
   }
 
   return steps
+}
+
+/** Regex for `## Step N: Title` top-level headings. */
+const H2_STEP_RE = /^## Step \d+:\s*(.+)/
+
+/**
+ * Extract `## Step N: Title` headings scattered as h2 sections.
+ * Collects the body between each step heading and the next h2 as description.
+ */
+function extractFromH2StepHeadings(stripped: string): SkillStep[] {
+  const lines = stripped.split("\n")
+  const steps: SkillStep[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? ""
+    const match = line.match(H2_STEP_RE)
+    if (!match?.[1]) continue
+
+    const descLines: string[] = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const next = lines[j] ?? ""
+      // Stop at next h2 heading (but not ###)
+      if (next.match(/^## (?!#)/)) break
+      descLines.push(next)
+      i = j
+    }
+    const desc = descLines.join("\n").trim() || undefined
+    steps.push({ subject: match[1].trim(), description: desc })
+  }
+
+  return steps
+}
+
+/**
+ * Extract numbered steps from a skill document.
+ *
+ * Strategy (in priority order):
+ * 1. A dedicated `## Steps` section with numbered items or `### N.` sub-headings.
+ * 2. Top-level `## Step N: Title` headings scattered throughout the document.
+ *
+ * Returns structured steps with subject and optional description body.
+ */
+export function extractStepsFromSkill(content: string): SkillStep[] {
+  const stripped = stripFrontmatter(content)
+
+  // Strategy 1: dedicated ## Steps section
+  const stepsMatch = stripped.match(/^## Steps\s*\n([\s\S]*?)(?=\n## (?!#))/m)
+  const body = stepsMatch?.[1] ?? stripped.match(/^## Steps\s*\n([\s\S]*)/m)?.[1]
+  if (body) return extractFromStepsSection(body)
+
+  // Strategy 2: ## Step N: Title headings
+  return extractFromH2StepHeadings(stripped)
 }
 
 // ─── Skill listing (async) ───────────────────────────────────────────────────

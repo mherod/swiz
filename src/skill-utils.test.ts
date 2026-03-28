@@ -461,6 +461,43 @@ describe("extractStepsFromSkill", () => {
     }
   })
 
+  test("extracts ## Step N: headings from commit skill", async () => {
+    const content = await readSkill("commit")
+    const steps = extractStepsFromSkill(content)
+
+    // commit skill has ## Step 0: Task Preflight as a top-level step heading
+    expect(steps.length).toBeGreaterThanOrEqual(1)
+    expect(steps[0]?.subject).toContain("Task Preflight")
+    expect(steps[0]?.description).toBeDefined()
+  })
+
+  test("extracts ## Step N: headings from synthetic content", () => {
+    const content = [
+      "---",
+      "name: test",
+      "---",
+      "",
+      "## Context",
+      "Some context.",
+      "",
+      "## Step 0: Prepare environment",
+      "Set up your tools.",
+      "",
+      "## Step 1: Run the thing",
+      "Execute the command.",
+      "",
+      "## Notes",
+      "Extra info.",
+    ].join("\n")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(2)
+    expect(steps[0]?.subject).toBe("Prepare environment")
+    expect(steps[0]?.description).toBe("Set up your tools.")
+    expect(steps[1]?.subject).toBe("Run the thing")
+    expect(steps[1]?.description).toBe("Execute the command.")
+  })
+
   test("subject and description are properly separated for sub-headed steps", async () => {
     const content = await readSkill("prune-branches")
     const steps = extractStepsFromSkill(content)
