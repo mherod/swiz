@@ -110,9 +110,9 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     expect(result.reason).toContain(FOOTER_MARKER)
   })
 
-  test("stop-completion-auditor: in_progress task block includes footer", async () => {
+  test("stop-incomplete-tasks: in_progress task block includes footer", async () => {
     const fakeHome = await tmp.create("swiz-stop-footer-home-")
-    const sessionId = "test-footer-auditor-session"
+    const sessionId = "test-footer-incomplete-session"
     const tasksDir = getSessionTasksDir(sessionId, fakeHome)
     if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
     await mkdir(tasksDir, { recursive: true })
@@ -121,7 +121,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
       JSON.stringify({ id: "task-1", status: "in_progress", subject: "Unfinished work" })
     )
     const result = await runStopHook(
-      "stop-completion-auditor.ts",
+      "stop-incomplete-tasks.ts",
       { cwd: process.cwd(), session_id: sessionId, transcript_path: "" },
       { env: { HOME: fakeHome } }
     )
