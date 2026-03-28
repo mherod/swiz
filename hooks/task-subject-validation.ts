@@ -1,5 +1,6 @@
 // Shared logic for compound task subject detection and splitting.
 
+import { TASK_TOOLS } from "../src/tool-matchers.ts"
 import { isPlaceholderSubject } from "./utils/hook-utils.ts"
 
 export interface CompoundResult {
@@ -65,6 +66,26 @@ function detectPlaceholder(s: string): CompoundMatch | null {
       "Run quality checks before pushing",
     ],
   }
+}
+
+/** Sorted longest-first so "TaskCreate" matches before "Task". */
+const TASK_TOOL_NAMES = [...TASK_TOOLS].sort((a, b) => b.length - a.length)
+
+function detectTaskToolName(s: string): CompoundMatch | null {
+  for (const tool of TASK_TOOL_NAMES) {
+    if (new RegExp(`\\b${tool}\\b`).test(s)) {
+      return {
+        matched: true,
+        intro: `Task subjects must describe the work, not the tool call. Remove "${tool}" and describe what you are actually doing. Examples:`,
+        suggestions: [
+          "Fix authentication bug in login flow",
+          "Add pagination to search results",
+          "Refactor database connection pooling",
+        ],
+      }
+    }
+  }
+  return null
 }
 
 function detectMultipleIssues(s: string, verb: string | null): CompoundMatch | null {
@@ -187,6 +208,9 @@ export function detect(s: string): DetectionResult {
 
   const verb = extractVerb(s)
   const bare = verb ? s.slice(verb.length).trim() : s
+
+  const taskTool = detectTaskToolName(s)
+  if (taskTool) return taskTool
 
   const issues = detectMultipleIssues(s, verb)
   if (issues) return issues
