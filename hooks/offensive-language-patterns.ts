@@ -939,6 +939,22 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If they are still open in this session, they are your current work — not a label that postpones them. " +
       "Do them now.",
   },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:was |were )?(?:created|generated|added|produced) by (?:a |the )?(?:skill|hook|expansion|automation|auto)[^.]*(?:not (?:by )?(?:my|current|this)|not (?:my |current )?(?:work|session))/i,
+    response:
+      "Every task in your session is your responsibility regardless of how it was created. " +
+      "Skill-generated tasks exist because the workflow determined they are needed. Do them.",
+  },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:this is |that(?:'s| is) )?(?:a |just a )?follow[- ]?up (?:suggestion|idea|recommendation|item),?\s*not (?:current|my|this)/i,
+    response:
+      "Rebranding a task as a 'follow-up suggestion' does not make it optional. " +
+      "If it exists in your task list, it is current work. Complete it.",
+  },
 
   // ── Performative compliance patterns ──────────────────────────────────
   // The agent appears to comply while doing the minimum or nothing
