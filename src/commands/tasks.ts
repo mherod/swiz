@@ -191,6 +191,7 @@ async function handleCompleteError(
     evidence: string | undefined
     verify: string | undefined
     filterCwd: string | undefined
+    skipLastTaskGuard?: boolean
   }
 ): Promise<void> {
   const msg = e instanceof Error ? e.message : String(e)
@@ -200,6 +201,7 @@ async function handleCompleteError(
       evidence: opts.evidence,
       verifyText: opts.verify,
       filterCwd: opts.filterCwd,
+      skipLastTaskGuard: opts.skipLastTaskGuard,
     })
     return
   }
@@ -236,7 +238,10 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
   }
 
   let verify = extractFlag(rest, "--verify")
+  const explicitSession = extractFlag(rest, "--session")
   const sessionId = await resolveSession(sessionArgs)
+  // Skip the last-task-standing guard for cross-session completions (Fixes #420)
+  const skipLastTaskGuard = !!explicitSession
 
   await ensureFileBackedTask({
     sessionId,
@@ -258,7 +263,14 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       filterCwd,
     })
   } catch (e) {
-    await handleCompleteError(e, { sessionId, taskId, evidence, verify, filterCwd })
+    await handleCompleteError(e, {
+      sessionId,
+      taskId,
+      evidence,
+      verify,
+      filterCwd,
+      skipLastTaskGuard,
+    })
     return
   }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())

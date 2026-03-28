@@ -421,12 +421,19 @@ export async function updateStatus(
 export async function completeTaskWithAutoTransition(
   sessionId: string,
   taskId: string,
-  options: { evidence?: string; verifyText?: string; filterCwd?: string } = {}
+  options: {
+    evidence?: string
+    verifyText?: string
+    filterCwd?: string
+    skipLastTaskGuard?: boolean
+  } = {}
 ): Promise<void> {
   const { filterCwd } = options
-  const allTasks = await readTasks(sessionId)
-  const lastTaskError = validateLastTaskStanding(taskId, allTasks)
-  if (lastTaskError) throw new Error(lastTaskError)
+  if (!options.skipLastTaskGuard) {
+    const allTasks = await readTasks(sessionId)
+    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
+    if (lastTaskError) throw new Error(lastTaskError)
+  }
 
   const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
