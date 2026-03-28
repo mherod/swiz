@@ -16,8 +16,6 @@ if (unsupported.length > 0) {
   const allowed = [...ALLOWED_FIELDS].join(", ")
   const reason =
     `TaskUpdate received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
-    `Allowed fields: ${allowed}.\n\n` +
-    `To complete a task with evidence, use:\n` +
-    `  swiz tasks complete <id> --evidence "note:..."`
+    `Allowed fields: ${allowed}.`
   denyPreToolUse(reason)
 }

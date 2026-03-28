@@ -40,8 +40,8 @@ describe("pretooluse-enforce-taskupdate", () => {
   test("allows `swiz tasks complete` with helpful guidance", async () => {
     const result = await runHook("swiz tasks complete 1 --evidence note:done")
     expect(result.decision).toBe("allow")
-    expect(result.reason).toContain("swiz tasks complete")
-    expect(result.reason).toContain("correct command")
+    expect(result.reason).toContain("TaskUpdate")
+    expect(result.reason).toContain("completed")
   })
 
   test("omits complete tip when transcript already shows swiz complete with --evidence", async () => {

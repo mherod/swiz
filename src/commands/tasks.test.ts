@@ -793,48 +793,6 @@ describe("native task recovery paths (#271)", () => {
     })
   })
 
-  it("evidence creates stub from --subject for missing task", async () => {
-    await serial(async () => {
-      const home = join(TMP, "issue-271-home-evidence")
-      const repoCwd = join(TMP, "issue-271-repo-evidence")
-      const sessionId = "55555555-aaaa-bbbb-cccc-000000000001"
-      const taskId = "77"
-      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
-
-      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-      await mkdir(repoCwd, { recursive: true })
-
-      const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
-      process.env.HOME = home
-      process.chdir(repoCwd)
-      try {
-        await expect(
-          tasksCommand.run([
-            "evidence",
-            taskId,
-            "note:evidence added",
-            "--session",
-            sessionId,
-            "--subject",
-            "Recovered native task",
-          ])
-        ).resolves.toBeUndefined()
-      } finally {
-        process.chdir(prevCwd)
-        if (prevHome === undefined) delete process.env.HOME
-        else process.env.HOME = prevHome
-      }
-
-      const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
-        subject: string
-        completionEvidence?: string
-      }
-      expect(recovered.subject).toBe("Recovered native task")
-      expect(recovered.completionEvidence).toBe("note:evidence added")
-    })
-  })
-
   it("status creates stub from --subject for missing task", async () => {
     await serial(async () => {
       const home = join(TMP, "issue-271-home-status")

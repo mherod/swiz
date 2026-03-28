@@ -54,11 +54,8 @@ function buildSwizTasksRules(): SwizTasksRule[] {
       severity: "warn",
       skipTipIf: (ctx) => ctx.hasSwizCompleteWithEvidence || ctx.usedSwizTasksAddCreateStart,
       message:
-        "Tip: `swiz tasks complete` is the correct command for task completion with evidence.\n\n" +
-        "Ensure you include structured evidence:\n" +
-        "  • swiz tasks complete <id> --evidence 'note:task done'\n" +
-        "  • swiz tasks complete <id> --evidence 'commit:abc123'\n\n" +
-        "Supported evidence types: commit, pr, file, test, note, ci_green, conclusion, run.",
+        "Tip: Use the native TaskUpdate tool instead of `swiz tasks complete`.\n\n" +
+        "In Claude Code, prefer TaskUpdate { taskId, status: 'completed' } for better integration.",
       lastTaskGuard: true,
     },
     {
