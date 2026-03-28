@@ -137,7 +137,7 @@ function buildFailingResult(branch: string, failing: CIRun[]): CIBlockResult {
     "Wait for CI to go green: gh run watch <run-id> --exit-status"
   )
   const planSteps: ActionPlanItem[] = ["Analyze and fix CI failures before stopping:", fixSubSteps]
-  reason += "\n" + formatActionPlan(planSteps, { translateToolNames: true })
+  reason += `\n${formatActionPlan(planSteps, { translateToolNames: true })}`
   return { reason, planSteps }
 }
 
