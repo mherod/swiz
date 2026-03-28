@@ -187,7 +187,6 @@ export const manifest: HookGroup[] = [
     matcher: "TaskUpdate|update_plan",
     hooks: [
       { file: "pretooluse-taskupdate-schema.ts", timeout: 5 },
-      { file: "pretooluse-require-task-evidence.ts", timeout: 5 },
       { file: "pretooluse-dirty-worktree-gate.ts", timeout: 5, cooldownSeconds: 60 },
     ],
   },
@@ -293,11 +292,6 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "TaskList",
     hooks: [{ file: "posttooluse-task-list-sync.ts", timeout: 5 }],
-  },
-  {
-    event: "postToolUse",
-    matcher: "TaskUpdate",
-    hooks: [{ file: "posttooluse-task-evidence.ts", timeout: 5 }],
   },
   {
     event: "postToolUse",
