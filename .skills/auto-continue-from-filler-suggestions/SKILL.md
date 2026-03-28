@@ -37,6 +37,10 @@ console.log(result || 'No suggestion — session is clean.');
 
 ## Integration
 
-This module is already integrated as the fallback path in `hooks/stop-auto-continue.ts`. When the Gemini API call fails, the hook calls `buildFillerSuggestion()` to produce a blocking suggestion without AI.
+This module is integrated at two levels in `hooks/stop-auto-continue.ts`:
+
+1. **Primary fallback** — When no AI backend is available (`!hasAiProvider()`), filler suggestions are used directly instead of blocking with an API key error. If a filler suggestion exists, it blocks the stop with actionable guidance. If no suggestion can be generated, the stop is allowed gracefully.
+
+2. **Error fallback** — When the AI backend call fails (network error, model not found, etc.), filler suggestions are tried before allowing the stop.
 
 To extend the suggestion logic, edit `hooks/stop-auto-continue/filler-suggestions.ts` and add new priority levels to `buildFillerSuggestion()`.

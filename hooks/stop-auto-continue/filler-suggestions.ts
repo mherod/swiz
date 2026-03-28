@@ -44,6 +44,30 @@ async function getIncompleteTasks(sessionId: string): Promise<number> {
   return tasks.filter((t) => t.status === "pending" || t.status === "in_progress").length
 }
 
+function suggestFromGitState(gitState: GitState | null): string {
+  if (!gitState) return ""
+  if (gitState.dirtyCount > 0) {
+    return `Commit ${gitState.dirtyCount} uncommitted file(s) before stopping. Use /commit to stage and commit.`
+  }
+  if (gitState.unpushedCount > 0) {
+    return `Push ${gitState.unpushedCount} unpushed commit(s) to origin/${gitState.branch}. Use /push.`
+  }
+  return ""
+}
+
+function suggestFromEditedFiles(editedFiles: string[] | undefined): string {
+  if (!editedFiles || editedFiles.length === 0) return ""
+  const hasTests = editedFiles.some((f) => /\.test\.|\.spec\./.test(f))
+  const hasHooks = editedFiles.some((f) => f.startsWith("hooks/"))
+  if (hasHooks && !hasTests) {
+    return "Run tests for the edited hook files to verify they work correctly."
+  }
+  if (editedFiles.length > 5) {
+    return "Review the breadth of changes made this session and verify nothing was missed."
+  }
+  return ""
+}
+
 /**
  * Build a deterministic filler next-step suggestion.
  * Returns "" if no useful suggestion can be derived.
@@ -51,37 +75,13 @@ async function getIncompleteTasks(sessionId: string): Promise<number> {
 export async function buildFillerSuggestion(ctx: FillerContext): Promise<string> {
   const { cwd, sessionId, editedFiles } = ctx
 
-  const gitState = await getGitState(cwd)
+  const gitSuggestion = suggestFromGitState(await getGitState(cwd))
+  if (gitSuggestion) return gitSuggestion
 
-  // Priority 1: uncommitted changes
-  if (gitState && gitState.dirtyCount > 0) {
-    return `Commit ${gitState.dirtyCount} uncommitted file(s) before stopping. Use /commit to stage and commit.`
-  }
-
-  // Priority 2: unpushed commits
-  if (gitState && gitState.unpushedCount > 0) {
-    return `Push ${gitState.unpushedCount} unpushed commit(s) to origin/${gitState.branch}. Use /push.`
-  }
-
-  // Priority 3: incomplete tasks
   if (sessionId) {
     const incomplete = await getIncompleteTasks(sessionId)
-    if (incomplete > 0) {
-      return `Complete ${incomplete} remaining task(s) before stopping.`
-    }
+    if (incomplete > 0) return `Complete ${incomplete} remaining task(s) before stopping.`
   }
 
-  // Priority 4: suggest based on edited files
-  if (editedFiles && editedFiles.length > 0) {
-    const hasTests = editedFiles.some((f) => /\.test\.|\.spec\./.test(f))
-    const hasHooks = editedFiles.some((f) => f.startsWith("hooks/"))
-    if (hasHooks && !hasTests) {
-      return "Run tests for the edited hook files to verify they work correctly."
-    }
-    if (editedFiles.length > 5) {
-      return "Review the breadth of changes made this session and verify nothing was missed."
-    }
-  }
-
-  return ""
+  return suggestFromEditedFiles(editedFiles)
 }

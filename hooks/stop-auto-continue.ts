@@ -622,10 +622,17 @@ async function validatePrerequisitesAndGenerateResponse(
   if (reviewingDirective) terminate("block", reviewingDirective)
 
   if (!hasAiProvider()) {
-    terminate(
-      "block",
-      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI, then continue working."
-    )
+    // No AI backend — use deterministic filler suggestions instead of blocking
+    const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
+    const filler = await buildFillerSuggestion({
+      cwd,
+      sessionId: input.session_id ?? undefined,
+    }).catch(() => "")
+    if (filler) {
+      terminate("block", filler)
+    }
+    // No filler suggestion either — allow stop gracefully
+    terminate("skip", "NO_AI_BACKEND", "No AI backend and no actionable filler suggestion")
   }
 
   const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
