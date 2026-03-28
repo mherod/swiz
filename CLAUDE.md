@@ -91,11 +91,11 @@ alwaysApply: false
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
-- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; uses `cwd.replace(/[/.]/g, "-")` — DO NOT reimplement.
+- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
 - In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
-- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
+- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping from `~/.claude/projects/` transcript `cwd`.
@@ -112,6 +112,7 @@ alwaysApply: false
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
 - **DO**: Use native task tools for creation/status/queries. **DON'T**: Use `swiz tasks` CLI for status transitions. Exception: `swiz tasks complete` (requires `--evidence`).
+- **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` for in-process task creation (hooks, services). Use `createSessionTask()` from `hooks/utils/hook-utils.ts` when sentinel dedup is needed. **DON'T**: Shell out to `swiz tasks create` from hooks — use the in-process path.
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
@@ -159,9 +160,8 @@ alwaysApply: false
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push to `main`.
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
-- **DO**: Treat `/Users/matthewherod/Development/swiz/.swiz/config.json` and `swiz settings` as authoritative for `collaboration-mode`, `trunk-mode`, `default-branch`, and `strict-no-direct-main`.
-- **DON'T**: Let `gh api repos/:owner/:repo/commits`, `gh pr list`, or random contributors override local policy when `swiz settings` shows `collaboration-mode: solo` and project `trunk-mode: enabled`.
-- **DO**: Stay on `main` when `swiz settings` shows `collaboration-mode: solo` and `trunk-mode: enabled`; branch only if the user or repo rules require it.
+- **DO**: Treat `.swiz/config.json` and `swiz settings` as authoritative for collaboration/trunk/branch policy. **DON'T**: Let `gh api` or `gh pr list` override local policy when solo+trunk mode.
+- **DO**: Stay on `main` in solo+trunk mode; branch only if user or repo rules require it.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI workflow `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip CI; markdown triggers CI.
 - Pre-push checklist:
@@ -188,7 +188,7 @@ alwaysApply: false
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
-- DO NOT use destructive git: `git revert`, `git restore`, `git stash` (mutations), `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery. Exception: `git stash list`/`git stash show` are allowed (read-only).
+- DO NOT use destructive git: `revert`, `restore`, `stash` (mutations), `reset --hard`, `checkout -- <file>`; use `reflog` for recovery. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
