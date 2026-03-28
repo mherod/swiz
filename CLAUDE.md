@@ -238,10 +238,10 @@ alwaysApply: false
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
 - Stop-memory prompts must include `Cause to capture: <cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, and resolve it immediately.
-- When unblocking a gated session: mark the prior task complete with evidence, then create an `in_progress` task in the current session before tool calls; do not work through memory enforcement.
+- When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- **DO**: Own every diagnostic in your workflow output — never label warnings as "pre-existing" or "unrelated to my changes". If it appears in `bun run lint` output, fix it in this session.
-- Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
+- **DO**: Own every diagnostic in workflow output — never label warnings as "pre-existing". Fix in this session.
+- Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
@@ -264,3 +264,4 @@ alwaysApply: false
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
 - **DON'T**: Work on auto-continue findings without a filed issue.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
+- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks from plan steps before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
