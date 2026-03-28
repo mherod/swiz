@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**108 hooks. 12 event types. Every agent. Zero compromises.**
+**109 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -226,12 +226,13 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `precompact-task-snapshot.ts` | Snapshots all current-session task IDs and statuses to disk before context compaction rewrites the transcript. The sessionstart-compact-context hook reads this snapshot on resume to verify and recreate any missing task files. |
 | `precompact-speak.ts` | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction. |
 
-### UserPromptSubmit (3)
+### UserPromptSubmit (4)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
+| `userpromptsubmit-skill-steps.ts` | When the user's message starts with a `/skill-name` invocation, extracts steps from the skill's SKILL.md and creates pending tasks. Renders content before extraction and applies quality filtering. |
 | `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
 
 ## Plugin Marketplace
