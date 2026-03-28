@@ -1,16 +1,14 @@
 #!/usr/bin/env bun
-// Stop hook: Check for in_progress/pending tasks in ~/.claude/tasks/
-// Current session tasks must be complete before stopping, regardless of stop_hook_active
+// Stop hook: Verify task creation and CI evidence after all tasks are complete.
+// Incomplete-task blocking is handled by the higher-priority stop-incomplete-tasks hook.
 
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { orderBy } from "lodash-es"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
-  computeSubjectFingerprint,
   computeTranscriptSummary,
   deriveCurrentSessionTaskToolStats,
   formatActionPlan,
@@ -20,10 +18,8 @@ import {
   getTranscriptSummary,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  normalizeSubject,
   readSessionTasks,
   type SessionTask,
-  subjectsOverlap,
   type TranscriptSummary,
 } from "./utils/hook-utils.ts"
 
@@ -70,56 +66,6 @@ function taskHasCiEvidence(t: TaskFile): boolean {
 
 function anyTaskHasCiEvidence(tasks: TaskFile[]): boolean {
   return tasks.filter((t) => t.status === "completed").some(taskHasCiEvidence)
-}
-
-function isTaskDuplicate(
-  stale: TaskFile,
-  completedFingerprints: Set<string>,
-  completedNormalized: string[]
-): boolean {
-  const staleFp = stale.subjectFingerprint ?? computeSubjectFingerprint(stale.subject)
-  if (completedFingerprints.has(staleFp)) return true
-
-  const staleNorm = normalizeSubject(stale.subject)
-  return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
-}
-
-async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<void> {
-  try {
-    const taskPath = join(tasksDir, `${stale.id}.json`)
-    // Transition through in_progress if pending, to satisfy lifecycle
-    if (stale.status === "pending") stale.status = "in_progress"
-    const updated = {
-      ...stale,
-      status: "completed" as const,
-      completionEvidence: "note:auto-completed — duplicate of a completed task",
-    }
-    await Bun.write(taskPath, JSON.stringify(updated, null, 2))
-    stale.status = "completed"
-  } catch {
-    // Write failed — leave as-is and let the normal block message fire
-  }
-}
-
-/** Auto-complete stale incomplete tasks that are duplicates of completed ones. */
-async function deduplicateStaleTasks(
-  completedTasks: TaskFile[],
-  incompleteTasks: TaskFile[],
-  tasksDir: string
-): Promise<void> {
-  if (completedTasks.length === 0 || incompleteTasks.length === 0) return
-
-  const completedFingerprints = new Set<string>()
-  for (const t of completedTasks) {
-    completedFingerprints.add(t.subjectFingerprint ?? computeSubjectFingerprint(t.subject))
-  }
-
-  const completedNormalized = completedTasks.map((t) => normalizeSubject(t.subject))
-
-  for (const stale of incompleteTasks) {
-    if (!isTaskDuplicate(stale, completedFingerprints, completedNormalized)) continue
-    await completeStaleTask(stale, tasksDir)
-  }
 }
 
 /** Check audit log when no live task files exist; returns true if stop is allowed. */
@@ -248,32 +194,6 @@ function handleNoTasksDir(taskToolUsed: boolean, toolCallCount: number): boolean
   return true
 }
 
-function getIncompleteDetails(allTasks: TaskFile[]): string[] {
-  const incompleteTaskRows = allTasks
-    .filter((t) => t.id && t.id !== "null")
-    .filter((t): t is TaskFile => isIncompleteTaskStatus(t.status))
-  return orderBy(
-    incompleteTaskRows,
-    [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],
-    ["desc", "asc"]
-  ).map((t) => `#${t.id} [${t.status}]: ${t.subject}`)
-}
-
-function blockIncompleteTasks(incompleteDetails: string[]): void {
-  blockStop(
-    "Incomplete tasks found.\n\n" +
-      formatActionPlan(
-        [
-          "Current task list:",
-          incompleteDetails,
-          "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
-          "If the work is still needed, complete it before stopping.",
-        ],
-        { translateToolNames: true }
-      )
-  )
-}
-
 async function enforceCiEvidence(
   allTasks: TaskFile[],
   transcript: string,
@@ -313,18 +233,6 @@ async function resolveToolCallStats(
   if (summary) return deriveToolCallStats(summary)
   if (transcript) return await countToolCalls(raw)
   return { total: 0, taskToolUsed: false }
-}
-
-async function filterAndDeduplicateTasks(
-  allTasks: TaskFile[],
-  tasksDir: string
-): Promise<{ completedTasks: TaskFile[]; incompleteTasks: TaskFile[] }> {
-  const completedTasks = allTasks.filter((t) => t.status === "completed")
-  const incompleteTasks = allTasks.filter(
-    (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
-  )
-  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir)
-  return { completedTasks, incompleteTasks }
 }
 
 interface CiEvidenceAfterPushCtx {
@@ -375,13 +283,12 @@ async function runStopCompletionWhenTasksDirReady(opts: {
     return
   }
 
-  await filterAndDeduplicateTasks(allTasks, tasksDir)
-
-  const incompleteDetails = getIncompleteDetails(allTasks)
-  if (incompleteDetails.length > 0) {
-    blockIncompleteTasks(incompleteDetails)
-    return
-  }
+  // Incomplete-task blocking is handled by stop-incomplete-tasks.ts (higher priority).
+  // This hook only enforces CI evidence and "no tasks created" checks.
+  const hasIncomplete = allTasks.some(
+    (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
+  )
+  if (hasIncomplete) return
 
   if (transcript) {
     await maybeEnforceCiEvidenceAfterPush({

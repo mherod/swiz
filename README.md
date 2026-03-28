@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**106 hooks. 12 event types. Every agent. Zero compromises.**
+**107 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -88,7 +88,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (24)
+### Stop (25)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -109,7 +109,8 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-github-ci.ts` | Blocks stop if GitHub Actions CI has failed on the current branch. If CI is still running, polls up to 30 s before blocking — eliminating false-positive blocks for short CI runs that finish within seconds. No shipping broken code. |
 | `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
 | `stop-non-default-branch.ts` | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it. |
-| `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
+| `stop-incomplete-tasks.ts` | Blocks stop when any session task is still pending or in-progress. Deduplicates stale tasks against completed ones first, then blocks with a task list if any remain incomplete. Fast, focused, and first in line. |
+| `stop-completion-auditor.ts` | Verifies task creation thresholds and CI evidence after all tasks are complete. If a push happened but no task carries CI-green evidence, blocks until the agent proves CI passed. |
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
 | `stop-upstream-branch-count.ts` | Blocks stop when the remote has more than 40 branches. Stale branches accumulate silently — this surfaces the cleanup work before it becomes unmanageable. Runs with a 2-hour cooldown so it doesn't interrupt every session. |
 | `stop-memory-size.ts` | Scans `CLAUDE.md` and `MEMORY.md` files against the configured line and word thresholds. Blocks stop with file-level details and `/compact-memory` guidance when any file is over threshold. |

@@ -56,10 +56,12 @@ describe("manifest.ts", () => {
       const files = stopGroup?.hooks.map((h) => h.file) || []
       // Offensive language check runs first so lazy patterns are caught before anything else
       expect(files[0]).toBe("stop-offensive-language.ts")
-      // Task completion auditor runs next so incomplete tasks block before git checks
-      expect(files[1]).toBe("stop-completion-auditor.ts")
+      // Incomplete tasks block early — before auditor and git checks
+      expect(files[1]).toBe("stop-incomplete-tasks.ts")
+      // Completion auditor verifies evidence and CI after tasks are complete
+      expect(files[2]).toBe("stop-completion-auditor.ts")
       // Security hooks follow immediately after
-      expect(files[2]).toBe("stop-secret-scanner.ts")
+      expect(files[3]).toBe("stop-secret-scanner.ts")
     })
   })
 
