@@ -160,6 +160,60 @@ describe("detect", () => {
       expect(result.suggestions[0]).toContain("login")
     })
   })
+
+  describe("brackets and punctuation", () => {
+    test("parenthesized qualifier does not trigger compound detection", () => {
+      expect(detect("Fix authentication (OAuth) bug").matched).toBe(false)
+    })
+
+    test("square brackets in subject do not trigger compound detection", () => {
+      expect(detect("Update [WIP] login page").matched).toBe(false)
+    })
+
+    test("colon after verb with comma list still triggers compound", () => {
+      const result = detect("Fix: login, register, and logout")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.suggestions.length).toBeGreaterThanOrEqual(3)
+    })
+
+    test("semicolons are not treated as separators", () => {
+      // Semicolons are not handled; this should not match as compound
+      expect(detect("Fix login; update register").matched).toBe(false)
+    })
+
+    test("exclamation mark does not affect detection", () => {
+      expect(detect("Fix the critical auth bug!").matched).toBe(false)
+    })
+
+    test("slashes in paths do not trigger detection", () => {
+      expect(detect("Fix src/components/Login.tsx rendering").matched).toBe(false)
+    })
+
+    test("curly braces in subject pass through without detection", () => {
+      expect(detect("Update {config} template values").matched).toBe(false)
+    })
+
+    test("multiple issue hashes with parentheses are still split", () => {
+      const result = detect("Fix #123 (login) and #456 (logout)")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.suggestions).toHaveLength(2)
+      expect(result.suggestions[0]).toContain("#123")
+      expect(result.suggestions[1]).toContain("#456")
+    })
+
+    test("comma list with parenthesized details preserves context", () => {
+      const result = detect("Fix the login (OAuth), register (email), and logout (session) flows")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.suggestions.length).toBeGreaterThanOrEqual(3)
+    })
+
+    test("hyphenated compound words are not split", () => {
+      expect(detect("Add re-authentication flow").matched).toBe(false)
+    })
+  })
 })
 
 describe("formatMessage", () => {
