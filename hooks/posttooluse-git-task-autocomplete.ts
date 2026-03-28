@@ -15,6 +15,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { validateTransition } from "../src/tasks/task-service.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
   autoTransitionForComplete,
@@ -52,6 +53,7 @@ async function completeTasks(
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
     autoTransitionForComplete(task)
+    if (validateTransition(task.status, "completed")) continue
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
   }

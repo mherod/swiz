@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { formatActionPlan } from "../../src/action-plan.ts"
 import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
+import { validateTransition } from "../../src/tasks/task-service.ts"
 import {
   autoTransitionForComplete,
   getSessionTasksDir,
@@ -51,6 +52,7 @@ async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<voi
   try {
     const taskPath = join(tasksDir, `${stale.id}.json`)
     autoTransitionForComplete(stale)
+    if (validateTransition(stale.status, "completed")) return
     const updated = {
       ...stale,
       status: "completed" as const,
