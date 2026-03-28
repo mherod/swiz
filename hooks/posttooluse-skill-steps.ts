@@ -1,18 +1,11 @@
 #!/usr/bin/env bun
 
 // PostToolUse hook: After a Skill tool call, extract numbered steps from the
-// skill's `## Steps` section and create pending tasks for each step that
+// skill's SKILL.md and create pending tasks for each quality step that
 // doesn't already exist as a pending/in_progress task in the session.
-//
-// Renders the skill content (inline command expansion + arg substitution)
-// before extracting steps, matching what the agent actually sees.
-// Applies quality filtering to exclude single-word and command-like subjects.
 
-import { join } from "node:path"
-import { expandInlineCommands, substituteArgs } from "../src/commands/skill.ts"
-import { extractStepsFromSkill, filterQualitySteps, SKILL_DIRS } from "../src/skill-utils.ts"
-import { mergeIntoTasks } from "../src/tasks/task-service.ts"
 import { emitContext } from "./utils/hook-utils.ts"
+import { createTasksFromSkillSteps, formatSkillStepsSummary } from "./utils/skill-steps.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -27,36 +20,9 @@ const cwd: string = input.cwd ?? process.cwd()
 
 if (!skillName || !sessionId) process.exit(0)
 
-// Resolve skill content from SKILL.md on disk
-let content: string | null = null
-for (const dir of SKILL_DIRS) {
-  const skillPath = join(dir, skillName, "SKILL.md")
-  const file = Bun.file(skillPath)
-  if (await file.exists()) {
-    content = await file.text()
-    break
-  }
-}
-
-if (!content) process.exit(0)
-
-// Render content like the skill command does: substitute args then expand inline commands
-const positionalArgs = skillArgs ? skillArgs.split(/\s+/) : []
-content = substituteArgs(content, positionalArgs)
-content = await expandInlineCommands(content)
-
-const steps = filterQualitySteps(extractStepsFromSkill(content))
-if (steps.length === 0) process.exit(0)
-
-const created = await mergeIntoTasks(sessionId, steps, cwd)
-
-if (created.length > 0) {
-  const summary = created.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
-  await emitContext(
-    "PostToolUse",
-    `Created ${created.length} task(s) from /${skillName} steps:\n${summary}`,
-    cwd
-  )
+const result = await createTasksFromSkillSteps({ skillName, args: skillArgs, sessionId, cwd })
+if (result) {
+  await emitContext("PostToolUse", formatSkillStepsSummary(result), cwd)
 }
 
 process.exit(0)
