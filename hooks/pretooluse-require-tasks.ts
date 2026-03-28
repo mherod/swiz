@@ -328,10 +328,12 @@ function shouldSkipStalenessCheck(opts: {
   callsSinceTask: number
   toolName: string
   input: Record<string, unknown>
+  hasInProgressTask: boolean
 }): boolean {
   if (!opts.transcriptPath) return true
   if (opts.lastTaskIndex < 0 || opts.allTasksDone) return true
   if (opts.callsSinceTask < STALENESS_THRESHOLD) return true
+  if (opts.hasInProgressTask) return true
   if (
     (isEditTool(opts.toolName) || isWriteTool(opts.toolName)) &&
     isLargeContentPayload(opts.input)
@@ -345,6 +347,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const { lastTaskToolCallIndex, callsSinceLastTaskTool } =
     await getCurrentSessionTaskToolStats(input)
 
+  const hasInProgressTask = allTasks.some((t) => t.status === "in_progress")
   if (
     shouldSkipStalenessCheck({
       transcriptPath,
@@ -353,6 +356,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
       callsSinceTask: callsSinceLastTaskTool,
       toolName,
       input,
+      hasInProgressTask,
     })
   )
     return

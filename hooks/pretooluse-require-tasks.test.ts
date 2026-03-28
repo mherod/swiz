@@ -312,7 +312,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).toContain("Task #1 has been in_progress for 2m")
   })
 
-  test("denies when tasks exist but are stale (20+ calls since last task tool)", async () => {
+  test("allows when tasks are stale but in_progress task exists", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-stale"
     await writeTask(homeDir, sessionId, {
@@ -342,13 +342,10 @@ describe("pretooluse-require-tasks", () => {
     await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("stale")
-    expect(result.reason).toContain("Use TaskUpdate")
-    expect(result.reason).toContain("Use TaskCreate")
+    expect(result.decision).toBeUndefined()
   })
 
-  test("stale-task denial uses the current agent task tool aliases", async () => {
+  test("stale-task check skips when in_progress task exists even with agent aliases", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-stale-codex"
     await writeTask(homeDir, sessionId, {
@@ -383,8 +380,7 @@ describe("pretooluse-require-tasks", () => {
       transcriptPath,
       envOverrides: { CODEX_THREAD_ID: "test-codex" },
     })
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Use update_plan")
+    expect(result.decision).toBeUndefined()
   })
 
   test("allows when tasks exist and transcript is fresh (< 20 calls since last task tool)", async () => {
@@ -747,7 +743,7 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBeUndefined()
     })
 
-    test("still denies Edit with <10 line new_string when tasks are stale", async () => {
+    test("allows Edit with <10 line new_string when tasks are stale but in_progress exists", async () => {
       const homeDir = await createTempHome()
       const sessionId = `session-small-edit-${Date.now()}`
       const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
@@ -759,11 +755,10 @@ describe("pretooluse-require-tasks", () => {
         transcriptPath,
         newString: smallContent,
       })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("stale")
+      expect(result.decision).toBeUndefined()
     })
 
-    test("still denies Bash when tasks are stale regardless of payload", async () => {
+    test("allows Bash when tasks are stale but in_progress exists", async () => {
       const homeDir = await createTempHome()
       const sessionId = `session-stale-bash-${Date.now()}`
       const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
@@ -775,8 +770,7 @@ describe("pretooluse-require-tasks", () => {
         transcriptPath,
         command: "echo 'large output here'",
       })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("stale")
+      expect(result.decision).toBeUndefined()
     })
   })
 })

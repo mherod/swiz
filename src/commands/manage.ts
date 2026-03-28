@@ -1,13 +1,13 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { getAgentSettingsPath } from "../agent-paths.ts"
+import { type AgentSettingsId, getAgentSettingsPath } from "../agent-paths.ts"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 
 type ManageSubject = "mcp"
 type ManageAction = "list" | "add" | "remove" | "validate" | "show"
-type AgentId = "cursor" | "claude" | "claude-desktop" | "gemini"
+type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop"
 type AgentScope = "global" | "project"
 
 interface McpServerDef {

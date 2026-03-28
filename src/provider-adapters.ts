@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { basename, join } from "node:path"
+import type { AgentSettingsId } from "./agent-paths.ts"
 import type { AgentDef } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
-export type ProviderAgentId = "claude" | "cursor" | "gemini" | "codex"
-export type TranscriptProviderId = "claude" | "gemini" | "cursor" | "antigravity" | "codex"
+export type ProviderAgentId = AgentSettingsId
+export type TranscriptProviderId = ProviderAgentId | "antigravity"
 
 export interface ProviderConfig {
   agentId: ProviderAgentId
