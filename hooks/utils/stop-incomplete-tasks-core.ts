@@ -95,7 +95,7 @@ function getIncompleteDetails(allTasks: TaskFile[]): string[] {
     incompleteTaskRows,
     [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],
     ["desc", "asc"]
-  ).map((t) => `#${t.id}: ${t.subject}`)
+  ).map((t) => `${t.subject} (task #${t.id})`)
 }
 
 // ─── Public entry point ─────────────────────────────────────────────────────
@@ -131,12 +131,11 @@ export async function checkIncompleteTasks(
     decision: "block",
     reason: formatActionPlan(
       [
-        "Incomplete tasks found:",
-        incompleteDetails,
+        ...incompleteDetails,
         "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
         "If the work is still needed, complete it before stopping.",
       ],
-      { translateToolNames: true }
+      { translateToolNames: true, header: "Incomplete tasks found:" }
     ),
   }
 }
