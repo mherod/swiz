@@ -6,6 +6,7 @@ import {
   promptObject,
   promptStreamText,
 } from "../ai-providers.ts"
+import { extractJsonCandidate } from "../extract-json-candidate.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import {
   extractPlainTurns,
@@ -338,19 +339,6 @@ function renderReflection(reflection: SessionReflection): string {
       return `${index + 1}. **${label}**: ${whatHappened} ${whyWrong} ${whatToDoInstead}`
     })
     .join("\n\n")
-}
-
-function extractJsonCandidate(text: string): string {
-  const trimmed = text.trim()
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  if (fenced?.[1]) return fenced[1].trim()
-
-  const firstBrace = trimmed.indexOf("{")
-  const lastBrace = trimmed.lastIndexOf("}")
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1)
-  }
-  return trimmed
 }
 
 function parseReflectionFromJsonText(text: string, count: number): SessionReflection {

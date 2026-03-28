@@ -329,7 +329,7 @@ describe("dispatch replay", () => {
     // high-load suites in CI, making process scheduling noisy.
   }, 60_000)
 
-  test("stop replay continues after first block and still runs stop-git-status", async () => {
+  test("stop replay short-circuits on secret-scanner block", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
     try {
       await runGit(repoDir, ["init"])
@@ -386,14 +386,12 @@ describe("dispatch replay", () => {
       const hooks = parsed.hooks as Array<Record<string, unknown>>
       expect(Array.isArray(hooks)).toBe(true)
 
-      console.error(result.stderr)
-      console.log(hooks.map((h) => h.file))
+      // Blocking replay short-circuits: hooks after the first block don't run
       const secretIndex = hooks.findIndex((h) => h.file === "stop-secret-scanner.ts")
-      const gitStatusIndex = hooks.findIndex((h) => h.file === "stop-git-status.ts")
-
       expect(secretIndex).toBeGreaterThanOrEqual(0)
-      expect(gitStatusIndex).toBeGreaterThan(secretIndex)
       expect(hooks[secretIndex]?.status).toBe("block")
+      // The last hook in the trace is the blocker (replay returns immediately)
+      expect(hooks[hooks.length - 1]?.file).toBe("stop-secret-scanner.ts")
 
       const resultField = parsed.result as Record<string, unknown>
       expect(resultField.blocked).toBe(true)

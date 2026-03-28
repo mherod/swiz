@@ -1,8 +1,15 @@
 import { existsSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { z } from "zod"
-import { type AiProviderId, hasAiProvider, promptObject } from "../ai-providers.ts"
+import {
+  type AiProviderId,
+  hasAiProvider,
+  promptObject,
+  promptStreamText,
+} from "../ai-providers.ts"
 import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
+import { extractJsonCandidate } from "../extract-json-candidate.ts"
+import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
 
 const DEFAULT_TIMEOUT_MS = 90_000
@@ -40,6 +47,8 @@ export interface IdeaArgs {
   targetDir: string
   model?: string
   timeoutMs: number
+  json: boolean
+  printPrompt: boolean
   provider?: AiProviderId
 }
 
@@ -47,69 +56,107 @@ interface IdeaParseState {
   targetDir: string
   model?: string
   timeoutMs: number
+  json: boolean
+  printPrompt: boolean
   provider?: AiProviderId
 }
 
-type IdeaArgKey = "--dir" | "-d" | "--model" | "-m" | "--timeout" | "-t" | "--provider" | "-p"
-
-const IDEA_ARG_MAP: Record<IdeaArgKey, (next: string, state: IdeaParseState) => void> = {
-  "--dir": (n, s) => {
-    s.targetDir = resolve(n)
-  },
-  "-d": (n, s) => {
-    s.targetDir = resolve(n)
-  },
-  "--model": (n, s) => {
-    s.model = n
-  },
-  "-m": (n, s) => {
-    s.model = n
-  },
-  "--timeout": (n, s) => {
-    const parsed = Number.parseInt(n, 10)
-    if (!Number.isFinite(parsed) || parsed <= 0)
-      throw new Error(`--timeout must be a positive integer, got: ${n}`)
-    s.timeoutMs = parsed
-  },
-  "-t": (n, s) => {
-    const parsed = Number.parseInt(n, 10)
-    if (!Number.isFinite(parsed) || parsed <= 0)
-      throw new Error(`--timeout must be a positive integer, got: ${n}`)
-    s.timeoutMs = parsed
-  },
-  "--provider": (n, s) => {
-    if (n !== "gemini" && n !== "claude" && n !== "openrouter")
-      throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${n}`)
-    s.provider = n
-  },
-  "-p": (n, s) => {
-    if (n !== "gemini" && n !== "claude" && n !== "openrouter")
-      throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${n}`)
-    s.provider = n
-  },
+function parsePositiveInt(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer, got: ${value}`)
+  }
+  return parsed
 }
 
-function consumeArg(arg: string, next: string | undefined, state: IdeaParseState): number {
-  const handler = IDEA_ARG_MAP[arg as IdeaArgKey]
-  if (!handler) throw new Error(`Unknown argument: ${arg}`)
-  if (!next) throw new Error(`Missing value for ${arg}`)
-  handler(next, state)
-  return 1
+function parseProvider(value: string): AiProviderId {
+  if (value === "gemini" || value === "claude" || value === "openrouter") return value
+  throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
+}
+
+type IdeaValueOption = {
+  names: string[]
+  missingMessage: string
+  apply: (state: IdeaParseState, value: string) => void
+}
+
+const VALUE_OPTIONS: IdeaValueOption[] = [
+  {
+    names: ["--dir", "-d"],
+    missingMessage: "Missing value for --dir",
+    apply: (state, value) => {
+      state.targetDir = resolve(value)
+    },
+  },
+  {
+    names: ["--model", "-m"],
+    missingMessage: "Missing value for --model",
+    apply: (state, value) => {
+      state.model = value
+    },
+  },
+  {
+    names: ["--timeout", "-t"],
+    missingMessage: "Missing value for --timeout",
+    apply: (state, value) => {
+      state.timeoutMs = parsePositiveInt(value, "--timeout")
+    },
+  },
+  {
+    names: ["--provider", "-p"],
+    missingMessage: "Missing value for --provider",
+    apply: (state, value) => {
+      state.provider = parseProvider(value)
+    },
+  },
+]
+
+function applyValueOption(arg: string, next: string | undefined, state: IdeaParseState): boolean {
+  const option = VALUE_OPTIONS.find((entry) => entry.names.includes(arg))
+  if (!option) return false
+  if (!next) throw new Error(option.missingMessage)
+  option.apply(state, next)
+  return true
 }
 
 export function parseIdeaArgs(args: string[]): IdeaArgs {
   const state: IdeaParseState = {
     targetDir: process.cwd(),
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    json: false,
+    printPrompt: false,
   }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
-    i += consumeArg(arg, args[i + 1], state)
+
+    if (applyValueOption(arg, args[i + 1], state)) {
+      i++
+      continue
+    }
+
+    if (arg === "--json" || arg === "-j") {
+      state.json = true
+      continue
+    }
+
+    if (arg === "--print-prompt") {
+      state.printPrompt = true
+      continue
+    }
+
+    throw new Error(`Unknown argument: ${arg}`)
   }
 
-  return state
+  return {
+    targetDir: state.targetDir,
+    model: state.model,
+    timeoutMs: state.timeoutMs,
+    json: state.json,
+    printPrompt: state.printPrompt,
+    provider: state.provider,
+  }
 }
 
 async function readReadmeContent(targetDir: string): Promise<string | null> {
@@ -240,10 +287,16 @@ function renderIssueDescription(idea: IssueIdea): string {
     .join("\n")
 }
 
+function parseIdeaFromJsonText(text: string): IssueIdea {
+  const candidate = extractJsonCandidate(text)
+  const parsed = JSON.parse(candidate) as unknown
+  return IssueIdeaSchema.parse(parsed)
+}
+
 export const ideaCommand: Command = {
   name: "idea",
   description: "Use Gemini to propose a creative next idea for the current project",
-  usage: "swiz idea [--dir <path>] [--model <name>] [--timeout <ms>]",
+  usage: "swiz idea [--dir <path>] [--model <name>] [--timeout <ms>] [--json] [--print-prompt]",
   options: [
     { flags: "--dir, -d <path>", description: "Project directory to analyze (default: cwd)" },
     {
@@ -255,19 +308,18 @@ export const ideaCommand: Command = {
       description: `Request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
     },
     {
+      flags: "--json, -j",
+      description: "Print structured idea JSON instead of formatted markdown",
+    },
+    { flags: "--print-prompt", description: "Print the generated prompt and exit" },
+    {
       flags: "--provider, -p <name>",
       description:
         'AI provider override: "gemini", "claude", or "openrouter" (default: auto-select)',
     },
   ],
   async run(args: string[]) {
-    if (!hasAiProvider()) {
-      throw new Error(
-        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
-      )
-    }
-
-    const { targetDir, model, timeoutMs, provider } = parseIdeaArgs(args)
+    const { targetDir, model, timeoutMs, json, printPrompt, provider } = parseIdeaArgs(args)
     const [readme, frameworks, stacks] = await Promise.all([
       readReadmeContent(targetDir),
       detectFrameworks(targetDir).then((f) => Array.from(f).sort()),
@@ -283,11 +335,54 @@ export const ideaCommand: Command = {
       stacks,
     })
 
-    const idea = await promptObject(prompt, IssueIdeaSchema, {
-      model,
-      timeout: timeoutMs,
-      provider,
-    })
+    if (printPrompt) {
+      console.log(prompt)
+      return
+    }
+
+    if (!hasAiProvider()) {
+      throw new Error(
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
+      )
+    }
+
+    let idea: IssueIdea
+    const bufferReporter = createStreamBufferReporter({ enabled: !json })
+    try {
+      bufferReporter.startSubmitting()
+      const streamed = await promptStreamText(prompt, {
+        model,
+        timeout: timeoutMs,
+        provider,
+        onTextPart: (textPart: string) => {
+          if (json) {
+            process.stdout.write(textPart)
+            return
+          }
+          bufferReporter.onChunk(textPart)
+        },
+      })
+      bufferReporter.finish()
+      idea = parseIdeaFromJsonText(streamed)
+      if (json) {
+        if (process.stdout.isTTY) process.stdout.write("\n")
+        return
+      }
+    } catch (error) {
+      bufferReporter.finish()
+      if (json) throw error
+
+      idea = await promptObject(prompt, IssueIdeaSchema, {
+        model,
+        timeout: timeoutMs,
+        provider,
+      })
+    }
+
+    if (json) {
+      console.log(JSON.stringify(idea, null, 2))
+      return
+    }
     console.log(renderIssueDescription(idea))
   },
 }

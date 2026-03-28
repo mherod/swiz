@@ -6,6 +6,7 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
+import { checkIncompleteTasks } from "../../hooks/utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../../hooks/utils/terminal-detection.ts"
 import { stderrLog } from "../debug.ts"
 import {
@@ -20,6 +21,7 @@ import {
   replayPreToolUse,
   withLogBuffer,
 } from "../dispatch/index.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
@@ -206,6 +208,120 @@ function appendCliTimingLog(info: CliTimingInfo): Promise<void> {
   return appendHookLog(entry)
 }
 
+// ─── Fast path ─────────────────────────────────────────────────────────────
+
+interface DispatchTiming {
+  canonicalEvent: string
+  hookEventName: string
+  sessionId?: string
+  cwd: string
+  toolName?: string
+  t0: number
+  stdinMs: number
+}
+
+/** In-process incomplete-tasks check — skips daemon round-trip when tasks block. */
+async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
+  const { canonicalEvent, sessionId } = timing
+  if (canonicalEvent !== "stop" || !sessionId) return false
+
+  const home = getHomeDirOrNull()
+  if (!home) return false
+
+  const tFast = performance.now()
+  const blockResult = await checkIncompleteTasks(sessionId, home)
+  log(`   ⏱ cli:fast-incomplete-tasks: ${Math.round(performance.now() - tFast)}ms`)
+
+  if (!blockResult) return false
+
+  process.stdout.write(`${JSON.stringify(blockResult)}\n`)
+  const totalMs = Math.round(performance.now() - timing.t0)
+  log(`   ⏱ cli:total: ${totalMs}ms (fast-path)`)
+  void appendCliTimingLog({
+    ...timing,
+    totalMs,
+    daemonMs: 0,
+    route: "local",
+  })
+  return true
+}
+
+// ─── Dispatch callback ─────────────────────────────────────────────────────
+
+async function runDispatch(canonicalEvent: string, hookEventName: string): Promise<void> {
+  const t0 = performance.now()
+  const payloadStr = await readStdinPayloadWithTimeout()
+  const stdinMs = Math.round(performance.now() - t0)
+  log(`   ⏱ cli:stdin: ${stdinMs}ms`)
+
+  const { payload } = parsePayload(payloadStr)
+  const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+  const cwd = (payload.cwd as string | undefined) ?? process.cwd()
+  const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
+
+  // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
+  if (!payload._terminal) {
+    const terminal = detectTerminal()
+    payload._terminal = { app: terminal.app, name: terminal.name }
+  }
+  // Inject caller's environment so daemon-spawned hooks inherit the full
+  // shell env (LaunchAgent only gets a minimal set of env vars).
+  if (!payload._env) {
+    payload._env = { ...process.env }
+  }
+  const enrichedPayloadStr = JSON.stringify(payload)
+
+  const timing: DispatchTiming = {
+    canonicalEvent,
+    hookEventName,
+    sessionId,
+    cwd,
+    toolName,
+    t0,
+    stdinMs,
+  }
+
+  // ── Fast path: in-process incomplete-tasks check for stop events ──
+  if (await tryStopFastPath(timing)) return
+
+  // ── Try daemon first, fall back to local execution ──
+  const tDaemon = performance.now()
+  const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, enrichedPayloadStr)
+  const daemonMs = Math.round(performance.now() - tDaemon)
+  const forwarded = daemonResponse !== null
+  log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
+
+  if (daemonResponse !== null) {
+    if (Object.keys(daemonResponse).length > 0) {
+      process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
+    }
+    const totalMs = Math.round(performance.now() - t0)
+    log(`   ⏱ cli:total: ${totalMs}ms`)
+    void appendCliTimingLog({ ...timing, totalMs, daemonMs, route: "daemon" })
+    return
+  }
+
+  // ── Local execution fallback ──
+  const tLocal = performance.now()
+  const { executeDispatch } = await import("../dispatch/execute.ts")
+  const { response } = await executeDispatch({
+    canonicalEvent,
+    hookEventName,
+    payloadStr: enrichedPayloadStr,
+  })
+  const localMs = Math.round(performance.now() - tLocal)
+  const totalMs = Math.round(performance.now() - t0)
+  log(`   ⏱ cli:local-execute: ${localMs}ms`)
+  log(`   ⏱ cli:total: ${totalMs}ms`)
+  void appendCliTimingLog({ ...timing, totalMs, daemonMs, localMs, route: "local" })
+  // Response already written to stdout by engine strategy functions.
+  // The returned response is used only by the daemon path above.
+  void response
+  // In CLI mode, exit immediately — open resources (SQLite handles,
+  // fire-and-forget hook subprocesses) would otherwise keep Bun alive.
+  process.exit(0)
+}
+
 // ─── Command ────────────────────────────────────────────────────────────────
 
 export const dispatchCommand: Command = {
@@ -273,90 +389,6 @@ export const dispatchCommand: Command = {
     }
     const hookEventName = args[1] ?? canonicalEvent
 
-    await withLogBuffer(async () => {
-      const t0 = performance.now()
-      const payloadStr = await readStdinPayloadWithTimeout()
-      const stdinMs = Math.round(performance.now() - t0)
-      log(`   ⏱ cli:stdin: ${stdinMs}ms`)
-
-      const { payload } = parsePayload(payloadStr)
-      const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-      const cwd = (payload.cwd as string | undefined) ?? process.cwd()
-      const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
-
-      // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
-      if (!payload._terminal) {
-        const terminal = detectTerminal()
-        payload._terminal = { app: terminal.app, name: terminal.name }
-      }
-      // Inject caller's environment so daemon-spawned hooks inherit the full
-      // shell env (LaunchAgent only gets a minimal set of env vars).
-      if (!payload._env) {
-        payload._env = { ...process.env }
-      }
-      const enrichedPayloadStr = JSON.stringify(payload)
-
-      // ── Try daemon first, fall back to local execution ──
-      const tDaemon = performance.now()
-      const daemonResponse = await tryDaemonDispatch(
-        canonicalEvent,
-        hookEventName,
-        enrichedPayloadStr
-      )
-      const daemonMs = Math.round(performance.now() - tDaemon)
-      const forwarded = daemonResponse !== null
-      log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
-
-      if (daemonResponse !== null) {
-        if (Object.keys(daemonResponse).length > 0) {
-          process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
-        }
-        const totalMs = Math.round(performance.now() - t0)
-        log(`   ⏱ cli:total: ${totalMs}ms`)
-        void appendCliTimingLog({
-          canonicalEvent,
-          hookEventName,
-          sessionId,
-          cwd,
-          toolName,
-          totalMs,
-          stdinMs,
-          daemonMs,
-          route: "daemon",
-        })
-        return
-      }
-
-      // ── Local execution fallback ──
-      const tLocal = performance.now()
-      const { executeDispatch } = await import("../dispatch/execute.ts")
-      const { response } = await executeDispatch({
-        canonicalEvent,
-        hookEventName,
-        payloadStr: enrichedPayloadStr,
-      })
-      const localMs = Math.round(performance.now() - tLocal)
-      const totalMs = Math.round(performance.now() - t0)
-      log(`   ⏱ cli:local-execute: ${localMs}ms`)
-      log(`   ⏱ cli:total: ${totalMs}ms`)
-      void appendCliTimingLog({
-        canonicalEvent,
-        hookEventName,
-        sessionId,
-        cwd,
-        toolName,
-        totalMs,
-        stdinMs,
-        daemonMs,
-        localMs,
-        route: "local",
-      })
-      // Response already written to stdout by engine strategy functions.
-      // The returned response is used only by the daemon path above.
-      void response
-      // In CLI mode, exit immediately — open resources (SQLite handles,
-      // fire-and-forget hook subprocesses) would otherwise keep Bun alive.
-      process.exit(0)
-    })
+    await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName))
   },
 }
