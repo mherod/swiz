@@ -232,32 +232,39 @@ function extractFromStepsSection(body: string): SkillStep[] {
   return steps
 }
 
-/** Regex for `## Step N: Title` top-level headings. */
-const H2_STEP_RE = /^## Step \d+:\s*(.+)/
+/**
+ * Matches step headings at any markdown heading level (##, ###, ####):
+ *   `## Step 0: Title`, `### Step 1 — Title`, `### Step 2: Title`
+ * Captures the heading level (number of #) and the title after the separator.
+ */
+const STEP_HEADING_RE = /^(#{2,4})\s+Step\s+\d+\s*[-:—]\s*(.+)/
 
 /**
- * Extract `## Step N: Title` headings scattered as h2 sections.
- * Collects the body between each step heading and the next h2 as description.
+ * Extract `Step N:` / `Step N —` headings scattered throughout the document.
+ * Handles h2, h3, and h4 levels. Collects the body between each step heading
+ * and the next heading at the same or higher level as description.
  */
-function extractFromH2StepHeadings(stripped: string): SkillStep[] {
+function extractFromStepHeadings(stripped: string): SkillStep[] {
   const lines = stripped.split("\n")
   const steps: SkillStep[] = []
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ""
-    const match = line.match(H2_STEP_RE)
-    if (!match?.[1]) continue
+    const match = line.match(STEP_HEADING_RE)
+    if (!match?.[1] || !match[2]) continue
 
+    const level = match[1].length // number of # characters
     const descLines: string[] = []
     for (let j = i + 1; j < lines.length; j++) {
       const next = lines[j] ?? ""
-      // Stop at next h2 heading (but not ###)
-      if (next.match(/^## (?!#)/)) break
+      // Stop at next heading at same or higher level
+      const headingMatch = next.match(/^(#{2,6})\s/)
+      if (headingMatch && headingMatch[1]!.length <= level) break
       descLines.push(next)
       i = j
     }
     const desc = descLines.join("\n").trim() || undefined
-    steps.push({ subject: match[1].trim(), description: desc })
+    steps.push({ subject: match[2].trim(), description: desc })
   }
 
   return steps
@@ -281,7 +288,7 @@ export function extractStepsFromSkill(content: string): SkillStep[] {
   if (body) return extractFromStepsSection(body)
 
   // Strategy 2: ## Step N: Title headings
-  return extractFromH2StepHeadings(stripped)
+  return extractFromStepHeadings(stripped)
 }
 
 // ─── Skill listing (async) ───────────────────────────────────────────────────

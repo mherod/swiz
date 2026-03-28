@@ -471,7 +471,17 @@ describe("extractStepsFromSkill", () => {
     expect(steps[0]?.description).toBeDefined()
   })
 
-  test("extracts ## Step N: headings from synthetic content", () => {
+  test("extracts ### Step N: headings from push skill", async () => {
+    const content = await readSkill("push")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBeGreaterThanOrEqual(2)
+    expect(steps[0]?.subject).toContain("Task Preflight")
+    expect(steps[1]?.subject).toContain("Collaboration Guard")
+    expect(steps[0]?.description).toBeDefined()
+  })
+
+  test("extracts ## Step N: headings from synthetic h2 content", () => {
     const content = [
       "---",
       "name: test",
@@ -496,6 +506,69 @@ describe("extractStepsFromSkill", () => {
     expect(steps[0]?.description).toBe("Set up your tools.")
     expect(steps[1]?.subject).toBe("Run the thing")
     expect(steps[1]?.description).toBe("Execute the command.")
+  })
+
+  test("extracts ### Step N — Title with em-dash separator", () => {
+    const content = [
+      "---",
+      "name: test",
+      "---",
+      "",
+      "### Step 0 — Setup",
+      "Install deps.",
+      "",
+      "### Step 1 — Build",
+      "Run the build.",
+    ].join("\n")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(2)
+    expect(steps[0]?.subject).toBe("Setup")
+    expect(steps[1]?.subject).toBe("Build")
+  })
+
+  test("extracts ### Step N: Title with colon separator at h3", () => {
+    const content = [
+      "---",
+      "name: test",
+      "---",
+      "",
+      "## Your Task",
+      "",
+      "### Step 0: First thing",
+      "Do the first thing.",
+      "",
+      "### Step 1: Second thing",
+      "Do the second thing.",
+    ].join("\n")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(2)
+    expect(steps[0]?.subject).toBe("First thing")
+    expect(steps[1]?.subject).toBe("Second thing")
+  })
+
+  test("step description stops at next heading of same or higher level", () => {
+    const content = [
+      "---",
+      "name: test",
+      "---",
+      "",
+      "### Step 0: Do something",
+      "Line 1.",
+      "#### Sub-detail",
+      "Sub content.",
+      "",
+      "### Step 1: Next step",
+      "Line 2.",
+    ].join("\n")
+    const steps = extractStepsFromSkill(content)
+
+    expect(steps.length).toBe(2)
+    // Step 0 description includes the h4 sub-detail
+    expect(steps[0]?.description).toContain("Sub-detail")
+    expect(steps[0]?.description).toContain("Sub content.")
+    expect(steps[1]?.description).toBe("Line 2.")
   })
 
   test("subject and description are properly separated for sub-headed steps", async () => {
