@@ -8,6 +8,17 @@ import { getSessionTasksDir } from "./hook-utils.ts"
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, unknown>
 
+/** Simplified hook result for tests that check blocked/allowed state. */
+export interface SimpleHookResult {
+  blocked: boolean
+  reason: string
+}
+
+/** Extended hook result that also tracks advisory (non-blocking) hints. */
+export interface AdvisoryHookResult extends SimpleHookResult {
+  advisory: boolean
+}
+
 /** Write a `.swiz/state.json` file into the given directory. */
 export async function writeState(dir: string, state: string): Promise<void> {
   const configDir = join(dir, ".swiz")

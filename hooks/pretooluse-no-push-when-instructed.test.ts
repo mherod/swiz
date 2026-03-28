@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { SimpleHookResult } from "./utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -27,17 +28,12 @@ function assistantText(text: string) {
   return { role: "assistant" as const, text }
 }
 
-interface HookResult {
-  blocked: boolean
-  reason: string
-}
-
 async function runHook(opts: {
   command: string
   transcriptContent?: string
   transcriptPath?: string
   home?: string
-}): Promise<HookResult> {
+}): Promise<SimpleHookResult> {
   let tPath = opts.transcriptPath ?? ""
 
   if (opts.transcriptContent !== undefined && !opts.transcriptPath) {

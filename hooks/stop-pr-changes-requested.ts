@@ -148,8 +148,8 @@ type Review = {
   body?: string
   submitted_at: string
 }
-type ReviewComment = { user: { login: string }; body: string; created_at: string; path: string }
 type IssueComment = { user: { login: string }; body: string; created_at: string }
+type ReviewComment = IssueComment & { path: string }
 
 interface ResolvedPrContext {
   cwd: string

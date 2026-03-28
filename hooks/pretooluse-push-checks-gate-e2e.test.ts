@@ -11,7 +11,7 @@
 import { describe, expect, it, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { type AdvisoryHookResult, useTempDir } from "./utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-push-checks-gate.ts")
 
@@ -73,13 +73,10 @@ class SessionTranscript {
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
-interface HookResult {
-  blocked: boolean
-  reason: string
-  advisory: boolean
-}
-
-async function runGate(opts: { pushCommand: string; transcriptPath: string }): Promise<HookResult> {
+async function runGate(opts: {
+  pushCommand: string
+  transcriptPath: string
+}): Promise<AdvisoryHookResult> {
   const payload = JSON.stringify({
     tool_name: "Bash",
     tool_input: { command: opts.pushCommand },

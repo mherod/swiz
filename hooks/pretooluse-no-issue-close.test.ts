@@ -1,15 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
-import { runHook as runHookScript } from "./utils/test-utils.ts"
+import { runHook as runHookScript, type SimpleHookResult } from "./utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-issue-close.ts")
 
-interface HookResult {
-  blocked: boolean
-  reason: string
-}
-
-async function runHook(command: string): Promise<HookResult> {
+async function runHook(command: string): Promise<SimpleHookResult> {
   const result = await runHookScript(HOOK_PATH, {
     tool_name: "Bash",
     tool_input: { command },

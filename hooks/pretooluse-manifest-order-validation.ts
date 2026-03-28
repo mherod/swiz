@@ -9,8 +9,7 @@ import {
   allowPreToolUse,
   computeProjectedContent,
   denyPreToolUse,
-  isEditTool,
-  isWriteTool,
+  isFileEditForPath,
 } from "./utils/hook-utils.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
@@ -80,9 +79,7 @@ async function checkOrderAgainstTest(projectedOrder: string[], cwd: string): Pro
 }
 
 function isManifestEdit(input: FileEditHookInput): boolean {
-  const filePath = input.tool_input?.file_path ?? ""
-  const toolName = input.tool_name ?? ""
-  return filePath.endsWith("src/manifest.ts") && (isEditTool(toolName) || isWriteTool(toolName))
+  return isFileEditForPath(input, "src/manifest.ts")
 }
 
 async function main() {

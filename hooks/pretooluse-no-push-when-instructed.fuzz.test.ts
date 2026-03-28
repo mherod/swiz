@@ -21,17 +21,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeTranscript } from "./utils/test-utils.ts"
+import { makeTranscript, type SimpleHookResult } from "./utils/test-utils.ts"
 
 // ─── Shared transcript builder & runner ──────────────────────────────────────
 
 function entry(role: "user" | "assistant", text: string): string {
   return JSON.stringify({ type: role, message: { content: [{ type: "text", text }] } })
-}
-
-interface HookResult {
-  blocked: boolean
-  reason: string
 }
 
 let tmpDir: string
@@ -51,7 +46,7 @@ afterAll(async () => {
   await rm(tmpDir, { recursive: true })
 })
 
-async function runHook(transcriptContent: string): Promise<HookResult> {
+async function runHook(transcriptContent: string): Promise<SimpleHookResult> {
   const tPath = join(tmpDir, `f-${Math.random().toString(36).slice(2)}.jsonl`)
   await Bun.write(tPath, transcriptContent)
 

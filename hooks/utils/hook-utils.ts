@@ -118,6 +118,7 @@ export {
 import {
   isEditTool as _isEditTool,
   isNotebookTool as _isNotebookTool,
+  isWriteTool as _isWriteTool,
 } from "../../src/tool-matchers.ts"
 
 // ─── Subprocess timeout enforcement ─────────────────────────────────────────
@@ -358,6 +359,19 @@ export function allowPreToolUseWithUpdatedInput(
  * `predicate`, and calls `denyPreToolUse` / `allowPreToolUse` accordingly.
  * Absorbs the boilerplate shared by lockfile, node_modules, and similar guards.
  */
+/**
+ * Check whether a hook input represents an Edit/Write operation targeting a file
+ * whose path ends with the given suffix. Shared predicate for file-path guards.
+ */
+export function isFileEditForPath(
+  input: { tool_name?: string; tool_input?: { file_path?: string } },
+  pathSuffix: string
+): boolean {
+  const filePath = input.tool_input?.file_path ?? ""
+  const toolName = input.tool_name ?? ""
+  return filePath.endsWith(pathSuffix) && (_isEditTool(toolName) || _isWriteTool(toolName))
+}
+
 export function filePathGuardHook(
   predicate: (filePath: string) => boolean,
   denyReason: string,

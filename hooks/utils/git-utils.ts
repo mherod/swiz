@@ -453,43 +453,40 @@ export function extractCheckoutStartPoint(command: string): string | null {
   return null
 }
 
+/** Collect all capture-group-1 matches from checkout and switch regex patterns. */
+function collectGitRefMatches(
+  command: string,
+  checkoutPattern: string,
+  switchPattern: string
+): string[] {
+  const results: string[] = []
+  for (const m of command.matchAll(new RegExp(checkoutPattern, "g"))) {
+    if (m[1]) results.push(m[1])
+  }
+  for (const m of command.matchAll(new RegExp(switchPattern, "g"))) {
+    if (m[1]) results.push(m[1])
+  }
+  return results
+}
+
 /** All new branch names from `checkout -b|-B` / `switch -c|-C` in a compound shell command. */
 export function collectCheckoutNewBranchNames(command: string): string[] {
-  const names: string[] = []
-  const checkoutRe = new RegExp(
+  return collectGitRefMatches(
+    command,
     `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+-[bB]\\s+([^\\s;|&]+)`,
-    "g"
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+-[cC]\\s+([^\\s;|&]+)`
   )
-  const switchRe = new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+-[cC]\\s+([^\\s;|&]+)`, "g")
-  for (const m of command.matchAll(checkoutRe)) {
-    if (m[1]) names.push(m[1])
-  }
-  for (const m of command.matchAll(switchRe)) {
-    if (m[1]) names.push(m[1])
-  }
-  return names
 }
 
 /**
  * Plain `checkout <ref>` / `switch <ref>` targets (excludes `-b`/`-c` forms), in order.
  */
 export function collectPlainCheckoutSwitchTargets(command: string): string[] {
-  const targets: string[] = []
-  const checkoutRe = new RegExp(
+  return collectGitRefMatches(
+    command,
     `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+(?!-[bcBC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`,
-    "g"
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+(?!-[cC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`
   )
-  const switchRe = new RegExp(
-    `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+(?!-[cC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`,
-    "g"
-  )
-  for (const m of command.matchAll(checkoutRe)) {
-    if (m[1]) targets.push(m[1])
-  }
-  for (const m of command.matchAll(switchRe)) {
-    if (m[1]) targets.push(m[1])
-  }
-  return targets
 }
 
 /**

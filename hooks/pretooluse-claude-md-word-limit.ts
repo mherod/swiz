@@ -19,8 +19,7 @@ import {
   computeProjectedContent,
   denyPreToolUse,
   formatActionPlan,
-  isEditTool,
-  isWriteTool,
+  isFileEditForPath,
   skillAdvice,
 } from "./utils/hook-utils.ts"
 
@@ -55,9 +54,7 @@ async function buildWordLimitDenyReason(
 }
 
 function isClaudeMdEdit(input: FileEditHookInput): boolean {
-  const toolName = input.tool_name ?? ""
-  const filePath = input.tool_input?.file_path ?? ""
-  return filePath.endsWith("CLAUDE.md") && (isEditTool(toolName) || isWriteTool(toolName))
+  return isFileEditForPath(input, "CLAUDE.md")
 }
 
 async function main() {

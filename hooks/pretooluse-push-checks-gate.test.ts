@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { AdvisoryHookResult } from "./utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -19,17 +20,11 @@ function makeTranscript(...commands: string[]): string {
     .join("\n")
 }
 
-interface HookResult {
-  blocked: boolean
-  reason: string
-  advisory: boolean
-}
-
 async function runHook(opts: {
   command: string
   transcriptContent?: string
   transcriptPath?: string
-}): Promise<HookResult> {
+}): Promise<AdvisoryHookResult> {
   let tPath = opts.transcriptPath ?? ""
 
   if (opts.transcriptContent !== undefined && !opts.transcriptPath) {
@@ -356,7 +351,7 @@ describe("CI check advisory — prHooksActive modes", () => {
   async function runHookWithMode(
     mode: "team" | "relaxed-collab",
     transcriptCommands: string[]
-  ): Promise<HookResult> {
+  ): Promise<AdvisoryHookResult> {
     // Use a per-call subdirectory so concurrent tests don't share config.json
     const projectDir = await mkdtemp(join(tmpDir, `mode-${mode}-`))
     const swizDir = join(projectDir, ".swiz")
@@ -627,7 +622,7 @@ async function runHookInRepo(opts: {
   repoDir: string
   command: string
   transcriptContent?: string
-}): Promise<HookResult> {
+}): Promise<AdvisoryHookResult> {
   const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
   await Bun.write(tPath, opts.transcriptContent ?? "")
   const payload = JSON.stringify({
