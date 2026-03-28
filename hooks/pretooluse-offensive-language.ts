@@ -76,9 +76,7 @@ async function tryRefinedFeedback(
 
 // ── Suffix shared by both paths ──────────────────────────────────────────────
 
-const BLOCKING_SUFFIX =
-  "This hook scans your most recent message and will keep blocking until " +
-  "your next message demonstrates corrected behavior through action, not words."
+const BLOCKING_SUFFIX = "Demonstrate corrected behavior through action, not words."
 
 async function main() {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

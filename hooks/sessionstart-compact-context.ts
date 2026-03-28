@@ -171,7 +171,7 @@ function buildIncompleteTaskSection(tasks: SessionTask[]): string {
       subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
     }) +
     `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
-    `for the same work. The stop hook will block until every task in this session is completed. ` +
+    `for the same work. Every task in this session must be completed before stopping. ` +
     `If the work described by a task is already done, mark it completed immediately.`
   )
 }

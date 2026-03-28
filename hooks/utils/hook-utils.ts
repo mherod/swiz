@@ -518,13 +518,13 @@ function memoryAdvice(include: boolean, reason: string): string {
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */
 export function preToolActionRequired(reason = "", options: ActionRequiredOptions = {}): string {
   const memory = memoryAdvice(options.includeUpdateMemoryAdvice ?? true, reason)
-  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.${memory}`
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause.${memory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
 export function actionRequired(reason = "", options: ActionRequiredOptions = {}): string {
   const memory = memoryAdvice(options.includeUpdateMemoryAdvice ?? true, reason)
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.${memory}`
+  return `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.${memory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */

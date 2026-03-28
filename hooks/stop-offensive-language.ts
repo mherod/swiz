@@ -29,10 +29,8 @@ async function main() {
     blockStop(
       formatAllDenialMessages(
         matches,
-        "This hook detected a lazy behavior pattern in your final message. " +
-          "You cannot stop while your last message contains hedging, deferral, " +
-          "or other avoidance patterns. Produce a new message that demonstrates " +
-          "corrected behavior through action, not words."
+        "Avoidance behavior detected. Produce a corrected message that " +
+          "demonstrates action, not words."
       )
     )
   }

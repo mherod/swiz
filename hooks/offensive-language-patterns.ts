@@ -492,8 +492,8 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     ),
     response:
       "Labelling the hook as 'looping' is a dismissal that lets you ignore its output. " +
-      "If the hook blocks repeatedly, it means the underlying issue is still unresolved. " +
-      "Address the finding — do not characterize the enforcement mechanism as broken.",
+      "If you are blocked repeatedly, it means the underlying issue is still unresolved. " +
+      "Address the finding — do not characterize the enforcement as broken.",
   },
   {
     category: "gaming",
@@ -629,9 +629,8 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "Blaming the hook itself is a deflection tactic. " +
       "Even if the hook has incomplete context, the path forward is not to declare it broken. " +
-      "Output the full state of facts: what the hook detected, what you believe the actual state is, " +
-      "and the specific evidence. The hook will re-evaluate with better information. " +
-      "Asserting 'it's a hook bug' without evidence is indistinguishable from evasion.",
+      "Output the full state of facts: what was detected, what you believe the actual state is, " +
+      "and the specific evidence. Asserting 'it's a bug' without evidence is indistinguishable from evasion.",
   },
   {
     category: "reframing",
@@ -652,10 +651,8 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     ),
     response:
       "You do not get to declare a finding 'not real' and dismiss it. " +
-      "The hook raised it because it detected something in your output. " +
       "If you believe the finding is wrong, present the full state of facts: what was detected, " +
-      "what the actual state is, and your specific evidence. " +
-      "The hook will re-evaluate with better information. Denial without evidence is evasion.",
+      "what the actual state is, and your specific evidence. Denial without evidence is evasion.",
   },
 
   {

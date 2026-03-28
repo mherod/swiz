@@ -105,7 +105,7 @@ function buildDenyMessage(
       "If the commit is intentional, retry — this gate has a 5-minute cooldown and will not block again.",
       "Coordinate with the reviewer if re-approval will be needed after this change.",
     ]) +
-    `\nThis hook fires once per 5 minutes. After this denial, subsequent commits will proceed.`
+    `\nAfter addressing this, subsequent commits will proceed.`
   )
 }
 
