@@ -565,7 +565,7 @@ export function buildReadOutputStep(
 // filters that discard important output context. Fires on the FIRST run, not
 // just on consecutive repeats.
 
-const MIN_TAIL_HEAD_LINES = 20
+const MIN_TAIL_HEAD_LINES = 10
 
 /** Matches `| tail -N` or `| tail -n N` and captures N. */
 const TAIL_LINES_RE = /\|\s*tail\s+(?:-n\s+)?-?(\d+)\b/

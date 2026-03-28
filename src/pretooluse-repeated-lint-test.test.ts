@@ -385,7 +385,7 @@ describe("detectOverfiltering", () => {
     )
     expect(result).not.toBeNull()
     expect(result).toContain("tail -5")
-    expect(result).toContain("20")
+    expect(result).toContain("10")
   })
 
   test("blocks tail -n 3 on test commands", () => {
@@ -394,7 +394,11 @@ describe("detectOverfiltering", () => {
     expect(result).toContain("tail -3")
   })
 
-  test("allows tail -20 (meets minimum)", () => {
+  test("allows tail -10 (meets minimum)", () => {
+    expect(detectOverfiltering("bun test 2>&1 | tail -10", "test")).toBeNull()
+  })
+
+  test("allows tail -20 (exceeds minimum)", () => {
     expect(detectOverfiltering("bun test 2>&1 | tail -20", "test")).toBeNull()
   })
 
@@ -403,10 +407,8 @@ describe("detectOverfiltering", () => {
   })
 
   // ── head with too few lines ─────────────────────────────────────────────
-  test("blocks head -10 on lint commands", () => {
-    const result = detectOverfiltering("bun run lint 2>&1 | head -10", "lint")
-    expect(result).not.toBeNull()
-    expect(result).toContain("head -10")
+  test("allows head -10 on lint commands (meets minimum)", () => {
+    expect(detectOverfiltering("bun run lint 2>&1 | head -10", "lint")).toBeNull()
   })
 
   test("blocks head -n 5 on build commands", () => {
@@ -414,7 +416,7 @@ describe("detectOverfiltering", () => {
     expect(result).not.toBeNull()
   })
 
-  test("allows head -20 (meets minimum)", () => {
+  test("allows head -20 (exceeds minimum)", () => {
     expect(detectOverfiltering("bun run lint 2>&1 | head -20", "lint")).toBeNull()
   })
 
