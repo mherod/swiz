@@ -108,7 +108,7 @@ type LazyCategory =
   | "premature_completion"
   | "task_cancellation"
 
-interface LazyPattern {
+export interface LazyPattern {
   /** RegExp tested against assistant text (case-insensitive). */
   pattern: RegExp
   /** Scolding message returned when the pattern matches. */
