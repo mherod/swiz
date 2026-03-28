@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-03-28
+
+### New Features
+
+- **In-process task creation** — `createTaskInProcess()` in `src/tasks/task-service.ts`
+  provides a core task creation utility with no console side-effects, usable from hooks
+  and services without subprocess overhead. `createSessionTask()` in hook-utils now calls
+  it directly instead of shelling out to `swiz tasks create`.
+- **Shell string stripping** — `stripQuotedShellStrings()` in `hooks/utils/shell-patterns.ts`
+  for safe command token matching after removing quoted content.
+
+### Refactors
+
+- Extracted issue-store replay logic into `src/issue-store-replay.ts` (net -426 lines).
+- Reduced `createSessionTask` cyclomatic complexity from 14 to under 10 by extracting
+  `writeSentinel`, `buildTaskCreateArgs`, and `createTaskViaSubprocess` helpers.
+- `PromptAgentOptions` now extends `PromptOptions` for signal/timeout instead of duplicating fields.
+- Simplified hook test files by reducing boilerplate across 6 test suites.
+
+### Fixes
+
+- Removed task recovery hooks that spawned ghost tasks.
+- Staleness check now skips when an `in_progress` task exists.
+
 ## 2026-03-27
 
 ### New Features
