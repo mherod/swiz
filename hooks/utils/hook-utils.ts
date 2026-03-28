@@ -438,7 +438,11 @@ export async function emitContext(
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
-export { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
+export {
+  type ActionPlanItem,
+  formatActionPlan,
+  mergeActionPlanIntoTasks,
+} from "../../src/action-plan.ts"
 
 /** Return the current agent's tool name for a canonical tool identifier. */
 export function toolNameForCurrentAgent(canonicalName: string): string {

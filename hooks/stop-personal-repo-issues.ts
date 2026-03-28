@@ -34,6 +34,7 @@ import {
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
+  mergeActionPlanIntoTasks,
   sanitizeSessionId,
   skillAdvice,
   skillExists,
@@ -971,6 +972,10 @@ async function main(): Promise<void> {
     const reasonLines = buildStopReasonLines(stopCtx)
     const planSteps = buildStopPlanSteps(stopCtx)
     reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
+
+    if (ctx.sessionId) {
+      await mergeActionPlanIntoTasks(planSteps, ctx.sessionId, ctx.cwd)
+    }
 
     if (shouldUpdateStopCooldown(stopCtx)) await updateCooldown(ctx.sessionId, ctx.cwd)
 

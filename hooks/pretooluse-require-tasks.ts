@@ -32,6 +32,7 @@ import {
   isTaskTrackingExemptShellCommand,
   isTerminalTaskStatus,
   isWriteTool,
+  mergeActionPlanIntoTasks,
   readSessionTasks,
   resolveSafeSessionId,
   scheduleAutoSteer,
@@ -366,6 +367,18 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const stateStep = projectState
     ? `Check project state (\`swiz state show\`): currently \`${projectState}\`. Run \`swiz state set <state>\` if the work phase has changed.`
     : `Set a project state to reflect the current phase: \`swiz state set <state>\` (\`swiz state list\` for options).`
+  const stalePlanSteps: (string | string[])[] = [
+    "Update existing tasks to reflect current reality:",
+    [
+      "Use TaskUpdate to update in-progress tasks with the latest progress.",
+      "Mark completed work done.",
+      "Ensure the current work has an in_progress task with a clear description.",
+    ],
+    "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
+    stateStep,
+  ]
+  const sessionId = (input as Record<string, unknown>).session_id as string | undefined
+  if (sessionId) await mergeActionPlanIntoTasks(stalePlanSteps, sessionId, cwd)
   await deny(
     `STOP. Tasks have gone stale. ${callsSinceLastTaskTool} tool calls since last task update. ` +
       `${toolName} is BLOCKED.\n\n` +
@@ -373,19 +386,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
       `However, it's been a while since we've updated the task list. Good task hygiene means the list should stay fully reflective of what we're currently doing.\n\n` +
       `Tasks are not suggestions - they are our execution plan. Stale tasks mean we are operating without clear accountability.\n\n` +
       `Our current work has clearly grown in scope beyond the original task definition. We should update the in-progress task with current status, and create a new task that represents the work now underway.\n\n` +
-      formatActionPlan(
-        [
-          "Update existing tasks to reflect current reality:",
-          [
-            "Use TaskUpdate to update in-progress tasks with the latest progress.",
-            "Mark completed work done.",
-            "Ensure the current work has an in_progress task with a clear description.",
-          ],
-          "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
-          stateStep,
-        ],
-        { translateToolNames: true }
-      ) +
+      formatActionPlan(stalePlanSteps, { translateToolNames: true }) +
       `\n` +
       `After updating tasks, ${toolName} will be unblocked automatically.`
   )

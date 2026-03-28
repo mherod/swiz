@@ -18,6 +18,7 @@ import {
   getTranscriptSummary,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
+  mergeActionPlanIntoTasks,
   readSessionTasks,
   type SessionTask,
   type TranscriptSummary,
@@ -72,7 +73,9 @@ function anyTaskHasCiEvidence(tasks: TaskFile[]): boolean {
 async function checkAuditLogAllowsStop(
   tasksDir: string,
   taskToolUsed: boolean,
-  toolCallCount: number
+  toolCallCount: number,
+  sessionId?: string,
+  cwd?: string
 ): Promise<boolean> {
   const auditLog = join(tasksDir, ".audit-log.jsonl")
   try {
@@ -106,16 +109,15 @@ async function checkAuditLogAllowsStop(
   if (taskToolUsed) return true
 
   if (toolCallCount >= TOOL_CALL_THRESHOLD) {
+    const planSteps = [
+      "Use TaskCreate to create one task for each significant piece of work",
+      "Use TaskUpdate to mark each task completed after recording the work",
+    ]
+    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
     blockStop(
       `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
         "Create tasks to record the work done.\n\n" +
-        formatActionPlan(
-          [
-            "Use TaskCreate to create one task for each significant piece of work",
-            "Use TaskUpdate to mark each task completed after recording the work",
-          ],
-          { translateToolNames: true }
-        )
+        formatActionPlan(planSteps, { translateToolNames: true })
     )
   }
   return true
@@ -173,24 +175,32 @@ async function countToolCalls(
   }
 }
 
-function blockNoTasks(toolCallCount: number): void {
+async function blockNoTasks(
+  toolCallCount: number,
+  sessionId?: string,
+  cwd?: string
+): Promise<void> {
+  const planSteps = [
+    "Use TaskCreate to create one task for each significant piece of work",
+    "Use TaskUpdate to mark each task completed after recording the work",
+  ]
+  if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
   blockStop(
     `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
       "Create tasks to record the work done.\n\n" +
-      formatActionPlan(
-        [
-          "Use TaskCreate to create one task for each significant piece of work",
-          "Use TaskUpdate to mark each task completed after recording the work",
-        ],
-        { translateToolNames: true }
-      )
+      formatActionPlan(planSteps, { translateToolNames: true })
   )
 }
 
 /** Returns true if stop should proceed, false if blocked. */
-function handleNoTasksDir(taskToolUsed: boolean, toolCallCount: number): boolean {
+async function handleNoTasksDir(
+  taskToolUsed: boolean,
+  toolCallCount: number,
+  sessionId?: string,
+  cwd?: string
+): Promise<boolean> {
   if (taskToolUsed) return true
-  if (toolCallCount >= TOOL_CALL_THRESHOLD) blockNoTasks(toolCallCount)
+  if (toolCallCount >= TOOL_CALL_THRESHOLD) await blockNoTasks(toolCallCount, sessionId, cwd)
   return true
 }
 
@@ -209,18 +219,17 @@ async function enforceCiEvidence(
   if (!hasCiEvidence) hasCiEvidence = await findCiEvidenceInAllSessions(sessionId, home)
 
   if (!hasCiEvidence) {
+    const planSteps = [
+      'Create a "Push and verify CI" task and mark it in_progress.',
+      "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
+      'Mark the task completed: swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"',
+    ]
+    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId)
     blockStop(
       "All tasks are completed but none have CI verification evidence.\n\n" +
         "The push+CI lifecycle rule requires a completed task with evidence " +
         "confirming CI passed (e.g. 'CI green', 'conclusion: success').\n\n" +
-        formatActionPlan(
-          [
-            'Create a "Push and verify CI" task and mark it in_progress.',
-            "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
-            'Mark the task completed: swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"',
-          ],
-          { translateToolNames: true }
-        )
+        formatActionPlan(planSteps, { translateToolNames: true })
     )
   }
 }
@@ -274,12 +283,18 @@ async function runStopCompletionWhenTasksDirReady(opts: {
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   if (!tasksDirExists) {
-    handleNoTasksDir(taskToolUsed, toolCallCount)
+    await handleNoTasksDir(taskToolUsed, toolCallCount, sessionId, input.cwd ?? process.cwd())
     return
   }
 
   if (allTasks.length === 0) {
-    await checkAuditLogAllowsStop(tasksDir, taskToolUsed, toolCallCount)
+    await checkAuditLogAllowsStop(
+      tasksDir,
+      taskToolUsed,
+      toolCallCount,
+      sessionId,
+      input.cwd ?? process.cwd()
+    )
     return
   }
 

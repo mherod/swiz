@@ -19,6 +19,7 @@ import {
   isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
+  mergeActionPlanIntoTasks,
   skillExists,
 } from "./utils/hook-utils.ts"
 
@@ -109,7 +110,12 @@ async function pollUntilComplete(branch: string, cwd: string): Promise<CIRun[]> 
   return relevant
 }
 
-function buildFailingReason(branch: string, failing: CIRun[]): string {
+interface CIBlockResult {
+  reason: string
+  planSteps: ActionPlanItem[]
+}
+
+function buildFailingResult(branch: string, failing: CIRun[]): CIBlockResult {
   const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
   let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
   reason += `Failing checks (${failing.length}): ${names}\n\n`
@@ -130,15 +136,12 @@ function buildFailingReason(branch: string, failing: CIRun[]): string {
     "Commit and push the fix",
     "Wait for CI to go green: gh run watch <run-id> --exit-status"
   )
-  reason +=
-    "\n" +
-    formatActionPlan(["Analyze and fix CI failures before stopping:", fixSubSteps], {
-      translateToolNames: true,
-    })
-  return reason
+  const planSteps: ActionPlanItem[] = ["Analyze and fix CI failures before stopping:", fixSubSteps]
+  reason += "\n" + formatActionPlan(planSteps, { translateToolNames: true })
+  return { reason, planSteps }
 }
 
-function buildActiveReason(branch: string, active: CIRun[]): string {
+function buildActiveResult(branch: string, active: CIRun[]): CIBlockResult {
   const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
   let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
   reason += `Active checks (${active.length}): ${names}\n\n`
@@ -152,10 +155,9 @@ function buildActiveReason(branch: string, active: CIRun[]): string {
     "gh run watch <run-id> --exit-status",
     "Once complete: if passing → stop. If failing → fix before stopping."
   )
-  reason += formatActionPlan(["Wait for CI to complete, then check results:", waitSubSteps], {
-    translateToolNames: true,
-  })
-  return reason
+  const planSteps: ActionPlanItem[] = ["Wait for CI to complete, then check results:", waitSubSteps]
+  reason += formatActionPlan(planSteps, { translateToolNames: true })
+  return { reason, planSteps }
 }
 
 async function main(): Promise<void> {
@@ -168,11 +170,21 @@ async function main(): Promise<void> {
   const relevant = await pollUntilComplete(branch, cwd)
   if (!relevant.length) return
 
+  const sessionId = input.session_id
+
   const failing = findFailing(relevant)
-  if (failing.length > 0) blockStop(buildFailingReason(branch, failing))
+  if (failing.length > 0) {
+    const { reason, planSteps } = buildFailingResult(branch, failing)
+    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
+    blockStop(reason)
+  }
 
   const stillActive = findActive(relevant)
-  if (stillActive.length > 0) blockStop(buildActiveReason(branch, stillActive))
+  if (stillActive.length > 0) {
+    const { reason, planSteps } = buildActiveResult(branch, stillActive)
+    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
+    blockStop(reason)
+  }
 }
 
 if (import.meta.main) void main()
