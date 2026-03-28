@@ -569,44 +569,6 @@ export async function validatePushPreFlightTaskState(filterCwd?: string): Promis
   return checkPushPreFlightTaskState(incomplete)
 }
 
-// ─── Evidence submission ──────────────────────────────────────────────────────
-
-export async function submitEvidence(
-  sessionId: string,
-  taskId: string,
-  evidence: string,
-  filterCwd?: string
-): Promise<void> {
-  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
-    taskId,
-    sessionId,
-    filterCwd
-  )
-
-  task.completionEvidence = evidence
-  if (!task.completionTimestamp) {
-    task.completionTimestamp = new Date().toISOString()
-  }
-  if (task.completedAt === undefined || task.completedAt === null) {
-    task.completedAt = Date.now()
-  }
-
-  await writeTask(effectiveSessionId, task, process.cwd())
-  await writeAudit(effectiveSessionId, {
-    timestamp: new Date().toISOString(),
-    taskId,
-    action: "status_change",
-    oldStatus: task.status,
-    newStatus: task.status,
-    evidence,
-    subject: task.subject,
-  })
-
-  console.log(`\n  ${STATUS_STYLE[task.status].emoji} #${taskId}: evidence submitted`)
-  console.log(`     ${task.subject}`)
-  console.log(`     ${DIM}Evidence: ${evidence}${RESET}\n`)
-}
-
 // ─── Task field update ────────────────────────────────────────────────────────
 
 export async function writeTaskUpdate(
