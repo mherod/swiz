@@ -1030,7 +1030,7 @@ export function formatTaskCompleteCommands(
 /** @deprecated Use the `executor` parameter on `createSessionTask` for test injection only. */
 export type TaskExecutor = (args: string[]) => Promise<number>
 
-const defaultTaskExecutor: TaskExecutor = async (args) => {
+const defaultTaskExecutor: (args: string[]) => Promise<number> = async (args) => {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
   await proc.exited
   return proc.exitCode ?? 1
@@ -1105,7 +1105,7 @@ export async function createSessionTask(
   sentinelKey: string,
   subject: string,
   description: string,
-  executor?: TaskExecutor
+  executor?: (args: string[]) => Promise<number>
 ): Promise<void> {
   const validated = await validateCreateTaskInputs(sessionId, sentinelKey)
   if (!validated) return
