@@ -2241,6 +2241,63 @@ tbody tr:hover {
   margin-top: var(--space-2);
 }
 
+.new-task-form {
+  margin-bottom: var(--space-3);
+}
+
+.new-task-form-row {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.new-task-input {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid rgba(93, 113, 154, 0.34);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.new-task-input:focus {
+  border-color: var(--accent, #5d9cec);
+}
+
+.new-task-input::placeholder {
+  color: rgba(180, 190, 210, 0.5);
+}
+
+.new-task-input:disabled {
+  opacity: 0.5;
+}
+
+.new-task-submit {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(67, 88, 138, 0.12);
+  color: var(--color-blue-200);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  min-width: 32px;
+}
+
+.new-task-submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.new-task-error {
+  margin: var(--space-1) 0 0;
+  color: #ef9d9d;
+  font-size: 0.72rem;
+}
+
 .view-toggle {
   display: flex;
   background: rgba(35, 58, 104, 0.25);

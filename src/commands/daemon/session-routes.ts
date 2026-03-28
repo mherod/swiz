@@ -206,6 +206,51 @@ async function handleProjectTasks(req: Request, ctx: SessionRoutesContext): Prom
   return Response.json(data)
 }
 
+interface CreateTaskBody {
+  sessionId?: string
+  subject?: string
+  description?: string
+  cwd?: string
+}
+
+function parseCreateTaskBody(
+  body: CreateTaskBody | null
+): { sessionId: string; subject: string; description: string; cwd?: string } | null {
+  const sessionId = body?.sessionId
+  const subject = body?.subject?.trim()
+  if (typeof sessionId !== "string" || !sessionId || typeof subject !== "string" || !subject) {
+    return null
+  }
+  const cwd = body?.cwd
+  return {
+    sessionId,
+    subject,
+    description: body?.description?.trim() || subject,
+    cwd: typeof cwd === "string" && cwd.length > 0 ? cwd : undefined,
+  }
+}
+
+async function handleCreateTask(req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as CreateTaskBody | null
+  const parsed = parseCreateTaskBody(body)
+  if (!parsed) {
+    return Response.json(
+      { error: "Missing required fields: sessionId (string), subject (string)" },
+      { status: 400 }
+    )
+  }
+  try {
+    const { createTaskInProcess } = await import("../../tasks/task-service.ts")
+    const task = await createTaskInProcess(parsed)
+    return Response.json({ task })
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Failed to create task" },
+      { status: 500 }
+    )
+  }
+}
+
 export async function handleSessionRoutes(
   req: Request,
   url: URL,
@@ -222,6 +267,9 @@ export async function handleSessionRoutes(
   }
   if (url.pathname === "/projects/tasks" && req.method === "POST") {
     return handleProjectTasks(req, ctx)
+  }
+  if (url.pathname === "/tasks/create" && req.method === "POST") {
+    return handleCreateTask(req)
   }
   return null
 }

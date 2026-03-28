@@ -90,6 +90,8 @@ function DashboardContent({ state }: { state: DashboardState }) {
         projectTasks={state.projectTasks}
         projectTaskSummary={state.projectTaskSummary}
         projectTasksLoading={state.projectTasksLoading}
+        sessionId={state.optimisticSessionId}
+        cwd={state.optimisticProjectCwd}
       />
     )
   }

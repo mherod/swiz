@@ -1,6 +1,6 @@
 import type { ReactElement } from "react"
 import type { ProjectTask, SessionTask, SessionTaskSummary } from "../session-browser-types.ts"
-import { ProjectTasksSection, SessionTasksSection } from "../session-tasks.tsx"
+import { NewTaskForm, ProjectTasksSection, SessionTasksSection } from "../session-tasks.tsx"
 
 export function TasksView({
   sessionTasks,
@@ -9,6 +9,8 @@ export function TasksView({
   projectTasks,
   projectTaskSummary,
   projectTasksLoading,
+  sessionId,
+  cwd,
 }: {
   sessionTasks: SessionTask[]
   sessionTaskSummary: SessionTaskSummary | null
@@ -16,9 +18,12 @@ export function TasksView({
   projectTasks: ProjectTask[]
   projectTaskSummary: SessionTaskSummary | null
   projectTasksLoading: boolean
+  sessionId: string | null
+  cwd: string | null
 }): ReactElement {
   return (
     <div className="bento-full-page">
+      <NewTaskForm sessionId={sessionId} cwd={cwd} />
       <SessionTasksSection
         tasks={sessionTasks}
         summary={sessionTaskSummary}

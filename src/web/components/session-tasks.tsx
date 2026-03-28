@@ -1,5 +1,6 @@
-import { type ReactElement, useMemo, useState } from "react"
+import { type ReactElement, useCallback, useMemo, useRef, useState } from "react"
 import { cn } from "../lib/cn.ts"
+import { postJson } from "../lib/http.ts"
 import type { ProjectTask, SessionTask, SessionTaskSummary } from "./session-browser-types.ts"
 import { formatTime } from "./session-browser-utils.ts"
 
@@ -252,6 +253,81 @@ function ProjectTaskList({
         </>
       )}
     </>
+  )
+}
+
+async function submitNewTask(
+  sessionId: string,
+  subject: string,
+  cwd: string | null
+): Promise<void> {
+  await postJson<{ task: unknown }>("/tasks/create", {
+    sessionId,
+    subject,
+    cwd: cwd ?? undefined,
+  })
+}
+
+export function NewTaskForm({
+  sessionId,
+  cwd,
+}: {
+  sessionId: string | null
+  cwd: string | null
+}): ReactElement {
+  const [subject, setSubject] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleSubmit = useCallback(
+    (e: { preventDefault(): void }) => {
+      e.preventDefault()
+      const trimmed = subject.trim()
+      if (!trimmed || !sessionId) return
+      setSubmitting(true)
+      setError(null)
+      submitNewTask(sessionId, trimmed, cwd)
+        .then(() => {
+          setSubject("")
+          inputRef.current?.focus()
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Failed to create task")
+        })
+        .finally(() => setSubmitting(false))
+    },
+    [subject, sessionId, cwd]
+  )
+
+  if (!sessionId) return <p className="empty">Select a session to create tasks.</p>
+
+  return (
+    <form className="new-task-form" onSubmit={handleSubmit}>
+      <div className="new-task-form-row">
+        <input
+          ref={inputRef}
+          type="text"
+          className="new-task-input"
+          placeholder="New task subject…"
+          value={subject}
+          onChange={(e) => {
+            setSubject(e.target.value)
+            if (error) setError(null)
+          }}
+          disabled={submitting}
+          aria-label="New task subject"
+        />
+        <button
+          type="submit"
+          className="new-task-submit"
+          disabled={submitting || subject.trim().length === 0}
+        >
+          {submitting ? "…" : "+"}
+        </button>
+      </div>
+      {error ? <p className="new-task-error">{error}</p> : null}
+    </form>
   )
 }
 
