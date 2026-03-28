@@ -1034,6 +1034,39 @@ async function validateCreateTaskInputs(
   return { safeSentinel, safeSession, sentinel }
 }
 
+/** Write sentinel file to mark a task as already created. */
+async function writeSentinel(sentinel: string): Promise<void> {
+  try {
+    await Bun.write(sentinel, "")
+  } catch {}
+}
+
+/** Build the argv array for `swiz tasks create` subprocess calls. */
+function buildTaskCreateArgs(
+  swizBin: string,
+  subject: string,
+  description: string,
+  sessionId: string
+): string[] {
+  return [swizBin, "tasks", "create", subject, description, "--session", sessionId]
+}
+
+/** Fallback: create task via subprocess when in-process import fails. */
+async function createTaskViaSubprocess(
+  subject: string,
+  description: string,
+  sessionId: string,
+  sentinel: string
+): Promise<void> {
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
+  const exitCode = await defaultTaskExecutor(
+    buildTaskCreateArgs(swiz, subject, description, sessionId)
+  )
+  if (exitCode === 0) await writeSentinel(sentinel)
+}
+
 /**
  * Create a session task in-process with sentinel dedup.
  *
@@ -1054,20 +1087,10 @@ export async function createSessionTask(
 
   // Legacy path: test-injected executor shells out to swiz CLI
   if (executor) {
-    const exitCode = await executor([
-      "swiz",
-      "tasks",
-      "create",
-      subject,
-      description,
-      "--session",
-      sessionId ?? "",
-    ])
-    if (exitCode === 0) {
-      try {
-        await Bun.write(sentinel, "")
-      } catch {}
-    }
+    const exitCode = await executor(
+      buildTaskCreateArgs("swiz", subject, description, sessionId ?? "")
+    )
+    if (exitCode === 0) await writeSentinel(sentinel)
     return
   }
 
@@ -1075,31 +1098,12 @@ export async function createSessionTask(
   try {
     const { createTaskInProcess } = await import("../../src/tasks/task-service.ts")
     await createTaskInProcess({ sessionId: sessionId!, subject, description })
-    try {
-      await Bun.write(sentinel, "")
-    } catch {}
+    await writeSentinel(sentinel)
   } catch (err) {
-    // Fallback to subprocess if import fails (e.g., circular dep edge case)
     console.error(
       `[swiz] createSessionTask: in-process creation failed (${err instanceof Error ? err.message : String(err)}), falling back to subprocess`
     )
-    const home = getHomeDirOrNull()
-    if (!home) return
-    const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
-    const exitCode = await defaultTaskExecutor([
-      swiz,
-      "tasks",
-      "create",
-      subject,
-      description,
-      "--session",
-      sessionId ?? "",
-    ])
-    if (exitCode === 0) {
-      try {
-        await Bun.write(sentinel, "")
-      } catch {}
-    }
+    await createTaskViaSubprocess(subject, description, sessionId ?? "", sentinel)
   }
 }
 
