@@ -141,6 +141,27 @@ describe("parseIdeaArgs", () => {
   it("throws on unknown args", () => {
     expect(() => parseIdeaArgs(["--wat"])).toThrow("Unknown argument")
   })
+
+  it("defaults json and printPrompt to false", () => {
+    const parsed = parseIdeaArgs([])
+    expect(parsed.json).toBe(false)
+    expect(parsed.printPrompt).toBe(false)
+  })
+
+  it("parses --json flag", () => {
+    expect(parseIdeaArgs(["--json"]).json).toBe(true)
+    expect(parseIdeaArgs(["-j"]).json).toBe(true)
+  })
+
+  it("parses --print-prompt flag", () => {
+    expect(parseIdeaArgs(["--print-prompt"]).printPrompt).toBe(true)
+  })
+
+  it("combines --json with other flags", () => {
+    const parsed = parseIdeaArgs(["--json", "--provider", "gemini"])
+    expect(parsed.json).toBe(true)
+    expect(parsed.provider).toBe("gemini")
+  })
 })
 
 describe("ideaCommand", () => {
