@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 // PreToolUse hook: Blocks edits that weaken TypeScript quality.
-// Checks for: `as any` casts, eslint-disable comments, @ts-expect-error/@ts-nocheck/@ts-expect-error.
+// Checks for: `as any` casts, lint-disable comments, @ts-expect-error/@ts-nocheck/@ts-expect-error.
 // Merged from pretooluse-no-as-any.ts, pretooluse-no-eslint-disable.ts, pretooluse-no-ts-ignore.ts.
 
 import { fileEditHookInputSchema } from "./schemas.ts"
