@@ -267,14 +267,41 @@ function collapseDoubledConsonant(stem: string): string {
 }
 
 /**
- * Strip negation prefix "un" when the remaining stem is a known word root.
+ * Words starting with "un" where the prefix is NOT a negation.
+ * These are etymologically distinct roots that must not be stripped.
+ */
+const UN_PREFIX_BLOCKLIST = new Set([
+  "understand",
+  "under",
+  "undo",
+  "unique",
+  "uniqu",
+  "unify",
+  "union",
+  "universe",
+  "univers",
+  "unless",
+  "unlike",
+  "until",
+  "unusual",
+  "uncle",
+  "uncl",
+  "unit",
+  "unix",
+  "unison",
+  "unfold",
+])
+
+/**
+ * Strip negation prefix "un" when the remaining stem is a meaningful word.
  * "uncommit" → "commit", "unpush" → "push", "uncook" → "cook".
- * Guards: stem after stripping must be ≥3 chars to avoid mangling
- * short words like "unit" or "unix".
+ * Guards: stem after stripping must be ≥3 chars, and the original word
+ * must not be in the blocklist of non-negation "un-" words.
  */
 function stripNegationPrefix(stem: string): string {
-  if (stem.length >= 5 && stem.startsWith("un")) {
-    return stem.slice(2)
+  if (stem.length >= 5 && stem.startsWith("un") && !UN_PREFIX_BLOCKLIST.has(stem)) {
+    const remainder = stem.slice(2)
+    if (remainder.length >= 3) return remainder
   }
   return stem
 }

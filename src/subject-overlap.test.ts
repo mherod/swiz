@@ -186,6 +186,27 @@ describe("stemWord", () => {
     expect(stemWord("unix")).toBe("unix")
   })
 
+  test("preserves blocklisted un- words (not negations)", () => {
+    expect(stemWord("understand")).toBe("understand")
+    expect(stemWord("unique")).toBe("unique")
+    expect(stemWord("union")).toBe("union")
+    expect(stemWord("universe")).toBe("universe")
+    expect(stemWord("unlike")).toBe("unlike")
+    expect(stemWord("until")).toBe("until")
+    expect(stemWord("unusual")).toBe("unusual")
+    expect(stemWord("uncle")).toBe("uncle")
+    expect(stemWord("undo")).toBe("undo")
+    expect(stemWord("unfold")).toBe("unfold")
+  })
+
+  test("strips un- from true negation forms", () => {
+    expect(stemWord("untrack")).toBe("track")
+    expect(stemWord("unstage")).toBe("stage")
+    expect(stemWord("unsafe")).toBe("safe")
+    expect(stemWord("unlock")).toBe("lock")
+    expect(stemWord("unset")).toBe("set")
+  })
+
   test("stems irregular plural nouns", () => {
     expect(stemWord("indices")).toBe("index")
     expect(stemWord("statuses")).toBe("status")
@@ -376,6 +397,19 @@ describe("computeSubjectFingerprint", () => {
     const fp1 = computeSubjectFingerprint("Commit uncommitted changes")
     const fp2 = computeSubjectFingerprint("Commit changes")
     expect(fp1).toBe(fp2)
+  })
+
+  test("matches 'Push unpushed changes' with 'Push changes'", () => {
+    const fp1 = computeSubjectFingerprint("Push unpushed changes")
+    const fp2 = computeSubjectFingerprint("Push changes")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("does NOT collapse 'Understand the codebase' with 'Derstand the codebase'", () => {
+    const fp1 = computeSubjectFingerprint("Understand the codebase")
+    const fp2 = computeSubjectFingerprint("Understand the codebase")
+    expect(fp1).toBe(fp2) // consistent with itself
+    // "understand" should not be stripped to "derstand"
   })
 
   test("ignores modal verbs (should/must/will)", () => {
