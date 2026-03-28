@@ -13,6 +13,7 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import { validateEvidence, verifyCiGreenEvidence, verifyTaskSubject } from "./evidence-validator.ts"
 import {
   compareTaskIds,
+  isIncompleteTaskStatus,
   parseTaskId,
   readTasks,
   STATUS_STYLE,
@@ -272,6 +273,23 @@ export function validateTransition(oldStatus: string, newStatus: string): string
   return null
 }
 
+/**
+ * Validate that completing a task won't leave zero incomplete tasks in the session.
+ * Returns an error string if blocked, null if allowed.
+ */
+export function validateLastTaskStanding(
+  taskId: string,
+  allTasks: Array<{ id: string; status: string }>
+): string | null {
+  const otherIncomplete = allTasks.filter(
+    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
+  )
+  if (otherIncomplete.length === 0) {
+    return `Completing task #${taskId} would leave zero incomplete tasks. Create a new task before completing this one.`
+  }
+  return null
+}
+
 function applyTaskTimestamps(
   task: Task,
   newStatus: Task["status"],
@@ -380,6 +398,10 @@ export async function completeTaskWithAutoTransition(
   options: { evidence?: string; verifyText?: string; filterCwd?: string } = {}
 ): Promise<void> {
   const { filterCwd } = options
+  const allTasks = await readTasks(sessionId)
+  const lastTaskError = validateLastTaskStanding(taskId, allTasks)
+  if (lastTaskError) throw new Error(lastTaskError)
+
   const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
     await updateStatus(sessionId, taskId, "in_progress", { filterCwd })

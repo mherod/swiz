@@ -3,11 +3,11 @@
 // In Claude Code environment, prefer native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList)
 // over the swiz CLI equivalent. This improves task tracking and eliminates subprocess overhead.
 
+import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
-  isIncompleteTaskStatus,
   isRunningInAgent,
   isShellTool,
   readSessionTasks,
@@ -102,12 +102,10 @@ async function checkLastTaskStanding(command: string, sessionId: string): Promis
   const safeId = resolveSafeSessionId(sessionId as string | undefined)
   if (!safeId) return
   const allTasks = await readSessionTasks(safeId)
-  const otherIncomplete = allTasks.filter(
-    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
-  )
-  if (otherIncomplete.length === 0) {
+  const error = validateLastTaskStanding(taskId, allTasks)
+  if (error) {
     denyPreToolUse(
-      `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
+      `STOP. ${error}\n\n` +
         `You have executive authority to determine the next logical step. ` +
         `Before completing this task, plan your next steps:\n\n` +
         formatActionPlan(
