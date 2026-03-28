@@ -428,9 +428,41 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
 }
 
+async function runCompleteAll(rest: string[], filterCwd?: string): Promise<void> {
+  const cwd = filterCwd ?? process.cwd()
+  const sessionIds = await getSessionIdsForProject(cwd)
+  let completed = 0
+
+  for (const sessionId of sessionIds) {
+    const tasks = await readTasks(sessionId)
+    const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
+    for (const task of incomplete) {
+      try {
+        await completeTaskWithAutoTransition(sessionId, task.id, {
+          evidence: rest.includes("--evidence") ? rest[rest.indexOf("--evidence") + 1] : undefined,
+          filterCwd,
+          skipLastTaskGuard: true,
+        })
+        console.log(`  ✅ #${task.id}: ${task.status} → completed — ${task.subject}`)
+        completed++
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.log(`  ❌ #${task.id}: ${msg}`)
+      }
+    }
+  }
+
+  if (completed === 0) {
+    console.log("  No incomplete tasks found in current project.")
+  } else {
+    console.log(`\n  Completed ${completed} task(s).`)
+  }
+}
+
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
+  "complete-all": (rest, filterCwd) => runCompleteAll(rest, filterCwd),
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
   adopt: async (rest) => {
