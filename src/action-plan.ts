@@ -4,9 +4,15 @@
  * crossing the src → hooks dependency boundary.
  */
 
+import { join } from "node:path"
 import { translateMatcher } from "./agents.ts"
 import { detectCurrentAgent } from "./detect.ts"
-import { filterQualitySteps, type SkillStep } from "./skill-utils.ts"
+import {
+  extractStepsFromSkill,
+  filterQualitySteps,
+  SKILL_DIRS,
+  type SkillStep,
+} from "./skill-utils.ts"
 import { type MergeStep, mergeIntoTasks } from "./tasks/task-service.ts"
 
 /** A step can be a plain string or an array of sub-steps (recursively nested). */
@@ -67,6 +73,64 @@ function renderSubItems(
     }
   }
   return lines
+}
+
+// ─── Skill reference expansion ─────────────────────────────────────────────
+
+/** Match `/skill-name` references in step text. */
+const SKILL_REF_RE = /\/([a-z][a-z0-9-]*)/g
+
+/**
+ * Resolve a skill name to its SKILL.md content, or null if not found.
+ */
+async function resolveSkillContent(skillName: string): Promise<string | null> {
+  for (const dir of SKILL_DIRS) {
+    const file = Bun.file(join(dir, skillName, "SKILL.md"))
+    if (await file.exists()) return file.text()
+  }
+  return null
+}
+
+/**
+ * Expand skill references in action plan steps.
+ *
+ * When a top-level step string contains a `/skill-name` pattern and that skill
+ * exists on disk, the skill's extracted steps are appended as a nested sub-step
+ * array immediately after the referencing step.
+ *
+ * Steps that already have a sub-step array (next item is an array) are skipped
+ * to avoid overwriting explicitly provided sub-steps.
+ */
+export async function expandSkillReferences(steps: ActionPlanItem[]): Promise<ActionPlanItem[]> {
+  const result: ActionPlanItem[] = []
+
+  for (let i = 0; i < steps.length; i++) {
+    const item = steps[i]!
+    result.push(item)
+
+    if (typeof item !== "string") continue
+    // Skip if already followed by explicit sub-steps
+    if (Array.isArray(steps[i + 1])) continue
+
+    // Find all skill references in this step
+    const refs = [...item.matchAll(SKILL_REF_RE)].map((m) => m[1]!)
+    if (refs.length === 0) continue
+
+    // Try each ref until one resolves to steps
+    for (const ref of refs) {
+      const content = await resolveSkillContent(ref)
+      if (!content) continue
+
+      const skillSteps = filterQualitySteps(extractStepsFromSkill(content))
+      if (skillSteps.length === 0) continue
+
+      // Inline as sub-step array
+      result.push(skillSteps.map((s) => s.subject))
+      break // only expand the first matching skill per step
+    }
+  }
+
+  return result
 }
 
 // ─── Auto-merge action plan steps into tasks ────────────────────────────────

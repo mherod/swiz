@@ -440,6 +440,7 @@ export async function emitContext(
 
 export {
   type ActionPlanItem,
+  expandSkillReferences,
   formatActionPlan,
   mergeActionPlanIntoTasks,
 } from "../../src/action-plan.ts"
