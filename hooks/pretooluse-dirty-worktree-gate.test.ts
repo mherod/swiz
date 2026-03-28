@@ -108,6 +108,6 @@ describe("pretooluse-dirty-worktree-gate", () => {
     const result = await runHook(dir)
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("30 dirty files")
-    expect(result.reason).toContain("/commit")
+    expect(result.reason).toContain("Commit your current changes")
   })
 })
