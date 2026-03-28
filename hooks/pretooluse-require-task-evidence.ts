@@ -4,11 +4,11 @@
 // record, causing stop hooks to fire repeatedly.  This hook requires >=1 distinct
 // evidence field in the description before allowing completion.
 
+import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   allowPreToolUse,
+  buildLastTaskStandingDenial,
   denyPreToolUse,
-  formatActionPlan,
-  isIncompleteTaskStatus,
   readSessionTasks,
   resolveSafeSessionId,
 } from "./utils/hook-utils.ts"
@@ -40,23 +40,9 @@ const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
 if (sessionId) {
   const taskId = String(toolInput.taskId ?? "")
   const allTasks = await readSessionTasks(sessionId)
-  const otherIncomplete = allTasks.filter(
-    (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
-  )
-  if (otherIncomplete.length === 0) {
-    denyPreToolUse(
-      `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
-        `You have executive authority to determine the next logical step. ` +
-        `Before completing this task, plan your next steps:\n\n` +
-        formatActionPlan(
-          [
-            "Use TaskCreate to add at least one pending task for the next logical step.",
-            "Then retry this completion — it will succeed once a pending task exists.",
-          ],
-          { translateToolNames: true }
-        ) +
-        `\nThe task list must never be fully complete — there is always a next step to plan.`
-    )
+  const error = validateLastTaskStanding(taskId, allTasks)
+  if (error) {
+    denyPreToolUse(buildLastTaskStandingDenial(taskId))
   }
 }
 

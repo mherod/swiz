@@ -438,12 +438,14 @@ export async function emitContext(
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
-export {
+import {
   type ActionPlanItem,
   expandSkillReferences,
   formatActionPlan,
   mergeActionPlanIntoTasks,
 } from "../../src/action-plan.ts"
+
+export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
 /** Return the current agent's tool name for a canonical tool identifier. */
 export function toolNameForCurrentAgent(canonicalName: string): string {
@@ -936,6 +938,26 @@ export function isIncompleteTaskStatus(status: string): boolean {
  */
 export function autoTransitionForComplete(task: { status: string }): void {
   if (task.status === "pending") task.status = "in_progress"
+}
+
+/**
+ * Build the standard denial message for the last-task-standing guard.
+ * Both pretooluse-enforce-taskupdate and pretooluse-require-task-evidence use this.
+ */
+export function buildLastTaskStandingDenial(taskId: string): string {
+  return (
+    `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
+    `You have executive authority to determine the next logical step. ` +
+    `Before completing this task, plan your next steps:\n\n` +
+    formatActionPlan(
+      [
+        "Use TaskCreate to add at least one pending task for the next logical step.",
+        "Then retry this completion — it will succeed once a pending task exists.",
+      ],
+      { translateToolNames: true }
+    ) +
+    `\nThe task list must never be fully complete — there is always a next step to plan.`
+  )
 }
 
 /** True when a task status counts as terminal work. */

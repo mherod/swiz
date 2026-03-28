@@ -6,8 +6,8 @@
 import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   allowPreToolUse,
+  buildLastTaskStandingDenial,
   denyPreToolUse,
-  formatActionPlan,
   isRunningInAgent,
   isShellTool,
   readSessionTasks,
@@ -104,19 +104,8 @@ async function checkLastTaskStanding(command: string, sessionId: string): Promis
   const allTasks = await readSessionTasks(safeId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
-    denyPreToolUse(
-      `STOP. ${error}\n\n` +
-        `You have executive authority to determine the next logical step. ` +
-        `Before completing this task, plan your next steps:\n\n` +
-        formatActionPlan(
-          [
-            "Use TaskCreate to add at least one pending task for the next logical step.",
-            "Then retry this completion — it will succeed once a pending task exists.",
-          ],
-          { translateToolNames: true }
-        ) +
-        `\nThe task list must never be fully complete — there is always a next step to plan.`
-    )
+    const taskId = extractCompleteTaskId(command)
+    denyPreToolUse(buildLastTaskStandingDenial(taskId ?? "unknown"))
   }
 }
 
