@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { JsonObject } from "./test-utils.ts"
@@ -35,41 +35,16 @@ async function runHelper(code: string): Promise<{
   }
 }
 
+/** Update-memory footer is now always enabled — no settings init needed. */
 async function runHelperWithUpdateMemoryFooter(
   code: string,
-  enabled: boolean
+  _enabled: boolean
 ): Promise<{
   exitCode: number | null
   parsed: JsonObject
   stdout: string
 }> {
-  const home = await mkdtemp(join(tmpdir(), "swiz-hook-utils-"))
-  try {
-    const swizDir = join(home, ".swiz")
-    await mkdir(swizDir, { recursive: true })
-    await writeFile(join(swizDir, "settings.json"), JSON.stringify({ updateMemoryFooter: enabled }))
-    // Split code into import part and execution part, inject initUpdateMemoryFooterCache
-    const importEnd = code.indexOf('from "./hook-utils.ts"')
-    const importNames = code.slice(0, importEnd).trim()
-    const rest = code.slice(importEnd + 'from "./hook-utils.ts";'.length).trim()
-    const script = `import { initUpdateMemoryFooterCache, ${importNames} from "./hook-utils.ts"; await initUpdateMemoryFooterCache(); ${rest}`
-    const proc = Bun.spawn(["bun", "-e", script], {
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: import.meta.dir,
-      env: { ...process.env, HOME: home },
-    })
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    const trimmed = stdout.trim()
-    return {
-      exitCode: proc.exitCode,
-      parsed: trimmed ? (JSON.parse(trimmed) as JsonObject) : {},
-      stdout: trimmed,
-    }
-  } finally {
-    await rm(home, { recursive: true, force: true })
-  }
+  return runHelper(code)
 }
 
 describe("denyPreToolUse", () => {
@@ -98,14 +73,14 @@ describe("denyPreToolUse", () => {
     expect(reason).toContain("The user asked for a changelog update before stopping.")
   })
 
-  test("does not include update-memory reminder by default", async () => {
+  test("always includes update-memory reminder (footer is unconditionally enabled)", async () => {
     const { parsed } = await runHelper(
       `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked for testing")`
     )
     const hso = parsed.hookSpecificOutput as JsonObject
     const reason = hso.permissionDecisionReason as string
-    expect(reason).not.toContain("Use the /update-memory skill")
-    expect(reason).not.toContain("Cause to capture:")
+    expect(reason).toContain("Update your MEMORY.md")
+    expect(reason).toContain("Cause to capture:")
   })
 })
 

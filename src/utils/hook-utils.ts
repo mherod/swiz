@@ -4,9 +4,12 @@
 
 import { dirname, join } from "node:path"
 import type { Subprocess } from "bun"
-import { hookOutputSchema, type SessionHookInput, type ToolHookInput } from "../../hooks/schemas.ts"
-export type { SessionHookInput, ToolHookInput }
-
+import {
+  type HookOutput,
+  hookOutputSchema,
+  type SessionHookInput,
+  type ToolHookInput,
+} from "../../hooks/schemas.ts"
 import {
   type ActionPlanItem,
   expandSkillReferences,
@@ -42,6 +45,8 @@ import {
   SOURCE_EXT_RE,
 } from "./git-utils.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
+
+export type { SessionHookInput, ToolHookInput }
 
 // ─── Runtime dependency check ───────────────────────────────────────────────
 // Verify bun is reachable on PATH. This file executes inside bun, but the
@@ -333,51 +338,69 @@ export function isPlaceholderSubject(subject: string): boolean {
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
+function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
+  return hookOutputSchema.parse({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason + preToolActionRequired(reason, options),
+    },
+  })
+}
+
 /** Emit a PreToolUse denial and exit. Appends ACTION REQUIRED footer. Works across all agents. */
 export function denyPreToolUse(reason: string, options: ActionRequiredOptions = {}): never {
-  console.log(
-    JSON.stringify(
-      hookOutputSchema.parse({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: reason + preToolActionRequired(reason, options),
-        },
-      })
-    )
-  )
+  console.log(JSON.stringify(denyPreToolUseObj(reason, options)))
   process.exit(0)
+}
+
+function allowPreToolUseObj(reason: string) {
+  return hookOutputSchema.parse({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: reason,
+    },
+  })
 }
 
 /** Emit a PreToolUse allow with advisory context and exit. Does NOT block. Works across all agents. */
 export function allowPreToolUse(reason: string): never {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-        permissionDecisionReason: reason,
-      },
-    })
-  )
+  console.log(JSON.stringify(allowPreToolUseObj(reason)))
   process.exit(0)
+}
+
+function allowPreToolUseWithContextObj(additionalContext: string, effectiveReason: string) {
+  return hookOutputSchema.parse({
+    ...(additionalContext && { systemMessage: additionalContext }),
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
+      ...(additionalContext && { additionalContext }),
+    },
+  })
 }
 
 /** Emit a PreToolUse allow with both a visible hint and additionalContext. */
 export function allowPreToolUseWithContext(reason: string, additionalContext: string): never {
   const effectiveReason = reason || additionalContext
-  console.log(
-    JSON.stringify({
-      ...(additionalContext && { systemMessage: additionalContext }),
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-        ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
-        ...(additionalContext && { additionalContext }),
-      },
-    })
-  )
+  console.log(JSON.stringify(allowPreToolUseWithContextObj(additionalContext, effectiveReason)))
   process.exit(0)
+}
+
+function allowPreToolUseWithUpdatedInputObj(
+  updatedInput: Record<string, unknown>,
+  reason?: string
+) {
+  return hookOutputSchema.parse({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      ...(reason && { permissionDecisionReason: reason }),
+      updatedInput,
+    },
+  })
 }
 
 /** Emit a PreToolUse allow with modified tool input and exit. Works across all agents. */
@@ -385,16 +408,7 @@ export function allowPreToolUseWithUpdatedInput(
   updatedInput: Record<string, unknown>,
   reason?: string
 ): never {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-        ...(reason && { permissionDecisionReason: reason }),
-        updatedInput,
-      },
-    })
-  )
+  console.log(JSON.stringify(allowPreToolUseWithUpdatedInputObj(updatedInput, reason)))
   process.exit(0)
 }
 
@@ -433,19 +447,26 @@ export function filePathGuardHook(
   }
 }
 
+function denyPostToolUseObj(reason: string): HookOutput {
+  return hookOutputSchema.parse({
+    decision: "block",
+    reason,
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      additionalContext: reason,
+    },
+  })
+}
+
+function exitWithHookObject(obj: HookOutput): never {
+  process.stdout.write(`${JSON.stringify(obj)}\n`)
+  process.exit(0)
+}
+
 /** Emit a PostToolUse block decision and exit. Works across all agents. */
 export function denyPostToolUse(reason: string): never {
-  console.log(
-    JSON.stringify({
-      decision: "block",
-      reason,
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: reason,
-      },
-    })
-  )
-  process.exit(0)
+  const obj = denyPostToolUseObj(reason)
+  exitWithHookObject(obj)
 }
 
 /** Read current project state line, e.g. "State: developing → [reviewing, planning]". */
@@ -461,6 +482,19 @@ async function readStateMaybe(cwd: string): Promise<string | null> {
   }
 }
 
+async function emitContextObj(eventName: string, cwd: string | undefined, context: string) {
+  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
+  const fullContext = stateLine ? `${context} ${stateLine}` : context
+
+  return hookOutputSchema.parse({
+    systemMessage: fullContext,
+    hookSpecificOutput: {
+      hookEventName: eventName,
+      additionalContext: fullContext,
+    },
+  })
+}
+
 /** Emit additional context for a hook event. Works across all agents.
  *  For PostToolUse events, appends current project state + allowed transitions when a state is set. */
 export async function emitContext(
@@ -468,17 +502,8 @@ export async function emitContext(
   context: string,
   cwd?: string
 ): Promise<never> {
-  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
-  const fullContext = stateLine ? `${context} ${stateLine}` : context
-  console.log(
-    JSON.stringify({
-      systemMessage: fullContext,
-      hookSpecificOutput: {
-        hookEventName: eventName,
-        additionalContext: fullContext,
-      },
-    })
-  )
+  const obj = await emitContextObj(eventName, cwd, context)
+  console.log(JSON.stringify(obj))
   process.exit(0)
 }
 
@@ -522,26 +547,8 @@ function updateMemoryAdvice(reason: string): string {
   )
 }
 
-let _updateMemoryFooterEnabledCache: boolean | null = null
-
-/** Load the updateMemoryFooter setting. Call before synchronous helpers that read the cache. */
-export async function initUpdateMemoryFooterCache(): Promise<void> {
-  if (_updateMemoryFooterEnabledCache !== null) return
-  try {
-    const home = process.env.HOME ?? ""
-    if (!home) {
-      _updateMemoryFooterEnabledCache = false
-      return
-    }
-    const raw = await Bun.file(`${home}/.swiz/settings.json`).json()
-    _updateMemoryFooterEnabledCache = raw?.updateMemoryFooter === true
-  } catch {
-    _updateMemoryFooterEnabledCache = false
-  }
-}
-
 function isUpdateMemoryFooterEnabled(): boolean {
-  return _updateMemoryFooterEnabledCache ?? false
+  return true
 }
 
 interface ActionRequiredOptions {
@@ -565,21 +572,39 @@ export function actionRequired(reason = "", options: ActionRequiredOptions = {})
   return `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.${memory}`
 }
 
+function blockStopObj(reason: string, options: { includeUpdateMemoryAdvice?: boolean } = {}) {
+  return hookOutputSchema.parse({
+    decision: "block",
+    reason: reason + actionRequired(reason, options),
+  })
+}
+
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
 export function blockStop(
   reason: string,
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): never {
-  console.log(
-    JSON.stringify({ decision: "block", reason: reason + actionRequired(reason, options) })
-  )
+  console.log(JSON.stringify(blockStopObj(reason, options)))
   process.exit(0)
+}
+
+function blockStopRawObj(reason: string) {
+  return hookOutputSchema.parse({ decision: "block", reason })
 }
 
 /** Emit a raw stop block (no footer appended — caller controls the full reason). */
 export function blockStopRaw(reason: string): never {
-  console.log(JSON.stringify({ decision: "block", reason }))
+  console.log(JSON.stringify(blockStopRawObj(reason)))
   process.exit(0)
+}
+
+function blockStopHumanRequiredObj(reason: string) {
+  const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
+  return hookOutputSchema.parse({
+    decision: "block",
+    reason: fullReason,
+    resolution: "human-required",
+  })
 }
 
 /**
@@ -589,10 +614,7 @@ export function blockStopRaw(reason: string): never {
  * Appends a note to the reason explaining this.
  */
 export function blockStopHumanRequired(reason: string): never {
-  const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
-  console.log(
-    JSON.stringify({ decision: "block", reason: fullReason, resolution: "human-required" })
-  )
+  console.log(JSON.stringify(blockStopHumanRequiredObj(reason)))
   process.exit(0)
 }
 
