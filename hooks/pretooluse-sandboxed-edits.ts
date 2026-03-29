@@ -7,8 +7,9 @@ import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { readSwizSettings } from "../src/settings.ts"
+import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { getDefaultBranch } from "./utils/git-utils.ts"
 import {
   allowPreToolUse,
   buildIssueGuidance,
@@ -16,6 +17,7 @@ import {
   git,
   isFileEditTool,
   isGitHubHost,
+  isGitRepo,
   parseRemoteUrl,
 } from "./utils/hook-utils.ts"
 
@@ -28,6 +30,30 @@ if (!filePath) process.exit(0)
 
 const settings = await readSwizSettings()
 if (!settings.sandboxedEdits) process.exit(0)
+
+// When trunk mode is enabled, block edits if the current branch is not the
+// default branch. This prevents accidental work on stale feature branches
+// when the project expects all commits on the trunk.
+const hookCwd = input.cwd ?? process.cwd()
+if (await isGitRepo(hookCwd)) {
+  const project = await readProjectSettings(hookCwd)
+  if (project?.trunkMode) {
+    const defaultBranch = await getDefaultBranch(hookCwd)
+    const currentBranch = (await git(["branch", "--show-current"], hookCwd)).trim()
+    if (currentBranch && currentBranch !== defaultBranch) {
+      denyPreToolUse(
+        [
+          "Trunk mode is enabled — file edits are blocked on non-default branches.",
+          "",
+          `  Current branch: ${currentBranch}`,
+          `  Default branch: ${defaultBranch}`,
+          "",
+          `Switch to the default branch first: git checkout ${defaultBranch}`,
+        ].join("\n")
+      )
+    }
+  }
+}
 
 // Block direct edits to swiz config files even when the path is within the sandbox.
 // Agents must use `swiz settings` / `swiz state` — direct JSON edits bypass all

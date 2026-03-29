@@ -7,5 +7,5 @@
   "ambitionMode": "aggressive",
   "trunkMode": true,
   "autoContinue": true,
-  "defaultBranch": "test-branch"
+  "defaultBranch": "main"
 }

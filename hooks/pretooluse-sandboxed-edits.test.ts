@@ -316,6 +316,114 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(result.stdout).toBe("")
   })
 
+  describe("trunk mode branch guard", () => {
+    async function initGitRepoWithBranch(
+      dir: string,
+      defaultBranch: string,
+      currentBranch: string
+    ): Promise<void> {
+      const run = async (...args: string[]) => {
+        const proc = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+        await proc.exited
+      }
+      await run("init", "-b", defaultBranch)
+      await run("config", "user.email", "test@example.com")
+      await run("config", "user.name", "Test")
+      await writeFile(join(dir, "init.txt"), "init")
+      await run("add", ".")
+      await run("commit", "-m", "init")
+      if (currentBranch !== defaultBranch) {
+        await run("checkout", "-b", currentBranch)
+      }
+    }
+
+    async function runHookWithTrunkMode(
+      cwd: string,
+      filePath: string,
+      trunkMode: boolean,
+      defaultBranch = "main"
+    ): Promise<HookResult> {
+      const fakeHome = await tmp.create("swiz-trunk-home-")
+      await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+      // Global settings
+      await writeFile(
+        join(fakeHome, ".swiz", "settings.json"),
+        JSON.stringify({ sandboxedEdits: true, autoContinue: false, pushGate: false, sessions: {} })
+      )
+      // Project settings with trunk mode
+      await mkdir(join(cwd, ".swiz"), { recursive: true })
+      await writeFile(
+        join(cwd, ".swiz", "config.json"),
+        JSON.stringify(trunkMode ? { trunkMode: true, defaultBranch } : {})
+      )
+
+      const payload = JSON.stringify({
+        tool_name: "Edit",
+        cwd,
+        tool_input: { file_path: filePath },
+      })
+
+      const fakeTmpDir = join(fakeHome, "tmp")
+      await mkdir(fakeTmpDir, { recursive: true })
+
+      const proc = Bun.spawn(["bun", HOOK], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: fakeHome, TMPDIR: fakeTmpDir, SWIZ_DAEMON_PORT: "19999" },
+      })
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
+
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+
+      let json: Record<string, unknown> | null = null
+      try {
+        if (stdout.trim()) json = JSON.parse(stdout.trim())
+      } catch {}
+
+      return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
+    }
+
+    test("blocks edits on non-default branch when trunk mode is enabled", async () => {
+      const cwd = await createTempDir()
+      await initGitRepoWithBranch(cwd, "main", "feature-branch")
+
+      const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), true)
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("deny")
+      const msg = String(hso?.permissionDecisionReason)
+      expect(msg).toContain("Trunk mode is enabled")
+      expect(msg).toContain("feature-branch")
+      expect(msg).toContain("main")
+    })
+
+    test("allows edits on default branch when trunk mode is enabled", async () => {
+      const cwd = await createTempDir()
+      await initGitRepoWithBranch(cwd, "main", "main")
+
+      const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), true)
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("allow")
+    })
+
+    test("allows edits on non-default branch when trunk mode is disabled", async () => {
+      const cwd = await createTempDir()
+      await initGitRepoWithBranch(cwd, "main", "feature-branch")
+
+      const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), false)
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("allow")
+    })
+  })
+
   describe("swiz config file protection", () => {
     test("blocks Edit to .swiz/config.json within cwd when sandbox is enabled", async () => {
       const cwd = await createTempDir()
