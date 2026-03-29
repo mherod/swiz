@@ -44,4 +44,4 @@ const advice = skillAdvice(
   `PR #${pr.number} was just created with a thin description. Consider updating it:\n  gh pr edit ${pr.number} --body "## Summary\\n<description>\\n\\n## Changes\\n- <change 1>"`
 )
 
-await emitContext("PostToolUse", advice, cwd)
+await emitContext("PostToolUse", advice)

@@ -113,4 +113,4 @@ if (pr.comments?.length) {
 
 const context = lines.join("\n")
 
-await emitContext("PostToolUse", context, cwd)
+await emitContext("PostToolUse", context)

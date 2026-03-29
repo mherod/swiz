@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const message = `Test file exists for this source file: ${foundTest} _ check if it needs updating to reflect your changes.`
   const sessionId = (input.session_id as string) ?? ""
   if (sessionId) await scheduleAutoSteer(sessionId, message, "after_commit", input.cwd)
-  await emitContext("PostToolUse", message, input.cwd)
+  await emitContext("PostToolUse", message)
 }
 
 if (import.meta.main) void main()

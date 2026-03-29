@@ -753,8 +753,7 @@ if (typeof response === "string") {
       await emitContext(
         "PostToolUse",
         `Task \`${taskId}\` output recovered from file (record had expired).\n` +
-          `Output preview:\n${recovered.slice(0, 500)}`,
-        input.cwd ?? process.cwd()
+          `Output preview:\n${recovered.slice(0, 500)}`
       )
     }
     // Record gone + taskId empty OR record gone + file missing → block with actionable message.
@@ -794,4 +793,4 @@ if (effectivePush.ignoreCi) process.exit(0)
 const ciContext = await buildCiContext(output, pushCwd)
 if (!ciContext) process.exit(0)
 
-await emitContext("PostToolUse", ciContext, input.cwd ?? process.cwd())
+await emitContext("PostToolUse", ciContext)

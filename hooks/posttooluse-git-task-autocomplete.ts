@@ -101,7 +101,7 @@ async function main(): Promise<void> {
 
   if (op.isPush) {
     const cwd = input.cwd ?? process.cwd()
-    await emitContext("PostToolUse", await buildPushContext(op.sessionId, cwd), cwd)
+    await emitContext("PostToolUse", await buildPushContext(op.sessionId, cwd))
   }
 }
 

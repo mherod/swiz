@@ -22,7 +22,7 @@ if (!skillName || !sessionId) process.exit(0)
 
 const result = await createTasksFromSkillSteps({ skillName, args: skillArgs, sessionId, cwd })
 if (result) {
-  await emitContext("PostToolUse", formatSkillStepsSummary(result), cwd)
+  await emitContext("PostToolUse", formatSkillStepsSummary(result))
 }
 
 process.exit(0)

@@ -30,8 +30,8 @@ import {
   isGitRepo,
   sanitizeSessionId,
   skillExists,
-  spawnWithTimeout,
 } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes

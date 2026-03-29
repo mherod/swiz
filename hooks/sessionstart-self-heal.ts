@@ -10,7 +10,8 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
 import { isSessionstartSelfHealPaused } from "../src/sessionstart-self-heal-state.ts"
-import { emitContext, spawnWithTimeout } from "../src/utils/hook-utils.ts"
+import { emitContext } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 

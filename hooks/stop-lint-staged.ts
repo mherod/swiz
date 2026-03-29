@@ -2,8 +2,9 @@
 // Stop hook: Run lint-staged if configured in project
 
 import { join } from "node:path"
-import { blockStop, spawnWithTimeout } from "../src/utils/hook-utils.ts"
+import { blockStop } from "../src/utils/hook-utils.ts"
 import type { PackageManager } from "../src/utils/package-detection.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 const PM_LOCKFILE_MAP: Array<{ pm: PackageManager; files: string[] }> = [

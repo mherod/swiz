@@ -64,7 +64,7 @@ const argsText = userMessage.slice(match[0].length).trim()
 
 const result = await createTasksFromSkillSteps({ skillName, args: argsText, sessionId, cwd })
 if (result) {
-  await emitContext("UserPromptSubmit", formatSkillStepsSummary(result), cwd)
+  await emitContext("UserPromptSubmit", formatSkillStepsSummary(result))
 }
 
 process.exit(0)

@@ -3,7 +3,6 @@
 // noinspection JSUnusedGlobalSymbols
 
 import { dirname, join } from "node:path"
-import type { Subprocess } from "bun"
 import {
   type HookOutput,
   hookOutputSchema,
@@ -16,8 +15,6 @@ import {
   formatActionPlan,
   mergeActionPlanIntoTasks,
 } from "../action-plan.ts"
-import { detectCurrentAgent, isRunningInAgent, toolNameForCurrentAgent } from "../agent-paths.ts"
-import type { AgentDef } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
 import {
   getOpenPrForBranch,
@@ -30,7 +27,6 @@ import {
   isGitRepo,
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
-import { getStatePath, STATE_TRANSITIONS, stateDataSchema } from "../settings.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 // Local import for names used within this file (re-exports don't create local bindings)
@@ -75,38 +71,11 @@ export {
   toolNameForCurrentAgent,
 } from "../agent-paths.ts"
 
-// ─── Agent detection normalization for hooks ────────────────────────────────
-// Provides a consistent interface for hooks to query agent state.
-
-/**
- * Get normalized agent context for hook execution.
- * Returns the current agent definition or null if not running in agent.
- */
-export function getHookAgentContext(): AgentDef | null {
-  return detectCurrentAgent()
-}
-
-/**
- * Check if hook is running in any agent context.
- * Convenience wrapper for hook-specific agent checks.
- */
-export function isHookInAgent(): boolean {
-  return isRunningInAgent()
-}
-
-/**
- * Translate canonical tool name to hook's agent-specific equivalent.
- * Normalizes tool name queries for consistent hook behavior across agents.
- */
-export function getHookToolName(canonicalName: string): string {
-  return toolNameForCurrentAgent(canonicalName)
-}
-
-// ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../git-helpers.ts"
 export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../session-id.ts"
 
 export type { PackageManager, Runtime } from "./package-detection.ts"
+
 export {
   detectPackageManager,
   detectPkgRunner,
@@ -173,84 +142,6 @@ export {
 // Hooks that spawn subprocesses (lint, typecheck, prettier, git, gh, etc.)
 // must use this utility to prevent hangs. SIGTERM is sent on timeout,
 // escalated to SIGKILL after a grace period.
-
-/** Grace period before escalating SIGTERM → SIGKILL (ms). */
-const SUBPROCESS_SIGKILL_GRACE_MS = 3_000
-
-export interface SpawnWithTimeoutResult {
-  stdout: string
-  stderr: string
-  exitCode: number | null
-  timedOut: boolean
-}
-
-/**
- * Spawn a subprocess with a hard timeout. On expiry, sends SIGTERM then
- * escalates to SIGKILL after the grace period. Returns stdout, stderr,
- * exit code, and whether the timeout fired.
- *
- * @param cmd  Command array, e.g. `["bun", "run", "lint"]`
- * @param opts
- * @param opts.cwd  Working directory for the subprocess
- * @param opts.timeoutMs  Hard timeout in milliseconds (default: 30_000)
- * @param opts.stdin  Optional stdin content to pipe into the process
- */
-export async function spawnWithTimeout(
-  cmd: string[],
-  opts: { cwd?: string; timeoutMs?: number; stdin?: string } = {}
-): Promise<SpawnWithTimeoutResult> {
-  const { cwd, timeoutMs = 30_000, stdin } = opts
-
-  const finish = async (
-    proc: Subprocess<"pipe" | "ignore", "pipe", "pipe">
-  ): Promise<SpawnWithTimeoutResult> => {
-    let timedOut = false
-    let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-    const timer = setTimeout(() => {
-      timedOut = true
-      proc.kill("SIGTERM")
-      sigkillTimer = setTimeout(() => {
-        proc.kill("SIGKILL")
-      }, SUBPROCESS_SIGKILL_GRACE_MS)
-    }, timeoutMs)
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
-    if (sigkillTimer) clearTimeout(sigkillTimer)
-
-    return {
-      stdout,
-      stderr,
-      exitCode: proc.exitCode,
-      timedOut,
-    }
-  }
-
-  if (stdin !== undefined) {
-    const proc = Bun.spawn(cmd, {
-      cwd,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    void proc.stdin.write(stdin)
-    void proc.stdin.end()
-    return finish(proc)
-  }
-
-  return finish(
-    Bun.spawn(cmd, {
-      cwd,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-  )
-}
 
 // ─── Projected content computation ──────────────────────────────────────────
 // Shared by PreToolUse hooks that validate file content before writes.
@@ -339,7 +230,10 @@ export function isPlaceholderSubject(subject: string): boolean {
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
 function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
+    suppressOutput: true,
+    systemMessage: firstLine || "",
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
@@ -353,8 +247,11 @@ export function denyPreToolUse(reason: string, options: ActionRequiredOptions = 
   exitWithHookObject(denyPreToolUseObj(reason, options))
 }
 
-function allowPreToolUseObj(reason: string) {
+function allowPreToolUseObj(reason: string): HookOutput {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
+    suppressOutput: true,
+    systemMessage: firstLine || "",
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
@@ -368,8 +265,12 @@ export function allowPreToolUse(reason: string): never {
   exitWithHookObject(allowPreToolUseObj(reason))
 }
 
-function allowPreToolUseWithContextObj(additionalContext: string, effectiveReason: string) {
+function allowPreToolUseWithContextObj(
+  additionalContext: string,
+  effectiveReason: string
+): HookOutput {
   return hookOutputSchema.parse({
+    suppressOutput: true,
     ...(additionalContext && { systemMessage: additionalContext }),
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -389,13 +290,17 @@ export function allowPreToolUseWithContext(reason: string, additionalContext: st
 function allowPreToolUseWithUpdatedInputObj(
   updatedInput: Record<string, unknown>,
   reason?: string
-) {
+): HookOutput {
+  const firstLine = (reason ?? "").slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
+    suppressOutput: true,
+    systemMessage: firstLine || "",
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
       ...(reason && { permissionDecisionReason: reason }),
       updatedInput,
+      modifiedInput: updatedInput,
     },
   })
 }
@@ -444,9 +349,12 @@ export function filePathGuardHook(
 }
 
 function denyPostToolUseObj(reason: string): HookOutput {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
     reason,
+    suppressOutput: true,
+    systemMessage: firstLine || "",
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext: reason,
@@ -454,7 +362,7 @@ function denyPostToolUseObj(reason: string): HookOutput {
   })
 }
 
-function exitWithHookObject(obj: HookOutput): never {
+export function exitWithHookObject(obj: HookOutput): never {
   process.stdout.write(`${JSON.stringify(obj)}\n`)
   process.exit(0)
 }
@@ -465,22 +373,10 @@ export function denyPostToolUse(reason: string): never {
   exitWithHookObject(obj)
 }
 
-/** Read current project state line, e.g. "State: developing → [reviewing, planning]". */
-async function readStateMaybe(cwd: string): Promise<string | null> {
-  try {
-    const raw = await Bun.file(getStatePath(cwd)).text()
-    const result = stateDataSchema.safeParse(JSON.parse(raw))
-    if (!result.success) return null
-    const allowed = STATE_TRANSITIONS[result.data.state]
-    return `State: ${result.data.state} → [${allowed.join(", ")}]`
-  } catch {
-    return null
-  }
-}
-
 function emitContextObj(eventName: string, context: string) {
   return hookOutputSchema.parse({
     systemMessage: context,
+    suppressOutput: true,
     hookSpecificOutput: {
       hookEventName: eventName,
       additionalContext: context,
@@ -490,15 +386,8 @@ function emitContextObj(eventName: string, context: string) {
 
 /** Emit additional context for a hook event. Works across all agents.
  *  For PostToolUse events, appends current project state + allowed transitions when a state is set. */
-export async function emitContext(
-  eventName: string,
-  context: string,
-  cwd?: string
-): Promise<never> {
-  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
-  const fullContext = stateLine ? `${context} ${stateLine}` : context
-  const obj = emitContextObj(eventName, fullContext)
-  exitWithHookObject(obj)
+export function emitContext(eventName: string, context: string): Promise<never> {
+  exitWithHookObject(emitContextObj(eventName, context))
 }
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
@@ -567,9 +456,12 @@ export function actionRequired(reason = "", options: ActionRequiredOptions = {})
 }
 
 function blockStopObj(reason: string, options: { includeUpdateMemoryAdvice?: boolean } = {}) {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
     reason: reason + actionRequired(reason, options),
+    suppressOutput: true,
+    systemMessage: firstLine || "",
   })
 }
 
@@ -582,7 +474,13 @@ export function blockStop(
 }
 
 function blockStopRawObj(reason: string) {
-  return hookOutputSchema.parse({ decision: "block", reason })
+  const firstLine = reason.slice(0, 70).split("\n").shift()
+  return hookOutputSchema.parse({
+    decision: "block",
+    reason,
+    suppressOutput: true,
+    systemMessage: firstLine || "",
+  })
 }
 
 /** Emit a raw stop block (no footer appended — caller controls the full reason). */
@@ -591,11 +489,14 @@ export function blockStopRaw(reason: string): never {
 }
 
 function blockStopHumanRequiredObj(reason: string) {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   return hookOutputSchema.parse({
     decision: "block",
     reason: fullReason,
     resolution: "human-required",
+    suppressOutput: true,
+    systemMessage: firstLine || "",
   })
 }
 

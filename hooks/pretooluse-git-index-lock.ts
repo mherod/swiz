@@ -15,8 +15,8 @@ import {
   GIT_ANY_CMD_RE,
   git,
   isShellTool,
-  spawnWithTimeout,
 } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────

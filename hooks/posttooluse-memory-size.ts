@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   )
   if (violations.length === 0) return
 
-  await emitContext("PostToolUse", buildViolationContext(filePath, violations), cwd)
+  await emitContext("PostToolUse", buildViolationContext(filePath, violations))
 }
 
 if (import.meta.main) void main()

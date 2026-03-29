@@ -52,6 +52,8 @@ export const fileEditHookInputSchema = z
       })
       .optional(),
     transcript_path: z.string().optional(),
+    permission_mode: z.string().optional(),
+    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -79,6 +81,8 @@ export const shellHookInputSchema = z
       })
       .optional(),
     transcript_path: z.string().optional(),
+    permission_mode: z.string().optional(),
+    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -100,6 +104,8 @@ export const toolHookInputSchema = z
     tool_name: z.string().optional(),
     tool_input: z.record(z.string(), z.unknown()).optional(),
     transcript_path: z.string().optional(),
+    permission_mode: z.string().optional(),
+    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -124,6 +130,8 @@ export const stopHookInputSchema = z.looseObject({
   session_id: z.string().optional(),
   stop_hook_active: z.boolean().optional(),
   transcript_path: z.string().optional(),
+  permission_mode: z.string().optional(),
+  hook_event_name: z.string().optional(),
 })
 
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
@@ -138,6 +146,8 @@ export const sessionHookInputSchema = z.looseObject({
   trigger: z.string().optional(),
   matcher: z.string().optional(),
   hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  permission_mode: z.string().optional(),
 })
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
@@ -485,6 +495,7 @@ export const sessionEndHookInputSchema = z.looseObject({
   session_id: z.string().optional(),
   hook_event_name: z.string().optional(),
   transcript_path: z.string().optional(),
+  permission_mode: z.string().optional(),
   reason: z
     .enum([
       "clear",
@@ -917,10 +928,28 @@ export const hookOutputSchema = z
     /** When decision is "block", signals the resolution type.
      *  "human-required" means the agent cannot resolve this autonomously — a human must act. */
     resolution: z.enum(["human-required"]).optional(),
-    hookSpecificOutput: z.looseObject({ hookEventName: z.string().optional() }).optional(),
+    hookSpecificOutput: z
+      .looseObject({
+        hookEventName: z.string().optional(),
+        additionalContext: z.string().optional(),
+        permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
+        permissionDecisionReason: z.string().optional(),
+        /** PreToolUse: rewritten tool input fields. */
+        modifiedInput: z.record(z.string(), z.unknown()).optional(),
+        updatedInput: z.record(z.string(), z.unknown()).optional(),
+      })
+      .optional(),
     ok: z.boolean().optional(),
-    continue: z.unknown().optional(),
-    systemMessage: z.unknown().optional(),
+    /** Whether the agent proceeds after this hook (default true). */
+    continue: z.boolean().optional(),
+    /** Alias for stopReason — message shown when continue is false. */
+    reason: z.string().optional(),
+    /** Message shown to the agent when continue is false. */
+    stopReason: z.string().optional(),
+    /** Optional message shown to the user only (not passed to the agent). */
+    systemMessage: z.string().optional(),
+    /** When true, suppresses the hook's JSON output from the conversation transcript. */
+    suppressOutput: z.boolean().optional(),
   })
   .refine(
     (o) =>

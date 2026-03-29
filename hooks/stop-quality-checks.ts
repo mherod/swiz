@@ -5,13 +5,8 @@
 import { join } from "node:path"
 import { getOpenPrForBranch } from "../src/git-helpers.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
-import {
-  blockStop,
-  detectPackageManager,
-  formatActionPlan,
-  git,
-  spawnWithTimeout,
-} from "../src/utils/hook-utils.ts"
+import { blockStop, detectPackageManager, formatActionPlan, git } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 // Script names probed in priority order for each quality category

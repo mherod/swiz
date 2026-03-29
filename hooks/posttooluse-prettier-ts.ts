@@ -2,7 +2,8 @@
 
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
-import { emitContext, isFileEditTool, spawnWithTimeout } from "../src/utils/hook-utils.ts"
+import { emitContext, isFileEditTool } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
@@ -31,11 +32,11 @@ function resolveTsEditTarget(input: FileEditHookInput): string | null {
   return filePath
 }
 
-async function runPrettier(prettierBin: string, filePath: string, cwd: string): Promise<void> {
+async function runPrettier(prettierBin: string, filePath: string, _cwd: string): Promise<void> {
   try {
     const result = await spawnWithTimeout([prettierBin, "--write", filePath], { timeoutMs: 10_000 })
     if (!result.timedOut && result.exitCode === 0) {
-      await emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
+      await emitContext("PostToolUse", `Prettier formatted: ${filePath}`)
     }
   } catch {
     // Prettier crashed — skip silently

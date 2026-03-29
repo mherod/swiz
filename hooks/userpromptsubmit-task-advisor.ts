@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     additionalContext = `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
   }
 
-  await emitContext("UserPromptSubmit", additionalContext, cwd)
+  await emitContext("UserPromptSubmit", additionalContext)
 }
 
 if (import.meta.main) void main()

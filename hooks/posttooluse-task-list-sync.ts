@@ -201,7 +201,7 @@ async function main(): Promise<void> {
   const summary = formatSyncSummary(counts, resolved.tasks.length)
   if (!summary) return
 
-  await emitContext("PostToolUse", summary, resolved.cwd)
+  await emitContext("PostToolUse", summary)
 }
 
 if (import.meta.main) void main()

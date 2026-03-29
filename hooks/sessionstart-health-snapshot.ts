@@ -115,7 +115,7 @@ async function main(): Promise<void> {
   }
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
-    if (parts.length > 0) await emitContext("SessionStart", parts.join(" "), cwd)
+    if (parts.length > 0) await emitContext("SessionStart", parts.join(" "))
     return
   }
 
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   const branch = await git(["branch", "--show-current"], cwd)
   parts.push(...(await collectGitHubParts(cwd, branch)))
 
-  if (parts.length > 0) await emitContext("SessionStart", parts.join(" "), cwd)
+  if (parts.length > 0) await emitContext("SessionStart", parts.join(" "))
 }
 
 if (import.meta.main) void main()

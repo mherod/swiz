@@ -11,11 +11,7 @@ async function main(): Promise<void> {
   const porcelain = await git(["status", "--porcelain"], cwd)
   const dirty = porcelain ? porcelain.split("\n").length : 0
 
-  await emitContext(
-    "UserPromptSubmit",
-    `[git] branch: ${branch} | uncommitted files: ${dirty}`,
-    cwd
-  )
+  await emitContext("UserPromptSubmit", `[git] branch: ${branch} | uncommitted files: ${dirty}`)
 }
 
 if (import.meta.main) void main()

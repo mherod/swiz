@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   }
   const status = buildGitContextLine(gitStatus, collabMode)
 
-  await emitContext("PostToolUse", status, cwd)
+  await emitContext("PostToolUse", status)
 }
 
 if (import.meta.main) void main()

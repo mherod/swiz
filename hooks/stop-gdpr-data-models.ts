@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   // Non-blocking: emit as additionalContext via emitContext helper
   const context = `Uncommitted changes touch user-data model files:\n${fileList}${truncated}\n\n${advice}`
 
-  await emitContext("Stop", context, cwd)
+  await emitContext("Stop", context)
 }
 
 if (import.meta.main) void main()

@@ -31,9 +31,9 @@ import {
   isShellTool,
   PR_CHECK_RE,
   skillAdvice,
-  spawnWithTimeout,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
+import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
