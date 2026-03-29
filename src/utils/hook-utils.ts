@@ -11,6 +11,8 @@ import {
   formatActionPlan,
   mergeActionPlanIntoTasks,
 } from "../action-plan.ts"
+import { detectCurrentAgent, isRunningInAgent, toolNameForCurrentAgent } from "../agent-paths.ts"
+import type { AgentDef } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
 import {
   getOpenPrForBranch,
@@ -71,6 +73,33 @@ export {
   isRunningInAgent,
   toolNameForCurrentAgent,
 } from "../agent-paths.ts"
+
+// ─── Agent detection normalization for hooks ────────────────────────────────
+// Provides a consistent interface for hooks to query agent state.
+
+/**
+ * Get normalized agent context for hook execution.
+ * Returns the current agent definition or null if not running in agent.
+ */
+export function getHookAgentContext(): AgentDef | null {
+  return detectCurrentAgent()
+}
+
+/**
+ * Check if hook is running in any agent context.
+ * Convenience wrapper for hook-specific agent checks.
+ */
+export function isHookInAgent(): boolean {
+  return isRunningInAgent()
+}
+
+/**
+ * Translate canonical tool name to hook's agent-specific equivalent.
+ * Normalizes tool name queries for consistent hook behavior across agents.
+ */
+export function getHookToolName(canonicalName: string): string {
+  return toolNameForCurrentAgent(canonicalName)
+}
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../git-helpers.ts"
