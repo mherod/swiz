@@ -7,19 +7,21 @@ import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
+  getSessionTasksDir,
+  getTasksRoot,
+  hasSessionTasksDir,
+  isIncompleteTaskStatus,
+  readSessionTasks,
+  type SessionTask,
+} from "../src/tasks/task-recovery.ts"
+import {
   blockStop,
   computeTranscriptSummary,
   deriveCurrentSessionTaskToolStats,
   formatActionPlan,
   getCurrentSessionTaskToolStats,
-  getSessionTasksDir,
-  getTasksRoot,
   getTranscriptSummary,
-  hasSessionTasksDir,
-  isIncompleteTaskStatus,
   mergeActionPlanIntoTasks,
-  readSessionTasks,
-  type SessionTask,
   type TranscriptSummary,
 } from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"

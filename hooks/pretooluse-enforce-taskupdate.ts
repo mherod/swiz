@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Enforce TaskUpdate tool instead of `swiz tasks` CLI in Claude Code.
 // In Claude Code environment, prefer native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList)
 // over the swiz CLI equivalent. This improves task tracking and eliminates subprocess overhead.
 
+import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   allowPreToolUse,
@@ -10,7 +12,6 @@ import {
   denyPreToolUse,
   isRunningInAgent,
   isShellTool,
-  readSessionTasks,
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"

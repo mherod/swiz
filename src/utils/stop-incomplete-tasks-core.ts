@@ -13,17 +13,15 @@ import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { formatActionPlan } from "../action-plan.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { validateTransition } from "../tasks/task-service.ts"
 import {
-  autoTransitionForComplete,
   getSessionTasksDir,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  normalizeSubject,
   readSessionTasks,
   type SessionTask,
-  subjectsOverlap,
-} from "./hook-utils.ts"
+} from "../tasks/task-recovery.ts"
+import { validateTransition } from "../tasks/task-service.ts"
+import { autoTransitionForComplete, normalizeSubject, subjectsOverlap } from "./hook-utils.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

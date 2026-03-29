@@ -4,7 +4,7 @@ import {
   formatTaskCompleteCommand,
   formatTaskCompleteCommands,
   formatTaskList,
-} from "./hook-utils.ts"
+} from "../tasks/task-recovery.ts"
 
 describe("task formatting helpers", () => {
   test("formatTaskList renders task bullets", () => {

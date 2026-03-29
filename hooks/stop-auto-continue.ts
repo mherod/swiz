@@ -18,6 +18,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
+import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
   buildTaskSection,
   buildUserMessagesSection,
@@ -27,14 +28,7 @@ import {
   resolveTranscriptText,
   type TranscriptResolution,
 } from "../src/transcript-utils.ts"
-import {
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-  readSessionTasks,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+import { git, hasGhCli, isGitHubRemote, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { buildPrompt } from "./stop-auto-continue/prompt.ts"
 import { writeReflections } from "./stop-auto-continue/reflections.ts"

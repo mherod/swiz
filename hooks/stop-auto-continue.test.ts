@@ -1,7 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, readdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "../src/utils/hook-utils.ts"
 import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils.ts"
 import {
   __testOnly_DEDUP_MAX_FILES,
@@ -1815,6 +1814,7 @@ describe("stop-auto-continue", () => {
 
 // ─── Workflow suggestion filter unit tests ─────────────────────────────────
 
+import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { isWorkflowSuggestion } from "./stop-auto-continue.ts"
 
 describe("isWorkflowSuggestion", () => {

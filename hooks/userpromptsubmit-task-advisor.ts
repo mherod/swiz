@@ -4,12 +4,14 @@
 
 import { getHomeDirOrNull } from "../src/home.ts"
 import {
-  emitContext,
   findPriorSessionTasks,
   formatTaskCompleteCommand,
   formatTaskList,
   isIncompleteTaskStatus,
   readSessionTasks,
+} from "../src/tasks/task-recovery.ts"
+import {
+  emitContext,
   type SessionHookInput,
   toolNameForCurrentAgent,
 } from "../src/utils/hook-utils.ts"

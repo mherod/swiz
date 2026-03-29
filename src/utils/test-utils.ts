@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getSessionTasksDir } from "./hook-utils.ts"
+
+import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, unknown>

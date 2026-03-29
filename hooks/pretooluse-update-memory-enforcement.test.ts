@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
   createEnforcementProjectDir,
   type HookResult,

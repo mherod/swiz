@@ -18,10 +18,10 @@
 import type { AutoSteerTrigger } from "../src/auto-steer-store.ts"
 import { getAutoSteerStore } from "../src/auto-steer-store.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
+import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
   GIT_COMMIT_RE,
   isShellTool,
-  readSessionTasks,
   sendAutoSteer,
   shouldDeferAutoSteerForForegroundChatApp,
 } from "../src/utils/hook-utils.ts"

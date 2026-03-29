@@ -15,16 +15,15 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { getSessionTasksDir, readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"
 import {
   autoTransitionForComplete,
   emitContext,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
-  getSessionTasksDir,
   isShellTool,
   isTerminalTaskStatus,
-  readSessionTasks,
   resolveSafeSessionId,
   stripHeredocs,
   toolNameForCurrentAgent,

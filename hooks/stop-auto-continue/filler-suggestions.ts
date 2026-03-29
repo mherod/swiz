@@ -9,7 +9,8 @@
  * Reusable by any hook that needs a fallback suggestion without AI.
  */
 
-import { git, isGitRepo, readSessionTasks } from "../../src/utils/hook-utils.ts"
+import { readSessionTasks } from "../../src/tasks/task-recovery.ts"
+import { git, isGitRepo } from "../../src/utils/hook-utils.ts"
 
 export interface FillerContext {
   cwd: string

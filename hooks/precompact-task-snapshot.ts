@@ -15,7 +15,7 @@ import {
   limitItems,
   readSessionTasks,
   type SessionTask,
-} from "../src/utils/hook-utils.ts"
+} from "../src/tasks/task-recovery.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 
 export interface CompactSnapshot {

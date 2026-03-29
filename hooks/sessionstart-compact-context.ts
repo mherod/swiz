@@ -6,7 +6,6 @@
 import { join } from "node:path"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import {
-  emitContext,
   findPriorSessionTasks,
   formatTaskCompleteCommand,
   formatTaskList,
@@ -15,7 +14,8 @@ import {
   isIncompleteTaskStatus,
   readSessionTasks,
   type SessionTask,
-} from "../src/utils/hook-utils.ts"
+} from "../src/tasks/task-recovery.ts"
+import { emitContext } from "../src/utils/hook-utils.ts"
 import {
   buildCompactSnapshotSummary,
   type CompactSnapshot,

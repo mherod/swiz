@@ -9,6 +9,7 @@
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
@@ -19,7 +20,6 @@ import {
   isNotebookTool,
   isWriteTool,
   readSessionLines,
-  readSessionTasks,
 } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 

@@ -13,27 +13,29 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
+import {
+  findPriorSessionTasks,
+  formatTaskCompleteCommands,
+  formatTaskList,
+  formatTaskSubjectsForDisplay,
+  isIncompleteTaskStatus,
+  readSessionTasks,
+} from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
   allowPreToolUse,
   allowPreToolUseWithContext,
   denyPreToolUse,
-  findPriorSessionTasks,
   formatActionPlan,
-  formatTaskCompleteCommands,
-  formatTaskList,
-  formatTaskSubjectsForDisplay,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
   isEditTool,
   isGitRepo,
-  isIncompleteTaskStatus,
   isShellTool,
   isTaskTrackingExemptShellCommand,
   isTerminalTaskStatus,
   isWriteTool,
   mergeActionPlanIntoTasks,
-  readSessionTasks,
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
