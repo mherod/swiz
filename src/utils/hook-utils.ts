@@ -350,8 +350,7 @@ function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
 
 /** Emit a PreToolUse denial and exit. Appends ACTION REQUIRED footer. Works across all agents. */
 export function denyPreToolUse(reason: string, options: ActionRequiredOptions = {}): never {
-  console.log(JSON.stringify(denyPreToolUseObj(reason, options)))
-  process.exit(0)
+  exitWithHookObject(denyPreToolUseObj(reason, options))
 }
 
 function allowPreToolUseObj(reason: string) {
@@ -366,8 +365,7 @@ function allowPreToolUseObj(reason: string) {
 
 /** Emit a PreToolUse allow with advisory context and exit. Does NOT block. Works across all agents. */
 export function allowPreToolUse(reason: string): never {
-  console.log(JSON.stringify(allowPreToolUseObj(reason)))
-  process.exit(0)
+  exitWithHookObject(allowPreToolUseObj(reason))
 }
 
 function allowPreToolUseWithContextObj(additionalContext: string, effectiveReason: string) {
@@ -385,8 +383,7 @@ function allowPreToolUseWithContextObj(additionalContext: string, effectiveReaso
 /** Emit a PreToolUse allow with both a visible hint and additionalContext. */
 export function allowPreToolUseWithContext(reason: string, additionalContext: string): never {
   const effectiveReason = reason || additionalContext
-  console.log(JSON.stringify(allowPreToolUseWithContextObj(additionalContext, effectiveReason)))
-  process.exit(0)
+  exitWithHookObject(allowPreToolUseWithContextObj(additionalContext, effectiveReason))
 }
 
 function allowPreToolUseWithUpdatedInputObj(
@@ -408,8 +405,7 @@ export function allowPreToolUseWithUpdatedInput(
   updatedInput: Record<string, unknown>,
   reason?: string
 ): never {
-  console.log(JSON.stringify(allowPreToolUseWithUpdatedInputObj(updatedInput, reason)))
-  process.exit(0)
+  exitWithHookObject(allowPreToolUseWithUpdatedInputObj(updatedInput, reason))
 }
 
 /**
@@ -502,8 +498,7 @@ export async function emitContext(
   const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
   const fullContext = stateLine ? `${context} ${stateLine}` : context
   const obj = emitContextObj(eventName, fullContext)
-  console.log(JSON.stringify(obj))
-  process.exit(0)
+  exitWithHookObject(obj)
 }
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
@@ -583,8 +578,7 @@ export function blockStop(
   reason: string,
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): never {
-  console.log(JSON.stringify(blockStopObj(reason, options)))
-  process.exit(0)
+  exitWithHookObject(blockStopObj(reason, options))
 }
 
 function blockStopRawObj(reason: string) {
@@ -593,8 +587,7 @@ function blockStopRawObj(reason: string) {
 
 /** Emit a raw stop block (no footer appended — caller controls the full reason). */
 export function blockStopRaw(reason: string): never {
-  console.log(JSON.stringify(blockStopRawObj(reason)))
-  process.exit(0)
+  exitWithHookObject(blockStopRawObj(reason))
 }
 
 function blockStopHumanRequiredObj(reason: string) {
@@ -613,8 +606,7 @@ function blockStopHumanRequiredObj(reason: string) {
  * Appends a note to the reason explaining this.
  */
 export function blockStopHumanRequired(reason: string): never {
-  console.log(JSON.stringify(blockStopHumanRequiredObj(reason)))
-  process.exit(0)
+  exitWithHookObject(blockStopHumanRequiredObj(reason))
 }
 
 // ─── Follow-up issue filing ─────────────────────────────────────────────
