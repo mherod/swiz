@@ -4,7 +4,7 @@
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
 // Uses the blocking strategy — returns { decision: "block", reason } to fail the commit.
 
-import { git, isGitRepo } from "../src/utils/hook-utils.ts"
+import { blockStop, git, isGitRepo } from "../src/utils/hook-utils.ts"
 import { preCommitHookInputSchema } from "./schemas.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
@@ -106,8 +106,7 @@ async function main(): Promise<void> {
   }
 
   const reason = formatReason(findings)
-  console.log(JSON.stringify({ decision: "block", reason }))
-  process.exit(0)
+  blockStop(reason)
 }
 
 main().catch(() => {
