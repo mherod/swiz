@@ -34,6 +34,10 @@ const SESSION_A = "aaaa-aaaa-aaaa"
 const SESSION_B = "bbbb-bbbb-bbbb"
 const SESSION_C = "cccc-cccc-cccc"
 
+// Clear CLAUDECODE so the native-task-tool guard doesn't block CLI tests
+const _savedClaudeCode = process.env.CLAUDECODE
+delete process.env.CLAUDECODE
+
 beforeAll(async () => {
   // ── Task directories (3 sessions) ──
   await mkdir(join(TASKS, SESSION_A), { recursive: true })
@@ -120,6 +124,10 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // Restore CLAUDECODE after all tests
+  if (_savedClaudeCode === undefined) delete process.env.CLAUDECODE
+  else process.env.CLAUDECODE = _savedClaudeCode
+
   const { rm } = await import("node:fs/promises")
   await rm(TMP, { recursive: true, force: true })
 })
@@ -904,21 +912,23 @@ describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
       process.chdir(repoCwdRaw)
       const repoCwd = process.cwd()
 
+      // Test uses GEMINI_CLI=1, so task store resolves to .gemini/ paths
+      const agentDir = ".gemini"
       const projKey = projectKeyFromCwd(repoCwd)
-      await mkdir(join(home, ".claude", "projects", projKey), { recursive: true })
+      await mkdir(join(home, agentDir, "projects", projKey), { recursive: true })
       await writeFile(
-        join(home, ".claude", "projects", projKey, `${currentSession}.jsonl`),
+        join(home, agentDir, "projects", projKey, `${currentSession}.jsonl`),
         `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
       )
       await writeFile(
-        join(home, ".claude", "projects", projKey, `${prevSession}.jsonl`),
+        join(home, agentDir, "projects", projKey, `${prevSession}.jsonl`),
         `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
       )
 
       // Previous session: has incomplete task (created first → older mtime)
-      await mkdir(join(home, ".claude", "tasks", prevSession), { recursive: true })
+      await mkdir(join(home, agentDir, "tasks", prevSession), { recursive: true })
       await writeFile(
-        join(home, ".claude", "tasks", prevSession, "1.json"),
+        join(home, agentDir, "tasks", prevSession, "1.json"),
         JSON.stringify({
           id: "1",
           subject: "Incomplete task",
@@ -929,12 +939,12 @@ describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
         })
       )
       const oldTime = new Date(Date.now() - 60_000)
-      await utimes(join(home, ".claude", "tasks", prevSession), oldTime, oldTime)
+      await utimes(join(home, agentDir, "tasks", prevSession), oldTime, oldTime)
 
       // Current session: all tasks completed (created second → newer mtime)
-      await mkdir(join(home, ".claude", "tasks", currentSession), { recursive: true })
+      await mkdir(join(home, agentDir, "tasks", currentSession), { recursive: true })
       await writeFile(
-        join(home, ".claude", "tasks", currentSession, "1.json"),
+        join(home, agentDir, "tasks", currentSession, "1.json"),
         JSON.stringify({
           id: "1",
           subject: "Done task",

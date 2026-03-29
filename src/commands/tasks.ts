@@ -437,6 +437,29 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   },
 }
 
+// ─── Claude Code native-tool guard ───────────────────────────────────────────
+
+/** Subcommands that have no native task-tool equivalent and must remain CLI-accessible. */
+const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["complete", "adopt"])
+
+function enforceNativeTaskTools(subcommand: string | undefined): void {
+  const agent = detectCurrentAgent()
+  if (agent?.id !== "claude") return
+
+  if (subcommand && CLAUDE_CODE_EXEMPT_SUBCOMMANDS.has(subcommand)) return
+
+  const nativeTools = "TaskCreate, TaskUpdate, TaskList, TaskGet"
+  const hint = subcommand
+    ? `"swiz tasks ${subcommand}" is not available inside Claude Code.`
+    : `"swiz tasks" (list) is not available inside Claude Code.`
+
+  throw new Error(
+    `${hint}\n` +
+      `Use native task tools instead: ${nativeTools}.\n` +
+      `Only "swiz tasks complete --evidence ..." and "swiz tasks adopt" require the CLI.`
+  )
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const tasksCommand: Command = {
@@ -487,6 +510,8 @@ export const tasksCommand: Command = {
   ],
   async run(args) {
     const [subcommand] = args
+
+    enforceNativeTaskTools(subcommand)
 
     if (isListInvocation(subcommand)) {
       await runListTasks(args)
