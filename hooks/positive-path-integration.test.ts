@@ -29,6 +29,8 @@ async function runHook(
   delete env.GEMINI_PROJECT_DIR
   delete env.CODEX_MANAGED_BY_NPM
   delete env.CODEX_THREAD_ID
+  // Force daemon connection failure — prevents 2s timeout per attempt under CI load
+  env.SWIZ_DAEMON_PORT = "19999"
 
   const proc = Bun.spawn(["bun", script], {
     stdin: "pipe",
