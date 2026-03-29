@@ -161,6 +161,7 @@ function processBlockingResults(
   executions: HookExecution[],
   finalResponse: Record<string, unknown>
 ): void {
+  const contexts: string[] = []
   for (const { execution, parsed: resp } of results) {
     if (execution.status === "skipped" || execution.status === "aborted") {
       executions.push(execution)
@@ -174,8 +175,19 @@ function processBlockingResults(
       if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
       break
     }
+    // Collect non-blocking context (systemMessage / additionalContext) so it
+    // reaches the model as a system-reminder even from blocking-strategy events.
+    if (resp) {
+      const ctx = extractContext(resp)
+      if (ctx) contexts.push(ctx)
+    }
     log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
     executions.push(execution)
+  }
+  if (contexts.length > 0) {
+    finalResponse.systemMessage =
+      (finalResponse.systemMessage ? finalResponse.systemMessage + "\n\n" : "") +
+      contexts.join("\n\n")
   }
 }
 
