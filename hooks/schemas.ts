@@ -499,6 +499,246 @@ export const sessionEndHookInputSchema = z.looseObject({
 
 export type SessionEndHookInput = z.infer<typeof sessionEndHookInputSchema>
 
+// ─── Gemini CLI hook input schemas ──────────────────────────────────────────
+
+/**
+ * Gemini common input fields — present on every Gemini hook event.
+ * Gemini injects `GEMINI_PROJECT_DIR`, `GEMINI_SESSION_ID`, `GEMINI_CWD`
+ * as env vars; hooks also receive a JSON payload on stdin.
+ */
+export const geminiCommonInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+})
+
+export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
+
+/**
+ * Gemini SessionStart hook input envelope.
+ * `source` matches: `startup`, `resume`, `clear`.
+ */
+export const geminiSessionStartInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  source: z.enum(["startup", "resume", "clear"]).optional(),
+})
+
+export type GeminiSessionStartInput = z.infer<typeof geminiSessionStartInputSchema>
+
+/**
+ * Gemini SessionEnd hook input envelope.
+ * Fires when a session ends (exit, clear).
+ */
+export const geminiSessionEndInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  reason: z.string().optional(),
+})
+
+export type GeminiSessionEndInput = z.infer<typeof geminiSessionEndInputSchema>
+
+/**
+ * Gemini BeforeAgent hook input envelope.
+ * Fires after user submits prompt, before planning. Can block the turn.
+ */
+export const geminiBeforeAgentInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  prompt: z.string().optional(),
+})
+
+export type GeminiBeforeAgentInput = z.infer<typeof geminiBeforeAgentInputSchema>
+
+/**
+ * Gemini AfterAgent hook input envelope.
+ * Fires when the agent loop ends. Can force retry or halt.
+ */
+export const geminiAfterAgentInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  stop_hook_active: z.boolean().optional(),
+  last_assistant_message: z.string().optional(),
+})
+
+export type GeminiAfterAgentInput = z.infer<typeof geminiAfterAgentInputSchema>
+
+/**
+ * Gemini BeforeModel hook input envelope.
+ * Fires before sending request to LLM. Can block turn or mock response.
+ */
+export const geminiBeforeModelInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+})
+
+export type GeminiBeforeModelInput = z.infer<typeof geminiBeforeModelInputSchema>
+
+/**
+ * Gemini AfterModel hook input envelope.
+ * Fires after receiving LLM response. Can block turn or redact.
+ */
+export const geminiAfterModelInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  model: z.string().optional(),
+  response: z.unknown().optional(),
+})
+
+export type GeminiAfterModelInput = z.infer<typeof geminiAfterModelInputSchema>
+
+/**
+ * Gemini BeforeToolSelection hook input envelope.
+ * Fires before LLM selects tools. Can filter available tools.
+ */
+export const geminiBeforeToolSelectionInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  available_tools: z.array(z.string()).optional(),
+})
+
+export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSelectionInputSchema>
+
+/**
+ * Gemini BeforeTool hook input envelope.
+ * Fires before a tool executes. `matcher` is regex against tool name.
+ * Can block tool or rewrite arguments.
+ */
+export const geminiBeforeToolInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    hook_event_name: z.string().optional(),
+    transcript_path: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z.record(z.string(), z.unknown()).optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    }
+    return val
+  })
+
+export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
+
+/**
+ * Gemini AfterTool hook input envelope.
+ * Fires after a tool executes. Can block result or add context.
+ * `matcher` is regex against tool name.
+ */
+export const geminiAfterToolInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    hook_event_name: z.string().optional(),
+    transcript_path: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z.record(z.string(), z.unknown()).optional(),
+    tool_response: z.unknown().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    }
+    return val
+  })
+
+export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
+
+/**
+ * Gemini PreCompress hook input envelope.
+ * Advisory event — fires before context compression.
+ */
+export const geminiPreCompressInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+})
+
+export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema>
+
+/**
+ * Gemini Notification hook input envelope.
+ * Advisory event — fires when a system notification occurs.
+ */
+export const geminiNotificationInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().optional(),
+  message: z.string().optional(),
+  title: z.string().optional(),
+  notification_type: z.string().optional(),
+})
+
+export type GeminiNotificationInput = z.infer<typeof geminiNotificationInputSchema>
+
+/**
+ * Gemini hook output envelope.
+ * Decision uses `"allow"/"deny"` (not `"approve"/"block"` like Claude).
+ * Exit code 2 = system block (stderr as reason). Other non-zero = warning.
+ * Silence on stdout (exit 0) = allow.
+ */
+export const geminiHookOutputSchema = z
+  .looseObject({
+    decision: z.enum(["allow", "deny"]).optional(),
+    reason: z.string().optional(),
+    systemMessage: z.string().optional(),
+    additionalContext: z.string().optional(),
+    /** AfterAgent: force retry of the agent loop. */
+    retry: z.boolean().optional(),
+    /** AfterAgent: halt execution entirely. */
+    halt: z.boolean().optional(),
+    /** BeforeToolSelection: filtered list of allowed tool names. */
+    filteredTools: z.array(z.string()).optional(),
+    /** BeforeTool: rewritten tool arguments. */
+    updatedInput: z.record(z.string(), z.unknown()).optional(),
+    /** BeforeModel: mock response to use instead of calling LLM. */
+    mockResponse: z.string().optional(),
+    hookSpecificOutput: z
+      .looseObject({
+        hookEventName: z.string().optional(),
+        additionalContext: z.string().optional(),
+        permissionDecision: z.enum(["allow", "deny"]).optional(),
+        permissionDecisionReason: z.string().optional(),
+      })
+      .optional(),
+  })
+  .refine(
+    (o) =>
+      "decision" in o ||
+      "hookSpecificOutput" in o ||
+      "systemMessage" in o ||
+      "additionalContext" in o ||
+      "retry" in o ||
+      "halt" in o ||
+      "filteredTools" in o ||
+      "updatedInput" in o ||
+      "mockResponse" in o,
+    { message: "Gemini hook output must contain at least one known control field" }
+  )
+
+export type GeminiHookOutput = z.infer<typeof geminiHookOutputSchema>
+
 // ─── Codex hook input schemas ───────────────────────────────────────────────
 
 /**
