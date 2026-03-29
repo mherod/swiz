@@ -5,7 +5,7 @@
 import { getHomeDirOrNull } from "../src/home.ts"
 import {
   findPriorSessionTasks,
-  formatTaskCompleteCommand,
+  formatNativeTaskCompleteCommand,
   formatTaskList,
   isIncompleteTaskStatus,
   readSessionTasks,
@@ -39,10 +39,10 @@ async function main(): Promise<void> {
 
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
+      const completeHint = formatNativeTaskCompleteCommand("<id>", priorSessionId, "note:done")
       additionalContext =
         `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
-        `If already done, run: ${completeHint}\n` +
+        `If already done: ${completeHint}\n` +
         `Resume using ${taskCreateName} before starting new work:\n` +
         formatTaskList(priorTasks, {
           limit: TASK_PREVIEW_LIMIT,

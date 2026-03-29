@@ -2,7 +2,6 @@
 // Reads Claude Code JSONL transcripts to extract tool calls, commands, and session boundaries.
 
 import {
-  computeTranscriptSummary,
   extractSessionLines,
   getBashCommandsUsedForCurrentSession,
   getSkillsUsedForCurrentSession,
@@ -151,60 +150,6 @@ export async function readSessionLines(transcriptPath: string): Promise<string[]
   } catch {
     return []
   }
-}
-
-/** Signals from the current session transcript for suppressing redundant PreToolUse tips. */
-export interface SessionTaskTipContext {
-  /** Prior Bash tool_use ran `swiz tasks complete` with `--evidence`. */
-  hasSwizCompleteWithEvidence: boolean
-  /** Assistant already used TaskList or TaskGet in this session. */
-  usedNativeTaskListOrGet: boolean
-  /** Prior Bash ran `swiz tasks` add/create/start (lifecycle engagement via CLI). */
-  usedSwizTasksAddCreateStart: boolean
-}
-
-const NATIVE_TASK_QUERY_TOOLS = new Set(["TaskList", "TaskGet"])
-
-function isSwizCompleteWithEvidenceCommand(normalizedCommand: string): boolean {
-  return (
-    /swiz\s+tasks\s+complete(?:\s|$)/.test(normalizedCommand) &&
-    /--evidence(?:\s|=|$)/.test(normalizedCommand)
-  )
-}
-
-function isSwizTasksAddCreateOrStartCommand(normalizedCommand: string): boolean {
-  return /swiz\s+tasks\s+(?:add|create|start)(?:\s|$)/.test(normalizedCommand)
-}
-
-function mergeShellCommandIntoSessionTaskTip(norm: string, acc: SessionTaskTipContext): void {
-  if (isSwizCompleteWithEvidenceCommand(norm)) acc.hasSwizCompleteWithEvidence = true
-  if (isSwizTasksAddCreateOrStartCommand(norm)) acc.usedSwizTasksAddCreateStart = true
-}
-
-function mergeToolNameIntoSessionTaskTip(name: string, acc: SessionTaskTipContext): void {
-  if (NATIVE_TASK_QUERY_TOOLS.has(name)) acc.usedNativeTaskListOrGet = true
-}
-
-/**
- * Scan the current session (after last compaction boundary) for task-tool patterns
- * that show the agent already follows CLI vs native guidance.
- */
-export async function sessionTaskToolPatterns(
-  transcriptPath: string
-): Promise<SessionTaskTipContext> {
-  const empty: SessionTaskTipContext = {
-    hasSwizCompleteWithEvidence: false,
-    usedNativeTaskListOrGet: false,
-    usedSwizTasksAddCreateStart: false,
-  }
-  if (!transcriptPath) return empty
-  const summary = await computeTranscriptSummary(transcriptPath)
-  if (!summary) return empty
-
-  const acc: SessionTaskTipContext = { ...empty }
-  for (const name of summary.toolNames) mergeToolNameIntoSessionTaskTip(name, acc)
-  for (const command of summary.bashCommands) mergeShellCommandIntoSessionTaskTip(command, acc)
-  return acc
 }
 
 /**

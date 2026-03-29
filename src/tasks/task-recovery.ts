@@ -276,7 +276,7 @@ export function formatTaskList(
 }
 
 /**
- * Render a single `swiz tasks complete` command.
+ * Render a single `swiz tasks complete` command (terminal / non-agent docs).
  * Pass `<id>` when showing a template rather than a concrete task command.
  */
 export function formatTaskCompleteCommand(
@@ -298,6 +298,35 @@ export function formatTaskCompleteCommands(
 ): string {
   return tasks
     .map((t) => formatTaskCompleteCommand(String(t.id), sessionId, evidence, options))
+    .join("\n")
+}
+
+/**
+ * Agent-facing hint: complete a task (including prior-session tasks) via native TaskUpdate.
+ * Do not use the `swiz tasks` CLI inside the agent.
+ */
+export function formatNativeTaskCompleteCommand(
+  taskId: string,
+  sessionId: string,
+  evidence: string,
+  options: { indent?: string } = {}
+): string {
+  const indent = options.indent ?? ""
+  return (
+    `${indent}TaskUpdate with taskId "${taskId}", status "completed", and description including ` +
+    `"${evidence}" (task lived under prior session ${sessionId})`
+  )
+}
+
+/** One native completion hint per task. */
+export function formatNativeTaskCompleteCommands(
+  tasks: Array<Pick<SessionTask, "id">>,
+  sessionId: string,
+  evidence: string,
+  options: { indent?: string } = {}
+): string {
+  return tasks
+    .map((t) => formatNativeTaskCompleteCommand(String(t.id), sessionId, evidence, options))
     .join("\n")
 }
 

@@ -831,9 +831,9 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).not.toContain("Prior completed work")
     expect(ctx).toContain("Prior incomplete work")
     expect(ctx).toContain("1 incomplete task(s)")
-    // Verify session-specific completion command is offered
-    expect(ctx).toContain("swiz tasks complete")
-    expect(ctx).toContain(`--session ${priorSessionId}`)
+    // Verify prior-session completion uses native TaskUpdate guidance
+    expect(ctx).toContain("TaskUpdate")
+    expect(ctx).toContain(priorSessionId)
   })
 
   test("prior-session all-completed tasks produce no prior-session section", async () => {
@@ -930,7 +930,8 @@ describe("userpromptsubmit-task-advisor: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
     expect(ctx).toContain("5 incomplete task(s)")
-    expect(ctx).toContain(`swiz tasks complete <id> --session ${priorSessionId}`)
+    expect(ctx).toContain("TaskUpdate")
+    expect(ctx).toContain(priorSessionId)
     expect(ctx).toContain("Resume task one")
     expect(ctx).toContain("Resume task two")
     expect(ctx).toContain("Resume task three")

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-// PostToolUse hook: Inject swiz git settings and branch protection rules after git commands.
+// PostToolUse hook: Inject swiz git settings and branch protection rules after git commands
+// when the worktree has uncommitted changes (dirty workflow). Clean trees stay silent.
 // Non-blocking — only emits additionalContext, never denies.
 // Uses the SETTINGS_REGISTRY effectExplanation to produce prescriptive directives
 // so the agent model is never in doubt about enforced rules.
@@ -100,10 +101,12 @@ async function main(): Promise<void> {
   if (!GIT_CMD_RE.test(command)) return
   if (!(await isGitRepo(cwd))) return
 
-  const [branch, repoSlug] = await Promise.all([
+  const [porcelain, branch, repoSlug] = await Promise.all([
+    git(["status", "--porcelain"], cwd),
     git(["branch", "--show-current"], cwd),
     getRepoSlug(cwd),
   ])
+  if (!porcelain.trim()) return
 
   // Resolve effective settings — prefer dispatcher-injected, fall back to disk read.
   const injected = (input as Record<string, unknown>)._effectiveSettings as

@@ -15,7 +15,7 @@ import {
 } from "../src/settings.ts"
 import {
   findPriorSessionTasks,
-  formatTaskCompleteCommands,
+  formatNativeTaskCompleteCommands,
   formatTaskList,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
@@ -178,7 +178,7 @@ function checkNoTasks(
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
       const taskLines = formatTaskList(priorTasks)
-      const completeExamples = formatTaskCompleteCommands(
+      const completeExamples = formatNativeTaskCompleteCommands(
         priorTasks,
         priorSessionId,
         "note:completed in prior session",

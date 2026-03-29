@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  formatNativeTaskCompleteCommand,
+  formatNativeTaskCompleteCommands,
   formatTaskCompleteCommand,
   formatTaskCompleteCommands,
   formatTaskList,
@@ -65,6 +67,29 @@ describe("task formatting helpers", () => {
     expect(text).toBe(
       '  swiz tasks complete 1 --session session-123 --evidence "note:completed"\n' +
         '  swiz tasks complete 2 --session session-123 --evidence "note:completed"'
+    )
+  })
+
+  test("formatNativeTaskCompleteCommand renders TaskUpdate hint", () => {
+    expect(formatNativeTaskCompleteCommand("<id>", "session-123", "note:done")).toBe(
+      'TaskUpdate with taskId "<id>", status "completed", and description including "note:done" ' +
+        "(task lived under prior session session-123)"
+    )
+  })
+
+  test("formatNativeTaskCompleteCommands renders one hint per task", () => {
+    const text = formatNativeTaskCompleteCommands(
+      [{ id: "1" }, { id: "2" }],
+      "session-123",
+      "note:completed",
+      { indent: "  " }
+    )
+
+    expect(text).toBe(
+      '  TaskUpdate with taskId "1", status "completed", and description including "note:completed" ' +
+        "(task lived under prior session session-123)\n" +
+        '  TaskUpdate with taskId "2", status "completed", and description including "note:completed" ' +
+        "(task lived under prior session session-123)"
     )
   })
 })

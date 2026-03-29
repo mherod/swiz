@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import {
   findPriorSessionTasks,
-  formatTaskCompleteCommand,
+  formatNativeTaskCompleteCommand,
   formatTaskList,
   getSessionTaskPath,
   getSessionTasksDir,
@@ -180,10 +180,10 @@ async function collectPriorSessionSection(cwd: string, sessionId: string): Promi
   const priorResult = await findPriorSessionTasks(cwd, sessionId)
   if (!priorResult || priorResult.tasks.length === 0) return null
   const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-  const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
+  const completeHint = formatNativeTaskCompleteCommand("<id>", priorSessionId, "note:done")
   return (
     `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
-    `If already done, run: ${completeHint}\n` +
+    `If already done: ${completeHint}\n` +
     `Otherwise continue these before creating new tasks:\n` +
     formatTaskList(priorTasks, {
       limit: TASK_PREVIEW_LIMIT,

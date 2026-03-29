@@ -166,9 +166,9 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("prior session")
     expect(result.reason).toContain("Implement cross-session restore")
-    // Verify session-specific completion command is offered
-    expect(result.reason).toContain("swiz tasks complete")
-    expect(result.reason).toContain(`--session ${priorSessionId}`)
+    // Verify prior-session completion uses native TaskUpdate guidance
+    expect(result.reason).toContain("TaskUpdate")
+    expect(result.reason).toContain(priorSessionId)
   })
 
   test("allows Edit when all tasks are completed (wrap-up work)", async () => {

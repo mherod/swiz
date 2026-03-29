@@ -439,8 +439,8 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
 
 // ─── Claude Code native-tool guard ───────────────────────────────────────────
 
-/** Subcommands that have no native task-tool equivalent and must remain CLI-accessible. */
-const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["complete", "adopt"])
+/** Subcommands with no native equivalent — only these may run via CLI inside Claude Code. */
+const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt"])
 
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()
@@ -456,7 +456,7 @@ function enforceNativeTaskTools(subcommand: string | undefined): void {
   throw new Error(
     `${hint}\n` +
       `Use native task tools instead: ${nativeTools}.\n` +
-      `Only "swiz tasks complete --evidence ..." and "swiz tasks adopt" require the CLI.`
+      `Only "swiz tasks adopt" is allowed via CLI (orphan recovery after compaction).`
   )
 }
 
