@@ -6,5 +6,6 @@
   "strictNoDirectMain": false,
   "ambitionMode": "aggressive",
   "trunkMode": true,
-  "autoContinue": true
+  "autoContinue": true,
+  "defaultBranch": "test-branch"
 }
