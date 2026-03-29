@@ -48,7 +48,11 @@ async function runHelperWithUpdateMemoryFooter(
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ updateMemoryFooter: enabled }))
-    const script = `import { ${code}`
+    // Split code into import part and execution part, inject initUpdateMemoryFooterCache
+    const importEnd = code.indexOf('from "./hook-utils.ts"')
+    const importNames = code.slice(0, importEnd).trim()
+    const rest = code.slice(importEnd + 'from "./hook-utils.ts";'.length).trim()
+    const script = `import { initUpdateMemoryFooterCache, ${importNames} from "./hook-utils.ts"; await initUpdateMemoryFooterCache(); ${rest}`
     const proc = Bun.spawn(["bun", "-e", script], {
       stdout: "pipe",
       stderr: "pipe",

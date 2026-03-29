@@ -2,13 +2,59 @@
 // Import with: import { denyPreToolUse, allowPreToolUseWithUpdatedInput, isShellTool, isEditTool, ... } from "./hook-utils.ts";
 // noinspection JSUnusedGlobalSymbols
 
+import { dirname, join } from "node:path"
+import type { Subprocess } from "bun"
+import { orderBy } from "lodash-es"
+import {
+  type ActionPlanItem,
+  expandSkillReferences,
+  formatActionPlan,
+  mergeActionPlanIntoTasks,
+} from "../action-plan.ts"
+import { translateMatcher } from "../agents.ts"
+import { stderrLog } from "../debug.ts"
+import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../detect.ts"
+import {
+  getOpenPrForBranch,
+  getRepoSlug,
+  gh,
+  ghJsonViaDaemon,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+} from "../git-helpers.ts"
+import { getHomeDirOrNull, getHomeDirWithFallback } from "../home.ts"
+import { getStatePath, STATE_TRANSITIONS, stateDataSchema } from "../settings.ts"
+import { skillAdvice, skillExists } from "../skill-utils.ts"
+import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { backfillTaskTimingFields } from "../tasks/task-timing.ts"
+import { sessionTaskSentinelPath } from "../temp-paths.ts"
+// Local import for names used within this file (re-exports don't create local bindings)
+import {
+  isEditTool as _isEditTool,
+  isNotebookTool as _isNotebookTool,
+  isWriteTool as _isWriteTool,
+} from "../tool-matchers.ts"
+import {
+  SOURCE_EXT_RE as _SOURCE_EXT_RE,
+  GH_CMD_RE,
+  GIT_READ_RE,
+  GIT_WRITE_RE,
+  READ_CMD_RE,
+  RECOVERY_CMD_RE,
+  SETUP_CMD_RE,
+} from "./git-utils.ts"
+import { shellTokenCommandRe } from "./shell-patterns.ts"
+
 // ─── Runtime dependency check ───────────────────────────────────────────────
 // Verify bun is reachable on PATH. This file executes inside bun, but the
 // check catches mangled PATH in non-interactive agent shells where the user's
 // profile wasn't sourced. Uses Bun.which() for a fast lookup (no spawn).
 
 if (!Bun.which("bun")) {
-  console.error(
+  stderrLog(
+    "bun PATH check",
     "swiz: bun is not reachable on PATH in this shell environment. " +
       "Hooks that invoke bun scripts will fail. " +
       "Ensure bun is installed: curl -fsSL https://bun.sh/install | bash"
@@ -19,26 +65,6 @@ if (!Bun.which("bun")) {
 // Walk up from CWD looking for lockfiles to determine the project's package
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
-
-import { dirname, join } from "node:path"
-import type { Subprocess } from "bun"
-import { orderBy } from "lodash-es"
-import { translateMatcher } from "../agents.ts"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../detect.ts"
-import { getHomeDirOrNull, getHomeDirWithFallback } from "../home.ts"
-import { getStatePath, STATE_TRANSITIONS, stateDataSchema } from "../settings.ts"
-import { skillAdvice, skillExists } from "../skill-utils.ts"
-import { backfillTaskTimingFields } from "../tasks/task-timing.ts"
-import { sessionTaskSentinelPath } from "../temp-paths.ts"
-import {
-  GH_CMD_RE,
-  GIT_READ_RE,
-  GIT_WRITE_RE,
-  READ_CMD_RE,
-  RECOVERY_CMD_RE,
-  SETUP_CMD_RE,
-} from "./git-utils.ts"
-import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
@@ -108,13 +134,6 @@ export {
   TASK_TOOLS,
   TASK_UPDATE_TOOLS,
   WRITE_TOOLS,
-} from "../tool-matchers.ts"
-
-// Local import for names used within this file (re-exports don't create local bindings)
-import {
-  isEditTool as _isEditTool,
-  isNotebookTool as _isNotebookTool,
-  isWriteTool as _isWriteTool,
 } from "../tool-matchers.ts"
 
 // ─── Subprocess timeout enforcement ─────────────────────────────────────────
@@ -435,13 +454,6 @@ export async function emitContext(
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
-import {
-  type ActionPlanItem,
-  expandSkillReferences,
-  formatActionPlan,
-  mergeActionPlanIntoTasks,
-} from "../action-plan.ts"
-
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
 /** Return the current agent's tool name for a canonical tool identifier. */
@@ -487,11 +499,25 @@ function updateMemoryAdvice(reason: string): string {
   )
 }
 
-const _updateMemoryFooterEnabledCache: boolean | null = null
+let _updateMemoryFooterEnabledCache: boolean | null = null
+
+/** Load the updateMemoryFooter setting. Call before synchronous helpers that read the cache. */
+export async function initUpdateMemoryFooterCache(): Promise<void> {
+  if (_updateMemoryFooterEnabledCache !== null) return
+  try {
+    const home = process.env.HOME ?? ""
+    if (!home) {
+      _updateMemoryFooterEnabledCache = false
+      return
+    }
+    const raw = await Bun.file(`${home}/.swiz/settings.json`).json()
+    _updateMemoryFooterEnabledCache = raw?.updateMemoryFooter === true
+  } catch {
+    _updateMemoryFooterEnabledCache = false
+  }
+}
 
 function isUpdateMemoryFooterEnabled(): boolean {
-  // Synchronous check — relies on cache being populated by prior async call.
-  // Falls back to false if cache not yet loaded (safe default).
   return _updateMemoryFooterEnabledCache ?? false
 }
 
@@ -629,17 +655,6 @@ export async function fileFollowUpIssue(
 // internal callers within hook-utils can reference them, and re-exported
 // so all hook scripts can keep importing from "./hook-utils.ts" unchanged.
 
-import {
-  getOpenPrForBranch,
-  getRepoSlug,
-  gh,
-  ghJsonViaDaemon,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-} from "../git-helpers.ts"
-
 /**
  * Hooks should prefer daemon-backed gh query caching to reduce API pressure.
  * Falls back to direct gh + local TTL cache when daemon is unavailable.
@@ -769,8 +784,6 @@ export {
   stemWord,
   subjectsOverlap,
 } from "../subject-fingerprint.ts"
-
-import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 
 /**
  * Read all task files for a session from ~/.claude/tasks/<sessionId>/.
@@ -1141,7 +1154,8 @@ export async function createSessionTask(
     await createTaskInProcess({ sessionId: sessionId!, subject, description })
     await writeSentinel(sentinel)
   } catch (err) {
-    console.error(
+    stderrLog(
+      "createSessionTask fallback",
       `[swiz] createSessionTask: in-process creation failed (${err instanceof Error ? err.message : String(err)}), falling back to subprocess`
     )
     await createTaskViaSubprocess(subject, description, sessionId ?? "", sentinel)
@@ -1303,8 +1317,6 @@ export { spawnSpeak } from "../speech.ts"
 
 export { countFileWords } from "../file-metrics.ts"
 
-import { SOURCE_EXT_RE as _SOURCE_EXT_RE } from "./git-utils.ts"
-
 /**
  * Returns true when a file path should be skipped by source-scanning hooks.
  * Always skips non-source files (unrecognised extension). Pass any additional
@@ -1381,11 +1393,15 @@ export async function shouldDeferAutoSteerForForegroundChatApp(): Promise<boolea
 
 type AutoSteerTerminalKind = "iterm2" | "apple-terminal"
 
+type CreateScript = typeof import("applescript-node").createScript
+
+type RunScript = typeof import("applescript-node").runScript
+
 async function runAutoSteerTerminalScripts(
   kind: AutoSteerTerminalKind,
   escaped: string,
-  createScript: typeof import("applescript-node").createScript,
-  runScript: typeof import("applescript-node").runScript
+  createScript: CreateScript,
+  runScript: RunScript
 ): Promise<void> {
   if (kind === "iterm2") {
     const script = createScript()
@@ -1393,19 +1409,20 @@ async function runAutoSteerTerminalScripts(
       .tellTarget("current session of current window")
       .raw(`write text "${escaped}" newline no`)
       .raw(`write text ""`)
-      .raw(`delay 0.1`)
+      .delay(0.1)
       .raw(`write text ""`)
       .end()
       .end()
     await runScript(script)
     return
   }
+
   const typeScript = createScript()
     .tell("System Events")
     .tellTarget('process "Terminal"')
-    .raw(`keystroke "${escaped}"`)
+    .keystroke(escaped)
     .raw(`keystroke return`)
-    .raw(`delay 0.1`)
+    .delay(0.1)
     .raw(`keystroke return`)
     .end()
     .end()
@@ -1506,7 +1523,7 @@ export async function sendAutoSteer(
       const alreadyFrontmost = originalFrontApp === targetApp
 
       // Always bring terminal to front before messaging
-      await runScript(createScript().tell(targetApp).raw("activate").end())
+      await runScript(createScript().tell(targetApp).activate().end())
 
       await runAutoSteerTerminalScripts(
         app as AutoSteerTerminalKind,
@@ -1582,4 +1599,35 @@ export async function consumeAutoSteerRequest(
 
   const first = requests[0]!
   return { message: first.message, timestamp: first.createdAt }
+}
+/** Strict task file shape with all timing fields required — used by builders. */
+export type TaskFile = Required<
+  Pick<
+    SessionTask,
+    | "id"
+    | "subject"
+    | "description"
+    | "status"
+    | "statusChangedAt"
+    | "elapsedMs"
+    | "startedAt"
+    | "completedAt"
+  >
+> &
+  Pick<SessionTask, "activeForm" | "completionTimestamp"> & {
+    blocks: string[]
+    blockedBy: string[]
+  }
+
+/** ToolHookInput extended with typed task tool_input fields. */
+export interface TaskToolInput extends ToolHookInput {
+  tool_input?: {
+    taskId?: string | number
+    status?: string
+    subject?: string
+    description?: string
+    activeForm?: string
+    metadata?: Record<string, unknown>
+    [key: string]: unknown
+  }
 }

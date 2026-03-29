@@ -47,6 +47,11 @@ const STDERR_ALLOWLIST = new Map<string, string>([
   ],
   ["src/commands/manage.ts", "manage validate emits validation failures to stderr"],
   [
+    "src/utils/hook-utils.ts",
+    "hook output helpers (denyPreToolUse, blockStop, etc.) emit structured JSON to stdout; " +
+      "console.error for bun PATH check and fallback diagnostics",
+  ],
+  [
     "src/commands/state.ts",
     "state set — Claude model write failures when entering planning/reviewing",
   ],
@@ -101,6 +106,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/tasks/task-renderer.ts",
   // task-service — business logic that produces user-facing status output (create/update/adopt confirmations)
   "src/tasks/task-service.ts",
+  // hook-utils — structured JSON hook output protocol (denyPreToolUse, blockStop, emitContext, etc.)
+  "src/utils/hook-utils.ts",
   "src/commands/transcript.ts",
   "src/commands/uninstall.ts",
   // Usage report — human-readable terminal output

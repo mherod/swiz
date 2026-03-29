@@ -269,7 +269,7 @@ describe("createSessionTask input sanitization", () => {
   test("empty HOME causes early return", async () => {
     // Use subprocess to control HOME env
     const script = `
-      import { createSessionTask } from "./hooks/utils/hook-utils.ts";
+      import { createSessionTask } from "./src/utils/hook-utils.ts";
       await createSessionTask("valid-id", "key", "subj", "desc");
       console.log("OK");
     `

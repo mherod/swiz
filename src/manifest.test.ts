@@ -80,7 +80,7 @@ describe("manifest.ts", () => {
 
     it("TaskCreate matcher hook enforces task validation", () => {
       const taskCreateHook = manifest.find(
-        (g) => g.event === "preToolUse" && g.matcher === "TaskCreate"
+        (g) => g.event === "preToolUse" && g.matcher === "TaskCreate|TodoWrite"
       )
       expect(taskCreateHook).toBeDefined()
       expect(taskCreateHook?.hooks.some((h) => h.file.includes("subject-validation")))
@@ -135,7 +135,7 @@ describe("manifest.ts", () => {
 
     it("postToolUse has task-specific hooks for TaskCreate", () => {
       const taskCreatePost = manifest.find(
-        (g) => g.event === "postToolUse" && g.matcher === "TaskCreate"
+        (g) => g.event === "postToolUse" && g.matcher === "TaskCreate|TodoWrite"
       )
       expect(taskCreatePost).toBeDefined()
     })
@@ -205,7 +205,6 @@ describe("manifest.ts", () => {
         .map((g) => g.matcher)
 
       expect(singleMatchers).toContain("Task")
-      expect(singleMatchers).toContain("TaskCreate")
       expect(singleMatchers).toContain("Bash")
     })
   })
