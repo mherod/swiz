@@ -19,10 +19,10 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.87",
     "@openrouter/ai-sdk-provider": "^2.3.1",
-    "ai": "^6.0.116",
-    "ai-sdk-provider-claude-code": "^3.4.3",
+    "ai": "^6.0.141",
+    "ai-sdk-provider-claude-code": "^3.4.4",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "applescript-node": "^1.0.3",
     "date-fns": "^4.1.0",

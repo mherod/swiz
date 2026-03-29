@@ -28,7 +28,8 @@ interface DiffScanStopHookOptions {
  * Handles: input parsing → git repo check → branch check → merge-base → diff → scan → block.
  */
 export async function runDiffScanStopHook(opts: DiffScanStopHookOptions): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const data = await Bun.stdin.json()
+  const input = stopHookInputSchema.parse(data)
   const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return

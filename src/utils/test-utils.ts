@@ -2,7 +2,7 @@ import { afterAll } from "bun:test"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
 import { getSessionTasksDir } from "./hook-utils.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */

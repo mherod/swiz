@@ -7,10 +7,12 @@
 
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { z } from "zod"
 import { DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { parseJsonlHead } from "../utils/jsonl.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -70,13 +72,9 @@ async function getAllProjectSessionIds(
 async function transcriptMatchesCwd(filePath: string, filterCwd: string): Promise<boolean> {
   try {
     const content = await readFile(filePath, "utf-8")
-    for (const line of content.split("\n").slice(0, 10)) {
-      if (!line.trim()) continue
-      try {
-        const data = JSON.parse(line) as { cwd?: string }
-        if (data.cwd === filterCwd) return true
-      } catch {}
-    }
+    const schema = z.looseObject({ cwd: z.string().optional() })
+    const entries = parseJsonlHead(content, schema, 10)
+    return entries.some((entry) => entry.cwd === filterCwd)
   } catch {}
   return false
 }

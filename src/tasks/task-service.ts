@@ -12,6 +12,7 @@ import {
 } from "../settings.ts"
 import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { splitJsonlLines, tryParseJsonLine } from "../utils/jsonl.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -263,20 +264,17 @@ async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mt
 }
 
 function tryParseAuditEntry(line: string, taskId: string): string | null {
-  try {
-    const entry = JSON.parse(line) as Record<string, unknown>
-    if (!isValidRecoveredSubject(entry, taskId)) return null
-    return typeof entry.subject === "string" ? entry.subject : null
-  } catch {
-    return null
-  }
+  const entry = tryParseJsonLine(line)
+  if (entry === undefined || typeof entry !== "object" || Array.isArray(entry)) return null
+  const e = entry as Record<string, unknown>
+  if (!isValidRecoveredSubject(e, taskId)) return null
+  return typeof e.subject === "string" ? e.subject : null
 }
 
 async function searchAuditLogForTask(auditPath: string, taskId: string): Promise<string | null> {
   try {
     const content = await readFile(auditPath, "utf-8")
-    for (const line of content.split("\n")) {
-      if (!line.trim()) continue
+    for (const line of splitJsonlLines(content)) {
       const subject = tryParseAuditEntry(line, taskId)
       if (subject) return subject
     }

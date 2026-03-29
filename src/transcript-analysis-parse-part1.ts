@@ -1,6 +1,7 @@
 import { z } from "zod"
 import type { ContentBlock, TranscriptEntry } from "./transcript-schemas.ts"
 import { toolResultBlockSchema, toolUseBlockSchema } from "./transcript-schemas.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }): string {
   const name = block.name ?? "unknown"
@@ -68,13 +69,9 @@ const jsonlEntrySchema = z.looseObject({
 
 export function parseJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
-  for (const line of text.split("\n").filter(Boolean)) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(line)
-    } catch {
-      continue
-    }
+  for (const line of splitJsonlLines(text)) {
+    const parsed = tryParseJsonLine(line)
+    if (parsed === undefined) continue
     const result = jsonlEntrySchema.safeParse(parsed)
     if (!result.success) continue
 
@@ -244,13 +241,9 @@ export function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   let sessionId: string | undefined
 
-  for (const line of text.split("\n").filter(Boolean)) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(line)
-    } catch {
-      continue
-    }
+  for (const line of splitJsonlLines(text)) {
+    const parsed = tryParseJsonLine(line)
+    if (parsed === undefined) continue
     sessionId = classifyCodexLine(parsed, sessionId, entries)
   }
 

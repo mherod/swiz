@@ -9,6 +9,7 @@ import {
   getToolsUsedForCurrentSession,
 } from "../transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../transcript-utils.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./jsonl.ts"
 
 // ── ANSI stripping ────────────────────────────────────────────────────────────
 
@@ -29,15 +30,14 @@ export function stripAnsi(s: string): string {
  * Shared by the extract* helpers below.
  */
 function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>> {
-  try {
-    const entry = JSON.parse(line)
-    if (entry?.type !== "assistant") return []
-    const content = entry?.message?.content
-    if (!Array.isArray(content)) return []
-    return content.filter((block: Record<string, unknown>) => block?.type === "tool_use")
-  } catch {
-    return []
-  }
+  const entry = tryParseJsonLine(line)
+  if (entry === undefined || typeof entry !== "object" || Array.isArray(entry)) return []
+  const e = entry as Record<string, unknown>
+  if (e?.type !== "assistant") return []
+  const message = (e?.message as Record<string, unknown> | undefined) ?? {}
+  const content = message?.content
+  if (!Array.isArray(content)) return []
+  return content.filter((block: Record<string, unknown>) => block?.type === "tool_use")
 }
 
 function collectToolBlocksFromLines(lines: string[]): Array<Record<string, unknown>> {
@@ -215,7 +215,7 @@ export async function sessionTaskToolPatterns(
 export async function readAllTranscriptLines(transcriptPath: string): Promise<string[]> {
   try {
     const text = await Bun.file(transcriptPath).text()
-    return text.split("\n")
+    return splitJsonlLines(text)
   } catch {
     return []
   }

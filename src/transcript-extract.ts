@@ -1,5 +1,6 @@
 import type { ContentBlock, PlainTurn, TextBlock } from "./transcript-schemas.ts"
 import { isTextBlockWithText } from "./transcript-schemas.ts"
+import { tryParseJsonLine } from "./utils/jsonl.ts"
 
 // ─── Text extraction ─────────────────────────────────────────────────────────
 
@@ -78,12 +79,10 @@ export function extractLastAssistantText(lines: string[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]
     if (!line?.trim()) continue
-    try {
-      const text = extractTextFromEntry(JSON.parse(line))
-      if (text) return text
-    } catch {
-      // skip malformed lines
-    }
+    const parsed = tryParseJsonLine(line)
+    if (parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) continue
+    const text = extractTextFromEntry(parsed as Record<string, unknown>)
+    if (text) return text
   }
   return ""
 }

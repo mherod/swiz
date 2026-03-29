@@ -6,6 +6,7 @@
 
 import { normalizeCommand } from "./command-utils.ts"
 import { isShellTool, isTaskTool } from "./tool-matchers.ts"
+import { tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
 
 /**
@@ -164,14 +165,10 @@ export function extractSessionLines(jsonlText: string): string[] {
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
     if (!raw?.trim()) continue
-    try {
-      const parsed = JSON.parse(raw) as { type?: string }
-      if (parsed?.type === "system") {
-        sessionStartIdx = i + 1
-        break
-      }
-    } catch {
-      // ignore malformed lines
+    const parsed = tryParseJsonLine(raw) as { type?: string } | undefined
+    if (parsed?.type === "system") {
+      sessionStartIdx = i + 1
+      break
     }
   }
   return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
@@ -188,17 +185,15 @@ interface ToolBlock {
 }
 
 function parseAssistantToolBlocks(line: string): ToolBlock[] {
-  try {
-    const entry = JSON.parse(line) as {
-      type?: string
-      message?: { content?: ToolBlock[] }
-    }
-    if (entry?.type !== "assistant") return []
-    const content = entry?.message?.content
-    return Array.isArray(content) ? content : []
-  } catch {
-    return []
-  }
+  const entry = tryParseJsonLine(line) as
+    | {
+        type?: string
+        message?: { content?: ToolBlock[] }
+      }
+    | undefined
+  if (entry?.type !== "assistant") return []
+  const content = entry?.message?.content
+  return Array.isArray(content) ? content : []
 }
 
 interface SummaryAccumulator {

@@ -10,6 +10,7 @@
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
+import { splitJsonlLines } from "./utils/jsonl.ts"
 
 export interface HookLogEntry {
   ts: string
@@ -66,15 +67,13 @@ export async function readHookLogs(limit = 200): Promise<HookLogEntry[]> {
     const file = Bun.file(logPath)
     if (!(await file.exists())) return []
     const text = await file.text()
-    const lines = text.trim().split("\n").filter(Boolean)
-    const recent = lines.slice(-limit)
+    // Slice raw lines before parsing to avoid JSON.parse on discarded lines
+    const lines = splitJsonlLines(text)
+    const recent = lines.slice(-limit).join("\n")
     const entries: HookLogEntry[] = []
-    for (const line of recent) {
-      try {
-        entries.push(JSON.parse(line) as HookLogEntry)
-      } catch {
-        // Skip malformed lines
-      }
+    for (const line of splitJsonlLines(recent)) {
+      const parsed = JSON.parse(line) as HookLogEntry
+      entries.push(parsed)
     }
     return entries
   } catch {
@@ -89,7 +88,7 @@ export async function pruneHookLogs(): Promise<void> {
     const file = Bun.file(logPath)
     if (!(await file.exists())) return
     const text = await file.text()
-    const lines = text.trim().split("\n").filter(Boolean)
+    const lines = splitJsonlLines(text)
     if (lines.length <= MAX_LOG_LINES) return
     const trimmed = lines.slice(-MAX_LOG_LINES)
     await Bun.write(logPath, `${trimmed.join("\n")}\n`)
