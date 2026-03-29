@@ -11,6 +11,7 @@ export interface UpstreamSyncResult {
   milestones: { upserted: number; removed: number }
   branchCi: { upserted: number }
   prBranchDetail: { upserted: number }
+  branchProtection: { upserted: number }
 }
 
 /** Labels that indicate an issue may be blocked/stalled and worth checking for recent comments. */
@@ -150,6 +151,21 @@ function upsertBranchCiRuns(
   }
 }
 
+/** Upsert fetched branch protection rules into the store. */
+function syncBranchProtectionResults(
+  ctx: SyncContext,
+  branches: string[],
+  results: (unknown | null)[]
+): void {
+  for (let i = 0; i < branches.length; i++) {
+    const branch = branches[i]!
+    const rules = results[i]
+    if (!rules) continue
+    ctx.store.upsertBranchProtection(ctx.repo, branch, rules)
+    ctx.result.branchProtection.upserted++
+  }
+}
+
 /** Sync CI runs and PR review detail for branches with open PRs plus the default branch. */
 async function syncBranchData(
   ctx: SyncContext,
@@ -157,10 +173,12 @@ async function syncBranchData(
 ): Promise<void> {
   const branches = collectSyncBranches(prs)
 
-  const branchRunResults = await Promise.all(
-    branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))
-  )
+  const [branchRunResults, branchProtectionResults] = await Promise.all([
+    Promise.all(branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))),
+    Promise.all(branches.map((branch) => ctx.client.getBranchProtection(ctx.cwd, branch))),
+  ])
   upsertBranchCiRuns(ctx.store, ctx.repo, branches, branchRunResults, ctx.result)
+  syncBranchProtectionResults(ctx, branches, branchProtectionResults)
 
   // Sync PR branch detail for open PRs (reviewDecision, comment count)
   if (!prs) return
@@ -241,6 +259,7 @@ export async function syncUpstreamState(
     milestones: { upserted: 0, removed: 0 },
     branchCi: { upserted: 0 },
     prBranchDetail: { upserted: 0 },
+    branchProtection: { upserted: 0 },
   }
 
   const [issues, prs, runs, closedIssues, closedPrs, labels, milestones] = await Promise.all([

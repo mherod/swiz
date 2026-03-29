@@ -160,6 +160,7 @@ export class UpstreamSyncRegistry {
           milestones: { upserted: 0, removed: 0 },
           branchCi: { upserted: 0 },
           prBranchDetail: { upserted: 0 },
+          branchProtection: { upserted: 0 },
         }
       )
     } finally {

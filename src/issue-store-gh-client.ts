@@ -5,7 +5,9 @@
  * Extracted from issue-store.ts (issue #423).
  */
 
+import { acquireGhSlot } from "./gh-rate-limit.ts"
 import type {
+  GitHubBranchProtectionRecord,
   GitHubCiRunRecord,
   GitHubClient,
   GitHubCommentRecord,
@@ -101,5 +103,78 @@ export class GhCliGitHubClient implements GitHubClient {
       ],
       cwd
     )
+  }
+
+  async getBranchProtection(
+    cwd: string,
+    branch: string
+  ): Promise<GitHubBranchProtectionRecord | null> {
+    await acquireGhSlot()
+    const proc = Bun.spawn(
+      ["gh", "api", `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`],
+      { cwd, stdout: "pipe", stderr: "pipe" }
+    )
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) {
+      // 404 = no protection rules configured; 403 = insufficient permissions
+      void stderr
+      return null
+    }
+    try {
+      const raw = JSON.parse(stdout) as Record<string, unknown>
+      return normalizeBranchProtection(branch, raw)
+    } catch {
+      return null
+    }
+  }
+}
+
+/** Extract the `enabled` boolean from a `{ enabled: boolean }` REST sub-object. */
+function enabledFlag(value: unknown): boolean {
+  return (value as { enabled?: boolean } | undefined)?.enabled ?? false
+}
+
+function normalizeRequiredReviews(
+  raw: Record<string, unknown> | undefined
+): GitHubBranchProtectionRecord["requiredReviews"] {
+  if (!raw) return undefined
+  return {
+    requiredApprovingReviewCount: (raw.required_approving_review_count as number) ?? 0,
+    dismissStaleReviews: (raw.dismiss_stale_reviews as boolean) ?? false,
+    requireCodeOwnerReviews: (raw.require_code_owner_reviews as boolean) ?? false,
+  }
+}
+
+function normalizeRequiredStatusChecks(
+  raw: Record<string, unknown> | undefined
+): GitHubBranchProtectionRecord["requiredStatusChecks"] {
+  if (!raw) return undefined
+  return {
+    strict: (raw.strict as boolean) ?? false,
+    contexts: (raw.contexts as string[]) ?? [],
+  }
+}
+
+/** Normalize GitHub REST branch protection response to our record shape. */
+function normalizeBranchProtection(
+  branch: string,
+  raw: Record<string, unknown>
+): GitHubBranchProtectionRecord {
+  return {
+    branch,
+    requiredReviews: normalizeRequiredReviews(
+      raw.required_pull_request_reviews as Record<string, unknown> | undefined
+    ),
+    requiredStatusChecks: normalizeRequiredStatusChecks(
+      raw.required_status_checks as Record<string, unknown> | undefined
+    ),
+    enforceAdmins: enabledFlag(raw.enforce_admins),
+    requiredLinearHistory: enabledFlag(raw.required_linear_history),
+    allowForcePushes: enabledFlag(raw.allow_force_pushes),
+    allowDeletions: enabledFlag(raw.allow_deletions),
   }
 }

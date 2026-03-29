@@ -1160,6 +1160,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listLabels: async () => [],
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1184,6 +1185,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listLabels: async () => null,
       listMilestones: async () => null,
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1222,6 +1224,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listLabels: async () => [],
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1266,6 +1269,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listLabels: async () => [],
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1297,6 +1301,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listLabels: async () => [],
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1394,6 +1399,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       ],
       listMilestones: async () => [{ number: 1, title: "v1.0", state: "open" }],
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1436,6 +1442,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
         }
         return null
       },
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1461,6 +1468,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       listLabels: async () => null,
       listMilestones: async () => null,
       listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
     }
 
     try {
@@ -1469,6 +1477,131 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       expect(result.milestones.upserted).toBe(0)
       expect(result.branchCi.upserted).toBe(0)
       expect(result.prBranchDetail.upserted).toBe(0)
+      expect(result.branchProtection.upserted).toBe(0)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStore branch protection operations", () => {
+  test("upserts and retrieves branch protection within TTL", () => {
+    const store = createStore()
+    try {
+      const rules = {
+        branch: "main",
+        enforceAdmins: true,
+        requiredLinearHistory: false,
+        allowForcePushes: false,
+        allowDeletions: false,
+        requiredReviews: {
+          requiredApprovingReviewCount: 2,
+          dismissStaleReviews: true,
+          requireCodeOwnerReviews: true,
+        },
+        requiredStatusChecks: {
+          strict: true,
+          contexts: ["ci/build", "ci/test"],
+        },
+      }
+      store.upsertBranchProtection("owner/repo", "main", rules)
+      const cached = store.getBranchProtection<typeof rules>("owner/repo", "main")
+      expect(cached).not.toBeNull()
+      expect(cached!.enforceAdmins).toBe(true)
+      expect(cached!.requiredReviews?.requiredApprovingReviewCount).toBe(2)
+      expect(cached!.requiredStatusChecks?.contexts).toEqual(["ci/build", "ci/test"])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("returns null for unknown branch", () => {
+    const store = createStore()
+    try {
+      const result = store.getBranchProtection("owner/repo", "nonexistent")
+      expect(result).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("removeBranchProtection clears cached entry", () => {
+    const store = createStore()
+    try {
+      store.upsertBranchProtection("owner/repo", "main", { branch: "main", enforceAdmins: false })
+      expect(store.getBranchProtection("owner/repo", "main")).not.toBeNull()
+      store.removeBranchProtection("owner/repo", "main")
+      expect(store.getBranchProtection("owner/repo", "main")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("clearCachedData removes branch protection", () => {
+    const store = createStore()
+    try {
+      store.upsertBranchProtection("owner/repo", "main", { branch: "main", enforceAdmins: true })
+      store.clearCachedData("owner/repo")
+      expect(store.getBranchProtection("owner/repo", "main")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("syncUpstreamState with branch protection", () => {
+  test("syncs branch protection rules for default branch", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async () => [],
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async (_cwd, branch) => {
+        if (branch === "main") {
+          return {
+            branch: "main",
+            enforceAdmins: true,
+            requiredLinearHistory: true,
+            allowForcePushes: false,
+            allowDeletions: false,
+            requiredStatusChecks: { strict: true, contexts: ["ci"] },
+          }
+        }
+        return null
+      },
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(result.branchProtection.upserted).toBe(1)
+      const cached = store.getBranchProtection<{ enforceAdmins: boolean }>("test/repo", "main")
+      expect(cached).not.toBeNull()
+      expect(cached!.enforceAdmins).toBe(true)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("null branch protection is handled gracefully", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async () => [],
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
+      getBranchProtection: async () => null,
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(result.branchProtection.upserted).toBe(0)
     } finally {
       store.close()
     }
@@ -1531,6 +1664,14 @@ describe("IssueStoreReader", () => {
       expect(milestones).toHaveLength(1)
       expect(milestones[0]!.title).toBe("v1.0")
 
+      store.upsertBranchProtection("test/repo", "main", { branch: "main", enforceAdmins: true })
+      const protection = await reader.getBranchProtection<{ enforceAdmins: boolean }>(
+        "test/repo",
+        "main"
+      )
+      expect(protection).not.toBeNull()
+      expect(protection!.enforceAdmins).toBe(true)
+
       const missing = await reader.getIssue("test/repo", 999)
       expect(missing).toBeNull()
     } finally {
@@ -1553,6 +1694,7 @@ describe("IssueStoreReader", () => {
       getLatestCommentAt: async () => null,
       listLabels: async <T = unknown>() => [] as T[],
       listMilestones: async <T = unknown>() => [] as T[],
+      getBranchProtection: async () => null,
     }
 
     const issues = await mockReader.listIssues("any/repo")

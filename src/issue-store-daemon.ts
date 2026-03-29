@@ -217,6 +217,14 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return result ?? []
   }
 
+  async getBranchProtection<T = unknown>(repo: string, branch: string): Promise<T | null> {
+    const result = await this.query<T>([
+      "api",
+      `repos/${repo}/branches/${encodeURIComponent(branch)}/protection`,
+    ])
+    return result ?? null
+  }
+
   get isDaemonAvailable(): boolean | null {
     return this.daemonAvailable
   }

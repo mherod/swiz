@@ -114,6 +114,8 @@ export interface IssueStoreReader {
   listLabels<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
   /** Cached milestones for a repo. Returns empty array when not yet synced. */
   listMilestones<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
+  /** Cached branch protection rules for a repo. Returns null when not yet synced. */
+  getBranchProtection<T = unknown>(repo: string, branch: string): Promise<T | null>
 }
 
 // ─── GitHubClient ────────────────────────────────────────────────────────────
@@ -193,6 +195,24 @@ export interface GitHubMilestoneRecord {
   closedIssues?: number
 }
 
+/** Branch protection rule shape returned by GitHub REST API. */
+export interface GitHubBranchProtectionRecord {
+  branch: string
+  requiredReviews?: {
+    requiredApprovingReviewCount: number
+    dismissStaleReviews: boolean
+    requireCodeOwnerReviews: boolean
+  }
+  requiredStatusChecks?: {
+    strict: boolean
+    contexts: string[]
+  }
+  enforceAdmins: boolean
+  requiredLinearHistory: boolean
+  allowForcePushes: boolean
+  allowDeletions: boolean
+}
+
 /**
  * Abstraction over GitHub data fetching. Allows sync logic to be tested
  * without spawning real `gh` CLI processes.
@@ -211,6 +231,8 @@ export interface GitHubClient {
   listMilestones(cwd: string): Promise<GitHubMilestoneRecord[] | null>
   /** List recent workflow runs for a specific branch. Returns null on error. */
   listBranchWorkflowRuns(cwd: string, branch: string): Promise<GitHubCiRunRecord[] | null>
+  /** Fetch branch protection rules for a branch. Returns null on error or insufficient permissions. */
+  getBranchProtection(cwd: string, branch: string): Promise<GitHubBranchProtectionRecord | null>
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -337,6 +359,15 @@ export class IssueStore {
         data TEXT NOT NULL,
         synced_at INTEGER NOT NULL,
         PRIMARY KEY (repo, number)
+      )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS branch_protection (
+        repo TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, branch)
       )
     `)
   }
@@ -703,9 +734,35 @@ export class IssueStore {
     return result.changes
   }
 
+  // ─── Branch protection operations ──────────────────────────────────────
+
+  /** Get cached branch protection rules for a branch. Returns null if no fresh data. */
+  getBranchProtection<T = unknown>(repo: string, branch: string, ttlMs = DEFAULT_TTL_MS): T | null {
+    const cutoff = Date.now() - ttlMs
+    const row = this.db
+      .query("SELECT data FROM branch_protection WHERE repo = ? AND branch = ? AND synced_at > ?")
+      .get(repo, branch, cutoff) as { data: string } | null
+    if (!row) return null
+    return JSON.parse(row.data) as T
+  }
+
+  /** Upsert branch protection rules for a branch. */
+  upsertBranchProtection<T>(repo: string, branch: string, rules: T): void {
+    this.db
+      .query(
+        "INSERT OR REPLACE INTO branch_protection (repo, branch, data, synced_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(repo, branch, JSON.stringify(rules), Date.now())
+  }
+
+  /** Remove cached branch protection for a branch. */
+  removeBranchProtection(repo: string, branch: string): void {
+    this.db.query("DELETE FROM branch_protection WHERE repo = ? AND branch = ?").run(repo, branch)
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
-  /** Clear all cached data (issues, PRs, CI, labels, milestones) for a repo. Preserves pending mutations. */
+  /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection) for a repo. Preserves pending mutations. */
   clearCachedData(repo: string): void {
     this.db.query("DELETE FROM issues WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM pull_requests WHERE repo = ?").run(repo)
@@ -715,6 +772,7 @@ export class IssueStore {
     this.db.query("DELETE FROM issue_comments WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM labels WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM milestones WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM branch_protection WHERE repo = ?").run(repo)
   }
 
   /** Clear ALL cached data across all repos. Preserves pending mutations. */
@@ -727,6 +785,7 @@ export class IssueStore {
     this.db.query("DELETE FROM issue_comments").run()
     this.db.query("DELETE FROM labels").run()
     this.db.query("DELETE FROM milestones").run()
+    this.db.query("DELETE FROM branch_protection").run()
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -760,6 +819,8 @@ export class IssueStore {
         Promise.resolve(this.listLabels<T>(repo, ttlMs)),
       listMilestones: <T = unknown>(repo: string, ttlMs?: number) =>
         Promise.resolve(this.listMilestones<T>(repo, ttlMs)),
+      getBranchProtection: <T = unknown>(repo: string, branch: string) =>
+        Promise.resolve(this.getBranchProtection<T>(repo, branch)),
     }
   }
 }
@@ -1322,6 +1383,10 @@ function createNoOpStore(): IssueStore {
           getLatestCommentAt: async (_repo: string, _issueNumber: number): Promise<null> => null,
           listLabels: async <T = unknown>(_repo: string): Promise<T[]> => [],
           listMilestones: async <T = unknown>(_repo: string): Promise<T[]> => [],
+          getBranchProtection: async <T = unknown>(
+            _repo: string,
+            _branch: string
+          ): Promise<T | null> => null,
         })
       }
       if (READ_LIST_METHODS.has(prop as string)) {
