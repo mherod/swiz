@@ -230,6 +230,29 @@ describe("transcript-utils.ts", () => {
       }
     })
 
+    it("recognizes <command-name> tag expansions in user messages as skill invocations", async () => {
+      const transcriptPath = await writeTranscriptFile("command-name-skills.jsonl", [
+        JSON.stringify({
+          type: "human",
+          message: {
+            content: "<command-name>commit</command-name>\nBase directory for this skill: ...",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
     it("reads current-session tool usage from enriched payload without touching transcript files", async () => {
       const payload = {
         transcript_path: "/nonexistent/transcript.jsonl",

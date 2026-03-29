@@ -239,12 +239,43 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   }
 }
 
+/** Match `<command-name>skill-name</command-name>` tags in user messages (skill expansion). */
+const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
+
+function extractUserSkillExpansions(line: string): string[] {
+  const entry = tryParseJsonLine(line) as
+    | { type?: string; message?: { content?: string | Array<{ type?: string; text?: string }> } }
+    | undefined
+  if (entry?.type !== "human") return []
+  const content = entry?.message?.content
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((b) => b?.type === "text")
+            .map((b) => b.text ?? "")
+            .join("")
+        : ""
+  if (!text) return []
+  const skills: string[] = []
+  for (const match of text.matchAll(COMMAND_NAME_RE)) {
+    if (match[1]) skills.push(match[1])
+  }
+  return skills
+}
+
 function collectSessionToolUsage(sessionLines: string[]): SummaryAccumulator {
   const acc = createEmptySummaryAccumulator()
   for (const line of sessionLines) {
     if (!line.trim()) continue
     for (const block of parseAssistantToolBlocks(line)) {
       processToolBlock(block, acc)
+    }
+    for (const skill of extractUserSkillExpansions(line)) {
+      if (!acc.skillInvocations.includes(skill)) {
+        acc.skillInvocations.push(skill)
+      }
     }
   }
   return acc
