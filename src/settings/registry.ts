@@ -525,6 +525,22 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         : `Invalid value "${v}" for collaboration-mode. Must be: ${collaborationModeSchema.options.join(" | ")}`,
   },
   {
+    key: "autoTransition",
+    aliases: ["auto-transition", "autotransition", "auto_transition"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description:
+        "Allow multi-step task status auto-transitions (e.g. pending→in_progress→completed in one step)",
+      effectExplanation:
+        "When enabled, completing a pending task automatically transitions it through in_progress first. When disabled, each status transition must be explicit — a pending task must be set to in_progress before it can be completed.",
+      enableDescription:
+        "Enable automatic task status transitions (pending→completed skips through in_progress)",
+      disableDescription: "Require explicit status transitions (pending→in_progress→completed)",
+    },
+  },
+  {
     key: "auditStrictness",
     aliases: [
       "audit-strictness",

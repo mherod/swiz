@@ -47,11 +47,12 @@ async function completeTasks(
   tasksDir: string,
   tasks: Array<{ id: string; status: string; subject: string }>,
   isCommit: boolean,
-  isPush: boolean
+  isPush: boolean,
+  autoTransitionEnabled: boolean
 ): Promise<void> {
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
-    autoTransitionForComplete(task)
+    autoTransitionForComplete(task, autoTransitionEnabled)
     if (validateTransition(task.status, "completed")) continue
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
@@ -97,7 +98,8 @@ async function main(): Promise<void> {
   if (!tasksDir) return
   const tasks = await readSessionTasks(op.sessionId, home)
 
-  await completeTasks(tasksDir, tasks, op.isCommit, op.isPush)
+  const settings = await readSwizSettings()
+  await completeTasks(tasksDir, tasks, op.isCommit, op.isPush, settings.autoTransition)
 
   if (op.isPush) {
     const cwd = input.cwd ?? process.cwd()

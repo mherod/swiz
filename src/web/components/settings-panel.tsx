@@ -27,6 +27,7 @@ interface GlobalSettingsForm {
   memoryUpdateReminder: boolean
   qualityChecksGate: boolean
   skipSecretScan: boolean
+  autoTransition: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
   largeFileSizeBlockKb: number
@@ -57,6 +58,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   memoryUpdateReminder: false,
   qualityChecksGate: true,
   skipSecretScan: false,
+  autoTransition: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
   largeFileSizeBlockKb: 5120,
@@ -138,6 +140,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     memoryUpdateReminder: !!settings.memoryUpdateReminder,
     qualityChecksGate: settings.qualityChecksGate !== false,
     skipSecretScan: !!settings.skipSecretScan,
+    autoTransition: settings.autoTransition !== false,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
     largeFileSizeBlockKb: Number(settings.largeFileSizeBlockKb) || 5120,
@@ -354,6 +357,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "skipSecretScan",
     label: "Skip secret scan",
     desc: "Disable credential/secret pattern detection in the push-checks-gate hook.",
+  },
+  {
+    key: "autoTransition",
+    label: "Auto-transition status",
+    desc: "Allow multi-step task status transitions (e.g. completing a pending task auto-transitions through in_progress).",
   },
 ]
 

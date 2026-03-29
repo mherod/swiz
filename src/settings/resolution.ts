@@ -164,6 +164,7 @@ function buildBaseSettings(
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,
     ignoreCi: settings.ignoreCi,
+    autoTransition: settings.autoTransition,
     githubCiGate: settings.ignoreCi ? false : settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,

@@ -224,7 +224,7 @@ async function enforceCiEvidence(
     const planSteps = [
       'Create a "Push and verify CI" task and mark it in_progress.',
       "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
-      'Mark the task completed: swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"',
+      "Mark the task completed via TaskUpdate (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>",
     ]
     if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId)
     blockStop(

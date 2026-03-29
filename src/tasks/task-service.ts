@@ -6,6 +6,7 @@ import {
   PROJECT_STATES,
   type ProjectState,
   readProjectState,
+  readSwizSettings,
   STATE_TRANSITIONS,
   writeProjectState,
 } from "../settings.ts"
@@ -483,6 +484,13 @@ export async function completeTaskWithAutoTransition(
 
   const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
+    const settings = await readSwizSettings()
+    if (!settings.autoTransition) {
+      throw new Error(
+        `Cannot complete task ${taskId}: status is "pending". ` +
+          `Auto-transition is disabled — transition to in_progress first.`
+      )
+    }
     await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
   }
   await updateStatus(sessionId, taskId, "completed", options)

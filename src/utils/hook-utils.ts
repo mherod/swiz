@@ -674,9 +674,10 @@ export async function hasFileInTree(startDir: string, fileName: string): Promise
 /**
  * Apply the pending → in_progress auto-transition before completing a task object.
  * Mutates the task in place. Use when bypassing the full updateStatus service (e.g., direct file writes in hooks).
+ * When `enabled` is false, the auto-transition is skipped — callers must transition explicitly.
  */
-export function autoTransitionForComplete(task: { status: string }): void {
-  if (task.status === "pending") task.status = "in_progress"
+export function autoTransitionForComplete(task: { status: string }, enabled = true): void {
+  if (enabled && task.status === "pending") task.status = "in_progress"
 }
 
 /**

@@ -101,7 +101,7 @@ alwaysApply: false
 - Task storage per agent: `createDefaultTaskStore()` in `src/task-roots.ts` detects the current agent via `detectCurrentAgent()` and resolves agent-specific paths from `getTaskRoots()` in `src/provider-adapters.ts`. Falls back to Claude paths.
 - Session-to-project mapping from `<projectsDir>/` transcript `cwd`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- Completion requires evidence: `swiz tasks complete <id> --evidence "..."`.
+- Completion: use `TaskUpdate` with `status: completed` and record evidence in the task `description` (or other allowed fields).
 
 - First action: `TaskCreate`/`TaskUpdate`; required after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
@@ -112,7 +112,7 @@ alwaysApply: false
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
-- **DO**: Use native task tools for creation/status/queries. **DON'T**: Use `swiz tasks` CLI for status transitions. Exception: `swiz tasks complete` (requires `--evidence`).
+- **DO**: Use native task tools for all task work (create, query, status, completion). **DON'T**: Use the `swiz tasks` CLI in the agent. Exception: `swiz tasks adopt` only (orphan recovery after compaction).
 - **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` for in-process task creation. Use `createSessionTask()` from `src/utils/hook-utils.ts` when sentinel dedup is needed. **DON'T**: Shell out to `swiz tasks create` from hooks.
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
@@ -121,11 +121,11 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `swiz tasks complete <id> --evidence "..."`. Prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:`. **DON'T**: Use `TaskUpdate status=completed` — hook rejects it.
-- **`swiz tasks complete` has NO `--subject` flag**. Stub via `swiz tasks update <id> --subject "..."`, then complete.
+- **Task completion**: `TaskUpdate` with `taskId` and `status: completed`; put structured evidence in `description` using prefixes like `commit:`, `pr:`, `file:`, `test:`, `note:`.
+- **Subject changes**: use `TaskUpdate` `subject` / `description` — not the CLI.
 - **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
 - Mark tasks complete immediately.
-- Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
+- Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate` to the relevant `taskId` (include session context in the evidence text if needed).
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold.
@@ -161,8 +161,7 @@ alwaysApply: false
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push to `main`.
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
-- **DO**: Treat `.swiz/config.json` and `swiz settings` as authoritative for collaboration/trunk/branch policy. **DON'T**: Let `gh api` or `gh pr list` override local policy when solo+trunk mode.
-- **DO**: Stay on `main` in solo+trunk mode; branch only if user or repo rules require it.
+- **DO**: Treat `.swiz/config.json` as authoritative for collaboration/trunk/branch policy; stay on `main` in solo+trunk mode.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI workflow `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip CI; markdown triggers CI.
 - Pre-push checklist:

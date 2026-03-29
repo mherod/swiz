@@ -195,6 +195,8 @@ export interface SwizSettings {
   strictNoDirectMain: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
   trunkMode: boolean
+  /** When true, project state auto-transitions based on git/PR lifecycle events (e.g. developing→reviewing on PR create). */
+  autoTransition: boolean
   /** Control governance strictness: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI). */
   auditStrictness: AuditStrictness
   taskDurationWarningMinutes: number

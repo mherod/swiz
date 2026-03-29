@@ -185,9 +185,7 @@ function processBlockingResults(
     executions.push(execution)
   }
   if (contexts.length > 0) {
-    finalResponse.systemMessage =
-      (finalResponse.systemMessage ? finalResponse.systemMessage + "\n\n" : "") +
-      contexts.join("\n\n")
+    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${contexts.join("\n\n")}`
   }
 }
 

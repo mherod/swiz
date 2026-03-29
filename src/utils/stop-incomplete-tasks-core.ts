@@ -45,10 +45,14 @@ function isTaskDuplicate(
   return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
 }
 
-async function completeStaleTask(stale: SessionTask, tasksDir: string): Promise<void> {
+async function completeStaleTask(
+  stale: SessionTask,
+  tasksDir: string,
+  autoTransitionEnabled: boolean
+): Promise<void> {
   try {
     const taskPath = join(tasksDir, `${stale.id}.json`)
-    autoTransitionForComplete(stale)
+    autoTransitionForComplete(stale, autoTransitionEnabled)
     if (validateTransition(stale.status, "completed")) return
     const updated = {
       ...stale,
@@ -65,7 +69,8 @@ async function completeStaleTask(stale: SessionTask, tasksDir: string): Promise<
 async function deduplicateStaleTasks(
   completedTasks: SessionTask[],
   incompleteTasks: SessionTask[],
-  tasksDir: string
+  tasksDir: string,
+  autoTransitionEnabled: boolean
 ): Promise<void> {
   if (completedTasks.length === 0 || incompleteTasks.length === 0) return
 
@@ -78,7 +83,7 @@ async function deduplicateStaleTasks(
 
   for (const stale of incompleteTasks) {
     if (!isTaskDuplicate(stale, completedFingerprints, completedNormalized)) continue
-    await completeStaleTask(stale, tasksDir)
+    await completeStaleTask(stale, tasksDir, autoTransitionEnabled)
   }
 }
 
@@ -105,7 +110,8 @@ function getIncompleteDetails(allTasks: SessionTask[]): string[] {
  */
 export async function checkIncompleteTasks(
   sessionId: string,
-  home: string
+  home: string,
+  autoTransitionEnabled = true
 ): Promise<HookOutput | null> {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return null
@@ -119,7 +125,7 @@ export async function checkIncompleteTasks(
   const incompleteTasks = allTasks.filter(
     (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
   )
-  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir)
+  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir, autoTransitionEnabled)
 
   const incompleteDetails = getIncompleteDetails(allTasks)
   if (incompleteDetails.length === 0) return null
