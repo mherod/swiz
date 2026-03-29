@@ -1,5 +1,6 @@
 import { readdir, readFile, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { detect, formatMessage } from "../../hooks/task-subject-validation.ts"
 import { DIM, GREEN, RESET } from "../ansi.ts"
 import {
   PROJECT_STATES,
@@ -64,6 +65,12 @@ export interface CreateTaskOptions {
  */
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
+
+  const detection = detect(subject)
+  if (detection.matched) {
+    throw new Error(formatMessage(detection))
+  }
+
   const tasks = await readTasks(sessionId)
 
   const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
