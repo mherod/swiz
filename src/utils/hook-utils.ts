@@ -482,15 +482,12 @@ async function readStateMaybe(cwd: string): Promise<string | null> {
   }
 }
 
-async function emitContextObj(eventName: string, cwd: string | undefined, context: string) {
-  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
-  const fullContext = stateLine ? `${context} ${stateLine}` : context
-
+function emitContextObj(eventName: string, context: string) {
   return hookOutputSchema.parse({
-    systemMessage: fullContext,
+    systemMessage: context,
     hookSpecificOutput: {
       hookEventName: eventName,
-      additionalContext: fullContext,
+      additionalContext: context,
     },
   })
 }
@@ -502,7 +499,9 @@ export async function emitContext(
   context: string,
   cwd?: string
 ): Promise<never> {
-  const obj = await emitContextObj(eventName, cwd, context)
+  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
+  const fullContext = stateLine ? `${context} ${stateLine}` : context
+  const obj = emitContextObj(eventName, fullContext)
   console.log(JSON.stringify(obj))
   process.exit(0)
 }
