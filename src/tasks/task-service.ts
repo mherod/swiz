@@ -57,6 +57,8 @@ export interface CreateTaskOptions {
   description: string
   /** Working directory to associate with the task. Defaults to `process.cwd()`. */
   cwd?: string
+  /** Skip compound-subject validation. Used by internal callers (e.g. mergeActionPlanIntoTasks). */
+  skipSubjectValidation?: boolean
 }
 
 /**
@@ -66,9 +68,11 @@ export interface CreateTaskOptions {
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
 
-  const detection = detect(subject)
-  if (detection.matched) {
-    throw new Error(formatMessage(detection))
+  if (!opts.skipSubjectValidation) {
+    const detection = detect(subject)
+    if (detection.matched) {
+      throw new Error(formatMessage(detection))
+    }
   }
 
   const tasks = await readTasks(sessionId)
@@ -145,6 +149,7 @@ export async function mergeIntoTasks(
         subject: step.subject,
         description: step.description ?? step.subject,
         cwd,
+        skipSubjectValidation: true,
       })
       created.push(task)
     } catch (err) {
