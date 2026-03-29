@@ -88,6 +88,27 @@ function detectTaskToolName(s: string): CompoundMatch | null {
   return null
 }
 
+/**
+ * Matches subjects that describe task-management mechanics rather than real work.
+ * e.g. "Ensure a task is in progress", "Create a pending task before running bash".
+ */
+const COMPLIANCE_GAMING_RE =
+  /\b(ensure|maintain|keep|satisfy|create|have)\b.*\b(task|tasks)\b.*\b(in.progress|pending|exist|before|requirement|hook|gate|block)/i
+
+function detectComplianceGaming(s: string): CompoundMatch | null {
+  if (!COMPLIANCE_GAMING_RE.test(s)) return null
+  return {
+    matched: true,
+    intro:
+      "Task subjects must describe real work, not task-management mechanics. Describe what you are actually doing. Examples:",
+    suggestions: [
+      "Fix authentication bug in login flow",
+      "Add pagination to search results",
+      "Refactor database connection pooling",
+    ],
+  }
+}
+
 function detectMultipleIssues(s: string, verb: string | null): CompoundMatch | null {
   const hashes = s.match(/#\d+/g) ?? []
   if (hashes.length < 2) return null
@@ -211,6 +232,9 @@ export function detect(s: string): DetectionResult {
 
   const taskTool = detectTaskToolName(s)
   if (taskTool) return taskTool
+
+  const gaming = detectComplianceGaming(s)
+  if (gaming) return gaming
 
   const issues = detectMultipleIssues(s, verb)
   if (issues) return issues

@@ -27,6 +27,45 @@ describe("detect", () => {
     })
   })
 
+  describe("compliance-gaming rejection", () => {
+    test("rejects 'Ensure a task is in progress'", () => {
+      const result = detect("Ensure a task is in progress")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("task-management mechanics")
+    })
+
+    test("rejects 'Create a pending task before running bash'", () => {
+      const result = detect("Create a pending task before running bash")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("real work")
+    })
+
+    test("rejects 'Maintain tasks in pending state to satisfy hook'", () => {
+      const result = detect("Maintain tasks in pending state to satisfy hook")
+      expect(result.matched).toBe(true)
+    })
+
+    test("rejects 'Keep a task in progress to unblock gate'", () => {
+      const result = detect("Keep a task in progress to unblock gate")
+      expect(result.matched).toBe(true)
+    })
+
+    test("rejects 'Ensure tasks exist before editing'", () => {
+      const result = detect("Ensure tasks exist before editing")
+      expect(result.matched).toBe(true)
+    })
+
+    test("does not reject 'Create authentication task tracking'", () => {
+      expect(detect("Create authentication task tracking").matched).toBe(false)
+    })
+
+    test("does not reject 'Ensure login flow handles errors'", () => {
+      expect(detect("Ensure login flow handles errors").matched).toBe(false)
+    })
+  })
+
   describe("no match (single concern)", () => {
     test("plain imperative subject", () => {
       expect(detect("Fix authentication bug").matched).toBe(false)
