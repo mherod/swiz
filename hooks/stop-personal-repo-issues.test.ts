@@ -1141,6 +1141,7 @@ describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => 
     ])
     expect(planSectionOrderForProjectState(null)).toEqual([
       "feedbackPr",
+      "conflict",
       "refinement",
       "readyIssues",
       "blocked",

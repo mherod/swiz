@@ -20,8 +20,8 @@ import {
   getIssueStoreReader,
   replayPendingMutations,
 } from "../src/issue-store.ts"
-import { readProjectState } from "../src/settings/persistence.ts"
-import type { ProjectState } from "../src/settings/types.ts"
+import type { ProjectState } from "../src/settings"
+import { readProjectState } from "../src/settings"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import {
   type ActionPlanItem,
@@ -87,9 +87,9 @@ export function sectionOrderForProjectState(state: ProjectState | null): StopSec
   }
 }
 
-/** Top-level action plan steps (excludes `conflict` — handled inside the conflict reason section). */
+/** Top-level action plan steps — all sections contribute to the plan. */
 export function planSectionOrderForProjectState(state: ProjectState | null): StopSection[] {
-  return sectionOrderForProjectState(state).filter((s) => s !== "conflict")
+  return sectionOrderForProjectState(state)
 }
 
 /** Labels whose block reason should be reviewed when no ready issues remain. */
@@ -541,171 +541,40 @@ function shouldUpdateStopCooldown(ctx: StopContext): boolean {
   return ctx.sortedIssues.length > 0 || feedbackPrCount(ctx) > 0 || ctx.conflictingPRs.length > 0
 }
 
-function buildFeedbackPRSection(ctx: StopContext): string[] {
-  const lines: string[] = []
+function buildConflictSteps(ctx: StopContext): ActionPlanItem[] {
+  const { shown: shownConflictingPRs, hiddenCount: hiddenConflictingPRs } =
+    selectRebaseSuggestionPRs(ctx.conflictingPRs)
+  const prListParts = shownConflictingPRs.map((pr) => `#${pr.number} ${pr.title}`)
+  if (hiddenConflictingPRs > 0) {
+    prListParts.push(`…and ${hiddenConflictingPRs} more`)
+  }
+  const rebaseAdvice = skillAdvice(
+    "rebase-onto-main",
+    "/rebase-onto-main --push — Rebase and resolve conflicts",
+    "Rebase manually: git fetch origin && git checkout <branch> && git rebase origin/<base-branch> && git push --force-with-lease"
+  )
+  const resolveAdvice = skillAdvice(
+    "resolve-conflicts",
+    "/resolve-conflicts — Resolve any rebase conflicts",
+    "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
+  )
+  return [
+    `Rebase ${ctx.conflictingPRs.length} open PR(s) with merge conflicts: ${prListParts.join("; ")}`,
+    [rebaseAdvice, resolveAdvice],
+  ]
+}
+
+function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
   const feedbackPRs = [...ctx.changesRequestedPRs, ...ctx.reviewRequiredPRs]
   const allChangesRequested = feedbackPRs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
   const label = allChangesRequested
     ? "changes requested"
     : "pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED)"
-  lines.push(`You have ${feedbackPRs.length} open PR(s) with ${label}:`)
-  for (const pr of feedbackPRs) {
+  const prListLines = feedbackPRs.map((pr) => {
     const decisionTag =
       pr.reviewDecision === "CHANGES_REQUESTED" ? "[changes requested]" : "[review required]"
-    lines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
-    lines.push(`    ${pr.url}`)
-  }
-  return lines
-}
-
-function buildConflictSection(ctx: StopContext): string[] {
-  const lines: string[] = []
-  lines.push(`You have ${ctx.conflictingPRs.length} open PR(s) with merge conflicts:`)
-  const { shown: shownConflictingPRs, hiddenCount: hiddenConflictingPRs } =
-    selectRebaseSuggestionPRs(ctx.conflictingPRs)
-  for (const pr of shownConflictingPRs) {
-    lines.push(`  #${pr.number} ${pr.title} [merge conflicts]`)
-    lines.push(`    ${pr.url}`)
-  }
-  if (hiddenConflictingPRs > 0) {
-    lines.push(`  …and ${hiddenConflictingPRs} more conflicting PR(s) between those extremes`)
-  }
-  const rebaseAdvice = skillAdvice(
-    "rebase-onto-main",
-    [
-      "Use the /rebase-onto-main skill to rebase and resolve conflicts:",
-      "  /rebase-onto-main --push",
-    ].join("\n"),
-    [
-      "Rebase manually:",
-      "  git fetch origin",
-      "  git checkout <branch>",
-      "  git rebase origin/<base-branch>",
-      "  # resolve conflicts, then:",
-      "  git rebase --continue",
-      "  git push --force-with-lease",
-    ].join("\n")
-  )
-  const resolveAdvice = skillAdvice(
-    "resolve-conflicts",
-    "Use the /resolve-conflicts skill if the rebase encounters conflicts.",
-    "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
-  )
-  lines.push(
-    formatActionPlan([rebaseAdvice, resolveAdvice], {
-      header: "Rebase conflicting PRs before stopping:",
-      translateToolNames: true,
-    })
-  )
-  return lines
-}
-
-function buildRefinementSection(ctx: StopContext): string[] {
-  const lines: string[] = []
-  lines.push(
-    `${ctx.sortedRefinement.length} issue(s) need refinement before they are ready for implementation:`
-  )
-  const shownRefinement = ctx.sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
-  const hiddenRefinement = ctx.sortedRefinement.length - shownRefinement.length
-  for (const issue of shownRefinement) {
-    const hasExplicitLabel = issue.labels.some(
-      (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
-    )
-    const missing = missingRefinementCategories(issue)
-    const tag = hasExplicitLabel ? "[needs-refinement]" : `[missing labels: ${missing.join(", ")}]`
-    lines.push(`  #${issue.number} ${issue.title} ${tag}`)
-  }
-  if (hiddenRefinement > 0) {
-    lines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
-  }
-  return lines
-}
-
-function buildIssueSection(ctx: StopContext): string[] {
-  const lines: string[] = []
-  const issueContext = ctx.isPersonalRepo
-    ? "in this personal repository"
-    : "assigned to or created by you in this repository"
-  lines.push(`You have ${ctx.sortedIssues.length} open issue(s) ${issueContext}:`)
-  const shownIssues = ctx.sortedIssues.slice(0, MAX_SHOWN_ISSUES)
-  const hiddenCount = ctx.sortedIssues.length - shownIssues.length
-  for (const issue of shownIssues) {
-    lines.push(`  #${issue.number} ${issue.title}`)
-  }
-  if (hiddenCount > 0) {
-    lines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
-    lines.push("")
-  }
-  return lines
-}
-
-function buildBlockedIssueSection(ctx: StopContext): string[] {
-  const lines: string[] = []
-  lines.push(
-    `No ready issues remain, but ${ctx.blockedIssues.length} issue(s) are blocked and may be unblockable now:`
-  )
-  const shownBlocked = ctx.blockedIssues.slice(0, MAX_SHOWN_ISSUES)
-  const hiddenBlocked = ctx.blockedIssues.length - shownBlocked.length
-  for (const issue of shownBlocked) {
-    const blockLabel = (issue.labels ?? []).find((l) =>
-      REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))
-    )
-    const tag = blockLabel ? ` [${blockLabel.name}]` : ""
-    lines.push(`  #${issue.number} ${issue.title}${tag}`)
-  }
-  if (hiddenBlocked > 0) {
-    lines.push(`  …and ${hiddenBlocked} more blocked issue(s)`)
-  }
-  return lines
-}
-
-function appendSection(lines: string[], section: string[]): void {
-  if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("")
-  lines.push(...section)
-}
-
-const appendStopSectionByKey: Record<
-  StopSection,
-  (ctx: StopContext, reasonLines: string[]) => void
-> = {
-  feedbackPr: (ctx, lines) => {
-    if (feedbackPrCount(ctx) > 0) appendSection(lines, buildFeedbackPRSection(ctx))
-  },
-  conflict: (ctx, lines) => {
-    if (ctx.conflictingPRs.length > 0) appendSection(lines, buildConflictSection(ctx))
-  },
-  refinement: (ctx, lines) => {
-    if (ctx.sortedRefinement.length > 0) appendSection(lines, buildRefinementSection(ctx))
-  },
-  readyIssues: (ctx, lines) => {
-    if (ctx.sortedIssues.length > 0) appendSection(lines, buildIssueSection(ctx))
-  },
-  blocked: (ctx, lines) => {
-    if (ctx.blockedIssues.length > 0) appendSection(lines, buildBlockedIssueSection(ctx))
-  },
-}
-
-function appendStopSection(key: StopSection, ctx: StopContext, reasonLines: string[]): void {
-  appendStopSectionByKey[key](ctx, reasonLines)
-}
-
-function buildStopReasonLines(ctx: StopContext): string[] {
-  const reasonLines: string[] = [
-    "There are open issues and PRs that need your attention before we can finish the session.",
-  ]
-  if (ctx.projectState != null) {
-    reasonLines.push(STATE_PRIORITY_HINT[ctx.projectState])
-  }
-  reasonLines.push("")
-
-  for (const key of sectionOrderForProjectState(ctx.projectState)) {
-    appendStopSection(key, ctx, reasonLines)
-  }
-
-  return reasonLines
-}
-
-function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
+    return `#${pr.number} ${pr.title} ${decisionTag}`
+  })
   const firstPrNum =
     ctx.changesRequestedPRs[0]?.number ?? ctx.reviewRequiredPRs[0]?.number ?? "<number>"
   const subSteps: ActionPlanItem[] = []
@@ -717,10 +586,24 @@ function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
     `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
     `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`
   )
-  return ["Address all PR feedback before stopping:", subSteps]
+  return [
+    `Address ${feedbackPRs.length} open PR(s) with ${label}: ${prListLines.join("; ")}`,
+    subSteps,
+  ]
 }
 
 function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
+  const shownRefinement = ctx.sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
+  const hiddenRefinement = ctx.sortedRefinement.length - shownRefinement.length
+  const issueListParts = shownRefinement.map((issue) => {
+    const hasExplicitLabel = issue.labels.some(
+      (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
+    )
+    const missing = missingRefinementCategories(issue)
+    const tag = hasExplicitLabel ? "[needs-refinement]" : `[missing labels: ${missing.join(", ")}]`
+    return `#${issue.number} ${issue.title} ${tag}`
+  })
+  if (hiddenRefinement > 0) issueListParts.push(`…and ${hiddenRefinement} more`)
   const refineArg = ctx.firstRefinementNum !== undefined ? ` ${ctx.firstRefinementNum}` : ""
   const subSteps: ActionPlanItem[] = []
   if (skillExists("refine-issue"))
@@ -731,10 +614,20 @@ function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
     'Label issues: gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
     "Rule: If you created the issue, NEVER add new comments — always edit the original issue body instead"
   )
-  return ["Refine issues before implementation:", subSteps]
+  return [
+    `Refine ${ctx.sortedRefinement.length} issue(s) before implementation: ${issueListParts.join("; ")}`,
+    subSteps,
+  ]
 }
 
 function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
+  const issueContext = ctx.isPersonalRepo
+    ? "in this personal repository"
+    : "assigned to or created by you"
+  const shownIssues = ctx.sortedIssues.slice(0, MAX_SHOWN_ISSUES)
+  const hiddenCount = ctx.sortedIssues.length - shownIssues.length
+  const issueListParts = shownIssues.map((issue) => `#${issue.number} ${issue.title}`)
+  if (hiddenCount > 0) issueListParts.push(`…and ${hiddenCount} more`)
   const issueArg = ctx.firstIssueNum !== undefined ? ` ${ctx.firstIssueNum}` : ""
   const issueNum = ctx.firstIssueNum ?? "<number>"
   const subSteps: ActionPlanItem[] = []
@@ -757,10 +650,23 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
     "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --concurrent",
     `Resolve: swiz issue resolve ${issueNum} --body "<evidence>"`
   )
-  return [`Pick up and resolve issue #${issueNum} before stopping:`, subSteps]
+  return [
+    `Pick up ${ctx.sortedIssues.length} open issue(s) ${issueContext}: ${issueListParts.join("; ")}`,
+    subSteps,
+  ]
 }
 
 function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
+  const shownBlocked = ctx.blockedIssues.slice(0, MAX_SHOWN_ISSUES)
+  const hiddenBlocked = ctx.blockedIssues.length - shownBlocked.length
+  const issueListParts = shownBlocked.map((issue) => {
+    const blockLabel = (issue.labels ?? []).find((l) =>
+      REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name))
+    )
+    const tag = blockLabel ? ` [${blockLabel.name}]` : ""
+    return `#${issue.number} ${issue.title}${tag}`
+  })
+  if (hiddenBlocked > 0) issueListParts.push(`…and ${hiddenBlocked} more`)
   const firstBlocked = ctx.blockedIssues[0]
   const blockedNum = firstBlocked?.number ?? "<number>"
   const subSteps: ActionPlanItem[] = []
@@ -774,28 +680,25 @@ function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
     subSteps.push(`/refine-issue ${blockedNum} — Refine and re-label the unblocked issue`)
   if (skillExists("triage-issues"))
     subSteps.push("/triage-issues — Run the full grooming workflow across the backlog")
-  return ["Review blocked issues — dependencies may have been resolved:", subSteps]
+  return [
+    `Review ${ctx.blockedIssues.length} blocked issue(s) — dependencies may have been resolved: ${issueListParts.join("; ")}`,
+    subSteps,
+  ]
+}
+
+const planStepBuilders: Record<StopSection, (ctx: StopContext) => ActionPlanItem[] | null> = {
+  feedbackPr: (ctx) => (feedbackPrCount(ctx) > 0 ? buildPrFeedbackSteps(ctx) : null),
+  conflict: (ctx) => (ctx.conflictingPRs.length > 0 ? buildConflictSteps(ctx) : null),
+  refinement: (ctx) => (ctx.sortedRefinement.length > 0 ? buildRefinementSteps(ctx) : null),
+  readyIssues: (ctx) => (ctx.sortedIssues.length > 0 ? buildIssuePickupSteps(ctx) : null),
+  blocked: (ctx) => (ctx.blockedIssues.length > 0 ? buildBlockedIssueReviewSteps(ctx) : null),
 }
 
 function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
   for (const key of planSectionOrderForProjectState(ctx.projectState)) {
-    switch (key) {
-      case "feedbackPr":
-        if (feedbackPrCount(ctx) > 0) planSteps.push(...buildPrFeedbackSteps(ctx))
-        break
-      case "refinement":
-        if (ctx.sortedRefinement.length > 0) planSteps.push(...buildRefinementSteps(ctx))
-        break
-      case "readyIssues":
-        if (ctx.sortedIssues.length > 0) planSteps.push(...buildIssuePickupSteps(ctx))
-        break
-      case "blocked":
-        if (ctx.blockedIssues.length > 0) planSteps.push(...buildBlockedIssueReviewSteps(ctx))
-        break
-      default:
-        break
-    }
+    const steps = planStepBuilders[key](ctx)
+    if (steps) planSteps.push(...steps)
   }
   return planSteps
 }
@@ -969,9 +872,17 @@ async function main(): Promise<void> {
     const stopCtx = buildStopContext(ctx, prs, gathered, projectState, strictNoDirectMain)
     if (!stopCtx) return
 
-    const reasonLines = buildStopReasonLines(stopCtx)
     const planSteps = buildStopPlanSteps(stopCtx)
-    reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
+    const headerParts = [
+      "There are open issues and PRs that need your attention before we can finish the session.",
+    ]
+    if (stopCtx.projectState != null) {
+      headerParts.push(STATE_PRIORITY_HINT[stopCtx.projectState])
+    }
+    const reason = formatActionPlan(planSteps, {
+      translateToolNames: true,
+      header: headerParts.join("\n"),
+    })
 
     if (ctx.sessionId) {
       await mergeActionPlanIntoTasks(planSteps, ctx.sessionId, ctx.cwd)
@@ -979,7 +890,7 @@ async function main(): Promise<void> {
 
     if (shouldUpdateStopCooldown(stopCtx)) await updateCooldown(ctx.sessionId, ctx.cwd)
 
-    blockStop(reasonLines.join("\n"), { includeUpdateMemoryAdvice: false })
+    blockStop(reason, { includeUpdateMemoryAdvice: false })
   } catch {
     // On error, allow stop (fail open)
   }
