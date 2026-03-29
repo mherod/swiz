@@ -19,6 +19,7 @@ alwaysApply: false
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude session interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` options instead.
 - **Complexity reduction**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
+- **Consolidate related utilities into canonical modules**: When multiple related functions live in different modules (e.g., `detectCurrentAgent` in `detect.ts`), consolidate into a single canonical module (e.g., `agent-paths.ts`). Maintain backward compatibility via re-exports from original locations.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -56,7 +57,7 @@ alwaysApply: false
   3. Every README hook filename exists on disk.
 - Per new hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, and exit `0`.
-- Output helpers (all return `never`, call `process.exit(0)`, never write stdout after them):
+- Output helpers (all return `never`, call `process.exit(0)`, don't write stdout after):
   - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with optional hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
   - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, and PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
@@ -70,7 +71,7 @@ alwaysApply: false
   - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
   - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
   - DO NOT define Git utilities locally — import from canonical source.
-- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr rolling window. Exempt: `gh auth status`, `gh run watch`.
+- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr limit. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns (e.g., `cat`) to `RECOVERY_CMD_RE`.
@@ -126,10 +127,10 @@ alwaysApply: false
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold (configurable via `.swiz/config.json`).
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold.
 - Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
-- When user provides explicit labels, remove conflicting inferred labels; do not restore inferred labels.
+- When user provides explicit labels, remove conflicting labels; don't restore them.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). **DON'T** skip `/refine-issue` — adding `ready` directly bypasses proposals.
 - **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
 - Before stop, audit open issue labels; if stop hook lists actionable issues, pick at least one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
