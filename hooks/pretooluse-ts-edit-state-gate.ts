@@ -5,8 +5,8 @@
 
 import type { ProjectState } from "../src/settings/types.ts"
 import { readProjectState } from "../src/settings.ts"
+import { denyPreToolUse, isCodeChangeTool } from "../src/utils/hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
-import { denyPreToolUse, isCodeChangeTool } from "./utils/hook-utils.ts"
 
 const ALLOWED_STATES = new Set<ProjectState>(["developing", "reviewing", "addressing-feedback"])
 

@@ -5,7 +5,12 @@
 // denies them.  The project has dedicated local remediation paths for conflict state
 // (stop-branch-conflicts.ts, /rebase-onto-main) that avoid public noise.
 
-import { allowPreToolUse, denyPreToolUse, isShellTool, skillAdvice } from "./utils/hook-utils.ts"
+import {
+  allowPreToolUse,
+  denyPreToolUse,
+  isShellTool,
+  skillAdvice,
+} from "../src/utils/hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

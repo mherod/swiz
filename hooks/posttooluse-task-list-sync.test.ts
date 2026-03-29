@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getSessionTaskPath, getSessionTasksDir } from "./utils/hook-utils.ts"
-import { runHook } from "./utils/test-utils.ts"
+import { getSessionTaskPath, getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import { runHook } from "../src/utils/test-utils.ts"
 
 const HOOK = join(import.meta.dir, "posttooluse-task-list-sync.ts")
 

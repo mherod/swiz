@@ -24,9 +24,9 @@ import {
   readSessionTasks,
   sendAutoSteer,
   shouldDeferAutoSteerForForegroundChatApp,
-} from "./utils/hook-utils.ts"
-import type { TerminalApp } from "./utils/terminal-detection.ts"
-import { detectTerminal } from "./utils/terminal-detection.ts"
+} from "../src/utils/hook-utils.ts"
+import type { TerminalApp } from "../src/utils/terminal-detection.ts"
+import { detectTerminal } from "../src/utils/terminal-detection.ts"
 
 const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
 if (!input) process.exit(0)

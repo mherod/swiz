@@ -29,7 +29,7 @@ import {
   git,
   isShellTool,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 /** Format milliseconds as "Xm Ys". */
 export function formatRemaining(ms: number): string {

@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../../hooks/utils/test-utils.ts"
 import { AGENTS } from "../agents.ts"
 import { manifest } from "../manifest.ts"
+import { useTempDir } from "../utils/test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-doctor-test-")
 

@@ -12,8 +12,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { getSessionTasksDir } from "./utils/hook-utils.ts"
-import { commitFile, makeTempGitRepo, runGit, useTempDir } from "./utils/test-utils.ts"
+import { getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import { commitFile, makeTempGitRepo, runGit, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"

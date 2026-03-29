@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../hooks/utils/test-utils.ts"
 import { DEFAULT_LARGE_FILE_SIZE_KB } from "../src/settings.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 // Re-export the internal isLfsTracked via dynamic import to test it
 // (it's not exported from the hook — test via the SIZE_LIMIT_KB boundary indirectly,

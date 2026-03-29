@@ -3,7 +3,6 @@
 // Stop hook: File follow-up issues for new TODO/FIXME/HACK lines introduced in commits.
 // Instead of blocking stop, auto-creates GitHub issues for each finding and allows stop.
 
-import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   fileFollowUpIssue,
@@ -11,7 +10,8 @@ import {
   isGitRepo,
   SOURCE_EXT_RE,
   sanitizeSessionId,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
 export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/

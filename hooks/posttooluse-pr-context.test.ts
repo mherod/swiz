@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runHook as runHookScript } from "./utils/test-utils.ts"
+import { runHook as runHookScript } from "../src/utils/test-utils.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 

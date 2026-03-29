@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { spawnSpeak } from "./utils/hook-utils.ts"
+import { spawnSpeak } from "../src/utils/hook-utils.ts"
 
 const NO_VOICE: { narratorVoice: string; narratorSpeed: number } = {
   narratorVoice: "",

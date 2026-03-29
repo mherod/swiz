@@ -12,12 +12,12 @@
 // to the streak — they neither count toward it nor reset it.
 
 import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   denyPreToolUse as deny,
   formatActionPlan,
   getToolsUsedForCurrentSession,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
 const STALL_THRESHOLD = 30

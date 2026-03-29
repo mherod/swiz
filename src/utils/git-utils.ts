@@ -1,7 +1,7 @@
 // Git command regexes, argument parsing, and status utilities for hook scripts.
 
-import { git } from "../../src/git-helpers.ts"
-import { readProjectSettings } from "../../src/settings.ts"
+import { git } from "../git-helpers.ts"
+import { readProjectSettings } from "../settings.ts"
 import {
   GIT_GLOBAL_OPTS,
   gitSubcommandRe,
@@ -646,13 +646,13 @@ export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
 
 // ── GitHub identity helpers ───────────────────────────────────────────────────
 
-import { gh } from "../../src/git-helpers.ts"
+import { gh } from "../git-helpers.ts"
 
 export {
   isGitHubHost,
   parseRemoteUrl,
   type RemoteInfo,
-} from "../../src/git-helpers.ts"
+} from "../git-helpers.ts"
 
 /**
  * Extract the repository owner login from a git remote URL.

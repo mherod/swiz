@@ -4,8 +4,8 @@
 // The TaskUpdate tool accepts a fixed schema; unknown fields (e.g. `notes`)
 // cause an InputValidationError at the API boundary before any work is done.
 
+import { denyPreToolUse } from "../src/utils/hook-utils.ts"
 import { TASK_UPDATE_ALLOWED_FIELDS as ALLOWED_FIELDS } from "./schemas.ts"
-import { denyPreToolUse } from "./utils/hook-utils.ts"
 
 const input = await Bun.stdin.json()
 const toolInput: Record<string, unknown> = input?.tool_input ?? {}

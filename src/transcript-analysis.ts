@@ -1,4 +1,3 @@
-import { GIT_GLOBAL_OPTS } from "../hooks/utils/shell-patterns.ts"
 import { isToolResultSummaryBlock, summarizeToolCalls } from "./transcript-analysis-parse-part1.ts"
 import { parseTranscriptEntries } from "./transcript-analysis-parse-part2.ts"
 import { extractToolResultText, isHookFeedback } from "./transcript-extract.ts"
@@ -10,6 +9,7 @@ import type {
   TranscriptData,
 } from "./transcript-schemas.ts"
 import { isTextBlockWithText, toolUseBlockSchema } from "./transcript-schemas.ts"
+import { GIT_GLOBAL_OPTS } from "./utils/shell-patterns.ts"
 
 function extractContentText(content: unknown): string {
   if (typeof content === "string") return content

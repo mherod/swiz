@@ -4,8 +4,8 @@
 // Checks for: `as any` casts, lint-disable comments, @ts-expect-error/@ts-nocheck/@ts-expect-error.
 // Merged from pretooluse-no-as-any.ts, pretooluse-no-eslint-disable.ts, pretooluse-no-ts-ignore.ts.
 
+import { allowPreToolUse, denyPreToolUse, formatActionPlan } from "../src/utils/hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse, formatActionPlan } from "./utils/hook-utils.ts"
 
 // ─── stripNonCode ────────────────────────────────────────────────────────────
 

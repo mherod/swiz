@@ -26,7 +26,7 @@ import {
   isShellTool,
   readSessionLines,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 // ── Feature flag: disabled by default ────────────────────────────────────────
 // Enable with: swiz settings enable push-gate

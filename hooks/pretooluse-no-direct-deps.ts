@@ -15,7 +15,7 @@ import {
   isEditTool,
   isFileEditTool,
   isWriteTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 const DEP_FIELDS = [
   "dependencies",

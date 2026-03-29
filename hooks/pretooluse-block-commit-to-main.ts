@@ -12,7 +12,7 @@
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
 import { readProjectSettings } from "../src/settings.ts"
-import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -20,7 +20,7 @@ import {
   git,
   isShellTool,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)

@@ -179,7 +179,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "TaskCreate",
+    matcher: "TaskCreate|TodoWrite",
     hooks: [{ file: "pretooluse-task-subject-validation.ts", timeout: 5 }],
   },
   {
@@ -285,7 +285,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
-    matcher: "TaskCreate",
+    matcher: "TaskCreate|TodoWrite",
     hooks: [{ file: "posttooluse-task-subject-validation.ts", timeout: 5 }],
   },
   {
@@ -295,7 +295,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
-    matcher: "TaskUpdate|TaskCreate",
+    matcher: "TaskUpdate|TaskCreate|TodoWrite",
     hooks: [{ file: "posttooluse-task-audit-sync.ts", timeout: 5 }],
   },
   {

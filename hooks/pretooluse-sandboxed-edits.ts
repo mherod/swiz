@@ -8,8 +8,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { toolHookInputSchema } from "./schemas.ts"
-import { getDefaultBranch } from "./utils/git-utils.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   allowPreToolUse,
   buildIssueGuidance,
@@ -19,7 +18,8 @@ import {
   isGitHubHost,
   isGitRepo,
   parseRemoteUrl,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const input = toolHookInputSchema.parse(await Bun.stdin.json())
 

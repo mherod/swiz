@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { commitFile, makeTempGitRepo, useTempDir } from "./utils/test-utils.ts"
+import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Git repo helpers ─────────────────────────────────────────────────────────
 

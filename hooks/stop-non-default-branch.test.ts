@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { type HookResult, useTempDir } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir } from "../src/utils/test-utils.ts"
 
 async function enableTrunkMode(dir: string): Promise<void> {
   await mkdir(join(dir, ".swiz"), { recursive: true })

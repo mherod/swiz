@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-no-direct-deps.ts"
 const { create: createTempDir } = useTempDir("swiz-nodeps-")

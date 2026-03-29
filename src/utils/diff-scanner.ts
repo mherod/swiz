@@ -1,6 +1,6 @@
 // Shared types and utilities for stop hooks that scan git diffs for violations.
 
-import { stopHookInputSchema } from "../schemas.ts"
+import { stopHookInputSchema } from "../../hooks/schemas.ts"
 import { blockStop, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
 
 /** Violation result shared by all diff-scanning stop hooks. */

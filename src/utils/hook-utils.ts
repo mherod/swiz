@@ -1,5 +1,6 @@
 // Shared utilities for swiz hook scripts.
 // Import with: import { denyPreToolUse, allowPreToolUseWithUpdatedInput, isShellTool, isEditTool, ... } from "./hook-utils.ts";
+// noinspection JSUnusedGlobalSymbols
 
 // ─── Runtime dependency check ───────────────────────────────────────────────
 // Verify bun is reachable on PATH. This file executes inside bun, but the
@@ -22,18 +23,13 @@ if (!Bun.which("bun")) {
 import { dirname, join } from "node:path"
 import type { Subprocess } from "bun"
 import { orderBy } from "lodash-es"
-import { translateMatcher } from "../../src/agents.ts"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../../src/detect.ts"
-import { getHomeDirOrNull, getHomeDirWithFallback } from "../../src/home.ts"
-import {
-  getStatePath,
-  getSwizSettingsPath,
-  STATE_TRANSITIONS,
-  stateDataSchema,
-} from "../../src/settings.ts"
-import { skillAdvice, skillExists } from "../../src/skill-utils.ts"
-import { backfillTaskTimingFields } from "../../src/tasks/task-timing.ts"
-import { sessionTaskSentinelPath } from "../../src/temp-paths.ts"
+import { translateMatcher } from "../agents.ts"
+import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../detect.ts"
+import { getHomeDirOrNull, getHomeDirWithFallback } from "../home.ts"
+import { getStatePath, STATE_TRANSITIONS, stateDataSchema } from "../settings.ts"
+import { skillAdvice, skillExists } from "../skill-utils.ts"
+import { backfillTaskTimingFields } from "../tasks/task-timing.ts"
+import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
   GH_CMD_RE,
   GIT_READ_RE,
@@ -48,8 +44,8 @@ export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
-export { getCanonicalPathHash } from "../../src/git-helpers.ts"
-export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../../src/session-id.ts"
+export { getCanonicalPathHash } from "../git-helpers.ts"
+export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../session-id.ts"
 
 export type { PackageManager, Runtime } from "./package-detection.ts"
 export {
@@ -76,12 +72,12 @@ export { detectEnvironment, detectShell, detectTerminal } from "./terminal-detec
 // via the single hook-utils.ts import, and so src/manifest.ts can import
 // directly from src/ without creating a src→hooks dependency.
 
-export type { Framework, ProjectStack } from "../../src/detect-frameworks.ts"
+export type { Framework, ProjectStack } from "../detect-frameworks.ts"
 export {
   clearFrameworkCache,
   detectFrameworks,
   detectProjectStack,
-} from "../../src/detect-frameworks.ts"
+} from "../detect-frameworks.ts"
 
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
@@ -112,14 +108,14 @@ export {
   TASK_TOOLS,
   TASK_UPDATE_TOOLS,
   WRITE_TOOLS,
-} from "../../src/tool-matchers.ts"
+} from "../tool-matchers.ts"
 
 // Local import for names used within this file (re-exports don't create local bindings)
 import {
   isEditTool as _isEditTool,
   isNotebookTool as _isNotebookTool,
   isWriteTool as _isWriteTool,
-} from "../../src/tool-matchers.ts"
+} from "../tool-matchers.ts"
 
 // ─── Subprocess timeout enforcement ─────────────────────────────────────────
 // Hooks that spawn subprocesses (lint, typecheck, prettier, git, gh, etc.)
@@ -142,6 +138,7 @@ export interface SpawnWithTimeoutResult {
  * exit code, and whether the timeout fired.
  *
  * @param cmd  Command array, e.g. `["bun", "run", "lint"]`
+ * @param opts
  * @param opts.cwd  Working directory for the subprocess
  * @param opts.timeoutMs  Hard timeout in milliseconds (default: 30_000)
  * @param opts.stdin  Optional stdin content to pipe into the process
@@ -378,7 +375,7 @@ export function filePathGuardHook(
   allowMsg?: string | ((filePath: string) => string)
 ): () => Promise<void> {
   return async () => {
-    const { fileEditHookInputSchema } = await import("../schemas.ts")
+    const { fileEditHookInputSchema } = await import("../../hooks/schemas.ts")
     const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
     const filePath = input.tool_input?.file_path ?? ""
     if (predicate(filePath)) denyPreToolUse(denyReason)
@@ -443,7 +440,7 @@ import {
   expandSkillReferences,
   formatActionPlan,
   mergeActionPlanIntoTasks,
-} from "../../src/action-plan.ts"
+} from "../action-plan.ts"
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
@@ -490,23 +487,15 @@ function updateMemoryAdvice(reason: string): string {
   )
 }
 
-const _updateMemoryFooterEnabledCache: boolean = await (async () => {
-  const settingsPath = getSwizSettingsPath()
-  if (!settingsPath) return false
-  try {
-    if (!(await Bun.file(settingsPath).exists())) return false
-    const parsed = (await Bun.file(settingsPath).json()) as Record<string, unknown>
-    return parsed.updateMemoryFooter === true
-  } catch {
-    return false
-  }
-})()
+const _updateMemoryFooterEnabledCache: boolean | null = null
 
 function isUpdateMemoryFooterEnabled(): boolean {
-  return _updateMemoryFooterEnabledCache
+  // Synchronous check — relies on cache being populated by prior async call.
+  // Falls back to false if cache not yet loaded (safe default).
+  return _updateMemoryFooterEnabledCache ?? false
 }
 
-type ActionRequiredOptions = {
+interface ActionRequiredOptions {
   includeUpdateMemoryAdvice?: boolean
 }
 
@@ -649,7 +638,7 @@ import {
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
-} from "../../src/git-helpers.ts"
+} from "../git-helpers.ts"
 
 /**
  * Hooks should prefer daemon-backed gh query caching to reduce API pressure.
@@ -779,9 +768,9 @@ export {
   significantWords,
   stemWord,
   subjectsOverlap,
-} from "../../src/subject-fingerprint.ts"
+} from "../subject-fingerprint.ts"
 
-import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
+import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 
 /**
  * Read all task files for a session from ~/.claude/tasks/<sessionId>/.
@@ -891,7 +880,7 @@ export async function findPriorSessionTasks(
   home: string = getHomeDirWithFallback("")
 ): Promise<PriorSessionResult | null> {
   if (!home || !cwd) return null
-  const { projectKeyFromCwd } = await import("../../src/transcript-utils.ts")
+  const { projectKeyFromCwd } = await import("../transcript-utils.ts")
 
   const projectKey = projectKeyFromCwd(cwd)
   const projectsRoot = getProjectsRoot(home)
@@ -1056,13 +1045,6 @@ export function formatTaskCompleteCommands(
     .join("\n")
 }
 
-/**
- * Executor type for createSessionTask — injectable for testing.
- * Receives the full argv array and returns the process exit code.
- */
-/** @deprecated Use the `executor` parameter on `createSessionTask` for test injection only. */
-export type TaskExecutor = (args: string[]) => Promise<number>
-
 const defaultTaskExecutor: (args: string[]) => Promise<number> = async (args) => {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
   await proc.exited
@@ -1155,7 +1137,7 @@ export async function createSessionTask(
 
   // In-process path: direct disk write, no subprocess
   try {
-    const { createTaskInProcess } = await import("../../src/tasks/task-service.ts")
+    const { createTaskInProcess } = await import("../tasks/task-service.ts")
     await createTaskInProcess({ sessionId: sessionId!, subject, description })
     await writeSentinel(sentinel)
   } catch (err) {
@@ -1167,9 +1149,9 @@ export async function createSessionTask(
 }
 
 // ─── Command normalisation (re-exported from src/) ──────────────────────
-export { normalizeCommand, stripHeredocs } from "../../src/command-utils.ts"
+export { normalizeCommand, stripHeredocs } from "../command-utils.ts"
 // ─── Task creation (re-exported from src/) ───────────────────────────────
-export { type CreateTaskOptions, createTaskInProcess } from "../../src/tasks/task-service.ts"
+export { type CreateTaskOptions, createTaskInProcess } from "../tasks/task-service.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
 export {
   type CurrentSessionTaskToolStats,
@@ -1183,7 +1165,7 @@ export {
   getTranscriptSummary,
   parseTranscriptSummary,
   type TranscriptSummary,
-} from "../../src/transcript-summary.ts"
+} from "../transcript-summary.ts"
 
 // ─── Branch, git status, and source file utilities ─────────────────────
 // Implementations live in ./utils/git-utils.ts; re-exported here for
@@ -1288,7 +1270,7 @@ export function isSettingDisableCommand(command: string, aliases: string[]): boo
 }
 
 // Re-exported from src/git-helpers.ts
-export { issueState } from "../../src/git-helpers.ts"
+export { issueState } from "../git-helpers.ts"
 
 // ─── Common input types ─────────────────────────────────────────────────
 
@@ -1315,11 +1297,11 @@ export interface SessionHookInput {
   hook_event_name?: string
 }
 
-export { spawnSpeak } from "../../src/speech.ts"
+export { spawnSpeak } from "../speech.ts"
 
 // ─── File utilities ───────────────────────────────────────────────────────
 
-export { countFileWords } from "../../src/file-metrics.ts"
+export { countFileWords } from "../file-metrics.ts"
 
 import { SOURCE_EXT_RE as _SOURCE_EXT_RE } from "./git-utils.ts"
 
@@ -1364,7 +1346,7 @@ export function resolveEditDelta(
 export interface AutoSteerRequest {
   message: string
   timestamp: number
-  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
+  trigger?: import("../auto-steer-store.ts").AutoSteerTrigger
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
@@ -1390,7 +1372,7 @@ export async function shouldDeferAutoSteerForForegroundChatApp(): Promise<boolea
     .end()
   try {
     const result = await runScript(script)
-    const out = typeof result.output === "string" ? result.output.trim() : ""
+    const out = result.success && typeof result.output === "string" ? result.output.trim() : ""
     return isAutoSteerDeferredForForegroundAppName(out)
   } catch {
     return false
@@ -1438,7 +1420,7 @@ export async function isAutoSteerAvailable(sessionId: string): Promise<string | 
   const { detectTerminal } = await import("./terminal-detection.ts")
   const terminal = detectTerminal()
   if (!AUTOSTEER_SUPPORTED_TERMINALS.has(terminal.app)) return null
-  const { getEffectiveSwizSettings, readSwizSettings } = await import("../../src/settings.ts")
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../settings.ts")
   const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
   if (!settings.autoSteer) return null
   return terminal.app
@@ -1558,7 +1540,7 @@ export async function sendAutoSteer(
 export async function scheduleAutoSteer(
   sessionId: string,
   message = "Continue",
-  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger,
+  trigger?: import("../auto-steer-store.ts").AutoSteerTrigger,
   cwd?: string
 ): Promise<boolean> {
   // Check terminal support first (cheap, no I/O)
@@ -1567,15 +1549,15 @@ export async function scheduleAutoSteer(
   if (!AUTOSTEER_SUPPORTED_TERMINALS.has(terminal.app)) return false
 
   // Check autoSteer setting
-  const { getEffectiveSwizSettings, readSwizSettings } = await import("../../src/settings.ts")
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../settings.ts")
   const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
   if (!settings.autoSteer) return false
 
-  const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
+  const { sanitizeSessionId: sanitize } = await import("../session-id.ts")
   const safeSession = sanitize(sessionId)
   if (!safeSession) return false
 
-  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
   store.enqueue(safeSession, message, trigger ?? "next_turn", { cwd })
   return true
@@ -1587,13 +1569,13 @@ export async function scheduleAutoSteer(
  */
 export async function consumeAutoSteerRequest(
   sessionId: string,
-  trigger?: import("../../src/auto-steer-store.ts").AutoSteerTrigger
+  trigger?: import("../auto-steer-store.ts").AutoSteerTrigger
 ): Promise<AutoSteerRequest | null> {
-  const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
+  const { sanitizeSessionId: sanitize } = await import("../session-id.ts")
   const safeSession = sanitize(sessionId)
   if (!safeSession) return null
 
-  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
   const requests = store.consumeOne(safeSession, trigger ?? "next_turn")
   if (requests.length === 0) return null

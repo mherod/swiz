@@ -34,8 +34,8 @@ import {
   isShellTool,
   parseGitStatSummary,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
-import { escapeRegex, GIT_GLOBAL_OPTS } from "./utils/shell-patterns.ts"
+} from "../src/utils/hook-utils.ts"
+import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)

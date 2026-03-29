@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runFileEditHook } from "./utils/test-utils.ts"
+import { runFileEditHook } from "../src/utils/test-utils.ts"
 
 // Keywords split to avoid self-triggering the hook when this file is edited.
 const KW_IGNORE = ["ts", "ignore"].join("-")

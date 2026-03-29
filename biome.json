@@ -36,7 +36,8 @@
         "src/commands/*.ts",
         "src/commands/**/*.ts",
         "src/tasks/*.ts",
-        "src/dispatch/**"
+        "src/dispatch/**",
+        "src/utils/hook-utils.ts"
       ],
       "linter": {
         "rules": {

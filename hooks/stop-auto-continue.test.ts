@@ -1,6 +1,8 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, readdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils.ts"
 import {
   __testOnly_DEDUP_MAX_FILES,
   __testOnly_getSuggestionsPath,
@@ -8,8 +10,6 @@ import {
   __testOnly_recordSuggestion,
 } from "./stop-auto-continue/suggestion-log.ts"
 import { checkChangelogStaleness, normalizeTerminateArgs } from "./stop-auto-continue.ts"
-import { getSessionTasksDir } from "./utils/hook-utils.ts"
-import { commitFile, makeTempGitRepo, useTempDir } from "./utils/test-utils.ts"
 
 // Subprocess-based tests spawn `bun hooks/stop-auto-continue.ts` which is
 // slower on CI runners (Ubuntu) than locally. Bump from the default 10s.

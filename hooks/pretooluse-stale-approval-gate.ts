@@ -21,7 +21,7 @@ import {
   isGitRepo,
   isShellTool,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 interface PrWithReviews {
   number: number

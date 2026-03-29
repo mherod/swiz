@@ -10,8 +10,8 @@
 
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
+import { denyPostToolUse, emitContext, ghJson, stripAnsi } from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
-import { denyPostToolUse, emitContext, ghJson, stripAnsi } from "./utils/hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

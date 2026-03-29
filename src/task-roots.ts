@@ -1,3 +1,5 @@
+// noinspection JSUnusedGlobalSymbols
+
 import { join } from "node:path"
 import { getHomeDir } from "./home.ts"
 import { getProviderTaskRoots, type ProviderTaskRoots } from "./provider-adapters.ts"
@@ -29,11 +31,4 @@ export function createDefaultTaskStore(homeDir = getHomeDir()): ProviderTaskRoot
     tasksDir: join(homeDir, ".claude", "tasks"),
     projectsDir: join(homeDir, ".claude", "projects"),
   }
-}
-
-/**
- * @deprecated Use `createDefaultTaskStore()` instead.
- */
-export function getDefaultTaskRoots(homeDir?: string): ProviderTaskRoots {
-  return createDefaultTaskStore(homeDir)
 }

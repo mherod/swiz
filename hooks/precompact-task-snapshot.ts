@@ -9,14 +9,14 @@
 // discovery or the agent's in-context memory.
 
 import { getHomeDirWithFallback } from "../src/home.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
 import {
   getSessionCompactSnapshotPath,
   isIncompleteTaskStatus,
   limitItems,
   readSessionTasks,
   type SessionTask,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
 
 export interface CompactSnapshot {
   sessionId: string

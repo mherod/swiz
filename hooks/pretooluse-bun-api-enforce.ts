@@ -3,8 +3,12 @@
 // the target file already uses Bun APIs or has a bun shebang.
 // Enforces Bun.file()/Bun.write()/Bun.spawn()/Bun.$``.
 
-import { parseBunEnforcementInput, usesBunApis } from "./utils/bun-enforcement-utils.ts"
-import { allowPreToolUse, computeProjectedContent, denyPreToolUse } from "./utils/hook-utils.ts"
+import { parseBunEnforcementInput, usesBunApis } from "../src/utils/bun-enforcement-utils.ts"
+import {
+  allowPreToolUse,
+  computeProjectedContent,
+  denyPreToolUse,
+} from "../src/utils/hook-utils.ts"
 
 // ── Blocked operations ──────────────────────────────────────────────────────
 
@@ -64,7 +68,7 @@ export const BLOCKED_NODE_SPAWN_OPS: Array<{ re: RegExp; name: string; replaceme
 
 const ALL_BLOCKED_OPS = [...BLOCKED_NODE_FILE_OPS, ...BLOCKED_NODE_SPAWN_OPS]
 
-export { usesBunApis } from "./utils/bun-enforcement-utils.ts"
+export { usesBunApis } from "../src/utils/bun-enforcement-utils.ts"
 
 /** Find all blocked Node.js sync file operations in projected content. */
 export function findBlockedNodeFileOps(

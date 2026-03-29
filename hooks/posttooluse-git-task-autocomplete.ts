@@ -16,7 +16,6 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   autoTransitionForComplete,
   emitContext,
@@ -29,7 +28,8 @@ import {
   resolveSafeSessionId,
   stripHeredocs,
   toolNameForCurrentAgent,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
 

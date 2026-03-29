@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { useTempDir } from "../hooks/utils/test-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 const _tmp = useTempDir("swiz-self-heal-")
 

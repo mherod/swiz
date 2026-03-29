@@ -79,7 +79,7 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
  * Debug log lines can embed ANSI colour codes (e.g. ESC[33mpendingESC[0m).
  * Uses String.fromCharCode(27) to avoid the no-control-regex Biome lint rule.
  */
-import { stripAnsi } from "../../hooks/utils/transcript.ts"
+import { stripAnsi } from "../utils/transcript.ts"
 
 function getWrapWidth(indentWidth: number, maxWidth = DEFAULT_WRAP_MAX): number {
   const cols = process.stdout.columns ?? DEFAULT_COLUMNS

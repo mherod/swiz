@@ -2,9 +2,9 @@
 // PostToolUse hook: Inject git status context after every tool call
 
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import type { GitStatusV2 } from "../src/utils/git-utils.ts"
+import { emitContext, getGitStatusV2, isGitRepo } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import type { GitStatusV2 } from "./utils/git-utils.ts"
-import { emitContext, getGitStatusV2, isGitRepo } from "./utils/hook-utils.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 

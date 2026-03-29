@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runBashHook } from "./utils/test-utils.ts"
+import { runBashHook } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-no-merge-conflict-comments.ts"
 

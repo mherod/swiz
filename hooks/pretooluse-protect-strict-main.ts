@@ -14,7 +14,7 @@ import {
   denyPreToolUse,
   isSettingDisableCommand,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 // All recognised aliases for the strictNoDirectMain setting
 const STRICT_MAIN_ALIASES = [

@@ -5,7 +5,6 @@
 
 import { DEFAULT_DIRTY_WORKTREE_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -13,7 +12,8 @@ import {
   getGitStatusV2,
   isGitRepo,
   mergeActionPlanIntoTasks,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

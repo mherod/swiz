@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
-import { useTempDir, writeState } from "./utils/test-utils.ts"
+import { useTempDir, writeState } from "../src/utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-ts-edit-state-gate.ts")
 

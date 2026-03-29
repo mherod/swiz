@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
 // Use absolute path so the script is found regardless of spawn CWD.
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")

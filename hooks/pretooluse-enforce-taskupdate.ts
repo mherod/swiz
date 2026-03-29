@@ -13,8 +13,8 @@ import {
   readSessionTasks,
   resolveSafeSessionId,
   scheduleAutoSteer,
-} from "./utils/hook-utils.ts"
-import { type SessionTaskTipContext, sessionTaskToolPatterns } from "./utils/transcript.ts"
+} from "../src/utils/hook-utils.ts"
+import { type SessionTaskTipContext, sessionTaskToolPatterns } from "../src/utils/transcript.ts"
 
 // Only enforce in agent/Claude Code context
 const isClaudeCode = isRunningInAgent() || process.env.CLAUDECODE === "1"

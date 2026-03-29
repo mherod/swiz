@@ -2,6 +2,7 @@ import { readdir, readFile, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { detect, formatMessage } from "../../hooks/task-subject-validation.ts"
 import { DIM, GREEN, RESET } from "../ansi.ts"
+import { verifyTaskSubject } from "../commands/tasks.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -11,7 +12,6 @@ import {
 } from "../settings.ts"
 import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { verifyTaskSubject } from "./evidence-validator.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,

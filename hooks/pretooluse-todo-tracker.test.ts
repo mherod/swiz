@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { runFileEditHook } from "../src/utils/test-utils.ts"
 import { countTodoMarkers } from "./pretooluse-todo-tracker.ts"
-import { runFileEditHook } from "./utils/test-utils.ts"
 
 // ─── Unit tests for countTodoMarkers ─────────────────────────────────────────
 

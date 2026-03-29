@@ -36,7 +36,7 @@ import {
   readSessionTasks,
   resolveSafeSessionId,
   scheduleAutoSteer,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 // ── Auto-steer deny wrapper ────────────────────────────────────────────────
 // When auto-steer is available, schedule the denial reason as a steering

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../../hooks/utils/test-utils.ts"
+import { useTempDir } from "../utils/test-utils.ts"
 import { convertSkillContent, parseFrontmatterField, stripFrontmatter } from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────

@@ -12,7 +12,7 @@ import {
   isFileEditTool,
   isSettingDisableCommand,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]

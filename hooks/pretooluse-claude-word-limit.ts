@@ -8,13 +8,13 @@ import {
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   countFileWords,
   denyPreToolUse,
   formatActionPlan,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

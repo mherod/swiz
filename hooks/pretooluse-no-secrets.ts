@@ -11,8 +11,8 @@
 // Detection logic mirrors stop-secret-scanner.ts to keep the two hooks aligned.
 // Test files are excluded (same exclusion policy as the stop hook).
 
+import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "./utils/hook-utils.ts"
 
 // ── Secret patterns (mirrored from stop-secret-scanner.ts) ───────────────────
 

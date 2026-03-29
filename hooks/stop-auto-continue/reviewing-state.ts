@@ -10,7 +10,7 @@ import {
   isGitHubRemote,
   isGitRepo,
   skillAdvice,
-} from "../utils/hook-utils.ts"
+} from "../../src/utils/hook-utils.ts"
 
 export interface ReviewingPr {
   number: number

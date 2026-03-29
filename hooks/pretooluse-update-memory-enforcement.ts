@@ -10,7 +10,6 @@ import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   denyPreToolUse,
   formatActionPlan,
@@ -21,7 +20,8 @@ import {
   isWriteTool,
   readSessionLines,
   readSessionTasks,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."

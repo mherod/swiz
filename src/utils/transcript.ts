@@ -7,8 +7,8 @@ import {
   getBashCommandsUsedForCurrentSession,
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
-} from "../../src/transcript-summary.ts"
-import { extractTextFromUnknownContent } from "../../src/transcript-utils.ts"
+} from "../transcript-summary.ts"
+import { extractTextFromUnknownContent } from "../transcript-utils.ts"
 
 // ── ANSI stripping ────────────────────────────────────────────────────────────
 

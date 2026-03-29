@@ -5,7 +5,6 @@
 // It emits the same CI verification evidence the manual sequence would produce,
 // so transcript-based workflow checks can treat the result as verified.
 
-import { getDefaultBranch, isDefaultBranch } from "../../hooks/utils/git-utils.ts"
 import { requiresPeerReview } from "../collaboration-policy.ts"
 import { stderrLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
@@ -16,6 +15,7 @@ import {
   readSwizSettings,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
+import { getDefaultBranch, isDefaultBranch } from "../utils/git-utils.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
 import { getSentinelPath, parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
 

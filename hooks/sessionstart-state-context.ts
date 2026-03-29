@@ -2,9 +2,9 @@
 
 // SessionStart hook: inject current project state into session context
 
+import { emitContext, isGitRepo } from "../src/utils/hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
-import { emitContext, isGitRepo } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = sessionHookInputSchema.parse(await Bun.stdin.json())

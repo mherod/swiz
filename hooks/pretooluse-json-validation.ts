@@ -2,7 +2,7 @@
 // PreToolUse hook: Validate that a .claude/settings.json file contains valid JSON
 // before allowing Edit or Write operations on it.
 
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "../src/utils/hook-utils.ts"
 
 const input = await Bun.stdin.json()
 const filePath: string = input?.tool_input?.file_path ?? ""

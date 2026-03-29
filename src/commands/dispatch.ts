@@ -6,8 +6,6 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
-import { checkIncompleteTasks } from "../../hooks/utils/stop-incomplete-tasks-core.ts"
-import { detectTerminal } from "../../hooks/utils/terminal-detection.ts"
 import { stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
@@ -25,6 +23,8 @@ import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
+import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
+import { detectTerminal } from "../utils/terminal-detection.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 const DEFAULT_DAEMON_TIMEOUT_MS = 15_000

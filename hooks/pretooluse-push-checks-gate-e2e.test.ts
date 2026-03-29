@@ -11,7 +11,7 @@
 import { describe, expect, it, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { type AdvisoryHookResult, useTempDir } from "./utils/test-utils.ts"
+import { type AdvisoryHookResult, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-push-checks-gate.ts")
 

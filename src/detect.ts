@@ -13,12 +13,12 @@ export type {
   ShellType,
   TerminalApp,
   TerminalInfo,
-} from "../hooks/utils/terminal-detection.ts"
+} from "./utils/terminal-detection.ts"
 export {
   detectEnvironment,
   detectShell,
   detectTerminal,
-} from "../hooks/utils/terminal-detection.ts"
+} from "./utils/terminal-detection.ts"
 
 /**
  * Detects the currently running agent by checking environment variables and parent process.

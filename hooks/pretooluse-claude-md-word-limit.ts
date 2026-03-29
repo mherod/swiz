@@ -12,8 +12,6 @@ import {
   manualCompactionGuidanceFallback,
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
-import { resolveThresholds } from "./posttooluse-memory-size.ts"
-import type { FileEditHookInput } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
@@ -21,7 +19,9 @@ import {
   formatActionPlan,
   isFileEditForPath,
   skillAdvice,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { resolveThresholds } from "./posttooluse-memory-size.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
 async function buildWordLimitDenyReason(
   filePath: string,

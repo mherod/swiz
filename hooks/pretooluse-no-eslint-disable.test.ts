@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runFileEditHook } from "./utils/test-utils.ts"
+import { runFileEditHook } from "../src/utils/test-utils.ts"
 
 // The keyword is split to avoid triggering the hook we are testing.
 // The hook itself uses the same technique: ["eslint", "disable"].join("-")

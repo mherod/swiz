@@ -15,9 +15,9 @@
 // Policy: only blocks on non-default branches. On the default branch, changes
 // are intentional (gated by code review and other hooks).
 
-import { type DiffViolation, runDiffScanStopHook } from "./utils/diff-scanner.ts"
+import { type DiffViolation, runDiffScanStopHook } from "../src/utils/diff-scanner.ts"
 
-export type { DiffViolation } from "./utils/diff-scanner.ts"
+export type { DiffViolation } from "../src/utils/diff-scanner.ts"
 /** @deprecated Use DiffViolation from utils/diff-scanner.ts */
 export type SuppressionViolation = DiffViolation
 

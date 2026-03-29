@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { filePathGuardHook } from "./utils/hook-utils.ts"
+import { filePathGuardHook } from "../src/utils/hook-utils.ts"
 
 // Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
 const LOCKFILE_RE =

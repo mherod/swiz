@@ -16,8 +16,7 @@
  *   - Skips when gh CLI is unavailable
  */
 
-import { shellHookInputSchema } from "./schemas.ts"
-import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -32,7 +31,8 @@ import {
   isGitRepo,
   isShellTool,
   skillAdvice,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { shellHookInputSchema } from "./schemas.ts"
 
 type Review = {
   state: string

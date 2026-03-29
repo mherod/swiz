@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { filePathGuardHook } from "./utils/hook-utils.ts"
+import { filePathGuardHook } from "../src/utils/hook-utils.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",

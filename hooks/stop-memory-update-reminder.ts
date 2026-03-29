@@ -5,8 +5,8 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { blockStop, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop, isGitRepo, skillAdvice } from "./utils/hook-utils.ts"
 
 const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 

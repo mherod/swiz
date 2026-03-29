@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir, writeClaudeSession } from "../../hooks/utils/test-utils.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
@@ -14,6 +13,7 @@ import {
   SETTINGS_REGISTRY,
 } from "../settings.ts"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
+import { useTempDir, writeClaudeSession } from "../utils/test-utils.ts"
 import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")

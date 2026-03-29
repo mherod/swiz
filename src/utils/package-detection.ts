@@ -2,7 +2,7 @@
 // Walks up from CWD looking for lockfiles. Cached per process.
 
 import { dirname, join } from "node:path"
-import { fileExists } from "../../src/detect-frameworks.ts"
+import { fileExists } from "../detect-frameworks.ts"
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"

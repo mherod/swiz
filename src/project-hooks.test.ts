@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../hooks/utils/test-utils.ts"
 import type { HookGroup } from "./manifest.ts"
 import { readProjectSettings, resolveProjectHooks } from "./settings.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 const { create: createTempDir } = useTempDir("swiz-project-hooks-")
 

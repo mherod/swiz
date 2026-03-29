@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, unlink, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "../../hooks/utils/hook-utils.ts"
-import { useTempDir } from "../../hooks/utils/test-utils.ts"
 import { hookCooldownPath } from "../dispatch/filters.ts"
+import { getSessionTasksDir } from "../utils/hook-utils.ts"
+import { useTempDir } from "../utils/test-utils.ts"
 
 interface DispatchResult {
   stdout: string

@@ -17,14 +17,14 @@ import {
   readSwizSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
   denyPreToolUse,
   isEditTool,
   isWriteTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Find .gitattributes content searching cwd and up to 5 parent directories. */
 async function findGitattributesLfsLines(cwd: string): Promise<string[]> {

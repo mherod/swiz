@@ -18,8 +18,13 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
+import {
+  emitContext,
+  formatActionPlan,
+  isFileEditTool,
+  skillAdvice,
+} from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { emitContext, formatActionPlan, isFileEditTool, skillAdvice } from "./utils/hook-utils.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
 export function isMemoryFile(filePath: string): boolean {

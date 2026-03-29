@@ -3,8 +3,8 @@
 
 import { stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
+import { emitContext, isFileEditTool, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { emitContext, isFileEditTool, scheduleAutoSteer } from "./utils/hook-utils.ts"
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs)$/
 const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__/

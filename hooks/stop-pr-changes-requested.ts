@@ -4,7 +4,6 @@
 import { min, uniq } from "lodash-es"
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   blockStopHumanRequired,
@@ -19,7 +18,8 @@ import {
   isGitHubRemote,
   isGitRepo,
   skillAdvice,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 function isSelfAuthored(pr: { author?: { login?: string } }, currentUser: string | null): boolean {
   return (

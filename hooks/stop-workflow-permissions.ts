@@ -11,9 +11,9 @@
 // Policy: only blocks on non-default branches. On the default branch, workflow
 // permission changes are intentional (gated by other hooks like code review).
 
-import { type DiffViolation, runDiffScanStopHook } from "./utils/diff-scanner.ts"
+import { type DiffViolation, runDiffScanStopHook } from "../src/utils/diff-scanner.ts"
 
-export type { DiffViolation } from "./utils/diff-scanner.ts"
+export type { DiffViolation } from "../src/utils/diff-scanner.ts"
 /** @deprecated Use DiffViolation from utils/diff-scanner.ts */
 export type PermissionViolation = DiffViolation
 

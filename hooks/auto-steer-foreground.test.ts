@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { isAutoSteerDeferredForForegroundAppName } from "./hook-utils.ts"
+import { isAutoSteerDeferredForForegroundAppName } from "../src/utils/hook-utils.ts"
 
 describe("isAutoSteerDeferredForForegroundAppName", () => {
   it("defers for WhatsApp and Telegram process names", () => {

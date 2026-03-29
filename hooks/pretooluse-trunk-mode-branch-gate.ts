@@ -10,13 +10,12 @@
  */
 
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
-import { shellHookInputSchema } from "./schemas.ts"
 import {
   collectCheckoutNewBranchNames,
   collectPlainCheckoutSwitchTargets,
   getDefaultBranch,
   isDefaultBranch,
-} from "./utils/git-utils.ts"
+} from "../src/utils/git-utils.ts"
 import {
   denyPreToolUse,
   GH_PR_CHECKOUT_RE,
@@ -26,7 +25,8 @@ import {
   ghJson,
   isGitRepo,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { shellHookInputSchema } from "./schemas.ts"
 
 function isAllowedTrunkCheckoutTarget(target: string, defaultBranch: string): boolean {
   if (target === "." || target === "-" || target === "@{-1}") return true

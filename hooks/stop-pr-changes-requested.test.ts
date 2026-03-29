@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createTestRepo } from "./utils/test-utils.ts"
+import { createTestRepo } from "../src/utils/test-utils.ts"
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 const WORKSPACE_ROOT = process.cwd()

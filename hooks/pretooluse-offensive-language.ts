@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod"
+import { allowPreToolUse, denyPreToolUse, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -22,7 +23,6 @@ import {
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse, scheduleAutoSteer } from "./utils/hook-utils.ts"
 
 // ── AI-refined feedback ──────────────────────────────────────────────────────
 

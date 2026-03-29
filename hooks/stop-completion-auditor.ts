@@ -6,7 +6,6 @@ import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   computeTranscriptSummary,
@@ -22,7 +21,8 @@ import {
   readSessionTasks,
   type SessionTask,
   type TranscriptSummary,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 

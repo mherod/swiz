@@ -41,18 +41,22 @@ export function isIncompleteTaskStatus(status: string): boolean {
   return status === "pending" || status === "in_progress"
 }
 
+export type TaskStatus = Task["status"]
+
+export type TaskMutationAction = "create" | "status_change" | "delete"
+
 export interface AuditEntry {
   timestamp: string
   taskId: string
-  action: "create" | "status_change" | "delete"
-  oldStatus?: Task["status"]
-  newStatus?: Task["status"]
+  action: TaskMutationAction
+  oldStatus?: TaskStatus
+  newStatus?: TaskStatus
   verificationText?: string
   evidence?: string
   subject?: string
 }
 
-export const STATUS_STYLE: Record<Task["status"], { emoji: string; color: string }> = {
+export const STATUS_STYLE: Record<TaskStatus, { emoji: string; color: string }> = {
   pending: { emoji: "⏳", color: "\x1b[33m" },
   in_progress: { emoji: "🔄", color: "\x1b[36m" },
   completed: { emoji: "✅", color: "\x1b[32m" },

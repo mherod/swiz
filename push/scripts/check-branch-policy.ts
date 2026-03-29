@@ -13,13 +13,6 @@
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
 import {
-  getDefaultBranch,
-  gh,
-  git,
-  isDefaultBranch,
-  isGitRepo,
-} from "../../hooks/utils/hook-utils.ts"
-import {
   detectProjectCollaborationPolicy,
   getCollaborationModePolicy,
 } from "../../src/collaboration-policy.ts"
@@ -29,6 +22,13 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
+import {
+  getDefaultBranch,
+  gh,
+  git,
+  isDefaultBranch,
+  isGitRepo,
+} from "../../src/utils/hook-utils.ts"
 
 const MAX_FILES_HARD_BLOCK = 5
 const MAX_TRIVIAL_FILES = 3

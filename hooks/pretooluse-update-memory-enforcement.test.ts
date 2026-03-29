@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "./utils/hook-utils.ts"
-import { createEnforcementProjectDir, type HookResult, useTempDir } from "./utils/test-utils.ts"
+import { getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import {
+  createEnforcementProjectDir,
+  type HookResult,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-update-memory-enforcement.ts"
 const REMINDER_FRAGMENT =

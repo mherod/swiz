@@ -11,9 +11,9 @@
 
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
-import { formatActionPlan } from "../../src/action-plan.ts"
-import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
-import { validateTransition } from "../../src/tasks/task-service.ts"
+import { formatActionPlan } from "../action-plan.ts"
+import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { validateTransition } from "../tasks/task-service.ts"
 import {
   autoTransitionForComplete,
   getSessionTasksDir,

@@ -22,7 +22,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { clearFrameworkCache, detectFrameworks } from "./utils/hook-utils.ts"
+import { clearFrameworkCache, detectFrameworks } from "../src/utils/hook-utils.ts"
 
 // ─── Detection helper (mirrors push skill logic) ───────────────────────────────
 

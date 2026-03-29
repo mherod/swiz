@@ -5,8 +5,8 @@
 // the skill's SKILL.md and create pending tasks for each quality step
 // that doesn't already exist in the session.
 
-import { emitContext, type SessionHookInput } from "./utils/hook-utils.ts"
-import { createTasksFromSkillSteps, formatSkillStepsSummary } from "./utils/skill-steps.ts"
+import { emitContext, type SessionHookInput } from "../src/utils/hook-utils.ts"
+import { createTasksFromSkillSteps, formatSkillStepsSummary } from "../src/utils/skill-steps.ts"
 
 /** Match `/skill-name` at the start of the user's message (with optional leading whitespace). */
 const SKILL_INVOCATION_RE = /^\s*\/([a-z][a-z0-9-]*)/i

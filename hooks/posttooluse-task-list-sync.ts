@@ -17,14 +17,14 @@
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
-import type { PostToolHookInput } from "./schemas.ts"
 import {
   emitContext,
   getSessionTaskPath,
   getSessionTasksDir,
   resolveSafeSessionId,
   type SessionTask,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import type { PostToolHookInput } from "./schemas.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

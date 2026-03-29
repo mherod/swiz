@@ -2,8 +2,8 @@
 // PreToolUse hook: Block closing issues via Bash commands.
 // Issues must only be closed by pushing commits with "Fixes #N" in the message.
 
-import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
-import { shellSegmentCommandRe, stripQuotedShellStrings } from "./utils/shell-patterns.ts"
+import { allowPreToolUse, denyPreToolUse, isShellTool } from "../src/utils/hook-utils.ts"
+import { shellSegmentCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

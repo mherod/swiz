@@ -22,8 +22,14 @@
  *      — Claude Code's response text for async Bash tool calls
  */
 
+import {
+  denyPostToolUse,
+  emitContext,
+  GIT_PUSH_RE,
+  git,
+  isShellTool,
+} from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
-import { denyPostToolUse, emitContext, GIT_PUSH_RE, git, isShellTool } from "./utils/hook-utils.ts"
 
 const input = (await Bun.stdin.json()) as PostToolHookInput
 if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)

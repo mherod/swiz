@@ -2,7 +2,7 @@
 // PreToolUse hook: Block gh issue edit commands that demote issues from "ready" to "backlog".
 // Prevents agents from gaming readiness hooks by downgrading ready work they want to avoid.
 
-import { denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
+import { denyPreToolUse, isShellTool } from "../src/utils/hook-utils.ts"
 
 const GH_ISSUE_EDIT_RE = /gh\s+issue\s+edit\b/
 

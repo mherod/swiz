@@ -4,13 +4,13 @@
 // without updating src/manifest.test.ts expectations. Prevents failed pushes
 // caused by manifest/test order divergence.
 
-import type { FileEditHookInput } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
   denyPreToolUse,
   isFileEditForPath,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
 function extractStopHookOrder(source: string): string[] {

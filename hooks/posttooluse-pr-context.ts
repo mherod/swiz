@@ -10,7 +10,7 @@ import {
   ghJson,
   git,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

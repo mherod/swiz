@@ -18,7 +18,6 @@ import {
   readSwizSettings,
 } from "../src/settings.ts"
 import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
-import { stopHookInputSchema } from "./schemas.ts"
 import {
   type ActionPlanItem,
   blockStop,
@@ -32,7 +31,8 @@ import {
   sanitizeSessionId,
   skillExists,
   spawnWithTimeout,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 

@@ -7,7 +7,7 @@
  *      including edge cases the regex cannot handle correctly
  */
 import { describe, expect, it } from "bun:test"
-import { FORCE_PUSH_RE, hasGitPushForceFlag } from "./utils/hook-utils.ts"
+import { FORCE_PUSH_RE, hasGitPushForceFlag } from "../src/utils/hook-utils.ts"
 
 // ── FORCE_PUSH_RE regression tests ───────────────────────────────────────────
 

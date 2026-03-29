@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { formatRemaining } from "./pretooluse-pr-age-gate.ts"
 import {
   extractMergeBranch,
   extractPrNumber,
   GH_PR_MERGE_RE,
   GIT_MERGE_RE,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { formatRemaining } from "./pretooluse-pr-age-gate.ts"
 
 // ── GH_PR_MERGE_RE ─────────────────────────────────────────────────────────
 

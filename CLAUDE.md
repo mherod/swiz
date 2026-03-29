@@ -66,11 +66,10 @@ alwaysApply: false
 - **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code.
 - **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` in `hook-utils.ts` for file-path PreToolUse hooks.
-- **Git Utilities Policy** — canonical locations, no duplication:
-  - `hooks/utils/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`). Test utils in `hooks/utils/test-utils.ts`.
-  - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars (lefthook `GIT_DIR` fix).
-  - DO NOT define Git utilities locally — import from canonical source. Duplicates: move to canonical file, update consumers, delete local.
-  - New `GIT_*_RE` constants in `hooks/utils/git-utils.ts` must also be re-exported from `hooks/utils/hook-utils.ts` for hook scripts to import them.
+- **Git Utilities Policy** — canonical locations:
+  - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
+  - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
+  - DO NOT define Git utilities locally — import from canonical source.
 - **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr rolling window. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
@@ -112,7 +111,7 @@ alwaysApply: false
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
 - **DO**: Use native task tools for creation/status/queries. **DON'T**: Use `swiz tasks` CLI for status transitions. Exception: `swiz tasks complete` (requires `--evidence`).
-- **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` for in-process task creation (hooks, services). Use `createSessionTask()` from `hooks/utils/hook-utils.ts` when sentinel dedup is needed. **DON'T**: Shell out to `swiz tasks create` from hooks — use the in-process path.
+- **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` for in-process task creation. Use `createSessionTask()` from `src/utils/hook-utils.ts` when sentinel dedup is needed. **DON'T**: Shell out to `swiz tasks create` from hooks.
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
@@ -209,14 +208,14 @@ alwaysApply: false
 - Do not hide user/default values.
 - Do not use one shared `source` for multiple settings.
 - Verify before declaring completion: hierarchy, per-value source tracking, display correctness.
-- Adding a new boolean setting (global scope) requires updates to 7 files plus tests:
-  1. `src/settings/types.ts` — add field to `SwizSettings` interface.
-  2. `src/settings/registry.ts` — add `SETTINGS_REGISTRY` entry with `key`, `aliases`, `kind`, `scopes`, `docs`.
-  3. `src/settings/persistence.ts` — add to `DEFAULT_SETTINGS` and `swizSettingsSchema`.
-  4. `src/settings/resolution.ts` — add to `getEffectiveSwizSettings` base object.
-  5. `src/commands/settings.ts` — add display line in `printGlobalSettings`.
-  6. `src/web/components/settings-panel.tsx` — add to `GlobalSettingsForm`, `DEFAULT_GLOBAL_FORM`, `globalSettingsToForm`, and `GLOBAL_TOGGLES`.
-  7. `src/commands/settings.test.ts` — add to every `SwizSettings` object literal and the `expectedKeys` array in the registry test.
+- Adding a boolean setting (global scope) requires updates to 7 files:
+  1. `src/settings/types.ts` — `SwizSettings` interface.
+  2. `src/settings/registry.ts` — `SETTINGS_REGISTRY` entry.
+  3. `src/settings/persistence.ts` — `DEFAULT_SETTINGS` and `swizSettingsSchema`.
+  4. `src/settings/resolution.ts` — `getEffectiveSwizSettings` base object.
+  5. `src/commands/settings.ts` — `printGlobalSettings`.
+  6. `src/web/components/settings-panel.tsx` — `GlobalSettingsForm`, `DEFAULT_GLOBAL_FORM`, `globalSettingsToForm`, `GLOBAL_TOGGLES`.
+  7. `src/commands/settings.test.ts` — `SwizSettings` literals and `expectedKeys`.
 ## CLI Error Handling
 - In `src/commands/`, throw errors instead of `process.exit(1)`.
 - `src/cli.ts` handles command errors via `process.exitCode = 1`.
@@ -226,6 +225,7 @@ alwaysApply: false
 - `src/debug-logging.test.ts` enforces allowlists for `console.error`/`console.warn` (STDERR_ALLOWLIST) and `console.log`/`console.info` (STDOUT_ALLOWLIST). Files not on an allowlist must use `import { debugLog } from "./debug.ts"` for diagnostics. Adding to an allowlist requires a justification comment in the test.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
+- DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
 - **DO**: Rename variable/constant declaration and all usages in one edit — splits in PreToolUse hooks cause unrecoverable deadlocks. **DON'T** add unrequested renames to hook changes; change only what was asked for.

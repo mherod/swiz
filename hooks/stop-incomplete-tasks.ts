@@ -3,9 +3,9 @@
 // Runs before the completion auditor so incomplete tasks are caught early.
 
 import { getHomeDirOrNull } from "../src/home.ts"
+import { blockStop } from "../src/utils/hook-utils.ts"
+import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop } from "./utils/hook-utils.ts"
-import { checkIncompleteTasks } from "./utils/stop-incomplete-tasks-core.ts"
 
 async function main(): Promise<void> {
   const raw = (await Bun.stdin.json()) as Record<string, unknown>

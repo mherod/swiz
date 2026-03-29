@@ -5,6 +5,7 @@
 // catches patterns that slipped past the PreToolUse gate (e.g., when the agent
 // produced the offending text in its final message before attempting to stop).
 
+import { blockStop } from "../src/utils/hook-utils.ts"
 import {
   extractLastAssistantText,
   findAllLazyPatterns,
@@ -12,7 +13,6 @@ import {
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop } from "./utils/hook-utils.ts"
 
 async function main() {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())

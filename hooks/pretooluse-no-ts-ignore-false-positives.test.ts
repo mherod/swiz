@@ -24,7 +24,7 @@
 // on this test file itself when it is written or edited.
 
 import { describe, expect, test } from "bun:test"
-import { runFileEditHook } from "./utils/test-utils.ts"
+import { runFileEditHook } from "../src/utils/test-utils.ts"
 
 const KW_IGNORE = ["ts", "ignore"].join("-")
 const KW_EXPECT = ["ts", "expect", "error"].join("-")

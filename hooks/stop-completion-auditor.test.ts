@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { formatActionPlan, getSessionTasksDir } from "./utils/hook-utils.ts"
-import { useTempDir } from "./utils/test-utils.ts"
+import { formatActionPlan, getSessionTasksDir } from "../src/utils/hook-utils.ts"
+import { useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── formatActionPlan unit tests ─────────────────────────────────────────────
 

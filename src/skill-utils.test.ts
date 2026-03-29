@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { useTempDir } from "../hooks/utils/test-utils.ts"
 import {
   extractMandatedSkillTools,
   extractStepsFromSkill,
@@ -14,6 +13,7 @@ import {
   skillExists,
   stripFrontmatter,
 } from "./skill-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

@@ -23,7 +23,6 @@ import {
 import { readProjectState } from "../src/settings/persistence.ts"
 import type { ProjectState } from "../src/settings/types.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
-import { stopHookInputSchema } from "./schemas.ts"
 import {
   type ActionPlanItem,
   blockStop,
@@ -38,7 +37,8 @@ import {
   sanitizeSessionId,
   skillAdvice,
   skillExists,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 export { missingRefinementCategories, needsRefinement }
 

@@ -4,8 +4,8 @@
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
 // Uses the blocking strategy — returns { decision: "block", reason } to fail the commit.
 
+import { git, isGitRepo } from "../src/utils/hook-utils.ts"
 import { preCommitHookInputSchema } from "./schemas.ts"
-import { git, isGitRepo } from "./utils/hook-utils.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
 const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/

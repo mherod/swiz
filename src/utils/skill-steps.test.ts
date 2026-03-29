@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { z } from "zod"
-import type { Task } from "../../src/tasks/task-repository.ts"
+import type { Task } from "../tasks/task-repository.ts"
 import { formatSkillStepsSummary } from "./skill-steps.ts"
 
 // ─── RefinedStepsSchema validation ──────────────────────────────────────────

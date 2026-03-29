@@ -3,8 +3,8 @@
 // PreToolUse hook: Block TaskOutput calls with missing or excessive timeout.
 // Missing timeouts block the session indefinitely; timeouts > 120s waste time.
 
+import { allowPreToolUse, denyPreToolUse } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 const MAX_TIMEOUT_MS = 120_000
 

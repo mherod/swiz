@@ -26,7 +26,7 @@ import {
   hasGitPushForceFlag,
   isShellTool,
   type ToolHookInput,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 
 const DEFAULT_COOLDOWN_MS = 60_000
 

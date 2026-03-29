@@ -5,11 +5,11 @@
 
 import { join } from "node:path"
 import { z } from "zod"
-import { hasAiProvider, promptObject } from "../../src/ai-providers.ts"
-import { expandInlineCommands, substituteArgs } from "../../src/commands/skill.ts"
-import { extractStepsFromSkill, filterQualitySteps, SKILL_DIRS } from "../../src/skill-utils.ts"
-import type { Task } from "../../src/tasks/task-repository.ts"
-import { type MergeStep, mergeIntoTasks } from "../../src/tasks/task-service.ts"
+import { hasAiProvider, promptObject } from "../ai-providers.ts"
+import { expandInlineCommands, substituteArgs } from "../commands/skill.ts"
+import { extractStepsFromSkill, filterQualitySteps, SKILL_DIRS } from "../skill-utils.ts"
+import type { Task } from "../tasks/task-repository.ts"
+import { type MergeStep, mergeIntoTasks } from "../tasks/task-service.ts"
 
 export interface SkillStepsResult {
   skillName: string

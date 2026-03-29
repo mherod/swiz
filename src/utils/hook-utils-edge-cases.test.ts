@@ -670,37 +670,37 @@ describe("isTaskTool — update_plan recognition (Codex alias)", () => {
 
 describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => {
   it("Codex has no TaskList alias (read-only, no Codex equivalent)", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(codex.toolAliases).not.toHaveProperty("TaskList")
   })
 
   it("Codex has no TaskGet alias (read-only, no Codex equivalent)", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(codex.toolAliases).not.toHaveProperty("TaskGet")
   })
 
   it("translateMatcher passes TaskList through unchanged for Codex", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(translateMatcher("TaskList", codex)).toBe("TaskList")
   })
 
   it("translateMatcher passes TaskGet through unchanged for Codex", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(translateMatcher("TaskGet", codex)).toBe("TaskGet")
   })
 
   it("translateMatcher still maps TaskCreate to update_plan for Codex", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(translateMatcher("TaskCreate", codex)).toBe("update_plan")
   })
 
   it("translateMatcher still maps TaskUpdate to update_plan for Codex", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(translateMatcher("TaskUpdate", codex)).toBe("update_plan")
   })
@@ -756,13 +756,13 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   }
 
   it("toolAliases object matches expected table exactly (shape + values)", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(codex.toolAliases).toEqual(EXPECTED_CODEX_ALIASES)
   })
 
   it("every canonical tool in the table translates to its expected alias", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     for (const [canonical, expected] of Object.entries(EXPECTED_CODEX_ALIASES)) {
       expect(translateMatcher(canonical, codex), `${canonical} → ${expected}`).toBe(expected)
@@ -770,13 +770,13 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   })
 
   it("spawn_agent is absent from all Codex alias values", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(Object.values(codex.toolAliases)).not.toContain("spawn_agent")
   })
 
   it("only Task/TaskCreate/TaskUpdate map to update_plan — no other key maps there", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     const mappedToUpdatePlan = Object.entries(codex.toolAliases)
       .filter(([, v]) => v === "update_plan")
@@ -786,7 +786,7 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   })
 
   it("TaskList and TaskGet are absent from Codex aliases (pass-through)", async () => {
-    const { getAgent } = await import("../../src/agents.ts")
+    const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     expect(Object.keys(codex.toolAliases)).not.toContain("TaskList")
     expect(Object.keys(codex.toolAliases)).not.toContain("TaskGet")
@@ -795,7 +795,7 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
 
 describe("mutation guards — Codex toolAliases translateMatcher", () => {
   it("broken alias (spawn_agent) gives wrong translation; real alias (update_plan) gives right one", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const realCodex = getAgent("codex")!
 
     // Simulate the pre-fix broken state: TaskCreate aliased to spawn_agent
@@ -808,7 +808,7 @@ describe("mutation guards — Codex toolAliases translateMatcher", () => {
   })
 
   it("absent TaskList alias passes through; adding a wrong alias would change the output", async () => {
-    const { translateMatcher, getAgent } = await import("../../src/agents.ts")
+    const { translateMatcher, getAgent } = await import("../agents.ts")
     const realCodex = getAgent("codex")!
 
     // Simulate accidentally mapping TaskList to something

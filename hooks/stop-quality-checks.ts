@@ -3,8 +3,8 @@
 
 import { join } from "node:path"
 import { readProjectSettings } from "../src/settings.ts"
+import { blockStop, detectPackageManager, spawnWithTimeout } from "../src/utils/hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop, detectPackageManager, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 // Script names probed in priority order for each quality category
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const

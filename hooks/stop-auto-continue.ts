@@ -27,6 +27,14 @@ import {
   resolveTranscriptText,
   type TranscriptResolution,
 } from "../src/transcript-utils.ts"
+import {
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+  readSessionTasks,
+  skillAdvice,
+} from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { buildPrompt } from "./stop-auto-continue/prompt.ts"
 import { writeReflections } from "./stop-auto-continue/reflections.ts"
@@ -38,14 +46,6 @@ import {
   startSuggestionLogCleanup,
 } from "./stop-auto-continue/suggestion-log.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
-import {
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-  readSessionTasks,
-  skillAdvice,
-} from "./utils/hook-utils.ts"
 
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const DEDUP_MAX_SEEN = 2 // Allow stop after suggestion seen this many times

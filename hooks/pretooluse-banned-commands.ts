@@ -9,7 +9,7 @@ import {
   detectPackageManager,
   isShellTool,
   skillExists,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,
@@ -19,8 +19,8 @@ import {
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
   stripQuotedShellStrings,
-} from "./utils/shell-patterns.ts"
-import { extractReadFilePaths } from "./utils/transcript.ts"
+} from "../src/utils/shell-patterns.ts"
+import { extractReadFilePaths } from "../src/utils/transcript.ts"
 
 interface Rule {
   /** Returns true if this rule matches the command. */

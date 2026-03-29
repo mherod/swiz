@@ -4,8 +4,8 @@
 // skill's SKILL.md and create pending tasks for each quality step that
 // doesn't already exist as a pending/in_progress task in the session.
 
-import { emitContext } from "./utils/hook-utils.ts"
-import { createTasksFromSkillSteps, formatSkillStepsSummary } from "./utils/skill-steps.ts"
+import { emitContext } from "../src/utils/hook-utils.ts"
+import { createTasksFromSkillSteps, formatSkillStepsSummary } from "../src/utils/skill-steps.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

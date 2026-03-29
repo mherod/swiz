@@ -4,7 +4,7 @@
 // to pretooluse-require-tasks.ts — the parent session stays blocked as if no
 // tasks exist. TaskCreate must always be called directly in the parent session.
 
-import { denyPreToolUse as deny, toolNameForCurrentAgent } from "./utils/hook-utils.ts"
+import { denyPreToolUse as deny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
 
 const input = await Bun.stdin.json()
 const prompt: string = input?.tool_input?.prompt ?? ""

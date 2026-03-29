@@ -29,8 +29,6 @@ import {
 } from "../tasks/task-service.ts"
 import type { Command } from "../types.ts"
 
-export { verifyTaskSubject } from "../tasks/evidence-validator.ts"
-
 export {
   compareTaskIds,
   findTaskAcrossSessions,
@@ -502,4 +500,15 @@ export const tasksCommand: Command = {
     }
     await handler(rest, resolveFilterCwd(args))
   },
+}
+
+export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
+  const normalizedSubject = taskSubject.toLowerCase().trim()
+  const normalizedVerify = verifyText.toLowerCase().trim()
+  if (normalizedSubject.startsWith(normalizedVerify)) return null
+  return (
+    `Verification failed.\n` +
+    `  Expected subject to start with: "${verifyText}"\n` +
+    `  Actual subject: "${taskSubject}"`
+  )
 }

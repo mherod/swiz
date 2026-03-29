@@ -20,7 +20,6 @@
 // so this is safe to run regardless of workflow or whether PRs are used.
 
 import { readProjectState, writeProjectState } from "../src/settings.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   extractCheckoutBranch,
   extractCheckoutStartPoint,
@@ -36,8 +35,15 @@ import {
   getDefaultBranch,
   getGitStatusV2,
   isDefaultBranch,
-} from "./utils/git-utils.ts"
-import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "./utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
+import {
+  getOpenPrForBranch,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 type ProjectState = "developing" | "reviewing" | "addressing-feedback" | "planning"
 

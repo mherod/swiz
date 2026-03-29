@@ -4,7 +4,6 @@
 // Provides countdown hints showing remaining calls until mandatory enforcement
 // Uses current-session tool history (daemon-injected when available) to determine position
 
-import { toolHookInputSchema } from "./schemas.ts"
 import {
   emitContext,
   getCurrentSessionTaskToolStats,
@@ -12,7 +11,8 @@ import {
   isWriteTool,
   scheduleAutoSteer,
   toolNameForCurrentAgent,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 function emitCreationCountdown(total: number, threshold: number, taskCreateName: string): void {
   const remaining = threshold - total

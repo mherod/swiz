@@ -15,14 +15,14 @@
 // pretooluse hook reading the stale sentinel.
 
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
-import type { PostToolHookInput } from "./schemas.ts"
 import {
   GIT_PUSH_RE,
   getCanonicalPathHash,
   git,
   hasGitPushForceFlag,
   isShellTool,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import type { PostToolHookInput } from "./schemas.ts"
 
 const input = (await Bun.stdin.json()) as PostToolHookInput
 if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)

@@ -20,10 +20,6 @@ export function formatDate(date: Date, dateFormat: DateFormat): string {
   if (dateFormat === "absolute") {
     return format(date, "d MMM yyyy, HH:mm")
   }
-  return timeAgo(date)
-}
-
-export function timeAgo(date: Date): string {
   return formatDistanceToNow(date, { addSuffix: true })
 }
 

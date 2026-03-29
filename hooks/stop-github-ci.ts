@@ -6,7 +6,6 @@
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { stopHookInputSchema } from "./schemas.ts"
 import {
   type ActionPlanItem,
   blockStop,
@@ -21,7 +20,8 @@ import {
   isGitRepo,
   mergeActionPlanIntoTasks,
   skillExists,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const POLL_INTERVAL_MS = 5_000
 const MAX_POLL_MS = 30_000

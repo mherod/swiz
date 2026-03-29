@@ -8,8 +8,8 @@ import {
   detectPackageManager,
   isShellTool,
   type PackageManager,
-} from "./utils/hook-utils.ts"
-import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
+} from "../src/utils/hook-utils.ts"
+import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
 // Equivalent subcommands across package managers
 interface CmdMap {

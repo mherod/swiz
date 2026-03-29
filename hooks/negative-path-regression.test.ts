@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { type HookResult, useTempDir } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 

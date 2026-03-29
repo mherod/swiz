@@ -8,7 +8,6 @@
 import { unlink } from "node:fs/promises"
 import { compact } from "lodash-es"
 import { GIT_DIR_NAME, GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -17,7 +16,8 @@ import {
   git,
   isShellTool,
   spawnWithTimeout,
-} from "./utils/hook-utils.ts"
+} from "../src/utils/hook-utils.ts"
+import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
