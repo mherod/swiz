@@ -1,6 +1,7 @@
 // noinspection JSUnusedGlobalSymbols
 
 import { join } from "node:path"
+import { detectCurrentAgent } from "./agent-paths.ts"
 import { getHomeDir } from "./home.ts"
 import { getProviderTaskRoots, type ProviderTaskRoots } from "./provider-adapters.ts"
 
@@ -15,17 +16,22 @@ export type TaskStore = ProviderTaskRoots
 
 /**
  * Create the default task store for the current environment.
- * This is the single canonical factory for resolving storage roots —
- * task-repository and task-resolver depend on this type, not on any
- * Claude-specific path logic.
+ * Detects the current agent and returns its task storage roots.
+ * Falls back to Claude paths when no agent is detected.
  *
  * Usage: `const store = createDefaultTaskStore()`
  */
 export function createDefaultTaskStore(homeDir = getHomeDir()): ProviderTaskRoots {
   const defaultHome = getHomeDir()
   if (homeDir === defaultHome) {
-    const roots = getProviderTaskRoots("claude")
-    if (roots) return roots
+    // Try detected agent first, then fall back to Claude
+    const agent = detectCurrentAgent()
+    if (agent) {
+      const roots = getProviderTaskRoots(agent)
+      if (roots) return roots
+    }
+    const claudeRoots = getProviderTaskRoots("claude")
+    if (claudeRoots) return claudeRoots
   }
   return {
     tasksDir: join(homeDir, ".claude", "tasks"),

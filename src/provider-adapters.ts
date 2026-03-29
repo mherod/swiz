@@ -224,7 +224,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return [join(this.getHomeDir(), "skills")]
     },
     getTaskRoots() {
-      return null
+      return {
+        tasksDir: join(this.getHomeDir(), "tasks"),
+        projectsDir: this.getSessionDir(),
+      }
     },
   },
 
@@ -273,7 +276,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       ]
     },
     getTaskRoots() {
-      return null
+      return {
+        tasksDir: join(this.getHomeDir(), "tasks"),
+        projectsDir: join(this.getHomeDir(), "projects"),
+      }
     },
   },
 
@@ -309,7 +315,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return [join(this.getHomeDir(), "skills")]
     },
     getTaskRoots() {
-      return null
+      return {
+        tasksDir: join(this.getHomeDir(), "tasks"),
+        projectsDir: join(this.getHomeDir(), "projects"),
+      }
     },
   },
 }
