@@ -3,7 +3,7 @@
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
 import { emitContext, isFileEditTool, spawnWithTimeout } from "../src/utils/hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
 async function findPrettier(filePath: string, cwd: string): Promise<string | null> {
@@ -23,9 +23,7 @@ async function findPrettier(filePath: string, cwd: string): Promise<string | nul
   return null
 }
 
-function resolveTsEditTarget(
-  input: ReturnType<typeof fileEditHookInputSchema.parse>
-): string | null {
+function resolveTsEditTarget(input: FileEditHookInput): string | null {
   const toolName = input.tool_name ?? ""
   if (!isFileEditTool(toolName)) return null
   const filePath = input.tool_input?.file_path ?? ""

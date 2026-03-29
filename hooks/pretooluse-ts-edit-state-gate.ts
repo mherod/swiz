@@ -3,10 +3,10 @@
 // PreToolUse hook: require developing, reviewing, or addressing-feedback state
 // before editing .ts / .tsx files. Planning is for triage and design — not TS edits.
 
-import type { ProjectState } from "../src/settings/types.ts"
+import type { ProjectState } from "../src/settings"
 import { readProjectState } from "../src/settings.ts"
 import { denyPreToolUse, isCodeChangeTool } from "../src/utils/hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 const ALLOWED_STATES = new Set<ProjectState>(["developing", "reviewing", "addressing-feedback"])
 
@@ -15,7 +15,7 @@ function isTsOrTsxPath(raw: string): boolean {
   return /\.(tsx|ts)$/i.test(p)
 }
 
-function resolveTsEditPath(input: ReturnType<typeof fileEditHookInputSchema.parse>): string | null {
+function resolveTsEditPath(input: FileEditHookInput): string | null {
   if (!isCodeChangeTool(input.tool_name ?? "")) return null
   const toolInput = input.tool_input as Record<string, unknown> | undefined
   const filePath = String(toolInput?.file_path ?? toolInput?.path ?? "")

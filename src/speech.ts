@@ -17,8 +17,12 @@ export async function spawnSpeak(
 ): Promise<void> {
   const scriptPath = speakScriptPath ?? join(dirname(import.meta.path), "../hooks/speak.ts")
   const speakArgs = ["bun", scriptPath]
-  if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
-  if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
+  if (settings.narratorVoice) {
+    speakArgs.push("--voice", settings.narratorVoice)
+  }
+  if (settings.narratorSpeed > 0) {
+    speakArgs.push("--speed", String(settings.narratorSpeed))
+  }
   try {
     const proc = Bun.spawn(speakArgs, {
       stdin: new Response(text).body!,
