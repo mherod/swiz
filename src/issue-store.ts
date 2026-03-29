@@ -110,6 +110,10 @@ export interface IssueStoreReader {
   listIssueComments<T = unknown>(repo: string, issueNumber: number): Promise<T[] | null>
   /** Timestamp (ms) of the most recent comment on an issue, or null when not yet synced. */
   getLatestCommentAt(repo: string, issueNumber: number): Promise<number | null>
+  /** Cached labels for a repo. Returns empty array when not yet synced. */
+  listLabels<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
+  /** Cached milestones for a repo. Returns empty array when not yet synced. */
+  listMilestones<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
 }
 
 // ─── GitHubClient ────────────────────────────────────────────────────────────
@@ -171,6 +175,24 @@ export interface GitHubCiRunRecord {
   url: string
 }
 
+/** Raw label shape returned by GitHub list APIs. */
+export interface GitHubLabelRecord {
+  name: string
+  color?: string
+  description?: string
+}
+
+/** Raw milestone shape returned by GitHub list APIs. */
+export interface GitHubMilestoneRecord {
+  number: number
+  title: string
+  description?: string
+  state?: string
+  dueOn?: string
+  openIssues?: number
+  closedIssues?: number
+}
+
 /**
  * Abstraction over GitHub data fetching. Allows sync logic to be tested
  * without spawning real `gh` CLI processes.
@@ -183,6 +205,12 @@ export interface GitHubClient {
   listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null>
   /** Fetch comments for a single issue. Returns null on error. */
   listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null>
+  /** List repo labels. Returns null on error. */
+  listLabels(cwd: string): Promise<GitHubLabelRecord[] | null>
+  /** List open milestones. Returns null on error. */
+  listMilestones(cwd: string): Promise<GitHubMilestoneRecord[] | null>
+  /** List recent workflow runs for a specific branch. Returns null on error. */
+  listBranchWorkflowRuns(cwd: string, branch: string): Promise<GitHubCiRunRecord[] | null>
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -292,6 +320,24 @@ export class IssueStore {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_issue_comments_repo_issue
       ON issue_comments (repo, issue_number)
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS labels (
+        repo TEXT NOT NULL,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, name)
+      )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS milestones (
+        repo TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, number)
+      )
     `)
   }
 
@@ -581,9 +627,85 @@ export class IssueStore {
       .run(repo, issueNumber)
   }
 
+  // ─── Label operations ─────────────────────────────────────────────────
+
+  /** List cached labels for a repo. Returns only labels within TTL window. */
+  listLabels<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
+    const cutoff = Date.now() - ttlMs
+    const rows = this.db
+      .query("SELECT data FROM labels WHERE repo = ? AND synced_at > ?")
+      .all(repo, cutoff) as { data: string }[]
+    return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Upsert labels from a successful gh call. Replaces existing data. */
+  upsertLabels<T extends { name: string }>(repo: string, labels: T[]): void {
+    const stmt = this.db.prepare(
+      "INSERT OR REPLACE INTO labels (repo, name, data, synced_at) VALUES (?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const label of labels) {
+        stmt.run(repo, label.name, JSON.stringify(label), now)
+      }
+    })
+    tx()
+  }
+
+  /** Remove labels not present in the given set (deleted upstream). */
+  removeStaleLabels(repo: string, currentNames: Set<string>): number {
+    if (currentNames.size === 0) {
+      const result = this.db.query("DELETE FROM labels WHERE repo = ?").run(repo)
+      return result.changes
+    }
+    const placeholders = [...currentNames].map(() => "?").join(",")
+    const result = this.db
+      .query(`DELETE FROM labels WHERE repo = ? AND name NOT IN (${placeholders})`)
+      .run(repo, ...currentNames)
+    return result.changes
+  }
+
+  // ─── Milestone operations ──────────────────────────────────────────────
+
+  /** List cached milestones for a repo. Returns only milestones within TTL window. */
+  listMilestones<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
+    const cutoff = Date.now() - ttlMs
+    const rows = this.db
+      .query("SELECT data FROM milestones WHERE repo = ? AND synced_at > ?")
+      .all(repo, cutoff) as { data: string }[]
+    return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Upsert milestones from a successful gh call. Replaces existing data. */
+  upsertMilestones<T extends { number: number }>(repo: string, milestones: T[]): void {
+    const stmt = this.db.prepare(
+      "INSERT OR REPLACE INTO milestones (repo, number, data, synced_at) VALUES (?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const milestone of milestones) {
+        stmt.run(repo, milestone.number, JSON.stringify(milestone), now)
+      }
+    })
+    tx()
+  }
+
+  /** Remove milestones not present in the given set (closed/deleted upstream). */
+  removeStaleMilestones(repo: string, currentNumbers: Set<number>): number {
+    if (currentNumbers.size === 0) {
+      const result = this.db.query("DELETE FROM milestones WHERE repo = ?").run(repo)
+      return result.changes
+    }
+    const placeholders = [...currentNumbers].map(() => "?").join(",")
+    const result = this.db
+      .query(`DELETE FROM milestones WHERE repo = ? AND number NOT IN (${placeholders})`)
+      .run(repo, ...currentNumbers)
+    return result.changes
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
-  /** Clear all cached data (issues, PRs, CI) for a repo. Preserves pending mutations. */
+  /** Clear all cached data (issues, PRs, CI, labels, milestones) for a repo. Preserves pending mutations. */
   clearCachedData(repo: string): void {
     this.db.query("DELETE FROM issues WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM pull_requests WHERE repo = ?").run(repo)
@@ -591,6 +713,8 @@ export class IssueStore {
     this.db.query("DELETE FROM ci_branch_runs WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM pr_branch_detail WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM issue_comments WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM labels WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM milestones WHERE repo = ?").run(repo)
   }
 
   /** Clear ALL cached data across all repos. Preserves pending mutations. */
@@ -601,6 +725,8 @@ export class IssueStore {
     this.db.query("DELETE FROM ci_branch_runs").run()
     this.db.query("DELETE FROM pr_branch_detail").run()
     this.db.query("DELETE FROM issue_comments").run()
+    this.db.query("DELETE FROM labels").run()
+    this.db.query("DELETE FROM milestones").run()
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -630,6 +756,10 @@ export class IssueStore {
         Promise.resolve(this.listIssueComments<T>(repo, issueNumber)),
       getLatestCommentAt: (repo: string, issueNumber: number) =>
         Promise.resolve(this.getLatestCommentAt(repo, issueNumber)),
+      listLabels: <T = unknown>(repo: string, ttlMs?: number) =>
+        Promise.resolve(this.listLabels<T>(repo, ttlMs)),
+      listMilestones: <T = unknown>(repo: string, ttlMs?: number) =>
+        Promise.resolve(this.listMilestones<T>(repo, ttlMs)),
     }
   }
 }
@@ -1190,6 +1320,8 @@ function createNoOpStore(): IssueStore {
             _issueNumber: number
           ): Promise<T[] | null> => null,
           getLatestCommentAt: async (_repo: string, _issueNumber: number): Promise<null> => null,
+          listLabels: async <T = unknown>(_repo: string): Promise<T[]> => [],
+          listMilestones: async <T = unknown>(_repo: string): Promise<T[]> => [],
         })
       }
       if (READ_LIST_METHODS.has(prop as string)) {

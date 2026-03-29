@@ -736,6 +736,14 @@ describe("syncUpstreamState", () => {
       if (endpoint.startsWith("repos/{owner}/{repo}/pulls?state=closed")) {
         return createMockSpawnResult(JSON.stringify([]))
       }
+      if (endpoint.startsWith("repos/{owner}/{repo}/labels")) {
+        return createMockSpawnResult(
+          JSON.stringify([{ name: "bug", color: "d73a4a", description: "Something isn't working" }])
+        )
+      }
+      if (endpoint.startsWith("repos/{owner}/{repo}/milestones")) {
+        return createMockSpawnResult(JSON.stringify([]))
+      }
 
       return createMockSpawnResult("", `unexpected endpoint: ${endpoint}`, 1)
     }
@@ -746,8 +754,10 @@ describe("syncUpstreamState", () => {
       expect(result.issues.upserted).toBe(1)
       expect(result.pullRequests.upserted).toBe(1)
       expect(result.ciStatuses.upserted).toBe(0)
-      expect(calls).toHaveLength(5)
-      expect(calls.every((args) => args[0] === "gh" && args[1] === "api")).toBe(true)
+      expect(result.labels.upserted).toBe(1)
+      // The initial batch calls (issues, PRs, runs, labels, milestones) should use REST API
+      const restCalls = calls.filter((args) => args[0] === "gh" && args[1] === "api")
+      expect(restCalls.length).toBeGreaterThanOrEqual(7) // 5 original + labels + milestones
       expect(store.getIssue<{ title: string }>("owner/repo", 101)?.title).toBe("REST issue")
       expect(store.getPullRequest<{ title: string }>("owner/repo", 202)?.title).toBe("REST pr")
     } finally {
@@ -1147,6 +1157,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       },
       listWorkflowRuns: async () => [],
       listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
     }
 
     try {
@@ -1168,6 +1181,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listPullRequests: async () => null,
       listWorkflowRuns: async () => null,
       listIssueComments: async () => null,
+      listLabels: async () => null,
+      listMilestones: async () => null,
+      listBranchWorkflowRuns: async () => null,
     }
 
     try {
@@ -1203,6 +1219,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       },
       listWorkflowRuns: async () => [],
       listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
     }
 
     try {
@@ -1244,6 +1263,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
         },
       ],
       listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
     }
 
     try {
@@ -1272,6 +1294,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listPullRequests: async (_cwd, state) => (state === "open" ? [] : []),
       listWorkflowRuns: async () => [],
       listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => null,
     }
 
     try {
@@ -1281,6 +1306,169 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       expect(result.issues.removed).toBe(2)
       expect(store.getIssue("test/repo", 1)).toBeNull()
       expect(store.getIssue("test/repo", 2)).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStore label operations", () => {
+  test("upserts and lists labels within TTL", () => {
+    const store = createStore()
+    try {
+      store.upsertLabels("owner/repo", [
+        { name: "bug", color: "d73a4a", description: "Something broken" },
+        { name: "enhancement", color: "a2eeef", description: "New feature" },
+      ])
+      const labels = store.listLabels<{ name: string }>("owner/repo")
+      expect(labels).toHaveLength(2)
+      expect(labels.map((l) => l.name).sort()).toEqual(["bug", "enhancement"])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("removeStaleLabels purges labels not in current set", () => {
+    const store = createStore()
+    try {
+      store.upsertLabels("owner/repo", [
+        { name: "bug", color: "d73a4a" },
+        { name: "wontfix", color: "ffffff" },
+        { name: "enhancement", color: "a2eeef" },
+      ])
+      const removed = store.removeStaleLabels("owner/repo", new Set(["bug", "enhancement"]))
+      expect(removed).toBe(1)
+      const labels = store.listLabels<{ name: string }>("owner/repo")
+      expect(labels.map((l) => l.name).sort()).toEqual(["bug", "enhancement"])
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStore milestone operations", () => {
+  test("upserts and lists milestones within TTL", () => {
+    const store = createStore()
+    try {
+      store.upsertMilestones("owner/repo", [
+        { number: 1, title: "v1.0" },
+        { number: 2, title: "v2.0" },
+      ])
+      const milestones = store.listMilestones<{ title: string }>("owner/repo")
+      expect(milestones).toHaveLength(2)
+      expect(milestones.map((m) => m.title).sort()).toEqual(["v1.0", "v2.0"])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("removeStaleMilestones purges milestones not in current set", () => {
+    const store = createStore()
+    try {
+      store.upsertMilestones("owner/repo", [
+        { number: 1, title: "v1.0" },
+        { number: 2, title: "v2.0" },
+      ])
+      const removed = store.removeStaleMilestones("owner/repo", new Set([1]))
+      expect(removed).toBe(1)
+      const milestones = store.listMilestones<{ title: string }>("owner/repo")
+      expect(milestones).toHaveLength(1)
+      expect(milestones[0]!.title).toBe("v1.0")
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("syncUpstreamState with labels, milestones, and branch data", () => {
+  test("syncs labels and milestones into store", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async () => [],
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
+      listLabels: async () => [
+        { name: "bug", color: "d73a4a", description: "Something broken" },
+        { name: "feature", color: "a2eeef" },
+      ],
+      listMilestones: async () => [{ number: 1, title: "v1.0", state: "open" }],
+      listBranchWorkflowRuns: async () => null,
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(result.labels.upserted).toBe(2)
+      expect(result.milestones.upserted).toBe(1)
+      const labels = store.listLabels<{ name: string }>("test/repo")
+      expect(labels).toHaveLength(2)
+      const milestones = store.listMilestones<{ title: string }>("test/repo")
+      expect(milestones).toHaveLength(1)
+      expect(milestones[0]!.title).toBe("v1.0")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("syncs branch CI runs for open PR branches", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async (_cwd, state) => {
+        if (state === "open") return [{ number: 1, title: "PR", headRefName: "feat/x" }]
+        return []
+      },
+      listWorkflowRuns: async () => [],
+      listIssueComments: async () => null,
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async (_cwd, branch) => {
+        if (branch === "main" || branch === "feat/x") {
+          return [
+            {
+              headSha: "abc",
+              databaseId: 100,
+              status: "completed",
+              conclusion: "success",
+              url: "u",
+            },
+          ]
+        }
+        return null
+      },
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      // main + feat/x = 2 branches, 1 run each
+      expect(result.branchCi.upserted).toBe(2)
+      const mainRuns = store.getCiBranchRuns<{ databaseId: number }>("test/repo", "main")
+      expect(mainRuns).toHaveLength(1)
+      const featRuns = store.getCiBranchRuns<{ databaseId: number }>("test/repo", "feat/x")
+      expect(featRuns).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("null labels/milestones are handled gracefully", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => null,
+      listPullRequests: async () => null,
+      listWorkflowRuns: async () => null,
+      listIssueComments: async () => null,
+      listLabels: async () => null,
+      listMilestones: async () => null,
+      listBranchWorkflowRuns: async () => null,
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      expect(result.labels.upserted).toBe(0)
+      expect(result.milestones.upserted).toBe(0)
+      expect(result.branchCi.upserted).toBe(0)
+      expect(result.prBranchDetail.upserted).toBe(0)
     } finally {
       store.close()
     }
@@ -1334,6 +1522,15 @@ describe("IssueStoreReader", () => {
       const detail = await reader.getPrBranchDetail<{ commentCount: number }>("test/repo", "feat/x")
       expect(detail?.commentCount).toBe(2)
 
+      store.upsertLabels("test/repo", [{ name: "bug", color: "d73a4a" }])
+      store.upsertMilestones("test/repo", [{ number: 1, title: "v1.0" }])
+      const labels = await reader.listLabels<{ name: string }>("test/repo")
+      expect(labels).toHaveLength(1)
+      expect(labels[0]!.name).toBe("bug")
+      const milestones = await reader.listMilestones<{ title: string }>("test/repo")
+      expect(milestones).toHaveLength(1)
+      expect(milestones[0]!.title).toBe("v1.0")
+
       const missing = await reader.getIssue("test/repo", 999)
       expect(missing).toBeNull()
     } finally {
@@ -1354,6 +1551,8 @@ describe("IssueStoreReader", () => {
       getPrBranchDetail: async () => null,
       listIssueComments: async () => null,
       getLatestCommentAt: async () => null,
+      listLabels: async <T = unknown>() => [] as T[],
+      listMilestones: async <T = unknown>() => [] as T[],
     }
 
     const issues = await mockReader.listIssues("any/repo")

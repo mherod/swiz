@@ -341,33 +341,76 @@ function formatNumericDisplay(numVal: number, placeholder: string | undefined): 
   return String(numVal)
 }
 
+function formatSettingValue(def: (typeof SETTINGS_REGISTRY)[number], value: unknown): string {
+  if (def.kind === "numeric")
+    return formatNumericDisplay(value as number, def.docs?.valuePlaceholder)
+  return (value as string) || "system default"
+}
+
 function numericGlobalSettingsRows(effective: EffectiveSwizSettings): SettingsRow[] {
-  const out: SettingsRow[] = []
-  for (const def of SETTINGS_REGISTRY) {
-    if (def.kind !== "numeric" && def.kind !== "string") continue
-    if (!def.scopes.includes("global")) continue
-    const key = def.key as keyof EffectiveSwizSettings
-    const value = effective[key]
-    const label = def.aliases[0] ?? def.key
-    if (def.kind === "numeric") {
-      const display = formatNumericDisplay(value as number, def.docs?.valuePlaceholder)
-      out.push({
-        label: `${label}:`,
-        value: display,
-        scope: "global",
-        description: def.docs?.description,
-      })
-    } else {
-      const strVal = value as string
-      out.push({
-        label: `${label}:`,
-        value: strVal || "system default",
-        scope: "global",
-        description: def.docs?.description,
-      })
-    }
+  return SETTINGS_REGISTRY.filter(
+    (def) => (def.kind === "numeric" || def.kind === "string") && def.scopes.includes("global")
+  ).map((def) => ({
+    label: `${def.aliases[0] ?? def.key}:`,
+    value: formatSettingValue(def, effective[def.key as keyof EffectiveSwizSettings]),
+    scope: "global",
+    description: def.docs?.description,
+  }))
+}
+
+function resolveGlobalScopes(
+  effective: EffectiveSwizSettings,
+  ambitionSource: "global" | "project" | "session" | undefined,
+  strictNoDirectMainSource: "global" | "project" | undefined
+): { base: string; ambition: string; collaboration: string; strict: string } {
+  const base = effective.source === "session" ? "session override" : "global/default"
+  return {
+    base,
+    ambition: resolveScopeLabel(ambitionSource, "global/default"),
+    collaboration: effective.collaborationMode === "auto" ? "default" : base,
+    strict: strictNoDirectMainSource === "project" ? "project override" : "global",
   }
-  return out
+}
+
+function descFor(key: string): string | undefined {
+  return DEF_BY_KEY.get(key)?.docs?.description
+}
+
+function buildGlobalSettingsRows(
+  effective: EffectiveSwizSettings & { disabledHooks?: string[] },
+  ambitionSource: "global" | "project" | "session" | undefined,
+  strictNoDirectMainSource: "global" | "project" | undefined
+): SettingsRow[] {
+  const scopes = resolveGlobalScopes(effective, ambitionSource, strictNoDirectMainSource)
+
+  return [
+    {
+      label: "auto-continue:",
+      value: boolToEnabledDisabled(effective.autoContinue),
+      scope: scopes.base,
+      description: descFor("autoContinue"),
+    },
+    {
+      label: "ambition-mode:",
+      value: effective.ambitionMode,
+      scope: scopes.ambition,
+      description: descFor("ambitionMode"),
+    },
+    {
+      label: "collaboration:",
+      value: effective.collaborationMode,
+      scope: scopes.collaboration,
+      description: descFor("collaborationMode"),
+    },
+    ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective),
+    {
+      label: "strict-no-direct-main:",
+      value: boolToEnabledDisabled(effective.strictNoDirectMain),
+      scope: scopes.strict,
+      description: descFor("strictNoDirectMain"),
+    },
+    ...numericGlobalSettingsRows(effective),
+  ]
 }
 
 function printGlobalSettings(
@@ -375,38 +418,7 @@ function printGlobalSettings(
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined
 ): void {
-  const scopeLabel = effective.source === "session" ? "session override" : "global/default"
-  const ambitionScopeLabel = resolveScopeLabel(ambitionSource, "global/default")
-  const strictLabel = strictNoDirectMainSource === "project" ? "project override" : "global"
-
-  const rows: SettingsRow[] = [
-    {
-      label: "auto-continue:",
-      value: boolToEnabledDisabled(effective.autoContinue),
-      scope: scopeLabel,
-      description: DEF_BY_KEY.get("autoContinue")?.docs?.description,
-    },
-    {
-      label: "ambition-mode:",
-      value: effective.ambitionMode,
-      scope: ambitionScopeLabel,
-      description: DEF_BY_KEY.get("ambitionMode")?.docs?.description,
-    },
-    {
-      label: "collaboration:",
-      value: effective.collaborationMode,
-      scope: effective.collaborationMode === "auto" ? "default" : scopeLabel,
-      description: DEF_BY_KEY.get("collaborationMode")?.docs?.description,
-    },
-    ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective),
-    {
-      label: "strict-no-direct-main:",
-      value: boolToEnabledDisabled(effective.strictNoDirectMain),
-      scope: strictLabel,
-      description: DEF_BY_KEY.get("strictNoDirectMain")?.docs?.description,
-    },
-    ...numericGlobalSettingsRows(effective),
-  ]
+  const rows = buildGlobalSettingsRows(effective, ambitionSource, strictNoDirectMainSource)
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
@@ -699,6 +711,41 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
   }
 }
 
+function printSetConfirmation(
+  parsed: ParsedSettingsArgs & { scope: string },
+  key: string,
+  displayValue: string,
+  path: string,
+  def: ReturnType<typeof getSettingDef>
+): void {
+  if (parsed.json) {
+    console.log(
+      JSON.stringify({
+        action: "set",
+        setting: key,
+        value: def.kind === "numeric" ? Number(displayValue) : displayValue,
+        scope: parsed.scope,
+        path,
+        description: def.docs?.description,
+        effect: def.docs?.effectExplanation,
+      })
+    )
+    return
+  }
+  console.log(`\n  Set ${parsed.settingArg} = ${displayValue} (${parsed.scope})`)
+  if (def.docs?.effectExplanation) {
+    console.log(`\n  Effect: ${def.docs.effectExplanation}`)
+  }
+  console.log(`\n  Saved: ${path}\n`)
+}
+
+function parseNumericSettingValue(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`Invalid value "${raw}". Must be a non-negative integer.\n${usage()}`)
+  }
+  return Number(raw)
+}
+
 async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (!parsed.settingValue) {
@@ -708,8 +755,7 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   }
   const resolvedScope = resolveSettingScope(key, parsed.scope, parsed.scopeExplicitlySet)
   validateSettingScope(key, resolvedScope, parsed.settingArg ?? key)
-  const parsedWithResolvedScope = { ...parsed, scope: resolvedScope }
-
+  const resolved = { ...parsed, scope: resolvedScope }
   const def = getSettingDef(key)
 
   if (def.kind === "string") {
@@ -717,58 +763,15 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       const error = def.validate(parsed.settingValue)
       if (error) throw new Error(`${error}\n${usage()}`)
     }
-    const path = await writeSettingToScope(parsedWithResolvedScope, key, parsed.settingValue)
-    if (parsedWithResolvedScope.json) {
-      console.log(
-        JSON.stringify({
-          action: "set",
-          setting: key,
-          value: parsed.settingValue,
-          scope: parsedWithResolvedScope.scope,
-          path,
-          description: def.docs?.description,
-          effect: def.docs?.effectExplanation,
-        })
-      )
-      return
-    }
-    console.log(
-      `\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsedWithResolvedScope.scope})`
-    )
-    if (def.docs?.effectExplanation) {
-      console.log(`\n  Effect: ${def.docs.effectExplanation}`)
-    }
-    console.log(`\n  Saved: ${path}\n`)
+    const path = await writeSettingToScope(resolved, key, parsed.settingValue)
+    printSetConfirmation(resolved, key, parsed.settingValue, path, def)
     return
   }
 
-  if (!/^\d+$/.test(parsed.settingValue)) {
-    throw new Error(
-      `Invalid value "${parsed.settingValue}". Must be a non-negative integer.\n${usage()}`
-    )
-  }
-  const value = Number(parsed.settingValue)
-  const path = await writeSettingToScope(parsedWithResolvedScope, key, value)
-  if (parsedWithResolvedScope.json) {
-    console.log(
-      JSON.stringify({
-        action: "set",
-        setting: key,
-        value,
-        scope: parsedWithResolvedScope.scope,
-        path,
-        description: def.docs?.description,
-        effect: def.docs?.effectExplanation,
-      })
-    )
-    return
-  }
+  const value = parseNumericSettingValue(parsed.settingValue)
+  const path = await writeSettingToScope(resolved, key, value)
   const label = value === 0 ? "system default" : `${value}`
-  console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsedWithResolvedScope.scope})`)
-  if (def.docs?.effectExplanation) {
-    console.log(`\n  Effect: ${def.docs.effectExplanation}`)
-  }
-  console.log(`\n  Saved: ${path}\n`)
+  printSetConfirmation(resolved, key, label, path, def)
 }
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943

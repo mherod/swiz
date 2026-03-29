@@ -1034,7 +1034,7 @@ describe("stop-completion-auditor: positive paths", () => {
     expect(r.stdout).toBe("")
   })
 
-  test("incomplete task blocks stop with task details", async () => {
+  test("incomplete tasks are delegated to stop-incomplete-tasks (auditor allows stop)", async () => {
     const homeDir = await createTempDir()
     const sessionId = "test-incomplete"
     await createTaskFile(homeDir, sessionId, {
@@ -1053,15 +1053,12 @@ describe("stop-completion-auditor: positive paths", () => {
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
-    expect(r.json).not.toBeNull()
-    expect(r.json?.decision).toBe("block")
-    const reason = r.json?.reason as string
-    expect(reason).toContain("Incomplete tasks")
-    expect(reason).toContain("#1 [in_progress]: Implement feature X")
-    expect(reason).toContain("#2 [pending]: Write tests")
+    // stop-completion-auditor delegates incomplete-task blocking to stop-incomplete-tasks.ts
+    // It returns early without blocking when incomplete tasks exist
+    expect(r.json).toBeNull()
   })
 
-  test("mix of completed and incomplete shows only incomplete", async () => {
+  test("mix of completed and incomplete delegates to stop-incomplete-tasks", async () => {
     const homeDir = await createTempDir()
     const sessionId = "test-mixed"
     await createTaskFile(homeDir, sessionId, {
@@ -1080,10 +1077,8 @@ describe("stop-completion-auditor: positive paths", () => {
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
-    expect(r.json?.decision).toBe("block")
-    const reason = r.json?.reason as string
-    expect(reason).toContain("Still working")
-    expect(reason).not.toContain("Done task")
+    // Auditor defers to stop-incomplete-tasks for incomplete task blocking
+    expect(r.json).toBeNull()
   })
 
   test("substantial session without tasks blocks stop", async () => {

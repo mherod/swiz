@@ -1,4 +1,4 @@
-import type { GitHubClient, IssueStore } from "./issue-store.ts"
+import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.ts"
 
 // ─── Upstream sync ─────────────────────────────────────────────────────────
 
@@ -7,10 +7,26 @@ export interface UpstreamSyncResult {
   pullRequests: { upserted: number; removed: number }
   ciStatuses: { upserted: number }
   comments: { upserted: number }
+  labels: { upserted: number; removed: number }
+  milestones: { upserted: number; removed: number }
+  branchCi: { upserted: number }
+  prBranchDetail: { upserted: number }
 }
 
 /** Labels that indicate an issue may be blocked/stalled and worth checking for recent comments. */
 const COMMENT_SYNC_LABELS = new Set(["blocked", "upstream", "on-hold", "waiting"])
+
+/** How many recently-updated issues (by updatedAt) to sync comments for, beyond label-gated ones. */
+const RECENT_ISSUE_COMMENT_LIMIT = 5
+
+/** Shared context for sync helper functions — avoids exceeding max-params. */
+interface SyncContext {
+  store: IssueStore
+  client: GitHubClient
+  repo: string
+  cwd: string
+  result: UpstreamSyncResult
+}
 
 interface EntitySyncOps {
   upsert: (repo: string, items: { number: number }[]) => void
@@ -59,6 +75,149 @@ function syncCiRuns(
   result.ciStatuses.upserted = ciRecords.length
 }
 
+function syncLabels(
+  s: IssueStore,
+  repo: string,
+  labels: { name: string }[] | null,
+  result: UpstreamSyncResult
+): void {
+  if (!labels) return
+  if (labels.length > 0) {
+    s.upsertLabels(repo, labels)
+    result.labels.removed = s.removeStaleLabels(repo, new Set(labels.map((l) => l.name)))
+  } else {
+    result.labels.removed = s.removeStaleLabels(repo, new Set())
+  }
+  result.labels.upserted = labels.length
+}
+
+function syncMilestones(
+  s: IssueStore,
+  repo: string,
+  milestones: { number: number }[] | null,
+  result: UpstreamSyncResult
+): void {
+  if (!milestones) return
+  if (milestones.length > 0) {
+    s.upsertMilestones(repo, milestones)
+    result.milestones.removed = s.removeStaleMilestones(
+      repo,
+      new Set(milestones.map((m) => m.number))
+    )
+  } else {
+    result.milestones.removed = s.removeStaleMilestones(repo, new Set())
+  }
+  result.milestones.upserted = milestones.length
+}
+
+/** Collect unique branch names: default branch + branches from open PRs. */
+function collectSyncBranches(prs: { headRefName?: string }[] | null): string[] {
+  const branches = new Set<string>()
+  branches.add("main")
+  if (prs) {
+    for (const pr of prs) {
+      if (pr.headRefName) branches.add(pr.headRefName)
+    }
+  }
+  return [...branches]
+}
+
+/** Upsert fetched branch CI runs into the store. */
+function upsertBranchCiRuns(
+  s: IssueStore,
+  repo: string,
+  branches: string[],
+  runResults: (GitHubCiRunRecord[] | null)[],
+  result: UpstreamSyncResult
+): void {
+  for (let i = 0; i < branches.length; i++) {
+    const branch = branches[i]!
+    const runs = runResults[i]
+    if (!runs || runs.length === 0) continue
+    s.upsertCiBranchRuns(
+      repo,
+      branch,
+      runs.map((r) => ({
+        databaseId: r.databaseId,
+        status: r.status,
+        conclusion: r.conclusion,
+        workflowName: "",
+        createdAt: "",
+        event: "",
+      }))
+    )
+    result.branchCi.upserted += runs.length
+  }
+}
+
+/** Sync CI runs and PR review detail for branches with open PRs plus the default branch. */
+async function syncBranchData(
+  ctx: SyncContext,
+  prs: { number: number; headRefName?: string }[] | null
+): Promise<void> {
+  const branches = collectSyncBranches(prs)
+
+  const branchRunResults = await Promise.all(
+    branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))
+  )
+  upsertBranchCiRuns(ctx.store, ctx.repo, branches, branchRunResults, ctx.result)
+
+  // Sync PR branch detail for open PRs (reviewDecision, comment count)
+  if (!prs) return
+  for (const pr of prs) {
+    if (!pr.headRefName) continue
+    const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
+    const prData = pr as { reviewDecision?: string }
+    ctx.store.upsertPrBranchDetail(ctx.repo, pr.headRefName, {
+      reviewDecision: prData.reviewDecision ?? "",
+      commentCount: comments?.length ?? 0,
+    })
+    ctx.result.prBranchDetail.upserted++
+  }
+}
+
+/** Identify which issue numbers need comment sync: label-gated + recently-updated. */
+function collectCommentSyncTargets(
+  issues: { number: number; labels?: unknown; updatedAt?: string }[]
+): Set<number> {
+  const toSync = new Set<number>()
+
+  for (const issue of issues) {
+    const labels = (issue.labels as Array<{ name: string }> | undefined) ?? []
+    if (labels.some((l) => COMMENT_SYNC_LABELS.has(l.name.toLowerCase()))) {
+      toSync.add(issue.number)
+    }
+  }
+
+  const sorted = [...issues]
+    .filter((i) => i.updatedAt)
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+  for (const issue of sorted.slice(0, RECENT_ISSUE_COMMENT_LIMIT)) {
+    toSync.add(issue.number)
+  }
+
+  return toSync
+}
+
+/** Sync comments for blocked/stalled issues AND recently-updated issues. */
+async function syncComments(
+  ctx: SyncContext,
+  issues: { number: number; labels?: unknown; updatedAt?: string }[] | null
+): Promise<void> {
+  if (!issues) return
+
+  const toSync = collectCommentSyncTargets(issues)
+  let commentCount = 0
+  for (const issueNumber of toSync) {
+    const comments = await ctx.client.listIssueComments(ctx.cwd, issueNumber)
+    if (comments && comments.length > 0) {
+      ctx.store.upsertIssueComments(ctx.repo, issueNumber, comments)
+      commentCount += comments.length
+    }
+  }
+  ctx.result.comments.upserted = commentCount
+}
+
 /**
  * Poll upstream GitHub state for a repo and refresh the local store.
  * Fetches open issues, open PRs, and recent workflow runs, then upserts
@@ -78,15 +237,21 @@ export async function syncUpstreamState(
     pullRequests: { upserted: 0, removed: 0 },
     ciStatuses: { upserted: 0 },
     comments: { upserted: 0 },
+    labels: { upserted: 0, removed: 0 },
+    milestones: { upserted: 0, removed: 0 },
+    branchCi: { upserted: 0 },
+    prBranchDetail: { upserted: 0 },
   }
 
-  const [issues, prs, runs, closedIssues, closedPrs] = await Promise.all([
+  const [issues, prs, runs, closedIssues, closedPrs, labels, milestones] = await Promise.all([
     gh.listIssues(cwd, "open"),
     gh.listPullRequests(cwd, "open"),
     gh.listWorkflowRuns(cwd),
     // Backfill: fetch recently-closed issues/PRs to explicitly purge stale rows
     gh.listIssues(cwd, "closed"),
     gh.listPullRequests(cwd, "closed"),
+    gh.listLabels(cwd),
+    gh.listMilestones(cwd),
   ])
 
   syncEntityGroup(
@@ -112,23 +277,18 @@ export async function syncUpstreamState(
     result.pullRequests
   )
   syncCiRuns(s, repo, runs, result)
+  syncLabels(s, repo, labels, result)
+  syncMilestones(s, repo, milestones, result)
 
-  // Sync comments for blocked/stalled issues so the stop hook can check recent activity
-  if (issues) {
-    const blockedIssues = issues.filter((i) => {
-      const labels = (i.labels as Array<{ name: string }> | undefined) ?? []
-      return labels.some((l) => COMMENT_SYNC_LABELS.has(l.name.toLowerCase()))
-    })
-    let commentCount = 0
-    for (const issue of blockedIssues) {
-      const comments = await gh.listIssueComments(cwd, issue.number)
-      if (comments && comments.length > 0) {
-        s.upsertIssueComments(repo, issue.number, comments)
-        commentCount += comments.length
-      }
-    }
-    result.comments.upserted = commentCount
-  }
+  const ctx: SyncContext = { store: s, client: gh, repo, cwd, result }
+
+  // ─── Branch-level sync ──────────────────────────────────────────────────
+  // Sync CI runs and PR detail for branches with open PRs, plus the default branch.
+  await syncBranchData(ctx, prs)
+
+  // ─── Comment sync ───────────────────────────────────────────────────────
+  // Sync comments for blocked/stalled issues AND recently-updated issues
+  await syncComments(ctx, issues)
 
   return result
 }

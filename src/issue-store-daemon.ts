@@ -195,6 +195,28 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return ts ? new Date(ts).getTime() : null
   }
 
+  async listLabels<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
+    const result = await this.query<T[]>([
+      "label",
+      "list",
+      "--repo",
+      repo,
+      "--json",
+      "name,color,description",
+      "--limit",
+      "100",
+    ])
+    return result ?? []
+  }
+
+  async listMilestones<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
+    const result = await this.query<T[]>([
+      "api",
+      `repos/${repo}/milestones?state=open&per_page=100`,
+    ])
+    return result ?? []
+  }
+
   get isDaemonAvailable(): boolean | null {
     return this.daemonAvailable
   }

@@ -136,7 +136,7 @@ export class UpstreamSyncRegistry {
       entry.lastSyncAt = Date.now()
       entry.lastResult = result
       debugLog(
-        `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
+        `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} labels=${result.labels.upserted} milestones=${result.milestones.upserted} branchCi=${result.branchCi.upserted} prBranchDetail=${result.prBranchDetail.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
       )
       // Drain any queued offline mutations now that we have a live connection.
       const store = this.store ?? getIssueStore()
@@ -156,6 +156,10 @@ export class UpstreamSyncRegistry {
           pullRequests: { upserted: 0, removed: 0 },
           ciStatuses: { upserted: 0 },
           comments: { upserted: 0 },
+          labels: { upserted: 0, removed: 0 },
+          milestones: { upserted: 0, removed: 0 },
+          branchCi: { upserted: 0 },
+          prBranchDetail: { upserted: 0 },
         }
       )
     } finally {

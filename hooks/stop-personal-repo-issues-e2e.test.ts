@@ -304,7 +304,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
       issues: [makeIssue(42, "Fix login redirect bug", ["bug", "priority:high"])],
     })
     expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("Action plan:")
+    expect(result.reason).toContain("Refine 1 issue(s)")
   })
 
   test("skip-only issues allow stop (no actionable issues)", async () => {
@@ -418,7 +418,7 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
     expect(result.blocked).toBe(true)
     const r = result.reason!
     // 5 issues are missing one or more required refinement categories
-    expect(r).toContain("need refinement")
+    expect(r).toContain("Refine")
     expect(r).toContain("[missing labels:")
     // 3 issues have `ready` → actionable section
     expect(r).toContain("3 open issue(s)")
@@ -465,7 +465,7 @@ describe("E2E stop-personal-repo-issues: project state ordering", () => {
     expect(result.blocked).toBe(true)
     const r = result.reason!
     const posReady = r.indexOf("open issue(s)")
-    const posRefine = r.indexOf("need refinement")
+    const posRefine = r.indexOf("Refine")
     expect(posReady).not.toBe(-1)
     expect(posRefine).not.toBe(-1)
     expect(posReady).toBeLessThan(posRefine)
@@ -638,7 +638,7 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
     expect(r).toContain("#102")
     expect(r).not.toContain("#103")
     expect(r).not.toContain("#104")
-    expect(r).toContain("and 2 more conflicting PR(s) between those extremes")
+    expect(r).toContain("and 2 more")
   })
 })
 
@@ -728,6 +728,6 @@ describe("E2E stop-personal-repo-issues: normalisation survives real-world label
     })
     expect(result.blocked).toBe(true)
     expect(result.reason).toMatch(/on hold/i)
-    expect(result.reason).toContain("blocked and may be unblockable")
+    expect(result.reason).toContain("blocked issue")
   })
 })

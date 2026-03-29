@@ -10,6 +10,8 @@ import type {
   GitHubClient,
   GitHubCommentRecord,
   GitHubIssueRecord,
+  GitHubLabelRecord,
+  GitHubMilestoneRecord,
   GitHubPullRequestRecord,
 } from "./issue-store.ts"
 import { fetchGhJson } from "./issue-store.ts"
@@ -60,6 +62,43 @@ export class GhCliGitHubClient implements GitHubClient {
   async listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null> {
     return fetchGhJson<GitHubCommentRecord[]>(
       ["issue", "view", String(issueNumber), "--json", "comments", "--jq", ".comments"],
+      cwd
+    )
+  }
+
+  async listLabels(cwd: string): Promise<GitHubLabelRecord[] | null> {
+    return fetchGhJson<GitHubLabelRecord[]>(
+      ["label", "list", "--json", "name,color,description", "--limit", "100"],
+      cwd
+    )
+  }
+
+  async listMilestones(cwd: string): Promise<GitHubMilestoneRecord[] | null> {
+    return fetchGhJson<GitHubMilestoneRecord[]>(
+      [
+        "milestone",
+        "list",
+        "--json",
+        "number,title,description,state,dueOn,openIssues,closedIssues",
+        "--limit",
+        "100",
+      ],
+      cwd
+    )
+  }
+
+  async listBranchWorkflowRuns(cwd: string, branch: string): Promise<GitHubCiRunRecord[] | null> {
+    return fetchGhJson<GitHubCiRunRecord[]>(
+      [
+        "run",
+        "list",
+        "--branch",
+        branch,
+        "--json",
+        "headSha,databaseId,status,conclusion,url",
+        "--limit",
+        "10",
+      ],
       cwd
     )
   }
