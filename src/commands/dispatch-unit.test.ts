@@ -444,6 +444,24 @@ describe("dispatch.ts unit tests", () => {
       expect(hook).toBeDefined()
       expect(hook?.cooldownSeconds).toBe(30)
     })
+
+    it("cooldownMode is only set on hooks that also have cooldownSeconds", () => {
+      const allHooks = manifest.flatMap((g) => g.hooks)
+      allHooks.forEach((hook) => {
+        if (hook.cooldownMode !== undefined) {
+          expect(hook.cooldownSeconds).toBeDefined()
+        }
+      })
+    })
+
+    it("cooldownMode is one of the valid values when set", () => {
+      const allHooks = manifest.flatMap((g) => g.hooks)
+      allHooks.forEach((hook) => {
+        if (hook.cooldownMode !== undefined) {
+          expect(["block-only", "always"]).toContain(hook.cooldownMode)
+        }
+      })
+    })
   })
 
   describe("event type coverage", () => {

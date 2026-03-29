@@ -460,8 +460,12 @@ function finalizeExecution(
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
     execution.status = "slow"
   }
-  if (hook.cooldownSeconds && parsed && (isDeny(parsed) || isBlock(parsed))) {
-    void markHookCooldown(hook.file, cwd)
+  if (hook.cooldownSeconds) {
+    const alwaysMode = hook.cooldownMode === "always"
+    const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
+    if (alwaysMode || blockResult) {
+      void markHookCooldown(hook.file, cwd)
+    }
   }
   return execution
 }

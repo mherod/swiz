@@ -11,13 +11,26 @@ export interface HookDef {
   timeout?: number
   async?: boolean
   /**
-   * Minimum seconds between successive deny/block results of this hook (scoped per hook+cwd).
-   * The cooldown timer only starts when the hook **denies or blocks** a tool call.
-   * If the hook allows the call, no cooldown is recorded and the hook will run
-   * again on the next invocation. This prevents repeated blocks while giving the
-   * agent time to address the issue.
+   * Minimum seconds between successive runs of this hook (scoped per hook+cwd).
+   *
+   * How the timer starts depends on `cooldownMode`:
+   * - `"block-only"` (default): timer only starts when the hook **denies or blocks**.
+   *   Allow responses do not start the timer, so the hook keeps running until it blocks.
+   * - `"always"`: timer starts after **every** run regardless of outcome, so the hook
+   *   is skipped for the full cooldown window whether it allowed or denied.
    */
   cooldownSeconds?: number
+  /**
+   * Controls when the cooldown timer is activated after a hook run.
+   *
+   * - `"block-only"` (default): cooldown only activates when the hook returns a deny/block.
+   *   The hook continues to run on every invocation until it blocks, then cools down.
+   * - `"always"`: cooldown activates after every run regardless of result.
+   *   Use this for expensive hooks that should run at most once per window.
+   *
+   * Has no effect when `cooldownSeconds` is not set.
+   */
+  cooldownMode?: "block-only" | "always"
   /**
    * Optional environment-based skip condition. Evaluated before the hook process
    * is spawned; when the condition evaluates to false the hook is skipped entirely.
