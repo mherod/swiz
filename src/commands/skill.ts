@@ -12,6 +12,7 @@ import {
   stripFrontmatter,
 } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
+import { parseQuotedString, transformQuotedString } from "../utils/quoted-string.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
@@ -148,16 +149,10 @@ function remapToolList(
   remap: (tool: string) => string
 ): { result: string; unmapped: string[] } {
   function remapToken(raw: string): { token: string; unmapped?: string } {
-    const trimmed = raw.trim()
-    const quoted =
-      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))
-    const quoteChar = quoted ? trimmed[0] : ""
-    const unquoted = quoted ? trimmed.slice(1, -1) : trimmed
-    const mapped = remap(unquoted)
+    const { result, unmapped } = transformQuotedString(raw, remap)
     return {
-      token: quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped,
-      unmapped: mapped === unquoted ? unquoted : undefined,
+      token: result,
+      unmapped,
     }
   }
 
@@ -178,16 +173,11 @@ function remapPossiblyQuotedTool(
   raw: string,
   remap: (tool: string) => string
 ): { mappedRaw: string; unmapped?: string } {
-  const trimmed = raw.trim()
-  const quoted =
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  const quoteChar = quoted ? trimmed[0] : ""
-  const unquoted = quoted ? trimmed.slice(1, -1) : trimmed
-  const mapped = remap(unquoted)
+  const { quoteChar, content } = parseQuotedString(raw)
+  const mapped = remap(content)
   return {
     mappedRaw: quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped,
-    unmapped: mapped === unquoted ? unquoted : undefined,
+    unmapped: mapped === content ? content : undefined,
   }
 }
 

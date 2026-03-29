@@ -26,6 +26,7 @@ import {
 } from "../skill-utils.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
+import { stripQuotes } from "../utils/quoted-string.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
 import type { CheckResult } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
@@ -506,7 +507,7 @@ async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName
     const content = await Bun.file(skillPath).text()
     // Extract the current quoted/unquoted name value so we can report what changed
     const rawName = parseFrontmatterField(content, "name") ?? ""
-    const oldName = rawName.replace(/^["']|["']$/g, "")
+    const oldName = stripQuotes(rawName)
     // Replace the name: line value (handles both quoted and unquoted values)
     const updated = content.replace(/^(name:\s*)["']?[^"'\n]+["']?/m, `$1${entry.name}`)
     await Bun.write(skillPath, updated)

@@ -6,6 +6,7 @@ import { AGENTS } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
+import { stripQuotes } from "./utils/quoted-string.ts"
 
 /** Matches directories renamed by swiz to disable a skill, e.g. "my-skill.disabled-by-swiz-20260312143027". */
 const DISABLED_BY_SWIZ_RE = /\.disabled-by-swiz-\d{14}$/
@@ -65,7 +66,7 @@ export function stripFrontmatter(content: string): string {
 // ─── Skill tool availability checks ──────────────────────────────────────────
 
 function normalizeToolSpec(raw: string): string | null {
-  const trimmed = raw.trim().replace(/^["']|["']$/g, "")
+  const trimmed = stripQuotes(raw)
   if (!trimmed) return null
   const base = trimmed.split("(")[0]?.trim() ?? ""
   return base || null
