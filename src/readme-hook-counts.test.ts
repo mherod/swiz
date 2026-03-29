@@ -96,11 +96,16 @@ function manifestCountsByEvent(): Record<string, number> {
     sessionStart: "SessionStart",
     userPromptSubmit: "UserPromptSubmit",
   }
-  const counts: Record<string, number> = {}
+  const filesBySection: Record<string, Set<string>> = {}
   for (const group of manifest) {
     const section = EVENT_TO_SECTION[group.event]
     if (!section) continue
-    counts[section] = (counts[section] ?? 0) + group.hooks.length
+    if (!filesBySection[section]) filesBySection[section] = new Set()
+    for (const hook of group.hooks) filesBySection[section]!.add(hook.file)
+  }
+  const counts: Record<string, number> = {}
+  for (const [section, files] of Object.entries(filesBySection)) {
+    counts[section] = files.size
   }
   return counts
 }

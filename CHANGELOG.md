@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-29
+
+### Improvements
+
+- **Three-layer task dedup** — `subjectsOverlap` in `src/subject-fingerprint.ts` now
+  uses phrase synonyms, stemmed+synonymized canonical word overlap, and semantic domain
+  classification with workflow pipeline detection. Catches duplicates like
+  "Run Collaboration Guard" / "Execute Task Preflight" and "Verify working tree is clean" /
+  "Stage all uncommitted changes" that previously slipped through.
+- Extracted `canonicalWords`, `wordOverlapRatio`, `domainOverlap`, and `hasSharedActionVerb`
+  helpers to reduce `subjectsOverlap` cyclomatic complexity from 20 to under 10.
+
 ## 2026-03-28
 
 ### New Features

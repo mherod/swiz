@@ -210,9 +210,9 @@ describe("manifest.ts", () => {
   })
 
   describe("manifest integrity", () => {
-    it("all hook files have unique combinations (event + file)", () => {
+    it("all hook files have unique combinations (event + matcher + file)", () => {
       const combinations = manifest.flatMap((group) =>
-        group.hooks.map((hook) => `${group.event}:${hook.file}`)
+        group.hooks.map((hook) => `${group.event}:${group.matcher ?? ""}:${hook.file}`)
       )
       const unique = new Set(combinations)
       expect(unique.size).toBe(combinations.length)

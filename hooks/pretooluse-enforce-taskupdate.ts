@@ -164,8 +164,37 @@ async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<
   await checkRules(command, buildSwizTasksRules(), sessionId, tipContext)
 }
 
+async function checkNativeTaskUpdateCompletion(input: Record<string, unknown>): Promise<void> {
+  const toolInput = (input.tool_input ?? {}) as Record<string, unknown>
+  if (toolInput.status !== "completed") process.exit(0)
+
+  const taskId = String(toolInput.taskId ?? "")
+  if (!taskId) process.exit(0)
+
+  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
+  if (!sessionId) process.exit(0)
+
+  const allTasks = await readSessionTasks(sessionId)
+  const error = validateLastTaskStanding(taskId, allTasks)
+  if (error) {
+    denyPreToolUse(buildLastTaskStandingDenial(taskId))
+  }
+
+  allowPreToolUse("")
+}
+
+function isNativeTaskTool(toolName: string): boolean {
+  return toolName === "TaskUpdate" || toolName === "update_plan"
+}
+
 async function main() {
   const input = await Bun.stdin.json()
+  const toolName = String(input?.tool_name ?? "")
+
+  if (isNativeTaskTool(toolName)) {
+    await checkNativeTaskUpdateCompletion(input as Record<string, unknown>)
+  }
+
   if (!shouldInspectShellInput(input)) process.exit(0)
   await runSwizTasksEnforcement(input as Record<string, unknown>)
 }
