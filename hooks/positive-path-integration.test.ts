@@ -8,8 +8,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { type HookResult, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────

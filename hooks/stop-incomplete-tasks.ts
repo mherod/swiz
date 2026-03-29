@@ -3,7 +3,6 @@
 // Runs before the completion auditor so incomplete tasks are caught early.
 
 import { getHomeDirOrNull } from "../src/home.ts"
-import { blockStop } from "../src/utils/hook-utils.ts"
 import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
@@ -16,7 +15,8 @@ async function main(): Promise<void> {
 
   const result = await checkIncompleteTasks(sessionId, home)
   if (result) {
-    blockStop(result.reason)
+    console.log(JSON.stringify(result))
+    process.exit(0)
   }
 }
 

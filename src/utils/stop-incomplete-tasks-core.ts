@@ -11,6 +11,7 @@
 
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
+import type { HookOutput } from "../../hooks/schemas.ts"
 import { formatActionPlan } from "../action-plan.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import {
@@ -21,21 +22,19 @@ import {
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { validateTransition } from "../tasks/task-service.ts"
-import { autoTransitionForComplete, normalizeSubject, subjectsOverlap } from "./hook-utils.ts"
+import {
+  autoTransitionForComplete,
+  blockStopObj,
+  normalizeSubject,
+  subjectsOverlap,
+} from "./hook-utils.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface StopIncompleteTasksResult {
-  decision: "block"
-  reason: string
-}
-
-type TaskFile = SessionTask
 
 // ─── Deduplication ──────────────────────────────────────────────────────────
 
 function isTaskDuplicate(
-  stale: TaskFile,
+  stale: SessionTask,
   completedFingerprints: Set<string>,
   completedNormalized: string[]
 ): boolean {
@@ -46,7 +45,7 @@ function isTaskDuplicate(
   return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
 }
 
-async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<void> {
+async function completeStaleTask(stale: SessionTask, tasksDir: string): Promise<void> {
   try {
     const taskPath = join(tasksDir, `${stale.id}.json`)
     autoTransitionForComplete(stale)
@@ -64,8 +63,8 @@ async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<voi
 }
 
 async function deduplicateStaleTasks(
-  completedTasks: TaskFile[],
-  incompleteTasks: TaskFile[],
+  completedTasks: SessionTask[],
+  incompleteTasks: SessionTask[],
   tasksDir: string
 ): Promise<void> {
   if (completedTasks.length === 0 || incompleteTasks.length === 0) return
@@ -85,10 +84,10 @@ async function deduplicateStaleTasks(
 
 // ─── Incomplete detail formatting ───────────────────────────────────────────
 
-function getIncompleteDetails(allTasks: TaskFile[]): string[] {
+function getIncompleteDetails(allTasks: SessionTask[]): string[] {
   const incompleteTaskRows = allTasks
     .filter((t) => t.id && t.id !== "null")
-    .filter((t): t is TaskFile => isIncompleteTaskStatus(t.status))
+    .filter((t): t is SessionTask => isIncompleteTaskStatus(t.status))
   return orderBy(
     incompleteTaskRows,
     [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],
@@ -107,7 +106,7 @@ function getIncompleteDetails(allTasks: TaskFile[]): string[] {
 export async function checkIncompleteTasks(
   sessionId: string,
   home: string
-): Promise<StopIncompleteTasksResult | null> {
+): Promise<HookOutput | null> {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return null
 
@@ -125,15 +124,17 @@ export async function checkIncompleteTasks(
   const incompleteDetails = getIncompleteDetails(allTasks)
   if (incompleteDetails.length === 0) return null
 
-  return {
-    decision: "block",
-    reason: formatActionPlan(
+  return blockStopObj(
+    formatActionPlan(
       [
         ...incompleteDetails,
         "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
         "If the work is still needed, complete it before stopping.",
       ],
-      { translateToolNames: true, header: "Incomplete tasks found:" }
-    ),
-  }
+      {
+        translateToolNames: true,
+        header: "There are tasks that need your attention before we can finish the session:",
+      }
+    )
+  )
 }

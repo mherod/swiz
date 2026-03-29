@@ -455,7 +455,10 @@ export function actionRequired(reason = "", options: ActionRequiredOptions = {})
   return `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.${memory}`
 }
 
-function blockStopObj(reason: string, options: { includeUpdateMemoryAdvice?: boolean } = {}) {
+export function blockStopObj(
+  reason: string,
+  options: { includeUpdateMemoryAdvice?: boolean } = {}
+): HookOutput {
   const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
