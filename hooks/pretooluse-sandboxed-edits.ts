@@ -140,6 +140,33 @@ if (allowedRoots.some((root) => isWithin(root, target))) {
   allowPreToolUse(`File is within sandbox: ${target.split("/").slice(-2).join("/")}`)
 }
 
+// Well-known home-dir config files that workflows legitimately need to modify
+// (e.g. `~/.npmrc` for npm auth). These are allowed individually to keep the
+// sandbox tight — full home-dir access is NOT granted.
+// See: https://github.com/mherod/swiz/issues/421
+const WELL_KNOWN_CONFIG_FILES = [
+  ".npmrc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  ".gitconfig",
+  ".gemrc",
+  ".curlrc",
+  ".wgetrc",
+  ".netrc",
+  ".docker/config.json",
+  ".config/gh/config.yml",
+  ".ssh/config",
+  ".ssh/known_hosts",
+]
+if (homeDir) {
+  for (const configPath of WELL_KNOWN_CONFIG_FILES) {
+    const canonical = await resolveCanonical(join(homeDir, configPath))
+    if (target === canonical) {
+      allowPreToolUse(`Well-known config file: ~/${configPath}`)
+    }
+  }
+}
+
 // Discover if the blocked path lives inside a different GitHub repo.
 // dirname(target) is already canonical so the git walk identifies the true
 // owning repo even when the path arrived through symlinks.
