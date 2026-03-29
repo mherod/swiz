@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
+import { uniq } from "lodash-es"
 import { createDefaultTaskStore } from "./task-roots.ts"
 import { findAllProviderSessions, type Session } from "./transcript-utils.ts"
 
@@ -30,8 +31,8 @@ export async function resolveSessionDeletionTargets(
   const matchedSessions = allSessions.filter(
     (session) => session.id === sessionId || session.id.startsWith(sessionId)
   )
-  const transcriptPaths = [...new Set(matchedSessions.map((session) => session.path))]
-  const sessionIds = [...new Set(matchedSessions.map((session) => session.id))]
+  const transcriptPaths = uniq(matchedSessions.map((session) => session.path))
+  const sessionIds = uniq(matchedSessions.map((session) => session.id))
   const { tasksDir } = createDefaultTaskStore()
 
   const taskDirPaths: string[] = []
