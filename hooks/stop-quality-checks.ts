@@ -1,9 +1,17 @@
 #!/usr/bin/env bun
 // Stop hook: Run project lint and typecheck scripts before allowing stop
+// Uses git state and settings to provide context-aware remediation guidance.
 
 import { join } from "node:path"
-import { readProjectSettings } from "../src/settings.ts"
-import { blockStop, detectPackageManager, spawnWithTimeout } from "../src/utils/hook-utils.ts"
+import { getOpenPrForBranch } from "../src/git-helpers.ts"
+import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
+import {
+  blockStop,
+  detectPackageManager,
+  formatActionPlan,
+  git,
+  spawnWithTimeout,
+} from "../src/utils/hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 // Script names probed in priority order for each quality category
@@ -68,29 +76,98 @@ export function isQualityChecksEnabled(raw: Record<string, unknown>): boolean {
   return !!settings?.qualityChecksGate
 }
 
-async function buildQualityBlockReason(failures: string[], cwd: string): Promise<string> {
+async function buildFeatureBranchSteps(
+  branch: string,
+  defaultBranch: string,
+  isSolo: boolean,
+  cwd: string
+): Promise<string[]> {
+  const pr = await getOpenPrForBranch<{ number: number; url: string }>(
+    branch,
+    cwd,
+    "number,url"
+  ).catch(() => null)
+
+  const steps: string[] = ["Fix all errors on this branch", "Commit and push the fixes"]
+  if (pr) {
+    steps.push(
+      isSolo
+        ? `Merge PR #${pr.number} (${pr.url})`
+        : `Merge PR #${pr.number} or request review (${pr.url})`
+    )
+  } else {
+    steps.push(
+      isSolo
+        ? "Push directly — no PR required in solo mode"
+        : "Open a PR and merge (or request review)"
+    )
+  }
+  steps.push(`Switch back: \`git checkout ${defaultBranch} && git pull\``)
+  return steps
+}
+
+interface QualityBlockContext {
+  cwd: string
+  settings: Record<string, unknown>
+}
+
+async function buildQualityBlockReason(
+  failures: string[],
+  ctx: QualityBlockContext
+): Promise<string> {
   let reason = "Quality checks failed — fix all issues before stopping.\n\n"
   reason += failures.join("\n\n")
   reason +=
     "\n\nFix every lint and typecheck error, including pre-existing ones inherited from the base branch."
   reason += "\nAll errors are your responsibility regardless of who introduced them."
 
-  const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
-  if (trunkMode) {
-    return (
-      reason +
-      "\n\nTrunk mode: fix all issues on your current branch, then commit and push to the default branch before stopping."
-    )
+  const { cwd, settings } = ctx
+  const trunkMode = settings.trunkMode === true
+  const collaborationMode = (settings.collaborationMode as string) ?? "auto"
+  const isSolo = collaborationMode === "solo"
+
+  let currentBranch = ""
+  try {
+    currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+  } catch {
+    // Not a git repo or detached HEAD — skip branch-specific guidance.
   }
-  return (
-    reason +
-    "\n\nIf you are on a feature branch with branch protection on the default branch:" +
-    "\n  1. Fix all errors on the current branch" +
-    "\n  2. Commit and push the fixes" +
-    "\n  3. Merge your PR (or request review if required)" +
-    "\n  4. Switch back to the default branch: `git checkout main && git pull`" +
-    "\n  5. Then try stopping again"
-  )
+
+  const defaultBranch = await getDefaultBranch(cwd)
+  const onDefault = currentBranch !== "" && isDefaultBranch(currentBranch, defaultBranch)
+
+  if (trunkMode || onDefault) {
+    const branchName = currentBranch || defaultBranch
+    return `${reason}\n\n${formatActionPlan(
+      ["Fix all lint and typecheck errors", "Commit the fixes", `Push to \`${branchName}\``],
+      { header: `You are on \`${branchName}\`.` }
+    )}`
+  }
+
+  if (currentBranch) {
+    const steps = await buildFeatureBranchSteps(currentBranch, defaultBranch, isSolo, cwd)
+    return `${reason}\n\n${formatActionPlan(steps, {
+      header: `You are on feature branch \`${currentBranch}\` (default: \`${defaultBranch}\`).`,
+    })}`
+  }
+
+  return `${reason}\n\n${formatActionPlan(["Fix all issues", "Commit and push before stopping"])}`
+}
+
+async function collectFailures(
+  resolved: { lint: string | null; typecheck: string | null },
+  cwd: string
+): Promise<string[]> {
+  const pm = (await detectPackageManager()) ?? "npm"
+  const scriptNames = [resolved.lint, resolved.typecheck].filter((s): s is string => s !== null)
+  const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
+  const failures: string[] = []
+  for (let i = 0; i < results.length; i++) {
+    if (!results[i]!.passed) {
+      failures.push(`\`${pm} run ${scriptNames[i]}\` failed:\n${results[i]!.output}`)
+    }
+  }
+  return failures
 }
 
 async function main(): Promise<void> {
@@ -100,26 +177,14 @@ async function main(): Promise<void> {
   const resolved = await resolveScripts(cwd)
   if (!resolved) return
 
-  const lintScript = resolved.lint
-  const typecheckScript = resolved.typecheck
-
-  if (!lintScript && !typecheckScript) return
-
-  const pm = (await detectPackageManager()) ?? "npm"
-  const failures: string[] = []
-
-  // Run lint and typecheck in parallel for performance — they are independent checks.
-  const scriptNames = [lintScript, typecheckScript].filter((s): s is string => s !== null)
-  const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
-  for (let i = 0; i < results.length; i++) {
-    if (!results[i]!.passed) {
-      failures.push(`\`${pm} run ${scriptNames[i]}\` failed:\n${results[i]!.output}`)
-    }
-  }
-
+  const failures = await collectFailures(resolved, cwd)
   if (failures.length === 0) return
 
-  blockStop(await buildQualityBlockReason(failures, cwd), { includeUpdateMemoryAdvice: false })
+  const settings =
+    ((input as Record<string, unknown>)._effectiveSettings as Record<string, unknown>) ?? {}
+  blockStop(await buildQualityBlockReason(failures, { cwd, settings }), {
+    includeUpdateMemoryAdvice: false,
+  })
 }
 
 if (import.meta.main) void main()

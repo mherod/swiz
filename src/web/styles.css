@@ -3316,10 +3316,6 @@ tbody tr:hover {
   cursor: pointer;
 }
 
-.log-row:hover .log-cell {
-  background: var(--bg-inset);
-}
-
 .log-cell {
   padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
@@ -3327,6 +3323,17 @@ tbody tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-main);
+}
+
+/* Dispatch summary rows */
+.log-row-dispatch .log-cell {
+  background: color-mix(in srgb, var(--bg-inset) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  font-weight: 600;
+}
+
+.log-row:hover .log-cell {
+  background: var(--bg-inset);
 }
 
 .log-cell-time {
@@ -3397,7 +3404,7 @@ tbody tr:hover {
   margin: 0 0 var(--space-1);
 }
 
-.log-detail code {
+.log-detail.log-detail code {
   font-size: 0.68rem;
   color: var(--text-main);
 }
@@ -3412,13 +3419,6 @@ tbody tr:hover {
   white-space: pre-wrap;
   word-break: break-all;
   margin: var(--space-1) 0;
-}
-
-/* Dispatch summary rows */
-.log-row-dispatch .log-cell {
-  background: color-mix(in srgb, var(--bg-inset) 60%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  font-weight: 600;
 }
 
 .log-row-dispatch:hover .log-cell {

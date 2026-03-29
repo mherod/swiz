@@ -6,9 +6,9 @@
 //   2+ commas      — listing 3+ items ("Fix A, B, and C")
 //   multiple #NNN  — referencing multiple issues ("Fix #12 and #34")
 
+import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { denyPostToolUse } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { detect, formatMessage } from "./task-subject-validation.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

@@ -1,6 +1,5 @@
 import { readdir, readFile, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { detect, formatMessage } from "../../hooks/task-subject-validation.ts"
 import { DIM, GREEN, RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
 import {
@@ -25,6 +24,7 @@ import {
   writeTask,
 } from "./task-repository.ts"
 import { collectIncompleteTasks, getOrphanSessionIds, resolveTaskById } from "./task-resolver.ts"
+import { detect, formatMessage } from "./task-subject-validation.ts"
 
 export { compareTaskIds, parseTaskId, sessionPrefix }
 
