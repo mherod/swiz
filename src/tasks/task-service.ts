@@ -26,6 +26,28 @@ import { collectIncompleteTasks, getOrphanSessionIds, resolveTaskById } from "./
 
 export { compareTaskIds, parseTaskId, sessionPrefix }
 
+// ─── Deduplication ──────────────────────────────────────────────────────────
+
+/**
+ * Check whether a subject collides with any existing incomplete (pending/in_progress)
+ * task in the session. Returns the colliding task if found, or null.
+ */
+export function findCollidingTask(
+  subject: string,
+  incompleteTasks: ReadonlyArray<Task>
+): Task | null {
+  const fp = computeSubjectFingerprint(subject)
+  for (const t of incompleteTasks) {
+    if (
+      (t.subjectFingerprint ?? computeSubjectFingerprint(t.subject)) === fp ||
+      subjectsOverlap(t.subject, subject)
+    ) {
+      return t
+    }
+  }
+  return null
+}
+
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 export interface CreateTaskOptions {
@@ -43,6 +65,15 @@ export interface CreateTaskOptions {
 export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task> {
   const { sessionId, subject, description, cwd = process.cwd() } = opts
   const tasks = await readTasks(sessionId)
+
+  const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
+  const collision = findCollidingTask(subject, incomplete)
+  if (collision) {
+    throw new Error(
+      `Duplicate task: "${subject}" collides with existing #${collision.id} ("${collision.subject}")`
+    )
+  }
+
   const prefix = sessionPrefix(sessionId)
   const maxSeq = tasks.reduce((m, t) => {
     const parsed = parseTaskId(t.id)
@@ -99,20 +130,20 @@ export async function mergeIntoTasks(
 
   const created: Task[] = []
   for (const step of steps) {
-    const dominated = incomplete.some(
-      (t) =>
-        computeSubjectFingerprint(t.subject) === computeSubjectFingerprint(step.subject) ||
-        subjectsOverlap(t.subject, step.subject)
-    )
-    if (dominated) continue
+    if (findCollidingTask(step.subject, incomplete)) continue
 
-    const task = await createTaskInProcess({
-      sessionId,
-      subject: step.subject,
-      description: step.description ?? step.subject,
-      cwd,
-    })
-    created.push(task)
+    try {
+      const task = await createTaskInProcess({
+        sessionId,
+        subject: step.subject,
+        description: step.description ?? step.subject,
+        cwd,
+      })
+      created.push(task)
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Duplicate task:")) continue
+      throw err
+    }
   }
   return created
 }
@@ -282,6 +313,11 @@ export async function ensureFileBackedTask({
 
   const resolved = await resolveTaskSubject(taskId, subject, allowPlaceholderSubject)
   if (!resolved) return false
+
+  // Check subject collision with existing incomplete tasks
+  const existing = await readTasks(sessionId)
+  const incomplete = existing.filter((t) => isIncompleteTaskStatus(t.status))
+  if (findCollidingTask(resolved.subject, incomplete)) return false
 
   const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
   await writeTask(sessionId, stubTask, process.cwd())

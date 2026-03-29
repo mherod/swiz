@@ -47,9 +47,42 @@ interface ParsedSettingsArgs {
   settingValue?: string
   targetDir: string
   scope: SettingsScope
+  scopeExplicitlySet: boolean
   sessionQuery: string | null
   force: boolean
   json: boolean
+}
+
+/**
+ * Auto-detect scope for a setting if user didn't explicitly specify one.
+ * If a setting only supports one scope (e.g., project-only), auto-apply it.
+ * Returns the resolved scope.
+ */
+function resolveSettingScope(
+  key: SettingKey,
+  requestedScope: SettingsScope,
+  scopeExplicitlySet: boolean
+): SettingsScope {
+  const def = getSettingDef(key)
+
+  // If user explicitly set a scope, use it (validation happens later)
+  if (scopeExplicitlySet) {
+    return requestedScope
+  }
+
+  // If requested scope is supported, use it
+  if (def.scopes.includes(requestedScope)) {
+    return requestedScope
+  }
+
+  // User didn't specify a scope and the default (global) isn't supported
+  // If there's only one supported scope, use it
+  if (def.scopes.length === 1) {
+    return def.scopes[0] as SettingsScope
+  }
+
+  // Multiple scopes available but not the requested one - user needs to specify
+  return requestedScope
 }
 
 function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg: string): void {
@@ -120,6 +153,7 @@ interface SettingsArgState {
   positionals: string[]
   targetDir: string
   scope: SettingsScope
+  scopeExplicitlySet: boolean
   sessionQuery: string | null
   force: boolean
   json: boolean
@@ -150,6 +184,7 @@ function processSettingsArg(args: string[], i: number, state: SettingsArgState):
   const scopeValue = SCOPE_FLAGS[arg]
   if (scopeValue) {
     state.scope = scopeValue
+    state.scopeExplicitlySet = true
     if (scopeValue === "session" && next && !next.startsWith("-")) {
       state.sessionQuery = next
       return i + 1
@@ -166,6 +201,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     positionals: [],
     targetDir: process.cwd(),
     scope: "global",
+    scopeExplicitlySet: false,
     sessionQuery: null,
     force: false,
     json: false,
@@ -187,6 +223,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     settingValue: state.positionals[2],
     targetDir: state.targetDir,
     scope: state.scope,
+    scopeExplicitlySet: state.scopeExplicitlySet,
     sessionQuery: state.sessionQuery,
     force: state.force,
     json: state.json,
@@ -607,13 +644,22 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
       `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
-  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
-  await enforceBooleanSettingConflicts(key, enabled, parsed)
+  const resolvedScope = resolveSettingScope(key, parsed.scope, parsed.scopeExplicitlySet)
+  validateSettingScope(key, resolvedScope, parsed.settingArg ?? key)
+  const parsedWithResolvedScope = { ...parsed, scope: resolvedScope }
+  await enforceBooleanSettingConflicts(key, enabled, parsedWithResolvedScope)
 
-  const path = await writeSettingToScope(parsed, key, enabled)
+  const path = await writeSettingToScope(parsedWithResolvedScope, key, enabled)
   const verb = enabled ? "Enabled" : "Disabled"
-  const scopeLabel = await resolveWriteScopeLabel(parsed)
-  printSettingChange({ parsed, key, value: enabled, verb, scopeLabel, path })
+  const scopeLabel = await resolveWriteScopeLabel(parsedWithResolvedScope)
+  printSettingChange({
+    parsed: parsedWithResolvedScope,
+    key,
+    value: enabled,
+    verb,
+    scopeLabel,
+    path,
+  })
 
   if (enabled && key === "speak") {
     const updatedSettings = await readSwizSettings()
@@ -629,7 +675,9 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       `Missing value. Usage: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
-  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
+  const resolvedScope = resolveSettingScope(key, parsed.scope, parsed.scopeExplicitlySet)
+  validateSettingScope(key, resolvedScope, parsed.settingArg ?? key)
+  const parsedWithResolvedScope = { ...parsed, scope: resolvedScope }
 
   const def = getSettingDef(key)
 
@@ -638,20 +686,22 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       const error = def.validate(parsed.settingValue)
       if (error) throw new Error(`${error}\n${usage()}`)
     }
-    const path = await writeSettingToScope(parsed, key, parsed.settingValue)
-    if (parsed.json) {
+    const path = await writeSettingToScope(parsedWithResolvedScope, key, parsed.settingValue)
+    if (parsedWithResolvedScope.json) {
       console.log(
         JSON.stringify({
           action: "set",
           setting: key,
           value: parsed.settingValue,
-          scope: parsed.scope,
+          scope: parsedWithResolvedScope.scope,
           path,
         })
       )
       return
     }
-    console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsed.scope})`)
+    console.log(
+      `\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsedWithResolvedScope.scope})`
+    )
     console.log(`  Saved: ${path}\n`)
     return
   }
@@ -662,13 +712,21 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
     )
   }
   const value = Number(parsed.settingValue)
-  const path = await writeSettingToScope(parsed, key, value)
-  if (parsed.json) {
-    console.log(JSON.stringify({ action: "set", setting: key, value, scope: parsed.scope, path }))
+  const path = await writeSettingToScope(parsedWithResolvedScope, key, value)
+  if (parsedWithResolvedScope.json) {
+    console.log(
+      JSON.stringify({
+        action: "set",
+        setting: key,
+        value,
+        scope: parsedWithResolvedScope.scope,
+        path,
+      })
+    )
     return
   }
   const label = value === 0 ? "system default" : `${value}`
-  console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsed.scope})`)
+  console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsedWithResolvedScope.scope})`)
   console.log(`  Saved: ${path}\n`)
 }
 
