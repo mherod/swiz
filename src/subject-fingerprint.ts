@@ -474,6 +474,41 @@ function extractVerb(words: Set<string>): string | null {
   return null
 }
 
+function wordOverlapRatio(wordsA: Set<string>, wordsB: Set<string>): number {
+  let overlap = 0
+  for (const w of wordsA) {
+    if (wordsB.has(w)) overlap++
+  }
+  return overlap / Math.min(wordsA.size, wordsB.size)
+}
+
+function domainDensity(words: Set<string>, domain: string): number {
+  let count = 0
+  for (const w of words) if (DOMAIN_MAP.get(w) === domain) count++
+  return count / words.size
+}
+
+function hasSharedActionVerb(wordsA: Set<string>, wordsB: Set<string>): boolean {
+  for (const w of wordsA) {
+    if (ACTION_VERBS.has(w) && wordsB.has(w)) return true
+  }
+  return false
+}
+
+function domainOverlap(wordsA: Set<string>, wordsB: Set<string>): boolean {
+  const domainsA = classifyDomains(wordsA)
+  const domainsB = classifyDomains(wordsB)
+  for (const domain of domainsA) {
+    if (!domainsB.has(domain)) continue
+    if (domainDensity(wordsA, domain) >= 0.5 && domainDensity(wordsB, domain) >= 0.5) return true
+    const verbA = extractVerb(wordsA)
+    const verbB = extractVerb(wordsB)
+    if (verbA && verbB && sameWorkflowPipeline(verbA, verbB)) return true
+    if (hasSharedActionVerb(wordsA, wordsB)) return true
+  }
+  return false
+}
+
 /**
  * Two subjects overlap if:
  * 1. They share ≥50% of their canonical (stemmed+synonymized) significant words, OR
@@ -484,42 +519,8 @@ export function subjectsOverlap(a: string, b: string): boolean {
   const wordsA = canonicalWords(normalizeSubject(a))
   const wordsB = canonicalWords(normalizeSubject(b))
   if (wordsA.size === 0 || wordsB.size === 0) return false
-
-  // Check 1: word-level overlap ≥50%
-  let overlap = 0
-  for (const w of wordsA) {
-    if (wordsB.has(w)) overlap++
-  }
-  const minSize = Math.min(wordsA.size, wordsB.size)
-  if (overlap / minSize >= 0.5) return true
-
-  // Check 2: shared domain with domain-word density check
-  const domainsA = classifyDomains(wordsA)
-  const domainsB = classifyDomains(wordsB)
-  for (const domain of domainsA) {
-    if (!domainsB.has(domain)) continue
-
-    let countA = 0
-    let countB = 0
-    for (const w of wordsA) if (DOMAIN_MAP.get(w) === domain) countA++
-    for (const w of wordsB) if (DOMAIN_MAP.get(w) === domain) countB++
-
-    const ratioA = countA / wordsA.size
-    const ratioB = countB / wordsB.size
-    if (ratioA >= 0.5 && ratioB >= 0.5) return true
-
-    // Check if verbs are in the same workflow pipeline
-    const verbA = extractVerb(wordsA)
-    const verbB = extractVerb(wordsB)
-    if (verbA && verbB && sameWorkflowPipeline(verbA, verbB)) return true
-
-    // Fallback: shared action verb
-    for (const w of wordsA) {
-      if (ACTION_VERBS.has(w) && wordsB.has(w)) return true
-    }
-  }
-
-  return false
+  if (wordOverlapRatio(wordsA, wordsB) >= 0.5) return true
+  return domainOverlap(wordsA, wordsB)
 }
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────
