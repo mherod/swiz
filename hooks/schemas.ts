@@ -1,3 +1,5 @@
+// noinspection JSUnusedGlobalSymbols
+
 /**
  * Shared Zod schemas for hook input/output envelopes.
  *
@@ -497,6 +499,172 @@ export const sessionEndHookInputSchema = z.looseObject({
 
 export type SessionEndHookInput = z.infer<typeof sessionEndHookInputSchema>
 
+// ─── Codex hook input schemas ───────────────────────────────────────────────
+
+/**
+ * Codex common input fields — present on every Codex hook event.
+ * Extends the base envelope with `model` and `hook_event_name`.
+ * `transcript_path` is nullable in Codex (null when no transcript exists).
+ */
+export const codexCommonInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().nullable().optional(),
+  model: z.string().optional(),
+})
+
+export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
+
+/**
+ * Codex SessionStart hook input envelope.
+ * `source` is limited to `startup` | `resume` in current Codex runtime.
+ * `matcher` filters on `source`.
+ */
+export const codexSessionStartInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().nullable().optional(),
+  model: z.string().optional(),
+  source: z.enum(["startup", "resume"]).optional(),
+})
+
+export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema>
+
+/**
+ * Codex PreToolUse hook input envelope.
+ * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
+ * `matcher` filters on `tool_name`.
+ */
+export const codexPreToolUseInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    hook_event_name: z.string().optional(),
+    transcript_path: z.string().nullable().optional(),
+    model: z.string().optional(),
+    turn_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_use_id: z.string().optional(),
+    tool_input: z
+      .looseObject({
+        command: z.string().optional(),
+      })
+      .optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input.command = nfkc(val.tool_input.command)
+    }
+    return val
+  })
+
+export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
+
+/**
+ * Codex PostToolUse hook input envelope.
+ * Currently only fires for `Bash` tool. Includes `tool_response` with the
+ * command output payload (usually a JSON string).
+ * `matcher` filters on `tool_name`.
+ */
+export const codexPostToolUseInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    hook_event_name: z.string().optional(),
+    transcript_path: z.string().nullable().optional(),
+    model: z.string().optional(),
+    turn_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_use_id: z.string().optional(),
+    tool_input: z
+      .looseObject({
+        command: z.string().optional(),
+      })
+      .optional(),
+    tool_response: z.unknown().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input.command = nfkc(val.tool_input.command)
+    }
+    return val
+  })
+
+export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
+
+/**
+ * Codex UserPromptSubmit hook input envelope.
+ * `matcher` is not used for this event in Codex.
+ */
+export const codexUserPromptSubmitInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().nullable().optional(),
+  model: z.string().optional(),
+  turn_id: z.string().optional(),
+  prompt: z.string().optional(),
+})
+
+export type CodexUserPromptSubmitInput = z.infer<typeof codexUserPromptSubmitInputSchema>
+
+/**
+ * Codex Stop hook input envelope.
+ * `matcher` is not used for this event in Codex.
+ * `stop_hook_active` indicates whether this turn was already continued by Stop.
+ * Expects JSON on stdout (plain text is invalid for this event).
+ */
+export const codexStopInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  session_id: z.string().optional(),
+  hook_event_name: z.string().optional(),
+  transcript_path: z.string().nullable().optional(),
+  model: z.string().optional(),
+  turn_id: z.string().optional(),
+  stop_hook_active: z.boolean().optional(),
+  last_assistant_message: z.string().nullable().optional(),
+})
+
+export type CodexStopInput = z.infer<typeof codexStopInputSchema>
+
+/**
+ * Codex hook output envelope.
+ * Supports common output fields (`continue`, `stopReason`, `systemMessage`,
+ * `suppressOutput`) plus `decision`/`reason` and `hookSpecificOutput`.
+ * Alternative blocking: exit code 2 + reason on stderr.
+ */
+export const codexHookOutputSchema = z
+  .looseObject({
+    decision: z.enum(["approve", "block"]).optional(),
+    reason: z.string().optional(),
+    continue: z.boolean().optional(),
+    stopReason: z.string().optional(),
+    systemMessage: z.string().optional(),
+    suppressOutput: z.boolean().optional(),
+    hookSpecificOutput: z
+      .looseObject({
+        hookEventName: z.string().optional(),
+        additionalContext: z.string().optional(),
+        permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
+        permissionDecisionReason: z.string().optional(),
+      })
+      .optional(),
+  })
+  .refine(
+    (o) =>
+      "decision" in o ||
+      "hookSpecificOutput" in o ||
+      "continue" in o ||
+      "systemMessage" in o ||
+      "stopReason" in o ||
+      "suppressOutput" in o,
+    { message: "Codex hook output must contain at least one known control field" }
+  )
+
+export type CodexHookOutput = z.infer<typeof codexHookOutputSchema>
+
 // ─── Hook output envelope schema ─────────────────────────────────────────────
 
 /**
@@ -523,6 +691,8 @@ export const hookOutputSchema = z
       "systemMessage" in o,
     { message: "Hook output must contain at least one known control field" }
   )
+
+export type HookOutput = z.infer<typeof hookOutputSchema>
 
 // ─── TaskUpdate schema ────────────────────────────────────────────────────────
 

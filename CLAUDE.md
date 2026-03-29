@@ -19,7 +19,7 @@ alwaysApply: false
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude session interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` options instead.
 - **Complexity reduction**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
-- **Consolidate related utilities into canonical modules**: When multiple related functions live in different modules (e.g., `detectCurrentAgent` in `detect.ts`), consolidate into a single canonical module (e.g., `agent-paths.ts`). Maintain backward compatibility via re-exports from original locations.
+- **Consolidate related utilities**: Multiple related functions → single canonical module (e.g., `agent-paths.ts`). Re-export from original locations.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -96,9 +96,10 @@ alwaysApply: false
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
+- **DO**: When extracting functions/types from a shared module, re-export all types that downstream consumers import. Verify with `pnpm typecheck` before committing.
 ## Task Data
-- Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
-- Session-to-project mapping from `~/.claude/projects/` transcript `cwd`.
+- Task storage per agent: `createDefaultTaskStore()` in `src/task-roots.ts` detects the current agent via `detectCurrentAgent()` and resolves agent-specific paths from `getTaskRoots()` in `src/provider-adapters.ts`. Falls back to Claude paths.
+- Session-to-project mapping from `<projectsDir>/` transcript `cwd`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
 - Completion requires evidence: `swiz tasks complete <id> --evidence "..."`.
 
@@ -201,14 +202,9 @@ alwaysApply: false
 - **DO**: Add consumer-needed fields (e.g., `mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
 - **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — REST has higher rate limits. Close issues via `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
 ## Settings Configuration
-- Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime data into user-authored config (`.swiz/config.json`).
-- Use 3-tier setting resolution: `project > user > default`.
-- Track source per value, not per group (`memoryLineSource`, `memoryWordSource`).
-- Always show effective values, regardless of source tier.
-- Label each setting with source tier: `(project)`, `(user)`, `(default)`.
-- Do not hide user/default values.
-- Do not use one shared `source` for multiple settings.
-- Verify before declaring completion: hierarchy, per-value source tracking, display correctness.
+- Separate state files for runtime data (`.swiz/context-stats.json`); never mix into config (`.swiz/config.json`).
+- 3-tier resolution: `project > user > default`. Track source per value, not per group. Label with `(project)`, `(user)`, `(default)`.
+- Show all effective values; never hide user/default. No shared `source` for multiple settings.
 - Adding a boolean setting (global scope) requires updates to 7 files:
   1. `src/settings/types.ts` — `SwizSettings` interface.
   2. `src/settings/registry.ts` — `SETTINGS_REGISTRY` entry.
