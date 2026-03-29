@@ -293,7 +293,7 @@ function resolveScopeLabel(source: string | undefined, fallback: string): string
   return fallback
 }
 
-type SettingsRow = { label: string; value: string; scope?: string }
+type SettingsRow = { label: string; value: string; scope?: string; description?: string }
 
 function printAlignedRows(rows: SettingsRow[]): void {
   if (rows.length === 0) return
@@ -301,6 +301,9 @@ function printAlignedRows(rows: SettingsRow[]): void {
   for (const row of rows) {
     const suffix = row.scope ? ` (${row.scope})` : ""
     console.log(`  ${row.label.padEnd(maxLabelLen)} ${row.value}${suffix}`)
+    if (row.description) {
+      console.log(`  ${" ".repeat(maxLabelLen)} ${row.description}`)
+    }
   }
 }
 
@@ -312,11 +315,15 @@ function booleanRowsToSettingsRows(
   rows: BoolSettingRow[],
   effective: EffectiveSwizSettings
 ): SettingsRow[] {
-  return rows.map(([label, key, scope]) => ({
-    label,
-    value: boolToEnabledDisabled(Boolean(effective[key])),
-    scope,
-  }))
+  return rows.map(([label, key, scope]) => {
+    const def = DEF_BY_KEY.get(key)
+    return {
+      label,
+      value: boolToEnabledDisabled(Boolean(effective[key])),
+      scope,
+      description: def?.docs?.description,
+    }
+  })
 }
 
 /** Excluded from auto-generated boolean rows — these have custom scope labels or positioning. */
@@ -344,10 +351,20 @@ function numericGlobalSettingsRows(effective: EffectiveSwizSettings): SettingsRo
     const label = def.aliases[0] ?? def.key
     if (def.kind === "numeric") {
       const display = formatNumericDisplay(value as number, def.docs?.valuePlaceholder)
-      out.push({ label: `${label}:`, value: display, scope: "global" })
+      out.push({
+        label: `${label}:`,
+        value: display,
+        scope: "global",
+        description: def.docs?.description,
+      })
     } else {
       const strVal = value as string
-      out.push({ label: `${label}:`, value: strVal || "system default", scope: "global" })
+      out.push({
+        label: `${label}:`,
+        value: strVal || "system default",
+        scope: "global",
+        description: def.docs?.description,
+      })
     }
   }
   return out
@@ -367,18 +384,26 @@ function printGlobalSettings(
       label: "auto-continue:",
       value: boolToEnabledDisabled(effective.autoContinue),
       scope: scopeLabel,
+      description: DEF_BY_KEY.get("autoContinue")?.docs?.description,
     },
-    { label: "ambition-mode:", value: effective.ambitionMode, scope: ambitionScopeLabel },
+    {
+      label: "ambition-mode:",
+      value: effective.ambitionMode,
+      scope: ambitionScopeLabel,
+      description: DEF_BY_KEY.get("ambitionMode")?.docs?.description,
+    },
     {
       label: "collaboration:",
       value: effective.collaborationMode,
       scope: effective.collaborationMode === "auto" ? "default" : scopeLabel,
+      description: DEF_BY_KEY.get("collaborationMode")?.docs?.description,
     },
     ...booleanRowsToSettingsRows(GLOBAL_BOOL_ROWS, effective),
     {
       label: "strict-no-direct-main:",
       value: boolToEnabledDisabled(effective.strictNoDirectMain),
       scope: strictLabel,
+      description: DEF_BY_KEY.get("strictNoDirectMain")?.docs?.description,
     },
     ...numericGlobalSettingsRows(effective),
   ]
@@ -601,6 +626,7 @@ function printSettingChange(opts: {
   path: string
 }): void {
   const { parsed, key, value, verb, scopeLabel, path } = opts
+  const def = DEF_BY_KEY.get(key)
   if (parsed.json) {
     console.log(
       JSON.stringify({
@@ -609,12 +635,17 @@ function printSettingChange(opts: {
         value,
         scope: scopeLabel,
         path,
+        description: def?.docs?.description,
+        effect: def?.docs?.effectExplanation,
       })
     )
     return
   }
   console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${scopeLabel})`)
-  console.log(`  Saved: ${path}\n`)
+  if (def?.docs?.effectExplanation) {
+    console.log(`\n  Effect: ${def.docs.effectExplanation}`)
+  }
+  console.log(`\n  Saved: ${path}\n`)
 }
 
 async function enforceBooleanSettingConflicts(
@@ -695,6 +726,8 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
           value: parsed.settingValue,
           scope: parsedWithResolvedScope.scope,
           path,
+          description: def.docs?.description,
+          effect: def.docs?.effectExplanation,
         })
       )
       return
@@ -702,7 +735,10 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
     console.log(
       `\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsedWithResolvedScope.scope})`
     )
-    console.log(`  Saved: ${path}\n`)
+    if (def.docs?.effectExplanation) {
+      console.log(`\n  Effect: ${def.docs.effectExplanation}`)
+    }
+    console.log(`\n  Saved: ${path}\n`)
     return
   }
 
@@ -721,13 +757,18 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
         value,
         scope: parsedWithResolvedScope.scope,
         path,
+        description: def.docs?.description,
+        effect: def.docs?.effectExplanation,
       })
     )
     return
   }
   const label = value === 0 ? "system default" : `${value}`
   console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsedWithResolvedScope.scope})`)
-  console.log(`  Saved: ${path}\n`)
+  if (def.docs?.effectExplanation) {
+    console.log(`\n  Effect: ${def.docs.effectExplanation}`)
+  }
+  console.log(`\n  Saved: ${path}\n`)
 }
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943

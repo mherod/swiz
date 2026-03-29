@@ -27,6 +27,10 @@ async function main(): Promise<void> {
   ])
   if (!gitStatus) process.exit(0)
 
+  if (gitStatus.total === 0) {
+    process.exit(0)
+  }
+
   if (gitStatus.total <= threshold) {
     allowPreToolUse(`Worktree has ${gitStatus.total} dirty file(s) (threshold: ${threshold})`)
   }

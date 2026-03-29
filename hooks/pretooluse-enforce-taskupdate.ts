@@ -100,6 +100,15 @@ function extractTargetSession(command: string): string | null {
   return m?.[1] ?? null
 }
 
+/** Shared guard: read tasks, validate, deny if last standing. */
+async function denyIfLastTaskStanding(taskId: string, sessionId: string): Promise<void> {
+  const allTasks = await readSessionTasks(sessionId)
+  const error = validateLastTaskStanding(taskId, allTasks)
+  if (error) {
+    denyPreToolUse(buildLastTaskStandingDenial(taskId))
+  }
+}
+
 async function checkLastTaskStanding(command: string, sessionId: string): Promise<void> {
   const taskId = extractCompleteTaskId(command)
   if (!taskId) return
@@ -118,12 +127,7 @@ async function checkLastTaskStanding(command: string, sessionId: string): Promis
   }
 
   if (!safeId) return
-  const allTasks = await readSessionTasks(safeId)
-  const error = validateLastTaskStanding(taskId, allTasks)
-  if (error) {
-    const taskId = extractCompleteTaskId(command)
-    denyPreToolUse(buildLastTaskStandingDenial(taskId ?? "unknown"))
-  }
+  await denyIfLastTaskStanding(taskId, safeId)
 }
 
 async function checkRules(
@@ -174,12 +178,7 @@ async function checkNativeTaskUpdateCompletion(input: Record<string, unknown>): 
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) process.exit(0)
 
-  const allTasks = await readSessionTasks(sessionId)
-  const error = validateLastTaskStanding(taskId, allTasks)
-  if (error) {
-    denyPreToolUse(buildLastTaskStandingDenial(taskId))
-  }
-
+  await denyIfLastTaskStanding(taskId, sessionId)
   allowPreToolUse("")
 }
 

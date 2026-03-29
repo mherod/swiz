@@ -10,6 +10,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "project", "session"],
     default: true,
     docs: {
+      description: "Automatically continue after a stop event instead of waiting for user input",
+      effectExplanation:
+        "Controls whether the agent automatically resumes work after hitting a stop point. When disabled, the agent pauses and waits for you to manually continue.",
       enableDescription: "Enable stop auto-continue behavior",
       disableDescription: "Disable stop auto-continue behavior",
     },
@@ -21,6 +24,10 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "session"],
     default: true,
     docs: {
+      description:
+        "Enable hooks that guide PRs toward merging (rebase, CI checks, review resolution)",
+      effectExplanation:
+        "When enabled, stop hooks check for unmerged PRs and prompt you to rebase, resolve reviews, and merge. When disabled, only PR creation guidance is active.",
       enableDescription: "Enable merge-oriented PR hooks",
       disableDescription: "Disable merge-oriented PR hooks; keep creation-oriented guidance only",
     },
@@ -32,6 +39,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: true,
     docs: {
+      description: "Include process/product critique feedback in auto-continue output",
+      effectExplanation:
+        "When enabled, auto-continue messages include critique lines evaluating process and product quality. When disabled, only the next-step directive is emitted.",
       enableDescription: "Show Process/Product critique lines in auto-continue output",
       disableDescription: "Suppress critique lines and emit only next-step directive",
     },
@@ -42,6 +52,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: false,
+    docs: {
+      description: "Block git push unless the user has explicitly approved it",
+      effectExplanation:
+        "When enabled, git push commands are blocked unless the user explicitly approves via /push, 'go ahead and push', or similar. Prevents the agent from pushing without consent.",
+    },
   },
   {
     key: "skipSecretScan",
@@ -50,6 +65,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Skip scanning outgoing diffs for leaked secrets and credentials before push",
+      effectExplanation:
+        "When enabled, the push-checks-gate hook skips secret pattern detection. This removes the safety net that catches accidentally committed API keys, tokens, and passwords.",
       enableDescription: "Skip credential/secret pattern scan in push-checks-gate hook",
       disableDescription: "Scan outgoing diff for secrets and credentials before push",
     },
@@ -61,6 +79,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: true,
     docs: {
+      description: "Restrict file edits to the current working directory and /tmp only",
+      effectExplanation:
+        "When enabled, Edit/Write tool calls targeting files outside cwd and /tmp are blocked (with exemptions for well-known config files like .gitconfig, .npmrc). Disabling allows edits anywhere on the filesystem.",
       enableDescription: "Block file edits outside cwd and /tmp",
       disableDescription: "Allow file edits anywhere on the filesystem",
     },
@@ -72,6 +93,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Read agent output aloud using text-to-speech",
+      effectExplanation:
+        "When enabled, the agent's responses are spoken aloud via the TTS narrator. Configure voice with narrator-voice and speed with narrator-speed.",
       enableDescription: "Enable TTS narrator",
       disableDescription: "Disable TTS narrator",
     },
@@ -83,6 +107,10 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description:
+        "Automatically type 'Continue' into the terminal after each tool call (macOS only)",
+      effectExplanation:
+        "When enabled, uses AppleScript to simulate typing 'Continue' into your terminal after every tool call, creating a fully autonomous loop. Only works on macOS with accessibility permissions.",
       enableDescription: "Type 'Continue' into the terminal after every tool call via AppleScript",
       disableDescription: "Disable auto-steer terminal input",
     },
@@ -99,6 +127,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Append memory-update guidance to ACTION REQUIRED stop hook footers",
+      effectExplanation:
+        "When enabled, stop hook block messages include a reminder to update CLAUDE.md/MEMORY.md with session learnings. This triggers the memory enforcement hook more frequently.",
       enableDescription: "Include update-memory guidance in ACTION REQUIRED footers",
       disableDescription: "Exclude update-memory guidance from ACTION REQUIRED footers",
     },
@@ -109,6 +140,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: true,
+    docs: {
+      description: "Block session stop when there are uncommitted changes in the git worktree",
+      effectExplanation:
+        "When enabled, the stop hook checks git status and blocks if modified, staged, or untracked files exist. Prevents losing work by ensuring everything is committed before ending a session.",
+    },
   },
   {
     key: "nonDefaultBranchGate",
@@ -121,6 +157,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: true,
+    docs: {
+      description: "Block session stop when on a non-default branch with unmerged work",
+      effectExplanation:
+        "When enabled, the stop hook checks if you're on a feature branch with unpushed or unmerged commits and blocks until the work is pushed or merged back to the default branch.",
+    },
   },
   {
     key: "githubCiGate",
@@ -128,6 +169,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: true,
+    docs: {
+      description: "Block session stop when the latest GitHub Actions CI run is failing",
+      effectExplanation:
+        "When enabled, the stop hook checks the most recent CI run for the current commit and blocks if it has failed. Ensures you don't leave a session with broken CI.",
+    },
   },
   {
     key: "ignoreCi",
@@ -136,6 +182,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Completely suppress all GitHub Actions CI integration",
+      effectExplanation:
+        "When enabled, disables all CI-related behavior: no gh run polling, no CI stop hooks, no CI data in the status line, and CI evidence gates are treated as satisfied. Useful for repos without GitHub Actions.",
       enableDescription:
         "Suppress CI interactions (no CI wait/poll, CI hooks, CI status-line data, or CI evidence gates)",
       disableDescription: "Use normal GitHub Actions CI integration",
@@ -152,6 +201,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: true,
+    docs: {
+      description: "Block session stop when open PRs have unaddressed 'changes requested' reviews",
+      effectExplanation:
+        "When enabled, the stop hook scans open PRs for CHANGES_REQUESTED reviews and blocks until they are addressed. Prevents leaving a session with outstanding review feedback.",
+    },
   },
   {
     key: "personalRepoIssuesGate",
@@ -164,6 +218,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
     default: true,
+    docs: {
+      description: "Block session stop when open GitHub issues exist in personal repositories",
+      effectExplanation:
+        "When enabled, the stop hook checks for open issues (personal repos) or self-authored/assigned issues (org repos) and blocks stop until they are addressed or triaged.",
+    },
   },
   {
     key: "issueCloseGate",
@@ -172,6 +231,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Require explicit confirmation before closing GitHub issues",
+      effectExplanation:
+        "When enabled, gh issue close and swiz issue close commands are blocked by a PreToolUse hook unless the close action is explicitly confirmed. Prevents accidental issue closure.",
       enableDescription: "Block issue close commands unless explicitly allowed",
       disableDescription: "Allow issue close commands without restriction",
     },
@@ -188,6 +250,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
+      description: "Prompt to update CLAUDE.md/MEMORY.md with session learnings on stop",
+      effectExplanation:
+        "When enabled, the stop hook reminds you to capture session lessons in memory files before ending. Ensures important discoveries and decisions are persisted for future sessions.",
       enableDescription: "Prompt to update memory files when session stops",
       disableDescription: "Skip memory update reminder on session stop",
     },
@@ -205,6 +270,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "project"],
     default: true,
     docs: {
+      description: "Run lint and typecheck before allowing session stop",
+      effectExplanation:
+        "When enabled, the stop hook runs the project's linter and type checker and blocks if either fails. Ensures code quality standards are met before ending a session.",
       enableDescription: "Run lint and typecheck quality checks before allowing session stop",
       disableDescription: "Skip lint and typecheck quality checks on session stop",
     },
@@ -221,6 +289,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global", "project"],
     default: false,
+    docs: {
+      description:
+        "Block all direct pushes to the default branch, requiring feature branches and PRs",
+      effectExplanation:
+        "When enabled, any git push to main/master is blocked regardless of repo type (solo or team). All changes must go through feature branches and pull requests. Conflicts with trunk-mode and solo collaboration mode.",
+    },
   },
   {
     key: "trunkMode",
@@ -229,6 +303,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["project"],
     default: false,
     docs: {
+      description: "Push directly to the default branch without feature branches or PRs",
+      effectExplanation:
+        "When enabled, all commits go directly to the default branch. Feature branches and PRs are skipped. Mutually exclusive with strict-no-direct-main.",
       enableDescription: "Enable trunk-based development (push directly to default branch, no PRs)",
       disableDescription: "Disable trunk mode (use feature branches and PRs)",
     },
@@ -239,7 +316,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global"],
     default: 10,
-    docs: { valuePlaceholder: "minutes" },
+    docs: {
+      description: "Minimum age (minutes) a PR must reach before merge is allowed",
+      effectExplanation:
+        "Sets how long a PR must exist before it can be merged. Gives reviewers time to see the PR. Set to 0 to disable the age gate entirely.",
+      valuePlaceholder: "minutes",
+    },
   },
   {
     key: "pushCooldownMinutes",
@@ -252,7 +334,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global"],
     default: 0,
-    docs: { valuePlaceholder: "minutes" },
+    docs: {
+      description: "Minimum wait time (minutes) between consecutive git pushes",
+      effectExplanation:
+        "Enforces a cooldown period after each push. Prevents rapid-fire pushes that can overwhelm CI. Set to 0 to disable.",
+      valuePlaceholder: "minutes",
+    },
   },
   {
     key: "taskDurationWarningMinutes",
@@ -266,7 +353,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
     default: 10,
-    docs: { valuePlaceholder: "minutes" },
+    docs: {
+      description: "Warn when a task has been in_progress longer than this many minutes",
+      effectExplanation:
+        "Triggers a warning in the status line and stop hooks when a single task exceeds this runtime, signaling it may need to be broken down or is stuck.",
+      valuePlaceholder: "minutes",
+    },
   },
   {
     key: "narratorSpeed",
@@ -275,7 +367,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: 0,
     zodSchema: z.number().min(0).max(600),
-    docs: { valuePlaceholder: "wpm" },
+    docs: {
+      description: "TTS narrator speech rate in words per minute (0 = system default)",
+      effectExplanation:
+        "Controls how fast the TTS narrator speaks. Higher values = faster speech. Set to 0 to use the system default rate. Requires speak to be enabled.",
+      valuePlaceholder: "wpm",
+    },
   },
   {
     key: "memoryLineThreshold",
@@ -283,7 +380,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
     default: 1400,
-    docs: { valuePlaceholder: "lines" },
+    docs: {
+      description: "Maximum line count for CLAUDE.md before triggering a compaction warning",
+      effectExplanation:
+        "When CLAUDE.md exceeds this line count, hooks warn you to run /compact-memory. Keeps memory files from growing unbounded and consuming too much context.",
+      valuePlaceholder: "lines",
+    },
   },
   {
     key: "memoryWordThreshold",
@@ -291,7 +393,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
     default: 5000,
-    docs: { valuePlaceholder: "words" },
+    docs: {
+      description: "Maximum word count for CLAUDE.md before triggering a compaction warning",
+      effectExplanation:
+        "When CLAUDE.md exceeds this word count, hooks warn you to run /compact-memory. Works alongside memory-line-threshold — whichever limit is hit first triggers the warning.",
+      valuePlaceholder: "words",
+    },
   },
   {
     key: "dirtyWorktreeThreshold",
@@ -304,7 +411,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
     default: 15,
-    docs: { valuePlaceholder: "files" },
+    docs: {
+      description: "Maximum uncommitted files before the worktree gate blocks further edits",
+      effectExplanation:
+        "When the number of modified/untracked files exceeds this threshold, PreToolUse hooks block new edits until you commit or clean up. Prevents runaway uncommitted changes.",
+      valuePlaceholder: "files",
+    },
   },
   {
     key: "largeFileSizeKb",
@@ -312,7 +424,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
     default: 500,
-    docs: { valuePlaceholder: "kb" },
+    docs: {
+      description: "Warn when committing files larger than this size (KB)",
+      effectExplanation:
+        "Files exceeding this size trigger a warning in the push-checks-gate hook. The warning is advisory — use large-file-size-block-kb for a hard block.",
+      valuePlaceholder: "kb",
+    },
   },
   {
     key: "largeFileSizeBlockKb",
@@ -320,14 +437,24 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global"],
     default: 5120,
-    docs: { valuePlaceholder: "kb" },
+    docs: {
+      description: "Hard-block pushes containing files larger than this size (KB)",
+      effectExplanation:
+        "Files exceeding this size (default 5 MB) cause the push-checks-gate hook to block the push entirely. Prevents accidentally pushing large binaries to the repo.",
+      valuePlaceholder: "kb",
+    },
   },
   {
     key: "defaultBranch",
     aliases: ["default-branch", "defaultbranch", "default_branch"],
     kind: "string",
     scopes: ["project"],
-    docs: { valuePlaceholder: "name" },
+    docs: {
+      description: "Override the auto-detected default branch name for this project",
+      effectExplanation:
+        "Sets the branch name used as the merge target and push protection reference. When unset, swiz auto-detects from git remote HEAD (usually 'main' or 'master').",
+      valuePlaceholder: "name",
+    },
     validate: (v: string): string | null => {
       if (!v.trim()) {
         return `Invalid value "${v}" for default-branch. Must be a non-empty branch name`
@@ -347,7 +474,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global"],
     default: "",
-    docs: { valuePlaceholder: "name" },
+    docs: {
+      description: "TTS voice name for the narrator (empty = system default)",
+      effectExplanation:
+        "Selects which voice the TTS narrator uses. Available voices depend on your system. Leave empty to use the system default. Requires speak to be enabled.",
+      valuePlaceholder: "name",
+    },
   },
   {
     key: "ambitionMode",
@@ -356,7 +488,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "project", "session"],
     default: "standard",
     zodSchema: ambitionModeSchema,
-    docs: { valuePlaceholder: "standard|aggressive|creative|reflective" },
+    docs: {
+      description: "Controls how aggressively the agent pursues goals and takes initiative",
+      effectExplanation:
+        "standard: balanced approach, follows instructions closely. aggressive: takes more initiative, tackles adjacent issues. creative: explores alternative solutions. reflective: pauses to evaluate before acting.",
+      valuePlaceholder: "standard|aggressive|creative|reflective",
+    },
     validate: (v) =>
       ambitionModeSchema.safeParse(v).success
         ? null
@@ -376,7 +513,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "project", "session"],
     default: "auto",
     zodSchema: collaborationModeSchema,
-    docs: { valuePlaceholder: "auto|solo|team|relaxed-collab" },
+    docs: {
+      description: "Controls branch and PR workflow behavior based on repo collaboration style",
+      effectExplanation:
+        "auto: detects from GitHub repo metadata (solo owner = direct push, org/team = PRs). solo: always push directly to main. team: always use feature branches and PRs. relaxed-collab: team workflow with relaxed gates.",
+      valuePlaceholder: "auto|solo|team|relaxed-collab",
+    },
     validate: (v) =>
       collaborationModeSchema.safeParse(v).success
         ? null
@@ -399,6 +541,10 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     default: "strict",
     zodSchema: auditStrictnessSchema,
     docs: {
+      description:
+        "Controls how strictly task creation, evidence, and governance rules are enforced",
+      effectExplanation:
+        "strict: all task/evidence rules always enforced. relaxed: loosened for exploratory work (fewer task requirements). local-dev: relaxed locally but strict rules apply before push/CI.",
       valuePlaceholder: "strict|relaxed|local-dev",
       setDescription:
         "Control task/evidence governance: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI)",

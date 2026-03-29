@@ -68,6 +68,10 @@ export type SettingsScope = "global" | "project" | "session"
 export type SettingValueKind = "boolean" | "numeric" | "string"
 
 export interface SettingDoc {
+  /** Human-readable description of what this setting does, shown in `swiz settings show`. */
+  description?: string
+  /** Explanation of the concrete effect when this setting is changed — shown after enable/disable/set. */
+  effectExplanation?: string
   valuePlaceholder?: string
   enableDescription?: string
   disableDescription?: string
