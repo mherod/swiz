@@ -237,7 +237,7 @@ alwaysApply: false
 - On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, and resolve it immediately.
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- **DO**: Own every diagnostic in workflow output — never label warnings as "pre-existing". Fix in this session.
+- **DO**: Own every diagnostic in workflow output — never label warnings as "pre-existing" or attribute failures to other sessions. Investigate all test failures before completing tasks, even when changes seem unrelated.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
