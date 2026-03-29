@@ -11,9 +11,7 @@ import {
   formatActionPlan,
   mergeActionPlanIntoTasks,
 } from "../action-plan.ts"
-import { translateMatcher } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../detect.ts"
 import {
   getOpenPrForBranch,
   getRepoSlug,
@@ -67,7 +65,12 @@ if (!Bun.which("bun")) {
 // on every import.
 
 export { skillAdvice, skillExists }
-export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
+export {
+  detectCurrentAgent,
+  isCurrentAgent,
+  isRunningInAgent,
+  toolNameForCurrentAgent,
+} from "../agent-paths.ts"
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../git-helpers.ts"
@@ -455,13 +458,6 @@ export async function emitContext(
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
-
-/** Return the current agent's tool name for a canonical tool identifier. */
-export function toolNameForCurrentAgent(canonicalName: string): string {
-  const agent = detectCurrentAgent()
-  if (!agent) return canonicalName
-  return translateMatcher(canonicalName, agent) ?? canonicalName
-}
 
 function summarizeUpdateMemoryCause(reason: string): string {
   const firstParagraph = reason
