@@ -20,14 +20,12 @@ import {
   BRANCH_CHECK_RE,
   CI_WAIT_RE,
   denyPreToolUse,
+  detectForkTopology,
   extractBashCommands,
   formatActionPlan,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
-  getRepoSlug,
-  ghJson,
   git,
-  hasGhCli,
   isShellTool,
   PR_CHECK_RE,
   skillAdvice,
@@ -74,54 +72,23 @@ if (!Number.isNaN(behindCount) && behindCount > 0) {
   )
 }
 
-// ── Fork detection ──────────────────────────────────────────────────────────
-// Block push when origin resolves to a GitHub fork. Work pushed to a fork
-// lands somewhere the team will never see.
+// ── Fork workflow detection ─────────────────────────────────────────────────
+// When origin is a fork, allow pushing to it (your fork) and advise on
+// upstream remote setup and PR creation against the canonical repo.
 
-const forkCache = new Map<string, { fork: boolean; parent: string | null }>()
+const forkTopology = await detectForkTopology(cwd)
 
-async function checkFork(workDir: string): Promise<void> {
-  if (!hasGhCli()) return // no gh → skip gracefully
-
-  const slug = await getRepoSlug(workDir)
-  if (!slug) return
-
-  if (forkCache.has(slug)) {
-    const cached = forkCache.get(slug)!
-    if (cached.fork) {
-      denyPreToolUse(
-        `Push blocked — \`origin\` points to a GitHub fork (\`${slug}\`).\n\n` +
-          `Canonical upstream: \`${cached.parent}\`\n\n` +
-          `Fix with:\n  git remote set-url origin https://github.com/${cached.parent}.git`
-      )
-    }
-    return
-  }
-
-  try {
-    // --jq flattens parent to a string: {"fork":true,"parent":"owner/repo"}
-    const repoInfo = await ghJson<{ fork: boolean; parent: string | null }>(
-      ["api", `repos/${slug}`, "--jq", "{fork,parent:.parent.full_name}"],
-      workDir
-    )
-    const isFork = repoInfo?.fork === true
-    const parentName = repoInfo?.parent ?? null
-
-    forkCache.set(slug, { fork: isFork, parent: parentName })
-
-    if (isFork) {
-      denyPreToolUse(
-        `Push blocked — \`origin\` points to a GitHub fork (\`${slug}\`).\n\n` +
-          `Canonical upstream: \`${parentName}\`\n\n` +
-          `Fix with:\n  git remote set-url origin https://github.com/${parentName}.git`
-      )
-    }
-  } catch {
-    // gh call failed — skip gracefully
-  }
+if (forkTopology && !forkTopology.hasUpstreamRemote) {
+  // Fork detected via API but no upstream remote configured — advise setup
+  allowPreToolUse(
+    `Fork detected — \`origin\` is a fork of \`${forkTopology.upstreamSlug}\`.\n\n` +
+      `Set up the upstream remote for sync:\n` +
+      `  git remote add upstream https://github.com/${forkTopology.upstreamSlug}.git\n` +
+      `  git fetch upstream\n\n` +
+      `After pushing, open a PR against upstream:\n` +
+      `  gh pr create --repo ${forkTopology.upstreamSlug}`
+  )
 }
-
-await checkFork(cwd)
 
 // ── WIP / fixup / squash commit check ───────────────────────────────────────
 // Block push when outgoing commits have temporary subjects that should be

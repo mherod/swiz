@@ -20,6 +20,9 @@ import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
+  detectForkTopology,
+  type ForkTopology,
+  forkPushCmd,
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
   getOpenPrForBranch,
@@ -85,7 +88,8 @@ async function getChangesRequestedReviews(
 function buildBlockReason(
   pr: { number: number; title: string },
   changesRequested: Review[],
-  currentBranch: string
+  currentBranch: string,
+  fork: ForkTopology | null = null
 ): string {
   const reviewers = [...new Set(changesRequested.map((r) => r.user.login))].join(", ")
   const details = changesRequested
@@ -108,7 +112,7 @@ function buildBlockReason(
         `  1. Read the reviewer's comment carefully`,
         `  2. Make the requested code change`,
         `  3. Reply to the comment confirming the change`,
-        `  4. Push: git push origin ${currentBranch}`,
+        `  4. Push: ${forkPushCmd(currentBranch, fork)}`,
         ``,
         `Once all feedback is addressed, request a re-review:`,
         `  gh pr edit ${pr.number} --add-reviewer ${reviewers}`,
@@ -133,7 +137,8 @@ async function main() {
     allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
   }
 
-  const reason = buildBlockReason(pr, changesRequested, currentBranch)
+  const fork = await detectForkTopology(cwd)
+  const reason = buildBlockReason(pr, changesRequested, currentBranch, fork)
   denyPreToolUse(reason)
 }
 

@@ -48,7 +48,9 @@ export class UpstreamSyncRegistry {
     this.store = opts?.store ?? null
   }
 
-  /** Register a project for periodic upstream sync. Idempotent. */
+  /** Register a project for periodic upstream sync. Idempotent.
+   *  For fork workflows, also registers the upstream (parent) repo so
+   *  its issues, labels, and milestones are synced alongside the fork's PRs/CI. */
   async register(cwd: string): Promise<{ deduped: boolean }> {
     if (this.entries.has(cwd)) return { deduped: true }
 
@@ -65,6 +67,26 @@ export class UpstreamSyncRegistry {
     }
     this.entries.set(cwd, entry)
     this.scheduleSync(cwd)
+
+    // Fork workflow: also register the upstream repo for issue/label/milestone sync
+    const { detectForkTopology } = await import("../../git-helpers.ts")
+    const fork = await detectForkTopology(cwd)
+    if (fork && fork.upstreamSlug !== repo) {
+      const upstreamKey = `${cwd}::upstream`
+      if (!this.entries.has(upstreamKey)) {
+        const upstreamEntry: SyncEntry = {
+          repo: fork.upstreamSlug,
+          cwd,
+          lastSyncAt: null,
+          lastResult: null,
+          syncing: false,
+          timer: null,
+        }
+        this.entries.set(upstreamKey, upstreamEntry)
+        this.scheduleSync(upstreamKey)
+      }
+    }
+
     return { deduped: false }
   }
 

@@ -1,4 +1,4 @@
-import { getRepoSlug, gh, ghJson } from "./git-helpers.ts"
+import { detectForkTopology, getRepoSlug, gh, ghJson } from "./git-helpers.ts"
 import type { CollaborationMode } from "./settings.ts"
 
 export interface OpenPullRequest {
@@ -319,6 +319,15 @@ export async function detectProjectCollaborationPolicy(
     recentContributorLogins,
     repoOwner: ownership.repoOwner,
   })
+
+  // Fork workflow implies team collaboration — you're contributing to an upstream repo
+  const fork = await detectForkTopology(cwd)
+  if (fork) {
+    if (!policy.signals.some((s) => s.includes("fork"))) {
+      policy.signals.push(`Fork of upstream repository (${fork.upstreamSlug})`)
+    }
+    policy.isCollaborative = true
+  }
 
   const resolved = ownership.resolved && openPullRequestsResult !== null && commitsResult !== null
 

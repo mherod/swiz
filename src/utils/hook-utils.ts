@@ -17,8 +17,10 @@ import {
 } from "../action-plan.ts"
 import { stderrLog } from "../debug.ts"
 import {
+  detectForkTopology,
   getOpenPrForBranch,
   getRepoSlug,
+  getUpstreamSlug,
   gh,
   ghJsonViaDaemon,
   git,
@@ -603,7 +605,18 @@ async function ghJson<T>(args: string[], cwd: string): Promise<T | null> {
   return ghJsonViaDaemon<T>(args, cwd, { ttlMs: 300_000 })
 }
 
-export { getOpenPrForBranch, getRepoSlug, gh, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo }
+export {
+  detectForkTopology,
+  getOpenPrForBranch,
+  getRepoSlug,
+  getUpstreamSlug,
+  gh,
+  ghJson,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+}
 
 // ─── Issue guidance consolidation ──────────────────────────────────────────
 // Shared formatter for "file an issue on the target repo instead" messaging.
@@ -927,7 +940,68 @@ export function isSettingDisableCommand(command: string, aliases: string[]): boo
 }
 
 // Re-exported from src/git-helpers.ts
-export { issueState } from "../git-helpers.ts"
+export { type ForkTopology, issueState } from "../git-helpers.ts"
+
+// ─── Fork-aware guidance helpers ───────────────────────────────────────────
+
+/**
+ * Build fork-aware git push command guidance.
+ * In fork workflows, you push to origin (your fork). The command is the same,
+ * but the context message differs.
+ */
+export function forkPushCmd(
+  branch: string,
+  fork: import("../git-helpers.ts").ForkTopology | null
+): string {
+  if (fork) return `git push origin ${branch}  # pushes to your fork (${fork.originSlug})`
+  return `git push origin ${branch}`
+}
+
+/**
+ * Build fork-aware PR creation command.
+ * In fork workflows, PRs target the upstream repo.
+ */
+export function forkPrCreateCmd(
+  defaultBranch: string,
+  fork: import("../git-helpers.ts").ForkTopology | null
+): string {
+  if (fork) return `gh pr create --repo ${fork.upstreamSlug} --base ${defaultBranch}`
+  return `gh pr create --base ${defaultBranch}`
+}
+
+/**
+ * Build fork-aware sync guidance (fetch + rebase from upstream).
+ * Returns null when not in a fork workflow.
+ */
+export function forkSyncGuidance(
+  defaultBranch: string,
+  fork: import("../git-helpers.ts").ForkTopology | null
+): string | null {
+  if (!fork) return null
+  const lines = [
+    `Sync your fork with upstream:`,
+    `  git fetch upstream`,
+    `  git rebase upstream/${defaultBranch}`,
+  ]
+  if (!fork.hasUpstreamRemote) {
+    lines.unshift(`Set up the upstream remote first:`)
+    lines.splice(1, 0, `  git remote add upstream https://github.com/${fork.upstreamSlug}.git`)
+  }
+  return lines.join("\n")
+}
+
+/**
+ * Build the remote ref prefix for diff ranges.
+ * In fork workflows where upstream is configured, use upstream/<branch>
+ * for comparing against the canonical repo's default branch.
+ */
+export function forkRemoteRef(
+  branch: string,
+  fork: import("../git-helpers.ts").ForkTopology | null
+): string {
+  if (fork?.hasUpstreamRemote) return `upstream/${branch}`
+  return `origin/${branch}`
+}
 
 // ─── Common input types ─────────────────────────────────────────────────
 

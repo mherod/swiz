@@ -16,6 +16,9 @@ import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
+  detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
   GIT_COMMIT_RE,
   git,
   isShellTool,
@@ -76,6 +79,8 @@ const owner = collaboration.repoOwner
 const repo = collaboration.repoName
 const repoRef = owner && repo ? `${owner}/${repo}` : "this repository"
 
+const fork = await detectForkTopology(cwd)
+
 denyPreToolUse(`
 Committing directly to '${defaultBranch}' is blocked in ${repoRef} (collaborative repository).
 
@@ -85,8 +90,8 @@ ${signals}
 Use the feature branch workflow instead:
   1. Create a feature branch: git checkout -b feat/description
   2. Commit your changes there
-  3. Push: git push origin feat/description
-  4. Open PR: gh pr create --base ${defaultBranch}
+  3. Push: ${forkPushCmd("feat/description", fork)}
+  4. Open PR: ${forkPrCreateCmd(defaultBranch, fork)}
 
 This ensures code review and prevents unreviewed changes from landing on the default branch.
 `)

@@ -5,6 +5,8 @@
 
 import {
   blockStop,
+  detectForkTopology,
+  forkRemoteRef,
   getDefaultBranch,
   ghJson,
   git,
@@ -20,9 +22,10 @@ function buildConflictReason(
   defaultBranch: string,
   defaultRemoteRef: string
 ): string {
+  const fetchRemote = defaultRemoteRef.startsWith("upstream/") ? "upstream" : "origin"
   const rebaseSteps = [
     `Rebase and resolve conflicts before stopping:`,
-    `  git fetch origin ${defaultBranch}`,
+    `  git fetch ${fetchRemote} ${defaultBranch}`,
     `  git rebase ${defaultRemoteRef}`,
     "  # resolve any conflicts, then: git rebase --continue",
     "",
@@ -116,7 +119,8 @@ async function main(): Promise<void> {
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return
 
-  const defaultRemoteRef = `origin/${defaultBranch}`
+  const fork = await detectForkTopology(cwd)
+  const defaultRemoteRef = forkRemoteRef(defaultBranch, fork)
   if (await checkPrConflicts(branch, cwd, defaultBranch, defaultRemoteRef)) return
   await checkLocalConflicts(branch, cwd, defaultBranch, defaultRemoteRef)
 }

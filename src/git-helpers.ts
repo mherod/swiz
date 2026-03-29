@@ -258,9 +258,8 @@ export async function isGitHubRemote(cwd: string): Promise<boolean> {
   return url.includes("github.com")
 }
 
-/** Get the owner/repo slug from the git remote URL (e.g., "mherod/swiz"). */
-export async function getRepoSlug(cwd: string): Promise<string | null> {
-  const url = await git(["remote", "get-url", "origin"], cwd)
+/** Get the owner/repo slug from a git remote URL (e.g., "mherod/swiz"). */
+export function slugFromRemoteUrl(url: string): string | null {
   if (!url) return null
   // SSH: git@github.com:owner/repo.git
   const sshMatch = url.match(/:([^/]+\/[^/]+?)(?:\.git)?$/)
@@ -268,6 +267,74 @@ export async function getRepoSlug(cwd: string): Promise<string | null> {
   // HTTPS: https://github.com/owner/repo.git
   const httpsMatch = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/)
   if (httpsMatch?.[1]) return httpsMatch[1]
+  return null
+}
+
+/** Get the owner/repo slug from the origin remote URL (e.g., "mherod/swiz"). */
+export async function getRepoSlug(cwd: string): Promise<string | null> {
+  const url = await git(["remote", "get-url", "origin"], cwd)
+  return slugFromRemoteUrl(url)
+}
+
+/** Get the owner/repo slug from the "upstream" remote, if configured. */
+export async function getUpstreamSlug(cwd: string): Promise<string | null> {
+  const url = await git(["remote", "get-url", "upstream"], cwd)
+  return slugFromRemoteUrl(url)
+}
+
+/**
+ * Fork workflow topology detection.
+ *
+ * Detection strategies (in order):
+ *   1. Git remote: an "upstream" remote is configured with both origin and upstream slugs
+ *   2. GitHub API: origin repo's `fork` flag is true and `parent.full_name` is available
+ *
+ * When detected via API but no upstream remote exists, `hasUpstreamRemote` is false —
+ * callers should advise `git remote add upstream`.
+ */
+export interface ForkTopology {
+  /** The origin remote slug (your fork), e.g. "youruser/repo" */
+  originSlug: string
+  /** The upstream remote slug (canonical repo), e.g. "org/repo" */
+  upstreamSlug: string
+  /** True when the "upstream" git remote is already configured. */
+  hasUpstreamRemote: boolean
+}
+
+export async function detectForkTopology(cwd: string): Promise<ForkTopology | null> {
+  const originUrl = await git(["remote", "get-url", "origin"], cwd)
+  const originSlug = slugFromRemoteUrl(originUrl)
+  if (!originSlug) return null
+
+  // Strategy 1: check for an "upstream" git remote
+  const upstreamUrl = await git(["remote", "get-url", "upstream"], cwd)
+  const upstreamSlugFromRemote = slugFromRemoteUrl(upstreamUrl)
+  if (upstreamSlugFromRemote) {
+    return { originSlug, upstreamSlug: upstreamSlugFromRemote, hasUpstreamRemote: true }
+  }
+
+  // Strategy 2: query GitHub API to check if origin is a fork
+  try {
+    await acquireGhSlot()
+    const proc = Bun.spawn(
+      ["gh", "api", `repos/${originSlug}`, "--jq", "{fork,parent:.parent.full_name}"],
+      { cwd, stdout: "pipe", stderr: "pipe" }
+    )
+    const [output] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode === 0 && output.trim()) {
+      const info = JSON.parse(output.trim()) as { fork: boolean; parent: string | null }
+      if (info.fork && info.parent) {
+        return { originSlug, upstreamSlug: info.parent, hasUpstreamRemote: false }
+      }
+    }
+  } catch {
+    // gh unavailable or API error — skip gracefully
+  }
+
   return null
 }
 

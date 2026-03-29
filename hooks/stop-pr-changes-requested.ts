@@ -7,6 +7,8 @@ import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from 
 import {
   blockStop,
   blockStopHumanRequired,
+  detectForkTopology,
+  forkPushCmd,
   getCurrentGitHubUser,
   getDefaultBranch,
   getOpenPrForBranch,
@@ -99,7 +101,8 @@ function buildChangesRequestedReason(
   pr: { number: number; title: string },
   changesRequested: Review[],
   reviewComments: ReviewComment[],
-  issueComments: IssueComment[]
+  issueComments: IssueComment[],
+  fork: import("../src/git-helpers.ts").ForkTopology | null = null
 ): string {
   const reviewers = uniq(changesRequested.map((r) => r.user.login)).join(", ")
   const details = changesRequested
@@ -133,7 +136,7 @@ function buildChangesRequestedReason(
       `  2. Make the requested code change`,
       `  3. Reply to the comment confirming the change (or explaining your decision)`,
       `  4. Re-run quality checks: bun run typecheck && bun run lint && bun test`,
-      `  5. Push: git push origin $(git branch --show-current)`,
+      `  5. Push: ${forkPushCmd("$(git branch --show-current)", fork)}`,
       ``,
       `Once all feedback is addressed, request a re-review:`,
       `  gh pr edit ${pr.number} --add-reviewer <reviewer-handle>`,
@@ -218,7 +221,14 @@ async function main(): Promise<void> {
     cwd,
     changesRequested
   )
-  const reason = buildChangesRequestedReason(pr, changesRequested, reviewComments, issueComments)
+  const fork = await detectForkTopology(cwd)
+  const reason = buildChangesRequestedReason(
+    pr,
+    changesRequested,
+    reviewComments,
+    issueComments,
+    fork
+  )
 
   // Review-feedback triage is actionable queue work, not a memory-capture miss.
   blockStop(reason, { includeUpdateMemoryAdvice: false })

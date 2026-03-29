@@ -1,6 +1,6 @@
 // Git command regexes, argument parsing, and status utilities for hook scripts.
 
-import { git } from "../git-helpers.ts"
+import { detectForkTopology, git } from "../git-helpers.ts"
 import { readProjectSettings } from "../settings.ts"
 import {
   GIT_GLOBAL_OPTS,
@@ -24,37 +24,34 @@ export function isDefaultBranch(
  * Resolve the effective default branch for a repository.
  * Precedence:
  *   1. Project setting `.swiz/config.json` → `defaultBranch`
- *   2. Git remote HEAD (`refs/remotes/origin/HEAD`)
- *   3. Local `main` branch
- *   4. Local `master` branch
- *   5. Fallback `main`
+ *   2. Fork workflow: `upstream/HEAD` (the canonical repo's default branch)
+ *   3. Git remote HEAD (`refs/remotes/origin/HEAD`)
+ *   4. Local `main` branch
+ *   5. Local `master` branch
+ *   6. Fallback `main`
  */
 export async function getDefaultBranch(cwd: string): Promise<string> {
   const projectSettings = await readProjectSettings(cwd)
   const configured = projectSettings?.defaultBranch?.trim()
   if (configured) return configured
 
-  try {
-    const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
-    const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
-    if (remoteHead) return remoteHead
-  } catch {
-    // Fallback to local branches when origin/HEAD is unavailable.
+  // In fork workflows, the upstream remote is the source of truth for the default branch.
+  const fork = await detectForkTopology(cwd)
+  if (fork) {
+    const upstreamHeadRef = await git(["symbolic-ref", "refs/remotes/upstream/HEAD"], cwd)
+    const upstreamHead = upstreamHeadRef.replace(/^refs\/remotes\/upstream\//, "").trim()
+    if (upstreamHead) return upstreamHead
   }
 
-  try {
-    const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
-    if (localMain) return "main"
-  } catch {
-    // continue fallback
-  }
+  const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
+  const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
+  if (remoteHead) return remoteHead
 
-  try {
-    const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
-    if (localMaster) return "master"
-  } catch {
-    // continue fallback
-  }
+  const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
+  if (localMain) return "main"
+
+  const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
+  if (localMaster) return "master"
 
   return "main"
 }

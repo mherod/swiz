@@ -9,6 +9,9 @@
 import { readProjectSettings } from "../src/settings.ts"
 import {
   blockStop,
+  detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
   getDefaultBranch,
   getOpenPrForBranch,
   git,
@@ -46,6 +49,8 @@ async function main(): Promise<void> {
     pr = await getOpenPrForBranch<{ number: number }>(branch, cwd, "number")
   }
 
+  const fork = await detectForkTopology(cwd)
+
   let reason = `Stopping on feature branch '${branch}' — the repository must be on '${defaultBranch}' before the session ends.\n\n`
 
   if (pr) {
@@ -53,7 +58,7 @@ async function main(): Promise<void> {
     reason += `PR #${pr.number} is open for this branch. Complete the full PR workflow:\n\n`
     reason += `1. Address any review feedback: \`gh pr view ${pr.number} --comments\`\n`
     reason += `2. Fix all lint and typecheck errors on this branch (including pre-existing ones from ${defaultBranch})\n`
-    reason += `3. Push fixes: \`git push origin ${branch}\`\n`
+    reason += `3. Push fixes: \`${forkPushCmd(branch, fork)}\`\n`
     reason += `4. Merge the PR: \`gh pr merge ${pr.number} --squash\`\n`
     reason += `   If merge requires external review: \`gh pr edit ${pr.number} --add-reviewer <handle>\`\n`
     reason += `   If branch protection blocks merge: request review, then switch back to '${defaultBranch}'\n`
@@ -65,8 +70,9 @@ async function main(): Promise<void> {
     // No PR — original guidance
     reason += `The branch itself signals in-progress work. Possible next steps:\n\n`
     reason += `1. Continue work: stay on '${branch}' and complete the task before stopping.\n`
+    const prCreateCmd = forkPrCreateCmd(defaultBranch, fork)
     const prOpenFallback = [
-      `run: gh pr create --fill`,
+      `run: ${prCreateCmd} --fill`,
       `  # --fill uses branch name + commits to populate title/body automatically`,
     ].join("\n")
     reason += `2. Open a PR: ${skillAdvice("pr-open", "use the /pr-open skill to create a pull request.", prOpenFallback)}\n`

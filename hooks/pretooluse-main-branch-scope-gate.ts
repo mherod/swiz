@@ -26,7 +26,10 @@ import {
   allowPreToolUse,
   classifyChangeScope,
   denyPreToolUse,
+  detectForkTopology,
   extractPrNumber,
+  forkPrCreateCmd,
+  forkPushCmd,
   GH_PR_MERGE_RE,
   getDefaultBranch,
   git,
@@ -163,6 +166,8 @@ async function resolveDiffRange(): Promise<string> {
 
 const diffRange = await resolveDiffRange()
 
+const fork = await detectForkTopology(cwd)
+
 // If no valid diff range could be resolved, block with actionable guidance.
 // This can happen on repos with only one commit and no remote tracking branch.
 if (!diffRange) {
@@ -176,7 +181,7 @@ Remediation:
   1. Verify the remote is configured: git remote -v
   2. Fetch remote refs: git fetch origin
   3. If this is the initial push, use a feature branch:
-     git checkout -b feat/description && git push origin feat/description && gh pr create --base ${currentBranch}
+     git checkout -b feat/description && ${forkPushCmd("feat/description", fork)} && ${forkPrCreateCmd(currentBranch, fork)}
 `)
 }
 
@@ -236,7 +241,7 @@ Remediation:
   2. Verify the output shows a summary line (e.g. "3 files changed, 10 insertions(+)")
   3. If the summary is missing or malformed, check for binary-only or rename-only changes
   4. If this is a false positive, use a feature branch instead:
-     git checkout -b feat/description && git push origin feat/description && gh pr create --base ${currentBranch}
+     git checkout -b feat/description && ${forkPushCmd("feat/description", fork)} && ${forkPrCreateCmd(currentBranch, fork)}
 `)
 }
 
@@ -251,10 +256,10 @@ Non-trivial changes to '${defaultBranch}' in ${repoContext}
 Change scope: ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines)
 Repository: ${owner}/${repo}
 
-For non-trivial work, use the feature branch workflow:
+For substantive work, use the feature branch workflow:
   1. Create a feature branch: git checkout -b feat/description
-  2. Push: git push origin feat/description
-  3. Open PR: gh pr create --base ${defaultBranch}
+  2. Push: ${forkPushCmd("feat/description", fork)}
+  3. Open PR: ${forkPrCreateCmd(defaultBranch, fork)}
   4. Wait for review and approval
   5. Merge via PR (not direct push)
 
