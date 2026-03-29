@@ -516,6 +516,7 @@ describe("pretooluse-banned-commands", () => {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        env: { ...process.env, SWIZ_DAEMON_PORT: "19999" },
       })
       void proc.stdin.write(payload)
       void proc.stdin.end()

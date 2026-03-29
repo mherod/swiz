@@ -179,6 +179,7 @@ export async function runBashHook(
     stdout: "pipe",
     stderr: "pipe",
     cwd: opts.cwd,
+    env: { ...process.env, SWIZ_DAEMON_PORT: "19999" },
   })
   void proc.stdin.write(payload)
   void proc.stdin.end()
