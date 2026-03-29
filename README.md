@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**107 hooks. 12 event types. Every agent. Zero compromises.**
+**108 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -180,13 +180,14 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts` | Blocks `swiz tasks update/status` CLI commands in Claude Code and redirects to the native TaskUpdate tool. Guides developers toward native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) instead of CLI equivalents for better integration and auditing. Allows `swiz tasks complete` with helpful guidance on evidence format. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (20)
+### PostToolUse (21)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
 | Hook | What it does |
 |------|-------------|
 | `posttooluse-git-status.ts` | Injects current git status context after every tool use — branch, upstream tracking ref (including no-upstream and gone-upstream states), uncommitted file count, and ahead/behind/diverged relationship. Rich enough that the agent rarely needs follow-up `git status` or `git branch` calls. |
+| `posttooluse-git-context.ts` | After any git Bash command, injects the active swiz git settings (trunk mode, push gate, collaboration mode, strict-no-direct-main) and locally-synced branch protection rules from the SQLite issue store. Keeps the agent aware of repo policy without repeated settings queries. |
 | `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |

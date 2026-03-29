@@ -315,6 +315,7 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "posttooluse-pr-context.ts", timeout: 10 },
       { file: "posttooluse-pr-create-refine.ts", timeout: 10 },
+      { file: "posttooluse-git-context.ts", timeout: 5 },
       { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
       { file: "posttooluse-push-cooldown.ts", timeout: 5 },
       { file: "posttooluse-verify-push.ts", timeout: 20 },
