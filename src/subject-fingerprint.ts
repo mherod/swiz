@@ -70,6 +70,43 @@ const FINGERPRINT_STOP_WORDS = new Set([
   "need",
 ])
 
+// ─── Phrase synonyms ───────────────────────────────────────────────────────
+//
+// Multi-word phrases that map to a single canonical token. Applied before
+// word-level processing. Order: longest phrases first to prevent partial matches.
+
+const PHRASE_SYNONYMS: [phrase: string, canonical: string][] = [
+  // Git workflow phases → canonical multi-tokens (space-separated)
+  ["working tree", "worktree"],
+  ["work tree", "worktree"],
+  ["collaboration guard", "prepush verify"],
+  ["task preflight", "prepush verify"],
+  ["pre push", "prepush"],
+  ["push preflight", "prepush verify"],
+  ["staged changes", "commit changes"],
+  ["uncommitted changes", "commit changes"],
+  ["unstaged changes", "commit changes"],
+  ["conventional commits", "commitformat"],
+  ["conventional commit", "commitformat"],
+  // CI verification
+  ["ci status", "cicheck"],
+  ["ci passes", "cicheck"],
+  ["ci green", "cicheck"],
+  ["github checks", "cicheck"],
+  // PR workflow
+  ["gate check", "prcheck"],
+  ["quality gate", "prcheck"],
+  ["merge check", "prcheck"],
+]
+
+function applyPhraseSynonyms(normalized: string): string {
+  let result = normalized
+  for (const [phrase, canonical] of PHRASE_SYNONYMS) {
+    result = result.replaceAll(phrase, canonical)
+  }
+  return result
+}
+
 // ─── Synonym map ────────────────────────────────────────────────────────────
 
 /**
@@ -116,12 +153,20 @@ const SYNONYM_MAP = new Map<string, string>([
   ["stage", "commit"],
   // test / spec → test
   ["spec", "test"],
-  // run / execute / invoke → run
+  // run / execute / invoke / perform → run
   ["execute", "run"],
   ["invoke", "run"],
+  ["perform", "run"],
   // changes / diff / modifications → changes
   ["diff", "changes"],
   ["modifications", "changes"],
+  // workflow: preflight / guard / gate → verify
+  ["preflight", "verify"],
+  ["guard", "verify"],
+  ["gate", "verify"],
+  // workflow: clean / pristine → clean
+  ["pristine", "clean"],
+  ["worktree", "tree"],
 ])
 
 // ─── Irregular stems ────────────────────────────────────────────────────────
@@ -347,40 +392,140 @@ export function significantWords(normalized: string): Set<string> {
   )
 }
 
+/** Extract significant words with phrase synonyms, stemming, and synonym resolution applied. */
+export function canonicalWords(normalized: string): Set<string> {
+  const withPhrases = applyPhraseSynonyms(normalized)
+  return new Set(
+    withPhrases
+      .split(" ")
+      .filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
+      .map((w) => {
+        const stemmed = stemWord(w)
+        return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(`${stemmed}e`) ?? stemmed
+      })
+  )
+}
+
+// ─── Domain classification ─────────────────────────────────────────────────
+//
+// Maps canonical words to semantic domains. Two tasks in the same domain with
+// overlapping action verbs are likely duplicates even when word overlap is low.
+// This catches subsumption cases like "Commit staged changes" vs
+// "Perform Git Commit and Push" — both in the git-commit domain.
+
+const DOMAIN_MAP = new Map<string, string>([
+  // git-commit domain: staging, committing, worktree cleanliness
+  ["commit", "git-commit"],
+  ["push", "git-commit"],
+  ["worktree", "git-commit"],
+  ["tree", "git-commit"],
+  ["remove", "git-commit"], // "clean" stems to "remove" via synonym
+  ["git", "git-commit"],
+  ["commitformat", "git-commit"],
+  // prepush domain: guards, preflights, collaboration checks
+  ["prepush", "git-prepush"],
+  // ci domain
+  ["cicheck", "ci"],
+  // pr domain
+  ["prcheck", "pr"],
+])
+
+/** Action verbs — words that describe what the task does (vs what it acts on). */
+const ACTION_VERBS = new Set([
+  "verify",
+  "run",
+  "implement",
+  "fix",
+  "update",
+  "remove",
+  "push",
+  "commit",
+  "test",
+])
+
+function classifyDomains(words: Set<string>): Set<string> {
+  const domains = new Set<string>()
+  for (const w of words) {
+    const domain = DOMAIN_MAP.get(w)
+    if (domain) domains.add(domain)
+  }
+  return domains
+}
+
+// ─── Verb-object decomposition (lightweight POS) ───────────────────────────
+
+const WORKFLOW_PIPELINES: string[][] = [
+  ["commit", "push", "verify", "remove", "run"],
+  ["test", "verify", "fix"],
+]
+
+function sameWorkflowPipeline(verbA: string, verbB: string): boolean {
+  if (verbA === verbB) return true
+  for (const pipeline of WORKFLOW_PIPELINES) {
+    if (pipeline.includes(verbA) && pipeline.includes(verbB)) return true
+  }
+  return false
+}
+
+function extractVerb(words: Set<string>): string | null {
+  for (const w of words) {
+    if (ACTION_VERBS.has(w)) return w
+  }
+  return null
+}
+
 /**
- * Two subjects overlap if they share ≥50% of their significant words.
- * This catches cases like "Push backward-compat error commit" vs
- * "Push backward-compat commit" without false-positiving on unrelated tasks.
+ * Two subjects overlap if:
+ * 1. They share ≥50% of their canonical (stemmed+synonymized) significant words, OR
+ * 2. They share a semantic domain AND either have high domain-word density,
+ *    verbs in the same workflow pipeline, or a shared action verb.
  */
 export function subjectsOverlap(a: string, b: string): boolean {
-  const wordsA = significantWords(a)
-  const wordsB = significantWords(b)
+  const wordsA = canonicalWords(normalizeSubject(a))
+  const wordsB = canonicalWords(normalizeSubject(b))
   if (wordsA.size === 0 || wordsB.size === 0) return false
+
+  // Check 1: word-level overlap ≥50%
   let overlap = 0
   for (const w of wordsA) {
     if (wordsB.has(w)) overlap++
   }
   const minSize = Math.min(wordsA.size, wordsB.size)
-  return overlap / minSize >= 0.5
+  if (overlap / minSize >= 0.5) return true
+
+  // Check 2: shared domain with domain-word density check
+  const domainsA = classifyDomains(wordsA)
+  const domainsB = classifyDomains(wordsB)
+  for (const domain of domainsA) {
+    if (!domainsB.has(domain)) continue
+
+    let countA = 0
+    let countB = 0
+    for (const w of wordsA) if (DOMAIN_MAP.get(w) === domain) countA++
+    for (const w of wordsB) if (DOMAIN_MAP.get(w) === domain) countB++
+
+    const ratioA = countA / wordsA.size
+    const ratioB = countB / wordsB.size
+    if (ratioA >= 0.5 && ratioB >= 0.5) return true
+
+    // Check if verbs are in the same workflow pipeline
+    const verbA = extractVerb(wordsA)
+    const verbB = extractVerb(wordsB)
+    if (verbA && verbB && sameWorkflowPipeline(verbA, verbB)) return true
+
+    // Fallback: shared action verb
+    for (const w of wordsA) {
+      if (ACTION_VERBS.has(w) && wordsB.has(w)) return true
+    }
+  }
+
+  return false
 }
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────
 
 export function computeSubjectFingerprint(subject: string): string {
-  const normalized = subject
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-  const words = normalized
-    .split(" ")
-    .filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
-    .map((w) => {
-      const stemmed = stemWord(w)
-      // Try stem directly, then with silent-e restored (creat→create)
-      return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(`${stemmed}e`) ?? stemmed
-    })
-    .sort()
-  const canonical = [...new Set(words)].join(" ")
+  const words = [...canonicalWords(normalizeSubject(subject))].sort()
+  const canonical = words.join(" ")
   return Bun.hash(canonical).toString(16).padStart(16, "0")
 }

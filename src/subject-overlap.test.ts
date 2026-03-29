@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  canonicalWords,
   computeSubjectFingerprint,
   normalizeSubject,
   significantWords,
@@ -85,6 +86,63 @@ describe("subjectsOverlap", () => {
         normalizeSubject("Push CLAUDE.md commit update")
       )
     ).toBe(true)
+  })
+
+  // ── Workflow step dedup (stemming + synonym in overlap) ──────────────
+
+  test("detects commit duplicates with synonym resolution", () => {
+    expect(
+      subjectsOverlap(
+        "Perform Git Commit and Push",
+        "Commit staged changes with Conventional Commits message"
+      )
+    ).toBe(true)
+  })
+
+  test("detects stage/commit synonym overlap", () => {
+    expect(
+      subjectsOverlap(
+        "Stage all uncommitted changes",
+        "Commit staged changes with Conventional Commits message"
+      )
+    ).toBe(true)
+  })
+
+  test("detects execute/run synonym overlap", () => {
+    expect(subjectsOverlap("Run Collaboration Guard", "Execute Task Preflight")).toBe(true)
+  })
+
+  test("detects verify/clean worktree duplicates", () => {
+    expect(subjectsOverlap("Verify working tree is clean", "Stage all uncommitted changes")).toBe(
+      true
+    )
+  })
+
+  test("detects push verification duplicates", () => {
+    expect(
+      subjectsOverlap("Verify Push Success with Hard Gate", "Perform Git Commit and Push")
+    ).toBe(true)
+  })
+
+  // Negative: different domains should not overlap
+  test("rejects cross-domain tasks", () => {
+    expect(subjectsOverlap("Update README documentation", "Fix authentication bug")).toBe(false)
+    expect(subjectsOverlap("Run database migration", "Verify CI status")).toBe(false)
+  })
+})
+
+describe("canonicalWords", () => {
+  test("applies phrase synonyms before word-level processing", () => {
+    const words = canonicalWords(normalizeSubject("Run Collaboration Guard"))
+    expect(words.has("prepush")).toBe(true)
+    expect(words.has("verify")).toBe(true)
+  })
+
+  test("maps staged/uncommitted changes to commit changes", () => {
+    const a = canonicalWords(normalizeSubject("Stage all uncommitted changes"))
+    const b = canonicalWords(normalizeSubject("Commit staged changes"))
+    expect(a.has("commit")).toBe(true)
+    expect(b.has("commit")).toBe(true)
   })
 })
 
