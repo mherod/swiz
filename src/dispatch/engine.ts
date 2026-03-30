@@ -245,24 +245,28 @@ function getConfiguredTimeoutSec(timeoutSec?: number): number {
   return Math.max(baseTimeoutSec, testTimeoutSec)
 }
 
+interface TimeoutState {
+  timer: ReturnType<typeof setTimeout>
+  sigkillTimer: ReturnType<typeof setTimeout> | undefined
+  timedOut: boolean
+}
+
 function setupTimeoutHandling(
   proc: ReturnType<typeof Bun.spawn>,
   file: string,
   configuredTimeoutSec: number
-): {
-  timer: ReturnType<typeof setTimeout>
-  sigkillTimer: ReturnType<typeof setTimeout> | undefined
-} {
-  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-  const timer = setTimeout(() => {
+): TimeoutState {
+  const state: TimeoutState = { timer: undefined!, sigkillTimer: undefined, timedOut: false }
+  state.timer = setTimeout(() => {
+    state.timedOut = true
     log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — SIGTERM ${file}`)
     proc.kill("SIGTERM")
-    sigkillTimer = setTimeout(() => {
+    state.sigkillTimer = setTimeout(() => {
       log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
       proc.kill("SIGKILL")
     }, SIGKILL_GRACE_MS)
   }, configuredTimeoutSec * 1000)
-  return { timer, sigkillTimer }
+  return state
 }
 
 function setupAbortListener(
@@ -353,10 +357,9 @@ export async function runHook(
   void proc.stdin.write(payloadStr)
   void proc.stdin.end()
 
-  let timedOut = false
   let aborted = false
 
-  const timeoutHandler = setupTimeoutHandling(proc, file, configuredTimeoutSec)
+  const timeoutState = setupTimeoutHandling(proc, file, configuredTimeoutSec)
   const abortHandler = setupAbortListener(proc, file, signal)
 
   signal?.addEventListener(
@@ -373,11 +376,8 @@ export async function runHook(
   ])
   await proc.exited
 
-  clearTimeout(timeoutHandler.timer)
-  if (timeoutHandler.sigkillTimer) {
-    clearTimeout(timeoutHandler.sigkillTimer)
-    timedOut = true
-  }
+  clearTimeout(timeoutState.timer)
+  if (timeoutState.sigkillTimer) clearTimeout(timeoutState.sigkillTimer)
   abortHandler.cleanup()
 
   const endTime = Date.now()
@@ -393,7 +393,7 @@ export async function runHook(
   }
 
   const { parsed, status } = classifyHookOutput({
-    timedOut,
+    timedOut: timeoutState.timedOut,
     trimmed,
     exitCode,
   })
