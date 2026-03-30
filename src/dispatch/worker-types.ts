@@ -5,6 +5,7 @@
 
 import { join } from "node:path"
 import { hookOutputSchema } from "../../hooks/schemas.ts"
+import type { HookStatus } from "./engine.ts"
 
 // ─── Shared constants ──────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ export function classifyHookOutput({
   timedOut: boolean
   trimmed: string
   exitCode: number | null
-}): { parsed: Record<string, unknown> | null; status: string } {
+}): { parsed: Record<string, unknown> | null; status: HookStatus } {
   if (timedOut) return { parsed: null, status: "timeout" }
   if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
 

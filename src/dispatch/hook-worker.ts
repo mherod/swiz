@@ -5,6 +5,7 @@
 
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
+import type { HookExecution } from "./engine.ts"
 import {
   classifyHookOutput,
   DEFAULT_TIMEOUT,
@@ -20,17 +21,7 @@ interface HookResult {
   id: string
   type: "hook-result"
   parsed: Record<string, unknown> | null
-  execution: {
-    file: string
-    startTime: number
-    endTime: number
-    durationMs: number
-    configuredTimeoutSec: number
-    status: string
-    exitCode: number | null
-    stdoutSnippet: string
-    stderrSnippet: string
-  }
+  execution: HookExecution
 }
 
 /**
