@@ -9,12 +9,7 @@
 // Dual-mode: exports a SwizToolHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { preToolUseDeny, runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 
@@ -91,7 +86,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
       }
     }
 
-    return preToolUseAllow("")
+    return {}
   },
 }
 
