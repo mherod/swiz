@@ -905,6 +905,7 @@ export {
   collectBlockedToolUseIds,
   extractBashCommands,
   extractSkillInvocations,
+  extractToolBlocksFromEntry,
   extractToolNamesFromTranscript,
   readAllTranscriptLines,
   readSessionLines,

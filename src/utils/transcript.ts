@@ -25,10 +25,11 @@ export function stripAnsi(s: string): string {
 // ── Core JSONL reading ────────────────────────────────────────────────────────
 
 /**
- * Read all `tool_use` blocks from assistant messages in a JSONL transcript.
- * Shared by the extract* helpers below.
+ * Extract all `tool_use` blocks from a single JSONL transcript line.
+ * Returns [] when the line is not an assistant message, is malformed, or has no tool_use blocks.
+ * Never throws — malformed JSON is handled via tryParseJsonLine.
  */
-function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>> {
+export function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>> {
   const entry = tryParseJsonLine(line)
   if (entry === undefined || typeof entry !== "object" || Array.isArray(entry)) return []
   const e = entry as Record<string, unknown>

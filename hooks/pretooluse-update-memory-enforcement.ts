@@ -9,10 +9,11 @@
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
+  extractToolBlocksFromEntry,
   formatActionPlan,
   hasFileInTree,
   isEditTool,
@@ -101,7 +102,7 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
       const s = await stat(p)
       if (now - s.mtimeMs < COOLDOWN_MS) return true
     } catch {
-      // File doesn't exist or stat failed — skip
+      // File doesn't exist, or stat failed — skip
     }
   }
   return false
@@ -132,18 +133,8 @@ function updateStateFromToolUse(block: Record<string, unknown>, state: Enforceme
   }
 }
 
-function extractToolUseBlocks(line: string): Array<Record<string, unknown>> {
-  const entry = JSON.parse(line)
-  if (entry?.type !== "assistant") return []
-  const content = entry?.message?.content
-  if (!Array.isArray(content)) return []
-  return (content as Array<Record<string, unknown>>).filter(
-    (b) => b?.type === "tool_use" && b?.name
-  )
-}
-
 function processTranscriptEntry(line: string, state: EnforcementState): void {
-  for (const block of extractToolUseBlocks(line)) {
+  for (const block of extractToolBlocksFromEntry(line)) {
     updateStateFromToolUse(block, state)
     if (state.skillReadComplete && state.markdownWriteComplete) return
   }
