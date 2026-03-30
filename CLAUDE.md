@@ -17,9 +17,9 @@ alwaysApply: false
 - `src/types.ts` `Command` interface fields: `name`, `description`, optional `usage`, `run(args)`.
 - Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
-- **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude session interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` options instead.
+- **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` instead.
 - **Complexity reduction**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
-- **Consolidate related utilities**: Multiple related functions → single canonical module (e.g., `agent-paths.ts`). Re-export from original locations.
+- **Consolidate related utilities**: Multiple related functions → single canonical module (e.g., `agent-paths.ts`). Re-export from originals.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -83,7 +83,7 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
-- **Hook cooldowns**: `cooldownSeconds` on a manifest entry skips re-runs within the window (per hook+cwd).
+- **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
 - **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project-scoped dedup; `await` and branch: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget with `void`; omit `cwd` (falls back to session-only scope). Use `store.consumeOne()` (thread-safe); `store.consume()` deprecated. Consumed by `posttooluse-auto-steer.ts`. Gated by `requiredSettings: ["autoSteer"]`. SQLite queue `~/.swiz/auto-steer.db` (`src/auto-steer-store.ts`): two-layer dedup, optional TTL, `project_key` column. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Stop auto-steer in `BlockingStrategy` (`src/dispatch/strategies.ts`). `sendAutoSteer` types text via AppleScript.
 - **DO**: All memory-threshold checkpoints must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
 - **DO**: Use `computeProjectedContent()` from `hook-utils.ts` — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
@@ -108,10 +108,11 @@ alwaysApply: false
 
 - First action: `TaskCreate`/`TaskUpdate` after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
-- Prior-session task blocks: complete `in_progress` tasks from prior sessions with `TaskUpdate status: completed` before new Bash. If work remains, recreate with `TaskCreate` as `in_progress`.
-- After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
+- Prior-session task blocks: complete prior-session `in_progress` tasks (`TaskUpdate status: completed`) before new Bash. If work remains, recreate with `TaskCreate`.
+- After compaction: `TaskList`; close stale tasks via `git log --oneline -3`.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
+- **DON'T**: Complete the final incomplete task without first creating a pending next-step task — `pretooluse-require-tasks.ts` blocks when zero incomplete tasks remain.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools every 10 calls; staleness gate at 20.
@@ -124,18 +125,18 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `TaskUpdate` with `taskId`, `status: completed`; structured evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
-- **Subject changes**: use `TaskUpdate` `subject` / `description` — not the CLI.
-- **DON'T**: Assume CI success from partial output. Confirm every job with `gh run view <run-id> --json conclusion,status,jobs`.
+- **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
+- **Subject changes**: `TaskUpdate` `subject`/`description` — not the CLI.
+- **DON'T**: Assume CI success from partial output. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
 - Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
-- Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
+- Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
 - **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
-- Before stop, audit open issue labels; if stop hook lists actionable issues, pick at least one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
+- Before stop, audit open issue labels; if stop hook lists actionable issues, pick one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
 ## Standard Work Sequence
 - Required order for each unit of work:
   1. `TaskCreate`/`TaskUpdate` -> `in_progress`.
