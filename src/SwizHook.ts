@@ -86,7 +86,9 @@ export async function runSwizHookAsMain(
     try {
       const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
       const sessionId = typeof input.session_id === "string" ? input.session_id : null
-      const rawSettings = await readSwizSettings()
+      // Strict parse: do not inject defaults over a present-but-corrupt settings file —
+      // hooks that fail-closed on parse errors must see missing _effectiveSettings.
+      const rawSettings = await readSwizSettings({ strict: true })
       input._effectiveSettings = getEffectiveSwizSettings(
         rawSettings,
         sessionId

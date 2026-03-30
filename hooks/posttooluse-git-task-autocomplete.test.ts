@@ -78,10 +78,23 @@ async function runHook(
 }
 
 async function createTempHomeWithSettings(settings: Record<string, unknown>): Promise<string> {
-  const home = join(tmpdir(), `swiz-posttooluse-git-task-${Date.now()}`)
+  const home = join(
+    tmpdir(),
+    `swiz-posttooluse-git-task-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  )
   await mkdir(join(home, ".swiz"), { recursive: true })
   await Bun.write(join(home, ".swiz", "settings.json"), `${JSON.stringify(settings)}\n`)
   return home
+}
+
+/** Unique cwd so concurrent tests do not race on `readProjectSettings("/tmp")`. */
+async function isolatedProjectCwd(): Promise<string> {
+  const dir = join(
+    tmpdir(),
+    `swiz-git-task-ac-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  )
+  await mkdir(dir, { recursive: true })
+  return dir
 }
 
 // ─── git push → additionalContext ────────────────────────────────────────────
@@ -112,11 +125,18 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
 
   test("git push emits PR creation context when pr-merge-mode is disabled", async () => {
     const home = await createTempHomeWithSettings({ prMergeMode: false })
+    const cwd = await isolatedProjectCwd()
 
     try {
-      const result = await runHook("git push origin main", "Bash", "test-session-id", {
-        HOME: home,
-      })
+      const result = await runHook(
+        "git push origin main",
+        "Bash",
+        "test-session-id",
+        {
+          HOME: home,
+        },
+        cwd
+      )
       expect(result.exitedCleanly).toBe(true)
       expect(result.additionalContext).toBeDefined()
       expect(result.additionalContext).toContain("Open PR for this branch")
@@ -128,10 +148,17 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
 
   test("git push with ignore-ci omits CI and PR workflow guidance", async () => {
     const home = await createTempHomeWithSettings({ ignoreCi: true })
+    const cwd = await isolatedProjectCwd()
     try {
-      const result = await runHook("git push origin main", "Bash", "test-session-id", {
-        HOME: home,
-      })
+      const result = await runHook(
+        "git push origin main",
+        "Bash",
+        "test-session-id",
+        {
+          HOME: home,
+        },
+        cwd
+      )
       expect(result.exitedCleanly).toBe(true)
       expect(result.additionalContext).toBe("git push succeeded.")
     } finally {

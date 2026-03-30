@@ -313,7 +313,8 @@ describe("pretooluse-sandboxed-edits", () => {
       sandboxedEdits: false,
     })
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   describe("trunk mode branch guard", () => {
@@ -449,7 +450,8 @@ describe("pretooluse-sandboxed-edits", () => {
         sandboxedEdits: false,
       })
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toBe("")
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("allow")
     })
   })
 })

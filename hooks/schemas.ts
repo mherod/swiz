@@ -825,8 +825,9 @@ export const hookOutputSchema = z
       .looseObject({
         hookEventName: z.string().optional(),
         additionalContext: z.string().optional(),
-        permissionDecision: z.enum(["allow", "deny", "ask"]),
-        permissionDecisionReason: z.string(),
+        /** PreToolUse: required when emitting permission decisions; omit for PostToolUse context-only payloads. */
+        permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
+        permissionDecisionReason: z.string().optional(),
         /** PreToolUse: rewritten tool input fields. */
         modifiedInput: z.record(z.string(), z.unknown()).optional(),
         updatedInput: z.record(z.string(), z.unknown()).optional(),

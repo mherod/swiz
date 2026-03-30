@@ -343,6 +343,8 @@ function denyPostToolUseObj(reason: string): HookOutput {
     systemMessage: extractFirstLine(reason),
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
       additionalContext: reason,
     },
   })
