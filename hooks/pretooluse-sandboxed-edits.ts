@@ -2,78 +2,26 @@
 
 // PreToolUse hook: Block file edits outside the session's cwd and temporary directories.
 // Enabled by default; disable with: swiz settings disable sandboxed-edits
+//
+// Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
+import { git, isGitHubHost, isGitRepo, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  allowPreToolUse,
-  buildIssueGuidance,
-  denyPreToolUse,
-  git,
-  isFileEditTool,
-  isGitHubHost,
-  isGitRepo,
-  parseRemoteUrl,
-} from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
-
-const input = toolHookInputSchema.parse(await Bun.stdin.json())
-
-if (!isFileEditTool(input.tool_name ?? "")) process.exit(0)
-
-const filePath: string = (input.tool_input?.file_path as string | undefined) ?? ""
-if (!filePath) process.exit(0)
-
-const settings = await readSwizSettings()
-if (!settings.sandboxedEdits) process.exit(0)
-
-// When trunk mode is enabled, block edits if the current branch is not the
-// default branch. This prevents accidental work on stale feature branches
-// when the project expects all commits on the trunk.
-const hookCwd = input.cwd ?? process.cwd()
-if (await isGitRepo(hookCwd)) {
-  const project = await readProjectSettings(hookCwd)
-  if (project?.trunkMode) {
-    const defaultBranch = await getDefaultBranch(hookCwd)
-    const currentBranch = (await git(["branch", "--show-current"], hookCwd)).trim()
-    if (currentBranch && currentBranch !== defaultBranch) {
-      denyPreToolUse(
-        [
-          "Trunk mode is enabled — file edits are blocked on non-default branches.",
-          "",
-          `  Current branch: ${currentBranch}`,
-          `  Default branch: ${defaultBranch}`,
-          "",
-          `Switch to the default branch first: git checkout ${defaultBranch}`,
-        ].join("\n")
-      )
-    }
-  }
-}
-
-// Block direct edits to swiz config files even when the path is within the sandbox.
-// Agents must use `swiz settings` / `swiz state` — direct JSON edits bypass all
-// setting validation, schema enforcement, and hook-level guards.
-const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
-if (SWIZ_CONFIG_RE.test(filePath)) {
-  denyPreToolUse(
-    [
-      "Editing swiz config files directly is not permitted.",
-      "",
-      `  Attempted: ${filePath}`,
-      "",
-      "Use the swiz CLI instead:",
-      "  swiz settings set <key> <value>",
-      "  swiz settings enable <setting>",
-      "  swiz settings disable <setting>",
-      "  swiz state set <state>",
-    ].join("\n")
-  )
-}
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
+import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 /**
  * Resolve the canonical (real) path for any path, whether or not it exists.
@@ -117,96 +65,165 @@ function isWithin(parent: string, child: string): boolean {
   return child === parent || child.startsWith(prefix)
 }
 
-// All paths are resolved through resolveCanonical so the isWithin() check
-// operates in a uniform canonical namespace — no mix of logical and real paths.
-const cwd = await resolveCanonical(input.cwd ?? process.cwd())
-const target = await resolveCanonical(filePath)
+const pretooluseSandboxedEdits: SwizFileEditHook = {
+  name: "pretooluse-sandboxed-edits",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
 
-// /tmp is a symlink on macOS (/tmp → /private/tmp); resolveCanonical gives the
-// real path so the namespace stays consistent with the resolved target.
-const tmp = await resolveCanonical(tmpdir())
-const tmpLiteral = await resolveCanonical("/tmp")
-// ~/.claude/projects/ is always allowed: Claude Code stores per-project
-// auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
-// deadlock with the memory-enforcement hook.
-// resolveCanonical walks up to HOME (which exists) when .claude/projects
-// hasn't been created yet, ensuring the prefix always matches the target's
-// canonical form.
-const homeDir = getHomeDirOrNull()
-const claudeProjectsDir = homeDir ? await resolveCanonical(`${homeDir}/.claude/projects`) : null
-const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
+  async run(input) {
+    const parsed = fileEditHookInputSchema.parse(input)
 
-if (allowedRoots.some((root) => isWithin(root, target))) {
-  allowPreToolUse(`File is within sandbox: ${target.split("/").slice(-2).join("/")}`)
-}
+    if (!isFileEditTool(parsed.tool_name ?? "")) return preToolUseAllow("")
 
-// Well-known home-dir config files that workflows legitimately need to modify
-// (e.g. `~/.npmrc` for npm auth). These are allowed individually to keep the
-// sandbox tight — full home-dir access is NOT granted.
-// See: https://github.com/mherod/swiz/issues/421
-const WELL_KNOWN_CONFIG_FILES = [
-  ".npmrc",
-  ".yarnrc",
-  ".yarnrc.yml",
-  ".gitconfig",
-  ".gemrc",
-  ".curlrc",
-  ".wgetrc",
-  ".netrc",
-  ".docker/config.json",
-  ".config/gh/config.yml",
-  ".ssh/config",
-  ".ssh/known_hosts",
-]
-if (homeDir) {
-  for (const configPath of WELL_KNOWN_CONFIG_FILES) {
-    const canonical = await resolveCanonical(join(homeDir, configPath))
-    if (target === canonical) {
-      allowPreToolUse(`Well-known config file: ~/${configPath}`)
+    const filePath: string = (parsed.tool_input?.file_path as string | undefined) ?? ""
+    if (!filePath) return preToolUseAllow("")
+
+    const settings = await readSwizSettings()
+    if (!settings.sandboxedEdits) return preToolUseAllow("")
+
+    // When trunk mode is enabled, block edits if the current branch is not the
+    // default branch. This prevents accidental work on stale feature branches
+    // when the project expects all commits on the trunk.
+    const hookCwd = parsed.cwd ?? process.cwd()
+    if (await isGitRepo(hookCwd)) {
+      const project = await readProjectSettings(hookCwd)
+      if (project?.trunkMode) {
+        const defaultBranch = await getDefaultBranch(hookCwd)
+        const currentBranch = (await git(["branch", "--show-current"], hookCwd)).trim()
+        if (currentBranch && currentBranch !== defaultBranch) {
+          return preToolUseDeny(
+            [
+              "Trunk mode is enabled — file edits are blocked on non-default branches.",
+              "",
+              `  Current branch: ${currentBranch}`,
+              `  Default branch: ${defaultBranch}`,
+              "",
+              `Switch to the default branch first: git checkout ${defaultBranch}`,
+            ].join("\n")
+          )
+        }
+      }
     }
-  }
-}
 
-// Discover if the blocked path lives inside a different GitHub repo.
-// dirname(target) is already canonical so the git walk identifies the true
-// owning repo even when the path arrived through symlinks.
-let targetDir = dirname(target)
-{
-  const { stat } = await import("node:fs/promises")
-  while (targetDir !== dirname(targetDir)) {
-    try {
-      await stat(targetDir)
-      break
-    } catch {
-      targetDir = dirname(targetDir)
+    // Block direct edits to swiz config files even when the path is within the sandbox.
+    // Agents must use `swiz settings` / `swiz state` — direct JSON edits bypass all
+    // setting validation, schema enforcement, and hook-level guards.
+    const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
+    if (SWIZ_CONFIG_RE.test(filePath)) {
+      return preToolUseDeny(
+        [
+          "Editing swiz config files directly is not permitted.",
+          "",
+          `  Attempted: ${filePath}`,
+          "",
+          "Use the swiz CLI instead:",
+          "  swiz settings set <key> <value>",
+          "  swiz settings enable <setting>",
+          "  swiz settings disable <setting>",
+          "  swiz state set <state>",
+        ].join("\n")
+      )
     }
-  }
-}
-const repoRoot = await git(["rev-parse", "--show-toplevel"], targetDir)
-let crossRepoHint = ""
-if (repoRoot && repoRoot !== cwd) {
-  const remoteUrl = await git(["remote", "get-url", "origin"], repoRoot)
-  const remote = parseRemoteUrl(remoteUrl)
-  if (remote && (await isGitHubHost(remote.host))) {
-    crossRepoHint = [
-      "",
-      `The blocked path is inside a different repository: ${remote.slug}`,
-      buildIssueGuidance(remote.slug, { crossRepo: true, hostname: remote.host }),
-    ].join("\n")
-  }
+
+    // All paths are resolved through resolveCanonical so the isWithin() check
+    // operates in a uniform canonical namespace — no mix of logical and real paths.
+    const cwd = await resolveCanonical(parsed.cwd ?? process.cwd())
+    const target = await resolveCanonical(filePath)
+
+    // /tmp is a symlink on macOS (/tmp → /private/tmp); resolveCanonical gives the
+    // real path so the namespace stays consistent with the resolved target.
+    const tmp = await resolveCanonical(tmpdir())
+    const tmpLiteral = await resolveCanonical("/tmp")
+    // ~/.claude/projects/ is always allowed: Claude Code stores per-project
+    // auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
+    // deadlock with the memory-enforcement hook.
+    // resolveCanonical walks up to HOME (which exists) when .claude/projects
+    // hasn't been created yet, ensuring the prefix always matches the target's
+    // canonical form.
+    const homeDir = getHomeDirOrNull()
+    const claudeProjectsDir = homeDir ? await resolveCanonical(`${homeDir}/.claude/projects`) : null
+    const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
+
+    if (allowedRoots.some((root) => isWithin(root, target))) {
+      return preToolUseAllow(`File is within sandbox: ${target.split("/").slice(-2).join("/")}`)
+    }
+
+    // Well-known home-dir config files that workflows legitimately need to modify
+    // (e.g. `~/.npmrc` for npm auth). These are allowed individually to keep the
+    // sandbox tight — full home-dir access is NOT granted.
+    // See: https://github.com/mherod/swiz/issues/421
+    const WELL_KNOWN_CONFIG_FILES = [
+      ".npmrc",
+      ".yarnrc",
+      ".yarnrc.yml",
+      ".gitconfig",
+      ".gemrc",
+      ".curlrc",
+      ".wgetrc",
+      ".netrc",
+      ".docker/config.json",
+      ".config/gh/config.yml",
+      ".ssh/config",
+      ".ssh/known_hosts",
+    ]
+    if (homeDir) {
+      for (const configPath of WELL_KNOWN_CONFIG_FILES) {
+        const canonical = await resolveCanonical(join(homeDir, configPath))
+        if (target === canonical) {
+          return preToolUseAllow(`Well-known config file: ~/${configPath}`)
+        }
+      }
+    }
+
+    // Discover if the blocked path lives inside a different GitHub repo.
+    // dirname(target) is already canonical so the git walk identifies the true
+    // owning repo even when the path arrived through symlinks.
+    let targetDir = dirname(target)
+    {
+      const { stat } = await import("node:fs/promises")
+      while (targetDir !== dirname(targetDir)) {
+        try {
+          await stat(targetDir)
+          break
+        } catch {
+          targetDir = dirname(targetDir)
+        }
+      }
+    }
+    const repoRoot = await git(["rev-parse", "--show-toplevel"], targetDir)
+    let crossRepoHint = ""
+    if (repoRoot && repoRoot !== cwd) {
+      const remoteUrl = await git(["remote", "get-url", "origin"], repoRoot)
+      const remote = parseRemoteUrl(remoteUrl)
+      if (remote && (await isGitHubHost(remote.host))) {
+        crossRepoHint = [
+          "",
+          `The blocked path is inside a different repository: ${remote.slug}`,
+          buildIssueGuidance(remote.slug, { crossRepo: true, hostname: remote.host }),
+        ].join("\n")
+      }
+    }
+
+    return preToolUseDeny(
+      [
+        "File edit blocked: path is outside the session sandbox.",
+        "",
+        `  Attempted: ${target}`,
+        `  Session cwd: ${cwd}`,
+        "",
+        "Only edits within the current project directory or temporary directories are allowed.",
+        buildIssueGuidance(null),
+        crossRepoHint,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+  },
 }
 
-denyPreToolUse(
-  [
-    "File edit blocked: path is outside the session sandbox.",
-    "",
-    `  Attempted: ${target}`,
-    `  Session cwd: ${cwd}`,
-    "",
-    "Only edits within the current project directory or temporary directories are allowed.",
-    buildIssueGuidance(null),
-    crossRepoHint,
-  ]
-    .filter(Boolean)
-    .join("\n")
-)
+export default pretooluseSandboxedEdits
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseSandboxedEdits)
+}

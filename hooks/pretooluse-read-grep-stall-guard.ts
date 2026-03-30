@@ -10,13 +10,19 @@
 //
 // Non-read/non-write tools (TaskUpdate, Skill, Bash, etc.) are invisible
 // to the streak — they neither count toward it nor reset it.
+//
+// Dual-mode: exports a SwizToolHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
 import {
-  denyPreToolUse as deny,
-  formatActionPlan,
-  getToolsUsedForCurrentSession,
-} from "../src/utils/hook-utils.ts"
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
+import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
+import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
@@ -54,33 +60,46 @@ function countReadStreak(toolNames: string[]): number {
   return readStreak
 }
 
-async function main(): Promise<void> {
-  const raw = await Bun.stdin.json()
-  const validated = await getToolNamesAndValidate(raw)
-  if (!validated) return
+const pretooluseReadGrepStallGuard: SwizToolHook = {
+  name: "pretooluse-read-grep-stall-guard",
+  event: "preToolUse",
+  matcher: "Read|Grep|Glob",
+  timeout: 5,
+  cooldownSeconds: 300,
 
-  const { toolNames, toolName } = validated
-  const readStreak = countReadStreak(toolNames)
+  async run(input): Promise<SwizHookOutput> {
+    try {
+      const validated = await getToolNamesAndValidate(input)
+      if (!validated) return {}
 
-  if (readStreak < STALL_THRESHOLD) return
+      const { toolNames, toolName } = validated
+      const readStreak = countReadStreak(toolNames)
 
-  deny(
-    `STOP. ${toolName} is BLOCKED — ${readStreak} consecutive Read/Search tool calls ` +
-      `have occurred without any Edit or Write output.\n\n` +
-      `Your information gathering has gone on for too long without producing changes. ` +
-      `This pattern indicates a stall — reading the same files or searching endlessly without acting on findings.\n\n` +
-      formatActionPlan(
-        [
-          "Use Edit or Write to make the changes you've been researching.",
-          "If you're blocked, explain what's preventing progress and ask the user for guidance.",
-          "If the task is complete, update your tasks accordingly.",
-        ],
-        { translateToolNames: true }
-      ) +
-      `\nAfter making an Edit or Write, Read/Grep/Glob will be unblocked automatically.`
-  )
+      if (readStreak < STALL_THRESHOLD) return {}
+
+      return preToolUseDeny(
+        `STOP. ${toolName} is BLOCKED — ${readStreak} consecutive Read/Search tool calls ` +
+          `have occurred without any Edit or Write output.\n\n` +
+          `Your information gathering has gone on for too long without producing changes. ` +
+          `This pattern indicates a stall — reading the same files or searching endlessly without acting on findings.\n\n` +
+          formatActionPlan(
+            [
+              "Use Edit or Write to make the changes you've been researching.",
+              "If you're blocked, explain what's preventing progress and ask the user for guidance.",
+              "If the task is complete, update your tasks accordingly.",
+            ],
+            { header: "Action plan:" }
+          ) +
+          `\nAfter making an Edit or Write, Read/Grep/Glob will be unblocked automatically.`
+      )
+    } catch {
+      return {}
+    }
+  },
 }
 
+export default pretooluseReadGrepStallGuard
+
 if (import.meta.main) {
-  void main().catch(() => process.exit(0))
+  await runSwizHookAsMain(pretooluseReadGrepStallGuard)
 }

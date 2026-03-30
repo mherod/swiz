@@ -28,63 +28,8 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
 import type { ToolHookInput } from "./schemas.ts"
-
-const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
-const PUSH_APPROVAL_PATTERNS = [
-  /\bgo ahead and push\b/i,
-  /\bpush now\b/i,
-  /^\/push(?:\s|$)/m,
-  /\bplease push\b/i,
-]
-
-interface PushCheckResult {
-  blockingLine: string
-  approvedAfter: boolean
-}
-
-const CONVERSATION_ROLES = new Set(["user", "assistant"])
-
-function isTextBlock(block: unknown): string | null {
-  const b = block as Record<string, unknown>
-  return b?.type === "text" && typeof b?.text === "string" ? String(b.text) : null
-}
-
-function extractTextBlocks(entry: Record<string, unknown>): Array<{ role: string; text: string }> {
-  const role: string = (entry?.type as string) ?? ""
-  if (!CONVERSATION_ROLES.has(role)) return []
-  const content = (entry as { message?: { content?: unknown[] } })?.message?.content
-  if (!Array.isArray(content)) return []
-  const results: Array<{ role: string; text: string }> = []
-  for (const block of content) {
-    const text = isTextBlock(block)
-    if (text) {
-      results.push({ role, text })
-    }
-  }
-  return results
-}
-
-function extractBlockingSnippet(text: string): string {
-  return (
-    text
-      .split("\n")
-      .find((l) => NO_PUSH_RE.test(l))
-      ?.trim() ?? text.slice(0, 120)
-  )
-}
-
-function processTranscriptEntry(entry: Record<string, unknown>, state: PushCheckResult): void {
-  for (const { role, text } of extractTextBlocks(entry)) {
-    if (role !== "user") continue
-    if (NO_PUSH_RE.test(text)) {
-      state.blockingLine = extractBlockingSnippet(text)
-      state.approvedAfter = false
-    } else if (state.blockingLine && PUSH_APPROVAL_PATTERNS.some((re) => re.test(text))) {
-      state.approvedAfter = true
-    }
-  }
-}
 
 const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
   name: "pretooluse-no-push-when-instructed",
@@ -130,19 +75,7 @@ const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
     const transcriptPath: string = input?.transcript_path ?? ""
     if (!transcriptPath) return preToolUseAllow("")
 
-    const state: PushCheckResult = { blockingLine: "", approvedAfter: false }
-    try {
-      for (const line of await readSessionLines(transcriptPath)) {
-        if (!line.trim()) continue
-        let entry: Record<string, unknown>
-        try {
-          entry = JSON.parse(line)
-        } catch {
-          continue
-        }
-        processTranscriptEntry(entry, state)
-      }
-    } catch {}
+    const state = scanPushGateFromJsonlLines(await readSessionLines(transcriptPath))
 
     if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
     if (state.approvedAfter) return preToolUseAllow("Push approved by user after instruction")

@@ -886,7 +886,17 @@ async function main(): Promise<void> {
     })
 
     if (ctx.sessionId) {
-      await mergeActionPlanIntoTasks(planSteps, ctx.sessionId, ctx.cwd)
+      // Guard: only create tasks when the session is registered in this cwd's project.
+      // If the session transcript lives in a different project (e.g. the agent started
+      // in project A but cwd at stop time is project B), merging tasks here would
+      // surface project-B action items in project A's task view.
+      const { getSessionIdsForProject } = await import("../src/tasks/task-resolver.ts")
+      const { projectKeyFromCwd } = await import("../src/project-key.ts")
+      const projectKey = projectKeyFromCwd(ctx.cwd)
+      const projectSessionIds = await getSessionIdsForProject(projectKey)
+      if (projectSessionIds.has(ctx.sessionId)) {
+        await mergeActionPlanIntoTasks(planSteps, ctx.sessionId, ctx.cwd)
+      }
     }
 
     if (shouldUpdateStopCooldown(stopCtx)) await updateCooldown(ctx.sessionId, ctx.cwd)

@@ -4,20 +4,25 @@
 // When a lock exists but no relevant git process is active for this repo,
 // the hook removes the stale lock and allows the command to proceed.
 // Only blocks when a genuine git process is still running or cleanup fails.
+//
+// Dual-mode: exports a SwizShellHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import { unlink } from "node:fs/promises"
 import { compact } from "lodash-es"
-import { GIT_DIR_NAME, GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
+import { GIT_DIR_NAME, GIT_INDEX_LOCK, git, joinGitPath } from "../src/git-helpers.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  formatActionPlan,
-  GIT_ANY_CMD_RE,
-  git,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { GIT_ANY_CMD_RE } from "../src/utils/git-utils.ts"
+import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
+import { type ShellHookInput, shellHookInputSchema } from "./schemas.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -30,10 +35,10 @@ const REMOVE_MAX_RETRIES = 3
 const REMOVE_RETRY_DELAY_MS = 150
 const STALE_LOCK_AGE_MS = 10_000
 
-// ── Main Execution ───────────────────────────────────────────────────────────
+// ── Validation & resolution ─────────────────────────────────────────────────
 
 async function validateMainInputs(
-  input: ToolHookInput
+  input: ShellHookInput
 ): Promise<{ cwd: string; repoRoot: string; lockPath: string } | null> {
   // Only applies to shell tools running git commands.
   if (!isShellTool(input.tool_name ?? "")) return null
@@ -55,27 +60,27 @@ async function validateMainInputs(
   return { cwd, repoRoot, lockPath }
 }
 
-async function handleLockResolution(lockPath: string, repoRoot: string): Promise<void> {
+async function handleLockResolution(lockPath: string, repoRoot: string): Promise<SwizHookOutput> {
   // Wait for lock to resolve or git process to finish
   const { lockExists, gitActive } = await waitForLockResolution(lockPath, repoRoot)
 
   if (!lockExists) {
-    allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` resolved automatically — proceeding.`)
+    return preToolUseAllow(`\`${LOCK_RELATIVE_PATH}\` resolved automatically — proceeding.`)
   }
 
   if (!gitActive) {
-    await autoRemoveStaleLock(lockPath)
+    return await autoRemoveStaleLock(lockPath)
   }
 
   // Git process appears active, but the lock may be stale if it's old enough.
   // Attempt removal for aged locks — pgrep false-positives are common.
   const lockAge = await getLockAgeMs(lockPath)
   if (lockAge >= STALE_LOCK_AGE_MS) {
-    await autoRemoveStaleLock(lockPath)
+    return await autoRemoveStaleLock(lockPath)
   }
 
   // A relevant git process IS active and lock is recent — block to prevent corruption.
-  denyPreToolUse(
+  return preToolUseDeny(
     [
       `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
       "",
@@ -94,16 +99,45 @@ async function handleLockResolution(lockPath: string, repoRoot: string): Promise
   )
 }
 
-async function main() {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
+  // Retry removal up to REMOVE_MAX_RETRIES times to handle transient failures.
+  for (let attempt = 1; attempt <= REMOVE_MAX_RETRIES; attempt++) {
+    try {
+      // Lock may have already been removed by another process or a prior attempt.
+      if (!(await Bun.file(lockPath).exists())) {
+        return preToolUseAllow(
+          `\`${LOCK_RELATIVE_PATH}\` resolved (attempt ${attempt}) — proceeding.`
+        )
+      }
 
-  const validated = await validateMainInputs(input)
-  if (!validated) process.exit(0)
+      await unlink(lockPath)
 
-  await handleLockResolution(validated.lockPath, validated.repoRoot)
+      // Verify removal succeeded (race condition: another process may have recreated it).
+      if (!(await Bun.file(lockPath).exists())) {
+        return preToolUseAllow(
+          `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` on attempt ${attempt} — proceeding.`
+        )
+      }
+
+      // Lock reappeared — retry if attempts remain.
+    } catch {
+      // ENOENT (lock vanished between exists() and unlink()) — that's fine.
+      if (!(await Bun.file(lockPath).exists())) {
+        return preToolUseAllow(`\`${LOCK_RELATIVE_PATH}\` disappeared during cleanup — proceeding.`)
+      }
+      // Permission error or similar — retry if attempts remain.
+    }
+
+    if (attempt < REMOVE_MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, REMOVE_RETRY_DELAY_MS))
+    }
+  }
+
+  // All retries exhausted — allow anyway and let git report the error if lock persists.
+  return preToolUseAllow(
+    `\`${LOCK_RELATIVE_PATH}\` cleanup exhausted ${REMOVE_MAX_RETRIES} retries — proceeding (git will report if lock persists).`
+  )
 }
-
-// ── High-Level Logic ─────────────────────────────────────────────────────────
 
 async function waitForLockResolution(lockPath: string, repoRoot: string) {
   const start = Date.now()
@@ -121,44 +155,6 @@ async function waitForLockResolution(lockPath: string, repoRoot: string) {
   }
 
   return { lockExists, gitActive }
-}
-
-async function autoRemoveStaleLock(lockPath: string): Promise<void> {
-  // Retry removal up to REMOVE_MAX_RETRIES times to handle transient failures.
-  for (let attempt = 1; attempt <= REMOVE_MAX_RETRIES; attempt++) {
-    try {
-      // Lock may have already been removed by another process or a prior attempt.
-      if (!(await Bun.file(lockPath).exists())) {
-        allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` resolved (attempt ${attempt}) — proceeding.`)
-      }
-
-      await unlink(lockPath)
-
-      // Verify removal succeeded (race condition: another process may have recreated it).
-      if (!(await Bun.file(lockPath).exists())) {
-        allowPreToolUse(
-          `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` on attempt ${attempt} — proceeding.`
-        )
-      }
-
-      // Lock reappeared — retry if attempts remain.
-    } catch {
-      // ENOENT (lock vanished between exists() and unlink()) — that's fine.
-      if (!(await Bun.file(lockPath).exists())) {
-        allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` disappeared during cleanup — proceeding.`)
-      }
-      // Permission error or similar — retry if attempts remain.
-    }
-
-    if (attempt < REMOVE_MAX_RETRIES) {
-      await new Promise((resolve) => setTimeout(resolve, REMOVE_RETRY_DELAY_MS))
-    }
-  }
-
-  // All retries exhausted — allow anyway and let git report the error if lock persists.
-  allowPreToolUse(
-    `\`${LOCK_RELATIVE_PATH}\` cleanup exhausted ${REMOVE_MAX_RETRIES} retries — proceeding (git will report if lock persists).`
-  )
 }
 
 async function getLockAgeMs(lockPath: string): Promise<number> {
@@ -260,21 +256,37 @@ async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean
   }
 }
 
-// ── Entry Point ──────────────────────────────────────────────────────────────
+const pretooluseGitIndexLock: SwizShellHook = {
+  name: "pretooluse-git-index-lock",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
+
+  async run(input) {
+    try {
+      const parsed = shellHookInputSchema.parse(input)
+      const validated = await validateMainInputs(parsed)
+      if (!validated) return {}
+      return await handleLockResolution(validated.lockPath, validated.repoRoot)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return preToolUseDeny(
+        `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
+          `Error: ${message}\n\n` +
+          formatActionPlan(
+            [
+              "Check that the hook file and its dependencies are intact.",
+              "If the error persists, inspect the hook source at hooks/pretooluse-git-index-lock.ts.",
+            ],
+            { header: "To resolve:" }
+          )
+      )
+    }
+  },
+}
+
+export default pretooluseGitIndexLock
 
 if (import.meta.main) {
-  void main().catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err)
-    denyPreToolUse(
-      `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
-        `Error: ${message}\n\n` +
-        formatActionPlan(
-          [
-            "Check that the hook file and its dependencies are intact.",
-            "If the error persists, inspect the hook source at hooks/pretooluse-git-index-lock.ts.",
-          ],
-          { translateToolNames: true }
-        )
-    )
-  })
+  await runSwizHookAsMain(pretooluseGitIndexLock)
 }

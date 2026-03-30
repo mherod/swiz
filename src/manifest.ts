@@ -4,12 +4,14 @@
 
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"
+import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
 import pretoolusClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
+import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
@@ -28,7 +30,9 @@ import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
+import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-guard.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
+import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
@@ -208,7 +212,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
-      { file: "pretooluse-sandboxed-edits.ts", timeout: 5 },
+      { hook: pretooluseSandboxedEdits },
       { hook: pretooluseSandboxGuidanceConsolidation },
       { hook: pretoolusJsonValidation },
       { hook: pretoolUseNoDirectDeps },
@@ -235,7 +239,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { hook: pretoolusNoMergeConflictComments },
       { hook: pretoolusNoCp },
-      { file: "pretooluse-git-index-lock.ts", timeout: 5 },
+      { hook: pretooluseGitIndexLock },
       { hook: pretoolusNoNpm },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
@@ -260,7 +264,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "Read|Grep|Glob",
-    hooks: [{ file: "pretooluse-read-grep-stall-guard.ts", timeout: 5, cooldownSeconds: 300 }],
+    hooks: [{ hook: pretooluseReadGrepStallGuard }],
   },
   {
     event: "postToolUse",
@@ -304,7 +308,7 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "Bash",
     hooks: [
-      { file: "posttooluse-pr-context.ts", timeout: 10 },
+      { hook: posttoolusPrContext },
       { file: "posttooluse-pr-create-refine.ts", timeout: 10 },
       { hook: posttoolusGitContext },
       { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
