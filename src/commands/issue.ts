@@ -2,6 +2,7 @@ import { debugLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getRepoSlug, issueState } from "../git-helpers.ts"
 import { getIssueStore, isGraphQLRateLimited } from "../issue-store.ts"
+import { syncUpstreamState } from "../issue-store-sync.ts"
 import type { Command } from "../types.ts"
 
 /** Close an issue via REST API fallback when GraphQL is rate-limited. */
@@ -35,12 +36,13 @@ async function commentViaRest(
 
 function usage(): string {
   return (
-    "Usage: swiz issue <subcommand> <number> [options]\n" +
-    "Subcommands: close, comment, resolve, cache-bust\n" +
+    "Usage: swiz issue <subcommand> [options]\n" +
+    "Subcommands: close, comment, resolve, cache-bust, sync\n" +
     "  swiz issue close <number>\n" +
     "  swiz issue comment <number> --body <text>\n" +
     "  swiz issue resolve <number> [--body <text>]\n" +
-    "  swiz issue cache-bust [--repo <slug>]"
+    "  swiz issue cache-bust [--repo <slug>]\n" +
+    "  swiz issue sync [<repo>]"
   )
 }
 
@@ -279,10 +281,41 @@ async function handleCacheBust(args: string[]): Promise<void> {
   }
 }
 
+async function handleSync(args: string[]): Promise<void> {
+  const cwd = process.cwd()
+  let repo: string | null = args[1] ?? null
+  if (!repo) {
+    repo = await getRepoSlug(cwd)
+  }
+  if (!repo) {
+    throw new Error(
+      `Repo required. Usage: swiz issue sync [<repo>]\nOr run this in a git repo with an origin.`
+    )
+  }
+
+  console.log(`🔄 Syncing upstream state for ${repo}...`)
+  const result = await syncUpstreamState(repo, cwd)
+
+  console.log("✅ Sync complete:")
+  console.log(`  Issues: ${result.issues.upserted} upserted, ${result.issues.removed} removed`)
+  console.log(
+    `  PRs: ${result.pullRequests.upserted} upserted, ${result.pullRequests.removed} removed`
+  )
+  console.log(`  CI statuses: ${result.ciStatuses.upserted} upserted`)
+  console.log(`  Comments: ${result.comments.upserted} upserted`)
+  console.log(`  Labels: ${result.labels.upserted} upserted, ${result.labels.removed} removed`)
+  console.log(
+    `  Milestones: ${result.milestones.upserted} upserted, ${result.milestones.removed} removed`
+  )
+  console.log(`  Branch CI: ${result.branchCi.upserted} upserted`)
+  console.log(`  PR branch detail: ${result.prBranchDetail.upserted} upserted`)
+  console.log(`  Branch protection: ${result.branchProtection.upserted} upserted`)
+}
+
 export const issueCommand: Command = {
   name: "issue",
-  description: "Interact with GitHub issues (guards against operating on closed issues)",
-  usage: "swiz issue <close|comment|resolve> <number> [--body <text>]",
+  description: "Interact with GitHub issues and store (guards against operating on closed issues)",
+  usage: "swiz issue <subcommand> [options]",
   options: [
     { flags: "close <number>", description: "Close an issue (skips if already closed)" },
     {
@@ -301,10 +334,17 @@ export const issueCommand: Command = {
       description:
         "Clear cached issue/PR/CI data. Defaults to current repo; omit --repo to clear all.",
     },
+    {
+      flags: "sync [<repo>]",
+      description:
+        "Manually sync upstream GitHub state (issues, PRs, CI, labels) into the local store. " +
+        "Defaults to current repo.",
+    },
   ],
   async run(args: string[]) {
     const sub = args[0]
     if (sub === "cache-bust") return handleCacheBust(args)
+    if (sub === "sync") return handleSync(args)
 
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
