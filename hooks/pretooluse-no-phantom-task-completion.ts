@@ -42,113 +42,154 @@ interface ScanResult {
   anchorFound: boolean
 }
 
-/**
- * Walk the transcript to find the last time taskId was set to in_progress.
- * Then count non-task tool calls from that anchor to the end of the transcript.
- * Returns anchorFound=false when no in_progress transition is found — this
- * signals fail-open: the task may have been worked on in a prior session.
- */
-function scanTranscript(lines: string[], taskId: string): ScanResult {
-  let anchorIndex = -1
+interface RawInputFields {
+  toolName: string
+  toolInput: Record<string, unknown>
+  cwd: string
+  transcriptPath: string
+  sessionId: string | undefined
+}
 
+/** True when block is a TaskUpdate/update_plan setting this task to in_progress. */
+function isInProgressTransition(block: Record<string, unknown>, taskId: string): boolean {
+  const name = String(block.name ?? "")
+  const inp = (block.input ?? {}) as Record<string, unknown>
+  const isTaskUpdateName = name === "TaskUpdate" || name === "update_plan"
+  if (!isTaskUpdateName) return false
+  const matchesTask = String(inp.taskId ?? "") === taskId
+  return matchesTask && String(inp.status ?? "") === "in_progress"
+}
+
+/** True when this call targets completing a task (TaskUpdate/update_plan, status=completed). */
+function isCompletionCall(toolName: string, toolInput: Record<string, unknown>): boolean {
+  const isTaskUpdateName = toolName === "TaskUpdate" || toolName === "update_plan"
+  if (!isTaskUpdateName) return false
+  return String(toolInput.status ?? "") === "completed"
+}
+
+/** Extract and normalise the string fields from a raw hook input. */
+function extractRawFields(raw: {
+  tool_name?: string
+  tool_input?: unknown
+  cwd?: string
+  transcript_path?: string
+  session_id?: string
+}): RawInputFields {
+  return {
+    toolName: raw.tool_name ?? "",
+    toolInput: (raw.tool_input ?? {}) as Record<string, unknown>,
+    cwd: raw.cwd ?? process.cwd(),
+    transcriptPath: raw.transcript_path ?? "",
+    sessionId: resolveSafeSessionId(raw.session_id) ?? undefined,
+  }
+}
+
+/** Extract task-specific fields from a tool_input record. */
+function extractTaskFields(toolInput: Record<string, unknown>): {
+  taskId: string
+  description: string
+} {
+  return {
+    taskId: String(toolInput.taskId ?? ""),
+    description: String(toolInput.description ?? ""),
+  }
+}
+
+/**
+ * Return the line index of the last in_progress transition for taskId.
+ * Returns -1 when no such transition is found in the transcript.
+ */
+function findAnchorIndex(lines: string[], taskId: string): number {
+  let anchorIndex = -1
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (!line) continue
     try {
       for (const block of extractToolBlocksFromEntry(line)) {
-        const name = String(block.name ?? "")
-        const inp = (block.input ?? {}) as Record<string, unknown>
-        if (
-          (name === "TaskUpdate" || name === "update_plan") &&
-          String(inp.taskId ?? "") === taskId &&
-          String(inp.status ?? "") === "in_progress"
-        ) {
-          anchorIndex = i
-        }
+        if (isInProgressTransition(block, taskId)) anchorIndex = i
       }
     } catch {
       // skip malformed transcript lines
     }
   }
+  return anchorIndex
+}
 
-  if (anchorIndex < 0) {
-    return { workCallCount: 0, anchorFound: false }
-  }
-
-  let workCallCount = 0
-  for (let i = anchorIndex + 1; i < lines.length; i++) {
+/** Count non-task tool calls after startIndex. */
+function countWorkCallsFrom(lines: string[], startIndex: number): number {
+  let count = 0
+  for (let i = startIndex + 1; i < lines.length; i++) {
     const line = lines[i]
     if (!line) continue
     try {
       for (const block of extractToolBlocksFromEntry(line)) {
-        const name = String(block.name ?? "")
-        if (!isTaskTool(name)) {
-          workCallCount++
-        }
+        if (!isTaskTool(String(block.name ?? ""))) count++
       }
     } catch {
       // skip malformed transcript lines
     }
   }
+  return count
+}
 
-  return { workCallCount, anchorFound: true }
+function scanTranscript(lines: string[], taskId: string): ScanResult {
+  const anchorIndex = findAnchorIndex(lines, taskId)
+  if (anchorIndex < 0) return { workCallCount: 0, anchorFound: false }
+  return { workCallCount: countWorkCallsFrom(lines, anchorIndex), anchorFound: true }
+}
+
+function buildDenialMessage(taskId: string, sessionId: string | undefined): string {
+  const sessionNote = sessionId ? ` (session ${sessionId})` : ""
+  return (
+    `PHANTOM TASK BLOCK: Task #${taskId}${sessionNote} cannot be marked completed.\n\n` +
+    `No substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep…) were\n` +
+    `recorded after this task was set to in_progress. This is the mechanical signature\n` +
+    `of phantom task completion — creating tasks to satisfy enforcement gates without\n` +
+    `performing the stated work.\n\n` +
+    formatActionPlan(
+      [
+        "Use Edit, Write, Bash, or Skill to actually perform the work described in the task subject.",
+        "Include traceable evidence in description: commit:<sha>, file:<path>, test:<result>, pr:<url>.",
+      ],
+      { header: "To resolve:" }
+    )
+  )
 }
 
 async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const toolName = input.tool_name ?? ""
-  const toolInput = (input.tool_input ?? {}) as Record<string, unknown>
+  const raw = toolHookInputSchema.parse(await Bun.stdin.json())
+  const { toolName, toolInput, cwd, transcriptPath, sessionId } = extractRawFields(raw)
 
-  if (toolName !== "TaskUpdate" && toolName !== "update_plan") return
-  if (String(toolInput.status ?? "") !== "completed") return
+  if (!isCompletionCall(toolName, toolInput)) return
 
-  const taskId = String(toolInput.taskId ?? "")
+  const { taskId, description } = extractTaskFields(toolInput)
   if (!taskId) return
 
-  const cwd = input.cwd ?? process.cwd()
   if (!(await isGitRepo(cwd))) return
 
   // Evidence in the completion description bypasses the work-count gate.
-  const newDescription = String(toolInput.description ?? "")
-  if (hasTrackedEvidence(newDescription)) {
+  if (hasTrackedEvidence(description)) {
     allowPreToolUse(`Task #${taskId} completion includes traceable evidence.`)
   }
 
-  const transcriptPath = input.transcript_path ?? ""
   if (!transcriptPath) return
-
-  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
 
   const lines = (await readSessionLines(transcriptPath)).filter((l) => l.trim())
   if (lines.length === 0) return
 
   const { workCallCount, anchorFound } = scanTranscript(lines, taskId)
 
-  // No in_progress transition in transcript → cannot verify → allow (fail-open).
+  // No in_progress transition found → cannot verify → fail-open.
   if (!anchorFound) return
 
   if (workCallCount >= 1) {
     allowPreToolUse(
-      `Task #${taskId}: ${workCallCount} substantive tool call(s) found — completion allowed.`
+      `Task #${taskId}: ${workCallCount} work tool call(s) after in_progress — completion allowed.`
     )
   }
 
   // Zero work calls after the in_progress anchor → phantom completion.
-  const sessionNote = sessionId ? ` (session ${sessionId})` : ""
-  denyPreToolUse(
-    `PHANTOM TASK BLOCK: Task #${taskId}${sessionNote} cannot be marked completed.\n\n` +
-      `No substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep…) were\n` +
-      `recorded after this task was set to in_progress. This is the mechanical signature\n` +
-      `of phantom task completion — creating tasks to satisfy enforcement gates without\n` +
-      `performing the stated work.\n\n` +
-      formatActionPlan(
-        [
-          "Use Edit, Write, Bash, or Skill to actually perform the work described in the task subject.",
-          "Include traceable evidence in description: commit:<sha>, file:<path>, test:<result>, pr:<url>.",
-        ],
-        { header: "To resolve:" }
-      )
-  )
+  denyPreToolUse(buildDenialMessage(taskId, sessionId))
 }
 
 if (import.meta.main) await main()
