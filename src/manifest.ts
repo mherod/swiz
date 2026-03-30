@@ -21,6 +21,7 @@ import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.t
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
+import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
@@ -157,7 +158,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "TaskCreate|TodoWrite",
-    hooks: [{ file: "pretooluse-task-subject-validation.ts", timeout: 5 }],
+    hooks: [{ hook: pretoolusTaskSubjectValidation }],
   },
   {
     event: "preToolUse",

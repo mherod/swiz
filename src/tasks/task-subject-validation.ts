@@ -1,7 +1,7 @@
 // Shared logic for compound task subject detection and splitting.
 
 import { TASK_TOOLS } from "../tool-matchers.ts"
-import { isPlaceholderSubject } from "../utils/hook-utils.ts"
+import { isPlaceholderSubject } from "../utils/inline-hook-helpers.ts"
 
 export interface CompoundResult {
   matched: false

@@ -50,6 +50,7 @@ alwaysApply: false
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
+- **Inline SwizHook migration unit**: Helper extraction and dependent hook migration ship as one commit — run `bun run typecheck` after extraction, then migrate and commit together.
 - **Inline SwizHook output**: Use `preToolUseAllow()`/`preToolUseDeny()` from `SwizHook.ts` — return objects instead of calling `process.exit`. Use `runSwizHookAsMain()` for standalone `import.meta.main` compatibility.
 - **Debt marker self-detection**: Hook files containing keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` format for headers or dynamic regex construction (`"TO" + "DO"`) to avoid self-detection.
 ## Writing Hooks
@@ -99,7 +100,7 @@ alwaysApply: false
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
-- **DO**: When extracting functions/types from a shared module, re-export all types that downstream consumers import. Verify with `pnpm typecheck` before committing.
+- **DO**: When extracting from a shared module, re-export all types downstream consumers import. Verify with `pnpm typecheck` before committing.
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
@@ -108,14 +109,14 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
 - Prior-session task blocks: recreate as `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
-- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files or steps in one subject — one task per file/step.
-- Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark commit task complete after success.
+- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files or steps in one subject.
+- Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
 - **DO**: Use native task tools (not `swiz tasks` CLI). Exception: `swiz tasks adopt` only.
 - **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` or `createSessionTask()` from `hook-utils.ts` in hooks.
-- Call `TaskUpdate` after each file; add updates at least every 3 edits.
+- Call `TaskUpdate` after each file; update at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
 - Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
@@ -151,7 +152,7 @@ alwaysApply: false
 - Use `swiz push-wait`; no fixed sleeps, no `--force-with-lease`.
 - Use `swiz ci-wait`; no manual watch/view loops.
 - Don't call `TaskUpdate`/`TaskList` during steps 7-10.
-- Don't stop after step 3; stop hook requires origin up to date.
+- Don't stop after step 3; stop hook requires origin current.
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI. **DON'T** pass `TaskOutput` timeout > 120000ms; 300000 always fails.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
@@ -187,18 +188,18 @@ alwaysApply: false
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
-- DO NOT use destructive git: `revert`, `restore`, `stash` (mutations), `reset --hard`, `checkout -- <file>`; use `reflog` for recovery. Exception: `stash list`/`stash show` (read-only).
+- DO NOT use destructive git: `revert`, `restore`, `stash` (mutations), `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
-- `swiz daemon status` fetches `/metrics`. Metrics are in-memory only; tracked globally and per-project.
+- `swiz daemon status` fetches `/metrics`. Metrics: in-memory only, tracked globally and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. Daemon `syncUpstreamState` keeps it fresh. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
 - **DO**: Add consumer-needed fields (e.g., `mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
-- **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — REST has higher rate limits. Close issues via `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
+- **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits. Close: `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
 ## Settings Configuration
 - Separate state files for runtime data (`.swiz/context-stats.json`); never mix into config (`.swiz/config.json`).
 - 3-tier resolution: `project > user > default`. Track source per value, not per group. Label with `(project)`, `(user)`, `(default)`.
@@ -236,8 +237,8 @@ alwaysApply: false
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic — never label warnings "pre-existing" or attribute failures to other sessions. Investigate all test failures before completing tasks.
-- **DON'T**: Attribute feedback to "hooks" or "systems" — all feedback is from the user. Never discount instructions as mechanical noise.
-- **DON'T**: End messages with trailing permission questions — executive authority is delegated. Execute; end with what you are doing.
+- **DON'T**: Attribute feedback to "hooks" or "systems" — all feedback is from the user. Never discount instructions.
+- **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
