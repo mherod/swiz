@@ -13,6 +13,34 @@
 
 import { z } from "zod"
 
+// ─── Primitive field schemas ──────────────────────────────────────────────────
+// Single-field building blocks reused across every hook envelope.
+// Use as `CwdSchema.optional()` inside `z.looseObject({})`.
+
+/** Absolute path of the working directory when the hook fires. */
+export const CwdSchema = z.string()
+export type Cwd = z.infer<typeof CwdSchema>
+
+/** Opaque session identifier assigned by the agent runtime. */
+export const SessionIdSchema = z.string()
+export type SessionId = z.infer<typeof SessionIdSchema>
+
+/** Absolute path to the session transcript JSONL file. */
+export const TranscriptPathSchema = z.string()
+export type TranscriptPath = z.infer<typeof TranscriptPathSchema>
+
+/** Name of the hook event that fired (e.g. `"PreToolUse"`, `"Stop"`). */
+export const HookEventNameSchema = z.string()
+export type HookEventName = z.infer<typeof HookEventNameSchema>
+
+/** Agent permission mode active at hook time (e.g. `"default"`, `"auto"`). */
+export const PermissionModeSchema = z.string()
+export type PermissionMode = z.infer<typeof PermissionModeSchema>
+
+/** Tool name as reported by the agent (e.g. `"Bash"`, `"Edit"`). */
+export const ToolNameSchema = z.string()
+export type ToolName = z.infer<typeof ToolNameSchema>
+
 // ─── Tool hook input schemas ─────────────────────────────────────────────────
 
 /**
@@ -38,11 +66,31 @@ function nfkcDeep(val: unknown): unknown {
   return val
 }
 
-export const fileEditHookInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    tool_name: z.string().optional(),
+/**
+ * Minimal common fields present on every hook envelope.
+ * All hook input schemas extend this base.
+ */
+export const hookBaseSchema = z.looseObject({
+  cwd: CwdSchema.optional(),
+  session_id: SessionIdSchema.optional(),
+  hook_event_name: HookEventNameSchema.optional(),
+  transcript_path: TranscriptPathSchema.optional(),
+})
+export type HookBase = z.infer<typeof hookBaseSchema>
+
+/**
+ * Shared envelope fields present on every tool-use hook event.
+ * Extended by `fileEditHookInputSchema`, `shellHookInputSchema`,
+ * `toolHookInputSchema`, and `skillToolInputSchema`.
+ */
+const toolHookBaseObjectSchema = hookBaseSchema.extend({
+  tool_name: ToolNameSchema.optional(),
+  tool_input: z.record(z.string(), z.unknown()).optional(),
+  permission_mode: PermissionModeSchema.optional(),
+})
+
+export const fileEditHookInputSchema = toolHookBaseObjectSchema
+  .extend({
     tool_input: z
       .looseObject({
         file_path: z.string().optional(),
@@ -51,9 +99,6 @@ export const fileEditHookInputSchema = z
         content: z.string().optional(),
       })
       .optional(),
-    transcript_path: z.string().optional(),
-    permission_mode: z.string().optional(),
-    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -70,19 +115,13 @@ export type FileEditHookInput = z.infer<typeof fileEditHookInputSchema>
  * Shell tool_input payload — used by hooks that inspect shell commands.
  * Covers Bash, Shell, run_shell_command and equivalent cross-agent tools.
  */
-export const shellHookInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    tool_name: z.string().optional(),
+export const shellHookInputSchema = toolHookBaseObjectSchema
+  .extend({
     tool_input: z
       .looseObject({
         command: z.string().optional(),
       })
       .optional(),
-    transcript_path: z.string().optional(),
-    permission_mode: z.string().optional(),
-    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -97,22 +136,12 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  * Base PreToolUse / PostToolUse hook input envelope.
  * Mirrors the `ToolHookInput` interface in hook-utils.ts with runtime validation.
  */
-export const toolHookInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    tool_name: z.string().optional(),
-    tool_input: z.record(z.string(), z.unknown()).optional(),
-    transcript_path: z.string().optional(),
-    permission_mode: z.string().optional(),
-    hook_event_name: z.string().optional(),
-  })
-  .transform((val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
-    }
-    return val
-  })
+export const toolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
+  if (val.tool_input) {
+    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+  }
+  return val
+})
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
@@ -120,20 +149,14 @@ export type ToolHookInput = z.infer<typeof toolHookInputSchema>
  * Skill tool_input payload — used by hooks that process Skill tool invocations.
  * Validates skill name and optional arguments with NFKC normalization.
  */
-export const skillToolInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    tool_name: z.string().optional(),
+export const skillToolInputSchema = toolHookBaseObjectSchema
+  .extend({
     tool_input: z
       .looseObject({
         skill: z.string().optional(),
         args: z.string().optional(),
       })
       .optional(),
-    transcript_path: z.string().optional(),
-    permission_mode: z.string().optional(),
-    hook_event_name: z.string().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -154,13 +177,9 @@ export interface PostToolHookInput extends ToolHookInput {
  * Stop / SubagentStop hook input envelope.
  * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.
  */
-export const stopHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
+export const stopHookInputSchema = hookBaseSchema.extend({
   stop_hook_active: z.boolean().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
-  hook_event_name: z.string().optional(),
+  permission_mode: PermissionModeSchema.optional(),
 })
 
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
@@ -169,14 +188,10 @@ export type StopHookInput = z.infer<typeof stopHookInputSchema>
  * SessionStart / UserPromptSubmit / PreCompact hook input envelope.
  * Mirrors the `SessionHookInput` interface in hook-utils.ts with runtime validation.
  */
-export const sessionHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
+export const sessionHookInputSchema = hookBaseSchema.extend({
   trigger: z.string().optional(),
   matcher: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+  permission_mode: PermissionModeSchema.optional(),
 })
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
@@ -187,7 +202,7 @@ export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
  * Contains cwd and optionally the list of staged files.
  */
 export const preCommitHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
+  cwd: CwdSchema.optional(),
   staged_files: z.array(z.string()).optional(),
 })
 
@@ -199,11 +214,8 @@ export type PreCommitHookInput = z.infer<typeof preCommitHookInputSchema>
  * Stop / SubagentStop hook input envelope (extended).
  * Adds `last_assistant_message` per the hooks reference.
  */
-export const stopHookExtendedInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
+export const stopHookExtendedInputSchema = hookBaseSchema.extend({
   stop_hook_active: z.boolean().optional(),
-  transcript_path: z.string().optional(),
   last_assistant_message: z.string().optional(),
   // SubagentStop-specific fields
   agent_id: z.string().optional(),
@@ -217,12 +229,9 @@ export type StopHookExtendedInput = z.infer<typeof stopHookExtendedInputSchema>
  * SessionStart hook input envelope.
  * Extends the base session schema with `source`, `model`, and `agent_type`.
  */
-export const sessionStartHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
+export const sessionStartHookInputSchema = hookBaseSchema.extend({
   trigger: z.string().optional(),
   matcher: z.string().optional(),
-  hook_event_name: z.string().optional(),
   source: z.enum(["startup", "resume", "clear", "compact"]).optional(),
   model: z.string().optional(),
   agent_type: z.string().optional(),
@@ -234,12 +243,8 @@ export type SessionStartHookInput = z.infer<typeof sessionStartHookInputSchema>
  * UserPromptSubmit hook input envelope.
  * Adds the `prompt` field containing the user's submitted text.
  */
-export const userPromptSubmitHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const userPromptSubmitHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   prompt: z.string().optional(),
 })
 
@@ -251,11 +256,7 @@ export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInput
  * Notification hook input envelope.
  * Fires when Claude Code sends a notification (permission_prompt, idle_prompt, etc.).
  */
-export const notificationHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const notificationHookInputSchema = hookBaseSchema.extend({
   message: z.string().optional(),
   title: z.string().optional(),
   notification_type: z.string().optional(),
@@ -267,14 +268,7 @@ export type NotificationHookInput = z.infer<typeof notificationHookInputSchema>
  * PermissionRequest hook input envelope.
  * Fires when a permission dialog is shown to the user.
  */
-export const permissionRequestHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z.record(z.string(), z.unknown()).optional(),
+export const permissionRequestHookInputSchema = toolHookBaseObjectSchema.extend({
   permission_suggestions: z.array(z.unknown()).optional(),
 })
 
@@ -284,14 +278,7 @@ export type PermissionRequestHookInput = z.infer<typeof permissionRequestHookInp
  * PostToolUseFailure hook input envelope.
  * Fires when a tool execution fails.
  */
-export const postToolUseFailureHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z.record(z.string(), z.unknown()).optional(),
+export const postToolUseFailureHookInputSchema = toolHookBaseObjectSchema.extend({
   tool_use_id: z.string().optional(),
   error: z.string().optional(),
   is_interrupt: z.boolean().optional(),
@@ -303,11 +290,7 @@ export type PostToolUseFailureHookInput = z.infer<typeof postToolUseFailureHookI
  * SubagentStart hook input envelope.
  * Fires when a subagent is spawned.
  */
-export const subagentStartHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const subagentStartHookInputSchema = hookBaseSchema.extend({
   agent_id: z.string().optional(),
   agent_type: z.string().optional(),
 })
@@ -318,12 +301,8 @@ export type SubagentStartHookInput = z.infer<typeof subagentStartHookInputSchema
  * TaskCreated / TaskCompleted hook input envelope.
  * Fires when a task is being created or completed.
  */
-export const taskEventHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const taskEventHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   task_id: z.string().optional(),
   task_subject: z.string().optional(),
   task_description: z.string().optional(),
@@ -337,12 +316,8 @@ export type TaskEventHookInput = z.infer<typeof taskEventHookInputSchema>
  * TeammateIdle hook input envelope.
  * Fires when an agent team teammate is about to go idle.
  */
-export const teammateIdleHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const teammateIdleHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   teammate_name: z.string().optional(),
   team_name: z.string().optional(),
 })
@@ -353,11 +328,7 @@ export type TeammateIdleHookInput = z.infer<typeof teammateIdleHookInputSchema>
  * StopFailure hook input envelope.
  * Fires when the turn ends due to an API error.
  */
-export const stopFailureHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const stopFailureHookInputSchema = hookBaseSchema.extend({
   error: z.string().optional(),
   error_details: z.string().optional(),
   last_assistant_message: z.string().optional(),
@@ -369,11 +340,7 @@ export type StopFailureHookInput = z.infer<typeof stopFailureHookInputSchema>
  * InstructionsLoaded hook input envelope.
  * Fires when a CLAUDE.md or .claude/rules/*.md file is loaded.
  */
-export const instructionsLoadedHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const instructionsLoadedHookInputSchema = hookBaseSchema.extend({
   file_path: z.string().optional(),
   memory_type: z.enum(["User", "Project", "Local", "Managed"]).optional(),
   load_reason: z
@@ -390,11 +357,7 @@ export type InstructionsLoadedHookInput = z.infer<typeof instructionsLoadedHookI
  * ConfigChange hook input envelope.
  * Fires when a configuration file changes during a session.
  */
-export const configChangeHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const configChangeHookInputSchema = hookBaseSchema.extend({
   source: z
     .enum(["user_settings", "project_settings", "local_settings", "policy_settings", "skills"])
     .optional(),
@@ -407,11 +370,7 @@ export type ConfigChangeHookInput = z.infer<typeof configChangeHookInputSchema>
  * CwdChanged hook input envelope.
  * Fires when the working directory changes during a session.
  */
-export const cwdChangedHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const cwdChangedHookInputSchema = hookBaseSchema.extend({
   old_cwd: z.string().optional(),
   new_cwd: z.string().optional(),
 })
@@ -422,11 +381,7 @@ export type CwdChangedHookInput = z.infer<typeof cwdChangedHookInputSchema>
  * FileChanged hook input envelope.
  * Fires when a watched file changes on disk.
  */
-export const fileChangedHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const fileChangedHookInputSchema = hookBaseSchema.extend({
   file_path: z.string().optional(),
   event: z.enum(["change", "add", "unlink"]).optional(),
 })
@@ -437,11 +392,7 @@ export type FileChangedHookInput = z.infer<typeof fileChangedHookInputSchema>
  * WorktreeCreate hook input envelope.
  * Fires when a worktree is being created.
  */
-export const worktreeCreateHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const worktreeCreateHookInputSchema = hookBaseSchema.extend({
   name: z.string().optional(),
 })
 
@@ -451,11 +402,7 @@ export type WorktreeCreateHookInput = z.infer<typeof worktreeCreateHookInputSche
  * WorktreeRemove hook input envelope.
  * Fires when a worktree is being removed.
  */
-export const worktreeRemoveHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const worktreeRemoveHookInputSchema = hookBaseSchema.extend({
   worktree_path: z.string().optional(),
 })
 
@@ -465,11 +412,7 @@ export type WorktreeRemoveHookInput = z.infer<typeof worktreeRemoveHookInputSche
  * PostCompact hook input envelope.
  * Fires after a compact operation completes.
  */
-export const postCompactHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const postCompactHookInputSchema = hookBaseSchema.extend({
   trigger: z.enum(["manual", "auto"]).optional(),
   compact_summary: z.string().optional(),
 })
@@ -480,12 +423,8 @@ export type PostCompactHookInput = z.infer<typeof postCompactHookInputSchema>
  * Elicitation hook input envelope.
  * Fires when an MCP server requests user input during a tool call.
  */
-export const elicitationHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const elicitationHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   mcp_server_name: z.string().optional(),
   message: z.string().optional(),
   mode: z.enum(["form", "url"]).optional(),
@@ -500,12 +439,8 @@ export type ElicitationHookInput = z.infer<typeof elicitationHookInputSchema>
  * ElicitationResult hook input envelope.
  * Fires after a user responds to an MCP elicitation.
  */
-export const elicitationResultHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const elicitationResultHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   mcp_server_name: z.string().optional(),
   action: z.enum(["accept", "decline", "cancel"]).optional(),
   content: z.record(z.string(), z.unknown()).optional(),
@@ -519,12 +454,8 @@ export type ElicitationResultHookInput = z.infer<typeof elicitationResultHookInp
  * SessionEnd hook input envelope.
  * Fires when a session terminates.
  */
-export const sessionEndHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-  permission_mode: z.string().optional(),
+export const sessionEndHookInputSchema = hookBaseSchema.extend({
+  permission_mode: PermissionModeSchema.optional(),
   reason: z
     .enum([
       "clear",
@@ -546,12 +477,7 @@ export type SessionEndHookInput = z.infer<typeof sessionEndHookInputSchema>
  * Gemini injects `GEMINI_PROJECT_DIR`, `GEMINI_SESSION_ID`, `GEMINI_CWD`
  * as env vars; hooks also receive a JSON payload on stdin.
  */
-export const geminiCommonInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-})
+export const geminiCommonInputSchema = hookBaseSchema
 
 export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
 
@@ -559,11 +485,7 @@ export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
  * Gemini SessionStart hook input envelope.
  * `source` matches: `startup`, `resume`, `clear`.
  */
-export const geminiSessionStartInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiSessionStartInputSchema = hookBaseSchema.extend({
   source: z.enum(["startup", "resume", "clear"]).optional(),
 })
 
@@ -573,11 +495,7 @@ export type GeminiSessionStartInput = z.infer<typeof geminiSessionStartInputSche
  * Gemini SessionEnd hook input envelope.
  * Fires when a session ends (exit, clear).
  */
-export const geminiSessionEndInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiSessionEndInputSchema = hookBaseSchema.extend({
   reason: z.string().optional(),
 })
 
@@ -587,11 +505,7 @@ export type GeminiSessionEndInput = z.infer<typeof geminiSessionEndInputSchema>
  * Gemini BeforeAgent hook input envelope.
  * Fires after user submits prompt, before planning. Can block the turn.
  */
-export const geminiBeforeAgentInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiBeforeAgentInputSchema = hookBaseSchema.extend({
   prompt: z.string().optional(),
 })
 
@@ -601,11 +515,7 @@ export type GeminiBeforeAgentInput = z.infer<typeof geminiBeforeAgentInputSchema
  * Gemini AfterAgent hook input envelope.
  * Fires when the agent loop ends. Can force retry or halt.
  */
-export const geminiAfterAgentInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiAfterAgentInputSchema = hookBaseSchema.extend({
   stop_hook_active: z.boolean().optional(),
   last_assistant_message: z.string().optional(),
 })
@@ -616,11 +526,7 @@ export type GeminiAfterAgentInput = z.infer<typeof geminiAfterAgentInputSchema>
  * Gemini BeforeModel hook input envelope.
  * Fires before sending request to LLM. Can block turn or mock response.
  */
-export const geminiBeforeModelInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiBeforeModelInputSchema = hookBaseSchema.extend({
   model: z.string().optional(),
   prompt: z.string().optional(),
 })
@@ -631,11 +537,7 @@ export type GeminiBeforeModelInput = z.infer<typeof geminiBeforeModelInputSchema
  * Gemini AfterModel hook input envelope.
  * Fires after receiving LLM response. Can block turn or redact.
  */
-export const geminiAfterModelInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiAfterModelInputSchema = hookBaseSchema.extend({
   model: z.string().optional(),
   response: z.unknown().optional(),
 })
@@ -646,11 +548,7 @@ export type GeminiAfterModelInput = z.infer<typeof geminiAfterModelInputSchema>
  * Gemini BeforeToolSelection hook input envelope.
  * Fires before LLM selects tools. Can filter available tools.
  */
-export const geminiBeforeToolSelectionInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiBeforeToolSelectionInputSchema = hookBaseSchema.extend({
   available_tools: z.array(z.string()).optional(),
 })
 
@@ -661,21 +559,12 @@ export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSele
  * Fires before a tool executes. `matcher` is regex against tool name.
  * Can block tool or rewrite arguments.
  */
-export const geminiBeforeToolInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    hook_event_name: z.string().optional(),
-    transcript_path: z.string().optional(),
-    tool_name: z.string().optional(),
-    tool_input: z.record(z.string(), z.unknown()).optional(),
-  })
-  .transform((val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
-    }
-    return val
-  })
+export const geminiBeforeToolInputSchema = toolHookBaseObjectSchema.transform((val) => {
+  if (val.tool_input) {
+    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+  }
+  return val
+})
 
 export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
 
@@ -684,14 +573,8 @@ export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
  * Fires after a tool executes. Can block result or add context.
  * `matcher` is regex against tool name.
  */
-export const geminiAfterToolInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    hook_event_name: z.string().optional(),
-    transcript_path: z.string().optional(),
-    tool_name: z.string().optional(),
-    tool_input: z.record(z.string(), z.unknown()).optional(),
+export const geminiAfterToolInputSchema = toolHookBaseObjectSchema
+  .extend({
     tool_response: z.unknown().optional(),
   })
   .transform((val) => {
@@ -707,12 +590,7 @@ export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
  * Gemini PreCompress hook input envelope.
  * Advisory event — fires before context compression.
  */
-export const geminiPreCompressInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
-})
+export const geminiPreCompressInputSchema = hookBaseSchema
 
 export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema>
 
@@ -720,11 +598,7 @@ export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema
  * Gemini Notification hook input envelope.
  * Advisory event — fires when a system notification occurs.
  */
-export const geminiNotificationInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().optional(),
+export const geminiNotificationInputSchema = hookBaseSchema.extend({
   message: z.string().optional(),
   title: z.string().optional(),
   notification_type: z.string().optional(),
@@ -786,13 +660,17 @@ export type GeminiHookOutput = z.infer<typeof geminiHookOutputSchema>
  * Extends the base envelope with `model` and `hook_event_name`.
  * `transcript_path` is nullable in Codex (null when no transcript exists).
  */
-export const codexCommonInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().nullable().optional(),
+/**
+ * Base input fields for Codex hook envelopes.
+ * Extends `hookBaseSchema` with nullable `transcript_path` (null when no
+ * transcript exists) and `model`.
+ */
+const codexHookBaseSchema = hookBaseSchema.extend({
+  transcript_path: TranscriptPathSchema.nullable().optional(),
   model: z.string().optional(),
 })
+
+export const codexCommonInputSchema = codexHookBaseSchema
 
 export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
 
@@ -801,12 +679,7 @@ export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
  * `source` is limited to `startup` | `resume` in current Codex runtime.
  * `matcher` filters on `source`.
  */
-export const codexSessionStartInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().nullable().optional(),
-  model: z.string().optional(),
+export const codexSessionStartInputSchema = codexHookBaseSchema.extend({
   source: z.enum(["startup", "resume"]).optional(),
 })
 
@@ -817,15 +690,10 @@ export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema
  * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
  * `matcher` filters on `tool_name`.
  */
-export const codexPreToolUseInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    hook_event_name: z.string().optional(),
-    transcript_path: z.string().nullable().optional(),
-    model: z.string().optional(),
+export const codexPreToolUseInputSchema = codexHookBaseSchema
+  .extend({
     turn_id: z.string().optional(),
-    tool_name: z.string().optional(),
+    tool_name: ToolNameSchema.optional(),
     tool_use_id: z.string().optional(),
     tool_input: z
       .looseObject({
@@ -848,15 +716,10 @@ export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
  * command output payload (usually a JSON string).
  * `matcher` filters on `tool_name`.
  */
-export const codexPostToolUseInputSchema = z
-  .looseObject({
-    cwd: z.string().optional(),
-    session_id: z.string().optional(),
-    hook_event_name: z.string().optional(),
-    transcript_path: z.string().nullable().optional(),
-    model: z.string().optional(),
+export const codexPostToolUseInputSchema = codexHookBaseSchema
+  .extend({
     turn_id: z.string().optional(),
-    tool_name: z.string().optional(),
+    tool_name: ToolNameSchema.optional(),
     tool_use_id: z.string().optional(),
     tool_input: z
       .looseObject({
@@ -878,12 +741,7 @@ export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
  * Codex UserPromptSubmit hook input envelope.
  * `matcher` is not used for this event in Codex.
  */
-export const codexUserPromptSubmitInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().nullable().optional(),
-  model: z.string().optional(),
+export const codexUserPromptSubmitInputSchema = codexHookBaseSchema.extend({
   turn_id: z.string().optional(),
   prompt: z.string().optional(),
 })
@@ -896,12 +754,7 @@ export type CodexUserPromptSubmitInput = z.infer<typeof codexUserPromptSubmitInp
  * `stop_hook_active` indicates whether this turn was already continued by Stop.
  * Expects JSON on stdout (plain text is invalid for this event).
  */
-export const codexStopInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  hook_event_name: z.string().optional(),
-  transcript_path: z.string().nullable().optional(),
-  model: z.string().optional(),
+export const codexStopInputSchema = codexHookBaseSchema.extend({
   turn_id: z.string().optional(),
   stop_hook_active: z.boolean().optional(),
   last_assistant_message: z.string().nullable().optional(),
