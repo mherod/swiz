@@ -7,7 +7,10 @@
  */
 
 import { isEditTool, isNotebookTool, isWriteTool } from "../tool-matchers.ts"
-import { SOURCE_EXT_RE } from "./git-utils.ts"
+
+// Duplicated from git-utils.ts to avoid pulling in settings.ts (which creates
+// a circular dependency via manifest.ts when inline hooks import this module).
+const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/
 
 // ─── Projected content ──────────────────────────────────────────────────────
 

@@ -21,8 +21,10 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
-import { TEST_FILE_RE } from "../src/utils/git-utils.ts"
 import type { FileEditHookInput } from "./schemas.ts"
+
+// Duplicated from git-utils.ts to avoid circular deps via settings.ts → manifest.ts
+const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//
 
 // ── Secret patterns (mirrored from stop-secret-scanner.ts) ───────────────────
 

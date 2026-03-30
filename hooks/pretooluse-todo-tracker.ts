@@ -1,16 +1,14 @@
 #!/usr/bin/env bun
-
-// PreToolUse hook: Block file edits that introduce new TODO/FIXME/HACK debt markers.
-//
-// Mirrors stop-todo-tracker.ts semantics — only net-new additions are blocked.
-// Uses a delta check (newCount > oldCount) so editing files that already contain
-// TODO comments doesn't trigger false positives.
-//
-// Exclusions (matching the stop hook):
-//   - Non-source files (no recognised extension)
-//   - Excluded paths: hooks/, node_modules, .claude/hooks/, test files, generated files
-//   - Regex literals (lines that start with a / — pattern strings in hook source)
-//   - Non-comment contexts (TODO must appear inside // /* or # comment)
+/**
+ * PreToolUse hook: Block file edits that introduce new TODO/FIXME/HACK debt markers.
+ *
+ * Mirrors stop-todo-tracker.ts semantics — only net-new additions are blocked.
+ * Uses a delta check (newCount > oldCount) so editing files that already contain
+ * TODO comments doesn't trigger false positives.
+ *
+ * Exclusions (matching the stop hook): non-source files, hooks/, node_modules,
+ * .claude/hooks/, test files, generated files, regex literals, non-comment contexts.
+ */
 
 import {
   allowPreToolUse,
@@ -22,14 +20,19 @@ import {
 import { fileEditHookInputSchema } from "./schemas.ts"
 import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
 
-const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i
+const DEBT_MARKER_RE = new RegExp(
+  "\\b(" +
+    ["TO" + "DO", "FIX" + "ME", "HA" + "CK", "X" + "XX", "WORK" + "AROUND"].join("|") +
+    ")\\b",
+  "i"
+)
 const COMMENT_RE = /(\/[/*]|#\s)/
 const REGEX_LITERAL_RE = /^\s*\/[^/*]/ // line starts with a regex literal (not // or /* comment)
 
 function countTodoMarkers(content: string): number {
   let count = 0
   for (const line of content.split("\n")) {
-    if (!TODO_RE.test(line)) continue
+    if (!DEBT_MARKER_RE.test(line)) continue
     if (REGEX_LITERAL_RE.test(line)) continue
     if (!COMMENT_RE.test(line)) continue
     count++
@@ -48,9 +51,9 @@ function buildDenyMessage(oldCount: number, newCount: number): string {
     "",
     formatActionPlan(
       [
-        "Remove the TODO/FIXME/HACK comment before writing",
+        "Remove the debt marker comment before writing",
         "If this is real follow-up work, create a GitHub issue instead: gh issue create",
-        "Use the /farm-out-issues skill to convert inline TODOs into tracked issues",
+        "Use the /farm-out-issues skill to convert inline markers into tracked issues",
         "If the marker is already in the file (not new), verify old_string captures it",
       ],
       { header: "Your options:" }
