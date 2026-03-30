@@ -3,14 +3,18 @@
 // PreToolUse hook: Block edits to src/manifest.ts that change stop hook order
 // without updating src/manifest.test.ts expectations. Prevents failed pushes
 // caused by manifest/test order divergence.
+//
+// Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import {
-  allowPreToolUse,
-  computeProjectedContent,
-  denyPreToolUse,
-  isFileEditForPath,
-} from "../src/utils/hook-utils.ts"
-import type { FileEditHookInput } from "./schemas.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
 function extractStopHookOrder(source: string): string[] {
@@ -50,62 +54,68 @@ function buildOrderDivergences(projectedOrder: string[], expectedOrder: string[]
   return divergences
 }
 
-async function checkOrderAgainstTest(projectedOrder: string[], cwd: string): Promise<void> {
+/** Returns deny reason string, or null if order is valid or check cannot run. */
+async function checkOrderAgainstTest(
+  projectedOrder: string[],
+  cwd: string
+): Promise<string | null> {
   const testPath = `${cwd}/src/manifest.test.ts`
   let testSource: string
   try {
     testSource = await Bun.file(testPath).text()
   } catch {
-    // No test file — fail open
-    allowPreToolUse("")
+    return null // fail open
   }
 
   const expectedOrder = extractTestExpectations(testSource)
-  if (expectedOrder.length === 0) {
-    // No order assertions found — fail open
-    allowPreToolUse("")
-  }
+  if (expectedOrder.length === 0) return null // no assertions — fail open
 
   const divergences = buildOrderDivergences(projectedOrder, expectedOrder)
-  if (divergences.length > 0) {
-    denyPreToolUse(
-      `Manifest stop hook order diverges from test expectations.\n\n` +
-        `Divergences:\n${divergences.join("\n")}\n\n` +
-        `You must also update src/manifest.test.ts to match the new order.\n` +
-        `Edit the "stop event hooks appear in correct order" test to reflect ` +
-        `the new positions before committing.`
-    )
-  }
+  if (divergences.length === 0) return null
+
+  return (
+    `Manifest stop hook order diverges from test expectations.\n\n` +
+    `Divergences:\n${divergences.join("\n")}\n\n` +
+    `You must also update src/manifest.test.ts to match the new order.\n` +
+    `Edit the "stop event hooks appear in correct order" test to reflect ` +
+    `the new positions before committing.`
+  )
 }
 
-function isManifestEdit(input: FileEditHookInput): boolean {
-  return isFileEditForPath(input, "src/manifest.ts")
+const pretooluseManiOrderValidation: SwizFileEditHook = {
+  name: "pretooluse-manifest-order-validation",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
+
+  async run(rawInput) {
+    const input = fileEditHookInputSchema.parse(rawInput)
+    if (!isFileEditForPath(input, "src/manifest.ts")) return preToolUseAllow("")
+
+    try {
+      const toolName = input.tool_name ?? ""
+      const filePath = input.tool_input?.file_path ?? ""
+      const projectedContent = await computeProjectedContent(
+        toolName,
+        filePath,
+        input.tool_input ?? {}
+      )
+      if (projectedContent === null) return preToolUseAllow("")
+
+      const projectedOrder = extractStopHookOrder(projectedContent)
+      if (projectedOrder.length === 0) return preToolUseAllow("")
+
+      const denyReason = await checkOrderAgainstTest(projectedOrder, input.cwd ?? process.cwd())
+      if (denyReason) return preToolUseDeny(denyReason)
+
+      return preToolUseAllow("")
+    } catch {
+      return preToolUseAllow("")
+    }
+  },
 }
 
-async function main() {
-  const input = (await Bun.stdin.json()) as FileEditHookInput
-  if (!isManifestEdit(input)) process.exit(0)
+export default pretooluseManiOrderValidation
 
-  try {
-    const toolName = input.tool_name ?? ""
-    const filePath = input.tool_input?.file_path ?? ""
-    const projectedContent = await computeProjectedContent(
-      toolName,
-      filePath,
-      input.tool_input ?? {}
-    )
-    if (projectedContent === null) allowPreToolUse("")
-
-    const projectedOrder = extractStopHookOrder(projectedContent)
-    if (projectedOrder.length === 0) allowPreToolUse("")
-
-    await checkOrderAgainstTest(projectedOrder, input.cwd ?? process.cwd())
-    allowPreToolUse("")
-  } catch {
-    process.exit(0)
-  }
-}
-
-if (import.meta.main) {
-  main().catch(() => process.exit(0))
-}
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseManiOrderValidation)

@@ -5,14 +5,18 @@
 // An agent can trivially bypass it by running `swiz settings disable sandboxed-edits`.
 // This hook denies that command unconditionally — the sandbox can only be
 // disabled by the user directly at the terminal (where this hook never fires).
+//
+// Dual-mode: exports a SwizToolHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import {
-  buildIssueGuidance,
-  denyPreToolUse,
-  isFileEditTool,
-  isSettingDisableCommand,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
+import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
@@ -43,40 +47,55 @@ export function isTrunkModeDisableCommand(command: string): boolean {
   return isSettingDisableCommand(command, TRUNK_MODE_ALIASES)
 }
 
-if (import.meta.main) {
-  const input = await Bun.stdin.json()
-  const toolName: string = input?.tool_name ?? ""
+const pretoolUseProtectSandbox: SwizToolHook = {
+  name: "pretooluse-protect-sandbox",
+  event: "preToolUse",
+  matcher: "Bash|Edit|Write|NotebookEdit",
+  timeout: 5,
 
-  if (isShellTool(toolName)) {
-    const command: string = input?.tool_input?.command ?? ""
-    if (isSandboxDisableCommand(command)) {
-      denyPreToolUse(
-        "Disabling sandboxed-edits is not permitted from agent Bash commands.\n\n" +
-          "The sandbox can only be disabled by the user directly at the terminal.\n" +
-          buildIssueGuidance(null)
-      )
-    }
-    if (isTrunkModeDisableCommand(command)) {
-      denyPreToolUse(
-        "Disabling trunk-mode is not permitted from agent Bash commands.\n\n" +
-          "Trunk mode can only be disabled by the user directly at the terminal.\n" +
-          buildIssueGuidance(null)
-      )
-    }
-  }
+  run(rawInput) {
+    const input = rawInput as Record<string, unknown>
+    const toolName: string = (input.tool_name as string) ?? ""
+    const toolInput = input.tool_input as Record<string, string> | undefined
 
-  if (isFileEditTool(toolName)) {
-    const filePath: string = input?.tool_input?.file_path ?? ""
-    if (SWIZ_CONFIG_RE.test(filePath)) {
-      denyPreToolUse(
-        "Editing swiz config files directly is not permitted from agent file edits.\n\n" +
-          "Use the swiz CLI instead:\n" +
-          "  swiz settings set <key> <value>\n" +
-          "  swiz settings enable <setting>\n" +
-          "  swiz settings disable <setting>\n" +
-          "  swiz state set <state>\n" +
-          buildIssueGuidance(null)
-      )
+    if (isShellTool(toolName)) {
+      const command: string = toolInput?.command ?? ""
+      if (isSandboxDisableCommand(command)) {
+        return preToolUseDeny(
+          "Disabling sandboxed-edits is not permitted from agent Bash commands.\n\n" +
+            "The sandbox can only be disabled by the user directly at the terminal.\n" +
+            buildIssueGuidance(null)
+        )
+      }
+      if (isTrunkModeDisableCommand(command)) {
+        return preToolUseDeny(
+          "Disabling trunk-mode is not permitted from agent Bash commands.\n\n" +
+            "Trunk mode can only be disabled by the user directly at the terminal.\n" +
+            buildIssueGuidance(null)
+        )
+      }
     }
-  }
+
+    if (isFileEditTool(toolName)) {
+      const filePath: string = toolInput?.file_path ?? ""
+      if (SWIZ_CONFIG_RE.test(filePath)) {
+        return preToolUseDeny(
+          "Editing swiz config files directly is not permitted from agent file edits.\n\n" +
+            "Use the swiz CLI instead:\n" +
+            "  swiz settings set <key> <value>\n" +
+            "  swiz settings enable <setting>\n" +
+            "  swiz settings disable <setting>\n" +
+            "  swiz state set <state>\n" +
+            buildIssueGuidance(null)
+        )
+      }
+    }
+
+    return preToolUseAllow("")
+  },
 }
+
+export default pretoolUseProtectSandbox
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolUseProtectSandbox)

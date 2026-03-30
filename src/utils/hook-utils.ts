@@ -563,31 +563,7 @@ export {
 }
 
 // ─── Issue guidance consolidation ──────────────────────────────────────────
-// Shared formatter for "file an issue on the target repo instead" messaging.
-
-/**
- * Build standardized guidance text for filing an issue on a target repository.
- * Consolidates the "file an issue instead of editing externally" messaging pattern.
- *
- * @param repo - Repository slug (owner/repo) or null for generic placeholder
- * @param options - Configuration for the guidance message
- * @returns Formatted guidance text ready for user display
- */
-export function buildIssueGuidance(
-  repo: string | null,
-  options?: { crossRepo?: boolean; hostname?: string }
-): string {
-  const isCrossRepo = options?.crossRepo ?? false
-  const hostname = options?.hostname ?? "github.com"
-  const hostnameFlag = hostname !== "github.com" ? ` --hostname ${hostname}` : ""
-  const repoSlug = repo ?? "<owner>/<repo>"
-
-  const prefix = isCrossRepo
-    ? "If this change is needed, consider filing an issue there so the repo can triage it:"
-    : "If you need to edit a file outside the project, file an issue on the target repo instead:"
-
-  return `${prefix}\n  gh issue create --repo ${repoSlug}${hostnameFlag} --title "..." --body "..."`
-}
+export { buildIssueGuidance } from "./inline-hook-helpers.ts"
 
 // ─── Session task I/O ────────────────────────────────────────────────────────
 
@@ -875,18 +851,9 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
   return isExemptGitCommand(command) || isExemptUtilityCommand(command)
 }
 
-/** Returns true when a command attempts to disable a swiz setting identified by any of the given aliases. */
-export function isSettingDisableCommand(command: string, aliases: string[]): boolean {
-  for (const alias of aliases) {
-    if (new RegExp(`swiz\\s+settings\\s+disable\\s+${alias}(?:\\s|$)`).test(command)) return true
-    if (new RegExp(`swiz\\s+settings\\s+set\\s+${alias}\\s+false(?:\\s|$)`).test(command))
-      return true
-  }
-  return false
-}
-
 // Re-exported from src/git-helpers.ts
 export { type ForkTopology, issueState } from "../git-helpers.ts"
+export { isSettingDisableCommand } from "./inline-hook-helpers.ts"
 
 // ─── Fork-aware guidance helpers ───────────────────────────────────────────
 

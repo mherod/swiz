@@ -5,17 +5,21 @@
 // For Edit tools, computes projected file content (current file + replacement)
 // then compares dependency blocks before/after to detect mutations.
 // For Write tools, parses the full content directly.
+//
+// Dual-mode: exports a SwizToolHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import { dirname } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  detectPackageManager,
-  isEditTool,
-  isFileEditTool,
-  isWriteTool,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { isEditTool, isFileEditTool, isWriteTool } from "../src/tool-matchers.ts"
+import { computeProjectedContent } from "../src/utils/edit-projection.ts"
+import { detectPackageManager } from "../src/utils/package-detection.ts"
 
 const DEP_FIELDS = [
   "dependencies",
@@ -60,62 +64,11 @@ function hasDependencyBlocks(parsed: Record<string, unknown>): boolean {
   )
 }
 
-async function checkWriteTool(input: Record<string, unknown>, addCmd: string): Promise<void> {
-  const toolInput = input.tool_input as Record<string, string> | undefined
-  const content: string = toolInput?.content ?? ""
-  if (!content) process.exit(0)
-  const parsed = JSON.parse(content)
-  if (hasDependencyBlocks(parsed)) {
-    denyPreToolUse(
-      `Do not directly write dependency blocks in package.json. ` +
-        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
-    )
-  }
-}
-
-async function parseContentSafely(content: string): Promise<Record<string, unknown> | null> {
+function parseContentSafely(content: string): Record<string, unknown> | null {
   try {
     return JSON.parse(content)
   } catch {
     return null
-  }
-}
-
-function resolveEditStrings(input: Record<string, unknown>): {
-  oldString: string
-  newString: string
-} | null {
-  const toolInput = input.tool_input as Record<string, string> | undefined
-  const oldString: string = toolInput?.old_string ?? ""
-  const newString: string = toolInput?.new_string ?? ""
-  return oldString || newString ? { oldString, newString } : null
-}
-
-async function checkEditTool(
-  input: Record<string, unknown>,
-  filePath: string,
-  addCmd: string
-): Promise<void> {
-  const strings = resolveEditStrings(input)
-  if (!strings) process.exit(0)
-
-  let currentContent: string
-  try {
-    currentContent = await Bun.file(filePath).text()
-  } catch {
-    process.exit(0)
-  }
-
-  const projectedContent = currentContent.replace(strings.oldString, strings.newString)
-  const currentParsed = await parseContentSafely(currentContent)
-  const projectedParsed = await parseContentSafely(projectedContent)
-  if (!currentParsed || !projectedParsed) process.exit(0)
-
-  if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
-    denyPreToolUse(
-      `Do not directly edit dependency blocks in package.json. ` +
-        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
-    )
   }
 }
 
@@ -126,42 +79,68 @@ const ADD_COMMANDS: Record<string, string> = {
   npm: "npm install",
 }
 
-function resolveFilePath(input: Record<string, unknown>): string {
-  const toolInput = input.tool_input as Record<string, string> | undefined
-  return toolInput?.file_path ?? toolInput?.path ?? ""
-}
+const pretoolUseNoDirectDeps: SwizToolHook = {
+  name: "pretooluse-no-direct-deps",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
 
-async function validateInputs(
-  input: Record<string, unknown>
-): Promise<{ filePath: string; toolName: string } | null> {
-  const toolName: string = (input.tool_name as string) ?? ""
-  if (!isFileEditTool(toolName)) return null
+  async run(rawInput) {
+    const input = rawInput as Record<string, unknown>
+    const toolName: string = (input.tool_name as string) ?? ""
+    if (!isFileEditTool(toolName)) return preToolUseAllow("")
 
-  const filePath = resolveFilePath(input)
-  if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) return null
+    const toolInput = input.tool_input as Record<string, string> | undefined
+    const filePath: string = toolInput?.file_path ?? toolInput?.path ?? ""
+    if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath))
+      return preToolUseAllow("")
 
-  return { filePath, toolName }
-}
+    const PM = await detectPackageManager(dirname(filePath))
+    const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
 
-async function main() {
-  const input = await Bun.stdin.json().catch(() => null)
-  if (!input) process.exit(0)
+    try {
+      if (isWriteTool(toolName)) {
+        const content: string = toolInput?.content ?? ""
+        if (!content) return preToolUseAllow("")
+        const parsed = parseContentSafely(content)
+        if (!parsed) return preToolUseAllow("")
+        if (hasDependencyBlocks(parsed)) {
+          return preToolUseDeny(
+            `Do not directly write dependency blocks in package.json. ` +
+              `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
+          )
+        }
+      } else if (isEditTool(toolName)) {
+        const projectedContent = await computeProjectedContent(toolName, filePath, toolInput ?? {})
+        if (projectedContent === null) return preToolUseAllow("")
 
-  const validation = await validateInputs(input)
-  if (!validation) process.exit(0)
+        let currentContent: string
+        try {
+          currentContent = await Bun.file(filePath).text()
+        } catch {
+          return preToolUseAllow("")
+        }
 
-  const { filePath, toolName } = validation
-  const PM = await detectPackageManager(dirname(filePath))
-  const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
+        const currentParsed = parseContentSafely(currentContent)
+        const projectedParsed = parseContentSafely(projectedContent)
+        if (!currentParsed || !projectedParsed) return preToolUseAllow("")
 
-  try {
-    if (isWriteTool(toolName)) {
-      await checkWriteTool(input, addCmd)
-    } else if (isEditTool(toolName)) {
-      await checkEditTool(input, filePath, addCmd)
+        if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
+          return preToolUseDeny(
+            `Do not directly edit dependency blocks in package.json. ` +
+              `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
+          )
+        }
+      }
+    } catch {
+      return preToolUseAllow("")
     }
-  } catch {}
-  allowPreToolUse(`No direct dependency edits detected in ${filePath.split("/").pop()}`)
+
+    return preToolUseAllow(`No direct dependency edits detected in ${filePath.split("/").pop()}`)
+  },
 }
 
-if (import.meta.main) main().catch(() => process.exit(0))
+export default pretoolUseNoDirectDeps
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolUseNoDirectDeps)

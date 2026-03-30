@@ -8,7 +8,9 @@ import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
+import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
+import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
 import pretoolusNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
 import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
@@ -17,6 +19,7 @@ import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit
 import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
 import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
+import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
@@ -194,7 +197,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-sandboxed-edits.ts", timeout: 5 },
       { file: "pretooluse-sandbox-guidance-consolidation.ts", timeout: 5 },
       { hook: pretoolusJsonValidation },
-      { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
+      { hook: pretoolUseNoDirectDeps },
       { hook: pretoolusNoNodeModulesEdit },
       { hook: pretoolusNoLockfileEdit },
       { file: "pretooluse-ts-quality.ts", timeout: 5 },
@@ -205,7 +208,7 @@ export const manifest: HookGroup[] = [
       { hook: pretooluseTodoTracker },
       { hook: pretooluseLargeFiles },
       { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
-      { file: "pretooluse-manifest-order-validation.ts", timeout: 5 },
+      { hook: pretoolUseManiOrderValidation },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
     ],
   },
@@ -221,7 +224,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { hook: pretoolusNoNpm },
       { hook: pretooluseBunTestConcurrent },
-      { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
+      { hook: pretoolUseProtectSandbox },
       { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
       { hook: pretooluseLongSleep },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
