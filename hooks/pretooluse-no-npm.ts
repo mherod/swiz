@@ -1,15 +1,23 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Redirect only implausible package-manager usage.
-// Main guardrail: prevent blind npm/npx usage when project signals indicate a non-npm setup.
+/**
+ * PreToolUse hook: Redirect implausible package-manager usage.
+ * Main guardrail: prevent blind npm/npx usage when project signals indicate a non-npm setup.
+ *
+ * Dual-mode: exports a SwizShellHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  detectPackageManager,
-  isShellTool,
-  type PackageManager,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { detectPackageManager, type PackageManager } from "../src/utils/package-detection.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
+import type { ShellHookInput } from "./schemas.ts"
 
 // Equivalent subcommands across package managers
 interface CmdMap {
@@ -81,8 +89,8 @@ const CMD: Record<PackageManager, CmdMap> = {
   },
 }
 
-function deny(from: string, to: string, pm: PackageManager): void {
-  denyPreToolUse(
+function buildDeny(from: string, to: string, pm: PackageManager): SwizHookOutput {
+  return preToolUseDeny(
     `Use ${pm} instead. Project signals suggest ${pm} is the expected package manager.\n\n` +
       `  ${from}  →  ${to}`
   )
@@ -116,16 +124,8 @@ function classifySubcmd(subcmd: string, args: string): keyof CmdMap | null {
   return SUBCMD_MAP[subcmd] ?? null
 }
 
-/**
- * Decide whether this invocation is implausible enough to redirect.
- *
- * We intentionally focus on npm/npx because accidental npm usage is the most
- * common lockfile-drift source. bun/pnpm are generally acceptable choices in
- * modern repos and should not be hard-redirected by default.
- */
 function isImplausibleInvocation(invoked: string, pm: PackageManager): boolean {
   if (invoked === "npm" || invoked === "npx") return pm !== "npm"
-  // Yarn is usually implausible in bun/pnpm projects.
   if (invoked === "yarn") return pm === "bun" || pm === "pnpm"
   return false
 }
@@ -152,39 +152,51 @@ function parseInvocation(command: string): ParsedInvocation | null {
   }
 }
 
-function denyImplausible(parsed: ParsedInvocation, pm: PackageManager): void {
+function buildImplausibleDeny(parsed: ParsedInvocation, pm: PackageManager): SwizHookOutput {
   const { invoked, subcmd, rest } = parsed
   const target = CMD[pm]
 
   if (PACKAGE_RUNNERS.has(invoked)) {
-    deny(`${invoked} <pkg>`, target.dlx, pm)
+    return buildDeny(`${invoked} <pkg>`, target.dlx, pm)
   }
 
   const kind = classifySubcmd(subcmd, rest)
   if (kind) {
     const fromCmd = CMD[invoked as PackageManager]?.[kind] ?? `${invoked} ${subcmd}`
-    deny(fromCmd, target[kind], pm)
+    return buildDeny(fromCmd, target[kind], pm)
   }
 
-  deny(`${invoked} ${subcmd}`, `${pm} ${subcmd}`, pm)
+  return buildDeny(`${invoked} ${subcmd}`, `${pm} ${subcmd}`, pm)
 }
 
-async function main() {
-  const input = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
-  const PM = await detectPackageManager()
-  if (!PM) process.exit(0)
+async function evaluate(input: ShellHookInput) {
+  if (!isShellTool(input.tool_name ?? "")) return {}
 
-  const command: string = input?.tool_input?.command ?? ""
+  const pm = await detectPackageManager()
+  if (!pm) return {}
+
+  const command: string = input.tool_input?.command ?? ""
   const parsed = parseInvocation(command)
-  if (!parsed) process.exit(0)
-  if (!isImplausibleInvocation(parsed.invoked, PM)) {
-    allowPreToolUse(`Package manager invocation '${parsed.invoked}' is plausible for ${PM}`)
+  if (!parsed) return {}
+  if (!isImplausibleInvocation(parsed.invoked, pm)) {
+    return preToolUseAllow(`Package manager invocation '${parsed.invoked}' is plausible for ${pm}`)
   }
 
-  denyImplausible(parsed, PM)
+  return buildImplausibleDeny(parsed, pm)
 }
 
-if (import.meta.main) {
-  void main()
+const pretoolusNoNpm: SwizShellHook = {
+  name: "pretooluse-no-npm",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input as ShellHookInput)
+  },
 }
+
+export default pretoolusNoNpm
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoNpm)

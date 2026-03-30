@@ -7,10 +7,13 @@ import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
+import pretoolusNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
 import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
 import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
+import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
+import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
@@ -318,7 +321,7 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoMergeConflictComments },
       { hook: pretoolusNoCp },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
-      { file: "pretooluse-no-npm.ts", timeout: 5 },
+      { hook: pretoolusNoNpm },
       { hook: pretooluseBunTestConcurrent },
       { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
       { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
@@ -335,8 +338,8 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
       { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
-      { file: "pretooluse-no-ready-to-backlog.ts", timeout: 5 },
-      { file: "pretooluse-no-issue-close.ts", timeout: 5 },
+      { hook: pretoolusNoReadyToBacklog },
+      { hook: pretoolusNoIssueClose },
     ],
   },
   {
