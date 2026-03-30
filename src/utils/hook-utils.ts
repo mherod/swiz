@@ -31,8 +31,6 @@ import {
 import { getHomeDirOrNull } from "../home.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
-// Local import for names used within this file (re-exports don't create local bindings)
-import { isEditTool, isNotebookTool, isWriteTool } from "../tool-matchers.ts"
 import {
   GH_CMD_RE,
   GIT_READ_RE,
@@ -40,7 +38,6 @@ import {
   READ_CMD_RE,
   RECOVERY_CMD_RE,
   SETUP_CMD_RE,
-  SOURCE_EXT_RE,
 } from "./git-utils.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
 
@@ -146,56 +143,10 @@ export {
 // escalated to SIGKILL after a grace period.
 
 // ─── Projected content computation ──────────────────────────────────────────
-// Shared by PreToolUse hooks that validate file content before writes.
-// For Edit: reads current file, applies old→new replacement.
-// For Write/NotebookEdit: returns content directly.
-// Returns null when the projected content cannot be determined.
-
-interface ProjectedContentInput {
-  old_string?: string
-  new_string?: string
-  content?: string
-}
-
-/**
- * Compute what a file's content will be after a tool applies its edit.
- * Used by PreToolUse hooks to validate file content before the write happens.
- *
- * Returns null if the projected content cannot be determined (e.g. file unreadable
- * on an Edit where both old/new are empty).
- */
-async function computeEditToolContent(
-  filePath: string,
-  oldString: string,
-  newString: string
-): Promise<string | null> {
-  if (!oldString && !newString) return null
-  try {
-    const currentContent = await Bun.file(filePath).text()
-    return currentContent.replace(oldString, () => newString)
-  } catch {
-    return null
-  }
-}
-
-export async function computeProjectedContent(
-  toolName: string,
-  filePath: string,
-  toolInput: ProjectedContentInput
-): Promise<string | null> {
-  if (isNotebookTool(toolName)) {
-    return (toolInput.content ?? "") || null
-  }
-
-  if (isEditTool(toolName)) {
-    const oldString = toolInput.old_string ?? ""
-    const newString = toolInput.new_string ?? ""
-    return computeEditToolContent(filePath, oldString, newString)
-  }
-
-  // Write tool — content is the full file
-  return (toolInput.content ?? "") || null
-}
+// Canonical implementations live in edit-projection.ts (extracted to avoid
+// circular deps when inline SwizHook files import these via manifest.ts).
+// Re-exported here for backward-compatible access via hook-utils.ts.
+export { computeProjectedContent, type ProjectedContentInput } from "./edit-projection.ts"
 
 /**
  * Returns true if the Bash command is a `swiz` CLI invocation.
@@ -326,14 +277,7 @@ export function allowPreToolUseWithUpdatedInput(
  * Check whether a hook input represents an Edit/Write operation targeting a file
  * whose path ends with the given suffix. Shared predicate for file-path guards.
  */
-export function isFileEditForPath(
-  input: { tool_name?: string; tool_input?: { file_path?: string } },
-  pathSuffix: string
-): boolean {
-  const filePath = input.tool_input?.file_path ?? ""
-  const toolName = input.tool_name ?? ""
-  return filePath.endsWith(pathSuffix) && (isEditTool(toolName) || isWriteTool(toolName))
-}
+export { isFileEditForPath } from "./edit-projection.ts"
 
 export function filePathGuardHook(
   predicate: (filePath: string) => boolean,
@@ -1028,43 +972,6 @@ export { spawnSpeak } from "../speech.ts"
 // ─── File utilities ───────────────────────────────────────────────────────
 
 export { countFileWords } from "../file-metrics.ts"
-
-/**
- * Returns true when a file path should be skipped by source-scanning hooks.
- * Always skips non-source files (unrecognised extension). Pass any additional
- * per-hook exclusion regexes as extra arguments.
- */
-export function isExcludedSourcePath(filePath: string, ...extras: RegExp[]): boolean {
-  if (!SOURCE_EXT_RE.test(filePath)) return true
-  return extras.some((re) => re.test(filePath))
-}
-
-// ─── Edit delta resolution ──────────────────────────────────────────────────
-
-export interface EditDelta {
-  oldString: string
-  newString: string
-}
-
-/**
- * Extract old/new strings from a file-edit hook input, returning null if the
- * file path matches any exclusion pattern. Common extraction shared across
- * hooks that inspect edit content (debug statements, TODO tracker, etc.).
- */
-export function resolveEditDelta(
-  input: {
-    tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
-  },
-  ...excludePatterns: RegExp[]
-): EditDelta | null {
-  const filePath = input.tool_input?.file_path ?? ""
-  if (isExcludedSourcePath(filePath, ...excludePatterns)) return null
-  return {
-    oldString: input.tool_input?.old_string ?? "",
-    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
-  }
-}
-
 // ─── Auto-steer scheduling (extracted to auto-steer-helpers.ts) ────────────
 export {
   type AutoSteerRequest,
@@ -1076,6 +983,18 @@ export {
   sendAutoSteer,
   shouldDeferAutoSteerForForegroundChatApp,
 } from "./auto-steer-helpers.ts"
+/**
+ * Returns true when a file path should be skipped by source-scanning hooks.
+ * Always skips non-source files (unrecognised extension). Pass any additional
+ * per-hook exclusion regexes as extra arguments.
+ */
+// ─── Edit delta resolution ──────────────────────────────────────────────────
+// Canonical implementations live in edit-projection.ts.
+export {
+  type EditDelta,
+  isExcludedSourcePath,
+  resolveEditDelta,
+} from "./edit-projection.ts"
 
 /** ToolHookInput extended with typed task tool_input fields. */
 export interface TaskToolInput extends ToolHookInput {
