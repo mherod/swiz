@@ -407,7 +407,16 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   return withLogBuffer(() => performDispatch(req))
 }
 
-/** Set SWIZ_PROJECT_CWD env var and return previous value for restoration. */
+/**
+ * Set SWIZ_PROJECT_CWD env var and return previous value for restoration.
+ *
+ * NOTE: This is a process-wide mutation and is NOT safe under concurrent
+ * daemon dispatches. It exists as a legacy bridge for detectPackageManager()
+ * which reads SWIZ_PROJECT_CWD when no startDir is passed. Hooks spawned
+ * with Bun.spawn({ cwd }) already have the correct process.cwd(), but
+ * in-process code paths (inline hooks, filters) still need this.
+ * See issue #434 for the full removal plan.
+ */
 function injectProjectCwd(cwd: string | undefined): string | undefined {
   const prev = process.env.SWIZ_PROJECT_CWD
   if (cwd) process.env.SWIZ_PROJECT_CWD = cwd
