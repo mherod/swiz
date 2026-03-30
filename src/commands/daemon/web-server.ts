@@ -24,6 +24,14 @@ import {
 } from "./agent-process-discovery.ts"
 import { type CiWatchRegistry, verifyWebhookSignature } from "./ci-watch-registry.ts"
 import {
+  type DashboardIssueRecord,
+  type DashboardPrRecord,
+  issueUpdatedAtMs,
+  normalizeDashboardIssue,
+  normalizeDashboardPr,
+  STALE_ISSUES_TTL_MS,
+} from "./dashboard-types.ts"
+import {
   type CooldownRegistry,
   createMetrics,
   type DaemonMetrics,
@@ -181,15 +189,6 @@ export function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): st
   return parts.join(" | ")
 }
 
-import {
-  type DashboardIssueRecord,
-  type DashboardPrRecord,
-  issueUpdatedAtMs,
-  normalizeDashboardIssue,
-  normalizeDashboardPr,
-  STALE_ISSUES_TTL_MS,
-} from "./dashboard-types.ts"
-
 export interface DaemonWebServerContext {
   port: number
   pruneTranscriptMemory: () => void
@@ -227,6 +226,13 @@ export interface DaemonWebServerContext {
 const DAEMON_REQUEST_TIMEOUT_GRACE_MS = 10_000
 const DAEMON_REQUEST_TIMEOUT_FALLBACK_MS = 60_000
 
+function daemonDispatchRequestTimeoutMs(canonicalEvent: string): number {
+  const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
+  return budgetSec
+    ? budgetSec * 1000 + DAEMON_REQUEST_TIMEOUT_GRACE_MS
+    : DAEMON_REQUEST_TIMEOUT_FALLBACK_MS
+}
+
 /** Maximum age before an active dispatch entry is considered stale and reaped (ms).
  *  Generous enough to cover the slowest event (stop: 180s) plus overhead. */
 const STALE_DISPATCH_MAX_AGE_MS = 300_000 // 5 minutes
@@ -244,6 +250,27 @@ function reapStaleDispatches(activeHookDispatches: Map<string, ActiveHookDispatc
       activeHookDispatches.delete(id)
     }
   }
+}
+
+/** Watcher registration then touch — standard order for POST routes scoped to a project cwd. */
+function registerProjectAndTouch(ctx: DaemonWebServerContext, cwd: string): void {
+  ctx.registerProjectWatchers(cwd)
+  ctx.touchProject(cwd)
+}
+
+/** Fire-and-forget upstream sync when the store returned no rows; returns whether a sync was scheduled. */
+function kickUpstreamSyncWhenEmpty(
+  ctx: DaemonWebServerContext,
+  cwd: string,
+  isEmpty: boolean
+): boolean {
+  if (!isEmpty) return false
+  void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+  return true
+}
+
+function clampDashboardListLimit(raw: number | undefined): number {
+  return Math.max(1, Math.min(30, raw ?? 10))
 }
 
 function createDispatchLifecycleHandler(
@@ -345,10 +372,7 @@ async function handleDispatchRoute(
   const payloadStr = await req.text()
   const start = performance.now()
 
-  const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
-  const requestTimeoutMs = budgetSec
-    ? budgetSec * 1000 + DAEMON_REQUEST_TIMEOUT_GRACE_MS
-    : DAEMON_REQUEST_TIMEOUT_FALLBACK_MS
+  const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
 
   // Daemon-level AbortController — when the request timeout fires, this
   // signal propagates through executeDispatch → strategy → individual hooks,
@@ -520,8 +544,7 @@ async function handleGhQuery(req: Request, ctx: DaemonWebServerContext): Promise
       { status: 400 }
     )
   }
-  ctx.registerProjectWatchers(body.cwd)
-  ctx.touchProject(body.cwd)
+  registerProjectAndTouch(ctx, body.cwd)
   const ttlMs = typeof body?.ttlMs === "number" ? body.ttlMs : GH_QUERY_TTL_MS
   const { hit, value } = await ctx.ghCache.get(body.args, body.cwd, ttlMs)
   return Response.json({ hit, value })
@@ -532,8 +555,7 @@ async function handleHooksEligible(req: Request, ctx: DaemonWebServerContext): P
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  ctx.registerProjectWatchers(body.cwd)
-  ctx.touchProject(body.cwd)
+  registerProjectAndTouch(ctx, body.cwd)
   const snapshot = await ctx.eligibilityCache.compute(body.cwd)
   return Response.json(snapshot)
 }
@@ -601,8 +623,7 @@ async function handleGitState(req: Request, ctx: DaemonWebServerContext): Promis
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  ctx.registerProjectWatchers(body.cwd)
-  ctx.touchProject(body.cwd)
+  registerProjectAndTouch(ctx, body.cwd)
   const state = await ctx.gitStateCache.get(body.cwd)
   if (!state) {
     return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })
@@ -644,8 +665,7 @@ async function handleCiWatchPost(req: Request, ctx: DaemonWebServerContext): Pro
   if (global.ignoreCi) {
     return Response.json({ ignored: true })
   }
-  ctx.registerProjectWatchers(body.cwd)
-  ctx.touchProject(body.cwd)
+  registerProjectAndTouch(ctx, body.cwd)
   const started = ctx.ciWatchRegistry.start(body.cwd, body.sha)
   return Response.json(started)
 }
@@ -788,22 +808,16 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
 
-  ctx.registerProjectWatchers(cwd)
-  ctx.touchProject(cwd)
+  registerProjectAndTouch(ctx, cwd)
 
   const repo = await getRepoSlug(cwd)
   if (!repo) return Response.json({ repo: null, pullRequests: [] satisfies DashboardPrRecord[] })
 
-  const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
+  const limit = clampDashboardListLimit(body?.limit)
   const reader = getIssueStoreReader()
   let prs = await reader.listPullRequests<unknown>(repo)
 
-  let syncing = false
-  if (prs.length === 0) {
-    // Fire-and-forget: don't block the response on network sync
-    void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
-    syncing = true
-  }
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, cwd, prs.length === 0)
 
   if (prs.length === 0) {
     prs = await reader.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
@@ -828,8 +842,7 @@ async function handleProjectSyncNow(req: Request, ctx: DaemonWebServerContext): 
   if (typeof cwd !== "string" || !cwd) {
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
-  ctx.registerProjectWatchers(cwd)
-  ctx.touchProject(cwd)
+  registerProjectAndTouch(ctx, cwd)
   // Register idempotently, then kick off sync in the background — returns immediately.
   void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
   return Response.json({ ok: true, started: true })
@@ -848,22 +861,16 @@ async function handleProjectIssuesRoute(
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
 
-  ctx.registerProjectWatchers(cwd)
-  ctx.touchProject(cwd)
+  registerProjectAndTouch(ctx, cwd)
 
   const repo = await getRepoSlug(cwd)
   if (!repo) return Response.json({ repo: null, issues: [] satisfies DashboardIssueRecord[] })
 
-  const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
+  const limit = clampDashboardListLimit(body?.limit)
   const reader = getIssueStoreReader()
   let issues = await reader.listIssues<unknown>(repo)
 
-  let syncing = false
-  if (issues.length === 0) {
-    // Fire-and-forget: don't block the response on network sync
-    void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
-    syncing = true
-  }
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, cwd, issues.length === 0)
 
   if (issues.length === 0) {
     issues = await reader.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)
@@ -936,8 +943,7 @@ async function handleProjectSettingsGet(
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  ctx.registerProjectWatchers(body.cwd)
-  ctx.touchProject(body.cwd)
+  registerProjectAndTouch(ctx, body.cwd)
   const cached = await ctx.projectSettingsCache.get(body.cwd)
   const globalSettings = await readSwizSettings()
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
@@ -1000,8 +1006,7 @@ async function handleProjectSettingsUpdate(
     return Response.json({ error: "No supported updates provided" }, { status: 400 })
   }
 
-  ctx.registerProjectWatchers(cwd)
-  ctx.touchProject(cwd)
+  registerProjectAndTouch(ctx, cwd)
   await applyProjectSettingsUpdates(cwd, normalized)
   ctx.projectSettingsCache.invalidateProject(cwd)
   ctx.manifestCache.invalidateProject(cwd)
@@ -1078,8 +1083,7 @@ function handleDispatchActive(url: URL, ctx: DaemonWebServerContext): Response {
   const cwd = url.searchParams.get("cwd")
   const sessionId = url.searchParams.get("sessionId")
   const active = [...ctx.activeHookDispatches.values()]
-    .filter((entry) => (cwd ? entry.cwd === cwd : true))
-    .filter((entry) => (sessionId ? entry.sessionId === sessionId : true))
+    .filter((entry) => (!cwd || entry.cwd === cwd) && (!sessionId || entry.sessionId === sessionId))
     .sort((a, b) => b.startedAt - a.startedAt)
   return Response.json({ active })
 }
