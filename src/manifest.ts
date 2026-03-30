@@ -3,8 +3,11 @@
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
 import precompactSpeak from "../hooks/precompact-speak.ts"
+import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
+import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
+import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
@@ -286,8 +289,8 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-sandbox-guidance-consolidation.ts", timeout: 5 },
       { file: "pretooluse-json-validation.ts", timeout: 5 },
       { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
-      { file: "pretooluse-no-node-modules-edit.ts", timeout: 5 },
-      { file: "pretooluse-no-lockfile-edit.ts", timeout: 5 },
+      { hook: pretoolusNoNodeModulesEdit },
+      { hook: pretoolusNoLockfileEdit },
       { file: "pretooluse-ts-quality.ts", timeout: 5 },
       { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
@@ -311,7 +314,7 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoCp },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
-      { file: "pretooluse-bun-test-concurrent.ts", timeout: 5 },
+      { hook: pretooluseBunTestConcurrent },
       { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
       { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
       { hook: pretooluseLongSleep },

@@ -1,7 +1,20 @@
 #!/usr/bin/env bun
 
+/**
+ * PreToolUse hook: Block direct edits to node_modules/.
+ *
+ * Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
+
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { filePathGuardHook } from "../src/utils/hook-utils.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",
@@ -19,15 +32,24 @@ const NODE_MODULES_REASON = [
   "Do not edit node_modules/ directly.",
 ].join("\n")
 
-const main = filePathGuardHook(
-  isNodeModulesPath,
-  NODE_MODULES_REASON,
-  (fp) => `File is not in node_modules: ${fp.split("/").pop()}`
-)
-
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+function evaluate(input: FileEditHookInput) {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (isNodeModulesPath(filePath)) return preToolUseDeny(NODE_MODULES_REASON)
+  return preToolUseAllow(`File is not in node_modules: ${filePath.split("/").pop()}`)
 }
+
+const pretoolusNoNodeModulesEdit: SwizFileEditHook = {
+  name: "pretooluse-no-node-modules-edit",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input)
+  },
+}
+
+export default pretoolusNoNodeModulesEdit
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoNodeModulesEdit)

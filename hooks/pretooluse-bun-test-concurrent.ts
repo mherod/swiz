@@ -1,13 +1,20 @@
 #!/usr/bin/env bun
-// PreToolUse hook: require --concurrent on bun test invocations.
+/**
+ * PreToolUse hook: Require --concurrent on bun test invocations.
+ *
+ * Dual-mode: exports a SwizShellHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-import { allowPreToolUse, denyPreToolUse, isShellTool } from "../src/utils/hook-utils.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
-
-const input = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
-
-const command: string = input?.tool_input?.command ?? ""
+import type { ShellHookInput } from "./schemas.ts"
 
 // Evaluate each shell segment independently so chained commands are handled.
 // Try \d>&\d? before [^|;&] so redirections like 2>&1 aren't split on &
@@ -20,35 +27,56 @@ const TEST_FILE_RE = /(?:\.\/)?[\w./-]+\.(?:test|spec)\.\w+/
 
 /** Returns true when the segment targets exactly one test file (no dirs/globs). */
 function isSingleFileTest(segment: string): boolean {
-  // Strip flags (--flag, --flag=val) and redirections to get positional args
   const stripped = segment
     .replace(/\s+--\w[\w-]*(?:=\S*)?/g, "") // flags
     .replace(/\s*(?:[12]?>>?|2>&1|>&)\s*\S+/g, "") // redirections
     .trim()
-  // Split remaining tokens — these are positional args (file paths, dirs)
   const positionals = stripped.split(/\s+/).filter(Boolean)
   return positionals.length === 1 && TEST_FILE_RE.test(positionals[0] ?? "")
 }
 
-for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
-  const segment = segMatch[1] ?? ""
-  const hasConcurrentFlag = /(?:^|\s)--concurrent(?:\s|=|$)/.test(segment)
-  if (hasConcurrentFlag) continue
+function evaluate(input: ShellHookInput) {
+  // In standalone mode the matcher isn't applied, so guard on tool name.
+  if (!isShellTool(input.tool_name ?? "")) return {}
 
-  // Single test file — --concurrent is unnecessary
-  if (isSingleFileTest(segment)) continue
+  const command: string = input.tool_input?.command ?? ""
 
-  const originalInvocation = `bun test${segment}`.trim()
-  // Insert --concurrent before any trailing shell redirections
-  const redirectRe = /(\s+(?:[12]?>>?|2>&1|>&)\s*\S+(?:\s+(?:[12]?>>?|2>&1|>&)\s*\S+)*)$/
-  const redirectMatch = originalInvocation.match(redirectRe)
-  const correctedInvocation = redirectMatch
-    ? `${originalInvocation.slice(0, redirectMatch.index)} --concurrent${redirectMatch[0]}`
-    : `${originalInvocation} --concurrent`
-  denyPreToolUse(
-    "Use `bun test` with `--concurrent`.\n\n" +
-      `Blocked command:\n  ${originalInvocation}\n\n` +
-      `Use this instead:\n  ${correctedInvocation}`
-  )
+  for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
+    const segment = segMatch[1] ?? ""
+    const hasConcurrentFlag = /(?:^|\s)--concurrent(?:\s|=|$)/.test(segment)
+    if (hasConcurrentFlag) continue
+
+    // Single test file — --concurrent is unnecessary
+    if (isSingleFileTest(segment)) continue
+
+    const originalInvocation = `bun test${segment}`.trim()
+    // Insert --concurrent before any trailing shell redirections
+    const redirectRe = /(\s+(?:[12]?>>?|2>&1|>&)\s*\S+(?:\s+(?:[12]?>>?|2>&1|>&)\s*\S+)*)$/
+    const redirectMatch = originalInvocation.match(redirectRe)
+    const correctedInvocation = redirectMatch
+      ? `${originalInvocation.slice(0, redirectMatch.index)} --concurrent${redirectMatch[0]}`
+      : `${originalInvocation} --concurrent`
+    return preToolUseDeny(
+      "Use `bun test` with `--concurrent`.\n\n" +
+        `Blocked command:\n  ${originalInvocation}\n\n` +
+        `Use this instead:\n  ${correctedInvocation}`
+    )
+  }
+  return preToolUseAllow("All bun test invocations have --concurrent or target single files")
 }
-allowPreToolUse("All bun test invocations have --concurrent or target single files")
+
+const pretooluseBunTestConcurrent: SwizShellHook = {
+  name: "pretooluse-bun-test-concurrent",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input as ShellHookInput)
+  },
+}
+
+export default pretooluseBunTestConcurrent
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseBunTestConcurrent)

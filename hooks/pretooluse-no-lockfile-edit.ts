@@ -1,8 +1,19 @@
 #!/usr/bin/env bun
+/**
+ * PreToolUse hook: Block direct edits to lockfiles.
+ *
+ * Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-import { filePathGuardHook } from "../src/utils/hook-utils.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
-// Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
 const LOCKFILE_RE =
   /(^|[\\/])(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|shrinkwrap\.yaml)$/i
 
@@ -23,11 +34,24 @@ const LOCKFILE_REASON = [
   "Do not edit lockfiles directly.",
 ].join("\n")
 
-const main = filePathGuardHook((fp) => LOCKFILE_RE.test(fp), LOCKFILE_REASON)
-
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+function evaluate(input: FileEditHookInput) {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (LOCKFILE_RE.test(filePath)) return preToolUseDeny(LOCKFILE_REASON)
+  return preToolUseAllow(`File is not a lockfile: ${filePath.split("/").pop()}`)
 }
+
+const pretoolusNoLockfileEdit: SwizFileEditHook = {
+  name: "pretooluse-no-lockfile-edit",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input)
+  },
+}
+
+export default pretoolusNoLockfileEdit
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoLockfileEdit)
