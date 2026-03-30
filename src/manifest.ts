@@ -22,6 +22,7 @@ import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
+import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
@@ -162,7 +163,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "TaskUpdate|update_plan",
     hooks: [
-      { file: "pretooluse-taskupdate-schema.ts", timeout: 5 },
+      { hook: pretoolusTaskupdateSchema },
       { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
       { file: "pretooluse-no-phantom-task-completion.ts", timeout: 5 },
       { file: "pretooluse-dirty-worktree-gate.ts", timeout: 5, cooldownSeconds: 60 },
