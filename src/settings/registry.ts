@@ -50,7 +50,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "pushGate",
     aliases: ["push-gate", "pushgate", "push_gate"],
     kind: "boolean",
-    scopes: ["global"],
+    scopes: ["global", "project"],
     default: false,
     docs: {
       description: "Block git push unless the user has explicitly approved it",

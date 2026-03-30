@@ -109,6 +109,8 @@ export interface ProjectSwizSettings {
   collaborationMode?: CollaborationMode
   /** Run lint and typecheck quality checks before allowing session stop. */
   qualityChecksGate?: boolean
+  /** Block git push unless the user has explicitly approved it. */
+  pushGate?: boolean
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
@@ -255,6 +257,7 @@ export const projectSettingsSchema = z.object({
   dirtyWorktreeThreshold: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
+  pushGate: z.boolean().optional(),
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
   trunkMode: z.boolean().optional(),
