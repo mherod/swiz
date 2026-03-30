@@ -9,7 +9,16 @@
 //
 // LFS exemption: reads .gitattributes from disk (not from git history) so
 // uncommitted LFS rules added in the same session are respected.
+//
+// Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
   getEffectiveSwizSettings,
@@ -17,13 +26,8 @@ import {
   readSwizSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import {
-  allowPreToolUse,
-  computeProjectedContent,
-  denyPreToolUse,
-  isEditTool,
-  isWriteTool,
-} from "../src/utils/hook-utils.ts"
+import { isEditTool, isWriteTool } from "../src/tool-matchers.ts"
+import { computeProjectedContent } from "../src/utils/edit-projection.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Find .gitattributes content searching cwd and up to 5 parent directories. */
@@ -100,53 +104,58 @@ async function checkFileSizeAllowed(
   return { allowed: false, projectedKb, sizeLimitKb }
 }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+const pretooluseLargeFiles: SwizFileEditHook = {
+  name: "pretooluse-large-files",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
 
-  const toolName = input.tool_name ?? ""
-  const filePath = input.tool_input?.file_path ?? ""
-  const cwd = input.cwd ?? process.cwd()
+  async run(input) {
+    const parsed = fileEditHookInputSchema.parse(input)
 
-  // Skip large-file enforcement in collaborative repos unless LFS is already configured
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
-  if (effective.collaborationMode === "team" && !(await repoHasLfs(cwd))) {
-    allowPreToolUse("")
-  }
+    const toolName = parsed.tool_name ?? ""
+    const filePath = parsed.tool_input?.file_path ?? ""
+    const cwd = parsed.cwd ?? process.cwd()
 
-  const check = await checkFileSizeAllowed(toolName, filePath, input.tool_input ?? {}, cwd)
+    // Skip large-file enforcement in collaborative repos unless LFS is already configured
+    const [globalSettings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+    if (effective.collaborationMode === "team" && !(await repoHasLfs(cwd))) {
+      return preToolUseAllow("")
+    }
 
-  if (check.allowed) {
-    allowPreToolUse("")
-  }
+    const check = await checkFileSizeAllowed(toolName, filePath, parsed.tool_input ?? {}, cwd)
 
-  const projectedKb = check.projectedKb!
-  const sizeLimitKb = check.sizeLimitKb!
+    if (check.allowed) {
+      return preToolUseAllow("")
+    }
 
-  denyPreToolUse(
-    [
-      `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
-      "",
-      `Projected size: ${projectedKb}KB`,
-      `Limit: ${sizeLimitKb}KB`,
-      "",
-      "Options:",
-      '  1. Track this file with Git LFS: git lfs track "<pattern>" && git add .gitattributes',
-      "  2. Split large content across multiple smaller files",
-      "  3. Store large binary assets outside the repository (cloud storage, CDN)",
-      "",
-      "If this file should be LFS-tracked, add the pattern to .gitattributes first,",
-      "then retry the write.",
-    ].join("\n")
-  )
+    const projectedKb = check.projectedKb!
+    const sizeLimitKb = check.sizeLimitKb!
+
+    return preToolUseDeny(
+      [
+        `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
+        "",
+        `Projected size: ${projectedKb}KB`,
+        `Limit: ${sizeLimitKb}KB`,
+        "",
+        "Options:",
+        '  1. Track this file with Git LFS: git lfs track "<pattern>" && git add .gitattributes',
+        "  2. Split large content across multiple smaller files",
+        "  3. Store large binary assets outside the repository (cloud storage, CDN)",
+        "",
+        "If this file should be LFS-tracked, add the pattern to .gitattributes first,",
+        "then retry the write.",
+      ].join("\n")
+    )
+  },
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
-}
+export default pretooluseLargeFiles
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseLargeFiles)

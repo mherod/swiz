@@ -2,13 +2,18 @@
 // PreToolUse hook: Blocks Node.js sync file and child_process operations when
 // the target file already uses Bun APIs or has a bun shebang.
 // Enforces Bun.file()/Bun.write()/Bun.spawn()/Bun.$``.
+//
+// Dual-mode: exports a SwizToolHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import { parseBunEnforcementInput, usesBunApis } from "../src/utils/bun-enforcement-utils.ts"
 import {
-  allowPreToolUse,
-  computeProjectedContent,
-  denyPreToolUse,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { parseBunEnforcementInput, usesBunApis } from "../src/utils/bun-enforcement-utils.ts"
+import { computeProjectedContent } from "../src/utils/edit-projection.ts"
 
 // ── Blocked operations ──────────────────────────────────────────────────────
 
@@ -90,48 +95,51 @@ export function findBlockedNodeSpawnOps(
   }))
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Hook implementation ─────────────────────────────────────────────────────
 
-async function main() {
-  const raw = await Bun.stdin.json().catch(() => null)
-  if (!raw) process.exit(0)
+const pretooluseBunApiEnforce: SwizToolHook = {
+  name: "pretooluse-bun-api-enforce",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
+  cooldownSeconds: 30,
 
-  const parsed = parseBunEnforcementInput(raw as Record<string, unknown>)
-  if (!parsed) process.exit(0)
+  async run(rawInput) {
+    const parsed = parseBunEnforcementInput(rawInput as Record<string, unknown>)
+    if (!parsed) return preToolUseAllow("")
 
-  const projectedContent = await computeProjectedContent(
-    parsed.toolName,
-    parsed.filePath,
-    parsed.toolInput
-  )
-  if (!projectedContent) process.exit(0)
+    const projectedContent = await computeProjectedContent(
+      parsed.toolName,
+      parsed.filePath,
+      parsed.toolInput
+    )
+    if (!projectedContent) return preToolUseAllow("")
 
-  if (usesBunApis(projectedContent)) {
-    const blocked = ALL_BLOCKED_OPS.filter((op) => op.re.test(projectedContent)).map((op) => ({
-      name: op.name,
-      replacement: op.replacement,
-    }))
-    if (blocked.length > 0) {
-      const lines = [
-        "This file uses Bun APIs or has a bun shebang but calls Node.js sync APIs.",
-        "",
-        "Blocked operations and their Bun-native replacements:",
-      ]
-      for (const op of blocked) {
-        lines.push(`  ${op.name}(...)  ->  ${op.replacement}`)
+    if (usesBunApis(projectedContent)) {
+      const blocked = ALL_BLOCKED_OPS.filter((op) => op.re.test(projectedContent)).map((op) => ({
+        name: op.name,
+        replacement: op.replacement,
+      }))
+      if (blocked.length > 0) {
+        const lines = [
+          "This file uses Bun APIs or has a bun shebang but calls Node.js sync APIs.",
+          "",
+          "Blocked operations and their Bun-native replacements:",
+        ]
+        for (const op of blocked) {
+          lines.push(`  ${op.name}(...)  ->  ${op.replacement}`)
+        }
+        lines.push("")
+        lines.push("Directory operations (mkdir, readdir, stat) are allowed via node:fs/promises.")
+        return preToolUseDeny(lines.join("\n"))
       }
-      lines.push("")
-      lines.push("Directory operations (mkdir, readdir, stat) are allowed via node:fs/promises.")
-      denyPreToolUse(lines.join("\n"))
     }
-  }
 
-  allowPreToolUse("")
+    return preToolUseAllow("")
+  },
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
-}
+export default pretooluseBunApiEnforce
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseBunApiEnforce)

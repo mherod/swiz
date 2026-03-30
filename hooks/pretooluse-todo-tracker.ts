@@ -8,17 +8,23 @@
  *
  * Exclusions (matching the stop hook): non-source files, hooks/, node_modules,
  * .claude/hooks/, test files, generated files, regex literals, non-comment contexts.
+ *
+ * Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { formatActionPlan } from "../src/action-plan.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  formatActionPlan,
-  resolveEditDelta,
-  TEST_FILE_RE,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import { resolveEditDelta } from "../src/utils/edit-projection.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
+
+const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//
 
 const DEBT_MARKER_RE = new RegExp(
   "\\b(" +
@@ -61,25 +67,30 @@ function buildDenyMessage(oldCount: number, newCount: number): string {
   ].join("\n")
 }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const delta = resolveEditDelta(input, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
-  if (!delta) allowPreToolUse("")
+const pretooluseTodoTracker: SwizFileEditHook = {
+  name: "pretooluse-todo-tracker",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
 
-  const oldCount = countTodoMarkers(delta!.oldString)
-  const newCount = countTodoMarkers(delta!.newString)
-  const netNew = newCount - oldCount
+  async run(input) {
+    const normalized = fileEditHookInputSchema.parse(input)
+    const delta = resolveEditDelta(normalized, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
+    if (!delta) return preToolUseAllow("")
 
-  if (netNew > 0) {
-    denyPreToolUse(buildDenyMessage(oldCount, newCount))
-  }
+    const oldCount = countTodoMarkers(delta.oldString)
+    const newCount = countTodoMarkers(delta.newString)
+    const netNew = newCount - oldCount
 
-  allowPreToolUse("")
+    if (netNew > 0) {
+      return preToolUseDeny(buildDenyMessage(oldCount, newCount))
+    }
+
+    return preToolUseAllow("")
+  },
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
-}
+export default pretooluseTodoTracker
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseTodoTracker)

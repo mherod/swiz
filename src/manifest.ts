@@ -3,8 +3,10 @@
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
 import precompactSpeak from "../hooks/precompact-speak.ts"
+import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
+import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolusNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
@@ -17,6 +19,7 @@ import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.t
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
+import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
@@ -198,9 +201,9 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
       { hook: pretoolusNoSecrets },
-      { file: "pretooluse-bun-api-enforce.ts", timeout: 5, cooldownSeconds: 30 },
-      { file: "pretooluse-todo-tracker.ts", timeout: 5 },
-      { file: "pretooluse-large-files.ts", timeout: 5 },
+      { hook: pretooluseBunApiEnforce },
+      { hook: pretooluseTodoTracker },
+      { hook: pretooluseLargeFiles },
       { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
       { file: "pretooluse-manifest-order-validation.ts", timeout: 5 },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
