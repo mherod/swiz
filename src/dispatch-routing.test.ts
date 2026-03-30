@@ -134,8 +134,8 @@ describe("mutation replay wiring", () => {
     expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
   })
 
-  it("stop-personal-repo-issues.ts calls replayPendingMutations", async () => {
-    const src = await Bun.file(join(SRC, "hooks", "stop-personal-repo-issues.ts")).text()
+  it("stop-personal-repo-issues issues module calls replayPendingMutations", async () => {
+    const src = await Bun.file(join(SRC, "hooks", "stop-personal-repo-issues", "issues.ts")).text()
     expect(src).toContain("replayPendingMutations")
     expect(src).toMatch(/await\s+replayPendingMutations\(/)
   })
