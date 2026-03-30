@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
-
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
+import { extractPreToolSurfaceDecision } from "./hook-specific-output.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, unknown>
@@ -104,11 +104,11 @@ export async function runHook(
 
   if (stdout.trim()) {
     try {
-      const parsed = JSON.parse(stdout.trim())
-      json = parsed as Record<string, unknown>
-      const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-      decision = (hso?.permissionDecision ?? parsed.decision) as string | undefined
-      reason = (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined
+      const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>
+      json = parsed
+      const surface = extractPreToolSurfaceDecision(parsed)
+      decision = surface.decision
+      reason = surface.reason
     } catch {}
   }
 
@@ -154,11 +154,7 @@ function parsePreToolUseHookStdout(stdout: string): {
 } | null {
   try {
     const parsed = JSON.parse(stdout) as Record<string, unknown>
-    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-    return {
-      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
-      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
-    }
+    return extractPreToolSurfaceDecision(parsed)
   } catch {
     return null
   }
@@ -235,11 +231,9 @@ export async function runFileEditHook(
 
   if (!rawOutput.trim()) return { rawOutput }
   try {
-    const parsed = JSON.parse(rawOutput.trim())
-    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+    const parsed = JSON.parse(rawOutput.trim()) as Record<string, unknown>
     return {
-      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
-      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
+      ...extractPreToolSurfaceDecision(parsed),
       rawOutput,
     }
   } catch {

@@ -146,7 +146,7 @@ async function getParseErrors(): Promise<Array<{ file: string; capture: CaptureE
 
   for (const file of files) {
     const cap = await loadCapture(file.name)
-    if (cap && cap._swizIncomingCapture.parseError) {
+    if (cap?._swizIncomingCapture.parseError) {
       results.push({ file: file.name, capture: cap })
     }
   }

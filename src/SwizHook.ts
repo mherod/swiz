@@ -33,10 +33,17 @@ import {
 } from "../hooks/schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
 import {
+  extractHookSystemMessagePreview,
   hasNonEmptyHookOutput,
   isJsonLikeRecord,
   messageFromUnknownError,
 } from "./utils/hook-json-helpers.ts"
+import {
+  hsoContextEvent,
+  hsoPreToolUseAllow,
+  hsoPreToolUseAllowContextual,
+  hsoPreToolUseDeny,
+} from "./utils/hook-specific-output.ts"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -144,10 +151,7 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
   return hookOutputSchema.parse({
     systemMessage: context,
     suppressOutput: true,
-    hookSpecificOutput: {
-      hookEventName: eventName,
-      additionalContext: context,
-    },
+    hookSpecificOutput: hsoContextEvent(eventName, context),
   })
 }
 
@@ -158,15 +162,11 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
 
 /** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
 export function preToolUseAllow(reason = ""): SwizHookOutput {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
+  const preview = extractHookSystemMessagePreview(reason)
   return {
     suppressOutput: true,
-    systemMessage: firstLine || "",
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow" as const,
-      permissionDecisionReason: reason,
-    },
+    systemMessage: preview,
+    hookSpecificOutput: hsoPreToolUseAllow(reason),
   }
 }
 
@@ -175,16 +175,28 @@ const PRE_TOOL_ACTION_REQUIRED =
 
 /** Build a PreToolUse deny response (mirrors `denyPreToolUse`). Appends ACTION REQUIRED footer. */
 export function preToolUseDeny(reason: string): SwizHookOutput {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
+  const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
   const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
   return {
     suppressOutput: true,
-    systemMessage: firstLine || "Denied without reason",
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny" as const,
-      permissionDecisionReason: fullReason,
-    },
+    systemMessage: preview,
+    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
+  }
+}
+
+/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
+export function preToolUseAllowWithContext(
+  reason: string,
+  additionalContext: string
+): SwizHookOutput {
+  const effectiveReason = reason || additionalContext
+  return {
+    suppressOutput: true,
+    ...(additionalContext && { systemMessage: additionalContext }),
+    hookSpecificOutput: hsoPreToolUseAllowContextual(
+      effectiveReason || undefined,
+      additionalContext || undefined
+    ),
   }
 }
 

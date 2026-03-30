@@ -30,7 +30,12 @@ import {
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { isInlineSwizHookRun, SwizHookExit } from "../inline-hook-context.ts"
-import { buildContextHookOutput, type SwizHookOutput } from "../SwizHook.ts"
+import {
+  buildContextHookOutput,
+  preToolUseAllow,
+  preToolUseAllowWithContext,
+  preToolUseDeny,
+} from "../SwizHook.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
@@ -41,7 +46,15 @@ import {
   RECOVERY_CMD_RE,
   SETUP_CMD_RE,
 } from "./git-utils.ts"
-import { messageFromUnknownError } from "./hook-json-helpers.ts"
+import { extractHookSystemMessagePreview, messageFromUnknownError } from "./hook-json-helpers.ts"
+import {
+  hsoPostToolUseDenyBlock,
+  hsoPreToolUseAllow,
+  hsoPreToolUseAllowContextual,
+  hsoPreToolUseAllowWithUpdatedInput,
+  hsoPreToolUseDeny,
+  hsoStopWithAdditionalContext,
+} from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 
 export type { SessionHookInput, ToolHookInput }
@@ -162,30 +175,17 @@ export {
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
-/** PreToolUse spinner / `suppressOutput` preview — keep short. */
-const PREVIEW_LEN_PRE_TOOL = 70
 /**
  * Stop / PostToolUse block: `systemMessage` is a first-line preview; full text stays in `reason`.
  * Cursor and other UIs surface `systemMessage` prominently — 70 chars looked like junk truncation.
  */
 const PREVIEW_LEN_BLOCK = 4000
 
-/** Extract the first line of a multi-line message, optionally capped for UI previews. */
-function extractFirstLine(text: string, maxLen = PREVIEW_LEN_PRE_TOOL): string {
-  const line = text.split("\n").shift()?.trim() || ""
-  if (maxLen <= 0) return line
-  return line.length > maxLen ? `${line.slice(0, maxLen - 3).trimEnd()}...` : line
-}
-
 function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: reason + preToolActionRequired(reason, options),
-    },
+    systemMessage: extractHookSystemMessagePreview(reason),
+    hookSpecificOutput: hsoPreToolUseDeny(reason + preToolActionRequired(reason, options)),
   })
 }
 
@@ -197,12 +197,8 @@ export function denyPreToolUse(reason: string, options: ActionRequiredOptions = 
 function allowPreToolUseObj(reason: string): HookOutput {
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      permissionDecisionReason: reason,
-    },
+    systemMessage: extractHookSystemMessagePreview(reason),
+    hookSpecificOutput: hsoPreToolUseAllow(reason),
   })
 }
 
@@ -218,12 +214,10 @@ function allowPreToolUseWithContextObj(
   return hookOutputSchema.parse({
     suppressOutput: true,
     ...(additionalContext && { systemMessage: additionalContext }),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
-      ...(additionalContext && { additionalContext }),
-    },
+    hookSpecificOutput: hsoPreToolUseAllowContextual(
+      effectiveReason || undefined,
+      additionalContext || undefined
+    ),
   })
 }
 
@@ -239,14 +233,8 @@ function allowPreToolUseWithUpdatedInputObj(
 ): HookOutput {
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason ?? ""),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      ...(reason && { permissionDecisionReason: reason }),
-      updatedInput,
-      modifiedInput: updatedInput,
-    },
+    systemMessage: extractHookSystemMessagePreview(reason ?? ""),
+    hookSpecificOutput: hsoPreToolUseAllowWithUpdatedInput(updatedInput, reason),
   })
 }
 
@@ -258,58 +246,8 @@ export function allowPreToolUseWithUpdatedInput(
   exitWithHookObject(allowPreToolUseWithUpdatedInputObj(updatedInput, reason))
 }
 
-// ── SwizHook inline output builders (return objects, do not exit) ─────────────
-// These mirror the above helpers but return HookOutput directly for use in
-// SwizHook.run() implementations. They enable inline hooks to participate in
-// cooldown tracking and multi-hook result merging.
-
-/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
-export function preToolUseAllow(reason = ""): SwizHookOutput {
-  return {
-    suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow" as const,
-      permissionDecisionReason: reason,
-    },
-  }
-}
-
-const PRE_TOOL_ACTION_REQUIRED =
-  "\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause."
-
-/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). Appends ACTION REQUIRED footer. */
-export function preToolUseDeny(reason: string): SwizHookOutput {
-  const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
-  return {
-    suppressOutput: true,
-    systemMessage: extractFirstLine(reason) || "Denied without reason",
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny" as const,
-      permissionDecisionReason: fullReason,
-    },
-  }
-}
-
-/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
-export function preToolUseAllowWithContext(
-  reason: string,
-  additionalContext: string
-): SwizHookOutput {
-  const effectiveReason = reason || additionalContext
-  return {
-    suppressOutput: true,
-    ...(additionalContext && { systemMessage: additionalContext }),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow" as const,
-      ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
-      ...(additionalContext && { additionalContext }),
-    },
-  }
-}
+// ── SwizHook inline output builders — canonical implementations in SwizHook.ts ─
+export { preToolUseAllow, preToolUseAllowWithContext, preToolUseDeny }
 
 /**
  * Factory for file-path guard PreToolUse hooks.
@@ -351,13 +289,8 @@ function denyPostToolUseObj(reason: string): HookOutput {
     decision: "block",
     reason,
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: reason,
-      additionalContext: reason,
-    },
+    systemMessage: extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK),
+    hookSpecificOutput: hsoPostToolUseDenyBlock(reason),
   })
 }
 
@@ -461,7 +394,7 @@ export function blockStopObj(
   reason: string,
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): HookOutput {
-  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
+  const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
@@ -484,7 +417,7 @@ export function blockStop(
 }
 
 function blockStopRawObj(reason: string) {
-  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
+  const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
@@ -506,7 +439,7 @@ export function blockStopRaw(reason: string): never {
 /** Inline SwizHook equivalent of {@link blockStopHumanRequired}. */
 export function blockStopHumanRequiredObj(reason: string): HookOutput {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
-  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
+  const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
@@ -514,10 +447,7 @@ export function blockStopHumanRequiredObj(reason: string): HookOutput {
     resolution: "human-required",
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: {
-      hookEventName: "Stop",
-      additionalContext: preview,
-    },
+    hookSpecificOutput: hsoStopWithAdditionalContext(preview),
   })
 }
 

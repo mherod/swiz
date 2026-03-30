@@ -27,6 +27,7 @@ import {
   isWriteTool,
 } from "../tool-matchers.ts"
 import { hasNonEmptyHookOutput } from "../utils/hook-json-helpers.ts"
+import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
@@ -495,14 +496,6 @@ export function writeResponse(response: Record<string, unknown>): void {
 }
 
 // ─── Response classification ────────────────────────────────────────────────
-
-/** Safely extract hookSpecificOutput from a response. */
-function getHookSpecificOutput(resp: Record<string, unknown>): Record<string, unknown> | undefined {
-  const hso = resp.hookSpecificOutput
-  return hso && typeof hso === "object" && !Array.isArray(hso)
-    ? (hso as Record<string, unknown>)
-    : undefined
-}
 
 /**
  * PreToolUse denial: checks `permissionDecision` in hookSpecificOutput

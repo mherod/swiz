@@ -1,6 +1,12 @@
 import { merge, unset } from "lodash-es"
 import { hookOutputSchema } from "../../hooks/schemas.ts"
 import type { HookGroup } from "../manifest.ts"
+import {
+  getHookSpecificOutput,
+  hsoContextEvent,
+  hsoPreToolUseMergedAllow,
+  mergeHookSpecificOutputClone,
+} from "../utils/hook-specific-output.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import {
   extractAllowReason,
@@ -49,7 +55,7 @@ function classifyAllowHint(
   hints: string[],
   contexts: string[]
 ): boolean {
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   const reason = extractAllowReason(resp)
   const context = extractContext(resp)
   if (hso?.permissionDecision !== "allow" || (!reason && !context)) return false
@@ -87,12 +93,10 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
   )
   return hookOutputSchema.parse({
     ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
-      ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
-    },
+    hookSpecificOutput: hsoPreToolUseMergedAllow({
+      hintsJoined: hints.length > 0 ? hints.join("\n\n") : undefined,
+      contextsJoined: contexts.length > 0 ? contexts.join("\n\n") : undefined,
+    }),
   })
 }
 
@@ -247,18 +251,7 @@ export function processBlockingResults(
     const mergedContext = contexts.join("\n\n")
     finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
 
-    const existingHso =
-      finalResponse.hookSpecificOutput &&
-      typeof finalResponse.hookSpecificOutput === "object" &&
-      !Array.isArray(finalResponse.hookSpecificOutput)
-        ? (merge({}, finalResponse.hookSpecificOutput as Record<string, unknown>) as Record<
-            string,
-            unknown
-          >)
-        : {}
-    const existingName = existingHso.hookEventName
-    existingHso.hookEventName =
-      typeof existingName === "string" && existingName.trim() ? existingName.trim() : hookEventName
+    const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
     existingHso.additionalContext = mergedContext
     finalResponse.hookSpecificOutput = existingHso
   }
@@ -443,10 +436,7 @@ class ContextStrategy implements HookExecutionStrategy {
         }
         log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
         return hookOutputSchema.parse({
-          hookSpecificOutput: {
-            hookEventName,
-            additionalContext: contexts.join("\n\n"),
-          },
+          hookSpecificOutput: hsoContextEvent(hookEventName, contexts.join("\n\n")),
         })
       },
     })

@@ -7,6 +7,7 @@ import { gh, git } from "../src/git-helpers.ts"
 import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
 import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { hsoContextEvent } from "../src/utils/hook-specific-output.ts"
 import { hookOutputSchema, prPollHookInputSchema } from "./schemas.ts"
 
 const BOT_AUTHOR_RE = /^(dependabot|renovate|github-actions|app\/)/i
@@ -99,10 +100,7 @@ export async function evaluatePrpollNotify(input: unknown): Promise<SwizHookOutp
   return hookOutputSchema.parse({
     systemMessage: summary,
     reason: summary,
-    hookSpecificOutput: {
-      hookEventName: "prPoll",
-      additionalContext: summary,
-    },
+    hookSpecificOutput: hsoContextEvent("prPoll", summary),
   })
 }
 

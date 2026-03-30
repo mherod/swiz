@@ -4,8 +4,9 @@
  * sets `continue: true` and mirrors `reason` / `stopReason`; see `normalizeStopDispatchResponseInPlace`.
  */
 
-import { merge, unset } from "lodash-es"
+import { unset } from "lodash-es"
 import { stopHookOutputSchema } from "../../hooks/schemas.ts"
+import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { isBlock } from "./engine.ts"
 
 /** Default context when stop hooks emit no agent-visible fields (after merge). */
@@ -36,20 +37,6 @@ function trimmedNonEmpty(value: DispatchJsonValue | undefined): string | null {
   if (typeof value !== "string") return null
   const t = value.trim()
   return t.length > 0 ? t : null
-}
-
-function mergeHookEventName(
-  response: DispatchJsonRecord,
-  hookEventName: string
-): DispatchJsonRecord {
-  const existingHso = isPlainRecord(response.hookSpecificOutput)
-    ? (merge({}, response.hookSpecificOutput) as DispatchJsonRecord)
-    : {}
-  const existingName = existingHso.hookEventName
-  if (typeof existingName !== "string" || !existingName.trim()) {
-    existingHso.hookEventName = hookEventName
-  }
-  return existingHso
 }
 
 function hasNonEmptyContext(response: DispatchJsonRecord): boolean {
@@ -121,14 +108,20 @@ export function normalizeStopDispatchResponseInPlace(
       envelope.reason = stopReasonText
     }
   } else if (!hasNonEmptyContext(envelope)) {
-    const hso = mergeHookEventName(envelope, hookEventName)
+    const hso = mergeHookSpecificOutputClone(
+      envelope as Record<string, unknown>,
+      hookEventName
+    ) as DispatchJsonRecord
     // Match prior coercion: non-strings (e.g. numbers) stringify before trim.
     if (!hso.additionalContext || !String(hso.additionalContext).trim()) {
       hso.additionalContext = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
     }
     envelope.hookSpecificOutput = hso
   } else {
-    envelope.hookSpecificOutput = mergeHookEventName(envelope, hookEventName)
+    envelope.hookSpecificOutput = mergeHookSpecificOutputClone(
+      envelope as Record<string, unknown>,
+      hookEventName
+    ) as DispatchJsonRecord
   }
 
   backfillStopDispatchReasonFields(envelope)

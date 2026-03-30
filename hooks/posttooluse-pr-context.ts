@@ -10,6 +10,7 @@ import { ghJson, git } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GH_PR_CHECKOUT_RE, GIT_CHECKOUT_RE } from "../src/utils/git-utils.ts"
+import { hsoContextEvent } from "../src/utils/hook-specific-output.ts"
 import { type ShellHookInput, shellHookInputSchema } from "./schemas.ts"
 
 /** Same envelope as `emitContext` in hook-utils, without `process.exit` (safe for inline dispatch). */
@@ -17,10 +18,7 @@ function postToolUseAdditionalContext(context: string): SwizHookOutput {
   return {
     systemMessage: context,
     suppressOutput: true,
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: context,
-    },
+    hookSpecificOutput: hsoContextEvent("PostToolUse", context),
   }
 }
 

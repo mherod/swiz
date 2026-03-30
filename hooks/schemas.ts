@@ -62,6 +62,7 @@
 
 import { z } from "zod"
 import { isJsonLikeRecord } from "../src/utils/hook-json-helpers.ts"
+import { getHookSpecificOutput } from "../src/utils/hook-specific-output.ts"
 
 // ─── Primitive field schemas ──────────────────────────────────────────────────
 // Single-field building blocks reused across every hook envelope.
@@ -939,7 +940,7 @@ const hookOutputRefinedSchema = z
         const hasSystemMsg = typeof o.systemMessage === "string" && o.systemMessage.trim()
         const hasReason = typeof o.reason === "string" && o.reason.trim()
         const hasStopReason = typeof o.stopReason === "string" && o.stopReason.trim()
-        const hso = o.hookSpecificOutput as Record<string, unknown> | undefined
+        const hso = getHookSpecificOutput(o as Record<string, unknown>)
         const hasHsoContext =
           hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim()
 
@@ -974,12 +975,10 @@ function stopHookOutputHasReasonOrStopReason(o: Record<string, unknown>): boolea
 
 function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
   if (o.decision === "block" || o.decision === "deny") return true
-  const hso = o.hookSpecificOutput
-  if (hso && typeof hso === "object" && !Array.isArray(hso)) {
-    const d = (hso as { decision?: string }).decision
-    return d === "block" || d === "deny"
-  }
-  return false
+  const hso = getHookSpecificOutput(o)
+  if (!hso) return false
+  const d = hso.decision
+  return d === "block" || d === "deny"
 }
 
 /**

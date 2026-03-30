@@ -13,6 +13,7 @@ import {
   hookIdentifier,
   isInlineHookDef,
 } from "../manifest.ts"
+import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import {
   extractAllowReason,
   extractContext,
@@ -186,7 +187,7 @@ function formatTraceStatus(status: HookStatus): string {
 function extractBlockReason(output: string): string | null {
   try {
     const parsed = JSON.parse(output) as Record<string, unknown>
-    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = getHookSpecificOutput(parsed)
     return (
       (parsed.reason as string | undefined) ??
       (parsed.message as string | undefined) ??
