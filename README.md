@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**108 hooks. 12 event types. Every agent. Zero compromises.**
+**109 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -120,7 +120,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (53)
+### PreToolUse (54)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -159,6 +159,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-push-when-instructed.ts` | Blocks `git push` when the transcript contains an explicit "do not push" instruction (e.g. from the `/commit` skill) without a subsequent push-approval signal. Push requires explicit user authorisation. |
 | `pretooluse-taskupdate-schema.ts` | Blocks TaskUpdate calls that include unsupported fields (e.g. `notes`). Lists the allowed schema fields; use only those keys (e.g. put completion evidence in `description`). |
 | `pretooluse-dirty-worktree-gate.ts` | Blocks task updates when the worktree has more than 15 dirty files. Forces a commit boundary before the task plan can be reshaped further. Covers Claude `TaskUpdate` and Codex `update_plan`. |
+| `pretooluse-no-phantom-task-completion.ts` | Blocks `TaskUpdate` with `status=completed` when the transcript shows zero non-task tool calls after the task's last `in_progress` transition. Phantom task completion — creating tasks solely to satisfy enforcement gates and immediately marking them done without doing the work — produces this exact signature. Fail-open: if no `in_progress` transition is found in the session transcript the completion is allowed (task may have been worked on in a prior session). Bypassed when the completion description contains traceable evidence prefixes (`commit:`, `pr:`, `file:`, `test:`, `ci_green:`). |
 | `pretooluse-taskoutput-timeout.ts` | Blocks TaskOutput calls that are missing a `timeout` parameter or have a timeout exceeding 120 seconds. Missing timeouts block the session indefinitely; excessive timeouts waste time. |
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
 | `pretooluse-no-ready-to-backlog.ts` | Blocks `gh issue edit` commands that demote issues from `ready` to `backlog`. Prevents agents from gaming readiness hooks by downgrading triaged work they want to avoid. |
