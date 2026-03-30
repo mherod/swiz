@@ -460,11 +460,17 @@ export function writeResponse(response: Record<string, unknown>): void {
 
 // ─── Response classification ────────────────────────────────────────────────
 
+/**
+ * PreToolUse denial: checks `permissionDecision` in hookSpecificOutput
+ * (the PreToolUse-specific pattern) and falls back to top-level `decision`
+ * for hooks that use the generic deny/block format.
+ */
 export function isDeny(resp: Record<string, unknown>): boolean {
+  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  if (hso?.permissionDecision === "deny") return true
   if (resp.decision === "deny" || resp.decision === "block") return true
   if (resp.continue === false) return true
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
-  return hso?.permissionDecision === "deny" || hso?.decision === "deny" || hso?.decision === "block"
+  return hso?.decision === "deny" || hso?.decision === "block" || false
 }
 
 export function isAllowWithReason(resp: Record<string, unknown>): boolean {
@@ -480,11 +486,16 @@ export function extractAllowReason(resp: Record<string, unknown>): string | null
   return null
 }
 
+/**
+ * Stop/PostToolUse block: checks top-level `decision` and `continue`
+ * (the blocking-strategy pattern). Does not check `permissionDecision`
+ * which is PreToolUse-specific.
+ */
 export function isBlock(resp: Record<string, unknown>): boolean {
   if (resp.decision === "block" || resp.decision === "deny") return true
   if (resp.continue === false) return true
   const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
-  return hso?.decision === "block" || hso?.decision === "deny"
+  return hso?.decision === "block" || hso?.decision === "deny" || false
 }
 
 export function extractContext(resp: Record<string, unknown>): string | null {
