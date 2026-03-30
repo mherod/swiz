@@ -50,6 +50,78 @@ function validateHookOutputSchema(
 }
 
 /**
+ * Parse a JSON object substring when the full stdout string is not valid JSON
+ * (prefix/suffix log lines, pretty-printed multi-line objects, etc.).
+ */
+function parseJsonFromPollutedStdout(trimmed: string): Record<string, unknown> | null {
+  const fromLastBrace = tryParseJsonObjectFromLastBrace(trimmed)
+  if (fromLastBrace !== null) return fromLastBrace
+
+  const balanced = extractFirstBalancedJsonObject(trimmed)
+  if (balanced !== null) {
+    try {
+      return JSON.parse(balanced) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/** Last `{` through end of string — handles prefix logs + pretty-printed JSON at the end. */
+function tryParseJsonObjectFromLastBrace(trimmed: string): Record<string, unknown> | null {
+  const lastBrace = trimmed.lastIndexOf("{")
+  if (lastBrace < 0) return null
+  try {
+    return JSON.parse(trimmed.slice(lastBrace)) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** One character inside a JSON string literal (handles `\\` and closing `"`). */
+function stepInsideJsonString(
+  c: string,
+  stringEscape: boolean
+): { stringEscape: boolean; closeString: boolean } {
+  if (stringEscape) return { stringEscape: false, closeString: false }
+  if (c === "\\") return { stringEscape: true, closeString: false }
+  if (c === '"') return { stringEscape: false, closeString: true }
+  return { stringEscape: false, closeString: false }
+}
+
+/**
+ * First balanced `{ ... }` from the first `{`, respecting string escapes.
+ * Handles JSON-first stdout with trailing non-JSON lines (e.g. auth library noise).
+ */
+function extractFirstBalancedJsonObject(s: string): string | null {
+  const start = s.indexOf("{")
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let stringEscape = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]!
+    if (inString) {
+      const next = stepInsideJsonString(c, stringEscape)
+      stringEscape = next.stringEscape
+      if (next.closeString) inString = false
+      continue
+    }
+    if (c === '"') {
+      inString = true
+      continue
+    }
+    if (c === "{") depth++
+    else if (c === "}") {
+      depth--
+      if (depth === 0) return s.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+/**
  * Pure classification of raw hook output into a status and parsed JSON.
  * Shared between engine.ts (main thread) and hook-worker.ts (worker thread).
  *
@@ -72,18 +144,7 @@ export function classifyHookOutput({
   try {
     parsed = JSON.parse(trimmed) as Record<string, unknown>
   } catch {
-    // Stdout may contain non-JSON lines before or after the hook's JSON object.
-    // Scan lines in reverse order so the last JSON-looking line wins.
-    for (const line of trimmed.split("\n").reverse()) {
-      const l = line.trim()
-      if (!l.startsWith("{")) continue
-      try {
-        parsed = JSON.parse(l) as Record<string, unknown>
-        break
-      } catch {
-        // Fall through to next line
-      }
-    }
+    parsed = parseJsonFromPollutedStdout(trimmed)
     if (!parsed) {
       return { parsed: null, status: "invalid-json" }
     }

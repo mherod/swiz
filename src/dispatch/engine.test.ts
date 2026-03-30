@@ -145,6 +145,16 @@ describe("classifyHookOutput", () => {
       expect(result.parsed).toEqual({ decision: "block", reason: "test" })
     })
 
+    it("extracts pretty-printed multi-line JSON (newlines inside the object)", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: '{\n  "decision": "block",\n  "reason": "test"\n}\n',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ decision: "block", reason: "test" })
+    })
+
     it("returns invalid-json when no valid JSON exists anywhere", () => {
       const result = classifyHookOutput({
         timedOut: false,
