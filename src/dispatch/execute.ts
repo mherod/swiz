@@ -407,28 +407,6 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   return withLogBuffer(() => performDispatch(req))
 }
 
-/**
- * Set SWIZ_PROJECT_CWD env var and return previous value for restoration.
- *
- * NOTE: This is a process-wide mutation and is NOT safe under concurrent
- * daemon dispatches. It exists as a legacy bridge for detectPackageManager()
- * which reads SWIZ_PROJECT_CWD when no startDir is passed. Hooks spawned
- * with Bun.spawn({ cwd }) already have the correct process.cwd(), but
- * in-process code paths (inline hooks, filters) still need this.
- * See issue #434 for the full removal plan.
- */
-function injectProjectCwd(cwd: string | undefined): string | undefined {
-  const prev = process.env.SWIZ_PROJECT_CWD
-  if (cwd) process.env.SWIZ_PROJECT_CWD = cwd
-  return prev
-}
-
-/** Restore SWIZ_PROJECT_CWD to its previous value (issue #328). */
-function restoreProjectCwd(prev: string | undefined): void {
-  if (prev !== undefined) process.env.SWIZ_PROJECT_CWD = prev
-  else delete process.env.SWIZ_PROJECT_CWD
-}
-
 /** Create an AbortController merged with an optional incoming abort signal. */
 function buildDispatchAbortController(signal: AbortSignal | undefined): AbortController {
   const controller = new AbortController()
@@ -560,22 +538,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = buildDispatchContext(req)
 
-  // Inject SWIZ_PROJECT_CWD so spawned hooks detect the correct package
-  // manager without relying on process.cwd() (issue #328).
-  const prevProjectCwd = injectProjectCwd(ctx.cwd)
-
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    restoreProjectCwd(prevProjectCwd)
     return { response: {} }
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
-  if (filteredGroups.length === 0) {
-    restoreProjectCwd(prevProjectCwd)
-    return { response: {} }
-  }
+  if (filteredGroups.length === 0) return { response: {} }
 
   await injectEffectiveSettings(ctx, projectSettings ?? null)
 
@@ -640,7 +610,6 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     )
     return { response }
   } finally {
-    restoreProjectCwd(prevProjectCwd)
     req.onDispatchLifecycle?.(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )
