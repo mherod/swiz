@@ -32,6 +32,7 @@ export { findSessions } from "./transcript-sessions-discovery.ts"
  * session_meta payload cwd metadata.
  *
  * @param projectDir - Project directory (used to compute Claude projectKey)
+ * @param home
  * @returns Aggregated sessions from all providers, sorted by mtime descending
  */
 export async function findAllProviderSessions(

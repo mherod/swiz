@@ -1,7 +1,7 @@
 import { type FSWatcher, watch } from "node:fs"
 import { LRUCache } from "lru-cache"
 import { detectProjectStack } from "../../detect-frameworks.ts"
-import { resolvePrMergeActive } from "../../dispatch/filters.ts"
+import { resolvePrMergeActive } from "../../dispatch"
 import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../../git-helpers.ts"
 import {
   evalCondition,
@@ -10,6 +10,7 @@ import {
   isInlineHookDef,
   manifest,
 } from "../../manifest.ts"
+import { projectKeyFromCwd } from "../../project-key.ts"
 import {
   getEffectiveSwizSettings,
   type ProjectSwizSettings,
@@ -20,7 +21,6 @@ import {
 } from "../../settings.ts"
 import { getWorkflowIntent } from "../../state-machine.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../../transcript-summary.ts"
-import { projectKeyFromCwd } from "../../transcript-utils.ts"
 
 export interface EventMetrics {
   count: number

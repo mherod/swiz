@@ -156,7 +156,11 @@ function buildAntenna(x) {
   return g
 }
 
-/** @param {number} x @param {number} y @param {number} z @param {number} scale @returns {THREE.Group} */
+/** @param {number} x @param {number} y @param {number} z @param {number} scale @returns {THREE.Group}
+ * @param y
+ * @param z
+ * @param scale
+ */
 function buildHexCell(x, y, z, scale) {
   const g = new THREE.Group()
   const bGeo = new THREE.CylinderGeometry(0.12 * scale, 0.12 * scale, 0.06, 6)

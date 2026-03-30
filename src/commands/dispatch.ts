@@ -18,7 +18,7 @@ import {
   replayContext,
   replayPreToolUse,
   withLogBuffer,
-} from "../dispatch/index.ts"
+} from "../dispatch"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"

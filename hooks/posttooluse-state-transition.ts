@@ -19,6 +19,7 @@
 // Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
 
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "../src/git-helpers.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import {
   extractCheckoutBranch,
@@ -36,13 +37,6 @@ import {
   getGitStatusV2,
   isDefaultBranch,
 } from "../src/utils/git-utils.ts"
-import {
-  getOpenPrForBranch,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-} from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 type ProjectState = "developing" | "reviewing" | "addressing-feedback" | "planning"

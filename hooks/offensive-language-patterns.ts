@@ -339,7 +339,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "dismissal",
     pattern:
-      /\bpre-?existing\b[^.!?\n]{0,180}\brace(?: |-)?condition\b|\brace(?: |-)?condition\b[^.!?\n]{0,120}\bpre-?existing\b/im,
+      /\bpre-?existing\b[^.!?\n]{0,180}\brace[ -]?condition\b|\brace[ -]?condition\b[^.!?\n]{0,120}\bpre-?existing\b/im,
     response:
       "Calling a failure a 'pre-existing race condition' does not remove it from your run. " +
       "If it surfaced while executing your workflow, reproduce, fix, or quarantine with evidence — do not relabel it as someone else's timing bug.",
@@ -707,7 +707,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "helplessness",
     pattern:
-      /(?:i (?:keep |am |continue to )?(?:getting|hitting|running into|encountering) (?:the same |this )?(?:block|error|issue|problem)(?:s)?(?: (?:over and over|repeatedly|again and again|every time))?)(?:\.|$| )/i,
+      /i (?:keep |am |continue to )?(?:getting|hitting|running into|encountering) (?:the same |this )?(?:block|error|issue|problem)(?:s)?(?: (?:over and over|repeatedly|again and again|every time))?(?:\.|$| )/i,
     response:
       "Repeating the same approach and complaining about the same result is not progress. " +
       "The hook blocks because the condition is not met. Change your approach, not your complaint.",
@@ -1121,7 +1121,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:(?:to )?give (?:this(?: task)?|it|the task|the work|your (?:task|request)) (?:the )?(?:focus|attention|care|thought|time|consideration) (?:it )?(?:deserves|requires|needs|warrants))/i,
+      /(?:to )?give (?:this(?: task)?|it|the task|the work|your (?:task|request)) (?:the )?(?:focus|attention|care|thought|time|consideration) (?:it )?(?:deserves|requires|needs|warrants)/i,
     response:
       "The task 'deserves' to be done now, not to be deferred under the guise of thoughtfulness. " +
       "Extended contemplation without output is procrastination.",

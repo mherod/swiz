@@ -262,6 +262,7 @@ export async function runGit(dir: string, args: string[]): Promise<string> {
  * Requires a `useTempDir` instance for lifecycle management.
  *
  * @param tmp - A `useTempDir()` instance that manages cleanup
+ * @param opts
  * @param opts.suffix - Suffix appended to the temp dir prefix (default: "")
  * @param opts.seedCommits - Number of empty seed commits (default: 1)
  */

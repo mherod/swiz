@@ -7,8 +7,8 @@
  */
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { spawnSpeak } from "../src/speech.ts"
 import { speakLockPath, speakPositionPath } from "../src/temp-paths.ts"
-import { spawnSpeak } from "../src/utils/hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

@@ -27,7 +27,7 @@ import {
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
-import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
+import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import type { CheckResult } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
 import { convertSkillContent } from "./skill.ts"

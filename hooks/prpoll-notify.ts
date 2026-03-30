@@ -10,8 +10,8 @@
 //      for new PR activity on the pushed branch.
 
 import { homedir } from "node:os"
+import { git } from "../src/git-helpers.ts"
 import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
-import { git } from "../src/utils/hook-utils.ts"
 
 /** Bot author patterns — these are excluded from notification output. */
 const BOT_AUTHOR_RE = /^(dependabot|renovate|github-actions|app\/)/i

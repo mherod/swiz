@@ -15,8 +15,8 @@
 
 import { appendFile, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { resolveSafeSessionId } from "../src/session-id.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { resolveSafeSessionId } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 interface AuditEntry {

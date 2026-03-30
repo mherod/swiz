@@ -144,7 +144,8 @@ export const SESSION_META_FILE = ".session-meta.json"
  * Recompute and persist the session metadata index after every task write.
  * Called internally by writeTask — consumers should not call this directly.
  * Silently ignores write failures (non-fatal, falls back to full scan).
- * @param cwd - Working directory of the owning project. Written once; preserved on subsequent updates.
+ * @param dir
+ * @param files
  */
 async function countOpenTasks(dir: string, files: string[]): Promise<number> {
   let count = 0

@@ -8,7 +8,7 @@
 
 import type { GitHubBranchProtectionRecord } from "../src/issue-store.ts"
 import { getIssueStore } from "../src/issue-store.ts"
-import { SETTINGS_REGISTRY } from "../src/settings/registry.ts"
+import { SETTINGS_REGISTRY } from "../src/settings"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { emitContext, getRepoSlug, git, isGitRepo, isShellTool } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
