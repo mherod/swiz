@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import type { SessionPreview } from "./session-data.ts"
 import {
   type AgentProcessSnapshot,
   annotateSessionsWithLiveness,
   hasLiveAgentForProject,
+  type SessionRoutesContext,
+  type SessionWithLiveness,
 } from "./session-routes.ts"
 
 function makeSnapshot(
@@ -41,7 +44,7 @@ describe("hasLiveAgentForProject", () => {
 
 describe("annotateSessionsWithLiveness", () => {
   test("marks sessions as processAlive when matching provider has live PID in project", () => {
-    const sessions = [
+    const sessions: SessionPreview[] = [
       { id: "s1", provider: "claude", mtime: 1000 },
       { id: "s2", provider: "cursor", mtime: 2000 },
     ]
@@ -49,60 +52,87 @@ describe("annotateSessionsWithLiveness", () => {
       { claude: [100], cursor: [200] },
       { 100: "/home/user/project" } // only claude PID is in this project
     )
-    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot) as Array<{
-      id: string
-      processAlive: boolean
-    }>
+    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot)
     expect(result[0]!.processAlive).toBe(true) // claude has live PID here
     expect(result[1]!.processAlive).toBe(false) // cursor PID is elsewhere
   })
 
   test("marks all sessions as not alive when no PIDs match project", () => {
-    const sessions = [
+    const sessions: SessionPreview[] = [
       { id: "s1", provider: "claude", mtime: 1000 },
       { id: "s2", provider: "claude", mtime: 2000 },
     ]
     const snapshot = makeSnapshot({ claude: [100] }, { 100: "/home/user/other" })
-    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot) as Array<{
-      id: string
-      processAlive: boolean
-    }>
+    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot)
     expect(result[0]!.processAlive).toBe(false)
     expect(result[1]!.processAlive).toBe(false)
   })
 
   test("falls back gracefully when pidCwds is empty (no lsof data)", () => {
-    const sessions = [{ id: "s1", provider: "claude", mtime: 1000 }]
+    const sessions: SessionPreview[] = [{ id: "s1", provider: "claude", mtime: 1000 }]
     const snapshot = makeSnapshot({ claude: [100] }, {})
-    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot) as Array<{
-      id: string
-      processAlive: boolean
-    }>
+    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot)
     expect(result[0]!.processAlive).toBe(false)
   })
 
   test("handles sessions with undefined provider", () => {
-    const sessions = [{ id: "s1", mtime: 1000 }]
+    const sessions: SessionPreview[] = [{ id: "s1", mtime: 1000 }]
     const snapshot = makeSnapshot({ unknown: [100] }, { 100: "/home/user/project" })
-    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot) as Array<{
-      id: string
-      processAlive: boolean
-    }>
+    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot)
     expect(result[0]!.processAlive).toBe(true) // provider defaults to "unknown"
   })
 
   test("preserves existing session fields", () => {
-    const sessions = [
+    const sessions: SessionPreview[] = [
       { id: "s1", provider: "claude", mtime: 1000, dispatches: 5, lastMessageAt: 900 },
     ]
     const snapshot = makeSnapshot({ claude: [100] }, { 100: "/home/user/project" })
-    const result = annotateSessionsWithLiveness(sessions, "/home/user/project", snapshot) as Array<
-      Record<string, unknown>
-    >
+    const result: SessionWithLiveness[] = annotateSessionsWithLiveness(
+      sessions,
+      "/home/user/project",
+      snapshot
+    )
     expect(result[0]!.id).toBe("s1")
     expect(result[0]!.dispatches).toBe(5)
     expect(result[0]!.lastMessageAt).toBe(900)
     expect(result[0]!.processAlive).toBe(true)
+  })
+})
+
+describe("SessionRoutesContext DTO shapes", () => {
+  test("minimal mock satisfies the session-routes contract", async () => {
+    const ctx: SessionRoutesContext = {
+      touchProject: () => {},
+      getKnownProjects: () => [],
+      getProjectLastSeen: () => 0,
+      getProjectStatusLine: async () => "",
+      listProjectSessions: async () => ({ sessionCount: 0, sessions: [] }),
+      getSessionData: async () => ({ messages: [], toolStats: [] }),
+      getSessionTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getProjectTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getAgentProcessSnapshot: async () => ({ providers: {}, pidCwds: {} }),
+    }
+    const listed = await ctx.listProjectSessions("/tmp", 5)
+    expect(listed.sessionCount).toBe(0)
+    expect(listed.sessions).toEqual([])
+
+    const data = await ctx.getSessionData("/tmp", "sid", 10)
+    expect(data.messages).toEqual([])
+    expect(data.toolStats).toEqual([])
+
+    const sessionTasks = await ctx.getSessionTasks("sid", 5)
+    expect(sessionTasks.tasks).toEqual([])
+    expect(sessionTasks.summary.total).toBe(0)
+
+    const projectTasks = await ctx.getProjectTasks("/tmp", 10)
+    expect(projectTasks.tasks).toEqual([])
+    expect(projectTasks.summary.cancelled).toBe(0)
   })
 })
 

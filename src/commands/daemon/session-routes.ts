@@ -1,9 +1,40 @@
+import type { SessionPreview } from "./session-data.ts"
+import type { SessionMessage, SessionTaskSummary } from "./types.ts"
+import type { ProjectTaskPreview, SessionTaskPreview } from "./utils.ts"
+
 export interface AgentProcessSnapshot {
   providers: Record<string, number[]>
   pidCwds: Record<number, string>
 }
 
-interface SessionRoutesContext {
+/** `listProjectSessions` payload exposed through session HTTP routes */
+export interface SessionRoutesListResult {
+  sessionCount: number
+  sessions: SessionPreview[]
+}
+
+/** `getSessionData` payload exposed through session HTTP routes */
+export interface SessionRoutesMessagesResult {
+  messages: SessionMessage[]
+  toolStats: Array<{ name: string; count: number }>
+}
+
+/** `getSessionTasks` payload exposed through session HTTP routes */
+export interface SessionRoutesSessionTasksResult {
+  tasks: SessionTaskPreview[]
+  summary: SessionTaskSummary
+}
+
+/** `getProjectTasks` payload exposed through session HTTP routes */
+export interface SessionRoutesProjectTasksResult {
+  tasks: ProjectTaskPreview[]
+  summary: SessionTaskSummary
+}
+
+/** Session row after liveness annotation for the projects list response */
+export type SessionWithLiveness = SessionPreview & { processAlive: boolean }
+
+export interface SessionRoutesContext {
   touchProject: (cwd: string) => void
   getKnownProjects: () => string[]
   getProjectLastSeen: (cwd: string) => number
@@ -12,26 +43,14 @@ interface SessionRoutesContext {
     cwd: string,
     limit: number,
     pinnedSessionId?: string
-  ) => Promise<{ sessionCount: number; sessions: unknown[] }>
+  ) => Promise<SessionRoutesListResult>
   getSessionData: (
     cwd: string,
     sessionId: string,
     limit: number
-  ) => Promise<{ messages: unknown[]; toolStats: unknown[] }>
-  getSessionTasks: (
-    sessionId: string,
-    limit: number
-  ) => Promise<{
-    tasks: unknown[]
-    summary: { total: number; open: number; completed: number; cancelled: number }
-  }>
-  getProjectTasks: (
-    cwd: string,
-    limit: number
-  ) => Promise<{
-    tasks: unknown[]
-    summary: { total: number; open: number; completed: number; cancelled: number }
-  }>
+  ) => Promise<SessionRoutesMessagesResult>
+  getSessionTasks: (sessionId: string, limit: number) => Promise<SessionRoutesSessionTasksResult>
+  getProjectTasks: (cwd: string, limit: number) => Promise<SessionRoutesProjectTasksResult>
   getAgentProcessSnapshot: () => Promise<AgentProcessSnapshot>
 }
 
@@ -59,13 +78,13 @@ function getProjectAgentPids(projectCwd: string, snapshot: AgentProcessSnapshot)
 
 /** Annotate sessions with processAlive based on agent process cwds matching project cwd. */
 export function annotateSessionsWithLiveness(
-  sessions: unknown[],
+  sessions: SessionPreview[],
   projectCwd: string,
   snapshot: AgentProcessSnapshot
-): unknown[] {
+): SessionWithLiveness[] {
   const projectHasLiveAgent = hasLiveAgentForProject(projectCwd, snapshot)
   if (!projectHasLiveAgent) {
-    return sessions.map((s) => ({ ...(s as Record<string, unknown>), processAlive: false }))
+    return sessions.map((s) => ({ ...s, processAlive: false }))
   }
   const projectPids = new Set(getProjectAgentPids(projectCwd, snapshot))
   // Map provider -> whether it has a live PID in this project
@@ -74,9 +93,8 @@ export function annotateSessionsWithLiveness(
     if (pids.some((pid) => projectPids.has(pid))) liveProviders.add(provider)
   }
   return sessions.map((s) => {
-    const session = s as Record<string, unknown>
-    const provider = ((session.provider as string) ?? "unknown").toLowerCase()
-    return { ...session, processAlive: liveProviders.has(provider) }
+    const provider = (s.provider ?? "unknown").toLowerCase()
+    return { ...s, processAlive: liveProviders.has(provider) }
   })
 }
 
@@ -115,10 +133,10 @@ async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Prom
           const pinnedSessionId =
             body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
           const sessions = await ctx.listProjectSessions(cwd, limitSessions, pinnedSessionId)
-          const firstSession = (sessions.sessions as Array<{ id?: string }>)[0]
+          const firstSession = sessions.sessions[0]
           const statusLine = await ctx.getProjectStatusLine(
             cwd,
-            pinnedSessionId ?? (typeof firstSession?.id === "string" ? firstSession.id : undefined)
+            pinnedSessionId ?? firstSession?.id
           )
           return {
             cwd,
