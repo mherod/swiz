@@ -16,7 +16,7 @@ describe("normalizeAgentHookPayload", () => {
     expect(payload.conversation_id).toBe("4ed177ce-8642-4533-a539-2746a66351bd")
   })
 
-  it("does not overwrite existing session_id or cwd", () => {
+  it("does not overwrite existing session_id", () => {
     const payload: Record<string, unknown> = {
       session_id: "prior-session",
       cwd: "/prior/cwd",
@@ -25,7 +25,24 @@ describe("normalizeAgentHookPayload", () => {
     }
     normalizeAgentHookPayload(payload)
     expect(payload.session_id).toBe("prior-session")
-    expect(payload.cwd).toBe("/prior/cwd")
+    expect(payload.cwd).toBe("/other")
+  })
+
+  it("keeps cwd when it lies under workspace_roots", () => {
+    const payload: Record<string, unknown> = {
+      cwd: "/repo/packages/foo",
+      workspace_roots: ["/repo"],
+    }
+    normalizeAgentHookPayload(payload)
+    expect(payload.cwd).toBe("/repo/packages/foo")
+  })
+
+  it("clears global Cursor user-data cwd when workspace_roots is absent", () => {
+    const payload: Record<string, unknown> = {
+      cwd: "/Users/someone/.cursor",
+    }
+    normalizeAgentHookPayload(payload)
+    expect(payload.cwd).toBeUndefined()
   })
 
   it("maps Cursor beforeShellExecution shape to Bash + tool_input.command", () => {
