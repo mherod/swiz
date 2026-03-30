@@ -186,8 +186,10 @@ class PreToolUseStrategy implements HookExecutionStrategy {
 /** Process blocking hook results, collecting contexts from all hooks.
  *  For stop events: runs all hooks, forwards first block, merges all contexts.
  *  For other events: may have been aborted early, but still collects contexts
- *  from any hooks that completed before abort. */
-function processBlockingResults(
+ *  from any hooks that completed before abort.
+ *
+ *  Exported for unit tests (see `strategies.test.ts`). */
+export function processBlockingResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
   executions: HookExecution[],
   finalResponse: Record<string, unknown>
@@ -209,8 +211,10 @@ function processBlockingResults(
         // First block: copy its entire response as the final response
         Object.assign(finalResponse, resp)
         firstBlockHandled = true
-        // Do NOT extractContext here — the full hook payload (including
-        // hookSpecificOutput.additionalContext) is already merged via Object.assign
+        // Still collect additionalContext via extractContext so it is flattened into
+        // systemMessage (agents read top-level systemMessage; nested hso alone is insufficient).
+        const firstCtx = extractContext(resp)
+        if (firstCtx) contexts.push(firstCtx)
       } else {
         // Subsequent blocks: only extract their context (if any) for inclusion
         const ctx = extractContext(resp)
