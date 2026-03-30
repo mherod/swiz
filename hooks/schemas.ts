@@ -116,12 +116,34 @@ export const toolHookInputSchema = z
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
-export interface SkillToolInput extends ToolHookInput {
-  tool_input?: {
-    skill?: string
-    args?: string
-  }
-}
+/**
+ * Skill tool_input payload — used by hooks that process Skill tool invocations.
+ * Validates skill name and optional arguments with NFKC normalization.
+ */
+export const skillToolInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z
+      .looseObject({
+        skill: z.string().optional(),
+        args: z.string().optional(),
+      })
+      .optional(),
+    transcript_path: z.string().optional(),
+    permission_mode: z.string().optional(),
+    hook_event_name: z.string().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input.skill = nfkc(val.tool_input.skill)
+      val.tool_input.args = nfkc(val.tool_input.args)
+    }
+    return val
+  })
+
+export type SkillToolInput = z.infer<typeof skillToolInputSchema>
 
 /** PostToolUse input — extends ToolHookInput with the tool's response payload. */
 export interface PostToolHookInput extends ToolHookInput {
