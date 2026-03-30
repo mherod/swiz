@@ -6,7 +6,7 @@
  * endpoint so that both paths execute identical logic.
  */
 
-import { merge, orderBy } from "lodash-es"
+import { merge, orderBy, unset } from "lodash-es"
 import { isGitRepo } from "../git-helpers.ts"
 import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
@@ -26,6 +26,14 @@ import {
   computeTranscriptSummary,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
+import {
+  assertDispatchInboundNotParseError,
+  assertEnrichedDispatchPayloadRecord,
+  assertNormalizedDispatchPayload,
+  coerceDispatchAgentEnvelopeInPlace,
+  parseDispatchPayloadString,
+  parseValidatedAgentDispatchWireJson,
+} from "./dispatch-zod-surfaces.ts"
 import { type HookExecution, writeResponse } from "./engine.ts"
 import {
   scheduleIncomingDispatchCapture,
@@ -69,14 +77,7 @@ export function parsePayload(payloadStr: string): {
   payload: Record<string, unknown>
   parseError: boolean
 } {
-  try {
-    return {
-      payload: JSON.parse(payloadStr || "{}") as Record<string, unknown>,
-      parseError: false,
-    }
-  } catch {
-    return { payload: {}, parseError: true }
-  }
+  return parseDispatchPayloadString(payloadStr)
 }
 
 function truncate(s: string, max: number): string {
@@ -183,8 +184,6 @@ async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult
 
 interface EnrichPayloadOptions {
   payload: Record<string, unknown>
-  parseError: boolean
-  fallbackPayloadStr: string
   summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
   currentSessionToolUsageProvider?: (
     sessionId: string,
@@ -196,16 +195,12 @@ interface EnrichPayloadOptions {
 async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string> {
   const {
     payload,
-    parseError,
-    fallbackPayloadStr,
     summaryProvider,
     currentSessionToolUsageProvider,
     disableTranscriptSummaryFallback,
   } = opts
-  if (parseError) return fallbackPayloadStr
 
   let enriched = payload
-  let changed = false
   const transcriptPath = payload.transcript_path as string | undefined
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
 
@@ -213,7 +208,6 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     const usage = await currentSessionToolUsageProvider(sessionId, transcriptPath)
     if (usage) {
       enriched = merge({}, enriched, { _currentSessionToolUsage: usage }) as Record<string, unknown>
-      changed = true
       log(
         `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
       )
@@ -227,11 +221,10 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
   )
   if (summary) {
     enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, unknown>
-    changed = true
     log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   }
 
-  return changed ? JSON.stringify(enriched) : fallbackPayloadStr
+  return JSON.stringify(assertEnrichedDispatchPayloadRecord(enriched))
 }
 
 async function resolveTranscriptSummary(
@@ -325,7 +318,6 @@ interface DispatchContext {
   canonicalEvent: string
   hookEventName: string
   payload: Record<string, unknown>
-  parseError: boolean
   payloadStr: string
   cwd: string
   toolName: string | undefined
@@ -335,19 +327,23 @@ interface DispatchContext {
 function buildDispatchContext(req: DispatchRequest): DispatchContext {
   const { canonicalEvent, hookEventName, payloadStr } = req
   const { payload, parseError } = parsePayload(payloadStr)
+  assertDispatchInboundNotParseError(canonicalEvent, parseError)
 
   const captureIncoming = shouldCaptureIncomingPayloads()
   let incomingBeforeNormalize: Record<string, unknown> | null = null
-  if (captureIncoming && !parseError) {
+  if (captureIncoming) {
     incomingBeforeNormalize = structuredClone(payload) as Record<string, unknown>
   }
 
   normalizeAgentHookPayload(payload)
   backfillPayloadDefaults(payload)
+  const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
+  for (const k of Object.keys(payload)) unset(payload, k)
+  merge(payload, validated)
   const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
   logHeader(canonicalEvent, hookEventName, toolName, trigger)
-  log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`)
+  log(`   payload: ${payloadStr.length} bytes`)
   logPayloadDiagnostics(payloadStr, payload, canonicalEvent)
 
   const cwd = (payload.cwd as string) ?? process.cwd()
@@ -356,16 +352,14 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
     scheduleIncomingDispatchCapture({
       canonicalEvent,
       hookEventName,
-      parseError,
+      parseError: false,
       payloadStr,
       incomingBeforeNormalize,
-      normalizedPayload: parseError
-        ? ({} as Record<string, unknown>)
-        : (structuredClone(payload) as Record<string, unknown>),
+      normalizedPayload: structuredClone(payload) as Record<string, unknown>,
     })
   }
 
-  return { canonicalEvent, hookEventName, payload, parseError, payloadStr, cwd, toolName, trigger }
+  return { canonicalEvent, hookEventName, payload, payloadStr, cwd, toolName, trigger }
 }
 
 interface ResolvedGroups {
@@ -570,6 +564,14 @@ function resolveLifecycleRequestId(payload: Record<string, unknown>): string {
   )
 }
 
+function assertDispatchResponseMatchesWire(
+  response: Record<string, unknown>,
+  canonicalEvent: string,
+  hookEventName: string
+): void {
+  parseValidatedAgentDispatchWireJson(response, canonicalEvent, hookEventName)
+}
+
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = buildDispatchContext(req)
@@ -580,8 +582,10 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     const response: Record<string, unknown> = {}
     if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
       if (!req.daemonContext) writeResponse(response)
     }
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
     return { response }
   }
 
@@ -590,8 +594,10 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     const response: Record<string, unknown> = {}
     if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
       if (!req.daemonContext) writeResponse(response)
     }
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
     return { response }
   }
 
@@ -607,8 +613,6 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const tEnrich = performance.now()
   const enrichedPayloadStr = await enrichPayloadForHooks({
     payload: ctx.payload,
-    parseError: ctx.parseError,
-    fallbackPayloadStr: JSON.stringify(ctx.payload),
     summaryProvider: req.transcriptSummaryProvider,
     currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
     disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
@@ -653,9 +657,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
       void appendHookLogs(logEntries)
     }
 
-    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
-      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+    if (!(typeof response.error === "string" && response.error.length > 0)) {
+      if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
+        normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+      }
+      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
     }
+
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
 
     log(
       `   ⏱ total: ${Math.round(performance.now() - t0)}ms (hooks: ${Math.round(performance.now() - dispatchStart)}ms)`

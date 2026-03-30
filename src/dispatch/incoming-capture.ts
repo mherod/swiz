@@ -4,8 +4,12 @@
  * **Disable** with **`SWIZ_CAPTURE_INCOMING=0`** or **`SWIZ_CAPTURE_INCOMING_PAYLOADS=0`** (also
  * `false`, `no`, `off`). Files older than **10 minutes** are removed on each write.
  *
- * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{hookEventName}-{id}.json` with `incoming` (before
+ * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
  * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`.
+ *
+ * **Event name normalization:** Filenames use canonical camelCase event names for consistency across agents:
+ * - Agent-specific names (PreToolUse, PostToolUse, beforeShellExecution, etc.) are normalized
+ * - Maps to canonical names (preToolUse, postToolUse, sessionStart, etc.)
  *
  * **Secrets:** `_env` (injected by `swiz dispatch` for hook subprocesses) is **never** written —
  * it is replaced with `_envKeys` (sorted var names only). `user_email` is redacted.
@@ -14,6 +18,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { merge, omit } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
 
@@ -40,19 +45,51 @@ export function sanitizeHookFilenameSegment(name: string): string {
 }
 
 /**
+ * Normalize agent-specific event names to canonical camelCase form.
+ * Handles PascalCase (Claude Code in Cursor), agent aliases (beforeShellExecution),
+ * and already-canonical names.
+ */
+export function normalizeEventNameToCanonical(eventName: string): string {
+  // Agent alias mappings (Cursor CLI)
+  const aliasMap: Record<string, string> = {
+    beforeShellExecution: "preToolUse",
+    afterShellExecution: "postToolUse",
+  }
+
+  // Check direct alias first
+  const aliased = aliasMap[eventName]
+  if (aliased) return aliased
+
+  // Convert PascalCase to camelCase (PreToolUse → preToolUse)
+  if (eventName.length > 0) {
+    const first = eventName[0]
+    if (first && first === first.toUpperCase() && first !== first.toLowerCase()) {
+      return first.toLowerCase() + eventName.slice(1)
+    }
+  }
+
+  // Already canonical or unknown; return as-is
+  return eventName
+}
+
+/**
  * Strip high-risk fields from dispatch payloads before writing to disk. The CLI injects full
  * `process.env` as `_env` — that must not be persisted in `/tmp`.
  */
 export function sanitizeDispatchPayloadForCapture(
   o: Record<string, unknown>
 ): Record<string, unknown> {
-  const out = structuredClone(o) as Record<string, unknown>
+  let out = structuredClone(o) as Record<string, unknown>
   if (out._env && typeof out._env === "object" && !Array.isArray(out._env)) {
-    out._envKeys = Object.keys(out._env as Record<string, unknown>).sort()
-    delete out._env
+    out = omit(
+      merge({}, out, {
+        _envKeys: Object.keys(out._env as Record<string, unknown>).sort(),
+      }),
+      ["_env"]
+    )
   }
   if (typeof out.user_email === "string" && out.user_email.includes("@")) {
-    out.user_email = "[redacted]"
+    out = merge({}, out, { user_email: "[redacted]" })
   }
   return out
 }
@@ -61,7 +98,8 @@ export function buildIncomingCaptureFilename(hookEventName: string): string {
   const iso = new Date().toISOString()
   const datePart = iso.slice(0, 10)
   const timePart = iso.slice(11, 23).replace(/:/g, "-")
-  const safe = sanitizeHookFilenameSegment(hookEventName)
+  const canonical = normalizeEventNameToCanonical(hookEventName)
+  const safe = sanitizeHookFilenameSegment(canonical)
   const id = randomUUID().slice(0, 8)
   return `${datePart}T${timePart}-${safe}-${id}.json`
 }

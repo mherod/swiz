@@ -36,7 +36,7 @@ describe("processBlockingResults", () => {
 
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(finalResponse.systemMessage).toContain("first-block-only-context")
     expect(finalResponse.decision).toBe("block")
     expect(finalResponse.reason).toBe("first")
@@ -72,7 +72,7 @@ describe("processBlockingResults", () => {
 
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(finalResponse.systemMessage).toContain("from-first")
     expect(finalResponse.systemMessage).toContain("from-second")
     expect(finalResponse.reason).toBe("a")
@@ -97,7 +97,7 @@ describe("processBlockingResults", () => {
 
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     const msg = finalResponse.systemMessage as string
     expect(msg).toContain("top-level-msg")
     expect(msg).toContain("nested-extra")
@@ -107,7 +107,7 @@ describe("processBlockingResults", () => {
   it("leaves finalResponse empty when there are no results", () => {
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults([], executions, finalResponse)
+    processBlockingResults([], executions, finalResponse, "Stop")
     expect(finalResponse).toEqual({})
     expect(executions).toEqual([])
   })
@@ -129,7 +129,7 @@ describe("processBlockingResults", () => {
     ]
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(executions).toHaveLength(2)
     expect(executions[0]?.status).toBe("skipped")
     expect(executions[1]?.status).toBe("block")
@@ -150,7 +150,7 @@ describe("processBlockingResults", () => {
       },
     ]
     const finalResponse: Record<string, unknown> = {}
-    processBlockingResults(results, [], finalResponse)
+    processBlockingResults(results, [], finalResponse, "Stop")
     expect(finalResponse.systemMessage).toBeUndefined()
     expect(finalResponse.reason).toBe("only-reason")
   })
@@ -169,7 +169,7 @@ describe("processBlockingResults", () => {
       },
     ]
     const finalResponse: Record<string, unknown> = {}
-    processBlockingResults(results, [], finalResponse)
+    processBlockingResults(results, [], finalResponse, "Stop")
     expect(finalResponse.systemMessage).toBe("top")
   })
 
@@ -187,7 +187,7 @@ describe("processBlockingResults", () => {
       },
     ]
     const finalResponse: Record<string, unknown> = {}
-    processBlockingResults(results, [], finalResponse)
+    processBlockingResults(results, [], finalResponse, "Stop")
     expect(finalResponse.systemMessage).toContain("from-continue-false")
     expect(finalResponse.continue).toBe(false)
   })
@@ -207,7 +207,7 @@ describe("processBlockingResults", () => {
     ]
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(executions[0]?.status).toBe("block")
     expect(finalResponse.systemMessage).toContain("nested-block-ctx")
   })
@@ -234,7 +234,7 @@ describe("processBlockingResults", () => {
       },
     ]
     const finalResponse: Record<string, unknown> = {}
-    processBlockingResults(results, [], finalResponse)
+    processBlockingResults(results, [], finalResponse, "Stop")
     const msg = finalResponse.systemMessage as string
     expect(msg.indexOf("pre-block")).toBeLessThan(msg.indexOf("from-block"))
   })
@@ -255,7 +255,7 @@ describe("processBlockingResults", () => {
     ]
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(executions[0]?.status).toBe("aborted")
     expect(finalResponse.reason).toBe("winner")
     expect(finalResponse.systemMessage).toContain("ac")
@@ -276,9 +276,31 @@ describe("processBlockingResults", () => {
     ]
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
-    processBlockingResults(results, executions, finalResponse)
+    processBlockingResults(results, executions, finalResponse, "Stop")
     expect(executions).toHaveLength(2)
     expect(executions[0]?.status).toBe("ok")
     expect(finalResponse.systemMessage).toBe("c")
+  })
+
+  it("sets hookSpecificOutput for PostToolUse-style context-only aggregation", () => {
+    const results = [
+      {
+        execution: makeHookExecution("posttooluse-git-status.ts"),
+        parsed: {
+          hookSpecificOutput: {
+            hookEventName: "PostToolUse",
+            additionalContext: "[git] branch: main | upstream: origin/main",
+          },
+          systemMessage: "[git] branch: main | upstream: origin/main",
+          suppressOutput: true,
+        },
+      },
+    ]
+    const finalResponse: Record<string, unknown> = {}
+    processBlockingResults(results, [], finalResponse, "PostToolUse")
+    const hso = finalResponse.hookSpecificOutput as Record<string, unknown>
+    expect(hso?.hookEventName).toBe("PostToolUse")
+    expect(hso?.additionalContext).toBe("[git] branch: main | upstream: origin/main")
+    expect(finalResponse.systemMessage).toContain("branch: main")
   })
 })

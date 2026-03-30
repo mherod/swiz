@@ -6,7 +6,13 @@
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
-import { evalCondition, type FileHookDef, type HookGroup, isInlineHookDef } from "../manifest.ts"
+import {
+  evalCondition,
+  type HookDef,
+  type HookGroup,
+  hookIdentifier,
+  isInlineHookDef,
+} from "../manifest.ts"
 import {
   extractAllowReason,
   extractContext,
@@ -15,8 +21,9 @@ import {
   isBlock,
   isDeny,
   log,
-  runHook,
+  runEntry,
 } from "./engine.ts"
+import { extractCwd } from "./filters.ts"
 import type { DispatchStrategy } from "./types.ts"
 
 // ─── Trace types ────────────────────────────────────────────────────────────
@@ -36,12 +43,12 @@ export interface TraceEntry {
 // ─── Replay strategies ──────────────────────────────────────────────────────
 
 function buildTraceEntry(
-  hook: { file: string; async?: boolean },
+  hook: HookDef,
   group: HookGroup,
   execution: { startTime: number; endTime?: number; status: HookStatus; stderrSnippet?: string }
 ): TraceEntry {
   return {
-    file: hook.file,
+    file: hookIdentifier(hook),
     ...(group.matcher && { matcher: group.matcher }),
     async: false,
     startTime: execution.startTime,
@@ -53,14 +60,16 @@ function buildTraceEntry(
 
 async function collectEligibleHooks(
   groups: HookGroup[]
-): Promise<{ group: HookGroup; hook: FileHookDef }[]> {
-  const result: { group: HookGroup; hook: FileHookDef }[] = []
+): Promise<{ group: HookGroup; hook: HookDef }[]> {
+  const result: { group: HookGroup; hook: HookDef }[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
-      if (isInlineHookDef(hook)) continue // inline hooks run in-process; not replayable as file
-      if (hook.async && hook.asyncMode !== "block-until-complete") continue
-      if (!(await evalCondition(hook.condition))) {
-        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+      const isAsync = isInlineHookDef(hook) ? !!hook.hook.async : !!hook.async
+      const asyncMode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
+      if (isAsync && asyncMode !== "block-until-complete") continue
+      const condition = isInlineHookDef(hook) ? hook.hook.condition : hook.condition
+      if (!(await evalCondition(condition))) {
+        log(`   ⏭ ${hookIdentifier(hook)} [condition false, skipping]`)
         continue
       }
       result.push({ group, hook })
@@ -76,9 +85,14 @@ export async function replayPreToolUse(
 ): Promise<TraceEntry[]> {
   const traces: TraceEntry[] = []
   const eligible = await collectEligibleHooks(groups)
+  const cwd = extractCwd(payloadStr)
 
   for (const { group, hook } of eligible) {
-    const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+    const { parsed: resp, execution } = await runEntry(
+      { hook, matcher: group.matcher },
+      payloadStr,
+      cwd
+    )
     const entry = buildTraceEntry(hook, group, execution)
     if (resp && isDeny(resp)) {
       entry.status = "deny"
@@ -104,10 +118,15 @@ export async function replayBlocking(
   _canonicalEvent?: string
 ): Promise<TraceEntry[]> {
   const eligible = await collectEligibleHooks(groups)
+  const cwd = extractCwd(payloadStr)
 
   const traces: TraceEntry[] = []
   for (const { group, hook } of eligible) {
-    const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+    const { parsed: resp, execution } = await runEntry(
+      { hook, matcher: group.matcher },
+      payloadStr,
+      cwd
+    )
     const entry = buildTraceEntry(hook, group, execution)
     if (resp && isBlock(resp)) {
       entry.status = "block"
@@ -126,10 +145,15 @@ export async function replayContext(
   payloadStr: string
 ): Promise<TraceEntry[]> {
   const eligible = await collectEligibleHooks(groups)
+  const cwd = extractCwd(payloadStr)
 
   return Promise.all(
     eligible.map(async ({ group, hook }) => {
-      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+      const { parsed: resp, execution } = await runEntry(
+        { hook, matcher: group.matcher },
+        payloadStr,
+        cwd
+      )
       const entry = buildTraceEntry(hook, group, execution)
       if (!resp) return entry
       const ctx = extractContext(resp)

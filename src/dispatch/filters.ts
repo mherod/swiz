@@ -6,6 +6,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
+import { merge, omit } from "lodash-es"
 import { isEmergencyBypassActive } from "../commands/emergency-bypass.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
@@ -103,7 +104,9 @@ export function filterHooksFromGroups(
   return groups
     .map((group) => {
       const hooks = group.hooks.filter(predicate)
-      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+      return hooks.length === group.hooks.length
+        ? group
+        : merge({}, omit(group, ["hooks"]), { hooks })
     })
     .filter((group) => group.hooks.length > 0)
 }

@@ -4,6 +4,7 @@
  */
 
 import { join } from "node:path"
+import { z } from "zod"
 import { hookOutputSchema } from "../../hooks/schemas.ts"
 import type { HookStatus } from "./engine.ts"
 
@@ -40,14 +41,17 @@ export interface ErrorResult {
 function validateHookOutputSchema(
   parsed: Record<string, unknown>
 ): { valid: true } | { valid: false; error: string } {
-  const result = hookOutputSchema.safeParse(parsed)
-  if (result.success) {
+  try {
+    hookOutputSchema.parse(parsed)
     return { valid: true }
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      const firstIssue = e.issues[0]
+      const errorMsg = firstIssue?.message ?? "Unknown schema validation error"
+      return { valid: false, error: errorMsg }
+    }
+    return { valid: false, error: "Unknown schema validation error" }
   }
-  // Extract the first validation error for clarity
-  const firstIssue = result.error.issues[0]
-  const errorMsg = firstIssue?.message ?? "Unknown schema validation error"
-  return { valid: false, error: errorMsg }
 }
 
 /**

@@ -54,6 +54,23 @@ export default tseslint.config(
       "@typescript-eslint/return-await": ["error", "error-handling-correctness-only"],
       /** Exported functions/classes must declare return types (public API surface). */
       "@typescript-eslint/explicit-module-boundary-types": "error",
+      /** No `any` — use concrete types or Zod-inferred types (`z.infer<typeof schema>`). */
+      "@typescript-eslint/no-explicit-any": "error",
+      /**
+       * Ban the `unknown` type keyword (including inside `Record<string, unknown>`). **warn** so
+       * `eslint`/`bun run lint` stay green during migration; tighten to `"error"` when the tree is clean.
+       */
+      "@typescript-eslint/no-restricted-types": [
+        "warn",
+        {
+          types: {
+            unknown: {
+              message:
+                " Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`.",
+            },
+          },
+        },
+      ],
       "max-len": [
         COMPLEXITY_WARN,
         {

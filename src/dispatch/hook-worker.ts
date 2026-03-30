@@ -5,6 +5,7 @@
 
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
+import { merge } from "lodash-es"
 import type { HookExecution } from "./engine.ts"
 import {
   classifyHookOutput,
@@ -41,7 +42,7 @@ async function runHookInWorker(
     // Merge caller's environment from the enriched payload so daemon-spawned
     // hooks inherit the full shell env (LaunchAgent only gets minimal env vars).
     const callerEnv = extractCallerEnv(payloadStr)
-    const env = callerEnv ? { ...process.env, ...callerEnv } : undefined
+    const env = callerEnv ? merge({}, process.env, callerEnv) : undefined
     const spawnCwd = extractPayloadCwd(payloadStr)
 
     const proc = bunSpawn(cmd, {

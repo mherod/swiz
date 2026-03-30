@@ -1,4 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { ZodError } from "zod"
+import {
+  coerceDispatchAgentEnvelopeInPlace,
+  DispatchPayloadValidationError,
+} from "./dispatch-zod-surfaces.ts"
 import { type DispatchRequest, executeDispatch } from "./execute.ts"
 import { DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT } from "./stop-response.ts"
 
@@ -36,15 +41,13 @@ describe("dispatch execute integration", () => {
       expect(result.response).toEqual({})
     })
 
-    it("handles invalid JSON payload gracefully", async () => {
+    it("rejects invalid JSON stdin for any dispatch event", async () => {
       const req: DispatchRequest = {
         canonicalEvent: "nonexistentEvent",
         hookEventName: "NonexistentEvent",
         payloadStr: "not-json{{{",
       }
-      const result = await executeDispatch(req)
-      expect(result).toBeDefined()
-      expect(result.response).toEqual({})
+      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
     })
 
     it("accepts daemonContext flag without error", async () => {
@@ -99,6 +102,29 @@ describe("dispatch execute integration", () => {
       ).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+    })
+
+    it("rejects stop dispatch with invalid JSON stdin", async () => {
+      const req: DispatchRequest = {
+        canonicalEvent: "stop",
+        hookEventName: "Stop",
+        payloadStr: "not-json{{{",
+      }
+      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
+    })
+
+    it("rejects subagentStop dispatch with non-object JSON stdin", async () => {
+      const req: DispatchRequest = {
+        canonicalEvent: "subagentStop",
+        hookEventName: "SubagentStop",
+        payloadStr: "[]",
+      }
+      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
+    })
+
+    it("throws when coercing stop envelope that violates stopHookOutputSchema", () => {
+      const r: Record<string, unknown> = { continue: true }
+      expect(() => coerceDispatchAgentEnvelopeInPlace(r, "stop", "Stop")).toThrow()
     })
   })
 
@@ -254,13 +280,29 @@ describe("dispatch execute integration", () => {
             }
 
             const payloadStr = await req.text()
-            const result = await executeDispatch({
-              canonicalEvent,
-              hookEventName,
-              payloadStr,
-              daemonContext: true,
-            })
-            return Response.json(result.response)
+            try {
+              const result = await executeDispatch({
+                canonicalEvent,
+                hookEventName,
+                payloadStr,
+                daemonContext: true,
+              })
+              return Response.json(result.response)
+            } catch (e) {
+              if (e instanceof DispatchPayloadValidationError) {
+                return Response.json(
+                  { error: e.message, issues: e.zodError.flatten() },
+                  { status: 400 }
+                )
+              }
+              if (e instanceof ZodError) {
+                return Response.json(
+                  { error: "Dispatch schema validation failed", issues: e.flatten() },
+                  { status: 422 }
+                )
+              }
+              throw e
+            }
           }
 
           return new Response("Not Found", { status: 404 })
@@ -287,6 +329,25 @@ describe("dispatch execute integration", () => {
       expect(resp.ok).toBe(true)
       const json = await resp.json()
       expect(json).toEqual({})
+    })
+
+    it("dispatch endpoint returns 400 for stop with invalid JSON body", async () => {
+      const resp = await fetch(
+        `http://127.0.0.1:${TEST_PORT}/dispatch?event=stop&hookEventName=Stop`,
+        { method: "POST", body: "not-json", headers: { "Content-Type": "application/json" } }
+      )
+      expect(resp.status).toBe(400)
+      const json = (await resp.json()) as { error?: string; issues?: unknown }
+      expect(json.error).toContain("Invalid dispatch payload")
+      expect(json.issues).toBeDefined()
+    })
+
+    it("dispatch endpoint returns 400 for invalid JSON on non-stop events", async () => {
+      const resp = await fetch(
+        `http://127.0.0.1:${TEST_PORT}/dispatch?event=nonexistentEvent&hookEventName=NonexistentEvent`,
+        { method: "POST", body: "not-json{{{", headers: { "Content-Type": "application/json" } }
+      )
+      expect(resp.status).toBe(400)
     })
 
     it("dispatch endpoint returns 400 when event param is missing", async () => {

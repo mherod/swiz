@@ -47,8 +47,17 @@
  *
  * - **Per-hook subprocess stdout** — {@link hookOutputSchema} via `classifyHookOutput` in
  *   `src/dispatch/worker-types.ts` (empty `{}` is valid).
- * - **Merged Stop / SubagentStop dispatch** — {@link stopHookOutputSchema} after
- *   `normalizeStopDispatchResponseInPlace` in `src/dispatch/stop-response.ts`.
+ * - **Dispatch stdin (entry)** — `assertDispatchInboundNotParseError` (fatal parse / non-object),
+ *   then `dispatchInboundObjectSchema` and per-route schemas in
+ *   `src/dispatch/dispatch-zod-surfaces.ts` (`DISPATCH_CANONICAL_INBOUND_SCHEMAS`) after
+ *   `normalizeAgentHookPayload` and cwd/session backfill (`executeDispatch`, replay).
+ * - **Enriched hook stdin** — `assertEnrichedDispatchPayloadRecord` before stringifying to hook subprocesses.
+ * - **Subprocess hook stdout** — {@link hookOutputSchema} via `hookOutputSchema.parse` in
+ *   `classifyHookOutput` (`src/dispatch/worker-types.ts`) and inline hook output (`engine.ts`).
+ * - **Merged agent-visible dispatch (exit)** — `coerceDispatchAgentEnvelopeInPlace` and
+ *   `parseValidatedAgentDispatchWireJson` (also run before `executeDispatch` returns and in the
+ *   daemon) call `.parse()` on {@link hookOutputSchema} / {@link stopHookOutputSchema}; internal
+ *   keys such as `hookExecutions` are stripped in `src/dispatch/dispatch-wire.ts`.
  */
 
 import { z } from "zod"
@@ -213,6 +222,22 @@ export type SkillToolInput = z.infer<typeof skillToolInputSchema>
 export interface PostToolHookInput extends ToolHookInput {
   tool_response?: unknown
 }
+
+/**
+ * PostToolUse stdin envelope — tool hook fields plus optional `tool_response` from the runtime.
+ */
+export const postToolUseHookInputSchema = toolHookBaseObjectSchema
+  .extend({
+    tool_response: z.unknown().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    }
+    return val
+  })
+
+export type PostToolUseHookInput = z.infer<typeof postToolUseHookInputSchema>
 
 /**
  * Stop / SubagentStop hook input envelope.

@@ -47,6 +47,10 @@ const STDERR_ALLOWLIST = new Map<string, string>([
   ],
   ["src/commands/manage.ts", "manage validate emits validation failures to stderr"],
   [
+    "src/dispatch/incoming-inspect.ts",
+    "CLI for SWIZ_INCOMING captures — stdout for JSON/summaries; stderrLog for unknown command and fatal errors",
+  ],
+  [
     "src/utils/hook-utils.ts",
     "hook output helpers (denyPreToolUse, blockStop, etc.) emit structured JSON to stdout; " +
       "console.error for bun PATH check and fallback diagnostics",
@@ -75,6 +79,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/dispatch/engine.ts",
   // Dispatch replay JSON trace output (extracted from dispatch.ts)
   "src/dispatch/replay.ts",
+  // incoming-inspect — list/query captured incoming payloads (JSON/summaries to stdout)
+  "src/dispatch/incoming-inspect.ts",
   "src/commands/doctor.ts",
   "src/commands/help.ts",
   "src/commands/hooks.ts",

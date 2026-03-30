@@ -9,6 +9,8 @@
 import { debugLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
+  assertDispatchInboundNotParseError,
+  assertNormalizedDispatchPayload,
   DISPATCH_ROUTES,
   formatTrace,
   groupMatches,
@@ -247,7 +249,8 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   const stdinMs = Math.round(performance.now() - t0)
   log(`   ⏱ cli:stdin: ${stdinMs}ms`)
 
-  const { payload } = parsePayload(payloadStr)
+  const { payload, parseError } = parsePayload(payloadStr)
+  assertDispatchInboundNotParseError(canonicalEvent, parseError)
   normalizeAgentHookPayload(payload)
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
   // Inject CLI process cwd into payload when agent didn't provide it.
@@ -361,8 +364,24 @@ export const dispatchCommand: Command = {
       const payloadStr = await readStdinPayloadWithTimeout()
       log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
 
-      const { payload } = parsePayload(payloadStr)
+      const { payload, parseError } = parsePayload(payloadStr)
+      if (parseError) {
+        throw new Error("Replay requires valid JSON object stdin payload")
+      }
       normalizeAgentHookPayload(payload)
+      if (!payload.cwd) {
+        payload.cwd =
+          process.env.GEMINI_CWD ||
+          process.env.GEMINI_PROJECT_DIR ||
+          process.env.CLAUDE_PROJECT_DIR ||
+          process.cwd()
+      }
+      if (!payload.session_id) {
+        payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
+      }
+      const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
+      for (const k of Object.keys(payload)) delete payload[k]
+      Object.assign(payload, validated)
       const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
       const matchingGroups = manifest.filter(

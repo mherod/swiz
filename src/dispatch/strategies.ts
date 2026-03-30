@@ -1,4 +1,7 @@
+import { merge, unset } from "lodash-es"
+import { hookOutputSchema } from "../../hooks/schemas.ts"
 import type { HookGroup } from "../manifest.ts"
+import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import {
   extractAllowReason,
   extractContext,
@@ -76,13 +79,13 @@ function classifyPreToolResult(
 function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, unknown> {
   if (hints.length === 0 && contexts.length === 0) {
     log(`   result: all passed`)
-    return {}
+    return hookOutputSchema.parse({})
   }
   log(
     `   result: passed with ${hints.length} hint(s)` +
       (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
   )
-  return {
+  return hookOutputSchema.parse({
     ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -90,7 +93,7 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
       ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
       ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
     },
-  }
+  })
 }
 
 // ─── Shared strategy pipeline ──────────────────────────────────────────────
@@ -141,10 +144,13 @@ async function runStrategyPipeline(
   const finalResponse = opts.processResults(results, executions)
 
   logSlowHookSummary(executions)
-  if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
+  if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })
   if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
     normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
   }
+
+  coerceDispatchAgentEnvelopeInPlace(finalResponse, ctx.canonicalEvent, ctx.hookEventName)
+
   writeResponse(finalResponse)
   return finalResponse
 }
@@ -170,12 +176,12 @@ class PreToolUseStrategy implements HookExecutionStrategy {
           const classification = classifyPreToolResult(execution, resp, hints, contexts)
           executions.push(execution)
           if (classification === "deny") {
-            Object.assign(finalResponse, resp)
+            merge(finalResponse, resp)
             break
           }
         }
         if (!isDeny(finalResponse)) {
-          Object.assign(finalResponse, buildPreToolResponse(hints, contexts))
+          merge(finalResponse, buildPreToolResponse(hints, contexts))
         }
         return finalResponse
       },
@@ -192,7 +198,8 @@ class PreToolUseStrategy implements HookExecutionStrategy {
 export function processBlockingResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
   executions: HookExecution[],
-  finalResponse: Record<string, unknown>
+  finalResponse: Record<string, unknown>,
+  hookEventName: string
 ): void {
   const contexts: string[] = []
   let firstBlockHandled = false
@@ -209,7 +216,7 @@ export function processBlockingResults(
 
       if (!firstBlockHandled) {
         // First block: copy its entire response as the final response
-        Object.assign(finalResponse, resp)
+        merge(finalResponse, resp)
         firstBlockHandled = true
         // Still collect additionalContext via extractContext so it is flattened into
         // systemMessage (agents read top-level systemMessage; nested hso alone is insufficient).
@@ -237,7 +244,23 @@ export function processBlockingResults(
   }
 
   if (contexts.length > 0) {
-    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${contexts.join("\n\n")}`
+    const mergedContext = contexts.join("\n\n")
+    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
+
+    const existingHso =
+      finalResponse.hookSpecificOutput &&
+      typeof finalResponse.hookSpecificOutput === "object" &&
+      !Array.isArray(finalResponse.hookSpecificOutput)
+        ? (merge({}, finalResponse.hookSpecificOutput as Record<string, unknown>) as Record<
+            string,
+            unknown
+          >)
+        : {}
+    const existingName = existingHso.hookEventName
+    existingHso.hookEventName =
+      typeof existingName === "string" && existingName.trim() ? existingName.trim() : hookEventName
+    existingHso.additionalContext = mergedContext
+    finalResponse.hookSpecificOutput = existingHso
   }
 }
 
@@ -336,8 +359,8 @@ async function tryAutoSteerStopBlock(
   log(
     `   auto-steer: sent stop block reason to terminal (${ctx.terminalApp}) — converting to allow`
   )
-  delete finalResponse.decision
-  delete finalResponse.reason
+  unset(finalResponse, "decision")
+  unset(finalResponse, "reason")
 }
 
 class BlockingStrategy implements HookExecutionStrategy {
@@ -350,6 +373,7 @@ class BlockingStrategy implements HookExecutionStrategy {
       if (shortCircuited) {
         const response: Record<string, unknown> = {}
         normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+        coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
         writeResponse(response)
         return response
       }
@@ -365,7 +389,7 @@ class BlockingStrategy implements HookExecutionStrategy {
         }
       },
       processResults: (results, executions) => {
-        processBlockingResults(results, executions, finalResponse)
+        processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
         if (!isBlock(finalResponse)) {
           log(`   result: all passed`)
         }
@@ -415,15 +439,15 @@ class ContextStrategy implements HookExecutionStrategy {
 
         if (contexts.length === 0) {
           log(`   result: no contexts to merge`)
-          return {}
+          return hookOutputSchema.parse({})
         }
         log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
-        return {
+        return hookOutputSchema.parse({
           hookSpecificOutput: {
             hookEventName,
             additionalContext: contexts.join("\n\n"),
           },
-        }
+        })
       },
     })
   }

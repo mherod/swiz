@@ -30,6 +30,18 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 
+export { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields } from "./dispatch-wire.ts"
+export {
+  assertDispatchInboundNotParseError,
+  assertEnrichedDispatchPayloadRecord,
+  assertNormalizedDispatchPayload,
+  coerceDispatchAgentEnvelopeInPlace,
+  DISPATCH_CANONICAL_INBOUND_SCHEMAS,
+  DispatchPayloadValidationError,
+  dispatchInboundObjectSchema,
+  parseDispatchPayloadString,
+  parseValidatedAgentDispatchWireJson,
+} from "./dispatch-zod-surfaces.ts"
 export {
   classifyHookOutput,
   DEFAULT_TIMEOUT,

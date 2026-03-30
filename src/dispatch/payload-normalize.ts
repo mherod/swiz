@@ -17,6 +17,8 @@
  * `cwd` is that global `…/.cursor` path (not `…/.cursor/projects/…`), we clear `cwd` so
  * `swiz dispatch` can inject `process.cwd()` from the launcher (the real project directory).
  */
+import { unset } from "lodash-es"
+
 export function normalizeAgentHookPayload(payload: Record<string, unknown>): void {
   const sid = payload.session_id
   if (typeof sid !== "string" || !sid.trim()) {
@@ -42,7 +44,7 @@ export function normalizeAgentHookPayload(payload: Record<string, unknown>): voi
       payload.cwd = roots[0]
     }
   } else if (cwdStr !== "" && isCursorGlobalUserDataCwd(cwdStr)) {
-    delete payload.cwd
+    unset(payload, "cwd")
   }
 
   normalizeCursorShellCommandShape(payload)

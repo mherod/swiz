@@ -8,7 +8,8 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
-import { hookBaseSchema } from "../../hooks/schemas.ts"
+import { merge } from "lodash-es"
+import { hookBaseSchema, hookOutputSchema } from "../../hooks/schemas.ts"
 import { debugLog } from "../debug.ts"
 import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
@@ -26,6 +27,7 @@ import {
   isWriteTool,
 } from "../tool-matchers.ts"
 import { hasNonEmptyHookOutput } from "../utils/hook-json-helpers.ts"
+import { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
 import {
@@ -319,7 +321,7 @@ function buildAbortedResult(
  *  the enriched payload with the current process env. */
 function buildHookEnv(payloadStr: string): Record<string, string | undefined> | undefined {
   const callerEnv = extractCallerEnv(payloadStr)
-  return callerEnv ? { ...process.env, ...callerEnv } : undefined
+  return callerEnv ? merge({}, process.env, callerEnv) : undefined
 }
 
 export async function runHook(
@@ -484,9 +486,12 @@ function finalizeExecution(
   return execution
 }
 
+export { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields }
+
 /** Write the final hook response to process.stdout. Exported for strategies. */
 export function writeResponse(response: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify(response)}\n`)
+  const agent = stripInternalDispatchFields(response)
+  process.stdout.write(`${JSON.stringify(agent)}\n`)
 }
 
 // ─── Response classification ────────────────────────────────────────────────
@@ -638,13 +643,25 @@ async function executeInlineHookWithErrorHandling(
     }
     const output = await withInlineSwizHookRun(async () => hook.run(input))
     if (hasNonEmptyHookOutput(output)) {
-      return { parsed: output as Record<string, unknown>, status: "ok", stderrSnippet: "" }
+      const out = output as Record<string, unknown>
+      const outParsed = hookOutputSchema.safeParse(out)
+      if (!outParsed.success) {
+        log(`   ⚠ ${hook.name} [inline hook output failed hookOutputSchema]`)
+        return { parsed: out, status: "invalid-schema", stderrSnippet: "" }
+      }
+      return { parsed: outParsed.data as Record<string, unknown>, status: "ok", stderrSnippet: "" }
     }
     return { parsed: null, status: "no-output", stderrSnippet: "" }
   } catch (err) {
     if (err instanceof SwizHookExit) {
+      const o = err.output as Record<string, unknown>
+      const op = hookOutputSchema.safeParse(o)
+      if (!op.success) {
+        log(`   ⚠ ${hook.name} [SwizHookExit output failed hookOutputSchema]`)
+        return { parsed: o, status: "invalid-schema", stderrSnippet: "" }
+      }
       return {
-        parsed: err.output as Record<string, unknown>,
+        parsed: op.data as Record<string, unknown>,
         status: "ok",
         stderrSnippet: "",
       }

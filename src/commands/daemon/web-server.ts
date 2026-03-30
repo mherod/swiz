@@ -1,6 +1,12 @@
 import { dirname, extname, join } from "node:path"
 import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
+import { ZodError } from "zod"
+import { debugLog } from "../../debug.ts"
+import {
+  DispatchPayloadValidationError,
+  parseValidatedAgentDispatchWireJson,
+} from "../../dispatch/dispatch-zod-surfaces.ts"
 import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
@@ -359,6 +365,21 @@ async function getCurrentSessionToolUsageFromDaemon(
   }
 }
 
+/** Maps dispatch validation failures to HTTP — always includes Zod `issues` when available. */
+function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
+  if (e instanceof DispatchPayloadValidationError) {
+    return Response.json({ error: e.message, issues: e.zodError.flatten() }, { status: 400 })
+  }
+  if (e instanceof ZodError) {
+    debugLog("[daemon] dispatch Zod validation failed:", e.flatten())
+    return Response.json(
+      { error: "Dispatch schema validation failed", issues: e.flatten() },
+      { status: 422 }
+    )
+  }
+  return null
+}
+
 async function handleDispatchRoute(
   req: Request,
   url: URL,
@@ -382,23 +403,33 @@ async function handleDispatchRoute(
   const TIMEOUT_SENTINEL = Symbol("timeout")
   const requestTimer = setTimeout(() => requestAbort.abort(), requestTimeoutMs)
 
-  const raceResult = await Promise.race([
-    executeDispatch({
-      canonicalEvent,
-      hookEventName,
-      payloadStr,
-      daemonContext: true,
-      signal: requestAbort.signal,
-      currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
-        getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
-      disableTranscriptSummaryFallback: true,
-      manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
-      onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
-    }),
-    new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
-      setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)
-    ),
-  ])
+  let raceResult: Awaited<ReturnType<typeof executeDispatch>> | typeof TIMEOUT_SENTINEL
+  try {
+    raceResult = await Promise.race([
+      executeDispatch({
+        canonicalEvent,
+        hookEventName,
+        payloadStr,
+        daemonContext: true,
+        signal: requestAbort.signal,
+        currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
+          getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
+        disableTranscriptSummaryFallback: true,
+        manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
+        onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
+      }),
+      new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
+        setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)
+      ),
+    ])
+  } catch (e) {
+    clearTimeout(requestTimer)
+    const durationMs = performance.now() - start
+    recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
+    const schemaResp = daemonDispatchSchemaFailureResponse(e)
+    if (schemaResp) return schemaResp
+    throw e
+  }
 
   clearTimeout(requestTimer)
 
@@ -420,7 +451,15 @@ async function handleDispatchRoute(
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
   await updateParsedPayloadMetrics(ctx, payloadStr, canonicalEvent, durationMs)
 
-  return Response.json(raceResult.response)
+  try {
+    return Response.json(
+      parseValidatedAgentDispatchWireJson(raceResult.response, canonicalEvent, hookEventName)
+    )
+  } catch (e) {
+    const schemaResp = daemonDispatchSchemaFailureResponse(e)
+    if (schemaResp) return schemaResp
+    throw e
+  }
 }
 
 function handleMetricsRoute(url: URL, ctx: DaemonWebServerContext): Response {

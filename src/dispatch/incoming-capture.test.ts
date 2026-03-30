@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   buildIncomingCaptureFilename,
+  normalizeEventNameToCanonical,
   pruneStaleIncomingCaptures,
   SWIZ_INCOMING_RETENTION_MS,
   sanitizeDispatchPayloadForCapture,
@@ -63,13 +64,26 @@ describe("incoming-capture", () => {
     expect(sanitizeHookFilenameSegment("../../etc/passwd")).toBe(".._.._etc_passwd")
   })
 
-  it("buildIncomingCaptureFilename includes date, hook name, and unique suffix", () => {
+  it("normalizeEventNameToCanonical normalizes PascalCase and aliases", () => {
+    expect(normalizeEventNameToCanonical("preToolUse")).toBe("preToolUse")
+    expect(normalizeEventNameToCanonical("PreToolUse")).toBe("preToolUse")
+    expect(normalizeEventNameToCanonical("PostToolUse")).toBe("postToolUse")
+    expect(normalizeEventNameToCanonical("beforeShellExecution")).toBe("preToolUse")
+    expect(normalizeEventNameToCanonical("afterShellExecution")).toBe("postToolUse")
+    expect(normalizeEventNameToCanonical("SessionStart")).toBe("sessionStart")
+  })
+
+  it("buildIncomingCaptureFilename includes date, canonical event name, and unique suffix", () => {
     const a = buildIncomingCaptureFilename("beforeShellExecution")
-    const b = buildIncomingCaptureFilename("beforeShellExecution")
-    expect(a).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}-beforeShellExecution-[a-f0-9]{8}\.json$/
-    )
+    const b = buildIncomingCaptureFilename("PreToolUse")
+    const c = buildIncomingCaptureFilename("preToolUse")
+    // All three should normalize to preToolUse in the filename
+    expect(a).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}-preToolUse-[a-f0-9]{8}\.json$/)
+    expect(b).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}-preToolUse-[a-f0-9]{8}\.json$/)
+    expect(c).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}-preToolUse-[a-f0-9]{8}\.json$/)
+    // Unique suffix ensures different files
     expect(a).not.toBe(b)
+    expect(b).not.toBe(c)
   })
 
   it("pruneStaleIncomingCaptures removes stale .json only", async () => {

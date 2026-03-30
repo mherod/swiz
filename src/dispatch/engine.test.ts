@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { HookDef } from "../hook-types.ts"
 import { hookIdentifier } from "../manifest.ts"
+import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import {
   classifyHookOutput,
   extractContext,
@@ -35,6 +36,16 @@ describe("extractContext", () => {
         hookSpecificOutput: { additionalContext: "   ", hookEventName: "Stop" },
       })
     ).toBeNull()
+  })
+})
+
+describe("stripInternalDispatchFields", () => {
+  it("removes hookExecutions for agent-visible JSON", () => {
+    const stripped = stripInternalDispatchFields({
+      systemMessage: "ctx",
+      hookExecutions: [{ file: "x.ts", startTime: 1, endTime: 2, durationMs: 1, status: "ok" }],
+    })
+    expect(stripped).toEqual({ systemMessage: "ctx" })
   })
 })
 

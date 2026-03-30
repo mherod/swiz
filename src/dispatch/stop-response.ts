@@ -4,147 +4,141 @@
  * sets `continue: true` and mirrors `reason` / `stopReason`; see `normalizeStopDispatchResponseInPlace`.
  */
 
+import { merge, unset } from "lodash-es"
 import { stopHookOutputSchema } from "../../hooks/schemas.ts"
-import { debugLog } from "../debug.ts"
 import { isBlock } from "./engine.ts"
 
 /** Default context when stop hooks emit no agent-visible fields (after merge). */
 export const DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT = "Stop hooks completed with no findings."
 
+/** JSON-serializable values for pre-parse dispatch envelopes (avoids eslint `no-restricted-types` on `unknown`). */
+export type DispatchJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | DispatchJsonValue[]
+  | DispatchJsonRecord
+
+/** Loose object shape for merged hook/dispatch JSON before {@link stopHookOutputSchema.parse}. */
+export type DispatchJsonRecord = { [key: string]: DispatchJsonValue }
+
 export function isStopLikeDispatchEvent(canonicalEvent: string): boolean {
   return canonicalEvent === "stop" || canonicalEvent === "subagentStop"
 }
 
+function isPlainRecord(value: DispatchJsonValue | undefined): value is DispatchJsonRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+/** Non-empty string after trim, or `null` if missing/blank. */
+function trimmedNonEmpty(value: DispatchJsonValue | undefined): string | null {
+  if (typeof value !== "string") return null
+  const t = value.trim()
+  return t.length > 0 ? t : null
+}
+
 function mergeHookEventName(
-  response: Record<string, unknown>,
+  response: DispatchJsonRecord,
   hookEventName: string
-): Record<string, unknown> {
-  const existingHso =
-    response.hookSpecificOutput !== null &&
-    typeof response.hookSpecificOutput === "object" &&
-    !Array.isArray(response.hookSpecificOutput)
-      ? ({ ...(response.hookSpecificOutput as Record<string, unknown>) } as Record<string, unknown>)
-      : {}
-  if (typeof existingHso.hookEventName !== "string" || !existingHso.hookEventName.trim()) {
+): DispatchJsonRecord {
+  const existingHso = isPlainRecord(response.hookSpecificOutput)
+    ? (merge({}, response.hookSpecificOutput) as DispatchJsonRecord)
+    : {}
+  const existingName = existingHso.hookEventName
+  if (typeof existingName !== "string" || !existingName.trim()) {
     existingHso.hookEventName = hookEventName
   }
   return existingHso
 }
 
-function hasNonEmptyContext(response: Record<string, unknown>): boolean {
-  if (typeof response.systemMessage === "string" && response.systemMessage.trim()) return true
-  if (typeof response.reason === "string" && response.reason.trim()) return true
-  if (typeof response.stopReason === "string" && response.stopReason.trim()) return true
+function hasNonEmptyContext(response: DispatchJsonRecord): boolean {
+  if (trimmedNonEmpty(response.systemMessage)) return true
+  if (trimmedNonEmpty(response.reason)) return true
+  if (trimmedNonEmpty(response.stopReason)) return true
   const hso = response.hookSpecificOutput
-  if (hso && typeof hso === "object" && !Array.isArray(hso)) {
-    const ac = (hso as { additionalContext?: string }).additionalContext
-    return typeof ac === "string" && ac.trim().length > 0
-  }
-  return false
+  if (!isPlainRecord(hso)) return false
+  return trimmedNonEmpty(hso.additionalContext) !== null
 }
 
 /**
  * `stopHookOutputSchema` requires non-empty `reason` and/or `stopReason`. Mirror one into the
  * other, or derive both from `systemMessage` / `hookSpecificOutput.additionalContext`, else default.
  */
-function backfillStopDispatchReasonFields(response: Record<string, unknown>): void {
-  const reason = typeof response.reason === "string" ? response.reason.trim() : ""
-  const stopReason = typeof response.stopReason === "string" ? response.stopReason.trim() : ""
+function backfillStopDispatchReasonFields(response: DispatchJsonRecord): void {
+  const reason = trimmedNonEmpty(response.reason) ?? ""
+  const stopReason = trimmedNonEmpty(response.stopReason) ?? ""
 
+  let resolvedReason: string
+  let resolvedStopReason: string
   if (reason && stopReason) {
-    response.reason = reason
-    response.stopReason = stopReason
-    return
-  }
-  if (reason && !stopReason) {
-    response.reason = reason
-    response.stopReason = reason
-    return
-  }
-  if (stopReason && !reason) {
-    response.reason = stopReason
-    response.stopReason = stopReason
-    return
+    resolvedReason = reason
+    resolvedStopReason = stopReason
+  } else if (reason) {
+    resolvedReason = reason
+    resolvedStopReason = reason
+  } else if (stopReason) {
+    resolvedReason = stopReason
+    resolvedStopReason = stopReason
+  } else {
+    const sm = trimmedNonEmpty(response.systemMessage) ?? ""
+    // Do not promote `hookSpecificOutput.additionalContext` into reason/stopReason — schema
+    // rejects additionalContext-only; merged `systemMessage` from hooks is the supported path.
+    const filler = sm || DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
+    resolvedReason = filler
+    resolvedStopReason = filler
   }
 
-  const sm = typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
-  // Do not promote `hookSpecificOutput.additionalContext` into reason/stopReason — schema
-  // rejects additionalContext-only; merged `systemMessage` from hooks is the supported path.
-  const filler = sm || DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
-  response.reason = filler
-  response.stopReason = filler
+  response.reason = resolvedReason
+  response.stopReason = resolvedStopReason
 }
 
 /**
  * Ensures merged stop/subagentStop dispatch JSON satisfies {@link stopHookOutputSchema}.
  * Mutates `response` in place.
+ *
+ * Parameter is `object` so callers may pass `Record<string, unknown>` without a cast; internally
+ * treated as {@link DispatchJsonRecord} until Zod validates.
  */
 export function normalizeStopDispatchResponseInPlace(
-  response: Record<string, unknown>,
+  response: object,
   hookEventName: string
 ): void {
+  const envelope = response as DispatchJsonRecord
   // `isBlock` treats `continue === false` as a block. Coercing `continue` to true first would
   // erase that signal and route real stops into the generic allow path — must snapshot first.
-  const dispatchBlocked = isBlock(response)
+  const dispatchBlocked = isBlock(envelope)
 
-  if (response.continue === false) {
-    delete response.continue
+  if (envelope.continue === false) {
+    unset(envelope, "continue")
   }
-  response.continue = true
+  envelope.continue = true
 
   if (dispatchBlocked) {
-    if (
-      (typeof response.reason !== "string" || !response.reason.trim()) &&
-      typeof response.stopReason === "string" &&
-      response.stopReason.trim()
-    ) {
-      response.reason = response.stopReason.trim()
+    const reasonMissing = trimmedNonEmpty(envelope.reason) === null
+    const stopReasonText = trimmedNonEmpty(envelope.stopReason)
+    if (reasonMissing && stopReasonText !== null) {
+      envelope.reason = stopReasonText
     }
-  } else if (!hasNonEmptyContext(response)) {
-    const hso = mergeHookEventName(response, hookEventName)
+  } else if (!hasNonEmptyContext(envelope)) {
+    const hso = mergeHookEventName(envelope, hookEventName)
+    // Match prior coercion: non-strings (e.g. numbers) stringify before trim.
     if (!hso.additionalContext || !String(hso.additionalContext).trim()) {
       hso.additionalContext = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
     }
-    response.hookSpecificOutput = hso
+    envelope.hookSpecificOutput = hso
   } else {
-    response.hookSpecificOutput = mergeHookEventName(response, hookEventName)
+    envelope.hookSpecificOutput = mergeHookEventName(envelope, hookEventName)
   }
 
-  backfillStopDispatchReasonFields(response)
+  backfillStopDispatchReasonFields(envelope)
 
-  const validated = stopHookOutputSchema.safeParse(response)
-  if (!validated.success) {
-    debugLog("[stop-dispatch] response failed stopHookOutputSchema:", validated.error.flatten())
-    if (!dispatchBlocked) {
-      response.continue = true
-      response.reason = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
-      response.stopReason = DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
-      response.hookSpecificOutput = {
-        ...mergeHookEventName(response, hookEventName),
-        additionalContext: DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
-      }
-    } else {
-      const fallback =
-        (typeof response.stopReason === "string" && response.stopReason.trim()
-          ? response.stopReason.trim()
-          : null) ??
-        (typeof response.reason === "string" && response.reason.trim()
-          ? response.reason.trim()
-          : null) ??
-        (typeof response.systemMessage === "string" && response.systemMessage.trim()
-          ? response.systemMessage.trim()
-          : null) ??
-        "Session stop was blocked."
-      response.reason = fallback
-      response.stopReason = fallback
-      response.continue = true
-    }
-  }
+  stopHookOutputSchema.parse(envelope)
 }
 
 /** Parse-only check for tests and diagnostics. */
 export function safeParseStopDispatchResponse(
-  response: unknown
+  response: DispatchJsonValue
 ): ReturnType<typeof stopHookOutputSchema.safeParse> {
   return stopHookOutputSchema.safeParse(response)
 }
