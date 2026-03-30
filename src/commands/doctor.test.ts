@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../agents.ts"
-import { manifest } from "../manifest.ts"
+import { hookIdentifier, manifest } from "../manifest.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-doctor-test-")
@@ -101,7 +101,9 @@ describe("swiz doctor", () => {
     })
 
     test("installed config scripts check includes manifest scripts in scope", () => {
-      const manifestScriptCount = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file))).size
+      const manifestScriptCount = new Set(
+        manifest.flatMap((g) => g.hooks.map((h) => hookIdentifier(h)))
+      ).size
       const match = result.stdout.match(/all (\d+) executable scripts are present/)
       expect(match).not.toBeNull()
       const count = parseInt(match![1]!, 10)

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { HookGroup } from "../manifest.ts"
+import { type HookGroup, hookIdentifier } from "../manifest.ts"
 import type { EffectiveSwizSettings } from "../settings.ts"
 import { filterRequiredSettingsHooks } from "./filters.ts"
 
@@ -98,7 +98,10 @@ describe("filterRequiredSettingsHooks", () => {
     const result = filterRequiredSettingsHooks(groups, makeEffective({ qualityChecksGate: false }))
     expect(result).toHaveLength(1)
     expect(result[0]!.hooks).toHaveLength(2)
-    expect(result[0]!.hooks.map((h) => h.file)).toEqual(["hook-keep.ts", "hook-also-keep.ts"])
+    expect(result[0]!.hooks.map((h) => hookIdentifier(h))).toEqual([
+      "hook-keep.ts",
+      "hook-also-keep.ts",
+    ])
   })
 
   test("hooks with multiple required settings — all must be truthy", () => {

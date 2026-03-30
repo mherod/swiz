@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { filterPrMergeModeHooks, resolvePrMergeActive } from "../dispatch/index.ts"
-import { manifest } from "../manifest.ts"
+import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
 
 describe("dispatch.ts unit tests", () => {
   describe("cross-agent tool matching patterns", () => {
@@ -145,8 +145,10 @@ describe("dispatch.ts unit tests", () => {
       const filtered = filterPrMergeModeHooks(groups, false)
 
       expect(filtered).toHaveLength(2)
-      expect(filtered[0]?.hooks.map((hook) => hook.file)).toEqual(["stop-non-default-branch.ts"])
-      expect(filtered[1]?.hooks.map((hook) => hook.file)).toEqual([
+      expect(filtered[0]?.hooks.map((hook) => hookIdentifier(hook))).toEqual([
+        "stop-non-default-branch.ts",
+      ])
+      expect(filtered[1]?.hooks.map((hook) => hookIdentifier(hook))).toEqual([
         "posttooluse-git-task-autocomplete.ts",
       ])
     })
@@ -175,7 +177,9 @@ describe("dispatch.ts unit tests", () => {
       const filtered = filterPrMergeModeHooks(groups, true, "solo")
 
       expect(filtered).toHaveLength(1)
-      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["stop-non-default-branch.ts"])
+      expect(filtered[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
+        "stop-non-default-branch.ts",
+      ])
     })
 
     it("team collaborationMode enables PR hooks regardless of prMergeMode", () => {
@@ -215,7 +219,9 @@ describe("dispatch.ts unit tests", () => {
       // auto + prMergeMode=false → disables PR hooks
       const filteredOff = filterPrMergeModeHooks(groups, false, "auto")
       expect(filteredOff).toHaveLength(1)
-      expect(filteredOff[0]?.hooks.map((h) => h.file)).toEqual(["stop-non-default-branch.ts"])
+      expect(filteredOff[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
+        "stop-non-default-branch.ts",
+      ])
 
       // auto + prMergeMode=true → keeps all hooks
       const filteredOn = filterPrMergeModeHooks(groups, true, "auto")
@@ -233,7 +239,7 @@ describe("dispatch.ts unit tests", () => {
       // prMergeMode=false + prAgeGateMinutes=10 → age-gate kept
       const filtered = filterPrMergeModeHooks(groups, false, "auto", 10)
       expect(filtered).toHaveLength(1)
-      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual([
+      expect(filtered[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
         "pretooluse-pr-age-gate.ts",
         "pretooluse-banned-commands.ts",
       ])
@@ -250,7 +256,9 @@ describe("dispatch.ts unit tests", () => {
       // prMergeMode=false + prAgeGateMinutes=0 → age-gate filtered
       const filtered = filterPrMergeModeHooks(groups, false, "auto", 0)
       expect(filtered).toHaveLength(1)
-      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-banned-commands.ts"])
+      expect(filtered[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
+        "pretooluse-banned-commands.ts",
+      ])
     })
 
     it("preserves pr-age-gate when solo mode but prAgeGateMinutes > 0", () => {
@@ -263,7 +271,9 @@ describe("dispatch.ts unit tests", () => {
 
       const filtered = filterPrMergeModeHooks(groups, false, "solo", 10)
       expect(filtered).toHaveLength(1)
-      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-pr-age-gate.ts"])
+      expect(filtered[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
+        "pretooluse-pr-age-gate.ts",
+      ])
     })
   })
 
@@ -343,10 +353,11 @@ describe("dispatch.ts unit tests", () => {
     it("hooks have timeout values or use default", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
+          const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
           // Each hook either has explicit timeout or will use DEFAULT_TIMEOUT (10s)
-          if (hook.timeout !== undefined) {
-            expect(typeof hook.timeout).toBe("number")
-            expect(hook.timeout).toBeGreaterThan(0)
+          if (timeout !== undefined) {
+            expect(typeof timeout).toBe("number")
+            expect(timeout).toBeGreaterThan(0)
           }
         })
       })
@@ -355,7 +366,10 @@ describe("dispatch.ts unit tests", () => {
     it("most timeouts are reasonable (under 30s)", () => {
       const longTimeouts = manifest
         .flatMap((g) => g.hooks)
-        .filter((h) => h.timeout && h.timeout > 30)
+        .filter((h) => {
+          const t = isInlineHookDef(h) ? h.hook.timeout : h.timeout
+          return t != null && t > 30
+        })
 
       // Only special cases like stop-auto-continue should exceed 30s
       expect(longTimeouts.length).toBeLessThanOrEqual(3)
@@ -363,24 +377,34 @@ describe("dispatch.ts unit tests", () => {
 
     it("stop-auto-continue has extended 120s timeout", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const autoContinue = stopGroup?.hooks.find((h) => h.file.includes("auto-continue"))
+      const autoContinue = stopGroup?.hooks.find((h) => hookIdentifier(h).includes("auto-continue"))
+      const timeout = autoContinue
+        ? isInlineHookDef(autoContinue)
+          ? autoContinue.hook.timeout
+          : autoContinue.timeout
+        : undefined
 
-      expect(autoContinue?.timeout).toBe(120)
+      expect(timeout).toBe(120)
     })
   })
 
   describe("async hook handling", () => {
     it("async hooks are identified in manifest", () => {
-      const asyncHooks = manifest.flatMap((g) => g.hooks.filter((h) => h.async))
+      const asyncHooks = manifest.flatMap((g) =>
+        g.hooks.filter((h) => (isInlineHookDef(h) ? h.hook.async : h.async))
+      )
       expect(asyncHooks.length).toBeGreaterThan(0)
     })
 
     it("async hooks have timeout values", () => {
-      const asyncHooks = manifest.flatMap((g) => g.hooks.filter((h) => h.async))
+      const asyncHooks = manifest.flatMap((g) =>
+        g.hooks.filter((h) => (isInlineHookDef(h) ? h.hook.async : h.async))
+      )
 
       asyncHooks.forEach((hook) => {
-        expect(hook.timeout).toBeDefined()
-        expect(typeof hook.timeout).toBe("number")
+        const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+        expect(timeout).toBeDefined()
+        expect(typeof timeout).toBe("number")
       })
     })
 
@@ -388,7 +412,7 @@ describe("dispatch.ts unit tests", () => {
       // Async hooks are pre-launched before blocking hooks (e.g. posttooluse-prettier-ts)
       const nonStopAsyncHooks = manifest
         .filter((g) => g.event !== "stop")
-        .flatMap((g) => g.hooks.filter((h) => h.async))
+        .flatMap((g) => g.hooks.filter((h) => (isInlineHookDef(h) ? h.hook.async : h.async)))
 
       expect(nonStopAsyncHooks.length).toBeGreaterThan(0)
     })
@@ -398,7 +422,7 @@ describe("dispatch.ts unit tests", () => {
     it("all hooks are .ts files", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
-          expect(hook.file).toMatch(/\.ts$/)
+          expect(hookIdentifier(hook)).toMatch(/\.ts$/)
         })
       })
     })
@@ -407,14 +431,14 @@ describe("dispatch.ts unit tests", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
           // Files should be lowercase with hyphens
-          expect(hook.file).toMatch(/^[a-z-]+\.ts$/)
+          expect(hookIdentifier(hook)).toMatch(/^[a-z-]+\.ts$/)
         })
       })
     })
 
     it("no duplicate hooks within the same event group", () => {
       for (const group of manifest) {
-        const files = group.hooks.map((h) => h.file)
+        const files = group.hooks.map((h) => hookIdentifier(h))
         const unique = new Set(files)
         expect(unique.size).toBe(files.length)
       }
@@ -424,32 +448,40 @@ describe("dispatch.ts unit tests", () => {
   describe("cooldownSeconds configuration", () => {
     it("hooks without cooldownSeconds are not throttled", () => {
       const allHooks = manifest.flatMap((g) => g.hooks)
-      const withoutCooldown = allHooks.filter((h) => !h.cooldownSeconds)
+      const withoutCooldown = allHooks.filter(
+        (h) => !(isInlineHookDef(h) ? h.hook.cooldownSeconds : h.cooldownSeconds)
+      )
       expect(withoutCooldown.length).toBeGreaterThan(0)
     })
 
     it("cooldownSeconds is a positive number when set", () => {
       const allHooks = manifest.flatMap((g) => g.hooks)
       allHooks.forEach((hook) => {
-        if (hook.cooldownSeconds !== undefined) {
-          expect(typeof hook.cooldownSeconds).toBe("number")
-          expect(hook.cooldownSeconds).toBeGreaterThan(0)
+        const cs = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+        if (cs !== undefined) {
+          expect(typeof cs).toBe("number")
+          expect(cs).toBeGreaterThan(0)
         }
       })
     })
 
     it("stop-personal-repo-issues has a 30-second cooldown", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const hook = stopGroup?.hooks.find((h) => h.file === "stop-personal-repo-issues.ts")
+      const hook = stopGroup?.hooks.find(
+        (h) => hookIdentifier(h) === "stop-personal-repo-issues.ts"
+      )
       expect(hook).toBeDefined()
-      expect(hook?.cooldownSeconds).toBe(30)
+      const cs = hook && (isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds)
+      expect(cs).toBe(30)
     })
 
     it("cooldownMode is only set on hooks that also have cooldownSeconds", () => {
       const allHooks = manifest.flatMap((g) => g.hooks)
       allHooks.forEach((hook) => {
-        if (hook.cooldownMode !== undefined) {
-          expect(hook.cooldownSeconds).toBeDefined()
+        const cm = isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
+        if (cm !== undefined) {
+          const cs = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+          expect(cs).toBeDefined()
         }
       })
     })
@@ -457,8 +489,9 @@ describe("dispatch.ts unit tests", () => {
     it("cooldownMode is one of the valid values when set", () => {
       const allHooks = manifest.flatMap((g) => g.hooks)
       allHooks.forEach((hook) => {
-        if (hook.cooldownMode !== undefined) {
-          expect(["block-only", "always"]).toContain(hook.cooldownMode)
+        const cm = isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
+        if (cm !== undefined) {
+          expect(["block-only", "always"]).toContain(cm)
         }
       })
     })
@@ -531,11 +564,11 @@ describe("dispatch.ts unit tests", () => {
     it("async hooks run in both preToolUse and stop", () => {
       const hasAsyncPreToolUse = manifest
         .filter((g) => g.event === "preToolUse")
-        .some((g) => g.hooks.some((h) => h.async))
+        .some((g) => g.hooks.some((h) => (isInlineHookDef(h) ? h.hook.async : h.async)))
 
       const hasAsyncStop = manifest
         .filter((g) => g.event === "stop")
-        .some((g) => g.hooks.some((h) => h.async))
+        .some((g) => g.hooks.some((h) => (isInlineHookDef(h) ? h.hook.async : h.async)))
 
       // Can have async in either or both
       expect(typeof hasAsyncPreToolUse === "boolean").toBe(true)

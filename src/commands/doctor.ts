@@ -12,7 +12,7 @@ import {
   SWIZ_DAEMON_LABEL,
   unloadLaunchAgent,
 } from "../launch-agents.ts"
-import { manifest } from "../manifest.ts"
+import { isInlineHookDef, manifest } from "../manifest.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { listProviderAdapters } from "../provider-adapters.ts"
 import { defaultTrashPath } from "../session-data-delete.ts"
@@ -135,6 +135,7 @@ async function checkHookScripts(): Promise<CheckResult> {
   const allFiles = new Set<string>()
   for (const group of manifest) {
     for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
       allFiles.add(hook.file)
     }
   }
@@ -164,7 +165,11 @@ async function checkHookScripts(): Promise<CheckResult> {
 
 /** Validate that every handler path referenced in the manifest resolves to an existing file. */
 async function checkManifestHandlerPaths(): Promise<CheckResult> {
-  const hookFiles = [...new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file)))]
+  const hookFiles = [
+    ...new Set(
+      manifest.flatMap((g) => g.hooks.flatMap((h) => (isInlineHookDef(h) ? [] : [h.file])))
+    ),
+  ]
 
   if (hookFiles.length === 0) {
     return {
@@ -199,7 +204,9 @@ async function checkManifestHandlerPaths(): Promise<CheckResult> {
 
 /** Return basenames of .ts entry points in hooks/ not referenced by the manifest or any agent config. */
 async function findOrphanedHookScripts(): Promise<string[]> {
-  const manifestFiles = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file)))
+  const manifestFiles = new Set(
+    manifest.flatMap((g) => g.hooks.flatMap((h) => (isInlineHookDef(h) ? [] : [h.file])))
+  )
 
   // Scripts referenced by agent configs that live inside hooks/ (by basename)
   const configPaths = await collectInstalledConfigScriptPaths()
@@ -759,6 +766,7 @@ async function buildScriptPathSourceMap(): Promise<Map<string, "manifest" | "con
   const pathSource = new Map<string, "manifest" | "config">()
   for (const group of manifest) {
     for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
       pathSource.set(join(HOOKS_DIR, hook.file), "manifest")
     }
   }
@@ -817,6 +825,7 @@ async function collectExecutableScriptPaths(): Promise<string[]> {
   // All manifest hook scripts
   for (const group of manifest) {
     for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
       paths.push(join(HOOKS_DIR, hook.file))
     }
   }

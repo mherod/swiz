@@ -11,8 +11,7 @@ import { isGitRepo } from "../git-helpers.ts"
 import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
 import { tryReplayPendingMutations } from "../issue-store.ts"
-import type { HookGroup } from "../manifest.ts"
-import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
+import { DISPATCH_TIMEOUTS, type HookGroup, hookIdentifier, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import {
   getEffectiveSwizSettings,
@@ -383,7 +382,9 @@ function buildLifecycleEvent(
   requestId: string,
   startedAt: number
 ): Parameters<NonNullable<DispatchRequest["onDispatchLifecycle"]>>[0] {
-  const requestedHooks = filteredGroups.flatMap((group) => group.hooks.map((hook) => hook.file))
+  const requestedHooks = filteredGroups.flatMap((group) =>
+    group.hooks.map((hook) => hookIdentifier(hook))
+  )
   const toolInput = (ctx.payload.tool_input ?? ctx.payload.toolInput) as
     | Record<string, unknown>
     | undefined

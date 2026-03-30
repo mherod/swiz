@@ -4,9 +4,17 @@
 
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
+import type { SwizHook } from "./SwizHook.ts"
 import type { EffectiveSwizSettings } from "./settings/types.ts"
 
-export interface HookDef {
+export type { SwizHook }
+
+/**
+ * File-based hook definition — the original format.
+ * The dispatcher spawns `bun hooks/<file>` as a subprocess and communicates
+ * via JSON stdin/stdout.
+ */
+export interface FileHookDef {
   file: string
   timeout?: number
   async?: boolean
@@ -65,6 +73,39 @@ export interface HookDef {
    * Example: `requiredSettings: ["qualityChecksGate"]`
    */
   requiredSettings?: (keyof EffectiveSwizSettings)[]
+}
+
+/**
+ * Inline hook definition — the new SOLID format.
+ * The dispatcher calls `hook.run(input)` directly in-process; no subprocess.
+ * All execution metadata (timeout, cooldown, requiredSettings, etc.) is carried
+ * by the SwizHook instance itself via SwizHookMeta.
+ */
+export interface InlineHookDef {
+  hook: SwizHook
+}
+
+/**
+ * A manifest hook entry — either a file-based or inline definition.
+ *
+ * Discriminate with `isInlineHookDef(def)` or `'hook' in def`.
+ * All existing `{ file: "..." }` entries satisfy `FileHookDef` and remain valid.
+ */
+export type HookDef = FileHookDef | InlineHookDef
+
+/** Type guard: narrows a HookDef to InlineHookDef. */
+export function isInlineHookDef(def: HookDef): def is InlineHookDef {
+  return "hook" in def
+}
+
+/**
+ * Returns the canonical identifier for a hook — used for logging, cooldown
+ * keying, and disabled-hook matching.
+ * - File-based: the `file` field (e.g. `"pretooluse-no-npm.ts"`)
+ * - Inline: the `hook.name` field (e.g. `"pretooluse-no-npm"`)
+ */
+export function hookIdentifier(def: HookDef): string {
+  return isInlineHookDef(def) ? def.hook.name : def.file
 }
 
 /**

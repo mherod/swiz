@@ -107,7 +107,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
 - Prior-session task blocks: recreate as `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
-- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
+- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files or steps in one subject — one task per file/step.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark commit task complete after success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
@@ -255,7 +255,7 @@ alwaysApply: false
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop; use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection; use `git log origin/main..HEAD --oneline`.
-- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls when Codex/Gemini is installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
+- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls with Codex/Gemini. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
 - **DON'T**: Work on auto-continue findings without a filed issue.

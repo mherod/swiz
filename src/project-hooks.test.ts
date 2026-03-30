@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import type { HookGroup } from "./manifest.ts"
+import { type HookGroup, hookIdentifier, isInlineHookDef } from "./manifest.ts"
 import { readProjectSettings, resolveProjectHooks } from "./settings.ts"
 import { useTempDir } from "./utils/test-utils.ts"
 
@@ -26,8 +26,9 @@ describe("ProjectSwizSettings hooks normalization", () => {
     const settings = await readProjectSettings(dir)
     expect(settings?.hooks).toHaveLength(1)
     expect(settings!.hooks![0]!.event).toBe("preToolUse")
-    expect(settings!.hooks![0]!.hooks[0]!.file).toBe("scripts/check.ts")
-    expect(settings!.hooks![0]!.hooks[0]!.timeout).toBe(5)
+    const hook = settings!.hooks![0]!.hooks[0]!
+    expect(hookIdentifier(hook)).toBe("scripts/check.ts")
+    expect(isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout).toBe(5)
   })
 
   test("ignores invalid hook entries (missing file)", async () => {
@@ -80,7 +81,8 @@ describe("ProjectSwizSettings hooks normalization", () => {
     )
 
     const settings = await readProjectSettings(dir)
-    expect(settings!.hooks![0]!.hooks[0]!.cooldownSeconds).toBe(60)
+    const hook = settings!.hooks![0]!.hooks[0]!
+    expect(isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds).toBe(60)
   })
 
   test("preserves stacks on hooks", async () => {
@@ -99,7 +101,8 @@ describe("ProjectSwizSettings hooks normalization", () => {
     )
 
     const settings = await readProjectSettings(dir)
-    expect(settings!.hooks![0]!.hooks[0]!.stacks).toEqual(["bun", "node"])
+    const hook = settings!.hooks![0]!.hooks[0]!
+    expect(isInlineHookDef(hook) ? hook.hook.stacks : hook.stacks).toEqual(["bun", "node"])
   })
 
   test("ignores stacks with non-string values", async () => {
@@ -119,8 +122,9 @@ describe("ProjectSwizSettings hooks normalization", () => {
 
     const settings = await readProjectSettings(dir)
     // Hook is preserved but stacks is dropped (invalid type)
-    expect(settings!.hooks![0]!.hooks[0]!.file).toBe("bad-stacks.ts")
-    expect(settings!.hooks![0]!.hooks[0]!.stacks).toBeUndefined()
+    const hook = settings!.hooks![0]!.hooks[0]!
+    expect(hookIdentifier(hook)).toBe("bad-stacks.ts")
+    expect(isInlineHookDef(hook) ? hook.hook.stacks : hook.stacks).toBeUndefined()
   })
 
   test("preserves matcher field on hook groups", async () => {
@@ -171,7 +175,7 @@ describe("resolveProjectHooks", () => {
 
     expect(warnings).toHaveLength(0)
     expect(resolved).toHaveLength(1)
-    expect(resolved[0]!.hooks[0]!.file).toBe(join(dir, "my-hook.ts"))
+    expect(hookIdentifier(resolved[0]!.hooks[0]!)).toBe(join(dir, "my-hook.ts"))
   })
 
   test("preserves absolute paths", async () => {
@@ -183,7 +187,7 @@ describe("resolveProjectHooks", () => {
     const { resolved } = resolveProjectHooks(hooks, "/other")
 
     expect(resolved).toHaveLength(1)
-    expect(resolved[0]!.hooks[0]!.file).toBe(absPath)
+    expect(hookIdentifier(resolved[0]!.hooks[0]!)).toBe(absPath)
   })
 
   test("filters out groups where all files are missing", () => {
@@ -208,7 +212,7 @@ describe("resolveProjectHooks", () => {
 
     expect(resolved).toHaveLength(1)
     expect(resolved[0]!.hooks).toHaveLength(1)
-    expect(resolved[0]!.hooks[0]!.file).toBe(join(dir, "good.ts"))
+    expect(hookIdentifier(resolved[0]!.hooks[0]!)).toBe(join(dir, "good.ts"))
     expect(warnings).toHaveLength(1)
   })
 })

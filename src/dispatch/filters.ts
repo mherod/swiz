@@ -9,7 +9,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { isEmergencyBypassActive } from "../commands/emergency-bypass.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
-import type { HookGroup } from "../manifest.ts"
+import { type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
 import {
   type CollaborationMode,
   type EffectiveSwizSettings,
@@ -128,26 +128,26 @@ export function filterPrMergeModeHooks(
   const settingsPreserved = new Set<string>()
   if (prAgeGateMinutes > 0) settingsPreserved.add("pretooluse-pr-age-gate.ts")
 
-  return filterHooksFromGroups(
-    groups,
-    (hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file) || settingsPreserved.has(hook.file)
-  )
+  return filterHooksFromGroups(groups, (hook) => {
+    const id = hookIdentifier(hook)
+    return !PR_MERGE_MODE_DISABLED_HOOKS.has(id) || settingsPreserved.has(id)
+  })
 }
 
 export function filterDisabledHooks(groups: HookGroup[], disabledHooks: Set<string>): HookGroup[] {
   if (disabledHooks.size === 0) return groups
 
-  return filterHooksFromGroups(groups, (hook) => !disabledHooks.has(hook.file))
+  return filterHooksFromGroups(groups, (hook) => !disabledHooks.has(hookIdentifier(hook)))
 }
 
 export function filterStackHooks(groups: HookGroup[], detectedStacks: string[]): HookGroup[] {
   if (detectedStacks.length === 0) return groups
 
   const stackSet = new Set(detectedStacks)
-  return filterHooksFromGroups(
-    groups,
-    (hook) => !hook.stacks || hook.stacks.some((s) => stackSet.has(s))
-  )
+  return filterHooksFromGroups(groups, (hook) => {
+    const stacks = isInlineHookDef(hook) ? hook.hook.stacks : hook.stacks
+    return !stacks || stacks.some((s) => stackSet.has(s))
+  })
 }
 
 // ─── State-based filtering ──────────────────────────────────────────────────
@@ -171,7 +171,10 @@ export async function filterStateHooks(groups: HookGroup[], cwd: string): Promis
 
     // In planning/reviewing states, skip hooks that only make sense during active development
     if (intent === "planning-work" || intent === "awaiting-review") {
-      return filterHooksFromGroups(groups, (hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hook.file))
+      return filterHooksFromGroups(
+        groups,
+        (hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hookIdentifier(hook))
+      )
     }
 
     return groups
@@ -193,8 +196,11 @@ export function filterRequiredSettingsHooks(
   effective: EffectiveSwizSettings
 ): HookGroup[] {
   return filterHooksFromGroups(groups, (hook) => {
-    if (!hook.requiredSettings || hook.requiredSettings.length === 0) return true
-    return hook.requiredSettings.every((key) => !!effective[key])
+    const requiredSettings = isInlineHookDef(hook)
+      ? hook.hook.requiredSettings
+      : hook.requiredSettings
+    if (!requiredSettings || requiredSettings.length === 0) return true
+    return requiredSettings.every((key) => !!effective[key])
   })
 }
 

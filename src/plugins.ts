@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
-import type { HookGroup } from "./manifest.ts"
+import { type HookGroup, isInlineHookDef } from "./manifest.ts"
 import { joinNodeModulesPath } from "./node-modules-path.ts"
 
 export type PluginErrorCode =
@@ -116,10 +116,10 @@ function findNodeModulesPlugin(name: string, projectRoot: string): string | null
 function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
   return groups.map((g) => ({
     ...g,
-    hooks: g.hooks.map((h) => ({
-      ...h,
-      file: isAbsolute(h.file) ? h.file : join(pluginDir, h.file),
-    })),
+    hooks: g.hooks.map((h) => {
+      if (isInlineHookDef(h)) return h
+      return { ...h, file: isAbsolute(h.file) ? h.file : join(pluginDir, h.file) }
+    }),
   }))
 }
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { type HookDef, type HookGroup, manifest } from "./manifest.ts"
+import {
+  type HookDef,
+  type HookGroup,
+  hookIdentifier,
+  isInlineHookDef,
+  manifest,
+} from "./manifest.ts"
 
 describe("manifest.ts", () => {
   describe("manifest structure", () => {
@@ -38,22 +44,28 @@ describe("manifest.ts", () => {
     it("stop hooks have timeout values", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       stopGroup?.hooks.forEach((hook) => {
-        if (hook.timeout) {
-          expect(typeof hook.timeout).toBe("number")
-          expect(hook.timeout).toBeGreaterThan(0)
+        const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+        if (timeout) {
+          expect(typeof timeout).toBe("number")
+          expect(timeout).toBeGreaterThan(0)
         }
       })
     })
 
     it("stop-auto-continue has extended timeout of 120s", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const autoContinue = stopGroup?.hooks.find((h) => h.file.includes("auto-continue"))
-      expect(autoContinue?.timeout ?? 0).toBe(120)
+      const autoContinue = stopGroup?.hooks.find((h) => hookIdentifier(h).includes("auto-continue"))
+      const timeout = autoContinue
+        ? isInlineHookDef(autoContinue)
+          ? autoContinue.hook.timeout
+          : autoContinue.timeout
+        : undefined
+      expect(timeout ?? 0).toBe(120)
     })
 
     it("stop event hooks appear in correct order", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const files = stopGroup?.hooks.map((h) => h.file) || []
+      const files = stopGroup?.hooks.map((h) => hookIdentifier(h)) || []
       // Offensive language check runs first so lazy patterns are caught before anything else
       expect(files[0]).toBe("stop-offensive-language.ts")
       // Incomplete tasks block early — before auditor and git checks
@@ -71,7 +83,9 @@ describe("manifest.ts", () => {
       expect(preToolUseGroups.length).toBeGreaterThan(0)
 
       preToolUseGroups.forEach((group) => {
-        const allAsync = group.hooks.every((h) => h.async === true)
+        const allAsync = group.hooks.every(
+          (h) => (isInlineHookDef(h) ? h.hook.async : h.async) === true
+        )
         if (allAsync) return // async-only groups don't need matchers (e.g. narrator)
         expect(group.matcher).toBeDefined()
         expect(typeof group.matcher).toBe("string")
@@ -83,13 +97,15 @@ describe("manifest.ts", () => {
         (g) => g.event === "preToolUse" && g.matcher === "TaskCreate|TodoWrite"
       )
       expect(taskCreateHook).toBeDefined()
-      expect(taskCreateHook?.hooks.some((h) => h.file.includes("subject-validation")))
+      expect(taskCreateHook?.hooks.some((h) => hookIdentifier(h).includes("subject-validation")))
     })
 
     it("Bash matcher blocks mixed-up tool calls before other shell guards", () => {
       const bashGroup = manifest.find((g) => g.event === "preToolUse" && g.matcher === "Bash")
       expect(bashGroup).toBeDefined()
-      expect(bashGroup?.hooks[0]?.file).toBe("pretooluse-no-mixed-tool-calls.ts")
+      expect(bashGroup?.hooks[0] && hookIdentifier(bashGroup.hooks[0])).toBe(
+        "pretooluse-no-mixed-tool-calls.ts"
+      )
     })
 
     it("Edit|Write|Bash matcher has require-tasks hook", () => {
@@ -97,7 +113,9 @@ describe("manifest.ts", () => {
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|Bash"
       )
       expect(requireTasksGroup).toBeDefined()
-      expect(requireTasksGroup?.hooks.some((h) => h.file.includes("require-tasks"))).toBe(true)
+      expect(
+        requireTasksGroup?.hooks.some((h) => hookIdentifier(h).includes("require-tasks"))
+      ).toBe(true)
     })
 
     it("Edit|Write|NotebookEdit|Bash matcher has update-memory enforcement hook", () => {
@@ -106,7 +124,9 @@ describe("manifest.ts", () => {
       )
       expect(updateMemoryGroup).toBeDefined()
       expect(
-        updateMemoryGroup?.hooks.some((h) => h.file.includes("update-memory-enforcement"))
+        updateMemoryGroup?.hooks.some((h) =>
+          hookIdentifier(h).includes("update-memory-enforcement")
+        )
       ).toBe(true)
     })
 
@@ -115,10 +135,15 @@ describe("manifest.ts", () => {
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|NotebookEdit|Bash"
       )
       const hook = updateMemoryGroup?.hooks.find((h) =>
-        h.file.includes("update-memory-enforcement")
+        hookIdentifier(h).includes("update-memory-enforcement")
       )
       expect(hook).toBeDefined()
-      expect(hook?.cooldownSeconds).toBe(300)
+      const cooldown = hook
+        ? isInlineHookDef(hook)
+          ? hook.hook.cooldownSeconds
+          : hook.cooldownSeconds
+        : undefined
+      expect(cooldown).toBe(300)
     })
   })
 
@@ -130,7 +155,9 @@ describe("manifest.ts", () => {
 
     it("postToolUse has git-status hook", () => {
       const basePostToolUse = manifest.find((g) => g.event === "postToolUse" && !g.matcher)
-      expect(basePostToolUse?.hooks.some((h) => h.file.includes("git-status"))).toBe(true)
+      expect(basePostToolUse?.hooks.some((h) => hookIdentifier(h).includes("git-status"))).toBe(
+        true
+      )
     })
 
     it("postToolUse has task-specific hooks for TaskCreate", () => {
@@ -142,12 +169,16 @@ describe("manifest.ts", () => {
   })
 
   describe("HookDef structure", () => {
-    it("HookDef requires file property", () => {
+    it("file-based HookDef has a .ts file; inline HookDef has a name", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
-          expect(hook).toHaveProperty("file")
-          expect(typeof hook.file).toBe("string")
-          expect(hook.file.endsWith(".ts")).toBe(true)
+          if (isInlineHookDef(hook)) {
+            expect(typeof hook.hook.name).toBe("string")
+            expect(hook.hook.name.length).toBeGreaterThan(0)
+          } else {
+            expect(typeof hook.file).toBe("string")
+            expect(hook.file.endsWith(".ts")).toBe(true)
+          }
         })
       })
     })
@@ -155,9 +186,10 @@ describe("manifest.ts", () => {
     it("HookDef timeout is optional but always a number when present", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
-          if (hook.timeout !== undefined) {
-            expect(typeof hook.timeout).toBe("number")
-            expect(hook.timeout).toBeGreaterThan(0)
+          const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+          if (timeout !== undefined) {
+            expect(typeof timeout).toBe("number")
+            expect(timeout).toBeGreaterThan(0)
           }
         })
       })
@@ -166,8 +198,9 @@ describe("manifest.ts", () => {
     it("HookDef async flag is optional and boolean", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
-          if (hook.async !== undefined) {
-            expect(typeof hook.async).toBe("boolean")
+          const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
+          if (isAsync !== undefined) {
+            expect(typeof isAsync).toBe("boolean")
           }
         })
       })
@@ -210,9 +243,9 @@ describe("manifest.ts", () => {
   })
 
   describe("manifest integrity", () => {
-    it("all hook files have unique combinations (event + matcher + file)", () => {
+    it("all hooks have unique combinations (event + matcher + identifier)", () => {
       const combinations = manifest.flatMap((group) =>
-        group.hooks.map((hook) => `${group.event}:${group.matcher ?? ""}:${hook.file}`)
+        group.hooks.map((hook) => `${group.event}:${group.matcher ?? ""}:${hookIdentifier(hook)}`)
       )
       const unique = new Set(combinations)
       expect(unique.size).toBe(combinations.length)
@@ -221,9 +254,10 @@ describe("manifest.ts", () => {
     it("no timeout values are unexpectedly long", () => {
       manifest.forEach((group) => {
         group.hooks.forEach((hook) => {
-          if (hook.timeout) {
+          const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+          if (timeout) {
             // Most hooks should timeout within 30s; 120s is only for special cases
-            expect(hook.timeout).toBeLessThanOrEqual(120)
+            expect(timeout).toBeLessThanOrEqual(120)
           }
         })
       })
@@ -232,23 +266,23 @@ describe("manifest.ts", () => {
     it("security hooks appear early in stop event", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       const securityHooks = ["stop-secret-scanner.ts", "stop-large-files.ts"]
-      const hookFiles = (stopGroup?.hooks || []).map((h) => h.file)
+      const hookIds = (stopGroup?.hooks || []).map((h) => hookIdentifier(h))
 
       securityHooks.forEach((securityHook) => {
-        const index = hookFiles.indexOf(securityHook)
+        const index = hookIds.indexOf(securityHook)
         expect(index).toBeLessThan(6) // Should be in first 6 hooks
       })
     })
 
     it("manifest exports are correct types", () => {
-      // Verify that types can be imported and used
-      const hookDef: HookDef = { file: "test.ts", timeout: 10 }
-      expect(hookDef.file).toBe("test.ts")
-      expect(hookDef.timeout).toBe(10)
+      // FileHookDef (existing format) satisfies HookDef
+      const fileDef: HookDef = { file: "test.ts", timeout: 10 }
+      expect(isInlineHookDef(fileDef)).toBe(false)
+      expect(hookIdentifier(fileDef)).toBe("test.ts")
 
       const hookGroup: HookGroup = {
         event: "stop",
-        hooks: [hookDef],
+        hooks: [fileDef],
       }
       expect(hookGroup.event).toBe("stop")
       expect(hookGroup.hooks.length).toBe(1)
@@ -280,13 +314,15 @@ describe("manifest.ts", () => {
   describe("requiredSettings validation", () => {
     it("every requiredSettings entry is a valid EffectiveSwizSettings key", () => {
       const allHooks = manifest.flatMap((g) => g.hooks)
-      const hooksWithRequired = allHooks.filter(
-        (h) => h.requiredSettings && h.requiredSettings.length > 0
-      )
+      const hooksWithRequired = allHooks.filter((h) => {
+        const rs = isInlineHookDef(h) ? h.hook.requiredSettings : h.requiredSettings
+        return rs && rs.length > 0
+      })
       expect(hooksWithRequired.length).toBeGreaterThan(0)
 
       for (const hook of hooksWithRequired) {
-        for (const key of hook.requiredSettings!) {
+        const rs = isInlineHookDef(hook) ? hook.hook.requiredSettings! : hook.requiredSettings!
+        for (const key of rs) {
           // TypeScript enforces this at compile time via keyof, but this test
           // catches runtime issues with project-local hooks or config drift.
           expect(typeof key).toBe("string")
@@ -297,9 +333,14 @@ describe("manifest.ts", () => {
 
     it("stop-quality-checks.ts has requiredSettings: ['qualityChecksGate']", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const hook = stopGroup?.hooks.find((h) => h.file === "stop-quality-checks.ts")
+      const hook = stopGroup?.hooks.find((h) => hookIdentifier(h) === "stop-quality-checks.ts")
       expect(hook).toBeDefined()
-      expect(hook?.requiredSettings).toEqual(["qualityChecksGate"])
+      const rs = hook
+        ? isInlineHookDef(hook)
+          ? hook.hook.requiredSettings
+          : hook.requiredSettings
+        : undefined
+      expect(rs).toEqual(["qualityChecksGate"])
     })
   })
 })

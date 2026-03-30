@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { filterDisabledHooks } from "../dispatch/index.ts"
+import { hookIdentifier } from "../manifest.ts"
 
 describe("filterDisabledHooks", () => {
   const makeGroups = (files: string[]) => [
@@ -16,13 +17,13 @@ describe("filterDisabledHooks", () => {
     const groups = makeGroups(["stop-github-ci.ts", "stop-lint-staged.ts"])
     const result = filterDisabledHooks(groups, new Set(["stop-github-ci.ts"]))
     expect(result).toHaveLength(1)
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["stop-lint-staged.ts"])
+    expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual(["stop-lint-staged.ts"])
   })
 
   it("removes multiple disabled hooks", () => {
     const groups = makeGroups(["stop-github-ci.ts", "stop-lint-staged.ts", "stop-git-status.ts"])
     const result = filterDisabledHooks(groups, new Set(["stop-github-ci.ts", "stop-git-status.ts"]))
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["stop-lint-staged.ts"])
+    expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual(["stop-lint-staged.ts"])
   })
 
   it("drops groups that become empty after filtering", () => {
@@ -45,8 +46,8 @@ describe("filterDisabledHooks", () => {
       new Set(["stop-github-ci.ts", "posttooluse-pr-context.ts"])
     )
     expect(result).toHaveLength(2)
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["stop-git-status.ts"])
-    expect(result[1]?.hooks.map((h) => h.file)).toEqual(["posttooluse-git-status.ts"])
+    expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual(["stop-git-status.ts"])
+    expect(result[1]?.hooks.map((h) => hookIdentifier(h))).toEqual(["posttooluse-git-status.ts"])
   })
 
   it("preserves group matcher when filtering", () => {
@@ -59,7 +60,9 @@ describe("filterDisabledHooks", () => {
     ]
     const result = filterDisabledHooks(groups, new Set(["pretooluse-ts-quality.ts"]))
     expect(result[0]?.matcher).toBe("Edit|Write")
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-debug-statements.ts"])
+    expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual([
+      "pretooluse-debug-statements.ts",
+    ])
   })
 
   it("is a no-op when disabled file is not in any group", () => {
@@ -76,6 +79,6 @@ describe("filterDisabledHooks", () => {
     const combinedSet = new Set([...userDisabled, ...projectDisabled])
 
     const result = filterDisabledHooks(groups, combinedSet)
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["stop-git-status.ts"])
+    expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual(["stop-git-status.ts"])
   })
 })

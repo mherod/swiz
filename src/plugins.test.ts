@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import type { HookGroup } from "./manifest.ts"
+import { type HookGroup, hookIdentifier } from "./manifest.ts"
 import { loadAllPlugins } from "./plugins.ts"
 import { useTempDir } from "./utils/test-utils.ts"
 
@@ -30,7 +30,9 @@ describe("loadAllPlugins", () => {
     expect(results[0]!.hooks).toHaveLength(1)
     expect(results[0]!.hooks[0]!.event).toBe("preToolUse")
     // Path should be resolved to absolute
-    expect(results[0]!.hooks[0]!.hooks[0]!.file).toBe(join(pluginDir, "check-imports.ts"))
+    expect(hookIdentifier(results[0]!.hooks[0]!.hooks[0]!)).toBe(
+      join(pluginDir, "check-imports.ts")
+    )
   })
 
   test("returns error for missing npm plugin", async () => {
@@ -134,9 +136,11 @@ describe("loadAllPlugins", () => {
 
     const results = await loadAllPlugins(["./nested/hooks"], projectRoot)
 
-    expect(results[0]!.hooks[0]!.hooks[0]!.file).toBe(join(pluginDir, "scripts/my-check.ts"))
+    expect(hookIdentifier(results[0]!.hooks[0]!.hooks[0]!)).toBe(
+      join(pluginDir, "scripts/my-check.ts")
+    )
     // Absolute paths should be preserved
-    expect(results[0]!.hooks[0]!.hooks[1]!.file).toBe("/absolute/path.ts")
+    expect(hookIdentifier(results[0]!.hooks[0]!.hooks[1]!)).toBe("/absolute/path.ts")
   })
 
   test("continues loading after a failed plugin", async () => {

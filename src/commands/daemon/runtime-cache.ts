@@ -3,7 +3,13 @@ import { LRUCache } from "lru-cache"
 import { detectProjectStack } from "../../detect-frameworks.ts"
 import { resolvePrMergeActive } from "../../dispatch/filters.ts"
 import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../../git-helpers.ts"
-import { evalCondition, type HookGroup, manifest } from "../../manifest.ts"
+import {
+  evalCondition,
+  type HookGroup,
+  hookIdentifier,
+  isInlineHookDef,
+  manifest,
+} from "../../manifest.ts"
 import {
   getEffectiveSwizSettings,
   type ProjectSwizSettings,
@@ -277,14 +283,16 @@ async function resolveWorkflowIntent(cwd: string): Promise<string | null> {
 }
 
 async function evalHookConditions(
-  groups: Array<{ hooks: Array<{ condition?: string; file: string }> }>,
+  groups: HookGroup[],
   results: Record<string, boolean>
 ): Promise<void> {
   const pending: Array<{ file: string; condition: string }> = []
   for (const group of groups)
-    for (const hook of group.hooks)
-      if (hook.condition && !(hook.file in results))
+    for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
+      if (hook.condition && !(hookIdentifier(hook) in results))
         pending.push({ file: hook.file, condition: hook.condition })
+    }
 
   if (pending.length === 0) return
   const evaluated = await Promise.all(pending.map(({ condition }) => evalCondition(condition)))

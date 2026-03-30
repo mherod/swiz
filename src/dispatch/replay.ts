@@ -6,7 +6,7 @@
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
-import { evalCondition, type HookGroup } from "../manifest.ts"
+import { evalCondition, type FileHookDef, type HookGroup, isInlineHookDef } from "../manifest.ts"
 import {
   extractAllowReason,
   extractContext,
@@ -51,19 +51,19 @@ function buildTraceEntry(
   }
 }
 
-async function collectEligibleHooks<T extends { group: HookGroup; hook: HookGroup["hooks"][0] }>(
-  groups: HookGroup[],
-  builder: (group: HookGroup, hook: HookGroup["hooks"][0]) => T
-): Promise<T[]> {
-  const result: T[] = []
+async function collectEligibleHooks(
+  groups: HookGroup[]
+): Promise<{ group: HookGroup; hook: FileHookDef }[]> {
+  const result: { group: HookGroup; hook: FileHookDef }[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue // inline hooks run in-process; not replayable as file
       if (hook.async) continue
       if (!(await evalCondition(hook.condition))) {
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
-      result.push(builder(group, hook))
+      result.push({ group, hook })
     }
   }
   return result
@@ -75,7 +75,7 @@ export async function replayPreToolUse(
   payloadStr: string
 ): Promise<TraceEntry[]> {
   const traces: TraceEntry[] = []
-  const eligible = await collectEligibleHooks(groups, (group, hook) => ({ group, hook }))
+  const eligible = await collectEligibleHooks(groups)
 
   for (const { group, hook } of eligible) {
     const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
@@ -103,7 +103,7 @@ export async function replayBlocking(
   payloadStr: string,
   _canonicalEvent?: string
 ): Promise<TraceEntry[]> {
-  const eligible = await collectEligibleHooks(groups, (group, hook) => ({ group, hook }))
+  const eligible = await collectEligibleHooks(groups)
 
   const traces: TraceEntry[] = []
   for (const { group, hook } of eligible) {
@@ -125,7 +125,7 @@ export async function replayContext(
   groups: HookGroup[],
   payloadStr: string
 ): Promise<TraceEntry[]> {
-  const eligible = await collectEligibleHooks(groups, (group, hook) => ({ group, hook }))
+  const eligible = await collectEligibleHooks(groups)
 
   return Promise.all(
     eligible.map(async ({ group, hook }) => {

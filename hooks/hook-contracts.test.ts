@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { manifest } from "../src/manifest.ts"
+import { isInlineHookDef, manifest } from "../src/manifest.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type JsonObject, useTempDir } from "../src/utils/test-utils.ts"
 import { hookOutputSchema } from "./schemas.ts"
@@ -101,7 +101,11 @@ async function runHookScript(
 
 describe("hook scripts contracts", () => {
   const hookFiles = [
-    ...new Set(manifest.flatMap((group) => group.hooks.map((hook) => hook.file))),
+    ...new Set(
+      manifest.flatMap((group) =>
+        group.hooks.flatMap((hook) => (isInlineHookDef(hook) ? [] : [hook.file]))
+      )
+    ),
   ].sort()
 
   for (const file of hookFiles) {

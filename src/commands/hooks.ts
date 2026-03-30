@@ -3,7 +3,7 @@ import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { CYAN as CYAN_H, DIM, RESET as RST } from "../ansi.ts"
 import { expandHomeVars } from "../home.ts"
-import { manifest } from "../manifest.ts"
+import { isInlineHookDef, manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
 import type { Command } from "../types.ts"
@@ -240,7 +240,10 @@ function collectBuiltinByEvent(): Map<string, { file: string }[]> {
   const byEvent = new Map<string, { file: string }[]>()
   for (const group of manifest) {
     const list = byEvent.get(group.event) ?? []
-    for (const hook of group.hooks) list.push({ file: hook.file })
+    for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
+      list.push({ file: hook.file })
+    }
     byEvent.set(group.event, list)
   }
   return byEvent
@@ -256,7 +259,10 @@ function collectPluginByEvent(
     if (result.errorCode) continue
     for (const group of result.hooks) {
       const list = byEvent.get(group.event) ?? []
-      for (const hook of group.hooks) list.push({ file: hook.file, plugin: result.name })
+      for (const hook of group.hooks) {
+        if (isInlineHookDef(hook)) continue
+        list.push({ file: hook.file, plugin: result.name })
+      }
       byEvent.set(group.event, list)
     }
   }
@@ -272,7 +278,10 @@ function collectLocalByEvent(
   const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
   for (const group of resolved) {
     const list = byEvent.get(group.event) ?? []
-    for (const hook of group.hooks) list.push({ file: hook.file })
+    for (const hook of group.hooks) {
+      if (isInlineHookDef(hook)) continue
+      list.push({ file: hook.file })
+    }
     byEvent.set(group.event, list)
   }
   return byEvent

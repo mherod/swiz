@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { hookIdentifier } from "../manifest.ts"
 import {
   classifyHookOutput,
   flatSyncHooks,
@@ -286,7 +287,7 @@ describe("flatSyncHooks", () => {
       },
     ]
     const entries = flatSyncHooks(groups)
-    expect(entries.map((e: HookEntry) => e.hook.file)).toEqual(["sync-hook.ts"])
+    expect(entries.map((e: HookEntry) => hookIdentifier(e.hook))).toEqual(["sync-hook.ts"])
   })
 
   it("preserves declaration order across groups", () => {
@@ -302,7 +303,12 @@ describe("flatSyncHooks", () => {
       },
     ]
     const entries = flatSyncHooks(groups)
-    expect(entries.map((e: HookEntry) => e.hook.file)).toEqual(["a.ts", "b.ts", "c.ts", "d.ts"])
+    expect(entries.map((e: HookEntry) => hookIdentifier(e.hook))).toEqual([
+      "a.ts",
+      "b.ts",
+      "c.ts",
+      "d.ts",
+    ])
   })
 
   it("propagates matcher from group to entry", () => {

@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
-import type { HookDef, HookGroup } from "../manifest.ts"
+import { type FileHookDef, type HookGroup, isInlineHookDef } from "../manifest.ts"
 import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
@@ -272,8 +272,8 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
           !Array.isArray(h) &&
           typeof (h as Record<string, unknown>).file === "string"
       )
-      .map((h): HookDef => {
-        const def: HookDef = { file: h.file as string }
+      .map((h): FileHookDef => {
+        const def: FileHookDef = { file: h.file as string }
         if (typeof h.timeout === "number") def.timeout = h.timeout
         if (typeof h.async === "boolean") def.async = h.async
         if (typeof h.condition === "string") def.condition = h.condition
@@ -315,6 +315,7 @@ export function resolveProjectHooks(
       ...g,
       hooks: g.hooks
         .filter((h) => {
+          if (isInlineHookDef(h)) return true // no file to validate
           const absPath = isAbsolute(h.file) ? h.file : join(projectRoot, h.file)
           if (!existsSync(absPath)) {
             warnings.push(`Project hook file not found: ${h.file} (resolved to ${absPath})`)
@@ -322,10 +323,10 @@ export function resolveProjectHooks(
           }
           return true
         })
-        .map((h) => ({
-          ...h,
-          file: isAbsolute(h.file) ? h.file : join(projectRoot, h.file),
-        })),
+        .map((h) => {
+          if (isInlineHookDef(h)) return h
+          return { ...h, file: isAbsolute(h.file) ? h.file : join(projectRoot, h.file) }
+        }),
     }))
     .filter((g) => g.hooks.length > 0)
   return { resolved, warnings }

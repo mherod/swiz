@@ -9,7 +9,8 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
-import { evalCondition, type HookGroup } from "../manifest.ts"
+import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
+import type { SwizHook } from "../SwizHook.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
   isEditTool,
@@ -405,13 +406,14 @@ function createSkippedExecution(
   skipReason: SkipReason
 ): HookExecution {
   const now = Date.now()
+  const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
   return {
-    file: hook.file,
+    file: hookIdentifier(hook),
     ...(matcher && { matcher }),
     startTime: now,
     endTime: now,
     durationMs: 0,
-    configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
+    configuredTimeoutSec: timeout ?? DEFAULT_TIMEOUT,
     status: "skipped",
     skipReason,
     exitCode: null,
@@ -426,13 +428,16 @@ async function tryRecordSkippedHook(
   cwd: string,
   executions: HookExecution[]
 ): Promise<boolean> {
-  if (!(await evalCondition(hook.condition))) {
-    log(`   ⏭ ${hook.file} [condition false, skipping]`)
+  const id = hookIdentifier(hook)
+  const condition = isInlineHookDef(hook) ? hook.hook.condition : hook.condition
+  const cooldownSeconds = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+  if (!(await evalCondition(condition))) {
+    log(`   ⏭ ${id} [condition false, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "condition-false"))
     return true
   }
-  if (hook.cooldownSeconds && (await isWithinCooldown(hook.file, hook.cooldownSeconds, cwd))) {
-    log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
+  if (cooldownSeconds && (await isWithinCooldown(id, cooldownSeconds, cwd))) {
+    log(`   ⏭ ${id} [cooldown active, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "cooldown-active"))
     return true
   }
@@ -460,11 +465,13 @@ function finalizeExecution(
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
     execution.status = "slow"
   }
-  if (hook.cooldownSeconds) {
-    const alwaysMode = hook.cooldownMode === "always"
+  const cooldownSeconds = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+  const cooldownMode = isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
+  if (cooldownSeconds) {
+    const alwaysMode = cooldownMode === "always"
     const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
     if (alwaysMode || blockResult) {
-      void markHookCooldown(hook.file, cwd)
+      void markHookCooldown(hookIdentifier(hook), cwd)
     }
   }
   return execution
@@ -526,10 +533,60 @@ export function flatSyncHooks(groups: HookGroup[]): HookEntry[] {
   const entries: HookEntry[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
-      if (!hook.async) entries.push({ hook, matcher: group.matcher })
+      const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
+      if (!isAsync) entries.push({ hook, matcher: group.matcher })
     }
   }
   return entries
+}
+
+/**
+ * Execute an inline SwizHook in-process. Parses the JSON payload, calls
+ * hook.run(), and wraps the result in a HookRunResult — same shape as the
+ * subprocess path so strategies need no special-casing.
+ */
+async function runInlineHook(
+  hook: SwizHook,
+  payloadStr: string,
+  signal?: AbortSignal
+): Promise<HookRunResult> {
+  if (signal?.aborted) {
+    const now = Date.now()
+    return buildAbortedResult(hook.name, now, now, hook.timeout ?? DEFAULT_TIMEOUT, null)
+  }
+
+  const startTime = Date.now()
+  const configuredTimeoutSec = getConfiguredTimeoutSec(hook.timeout)
+  let parsed: Record<string, unknown> | null = null
+  let status: HookStatus = "no-output"
+
+  try {
+    const input = JSON.parse(payloadStr) as Parameters<typeof hook.run>[0]
+    const output = await hook.run(input)
+    if (output && Object.keys(output).length > 0) {
+      parsed = output
+      status = "ok"
+    }
+  } catch (err) {
+    log(`   ⚠ ${hook.name} [inline error: ${err}]`)
+    status = "error"
+  }
+
+  const endTime = Date.now()
+  return {
+    parsed,
+    execution: {
+      file: hook.name,
+      startTime,
+      endTime,
+      durationMs: endTime - startTime,
+      configuredTimeoutSec,
+      status,
+      exitCode: status === "error" ? 1 : 0,
+      stdoutSnippet: parsed ? JSON.stringify(parsed).slice(0, 500) : "",
+      stderrSnippet: "",
+    },
+  }
 }
 
 /**
@@ -545,16 +602,18 @@ export async function runEntry(
   signal?: AbortSignal
 ): Promise<{ execution: HookExecution; parsed: Record<string, unknown> | null }> {
   const { hook, matcher } = entry
+  const id = hookIdentifier(hook)
+  const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
   // Check abort before skip-condition evaluation to avoid unnecessary work.
   if (signal?.aborted) {
     const now = Date.now()
     return {
       execution: {
-        file: hook.file,
+        file: id,
         startTime: now,
         endTime: now,
         durationMs: 0,
-        configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
+        configuredTimeoutSec: timeout ?? DEFAULT_TIMEOUT,
         status: "aborted",
         exitCode: null,
         stdoutSnippet: "",
@@ -567,7 +626,12 @@ export async function runEntry(
   if (await tryRecordSkippedHook(hook, matcher, cwd, skipExecs)) {
     return { execution: skipExecs[0]!, parsed: null }
   }
-  log(`   → ${formatHookTarget(hook.file, matcher)}`)
+  log(`   → ${formatHookTarget(id, matcher)}`)
+  if (isInlineHookDef(hook)) {
+    const { parsed, execution } = await runInlineHook(hook.hook, payloadStr, signal)
+    finalizeExecution(execution, matcher, hook, cwd, parsed)
+    return { execution, parsed }
+  }
   const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal)
   finalizeExecution(execution, matcher, hook, cwd, parsed)
   return { execution, parsed }
@@ -589,18 +653,32 @@ function scheduleAsyncHookEntry(
   }
 ): void {
   const { pool, daemonContext, signal, promises } = ctx
+  const id = hookIdentifier(hook)
+
+  if (isInlineHookDef(hook)) {
+    // Inline async hooks run in-process — no worker pool needed.
+    log(`   → ${id} [async, inline]`)
+    const p = runInlineHook(hook.hook, payloadStr, signal)
+      .then(() => {})
+      .catch((err) => {
+        log(`   ⚠ ${id} [async inline error: ${err}]`)
+      })
+    if (daemonContext) promises.push(p)
+    return
+  }
+
+  const timeout = hook.timeout ?? DEFAULT_TIMEOUT
   if (daemonContext && pool) {
-    log(`   → ${hook.file} [async, daemon-awaited]`)
-    const timeout = hook.timeout ?? DEFAULT_TIMEOUT
+    log(`   → ${id} [async, daemon-awaited]`)
     const p = pool
       .runHook(hook.file, payloadStr, timeout, signal)
       .then(() => {})
       .catch((err) => {
-        log(`   ⚠ ${hook.file} [async error: ${err}]`)
+        log(`   ⚠ ${id} [async error: ${err}]`)
       })
     promises.push(p)
   } else {
-    log(`   → ${hook.file} [async, fire-and-forget]`)
+    log(`   → ${id} [async, fire-and-forget]`)
     runHook(hook.file, payloadStr, hook.timeout, signal)
       .then(() => {})
       .catch(() => {})
@@ -614,15 +692,19 @@ export async function launchAsyncHooks(
   signal?: AbortSignal
 ): Promise<void> {
   // Flatten all async hooks across groups for concurrent condition evaluation.
-  type AsyncEntry = { hook: HookDef; file: string }
+  type AsyncEntry = { hook: HookDef; id: string }
   const asyncEntries: AsyncEntry[] = groups.flatMap((group) =>
-    group.hooks.filter((h) => h.async).map((h) => ({ hook: h, file: h.file }))
+    group.hooks
+      .filter((h) => (isInlineHookDef(h) ? h.hook.async : h.async))
+      .map((h) => ({ hook: h, id: hookIdentifier(h) }))
   )
   if (asyncEntries.length === 0) return
 
   // Evaluate all conditions concurrently instead of sequentially.
   const conditionResults = await Promise.all(
-    asyncEntries.map(({ hook }) => evalCondition(hook.condition))
+    asyncEntries.map(({ hook }) =>
+      evalCondition(isInlineHookDef(hook) ? hook.hook.condition : hook.condition)
+    )
   )
 
   const promises: Promise<void>[] = []
@@ -634,13 +716,13 @@ export async function launchAsyncHooks(
   if (pool) await pool.initialize()
 
   for (let i = 0; i < asyncEntries.length; i++) {
-    const { hook } = asyncEntries[i]!
+    const { hook, id } = asyncEntries[i]!
     if (!conditionResults[i]) {
-      log(`   ⏭ ${hook.file} [condition false, skipping]`)
+      log(`   ⏭ ${id} [condition false, skipping]`)
       continue
     }
     if (signal?.aborted) {
-      log(`   ⏭ ${hook.file} [async, dispatch aborted]`)
+      log(`   ⏭ ${id} [async, dispatch aborted]`)
       continue
     }
     scheduleAsyncHookEntry(hook, payloadStr, { pool, daemonContext, signal, promises })
