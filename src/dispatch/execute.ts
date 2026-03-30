@@ -563,7 +563,10 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
-  if (filteredGroups.length === 0) return { response: {} }
+  if (filteredGroups.length === 0) {
+    restoreProjectCwd(prevProjectCwd)
+    return { response: {} }
+  }
 
   await injectEffectiveSettings(ctx, projectSettings ?? null)
 
