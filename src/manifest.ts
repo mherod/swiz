@@ -8,9 +8,11 @@ import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
+import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
 import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
+import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
@@ -313,7 +315,7 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoMixedToolCalls },
       { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
-      { file: "pretooluse-no-merge-conflict-comments.ts", timeout: 5 },
+      { hook: pretoolusNoMergeConflictComments },
       { hook: pretoolusNoCp },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
@@ -324,7 +326,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
       { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-claude-word-limit.ts", timeout: 5 },
-      { file: "pretooluse-push-cooldown.ts", timeout: 5 },
+      { hook: pretoolusePushCooldown },
       { file: "pretooluse-main-branch-scope-gate.ts", timeout: 10 },
       { file: "pretooluse-block-commit-to-main.ts", timeout: 10 },
       { file: "pretooluse-pr-changes-branch-guard.ts", timeout: 10 },
