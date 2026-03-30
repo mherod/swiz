@@ -335,6 +335,23 @@ describe("pretooluse-no-push-when-instructed", () => {
       expect(result.blocked).toBe(true)
     })
 
+    test("/push skill body with Invocation is authorisation lifts restriction (issue #435)", async () => {
+      // Real transcripts: invoking /push injects the full SKILL.md; the first lines are not
+      // literally "/push" but the skill states authorisation in prose (swiz#435).
+      const transcript = makeTranscript(
+        userText("DO NOT push to remote without approval"),
+        userText(
+          "**Fast and professional: Get committed changes pushed to remote.**\n\n" +
+            "**Invocation is authorisation.** When the user explicitly invokes `/push`, that act is the push authorisation."
+        )
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
     test("stop hook action plan 'Push N commit(s)' does NOT lift restriction", async () => {
       // Stop-hook action plans are system-generated, not explicit human authorisation.
       // "Push N commit(s) to origin/main" must never be accepted as approval.

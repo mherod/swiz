@@ -11,6 +11,10 @@ export const PUSH_APPROVAL_PATTERNS: RegExp[] = [
   /\bpush now\b/i,
   /^\/push(?:\s|$)/m,
   /\bplease push\b/i,
+  // /push skill body (user invocation loads SKILL.md into the transcript). The opening
+  // marketing line alone is not enough (see tests); these phrases are unique to push.md.
+  /\bInvocation is authori[sz]ation\b/i,
+  /\bexplicitly invokes\s+[`']?\/push[`']?/i,
 ]
 
 export interface PushGateScanResult {
