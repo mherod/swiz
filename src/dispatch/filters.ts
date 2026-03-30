@@ -21,6 +21,7 @@ import {
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
 import { swizHookCooldownPath } from "../temp-paths.ts"
+import { extractPayloadCwd } from "./worker-types.ts"
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -65,12 +66,7 @@ export function markHookCooldown(hookFile: string, cwd: string): Promise<void> {
 // ─── Payload helpers ────────────────────────────────────────────────────────
 
 export function extractCwd(payloadStr: string): string {
-  try {
-    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
-    return (parsed.cwd as string) || ""
-  } catch {
-    return ""
-  }
+  return extractPayloadCwd(payloadStr) ?? ""
 }
 
 export function countHooks(groups: HookGroup[]): number {
