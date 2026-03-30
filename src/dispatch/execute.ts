@@ -439,6 +439,7 @@ async function executeStrategyWithTimeout(
     dispatchAbort.abort()
   }, budgetMs)
 
+  // Promise.race sentinel — clear in `finally` when strategy resolves first (orphaned timers otherwise).
   let sentinelTimer: ReturnType<typeof setTimeout> | undefined
 
   try {
