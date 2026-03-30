@@ -225,8 +225,10 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
       watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
     }
-    // Auto-register project for periodic upstream sync
-    void caches.upstreamSyncRegistry.register(cwd)
+    // Auto-register project for periodic upstream sync and sync immediately
+    void caches.upstreamSyncRegistry
+      .register(cwd)
+      .then(() => caches.upstreamSyncRegistry.syncNow(cwd))
     watchers.start()
   }
 
