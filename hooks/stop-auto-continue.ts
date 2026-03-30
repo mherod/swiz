@@ -625,8 +625,11 @@ async function validatePrerequisitesAndGenerateResponse(
     if (filler) {
       terminate("block", filler)
     }
-    // No filler suggestion either — allow stop gracefully
-    terminate("skip", "NO_AI_BACKEND", "No AI backend and no actionable filler suggestion")
+    // No filler suggestion either — fail-closed: block when no AI backend
+    terminate(
+      "block",
+      "no AI backend available to generate a next-step suggestion. Install an AI provider (set ANTHROPIC_API_KEY or configure a provider) to enable auto-continue."
+    )
   }
 
   const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
