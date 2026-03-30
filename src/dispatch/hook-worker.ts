@@ -6,16 +6,15 @@
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
 import {
+  classifyHookOutput,
+  DEFAULT_TIMEOUT,
   type ErrorResult,
   extractCallerEnv,
   extractPayloadCwd,
+  HOOKS_DIR,
   type RunHookMessage,
+  SIGKILL_GRACE_MS,
 } from "./worker-types.ts"
-
-const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
-const DEFAULT_TIMEOUT = 10 // seconds
-/** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
-const SIGKILL_GRACE_MS = 3_000
 
 interface HookResult {
   id: string
@@ -31,37 +30,6 @@ interface HookResult {
     exitCode: number | null
     stdoutSnippet: string
     stderrSnippet: string
-  }
-}
-
-/** Parse hook stdout to a JSON result, handling timeout/empty/invalid cases. */
-function parseWorkerOutput(
-  timedOut: boolean,
-  trimmed: string,
-  exitCode: number
-): { parsed: Record<string, unknown> | null; status: string } {
-  if (timedOut) return { parsed: null, status: "timeout" }
-  if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
-
-  try {
-    return {
-      parsed: JSON.parse(trimmed) as Record<string, unknown>,
-      status: "ok",
-    }
-  } catch {
-    // Stdout may contain non-JSON lines before or after the hook's JSON object.
-    // Scan lines in reverse order so the last JSON-looking line wins.
-    for (const line of trimmed.split("\n").reverse()) {
-      const l = line.trim()
-      if (!l.startsWith("{")) continue
-      try {
-        return {
-          parsed: JSON.parse(l) as Record<string, unknown>,
-          status: "ok",
-        }
-      } catch {}
-    }
-    return { parsed: null, status: "invalid-json" }
   }
 }
 
@@ -123,7 +91,7 @@ async function runHookInWorker(
     const trimmed = output.trim()
     const stderrTrimmed = stderr.trim()
 
-    const { parsed, status } = parseWorkerOutput(timedOut, trimmed, exitCode ?? 0)
+    const { parsed, status } = classifyHookOutput({ timedOut, trimmed, exitCode })
 
     return {
       id,

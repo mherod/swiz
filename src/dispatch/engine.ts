@@ -25,17 +25,21 @@ import {
 } from "../tool-matchers.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
-import { extractCallerEnv, extractPayloadCwd } from "./worker-types.ts"
+import {
+  classifyHookOutput,
+  DEFAULT_TIMEOUT,
+  extractCallerEnv,
+  extractPayloadCwd,
+  HOOKS_DIR,
+  SIGKILL_GRACE_MS,
+} from "./worker-types.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────
 
-const SWIZ_ROOT = join(import.meta.dir, "..", "..")
-const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 const LOG_PATH = swizDispatchLogPath()
-export const DEFAULT_TIMEOUT = 10 // seconds
 
-/** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
-const SIGKILL_GRACE_MS = 3_000
+// Re-export for barrel (index.ts) and downstream consumers.
+export { classifyHookOutput, DEFAULT_TIMEOUT }
 
 /** Slow-hook threshold: hooks taking longer than this are flagged in the log.
  *  Configurable via SWIZ_SLOW_HOOK_THRESHOLD_MS env var. Default: 3 seconds. */
@@ -149,47 +153,6 @@ export function logSlowHookSummary(executions: HookExecution[]): void {
   const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
   if (slowHooks.length > 0) {
     log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
-  }
-}
-
-// ─── Hook output classification ──────────────────────────────────────────────
-
-/**
- * Pure classification of raw hook output into a HookStatus and parsed JSON.
- * Extracted from runHook so it can be unit-tested without spawning subprocesses.
- */
-export function classifyHookOutput({
-  timedOut,
-  trimmed,
-  exitCode,
-}: {
-  timedOut: boolean
-  trimmed: string
-  exitCode: number | null
-}): { parsed: Record<string, unknown> | null; status: HookStatus } {
-  if (timedOut) return { parsed: null, status: "timeout" }
-  if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
-  try {
-    return {
-      parsed: JSON.parse(trimmed) as Record<string, unknown>,
-      status: "ok",
-    }
-  } catch {
-    // Stdout may contain non-JSON lines before or after the hook's JSON object.
-    // Scan lines in reverse order so the last JSON-looking line wins.
-    for (const line of trimmed.split("\n").reverse()) {
-      const l = line.trim()
-      if (!l.startsWith("{")) continue
-      try {
-        return {
-          parsed: JSON.parse(l) as Record<string, unknown>,
-          status: "ok",
-        }
-      } catch {
-        // Fall through to next line
-      }
-    }
-    return { parsed: null, status: "invalid-json" }
   }
 }
 
@@ -404,7 +367,7 @@ export async function runHook(
     endTime,
     durationMs: endTime - startTime,
     configuredTimeoutSec,
-    status,
+    status: status as HookStatus,
     exitCode: exitCode ?? null,
     stdoutSnippet: trimmed.slice(0, 500),
     stderrSnippet: stderrTrimmed.slice(0, 500),

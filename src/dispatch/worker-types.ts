@@ -1,7 +1,18 @@
 /**
- * Shared types and utilities for dispatch workers and engine.
+ * Shared types, constants, and utilities for dispatch workers and engine.
  * Imported by hook-worker.ts, worker-pool.ts, and engine.ts.
  */
+
+import { join } from "node:path"
+
+// ─── Shared constants ──────────────────────────────────────────────────────
+
+export const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
+export const DEFAULT_TIMEOUT = 10 // seconds
+/** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
+export const SIGKILL_GRACE_MS = 3_000
+
+// ─── Message types ─────────────────────────────────────────────────────────
 
 export interface RunHookMessage {
   id: string
@@ -15,6 +26,47 @@ export interface ErrorResult {
   id: string
   type: "hook-error"
   error: string
+}
+
+// ─── Hook output classification ────────────────────────────────────────────
+
+/**
+ * Pure classification of raw hook output into a status and parsed JSON.
+ * Shared between engine.ts (main thread) and hook-worker.ts (worker thread).
+ */
+export function classifyHookOutput({
+  timedOut,
+  trimmed,
+  exitCode,
+}: {
+  timedOut: boolean
+  trimmed: string
+  exitCode: number | null
+}): { parsed: Record<string, unknown> | null; status: string } {
+  if (timedOut) return { parsed: null, status: "timeout" }
+  if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
+  try {
+    return {
+      parsed: JSON.parse(trimmed) as Record<string, unknown>,
+      status: "ok",
+    }
+  } catch {
+    // Stdout may contain non-JSON lines before or after the hook's JSON object.
+    // Scan lines in reverse order so the last JSON-looking line wins.
+    for (const line of trimmed.split("\n").reverse()) {
+      const l = line.trim()
+      if (!l.startsWith("{")) continue
+      try {
+        return {
+          parsed: JSON.parse(l) as Record<string, unknown>,
+          status: "ok",
+        }
+      } catch {
+        // Fall through to next line
+      }
+    }
+    return { parsed: null, status: "invalid-json" }
+  }
 }
 
 /** Extract the caller's environment from the enriched payload `_env` field.
