@@ -8,9 +8,6 @@ import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
-/** Matches directories renamed by swiz to disable a skill, e.g. "my-skill.disabled-by-swiz-20260312143027". */
-const DISABLED_BY_SWIZ_RE = /\.disabled-by-swiz-\d{14}$/
-
 // Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
 export const SKILL_DIRS = [join(resolveCwd(), ".skills"), ...getAllProviderSkillDirs()]
@@ -367,7 +364,6 @@ export async function findSkills(): Promise<SkillInfo[]> {
 
     for (const name of orderedDirectoryNames) {
       if (seen.has(name)) continue
-      if (DISABLED_BY_SWIZ_RE.test(name)) continue
 
       const skillPath = join(dir, name, "SKILL.md")
       const file = Bun.file(skillPath)
@@ -398,7 +394,6 @@ async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[
   }
   const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
   for (const name of orderBy(directoryNames, [(n) => n], ["asc"])) {
-    if (DISABLED_BY_SWIZ_RE.test(name)) continue
     const skillPath = join(dir, name, "SKILL.md")
     if (!(await Bun.file(skillPath).exists())) continue
     const existing = byName.get(name) ?? []

@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
@@ -427,7 +427,6 @@ async function validateSkillEntry(
 ): Promise<InvalidSkillEntry[]> {
   if (!entry.isDirectory()) return []
   if (entry.name.startsWith(".")) return []
-  if (DISABLED_BY_SWIZ_RE.test(entry.name)) return []
   const entryDir = join(skillDir, entry.name)
   const skillPath = join(entryDir, "SKILL.md")
   const base = { name: entry.name, skillDir, entryDir }
@@ -500,8 +499,6 @@ const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
 const MISSING_CATEGORY_REASON = "missing category field"
 const INVALID_CATEGORY_REASON_PREFIX = 'unknown category "'
-/** Matches directories renamed by swiz to disable a skill, e.g. "my-skill.disabled-by-swiz-20260312143027". */
-const DISABLED_BY_SWIZ_RE = /\.disabled-by-swiz-\d{14}$/
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
 /** Default category used by swiz doctor --fix when no category field is present or it is invalid. */
@@ -570,18 +567,11 @@ async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
   }
 }
 
-/** Scan all skill dirs for .disabled-by-swiz-* directories that need restoring. */
-
-/** Restore a disabled skill directory: rename dir back and fix frontmatter name.
- *  If the target directory already exists, the disabled directory is removed
- *  (the existing non-disabled version is kept). */
-
 /** Repair invalid skill entries in-place.
  *  - missing SKILL.md    → generate a default stub
  *  - name mismatch       → update name: field in place
  *  - missing category    → insert category: uncategorized after description line
- *  - disabled dirs       → rename back to base name and fix frontmatter
- *  - everything else     → reported as unfixable (no auto-disable) */
+ *  - everything else     → reported as unfixable */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   nameFixed: InvalidSkillNameFixSuccess[]
   generated: InvalidSkillGenerateSuccess[]
@@ -1351,25 +1341,14 @@ async function skillDiffSummary(activePath: string, overriddenPath: string): Pro
 
 async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
   if (conflicts.length === 0) return
-  console.log(`  ${BOLD}Auto-resolving skill conflicts...${RESET}\n`)
-
-  const timestamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)
+  console.log(`  ${BOLD}Skill conflicts detected...${RESET}\n`)
 
   for (const conflict of conflicts) {
     for (const overridden of conflict.overridden) {
       if (await areSkillsSame(conflict.active, overridden)) {
-        const skillDir = dirname(overridden.path)
-        const newDir = `${skillDir}.disabled-by-swiz-${timestamp}`
-        try {
-          await rename(skillDir, newDir)
-          console.log(
-            `  ${GREEN}✓${RESET} ${conflict.name}: disabled redundant version at ${displayPath(skillDir)}`
-          )
-        } catch (err: unknown) {
-          console.log(
-            `  ${RED}✗${RESET} ${conflict.name}: failed to disable redundant version: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
+        console.log(
+          `  ${YELLOW}!${RESET} ${conflict.name}: redundant version at ${displayPath(dirname(overridden.path))} — remove manually`
+        )
       } else {
         const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
         const diffSuffix = diffStats ? ` (${diffStats})` : ""
@@ -1384,21 +1363,12 @@ async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
 
 async function fixOrphanedHookScripts(scripts: string[]): Promise<void> {
   if (scripts.length === 0) return
-  console.log(`  ${BOLD}Auto-disabling orphaned hook scripts...${RESET}\n`)
-
-  const timestamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)
+  console.log(`  ${BOLD}Orphaned hook scripts detected...${RESET}\n`)
 
   for (const script of scripts) {
-    const oldPath = join(HOOKS_DIR, script)
-    const newPath = `${oldPath}.disabled-by-swiz-${timestamp}`
-    try {
-      await rename(oldPath, newPath)
-      console.log(`  ${GREEN}✓${RESET} ${script}: moved to ${displayPath(newPath)}`)
-    } catch (err: unknown) {
-      console.log(
-        `  ${RED}✗${RESET} ${script}: failed to move: ${err instanceof Error ? err.message : String(err)}`
-      )
-    }
+    console.log(
+      `  ${YELLOW}!${RESET} ${script}: not referenced by manifest or agent config — remove manually`
+    )
   }
   console.log()
 }

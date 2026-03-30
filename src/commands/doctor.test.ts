@@ -761,21 +761,4 @@ describe("swiz doctor", () => {
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: no-cat-skill")
   }, 60_000)
-
-  // ── Disabled-by-swiz directory restore tests ──────────────────────────
-
-  test("disabled-by-swiz directories are skipped during validation", async () => {
-    const home = await createTempHome()
-    const disabledDir = join(home, ".claude", "skills", "my-skill.disabled-by-swiz-20260312143027")
-    await mkdir(disabledDir, { recursive: true })
-    await writeFile(
-      join(disabledDir, "SKILL.md"),
-      "---\nname: my-skill\ndescription: A skill\ncategory: automation\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).not.toContain("Invalid skill: my-skill.disabled-by-swiz-20260312143027")
-    expect(result.stdout).not.toContain("frontmatter name")
-    expect(result.stdout).toContain("no invalid skill entries found")
-  }, 60_000)
 })

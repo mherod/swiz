@@ -611,7 +611,7 @@ swiz doctor --fix                          # auto-fix stale configs + move lower
 
 | Flag | Description |
 |------|-------------|
-| `--fix` | Auto-fix stale agent configs by running `swiz install`, and rename lower-priority duplicate skill directories to `.disabled-by-swiz-<timestamp>` (reversible) |
+| `--fix` | Auto-fix stale agent configs by running `swiz install`, fix invalid skill entries, and report skill conflicts |
 
 Skill conflict warnings include both skill file paths, the currently active (winning) path, and the deterministic precedence order used to choose it.
 
