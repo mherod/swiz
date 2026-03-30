@@ -68,6 +68,20 @@ describe("offensive-language-patterns", () => {
       )
       expect(m?.category).toBe("dismissal")
     })
+    test("matches 'only deprecation warnings remain'", () => {
+      const m = findLazyPattern("Typecheck is clean — only deprecation warnings remain.")
+      expect(m?.category).toBe("dismissal")
+    })
+    test("matches 'Only pre-existing deprecation warnings remain'", () => {
+      const m = findLazyPattern(
+        "Only pre-existing deprecation warnings remain in the build output."
+      )
+      expect(m?.category).toBe("dismissal")
+    })
+    test("matches 'pre-existing, not from my changes'", () => {
+      const m = findLazyPattern("That failure is pre-existing, not from my changes.")
+      expect(m?.category).toBe("dismissal")
+    })
   })
 
   // ── Compliance gaming ──────────────────────────────────────────────────────

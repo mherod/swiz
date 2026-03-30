@@ -352,6 +352,20 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Isolating edits in separate describe blocks does not immunize you from failures in the same test run. " +
       "If the suite broke or red tests appeared in your session, own the investigation — not geographic separation in the file.",
   },
+  {
+    category: "dismissal",
+    pattern: re(`(?:\\bonly\\s+)?(?:pre-?existing\\s+)?deprecation warnings?\\s+remain\\b`),
+    response:
+      "Claiming that only deprecation warnings remain dismisses them as harmless noise. " +
+      "Warnings in your output are still your responsibility — fix them, silence them with an intentional migration plan, or show evidence; do not treat them as acceptable leftovers.",
+  },
+  {
+    category: "dismissal",
+    pattern: re(`pre-?existing\\s*,\\s*not from my (?:change|changes|work|edits|updates)\\b`),
+    response:
+      "Pairing 'pre-existing' with 'not from my changes' is responsibility evasion. " +
+      "If it appears in your workflow output, investigate and fix it — origin does not transfer ownership away from you.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {
