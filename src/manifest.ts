@@ -2,10 +2,11 @@
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
+import precompactSpeak from "../hooks/precompact-speak.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 import type { SwizHook } from "./SwizHook.ts"
-import type { EffectiveSwizSettings } from "./settings/types.ts"
+import type { EffectiveSwizSettings } from "./settings"
 
 export type { SwizHook }
 
@@ -408,7 +409,7 @@ export const manifest: HookGroup[] = [
     event: "preCompact",
     hooks: [
       { file: "precompact-task-snapshot.ts", timeout: 5 },
-      { file: "precompact-speak.ts", timeout: 10 },
+      { hook: precompactSpeak },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },

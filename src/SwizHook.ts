@@ -26,6 +26,42 @@ import type {
 } from "../hooks/schemas.ts"
 import type { EffectiveSwizSettings } from "./settings/types.ts"
 
+// ─── Standalone runner ──────────────────────────────────────────────────────
+
+/**
+ * Run a SwizHook as a standalone main script (file-based dispatch / manual testing).
+ *
+ * Reads JSON from stdin, injects `_effectiveSettings` if absent (the dispatcher
+ * injects it for inline hooks, but subprocess invocations don't have it), calls
+ * `hook.run()`, and writes any non-empty output to stdout.
+ *
+ * Usage in a hook file:
+ * ```ts
+ * if (import.meta.main) await runSwizHookAsMain(myHook)
+ * ```
+ */
+export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>): Promise<void> {
+  const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
+  if (!input) process.exit(0)
+
+  // Inject effective settings when missing (subprocess path)
+  if (!input._effectiveSettings) {
+    const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
+    const sessionId = typeof input.session_id === "string" ? input.session_id : null
+    const rawSettings = await readSwizSettings()
+    input._effectiveSettings = getEffectiveSwizSettings(
+      rawSettings,
+      sessionId
+    ) as unknown as Record<string, unknown>
+  }
+
+  const output = await hook.run(input)
+  if (output && Object.keys(output).length > 0) {
+    const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+    exitWithHookObject(output)
+  }
+}
+
 // ─── Output type ─────────────────────────────────────────────────────────────
 
 /**

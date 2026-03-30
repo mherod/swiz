@@ -1,18 +1,30 @@
 #!/usr/bin/env bun
-// PreCompact hook: Speak a narration before context compaction begins.
+/**
+ * PreCompact hook: Speak a narration before context compaction begins.
+ *
+ * Dual-mode: exports a SwizSessionHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
-import { spawnSpeak } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain, type SwizSessionHook } from "../src/SwizHook.ts"
+import type { EffectiveSwizSettings } from "../src/settings"
+import { spawnSpeak } from "../src/speech.ts"
 
-async function main(): Promise<void> {
-  const input = await Bun.stdin.json().catch(() => null)
-  const sessionId: string = ((input as Record<string, unknown>)?.session_id as string) ?? ""
+const precompactSpeak: SwizSessionHook = {
+  name: "precompact-speak",
+  event: "preCompact",
+  timeout: 10,
 
-  const rawSettings = await readSwizSettings()
-  const settings = getEffectiveSwizSettings(rawSettings, sessionId || null)
-  if (!settings.speak) return
+  async run(input) {
+    const settings = input._effectiveSettings as unknown as EffectiveSwizSettings | undefined
+    if (!settings?.speak) return {}
 
-  await spawnSpeak("Just a moment while I gather my thoughts", settings)
+    await spawnSpeak("Just a moment while I gather my thoughts", settings)
+    return {}
+  },
 }
 
-if (import.meta.main) void main()
+export default precompactSpeak
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(precompactSpeak)
