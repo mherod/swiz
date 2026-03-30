@@ -106,18 +106,18 @@ alwaysApply: false
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
 
-- First action: `TaskCreate`/`TaskUpdate`; required after compaction.
+- First action: `TaskCreate`/`TaskUpdate` after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
-- Prior-session task blocks: recreate as `in_progress` before retrying.
+- Prior-session task blocks: complete `in_progress` tasks from prior sessions with `TaskUpdate status: completed` before new Bash. If work remains, recreate with `TaskCreate` as `in_progress`.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
-- Call task tools regularly: every 10 calls; staleness gate at 20.
-- **DO**: Use native task tools (not `swiz tasks` CLI). Exception: `swiz tasks adopt` only.
+- Call task tools every 10 calls; staleness gate at 20.
+- **DO**: Use native task tools, not `swiz tasks` CLI (exception: `swiz tasks adopt`).
 - **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` or `createSessionTask()` from `hook-utils.ts` in hooks.
-- Call `TaskUpdate` after each file; update at least every 3 edits.
+- Call `TaskUpdate` after each file, at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
 - Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
@@ -126,7 +126,7 @@ alwaysApply: false
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - **Task completion**: `TaskUpdate` with `taskId`, `status: completed`; structured evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **Subject changes**: use `TaskUpdate` `subject` / `description` — not the CLI.
-- **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
+- **DON'T**: Assume CI success from partial output. Confirm every job with `gh run view <run-id> --json conclusion,status,jobs`.
 - Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
