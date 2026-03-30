@@ -2,6 +2,8 @@
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
+import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
+import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
@@ -262,7 +264,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     hooks: [
-      { file: "posttooluse-git-status.ts", timeout: 5, cooldownSeconds: 60 },
+      { hook: posttoolusGitStatus },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
       {
         file: "posttooluse-auto-steer.ts",
@@ -303,7 +305,7 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "posttooluse-pr-context.ts", timeout: 10 },
       { file: "posttooluse-pr-create-refine.ts", timeout: 10 },
-      { file: "posttooluse-git-context.ts", timeout: 5 },
+      { hook: posttoolusGitContext },
       { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
       { file: "posttooluse-push-cooldown.ts", timeout: 5 },
       { file: "posttooluse-verify-push.ts", timeout: 20 },

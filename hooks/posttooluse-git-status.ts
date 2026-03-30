@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { GitStatusV2 } from "../src/utils/git-utils.ts"
-import { emitContext, getGitStatusV2, isGitRepo } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import type { ToolHookInput } from "./schemas.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 
@@ -92,39 +94,54 @@ export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string =
   return status
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd
-  if (!cwd) return
+const posttoolusGitStatus: SwizHook<ToolHookInput> = {
+  name: "posttooluse-git-status",
+  event: "postToolUse",
+  cooldownSeconds: 60,
+  timeout: 5,
 
-  if (!(await isGitRepo(cwd))) return
+  async run(input: ToolHookInput): Promise<SwizHookOutput> {
+    const cwd = input.cwd
+    if (!cwd) return {}
 
-  // Try daemon cache first to avoid spawning git on every tool call.
-  // Falls back to a direct git subprocess when the daemon is unavailable.
-  const gitStatus = (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
-  if (!gitStatus) return
+    const { isGitRepo, getGitStatusV2, emitContext } = await import("../src/utils/hook-utils.ts")
+    if (!(await isGitRepo(cwd))) return {}
 
-  // Prefer dispatcher-provided effective settings; fall back to computing locally.
-  const injected = (input as Record<string, unknown>)._effectiveSettings as
-    | Record<string, unknown>
-    | undefined
-  let collabMode: string
-  if (injected && typeof injected.collaborationMode === "string") {
-    collabMode = injected.collaborationMode
-  } else {
-    const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-    collabMode = getEffectiveSwizSettings(
-      settings,
-      input.session_id,
-      projectSettings
-    ).collaborationMode
-  }
-  const status = buildGitContextLine(gitStatus, collabMode)
+    // Try daemon cache first to avoid spawning git on every tool call.
+    // Falls back to a direct git subprocess when the daemon is unavailable.
+    const gitStatus = (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
+    if (!gitStatus) return {}
 
-  await emitContext("PostToolUse", status)
+    // Prefer dispatcher-provided effective settings; fall back to computing locally.
+    const injected = (input as Record<string, unknown>)._effectiveSettings as
+      | Record<string, unknown>
+      | undefined
+    let collabMode: string
+    if (injected && typeof injected.collaborationMode === "string") {
+      collabMode = injected.collaborationMode
+    } else {
+      const { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } = await import(
+        "../src/settings.ts"
+      )
+      const [settings, projectSettings] = await Promise.all([
+        readSwizSettings(),
+        readProjectSettings(cwd),
+      ])
+      collabMode = getEffectiveSwizSettings(
+        settings,
+        input.session_id,
+        projectSettings
+      ).collaborationMode
+    }
+    const status = buildGitContextLine(gitStatus, collabMode)
+
+    await emitContext("PostToolUse", status)
+    return {}
+  },
 }
 
-if (import.meta.main) void main()
+export default posttoolusGitStatus
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttoolusGitStatus)
+}

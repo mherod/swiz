@@ -5,13 +5,12 @@
 // Non-blocking — only emits additionalContext, never denies.
 // Uses the SETTINGS_REGISTRY effectExplanation to produce prescriptive directives
 // so the agent model is never in doubt about enforced rules.
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import type { GitHubBranchProtectionRecord } from "../src/issue-store.ts"
-import { getIssueStore } from "../src/issue-store.ts"
-import { SETTINGS_REGISTRY } from "../src/settings"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { emitContext, getRepoSlug, git, isGitRepo, isShellTool } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import type { ToolHookInput } from "./schemas.ts"
 
 const GIT_CMD_RE = /\bgit\b/
 
@@ -33,113 +32,129 @@ const GIT_RELEVANT_KEYS: readonly string[] = [
   "pushCooldownMinutes",
 ]
 
-/** Look up the registry effectExplanation for a setting key. */
-function getEffectExplanation(key: string): string | undefined {
-  const def = SETTINGS_REGISTRY.find((d) => d.key === key)
-  return def?.docs?.effectExplanation
-}
+const posttoolusGitContext: SwizHook<ToolHookInput> = {
+  name: "posttooluse-git-context",
+  event: "postToolUse",
+  matcher: "Bash",
+  timeout: 5,
 
-/** Build a directive line for a boolean setting. */
-function booleanDirective(key: string, value: boolean): string {
-  const explanation = getEffectExplanation(key)
-  const state = value ? "enabled" : "disabled"
-  if (explanation) return `${key}: ${state} — ${explanation}`
-  return `${key}: ${state}`
-}
+  async run(input: ToolHookInput): Promise<SwizHookOutput> {
+    const { tool_name, cwd } = input
+    if (!tool_name || !cwd) return {}
 
-/** Build a directive line for an enum/numeric setting. */
-function valueDirective(key: string, value: unknown): string {
-  const explanation = getEffectExplanation(key)
-  if (explanation) return `${key}: ${String(value)} — ${explanation}`
-  return `${key}: ${String(value)}`
-}
+    const { isShellTool, emitContext, git, getRepoSlug, isGitRepo } = await import(
+      "../src/utils/hook-utils.ts"
+    )
+    if (!isShellTool(tool_name)) return {}
+    const command: string = ((input.tool_input as Record<string, unknown>)?.command as string) ?? ""
+    if (!GIT_CMD_RE.test(command)) return {}
+    if (!(await isGitRepo(cwd))) return {}
 
-function buildSettingsDirectives(settings: Record<string, unknown>): string[] {
-  const directives: string[] = []
-  for (const key of GIT_RELEVANT_KEYS) {
-    const value = settings[key]
-    if (value === undefined) continue
-    if (typeof value === "boolean") {
-      directives.push(booleanDirective(key, value))
-    } else {
-      directives.push(valueDirective(key, value))
-    }
-  }
-  return directives
-}
-
-function buildProtectionDirectives(
-  branch: string,
-  protection: GitHubBranchProtectionRecord
-): string[] {
-  const rules: string[] = []
-  if (protection.requiredReviews) {
-    const count = protection.requiredReviews.requiredApprovingReviewCount
-    rules.push(`${count} approving review(s) required before merge`)
-  }
-  if (protection.requiredStatusChecks) {
-    const checks = protection.requiredStatusChecks.contexts
-    if (checks.length > 0) {
-      rules.push(`Required status checks: ${checks.join(", ")}`)
-    }
-  }
-  if (protection.enforceAdmins) rules.push("Rules enforced for admins too")
-  if (protection.requiredLinearHistory) rules.push("Linear history required — no merge commits")
-  if (!protection.allowForcePushes) rules.push("Force push is FORBIDDEN on this branch")
-  if (!protection.allowDeletions) rules.push("Branch deletion is forbidden")
-  if (rules.length > 0) {
-    return [`Branch protection rules for '${branch}': ${rules.join(". ")}.`]
-  }
-  return []
-}
-
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const { tool_name, cwd } = input
-  if (!tool_name || !isShellTool(tool_name) || !cwd) return
-  const command: string = ((input.tool_input as Record<string, unknown>)?.command as string) ?? ""
-  if (!GIT_CMD_RE.test(command)) return
-  if (!(await isGitRepo(cwd))) return
-
-  const [porcelain, branch, repoSlug] = await Promise.all([
-    git(["status", "--porcelain"], cwd),
-    git(["branch", "--show-current"], cwd),
-    getRepoSlug(cwd),
-  ])
-  if (!porcelain.trim()) return
-
-  // Resolve effective settings — prefer dispatcher-injected, fall back to disk read.
-  const injected = (input as Record<string, unknown>)._effectiveSettings as
-    | Record<string, unknown>
-    | undefined
-  let settings: Record<string, unknown>
-  if (injected && typeof injected.trunkMode !== "undefined") {
-    settings = injected
-  } else {
-    const [swizSettings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
+    const [porcelain, branch, repoSlug] = await Promise.all([
+      git(["status", "--porcelain"], cwd),
+      git(["branch", "--show-current"], cwd),
+      getRepoSlug(cwd),
     ])
-    settings = getEffectiveSwizSettings(
-      swizSettings,
-      input.session_id,
-      projectSettings
-    ) as unknown as Record<string, unknown>
-  }
+    if (!porcelain.trim()) return {}
 
-  const lines = buildSettingsDirectives(settings)
-
-  if (branch && repoSlug) {
-    const store = getIssueStore()
-    const protection = store.getBranchProtection<GitHubBranchProtectionRecord>(repoSlug, branch)
-    if (protection) {
-      lines.push(...buildProtectionDirectives(branch, protection))
+    // Resolve effective settings — prefer dispatcher-injected, fall back to disk read.
+    const injected = (input as Record<string, unknown>)._effectiveSettings as
+      | Record<string, unknown>
+      | undefined
+    let settings: Record<string, unknown>
+    if (injected && typeof injected.trunkMode !== "undefined") {
+      settings = injected
+    } else {
+      const { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } = await import(
+        "../src/settings.ts"
+      )
+      const [swizSettings, projectSettings] = await Promise.all([
+        readSwizSettings(),
+        readProjectSettings(cwd),
+      ])
+      settings = getEffectiveSwizSettings(
+        swizSettings,
+        input.session_id,
+        projectSettings
+      ) as unknown as Record<string, unknown>
     }
-  }
 
-  if (lines.length > 0) {
-    await emitContext("PostToolUse", lines.join("\n"))
-  }
+    const { SETTINGS_REGISTRY } = await import("../src/settings.ts")
+
+    function getEffectExplanation(key: string): string | undefined {
+      const def = SETTINGS_REGISTRY.find((d) => d.key === key)
+      return def?.docs?.effectExplanation
+    }
+
+    function booleanDirective(key: string, value: boolean): string {
+      const explanation = getEffectExplanation(key)
+      const state = value ? "enabled" : "disabled"
+      if (explanation) return `${key}: ${state} — ${explanation}`
+      return `${key}: ${state}`
+    }
+
+    function valueDirective(key: string, value: unknown): string {
+      const explanation = getEffectExplanation(key)
+      if (explanation) return `${key}: ${String(value)} — ${explanation}`
+      return `${key}: ${String(value)}`
+    }
+
+    const lines: string[] = []
+    for (const key of GIT_RELEVANT_KEYS) {
+      const value = settings[key]
+      if (value === undefined) continue
+      if (typeof value === "boolean") {
+        lines.push(booleanDirective(key, value))
+      } else {
+        lines.push(valueDirective(key, value))
+      }
+    }
+
+    if (branch && repoSlug) {
+      const { getIssueStore } = await import("../src/issue-store.ts")
+      const store = getIssueStore()
+      type BranchProtection = {
+        requiredReviews?: { requiredApprovingReviewCount: number }
+        requiredStatusChecks?: { contexts: string[] }
+        enforceAdmins?: boolean
+        requiredLinearHistory?: boolean
+        allowForcePushes?: boolean
+        allowDeletions?: boolean
+      }
+      const protection = store.getBranchProtection<BranchProtection>(repoSlug, branch)
+      if (protection) {
+        const rules: string[] = []
+        if (protection.requiredReviews) {
+          const count = protection.requiredReviews.requiredApprovingReviewCount
+          rules.push(`${count} approving review(s) required before merge`)
+        }
+        if (protection.requiredStatusChecks) {
+          const checks = protection.requiredStatusChecks.contexts
+          if (checks.length > 0) {
+            rules.push(`Required status checks: ${checks.join(", ")}`)
+          }
+        }
+        if (protection.enforceAdmins) rules.push("Rules enforced for admins too")
+        if (protection.requiredLinearHistory)
+          rules.push("Linear history required — no merge commits")
+        if (!protection.allowForcePushes) rules.push("Force push is FORBIDDEN on this branch")
+        if (!protection.allowDeletions) rules.push("Branch deletion is forbidden")
+        if (rules.length > 0) {
+          lines.push(`Branch protection rules for '${branch}': ${rules.join(". ")}.`)
+        }
+      }
+    }
+
+    if (lines.length > 0) {
+      await emitContext("PostToolUse", lines.join("\n"))
+    }
+
+    return {}
+  },
 }
 
-if (import.meta.main) void main()
+export default posttoolusGitContext
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttoolusGitContext)
+}
