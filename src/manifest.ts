@@ -5,6 +5,7 @@
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
+import pretoolusClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
@@ -215,7 +216,7 @@ export const manifest: HookGroup[] = [
       { hook: pretooluseLargeFiles },
       { hook: pretoolusWorkflowPermissionsGate },
       { hook: pretoolUseManiOrderValidation },
-      { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
+      { hook: pretoolusClaudeMdWordLimit },
     ],
   },
   {

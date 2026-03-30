@@ -4,6 +4,9 @@
 // Blocks Edit/Write operations that would push the file over the threshold.
 // Threshold is read from project > global > default (5000) settings, matching
 // posttooluse-memory-size.ts and `swiz memory --strict` pre-commit enforcement.
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import { countMarkdownWords } from "../src/markdown-word-count.ts"
 import {
@@ -13,14 +16,14 @@ import {
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import {
-  allowPreToolUse,
-  computeProjectedContent,
-  denyPreToolUse,
-  formatActionPlan,
-  isFileEditForPath,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
-import { resolveThresholds } from "./posttooluse-memory-size.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+} from "../src/SwizHook.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
+import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import type { FileEditHookInput } from "./schemas.ts"
 
 async function buildWordLimitDenyReason(
@@ -53,40 +56,45 @@ async function buildWordLimitDenyReason(
   )
 }
 
-function isClaudeMdEdit(input: FileEditHookInput): boolean {
-  return isFileEditForPath(input, "CLAUDE.md")
-}
+const pretoolusClaudeMdWordLimit: SwizHook<FileEditHookInput> = {
+  name: "pretooluse-claude-md-word-limit",
+  event: "preToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
 
-async function main() {
-  const input = (await Bun.stdin.json()) as FileEditHookInput
-  if (!isClaudeMdEdit(input)) process.exit(0)
-
-  const toolName = input.tool_name ?? ""
-  const filePath = input.tool_input?.file_path ?? ""
-
-  try {
-    const cwd = input.cwd ?? process.cwd()
-    const { wordThreshold } = await resolveThresholds(cwd)
-    const projectedContent = await computeProjectedContent(
-      toolName,
-      filePath,
-      input.tool_input ?? {}
-    )
-    if (projectedContent === null) allowPreToolUse("")
-    const projectedWordCount = countMarkdownWords(projectedContent!)
-
-    if (projectedWordCount > wordThreshold) {
-      denyPreToolUse(await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold))
+  async run(rawInput) {
+    const input = rawInput as FileEditHookInput & {
+      _effectiveSettings?: { memoryWordThreshold?: number }
     }
+    if (!isFileEditForPath(input, "CLAUDE.md")) return {}
 
-    allowPreToolUse("")
-  } catch {
-    allowPreToolUse("")
-  }
+    const toolName = input.tool_name ?? ""
+    const filePath = input.tool_input?.file_path ?? ""
+
+    try {
+      const wordThreshold = input._effectiveSettings?.memoryWordThreshold ?? 5000
+      const projectedContent = await computeProjectedContent(
+        toolName,
+        filePath,
+        (input.tool_input as Record<string, unknown>) ?? {}
+      )
+      if (projectedContent === null) return preToolUseAllow("")
+      const projectedWordCount = countMarkdownWords(projectedContent)
+
+      if (projectedWordCount > wordThreshold) {
+        return preToolUseDeny(
+          await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold)
+        )
+      }
+
+      return preToolUseAllow("")
+    } catch {
+      return preToolUseAllow("")
+    }
+  },
 }
 
-if (import.meta.main) {
-  main().catch(() => {
-    process.exit(0)
-  })
-}
+export default pretoolusClaudeMdWordLimit
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusClaudeMdWordLimit)
