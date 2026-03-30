@@ -594,7 +594,10 @@ async function runInlineHook(
 
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(hook.timeout)
-  const { parsed, status } = await executeInlineHookWithErrorHandling(hook, payloadStr)
+  const { parsed, status, stderrSnippet } = await executeInlineHookWithErrorHandling(
+    hook,
+    payloadStr
+  )
   const endTime = Date.now()
 
   return {
@@ -608,7 +611,7 @@ async function runInlineHook(
       status,
       exitCode: status === "error" ? 1 : 0,
       stdoutSnippet: parsed ? JSON.stringify(parsed).slice(0, 500) : "",
-      stderrSnippet: "",
+      stderrSnippet,
     },
   }
 }
@@ -617,7 +620,11 @@ async function runInlineHook(
 async function executeInlineHookWithErrorHandling(
   hook: SwizHook,
   payloadStr: string
-): Promise<{ parsed: Record<string, unknown> | null; status: HookStatus }> {
+): Promise<{
+  parsed: Record<string, unknown> | null
+  status: HookStatus
+  stderrSnippet: string
+}> {
   try {
     const input = JSON.parse(payloadStr)
     const validation = hookBaseSchema.safeParse(input)
@@ -626,15 +633,20 @@ async function executeInlineHookWithErrorHandling(
     }
     const output = await withInlineSwizHookRun(async () => hook.run(input))
     if (hasNonEmptyHookOutput(output)) {
-      return { parsed: output as Record<string, unknown>, status: "ok" }
+      return { parsed: output as Record<string, unknown>, status: "ok", stderrSnippet: "" }
     }
-    return { parsed: null, status: "no-output" }
+    return { parsed: null, status: "no-output", stderrSnippet: "" }
   } catch (err) {
     if (err instanceof SwizHookExit) {
-      return { parsed: err.output as Record<string, unknown>, status: "ok" }
+      return {
+        parsed: err.output as Record<string, unknown>,
+        status: "ok",
+        stderrSnippet: "",
+      }
     }
-    log(`   ⚠ ${hook.name} [inline error: ${err}]`)
-    return { parsed: null, status: "error" }
+    const msg = err instanceof Error ? err.message : String(err)
+    log(`   ⚠ ${hook.name} [inline error: ${msg}]`)
+    return { parsed: null, status: "error", stderrSnippet: msg.slice(0, 500) }
   }
 }
 

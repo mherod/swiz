@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { HookDef } from "../hook-types.ts"
 import { hookIdentifier } from "../manifest.ts"
 import {
   classifyHookOutput,
@@ -7,6 +8,7 @@ import {
   type HookStatus,
   isAsyncFireAndForgetHook,
   logSlowHook,
+  runEntry,
   runsInSyncPipeline,
   toolMatchesToken,
 } from "./engine.ts"
@@ -379,6 +381,57 @@ describe("runsInSyncPipeline / isAsyncFireAndForgetHook", () => {
     const h = { file: "x.ts", async: true, asyncMode: "block-until-complete" as const }
     expect(runsInSyncPipeline(h)).toBe(true)
     expect(isAsyncFireAndForgetHook(h)).toBe(false)
+  })
+})
+
+describe("runEntry inline hook errors", () => {
+  it("populates stderrSnippet when inline hook throws Error", async () => {
+    const hook: HookDef = {
+      hook: {
+        name: "inline-throw.ts",
+        event: "stop",
+        async run() {
+          throw new Error("boom")
+        },
+      },
+    }
+    const entry: HookEntry = { hook, matcher: undefined }
+    const { execution } = await runEntry(entry, "{}", process.cwd())
+    expect(execution.status).toBe("error")
+    expect(execution.exitCode).toBe(1)
+    expect(execution.stderrSnippet).toBe("boom")
+    expect(execution.stdoutSnippet).toBe("")
+  })
+
+  it("truncates stderrSnippet to 500 chars", async () => {
+    const longMsg = "x".repeat(600)
+    const hook: HookDef = {
+      hook: {
+        name: "inline-throw-long.ts",
+        event: "stop",
+        async run() {
+          throw new Error(longMsg)
+        },
+      },
+    }
+    const entry: HookEntry = { hook, matcher: undefined }
+    const { execution } = await runEntry(entry, "{}", process.cwd())
+    expect(execution.stderrSnippet).toBe("x".repeat(500))
+  })
+
+  it("captures non-Error throws in stderrSnippet", async () => {
+    const hook: HookDef = {
+      hook: {
+        name: "inline-throw-string.ts",
+        event: "stop",
+        async run() {
+          throw "plain string"
+        },
+      },
+    }
+    const entry: HookEntry = { hook, matcher: undefined }
+    const { execution } = await runEntry(entry, "{}", process.cwd())
+    expect(execution.stderrSnippet).toBe("plain string")
   })
 })
 
