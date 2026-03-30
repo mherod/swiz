@@ -68,7 +68,8 @@ const PREVIEW_MAX_CHARS = 60
  * (e.g., the buildIssueGuidance implementation itself, or tests for it).
  */
 const EXCEPTION_PATTERNS = [
-  /hook-utils\.ts/, // Contains the canonical buildIssueGuidance()
+  /hook-utils\.ts/, // Re-exports the canonical buildIssueGuidance()
+  /inline-hook-helpers\.ts/, // Contains the canonical buildIssueGuidance() implementation
   /.*\.test\.ts$/, // Tests may reference the patterns
   /scanner.*\.test\.ts$/, // Tests for this scanner itself
   /manifest\.ts/, // Documents hook structure

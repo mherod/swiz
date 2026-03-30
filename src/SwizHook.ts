@@ -65,6 +65,13 @@ export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>)
 
   const output = await hook.run(input)
   if (output && Object.keys(output).length > 0) {
+    // For PreToolUse allows: exit silently to match file-based hook behavior.
+    // File-based hooks fell through without writing stdout; subprocess test
+    // helpers expect decision === undefined for allows.
+    const hso = (output as Record<string, unknown>).hookSpecificOutput as
+      | Record<string, unknown>
+      | undefined
+    if (hso?.permissionDecision === "allow") process.exit(0)
     const { exitWithHookObject } = await import("./utils/hook-utils.ts")
     exitWithHookObject(output)
   }
