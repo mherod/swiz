@@ -1,25 +1,53 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Block `cp` and recommend `ditto` for copy operations.
+/**
+ * PreToolUse hook: Block `cp` and recommend `ditto` for copy operations.
+ *
+ * Dual-mode: exports a SwizShellHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-import { allowPreToolUse, denyPreToolUse, isShellTool } from "../src/utils/hook-utils.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
+import type { ShellHookInput } from "./schemas.ts"
 
-const input = await Bun.stdin.json().catch(() => null)
-if (!input) process.exit(0)
-if (!isShellTool(input.tool_name ?? "")) process.exit(0)
+const DENY_REASON = [
+  "Do not use `cp` for file copying in this workflow.",
+  "",
+  "Use `ditto` instead (preserves metadata and handles directories cleanly):",
+  "  ditto <source> <destination>",
+  "  ditto -V <source> <destination>   # verbose copy",
+].join("\n")
 
-const command: string = input.tool_input?.command ?? ""
+function evaluate(input: ShellHookInput) {
+  // In standalone mode the matcher isn't applied, so guard on tool name.
+  if (!isShellTool(input.tool_name ?? "")) return {}
 
-// Match standalone cp invocations at command boundaries.
-if (!shellSegmentCommandRe("cp(?:\\s|$)").test(command))
-  allowPreToolUse("No cp invocation detected")
+  const command: string = input.tool_input?.command ?? ""
 
-denyPreToolUse(
-  [
-    "Do not use `cp` for file copying in this workflow.",
-    "",
-    "Use `ditto` instead (preserves metadata and handles directories cleanly):",
-    "  ditto <source> <destination>",
-    "  ditto -V <source> <destination>   # verbose copy",
-  ].join("\n")
-)
+  if (!shellSegmentCommandRe("cp(?:\\s|$)").test(command))
+    return preToolUseAllow("No cp invocation detected")
+
+  return preToolUseDeny(DENY_REASON)
+}
+
+const pretoolusNoCp: SwizShellHook = {
+  name: "pretooluse-no-cp",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input as ShellHookInput)
+  },
+}
+
+export default pretoolusNoCp
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoCp)

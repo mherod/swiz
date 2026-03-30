@@ -3,6 +3,9 @@
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
 import precompactSpeak from "../hooks/precompact-speak.ts"
+import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
+import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
+import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 import type { SwizHook } from "./SwizHook.ts"
@@ -101,12 +104,18 @@ export function isInlineHookDef(def: HookDef): def is InlineHookDef {
 
 /**
  * Returns the canonical identifier for a hook — used for logging, cooldown
- * keying, and disabled-hook matching.
+ * keying, disabled-hook matching, and README cross-referencing.
+ * Always includes the `.ts` extension so identifiers are consistent across
+ * file-based and inline formats.
  * - File-based: the `file` field (e.g. `"pretooluse-no-npm.ts"`)
- * - Inline: the `hook.name` field (e.g. `"pretooluse-no-npm"`)
+ * - Inline: the `hook.name` field with `.ts` appended (e.g. `"pretooluse-no-npm.ts"`)
  */
 export function hookIdentifier(def: HookDef): string {
-  return isInlineHookDef(def) ? def.hook.name : def.file
+  if (isInlineHookDef(def)) {
+    const name = def.hook.name
+    return name.endsWith(".ts") ? name : `${name}.ts`
+  }
+  return def.file
 }
 
 /**
@@ -250,7 +259,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "TaskOutput",
-    hooks: [{ file: "pretooluse-taskoutput-timeout.ts", timeout: 5 }],
+    hooks: [{ hook: pretoolusTaskoutputTimeout }],
   },
   {
     event: "preToolUse",
@@ -299,13 +308,13 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { file: "pretooluse-no-merge-conflict-comments.ts", timeout: 5 },
-      { file: "pretooluse-no-cp.ts", timeout: 5 },
+      { hook: pretoolusNoCp },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
       { file: "pretooluse-bun-test-concurrent.ts", timeout: 5 },
       { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
       { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
-      { file: "pretooluse-long-sleep.ts", timeout: 5 },
+      { hook: pretooluseLongSleep },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
       { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-claude-word-limit.ts", timeout: 5 },

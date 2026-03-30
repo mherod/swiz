@@ -1,20 +1,28 @@
 #!/usr/bin/env bun
+/**
+ * PreToolUse hook: Block TaskOutput calls with missing or excessive timeout.
+ * Missing timeouts block the session indefinitely; timeouts > 120s waste time.
+ *
+ * Dual-mode: exports a SwizToolHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-// PreToolUse hook: Block TaskOutput calls with missing or excessive timeout.
-// Missing timeouts block the session indefinitely; timeouts > 120s waste time.
-
-import { allowPreToolUse, denyPreToolUse } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import type { ToolHookInput } from "./schemas.ts"
 
 const MAX_TIMEOUT_MS = 120_000
 
-async function main() {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+function evaluate(input: ToolHookInput) {
   const toolInput = input.tool_input ?? {}
   const timeout = toolInput.timeout
 
   if (timeout === undefined || timeout === null) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         "TaskOutput requires a `timeout` parameter (number, milliseconds).",
         "",
@@ -25,7 +33,7 @@ async function main() {
   }
 
   if (typeof timeout !== "number") {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         `TaskOutput \`timeout\` must be a number, got ${typeof timeout}.`,
         "",
@@ -34,8 +42,8 @@ async function main() {
     )
   }
 
-  if ((timeout as number) > MAX_TIMEOUT_MS) {
-    denyPreToolUse(
+  if (timeout > MAX_TIMEOUT_MS) {
+    return preToolUseDeny(
       [
         `TaskOutput timeout ${timeout}ms exceeds the ${MAX_TIMEOUT_MS / 1000}s maximum.`,
         "",
@@ -44,12 +52,21 @@ async function main() {
     )
   }
 
-  allowPreToolUse("")
+  return preToolUseAllow("")
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+const pretoolusTaskoutputTimeout: SwizToolHook = {
+  name: "pretooluse-taskoutput-timeout",
+  event: "preToolUse",
+  matcher: "TaskOutput",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input)
+  },
 }
+
+export default pretoolusTaskoutputTimeout
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusTaskoutputTimeout)

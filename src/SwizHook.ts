@@ -19,12 +19,13 @@
 
 import type {
   FileEditHookInput,
+  HookOutput,
   SessionHookInput,
   ShellHookInput,
   StopHookInput,
   ToolHookInput,
 } from "../hooks/schemas.ts"
-import type { EffectiveSwizSettings } from "./settings/types.ts"
+import type { EffectiveSwizSettings } from "./settings"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -44,15 +45,22 @@ export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>)
   const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
   if (!input) process.exit(0)
 
-  // Inject effective settings when missing (subprocess path)
+  // Inject effective settings when missing (subprocess path).
+  // Wrapped in try/catch — hooks that don't use settings still work if the
+  // import chain has issues (e.g. circular dependencies in standalone mode).
   if (!input._effectiveSettings) {
-    const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
-    const sessionId = typeof input.session_id === "string" ? input.session_id : null
-    const rawSettings = await readSwizSettings()
-    input._effectiveSettings = getEffectiveSwizSettings(
-      rawSettings,
-      sessionId
-    ) as unknown as Record<string, unknown>
+    try {
+      const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
+      const sessionId = typeof input.session_id === "string" ? input.session_id : null
+      const rawSettings = await readSwizSettings()
+      input._effectiveSettings = getEffectiveSwizSettings(
+        rawSettings,
+        sessionId
+      ) as unknown as Record<string, unknown>
+    } catch {
+      // Settings injection is best-effort; hooks that need settings will
+      // check for their presence and exit early if missing.
+    }
   }
 
   const output = await hook.run(input)
@@ -69,7 +77,46 @@ export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>)
  * Mirrors the JSON object that file-based hooks write to stdout.
  * An empty object (`{}`) is equivalent to "no output" — allow with no hint.
  */
-export type HookOutput = Record<string, unknown>
+
+// biome-ignore lint/complexity/noBannedTypes: Allow empty object
+export type SwizHookOutput = HookOutput | {}
+
+// ─── PreToolUse output builders ─────────────────────────────────────────────
+// Inline equivalents of the process.exit-based helpers in hook-utils.ts.
+// These return output objects instead of terminating the process, making them
+// safe for use in SwizHook.run() implementations.
+
+/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
+export function preToolUseAllow(reason = ""): SwizHookOutput {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
+  return {
+    suppressOutput: true,
+    systemMessage: firstLine || "",
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow" as const,
+      permissionDecisionReason: reason,
+    },
+  }
+}
+
+const PRE_TOOL_ACTION_REQUIRED =
+  "\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause."
+
+/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). Appends ACTION REQUIRED footer. */
+export function preToolUseDeny(reason: string): SwizHookOutput {
+  const firstLine = reason.slice(0, 70).split("\n").shift()
+  const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
+  return {
+    suppressOutput: true,
+    systemMessage: firstLine || "",
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny" as const,
+      permissionDecisionReason: fullReason,
+    },
+  }
+}
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
 
@@ -139,7 +186,7 @@ export interface SwizHook<TInput = ToolHookInput> extends SwizHookMeta {
    * @returns A HookOutput object (or Promise thereof). Return `{}` to pass
    *   without a hint. Return `{ decision: "deny", reason: "..." }` to block.
    */
-  run(input: TInput): HookOutput | Promise<HookOutput>
+  run(input: TInput): SwizHookOutput | Promise<SwizHookOutput>
 }
 
 // ─── Event-specific aliases ───────────────────────────────────────────────────
