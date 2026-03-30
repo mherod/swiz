@@ -12,7 +12,6 @@ import {
   runSwizHookAsMain,
   type SwizHook,
 } from "../src/SwizHook.ts"
-import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 // Check if file is an ESLint config file
 // Legacy: .eslintrc, .eslintrc.json, .eslintrc.js, .eslintrc.cjs, .eslintrc.yml, .eslintrc.yaml
@@ -45,18 +44,6 @@ function buildWeakeningMessage(kind: string, oldCount: number, newCount: number)
     "Weakening ESLint config creates a slippery slope where standards gradually erode.",
     "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
   ].join("\n")
-}
-
-function extractInputValues(input: FileEditHookInput): {
-  filePath: string
-  oldString: string
-  newString: string
-} | null {
-  const ti = input.tool_input ?? {}
-  const filePath = String(ti.file_path ?? "")
-  const oldString = String(ti.old_string ?? "")
-  if (!isEslintConfigFile(filePath) || !oldString) return null
-  return { filePath, oldString, newString: String(ti.new_string ?? ti.content ?? "") }
 }
 
 const pretoolusEslintConfigStrength: SwizHook = {
@@ -99,9 +86,4 @@ const pretoolusEslintConfigStrength: SwizHook = {
 export default pretoolusEslintConfigStrength
 
 // ─── Standalone execution (file-based dispatch / manual testing) ────────────
-if (import.meta.main) {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const values = extractInputValues(input)
-  if (!values) process.exit(0)
-  await runSwizHookAsMain(pretoolusEslintConfigStrength)
-}
+if (import.meta.main) await runSwizHookAsMain(pretoolusEslintConfigStrength)

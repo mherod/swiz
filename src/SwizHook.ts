@@ -42,8 +42,15 @@ import type { EffectiveSwizSettings } from "./settings"
  * ```
  */
 export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>): Promise<void> {
-  const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
-  if (!input) process.exit(0)
+  let input: Record<string, unknown>
+  try {
+    const parsed = (await Bun.stdin.json()) as unknown
+    if (!parsed || typeof parsed !== "object") process.exit(0)
+    input = parsed as Record<string, unknown>
+  } catch (err) {
+    process.stderr.write(`Hook error: ${err instanceof Error ? err.message : String(err)}\n`)
+    process.exit(1)
+  }
 
   // Inject effective settings when missing (subprocess path).
   // Wrapped in try/catch — hooks that don't use settings still work if the
