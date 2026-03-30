@@ -86,6 +86,16 @@ export interface WatchEntry {
   invalidationCount: number
 }
 
+/**
+ * Registry of file-system watchers that trigger cache invalidation callbacks.
+ *
+ * Used by the daemon to keep caches consistent when hook source files,
+ * manifest, settings, or git state change on disk — without requiring a
+ * daemon restart. The `hooks/` directory watcher performs a full cache flush
+ * on any modification because `HookEligibilityCache` is keyed by `cwd` (not
+ * by individual hook file), making per-hook granularity impractical. Since
+ * hook edits are infrequent the full-flush approach is cheap and correct.
+ */
 export class FileWatcherRegistry {
   private entries = new Map<string, WatchEntry>()
 
