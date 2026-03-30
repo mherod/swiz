@@ -174,12 +174,12 @@ export class UpstreamSyncRegistry {
       )
       return (
         entry.lastResult ?? {
-          issues: { upserted: 0, removed: 0 },
-          pullRequests: { upserted: 0, removed: 0 },
+          issues: { upserted: 0, removed: 0, skipped: 0 },
+          pullRequests: { upserted: 0, removed: 0, skipped: 0 },
           ciStatuses: { upserted: 0 },
           comments: { upserted: 0 },
-          labels: { upserted: 0, removed: 0 },
-          milestones: { upserted: 0, removed: 0 },
+          labels: { upserted: 0, removed: 0, skipped: 0 },
+          milestones: { upserted: 0, removed: 0, skipped: 0 },
           branchCi: { upserted: 0 },
           prBranchDetail: { upserted: 0 },
           branchProtection: { upserted: 0 },

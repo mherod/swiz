@@ -3,15 +3,24 @@ import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.
 // ─── Upstream sync ─────────────────────────────────────────────────────────
 
 export interface UpstreamSyncResult {
-  issues: { upserted: number; removed: number }
-  pullRequests: { upserted: number; removed: number }
+  issues: { upserted: number; removed: number; skipped: number }
+  pullRequests: { upserted: number; removed: number; skipped: number }
   ciStatuses: { upserted: number }
   comments: { upserted: number }
-  labels: { upserted: number; removed: number }
-  milestones: { upserted: number; removed: number }
+  labels: { upserted: number; removed: number; skipped: number }
+  milestones: { upserted: number; removed: number; skipped: number }
   branchCi: { upserted: number }
   prBranchDetail: { upserted: number }
   branchProtection: { upserted: number }
+}
+
+/** Extract the maximum `updatedAt` ISO string from a list of entities. */
+function maxUpdatedAt(items: { updatedAt?: string }[]): string | null {
+  let max: string | null = null
+  for (const item of items) {
+    if (item.updatedAt && (!max || item.updatedAt > max)) max = item.updatedAt
+  }
+  return max
 }
 
 /** Labels that indicate an issue may be blocked/stalled and worth checking for recent comments. */
@@ -33,19 +42,34 @@ interface EntitySyncOps {
   upsert: (repo: string, items: { number: number }[]) => void
   removeClosed: (repo: string, openNumbers: Set<number>) => number
   remove: (repo: string, numbers: number[]) => void
+  getRaw: (repo: string, number: number) => string | null
 }
 
+/**
+ * Sync an entity group with change detection. Only upserts entities whose
+ * serialized JSON differs from the stored version.
+ */
 function syncEntityGroup(
   repo: string,
   open: { number: number }[] | null,
   closed: { number: number }[] | null,
   ops: EntitySyncOps,
-  bucket: { upserted: number; removed: number }
+  bucket: { upserted: number; removed: number; skipped: number }
 ): void {
   if (open) {
-    if (open.length > 0) ops.upsert(repo, open)
+    const changed: { number: number }[] = []
+    for (const item of open) {
+      const newJson = JSON.stringify(item)
+      const existingJson = ops.getRaw(repo, item.number)
+      if (existingJson === newJson) {
+        bucket.skipped++
+      } else {
+        changed.push(item)
+      }
+    }
+    if (changed.length > 0) ops.upsert(repo, changed)
     bucket.removed = ops.removeClosed(repo, new Set(open.map((i) => i.number)))
-    bucket.upserted = open.length
+    bucket.upserted = changed.length
   }
   if (closed?.length) {
     ops.remove(
@@ -65,15 +89,29 @@ function syncCiRuns(
   result: UpstreamSyncResult
 ): void {
   if (!runs || runs.length === 0) return
-  const ciRecords = runs.map((r) => ({
-    sha: r.headSha,
-    run_id: r.databaseId,
-    status: r.status,
-    conclusion: r.conclusion,
-    url: r.url,
-  }))
-  s.upsertCiStatuses(repo, ciRecords)
-  result.ciStatuses.upserted = ciRecords.length
+  const changed: {
+    sha: string
+    run_id: number
+    status: string
+    conclusion: string
+    url: string
+  }[] = []
+  for (const r of runs) {
+    const record = {
+      sha: r.headSha,
+      run_id: r.databaseId,
+      status: r.status,
+      conclusion: r.conclusion,
+      url: r.url,
+    }
+    const newJson = JSON.stringify(record)
+    const existingJson = s.getCiStatusRaw(repo, record.sha)
+    if (existingJson !== newJson) {
+      changed.push(record)
+    }
+  }
+  if (changed.length > 0) s.upsertCiStatuses(repo, changed)
+  result.ciStatuses.upserted = changed.length
 }
 
 function syncLabels(
@@ -83,13 +121,26 @@ function syncLabels(
   result: UpstreamSyncResult
 ): void {
   if (!labels) return
+  const storedCount = s.getLabelCount(repo)
   if (labels.length > 0) {
-    s.upsertLabels(repo, labels)
-    result.labels.removed = s.removeStaleLabels(repo, new Set(labels.map((l) => l.name)))
+    const changed: { name: string }[] = []
+    for (const label of labels) {
+      const newJson = JSON.stringify(label)
+      const existingJson = s.getLabelRaw(repo, label.name)
+      if (existingJson !== newJson) {
+        changed.push(label)
+      }
+    }
+    if (changed.length > 0) s.upsertLabels(repo, changed)
+    // Only scan for stale removals when count changed (label added/removed upstream)
+    if (labels.length !== storedCount) {
+      result.labels.removed = s.removeStaleLabels(repo, new Set(labels.map((l) => l.name)))
+    }
+    result.labels.upserted = changed.length
+    result.labels.skipped = labels.length - changed.length
   } else {
     result.labels.removed = s.removeStaleLabels(repo, new Set())
   }
-  result.labels.upserted = labels.length
 }
 
 function syncMilestones(
@@ -99,16 +150,28 @@ function syncMilestones(
   result: UpstreamSyncResult
 ): void {
   if (!milestones) return
+  const storedCount = s.getMilestoneCount(repo)
   if (milestones.length > 0) {
-    s.upsertMilestones(repo, milestones)
-    result.milestones.removed = s.removeStaleMilestones(
-      repo,
-      new Set(milestones.map((m) => m.number))
-    )
+    const changed: { number: number }[] = []
+    for (const milestone of milestones) {
+      const newJson = JSON.stringify(milestone)
+      const existingJson = s.getMilestoneRaw(repo, milestone.number)
+      if (existingJson !== newJson) {
+        changed.push(milestone)
+      }
+    }
+    if (changed.length > 0) s.upsertMilestones(repo, changed)
+    if (milestones.length !== storedCount) {
+      result.milestones.removed = s.removeStaleMilestones(
+        repo,
+        new Set(milestones.map((m) => m.number))
+      )
+    }
+    result.milestones.upserted = changed.length
+    result.milestones.skipped = milestones.length - changed.length
   } else {
     result.milestones.removed = s.removeStaleMilestones(repo, new Set())
   }
-  result.milestones.upserted = milestones.length
 }
 
 /** Collect unique branch names: default branch + branches from open PRs. */
@@ -123,7 +186,7 @@ function collectSyncBranches(prs: { headRefName?: string }[] | null): string[] {
   return [...branches]
 }
 
-/** Upsert fetched branch CI runs into the store. */
+/** Upsert fetched branch CI runs into the store, skipping unchanged branches. */
 function upsertBranchCiRuns(
   s: IssueStore,
   repo: string,
@@ -135,18 +198,18 @@ function upsertBranchCiRuns(
     const branch = branches[i]!
     const runs = runResults[i]
     if (!runs || runs.length === 0) continue
-    s.upsertCiBranchRuns(
-      repo,
-      branch,
-      runs.map((r) => ({
-        databaseId: r.databaseId,
-        status: r.status,
-        conclusion: r.conclusion,
-        workflowName: "",
-        createdAt: "",
-        event: "",
-      }))
-    )
+    const mapped = runs.map((r) => ({
+      databaseId: r.databaseId,
+      status: r.status,
+      conclusion: r.conclusion,
+      workflowName: "",
+      createdAt: "",
+      event: "",
+    }))
+    const newJson = JSON.stringify(mapped)
+    const existingJson = s.getCiBranchRunsRaw(repo, branch)
+    if (existingJson === newJson) continue
+    s.upsertCiBranchRuns(repo, branch, mapped)
     result.branchCi.upserted += runs.length
   }
 }
@@ -169,9 +232,12 @@ function syncBranchProtectionResults(
 /** Sync CI runs and PR review detail for branches with open PRs plus the default branch. */
 async function syncBranchData(
   ctx: SyncContext,
-  prs: { number: number; headRefName?: string }[] | null
+  prs: { number: number; headRefName?: string }[] | null,
+  prsChanged: boolean
 ): Promise<void> {
-  const branches = collectSyncBranches(prs)
+  // Always sync the default branch CI and protection (cheap, changes frequently).
+  // Only sync PR-specific branches when PRs have changed.
+  const branches = prsChanged ? collectSyncBranches(prs) : ["main"] // minimal: just the default branch
 
   const [branchRunResults, branchProtectionResults] = await Promise.all([
     Promise.all(branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))),
@@ -180,8 +246,8 @@ async function syncBranchData(
   upsertBranchCiRuns(ctx.store, ctx.repo, branches, branchRunResults, ctx.result)
   syncBranchProtectionResults(ctx, branches, branchProtectionResults)
 
-  // Sync PR branch detail for open PRs (reviewDecision, comment count)
-  if (!prs) return
+  // Sync PR branch detail only for PRs that actually changed
+  if (!prs || !prsChanged) return
   for (const pr of prs) {
     if (!pr.headRefName) continue
     const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
@@ -220,9 +286,10 @@ function collectCommentSyncTargets(
 /** Sync comments for blocked/stalled issues AND recently-updated issues. */
 async function syncComments(
   ctx: SyncContext,
-  issues: { number: number; labels?: unknown; updatedAt?: string }[] | null
+  issues: { number: number; labels?: unknown; updatedAt?: string }[] | null,
+  issuesChanged: boolean
 ): Promise<void> {
-  if (!issues) return
+  if (!issues || !issuesChanged) return
 
   const toSync = collectCommentSyncTargets(issues)
   let commentCount = 0
@@ -251,26 +318,45 @@ export async function syncUpstreamState(
   const gh = opts?.client ?? new GhCliGitHubClient()
 
   const result: UpstreamSyncResult = {
-    issues: { upserted: 0, removed: 0 },
-    pullRequests: { upserted: 0, removed: 0 },
+    issues: { upserted: 0, removed: 0, skipped: 0 },
+    pullRequests: { upserted: 0, removed: 0, skipped: 0 },
     ciStatuses: { upserted: 0 },
     comments: { upserted: 0 },
-    labels: { upserted: 0, removed: 0 },
-    milestones: { upserted: 0, removed: 0 },
+    labels: { upserted: 0, removed: 0, skipped: 0 },
+    milestones: { upserted: 0, removed: 0, skipped: 0 },
     branchCi: { upserted: 0 },
     prBranchDetail: { upserted: 0 },
     branchProtection: { upserted: 0 },
   }
 
-  const [issues, prs, runs, closedIssues, closedPrs, labels, milestones] = await Promise.all([
+  // ─── Snapshot existing state for fast-path decisions ────────────────────
+  const issueSnap = s.getIssueSnapshot(repo)
+  const prSnap = s.getPullRequestSnapshot(repo)
+
+  // ─── Fetch open entities (always needed to detect changes) ──────────────
+  const [issues, prs, runs, labels, milestones] = await Promise.all([
     gh.listIssues(cwd, "open"),
     gh.listPullRequests(cwd, "open"),
     gh.listWorkflowRuns(cwd),
-    // Backfill: fetch recently-closed issues/PRs to explicitly purge stale rows
-    gh.listIssues(cwd, "closed"),
-    gh.listPullRequests(cwd, "closed"),
     gh.listLabels(cwd),
     gh.listMilestones(cwd),
+  ])
+
+  // ─── Determine whether closed fetch is needed ──────────────────────────
+  // If the open count matches the stored count AND max updatedAt matches,
+  // nothing was opened or closed — skip the expensive closed-entity fetch.
+  const issueCountChanged = issues ? issues.length !== issueSnap.count : false
+  const issueMaxUpdated = issues ? maxUpdatedAt(issues as { updatedAt?: string }[]) : null
+  const issuesChanged = issueCountChanged || issueMaxUpdated !== issueSnap.maxUpdatedAt
+
+  const prCountChanged = prs ? prs.length !== prSnap.count : false
+  const prMaxUpdated = prs ? maxUpdatedAt(prs as { updatedAt?: string }[]) : null
+  const prsChanged = prCountChanged || prMaxUpdated !== prSnap.maxUpdatedAt
+
+  // Only fetch closed entities when open set has changed (count or content)
+  const [closedIssues, closedPrs] = await Promise.all([
+    issuesChanged ? gh.listIssues(cwd, "closed") : Promise.resolve(null),
+    prsChanged ? gh.listPullRequests(cwd, "closed") : Promise.resolve(null),
   ])
 
   syncEntityGroup(
@@ -281,6 +367,7 @@ export async function syncUpstreamState(
       upsert: (r, items) => s.upsertIssues(r, items),
       removeClosed: (r, nums) => s.removeClosedIssues(r, nums),
       remove: (r, nums) => s.removeIssues(r, nums),
+      getRaw: (r, num) => s.getIssueRaw(r, num),
     },
     result.issues
   )
@@ -292,6 +379,7 @@ export async function syncUpstreamState(
       upsert: (r, items) => s.upsertPullRequests(r, items),
       removeClosed: (r, nums) => s.removeClosedPullRequests(r, nums),
       remove: (r, nums) => s.removePullRequests(r, nums),
+      getRaw: (r, num) => s.getPullRequestRaw(r, num),
     },
     result.pullRequests
   )
@@ -303,11 +391,11 @@ export async function syncUpstreamState(
 
   // ─── Branch-level sync ──────────────────────────────────────────────────
   // Sync CI runs and PR detail for branches with open PRs, plus the default branch.
-  await syncBranchData(ctx, prs)
+  await syncBranchData(ctx, prs, prsChanged)
 
   // ─── Comment sync ───────────────────────────────────────────────────────
   // Sync comments for blocked/stalled issues AND recently-updated issues
-  await syncComments(ctx, issues)
+  await syncComments(ctx, issues, issuesChanged)
 
   return result
 }

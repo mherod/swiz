@@ -372,6 +372,88 @@ export class IssueStore {
     `)
   }
 
+  // ─── Sync snapshot (change-detection) ────────────────────────────────────
+
+  /** Return { count, maxUpdatedAt } for cached issues in a repo (ignores TTL). */
+  getIssueSnapshot(repo: string): { count: number; maxUpdatedAt: string | null } {
+    const row = this.db
+      .query(
+        "SELECT COUNT(*) as cnt, MAX(json_extract(data, '$.updatedAt')) as maxUpdatedAt FROM issues WHERE repo = ?"
+      )
+      .get(repo) as { cnt: number; maxUpdatedAt: string | null }
+    return { count: row.cnt, maxUpdatedAt: row.maxUpdatedAt }
+  }
+
+  /** Return { count, maxUpdatedAt } for cached PRs in a repo (ignores TTL). */
+  getPullRequestSnapshot(repo: string): { count: number; maxUpdatedAt: string | null } {
+    const row = this.db
+      .query(
+        "SELECT COUNT(*) as cnt, MAX(json_extract(data, '$.updatedAt')) as maxUpdatedAt FROM pull_requests WHERE repo = ?"
+      )
+      .get(repo) as { cnt: number; maxUpdatedAt: string | null }
+    return { count: row.cnt, maxUpdatedAt: row.maxUpdatedAt }
+  }
+
+  /** Return stored data JSON for an entity, without parsing. */
+  getIssueRaw(repo: string, number: number): string | null {
+    const row = this._stmtGetIssue.get(repo, number)
+    return row ? row.data : null
+  }
+
+  /** Return stored data JSON for a PR, without parsing. */
+  getPullRequestRaw(repo: string, number: number): string | null {
+    const row = this._stmtGetPullRequest.get(repo, number)
+    return row ? row.data : null
+  }
+
+  /** Return count of cached labels for a repo (ignores TTL). */
+  getLabelCount(repo: string): number {
+    const row = this.db.query("SELECT COUNT(*) as cnt FROM labels WHERE repo = ?").get(repo) as {
+      cnt: number
+    }
+    return row.cnt
+  }
+
+  /** Return count of cached milestones for a repo (ignores TTL). */
+  getMilestoneCount(repo: string): number {
+    const row = this.db
+      .query("SELECT COUNT(*) as cnt FROM milestones WHERE repo = ?")
+      .get(repo) as { cnt: number }
+    return row.cnt
+  }
+
+  /** Return stored raw JSON for a CI status by SHA, without parsing. */
+  getCiStatusRaw(repo: string, sha: string): string | null {
+    const row = this.db
+      .query("SELECT data FROM ci_status WHERE repo = ? AND sha = ?")
+      .get(repo, sha) as { data: string } | null
+    return row ? row.data : null
+  }
+
+  /** Return stored raw JSON for a label by name, without parsing. */
+  getLabelRaw(repo: string, name: string): string | null {
+    const row = this.db
+      .query("SELECT data FROM labels WHERE repo = ? AND name = ?")
+      .get(repo, name) as { data: string } | null
+    return row ? row.data : null
+  }
+
+  /** Return stored raw JSON for a milestone by number, without parsing. */
+  getMilestoneRaw(repo: string, number: number): string | null {
+    const row = this.db
+      .query("SELECT data FROM milestones WHERE repo = ? AND number = ?")
+      .get(repo, number) as { data: string } | null
+    return row ? row.data : null
+  }
+
+  /** Return stored raw JSON blob for CI branch runs, without parsing. */
+  getCiBranchRunsRaw(repo: string, branch: string): string | null {
+    const row = this.db
+      .query("SELECT data FROM ci_branch_runs WHERE repo = ? AND branch = ?")
+      .get(repo, branch) as { data: string } | null
+    return row ? row.data : null
+  }
+
   // ─── Read operations ────────────────────────────────────────────────────
 
   /** List cached issues for a repo. Returns only issues within TTL window. */

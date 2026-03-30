@@ -296,20 +296,55 @@ async function handleSync(args: string[]): Promise<void> {
   console.log(`🔄 Syncing upstream state for ${repo}...`)
   const result = await syncUpstreamState(repo, cwd)
 
-  console.log("✅ Sync complete:")
-  console.log(`  Issues: ${result.issues.upserted} upserted, ${result.issues.removed} removed`)
-  console.log(
-    `  PRs: ${result.pullRequests.upserted} upserted, ${result.pullRequests.removed} removed`
-  )
-  console.log(`  CI statuses: ${result.ciStatuses.upserted} upserted`)
-  console.log(`  Comments: ${result.comments.upserted} upserted`)
-  console.log(`  Labels: ${result.labels.upserted} upserted, ${result.labels.removed} removed`)
-  console.log(
-    `  Milestones: ${result.milestones.upserted} upserted, ${result.milestones.removed} removed`
-  )
-  console.log(`  Branch CI: ${result.branchCi.upserted} upserted`)
-  console.log(`  PR branch detail: ${result.prBranchDetail.upserted} upserted`)
-  console.log(`  Branch protection: ${result.branchProtection.upserted} upserted`)
+  const r = result
+  const totalUpserted =
+    r.issues.upserted +
+    r.pullRequests.upserted +
+    r.ciStatuses.upserted +
+    r.comments.upserted +
+    r.labels.upserted +
+    r.milestones.upserted +
+    r.branchCi.upserted +
+    r.prBranchDetail.upserted +
+    r.branchProtection.upserted
+  const totalUnchanged =
+    r.issues.skipped + r.pullRequests.skipped + r.labels.skipped + r.milestones.skipped
+
+  if (totalUpserted === 0 && totalUnchanged > 0) {
+    console.log(`✅ Already up to date (${totalUnchanged} entities unchanged)`)
+    return
+  }
+
+  console.log("✅ Sync complete:\n")
+
+  type Row = [string, string]
+  const rows: Row[] = []
+  const fmtEntity = (name: string, b: { upserted: number; removed: number; skipped: number }) => {
+    if (b.upserted === 0 && b.removed === 0 && b.skipped === 0) return
+    const parts: string[] = []
+    if (b.upserted > 0) parts.push(`\x1b[32m+${b.upserted}\x1b[0m`)
+    if (b.removed > 0) parts.push(`\x1b[31m-${b.removed}\x1b[0m`)
+    if (b.skipped > 0) parts.push(`\x1b[2m${b.skipped} unchanged\x1b[0m`)
+    rows.push([name, parts.join("  ")])
+  }
+  const fmtSimple = (name: string, upserted: number) => {
+    if (upserted === 0) return
+    rows.push([name, `\x1b[32m+${upserted}\x1b[0m`])
+  }
+  fmtEntity("Issues", r.issues)
+  fmtEntity("PRs", r.pullRequests)
+  fmtSimple("CI statuses", r.ciStatuses.upserted)
+  fmtSimple("Comments", r.comments.upserted)
+  fmtEntity("Labels", r.labels)
+  fmtEntity("Milestones", r.milestones)
+  fmtSimple("Branch CI", r.branchCi.upserted)
+  fmtSimple("PR detail", r.prBranchDetail.upserted)
+  fmtSimple("Protection", r.branchProtection.upserted)
+
+  const maxLabel = Math.max(...rows.map(([l]) => l.length))
+  for (const [label, value] of rows) {
+    console.log(`  ${label.padEnd(maxLabel)}  ${value}`)
+  }
 }
 
 export const issueCommand: Command = {

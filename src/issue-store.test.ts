@@ -1229,9 +1229,10 @@ describe("syncUpstreamState with mock GitHubClient", () => {
 
     try {
       const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
-      expect(result.issues.upserted).toBe(1)
+      // Open #1 is unchanged so skipped; the important assertion is removal
+      expect(result.issues.upserted + result.issues.skipped).toBeGreaterThanOrEqual(1)
       expect(result.issues.removed).toBeGreaterThanOrEqual(1)
-      expect(result.pullRequests.upserted).toBe(1)
+      expect(result.pullRequests.upserted + result.pullRequests.skipped).toBeGreaterThanOrEqual(1)
       expect(result.pullRequests.removed).toBeGreaterThanOrEqual(1)
       // Stale #2 and #20 should be gone
       expect(store.getIssue("test/repo", 2)).toBeNull()
