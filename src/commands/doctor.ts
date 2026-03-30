@@ -208,6 +208,23 @@ async function findOrphanedHookScripts(): Promise<string[]> {
     manifest.flatMap((g) => g.hooks.flatMap((h) => (isInlineHookDef(h) ? [] : [h.file])))
   )
 
+  // Extract inline hook filenames from manifest.ts import statements.
+  // Inline hooks are imported as: import hookName from "../hooks/hook-name.ts"
+  try {
+    const manifestPath = join(dirname(import.meta.filename), "../manifest.ts")
+    const manifestSource = await Bun.file(manifestPath).text()
+    const inlineHookImports =
+      manifestSource.match(/^import\s+\w+\s+from\s+['"]\.\.\/hooks\/([\w-]+)\.ts['"]/gm) ?? []
+    for (const importStmt of inlineHookImports) {
+      const match = importStmt.match(/from\s+['"]\.\.\/hooks\/([\w-]+)\.ts['"]/)
+      if (match?.[1]) {
+        manifestFiles.add(`${match[1]}.ts`)
+      }
+    }
+  } catch {
+    // Ignore errors reading manifest — orphaned check is optional
+  }
+
   // Scripts referenced by agent configs that live inside hooks/ (by basename)
   const configPaths = await collectInstalledConfigScriptPaths()
   const configBasenames = new Set(

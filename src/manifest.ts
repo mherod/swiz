@@ -2,6 +2,7 @@
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
+import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
@@ -294,7 +295,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     matcher: "Skill",
-    hooks: [{ file: "posttooluse-skill-steps.ts", timeout: 10 }],
+    hooks: [{ hook: posttoolusSkillSteps }],
   },
   {
     event: "postToolUse",

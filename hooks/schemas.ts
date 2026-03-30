@@ -116,6 +116,13 @@ export const toolHookInputSchema = z
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
+export interface SkillToolInput extends ToolHookInput {
+  tool_input?: {
+    skill?: string
+    args?: string
+  }
+}
+
 /** PostToolUse input — extends ToolHookInput with the tool's response payload. */
 export interface PostToolHookInput extends ToolHookInput {
   tool_response?: unknown
@@ -964,7 +971,6 @@ export const hookOutputSchema = z
 export type HookOutput = z.infer<typeof hookOutputSchema>
 
 // ─── TaskUpdate schema ────────────────────────────────────────────────────────
-
 /**
  * TaskUpdate tool_input schema — single source of truth for allowed fields.
  * `TASK_UPDATE_ALLOWED_FIELDS` is derived from this schema so the set stays
