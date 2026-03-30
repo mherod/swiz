@@ -49,6 +49,9 @@ alwaysApply: false
 - `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
+- **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe imports: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `hooks/schemas.ts`.
+- **Inline SwizHook output**: Use `preToolUseAllow()`/`preToolUseDeny()` from `SwizHook.ts` — return objects instead of calling `process.exit`. Use `runSwizHookAsMain()` for standalone `import.meta.main` compatibility.
+- **Debt marker self-detection**: Hook files containing keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` format for headers or dynamic regex construction (`"TO" + "DO"`) to avoid self-detection.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -98,10 +101,8 @@ alwaysApply: false
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
 - **DO**: When extracting functions/types from a shared module, re-export all types that downstream consumers import. Verify with `pnpm typecheck` before committing.
 ## Task Data
-- Task storage per agent: `createDefaultTaskStore()` in `src/task-roots.ts` detects the current agent via `detectCurrentAgent()` and resolves agent-specific paths from `getTaskRoots()` in `src/provider-adapters.ts`. Falls back to Claude paths.
-- Session-to-project mapping from `<projectsDir>/` transcript `cwd`.
+- Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- Completion: use `TaskUpdate` with `status: completed` and record evidence in the task `description` (or other allowed fields).
 
 - First action: `TaskCreate`/`TaskUpdate`; required after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
@@ -112,8 +113,8 @@ alwaysApply: false
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
-- **DO**: Use native task tools for all task work (create, query, status, completion). **DON'T**: Use the `swiz tasks` CLI in the agent. Exception: `swiz tasks adopt` only (orphan recovery after compaction).
-- **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` for in-process task creation. Use `createSessionTask()` from `src/utils/hook-utils.ts` when sentinel dedup is needed. **DON'T**: Shell out to `swiz tasks create` from hooks.
+- **DO**: Use native task tools (not `swiz tasks` CLI). Exception: `swiz tasks adopt` only.
+- **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` or `createSessionTask()` from `hook-utils.ts` in hooks.
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
@@ -125,14 +126,12 @@ alwaysApply: false
 - **Subject changes**: use `TaskUpdate` `subject` / `description` — not the CLI.
 - **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
 - Mark tasks complete immediately.
-- Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate` to the relevant `taskId` (include session context in the evidence text if needed).
-- Run `git diff <files>` before `git add`.
-- Run `git status` immediately after each `git commit`.
+- Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
+- Run `git diff <files>` before `git add`; `git status` after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold.
 - Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
-- Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
-- When user provides explicit labels, remove conflicting labels; don't restore them.
-- After `gh issue create`, run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). **DON'T** skip `/refine-issue` — adding `ready` directly bypasses proposals.
+- Before issue labeling, run `gh label list`; use requested literal labels when present.
+- After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
 - **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
 - Before stop, audit open issue labels; if stop hook lists actionable issues, pick at least one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
 ## Standard Work Sequence
