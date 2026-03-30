@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { isAsyncFireAndForgetHook } from "./dispatch/engine.ts"
 import {
   type HookDef,
   type HookGroup,
@@ -78,15 +79,14 @@ describe("manifest.ts", () => {
   })
 
   describe("preToolUse event hooks", () => {
-    it("preToolUse hooks have matchers for tool filtering (async-only groups exempt)", () => {
+    it("preToolUse hooks have matchers for tool filtering (fire-and-forget-async-only groups exempt)", () => {
       const preToolUseGroups = manifest.filter((g) => g.event === "preToolUse")
       expect(preToolUseGroups.length).toBeGreaterThan(0)
 
       preToolUseGroups.forEach((group) => {
-        const allAsync = group.hooks.every(
-          (h) => (isInlineHookDef(h) ? h.hook.async : h.async) === true
-        )
-        if (allAsync) return // async-only groups don't need matchers (e.g. narrator)
+        const allFireAndForgetAsync =
+          group.hooks.length > 0 && group.hooks.every((h) => isAsyncFireAndForgetHook(h))
+        if (allFireAndForgetAsync) return
         expect(group.matcher).toBeDefined()
         expect(typeof group.matcher).toBe("string")
       })
@@ -201,6 +201,17 @@ describe("manifest.ts", () => {
           const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
           if (isAsync !== undefined) {
             expect(typeof isAsync).toBe("boolean")
+          }
+        })
+      })
+    })
+
+    it("HookDef asyncMode when present is a valid literal", () => {
+      manifest.forEach((group) => {
+        group.hooks.forEach((hook) => {
+          const mode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
+          if (mode !== undefined) {
+            expect(["fire-and-forget", "block-until-complete"]).toContain(mode)
           }
         })
       })

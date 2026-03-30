@@ -5,7 +5,9 @@ import {
   flatSyncHooks,
   type HookEntry,
   type HookStatus,
+  isAsyncFireAndForgetHook,
   logSlowHook,
+  runsInSyncPipeline,
   toolMatchesToken,
 } from "./engine.ts"
 
@@ -276,7 +278,7 @@ describe("toolMatchesToken", () => {
 })
 
 describe("flatSyncHooks", () => {
-  it("excludes async hooks", () => {
+  it("excludes fire-and-forget async hooks", () => {
     const groups = [
       {
         event: "preToolUse",
@@ -288,6 +290,24 @@ describe("flatSyncHooks", () => {
     ]
     const entries = flatSyncHooks(groups)
     expect(entries.map((e: HookEntry) => hookIdentifier(e.hook))).toEqual(["sync-hook.ts"])
+  })
+
+  it("includes async hooks with asyncMode block-until-complete", () => {
+    const groups = [
+      {
+        event: "postToolUse",
+        hooks: [
+          { file: "ff.ts", async: true },
+          {
+            file: "block.ts",
+            async: true,
+            asyncMode: "block-until-complete" as const,
+          },
+        ],
+      },
+    ]
+    const entries = flatSyncHooks(groups)
+    expect(entries.map((e: HookEntry) => hookIdentifier(e.hook))).toEqual(["block.ts"])
   })
 
   it("preserves declaration order across groups", () => {
@@ -325,9 +345,29 @@ describe("flatSyncHooks", () => {
     expect(flatSyncHooks([])).toEqual([])
   })
 
-  it("returns empty array when all hooks are async", () => {
+  it("returns empty array when all hooks are async fire-and-forget", () => {
     const groups = [{ event: "stop", hooks: [{ file: "async.ts", async: true }] }]
     expect(flatSyncHooks(groups)).toEqual([])
+  })
+})
+
+describe("runsInSyncPipeline / isAsyncFireAndForgetHook", () => {
+  it("non-async file hook runs in sync pipeline and is not fire-and-forget async", () => {
+    const h = { file: "x.ts" }
+    expect(runsInSyncPipeline(h)).toBe(true)
+    expect(isAsyncFireAndForgetHook(h)).toBe(false)
+  })
+
+  it("async without asyncMode is fire-and-forget, not sync pipeline", () => {
+    const h = { file: "x.ts", async: true }
+    expect(runsInSyncPipeline(h)).toBe(false)
+    expect(isAsyncFireAndForgetHook(h)).toBe(true)
+  })
+
+  it("async block-until-complete is sync pipeline, not fire-and-forget", () => {
+    const h = { file: "x.ts", async: true, asyncMode: "block-until-complete" as const }
+    expect(runsInSyncPipeline(h)).toBe(true)
+    expect(isAsyncFireAndForgetHook(h)).toBe(false)
   })
 })
 

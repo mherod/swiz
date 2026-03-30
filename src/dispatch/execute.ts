@@ -245,7 +245,11 @@ export interface DispatchRequest {
   canonicalEvent: string
   hookEventName: string
   payloadStr: string
-  /** When true, async hooks are awaited with timeout instead of fire-and-forget. */
+  /**
+   * When true, fire-and-forget async file hooks use the worker pool and are awaited;
+   * fire-and-forget inline hooks are also awaited. Does not change
+   * `asyncMode: "block-until-complete"` hooks (they always run in the sync pipeline).
+   */
   daemonContext?: boolean
   /** Optional cached transcript summary provider (injected by daemon). */
   transcriptSummaryProvider?: (path: string) => Promise<TranscriptSummary | null>

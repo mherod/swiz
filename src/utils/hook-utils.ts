@@ -29,6 +29,7 @@ import {
   isGitRepo,
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
+import { isInlineSwizHookRun, SwizHookExit } from "../inline-hook-context.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
@@ -286,6 +287,9 @@ function denyPostToolUseObj(reason: string): HookOutput {
 }
 
 export function exitWithHookObject(obj: HookOutput): never {
+  if (isInlineSwizHookRun()) {
+    throw new SwizHookExit(obj)
+  }
   process.stdout.write(`${JSON.stringify(obj)}\n`)
   process.exit(0)
 }
@@ -296,7 +300,12 @@ export function denyPostToolUse(reason: string): never {
   exitWithHookObject(obj)
 }
 
-function emitContextObj(eventName: string, context: string) {
+/**
+ * Build additionalContext / systemMessage payload for SessionStart, PostToolUse, etc.
+ * Does not write stdout or exit — use from `SwizHook.run()`; subprocess hooks may use
+ * {@link emitContext} instead.
+ */
+export function buildContextHookOutput(eventName: string, context: string): HookOutput {
   return hookOutputSchema.parse({
     systemMessage: context,
     suppressOutput: true,
@@ -307,11 +316,16 @@ function emitContextObj(eventName: string, context: string) {
   })
 }
 
-/** Emit additional context for a hook event. Works across all agents.
- *  For PostToolUse events, appends current project state + allowed transitions when a state is set. */
+/**
+ * Emit additional context for a hook event. **Subprocess-only:** calls `process.exit(0)`.
+ * From `SwizHook.run()` (inline dispatch), return {@link buildContextHookOutput} instead
+ * so the dispatcher can record cooldowns and merge results with other hooks.
+ */
 export function emitContext(eventName: string, context: string): Promise<never> {
-  exitWithHookObject(emitContextObj(eventName, context))
+  exitWithHookObject(buildContextHookOutput(eventName, context))
 }
+
+export { SwizHookExit } from "../inline-hook-context.ts"
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 

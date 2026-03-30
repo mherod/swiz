@@ -9,6 +9,7 @@
 import { generateText, Output, streamText } from "ai"
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
+import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resolveSignal } from "./ai-signal.ts"
 
 const DEFAULT_MODEL = "gemini-flash-latest"
@@ -47,18 +48,8 @@ export function hasGeminiApiKey(): boolean {
   return Boolean(process.env.GEMINI_API_KEY) || Boolean(Bun.which("gemini"))
 }
 
-export interface PromptGeminiOptions {
-  /**
-   * Per-call timeout in milliseconds. Creates an internal AbortController
-   * that cancels the request after this many ms.
-   * Ignored if `signal` is also provided.
-   */
-  timeout?: number
-  /** External AbortSignal — takes precedence over timeout. */
-  signal?: AbortSignal
-  /** Gemini model to use. Defaults to gemini-flash-latest. */
-  model?: string
-}
+/** Options for Gemini prompt calls; `model` defaults to `gemini-flash-latest` when omitted. */
+export interface PromptGeminiOptions extends BaseAiPromptOptions {}
 
 export interface PromptGeminiStreamOptions extends PromptGeminiOptions {
   /**

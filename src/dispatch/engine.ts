@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
+import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
 import type { SwizHook } from "../SwizHook.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
@@ -424,11 +425,10 @@ async function tryRecordSkippedHook(
  * Finalize a hook execution record: apply matcher, detect slow hooks, and
  * start the cooldown timer when applicable.
  *
- * Cooldowns only activate after a **deny/block** result — when the hook
- * allowed the tool call, the cooldown is not started so the hook will run
- * again on the next invocation. This lets enforcement hooks stay quiet once
- * they've flagged an issue, giving the agent time to fix it without repeated
- * blocks on every tool call.
+ * Default `cooldownMode` is `block-only`: timer starts only after deny/block.
+ * With `cooldownMode: "always"`, the timer starts after every run (including
+ * allow / context-only), as long as the hook returns normally — inline hooks
+ * must not call `process.exit` before returning, or cooldown will not record.
  */
 function finalizeExecution(
   execution: HookExecution,
@@ -515,13 +515,28 @@ export interface HookEntry {
   matcher: string | undefined
 }
 
+/** True when the hook runs in the sync pipeline (non-async or `async` + block-until-complete). */
+export function runsInSyncPipeline(hook: HookDef): boolean {
+  const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
+  if (!isAsync) return true
+  const mode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
+  return mode === "block-until-complete"
+}
+
+/** True when the hook is async and should use `launchAsyncHooks` (fire-and-forget path). */
+export function isAsyncFireAndForgetHook(hook: HookDef): boolean {
+  const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
+  if (!isAsync) return false
+  const mode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
+  return mode !== "block-until-complete"
+}
+
 /** Collect all sync hooks from all groups into a flat ordered list. Exported for unit tests. */
 export function flatSyncHooks(groups: HookGroup[]): HookEntry[] {
   const entries: HookEntry[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
-      const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
-      if (!isAsync) entries.push({ hook, matcher: group.matcher })
+      if (runsInSyncPipeline(hook)) entries.push({ hook, matcher: group.matcher })
     }
   }
   return entries
@@ -549,14 +564,19 @@ async function runInlineHook(
 
   try {
     const input = JSON.parse(payloadStr) as Parameters<typeof hook.run>[0]
-    const output = await hook.run(input)
+    const output = await withInlineSwizHookRun(async () => hook.run(input))
     if (output && Object.keys(output).length > 0) {
-      parsed = output
+      parsed = output as Record<string, unknown>
       status = "ok"
     }
   } catch (err) {
-    log(`   ⚠ ${hook.name} [inline error: ${err}]`)
-    status = "error"
+    if (err instanceof SwizHookExit) {
+      parsed = err.output as Record<string, unknown>
+      status = "ok"
+    } else {
+      log(`   ⚠ ${hook.name} [inline error: ${err}]`)
+      status = "error"
+    }
   }
 
   const endTime = Date.now()
@@ -684,9 +704,7 @@ export async function launchAsyncHooks(
   // Flatten all async hooks across groups for concurrent condition evaluation.
   type AsyncEntry = { hook: HookDef; id: string }
   const asyncEntries: AsyncEntry[] = groups.flatMap((group) =>
-    group.hooks
-      .filter((h) => (isInlineHookDef(h) ? h.hook.async : h.async))
-      .map((h) => ({ hook: h, id: hookIdentifier(h) }))
+    group.hooks.filter(isAsyncFireAndForgetHook).map((h) => ({ hook: h, id: hookIdentifier(h) }))
   )
   if (asyncEntries.length === 0) return
 

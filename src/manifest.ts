@@ -1,6 +1,8 @@
 // Agent-agnostic hook manifest.
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
+// Hooks may set `async: true` for concurrent scheduling; optional `asyncMode` chooses
+// fire-and-forget (default) vs block-until-complete (sync pipeline). See SwizHookMeta.
 
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"

@@ -11,7 +11,7 @@ export function isGraphQLRateLimited(stderr: string): boolean {
 
 // ─── List REST fallback (issue/pr/run list) ─────────────────────────────────
 
-interface RestFallbackMapping {
+export interface RestFallbackMapping {
   endpoint: string
   /** Transforms the raw REST response body into the shape expected by the caller. */
   normalize?: (raw: unknown) => unknown

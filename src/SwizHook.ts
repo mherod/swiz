@@ -6,6 +6,11 @@
  * typed run() function. Hooks defined this way can be registered directly in
  * the manifest and executed in-process — no subprocess spawn required.
  *
+ * **No `process.exit` in `run()`:** return `preToolUseAllow` / `preToolUseDeny`,
+ * `buildContextHookOutput`, etc. Subprocess-only helpers (`denyPreToolUse`,
+ * `emitContext`, …) redirect via `SwizHookExit` during inline dispatch — prefer
+ * explicit returns.
+ *
  * ## Migration path
  * Existing file-based hooks continue to work unchanged via `FileHookDef`. New
  * hooks can adopt this format by implementing `SwizHook<TInput>` and registering
@@ -147,8 +152,20 @@ export interface SwizHookMeta {
   matcher?: string
   /** Maximum seconds before the dispatcher considers this hook timed out. */
   timeout?: number
-  /** When true, hook runs fire-and-forget without blocking the dispatch chain. */
+  /**
+   * When true, the hook may run outside the synchronous fan-out (see `asyncMode`).
+   * Has no effect unless the dispatcher treats the event as supporting async hooks.
+   */
   async?: boolean
+  /**
+   * How the dispatcher schedules hooks with `async: true`.
+   * - `"fire-and-forget"` (default): started alongside sync hooks; not awaited in CLI.
+   *   In daemon context, file hooks run on the worker pool and are awaited before the
+   *   dispatch completes; inline hooks are still awaited only when `daemonContext` is set.
+   * - `"block-until-complete"`: runs in the sync hook pipeline and is fully awaited; output
+   *   merges like a non-async hook (deny/block/context apply normally).
+   */
+  asyncMode?: "fire-and-forget" | "block-until-complete"
   /**
    * Minimum seconds between successive runs (scoped per hook name + cwd).
    * Behaviour controlled by `cooldownMode`.
@@ -191,7 +208,9 @@ export interface SwizHook<TInput = ToolHookInput> extends SwizHookMeta {
    *
    * @param input - Parsed hook payload from stdin.
    * @returns A HookOutput object (or Promise thereof). Return `{}` to pass
-   *   without a hint. Return `{ decision: "deny", reason: "..." }` to block.
+   *   without a hint. Use `preToolUseDeny` / blocking shapes for denials. Do not call
+   *   `process.exit` or rely on subprocess-only `hook-utils` helpers — return structured
+   *   output so cooldowns and multi-hook dispatch work.
    */
   run(input: TInput): SwizHookOutput | Promise<SwizHookOutput>
 }

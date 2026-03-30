@@ -98,13 +98,16 @@ const posttoolusGitStatus: SwizHook<ToolHookInput> = {
   name: "posttooluse-git-status",
   event: "postToolUse",
   cooldownSeconds: 60,
+  cooldownMode: "always",
   timeout: 5,
 
   async run(input: ToolHookInput): Promise<SwizHookOutput> {
     const cwd = input.cwd
     if (!cwd) return {}
 
-    const { isGitRepo, getGitStatusV2, emitContext } = await import("../src/utils/hook-utils.ts")
+    const { buildContextHookOutput, isGitRepo, getGitStatusV2 } = await import(
+      "../src/utils/hook-utils.ts"
+    )
     if (!(await isGitRepo(cwd))) return {}
 
     // Try daemon cache first to avoid spawning git on every tool call.
@@ -134,9 +137,7 @@ const posttoolusGitStatus: SwizHook<ToolHookInput> = {
       ).collaborationMode
     }
     const status = buildGitContextLine(gitStatus, collabMode)
-
-    await emitContext("PostToolUse", status)
-    return {}
+    return buildContextHookOutput("PostToolUse", status)
   },
 }
 

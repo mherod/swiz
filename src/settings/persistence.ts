@@ -239,6 +239,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   applySchemaFields(obj, result)
   applyBooleanFields(obj, result, [
     "autoContinue",
+    "pushGate",
     "qualityChecksGate",
     "strictNoDirectMain",
     "trunkMode",
@@ -276,6 +277,9 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
         const def: FileHookDef = { file: h.file as string }
         if (typeof h.timeout === "number") def.timeout = h.timeout
         if (typeof h.async === "boolean") def.async = h.async
+        if (h.asyncMode === "fire-and-forget" || h.asyncMode === "block-until-complete") {
+          def.asyncMode = h.asyncMode
+        }
         if (typeof h.condition === "string") def.condition = h.condition
         if (typeof h.cooldownSeconds === "number") def.cooldownSeconds = h.cooldownSeconds
         if (Array.isArray(h.stacks) && h.stacks.every((s: unknown) => typeof s === "string")) {

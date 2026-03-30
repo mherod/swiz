@@ -19,6 +19,7 @@
 
 import type { LanguageModel } from "ai"
 import type { ZodType } from "zod"
+import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
 import {
   ensureGeminiApiKey,
@@ -41,13 +42,7 @@ export type AiProviderId = "gemini" | "claude" | "openrouter"
 
 // ─── Provider options ─────────────────────────────────────────────────────────
 
-export interface PromptOptions {
-  /** Per-call timeout in milliseconds. */
-  timeout?: number
-  /** External AbortSignal — takes precedence over timeout. */
-  signal?: AbortSignal
-  /** Model identifier. Provider-specific defaults apply when omitted. */
-  model?: string
+export interface PromptOptions extends BaseAiPromptOptions {
   /**
    * Force a specific provider. Overrides AI_PROVIDER env var and auto-selection.
    * Throws if the requested provider is not available.

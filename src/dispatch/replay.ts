@@ -58,7 +58,7 @@ async function collectEligibleHooks(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (isInlineHookDef(hook)) continue // inline hooks run in-process; not replayable as file
-      if (hook.async) continue
+      if (hook.async && hook.asyncMode !== "block-until-complete") continue
       if (!(await evalCondition(hook.condition))) {
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue

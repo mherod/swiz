@@ -42,7 +42,7 @@ const posttoolusGitContext: SwizHook<ToolHookInput> = {
     const { tool_name, cwd } = input
     if (!tool_name || !cwd) return {}
 
-    const { isShellTool, emitContext, git, getRepoSlug, isGitRepo } = await import(
+    const { buildContextHookOutput, isShellTool, git, getRepoSlug, isGitRepo } = await import(
       "../src/utils/hook-utils.ts"
     )
     if (!isShellTool(tool_name)) return {}
@@ -146,7 +146,7 @@ const posttoolusGitContext: SwizHook<ToolHookInput> = {
     }
 
     if (lines.length > 0) {
-      await emitContext("PostToolUse", lines.join("\n"))
+      return buildContextHookOutput("PostToolUse", lines.join("\n"))
     }
 
     return {}

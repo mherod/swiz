@@ -18,6 +18,8 @@ export interface FileHookDef {
   file: string
   timeout?: number
   async?: boolean
+  /** Only meaningful when `async` is true; default is fire-and-forget. */
+  asyncMode?: "fire-and-forget" | "block-until-complete"
   cooldownSeconds?: number
   cooldownMode?: "block-only" | "always"
   condition?: string

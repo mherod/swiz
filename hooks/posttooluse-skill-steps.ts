@@ -41,9 +41,8 @@ const posttoolusSkillSteps: SwizHook<SkillToolInput> = {
     })
 
     if (result) {
-      // Import emitContext dynamically (hook-utils → skill-utils → agents → manifest cycle).
-      const { emitContext } = await import("../src/utils/hook-utils.ts")
-      await emitContext("PostToolUse", formatSkillStepsSummary(result))
+      const { buildContextHookOutput } = await import("../src/utils/hook-utils.ts")
+      return buildContextHookOutput("PostToolUse", formatSkillStepsSummary(result))
     }
 
     return {}

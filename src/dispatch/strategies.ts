@@ -98,8 +98,11 @@ type HookResult = { execution: HookExecution; parsed: Record<string, unknown> | 
 
 /**
  * Shared scaffolding for all three strategies: sets up an AbortController,
- * fans out sync hooks concurrently with async hooks, cleans up the abort
- * listener, attaches hookExecutions to the response, and writes it to stdout.
+ * fans out sync hooks concurrently with fire-and-forget async hooks, cleans up
+ * the abort listener, attaches hookExecutions to the response, and writes stdout.
+ *
+ * Hooks with `async: true` and `asyncMode: "block-until-complete"` are included
+ * in the sync fan-out (via `flatSyncHooks`) and are fully awaited like non-async hooks.
  *
  * `onResult` is called per-hook to let the strategy short-circuit (abort)
  * when a deny/block is detected. `processResults` builds the final response
