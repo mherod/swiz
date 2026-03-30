@@ -92,66 +92,87 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
   }
 }
 
+// ─── Shared strategy pipeline ──────────────────────────────────────────────
+
+type HookResult = { execution: HookExecution; parsed: Record<string, unknown> | null }
+
+/**
+ * Shared scaffolding for all three strategies: sets up an AbortController,
+ * fans out sync hooks concurrently with async hooks, cleans up the abort
+ * listener, attaches hookExecutions to the response, and writes it to stdout.
+ *
+ * `onResult` is called per-hook to let the strategy short-circuit (abort)
+ * when a deny/block is detected. `processResults` builds the final response
+ * from the collected results.
+ */
+async function runStrategyPipeline(
+  ctx: HookStrategyContext,
+  opts: {
+    onResult?: (result: HookResult, abort: () => void) => void
+    processResults: (results: HookResult[], executions: HookExecution[]) => Record<string, unknown>
+  }
+): Promise<Record<string, unknown>> {
+  const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
+  const entries = flatSyncHooks(filteredGroups)
+  const controller = new AbortController()
+  const { signal } = controller
+
+  const onDispatchAbort = () => controller.abort()
+  ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
+
+  const [results] = await Promise.all([
+    Promise.all(
+      entries.map(async (e) => {
+        const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
+        opts.onResult?.(result, () => controller.abort())
+        return result
+      })
+    ),
+    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
+  ])
+
+  ctx.signal?.removeEventListener("abort", onDispatchAbort)
+
+  const executions: HookExecution[] = []
+  const finalResponse = opts.processResults(results, executions)
+
+  logSlowHookSummary(executions)
+  if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
+  writeResponse(finalResponse)
+  return finalResponse
+}
+
+// ─── Strategy implementations ──────────────────────────────────────────────
+
 class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
-
     const hints: string[] = []
     const contexts: string[] = []
     const finalResponse: Record<string, unknown> = {}
-    const executions: HookExecution[] = []
 
-    const entries = flatSyncHooks(filteredGroups)
-    // AbortController allows early termination: when one hook denies OR the
-    // dispatch-level timeout fires, all running hook processes are killed
-    // immediately. Each hook checks the signal before spawning and listens
-    // for abort to kill its subprocess mid-flight.
-    const controller = new AbortController()
-    const { signal } = controller
-
-    // If the dispatch-level signal fires, propagate abort to our local controller.
-    const onDispatchAbort = () => controller.abort()
-    ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
-
-    // Run async hooks concurrently with sync hooks — in daemon context this avoids
-    // blocking the sync fan-out until all async hooks complete.
-    const [results] = await Promise.all([
-      Promise.all(
-        entries.map(async (e) => {
-          const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
-          // If this hook denied, abort all other running hooks immediately.
-          if (result.parsed && isDeny(result.parsed)) {
-            controller.abort()
+    return runStrategyPipeline(ctx, {
+      onResult: (result, abort) => {
+        if (result.parsed && isDeny(result.parsed)) abort()
+      },
+      processResults: (results, executions) => {
+        for (const { execution, parsed: resp } of results) {
+          if (execution.status === "skipped" || execution.status === "aborted") {
+            executions.push(execution)
+            continue
           }
-          return result
-        })
-      ),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
-    ])
-
-    ctx.signal?.removeEventListener("abort", onDispatchAbort)
-
-    for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped" || execution.status === "aborted") {
-        executions.push(execution)
-        continue
-      }
-      const classification = classifyPreToolResult(execution, resp, hints, contexts)
-      executions.push(execution)
-      if (classification === "deny") {
-        Object.assign(finalResponse, resp)
-        break
-      }
-    }
-
-    if (!isDeny(finalResponse)) {
-      Object.assign(finalResponse, buildPreToolResponse(hints, contexts))
-    }
-    logSlowHookSummary(executions)
-    if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-    writeResponse(finalResponse)
-    return finalResponse
+          const classification = classifyPreToolResult(execution, resp, hints, contexts)
+          executions.push(execution)
+          if (classification === "deny") {
+            Object.assign(finalResponse, resp)
+            break
+          }
+        }
+        if (!isDeny(finalResponse)) {
+          Object.assign(finalResponse, buildPreToolResponse(hints, contexts))
+        }
+        return finalResponse
+      },
+    })
   }
 }
 
@@ -290,11 +311,9 @@ async function tryAutoSteerStopBlock(
 
 class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
+    const { canonicalEvent, enrichedPayloadStr } = ctx
 
     // on_session_stop: short-circuit all stop hooks if pending messages exist.
-    // Deliver queued messages and return immediately — stop won't actually happen,
-    // so running the full hook chain is unnecessary.
     if (canonicalEvent === "stop") {
       const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
       if (shortCircuited) {
@@ -305,50 +324,25 @@ class BlockingStrategy implements HookExecutionStrategy {
     }
 
     const finalResponse: Record<string, unknown> = {}
-    const executions: HookExecution[] = []
 
-    // Fan out all sync hooks concurrently with async hooks; scan results in declaration order.
-    // AbortController kills remaining hooks on first block (including stop events)
-    // and also fires on dispatch-level timeout.
-    const entries = flatSyncHooks(filteredGroups)
-    const controller = new AbortController()
-    const { signal } = controller
+    const response = await runStrategyPipeline(ctx, {
+      onResult: (result, abort) => {
+        if (result.parsed && isBlock(result.parsed)) abort()
+      },
+      processResults: (results, executions) => {
+        processBlockingResults(results, executions, finalResponse)
+        if (!isBlock(finalResponse)) {
+          log(`   result: all passed`)
+        }
+        return finalResponse
+      },
+    })
 
-    // Propagate dispatch-level abort to our local controller.
-    const onDispatchAbort = () => controller.abort()
-    ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
-
-    const [results] = await Promise.all([
-      Promise.all(
-        entries.map(async (e) => {
-          // For stop events, only abort on dispatch-level timeout (not first-block).
-          // For other blocking events, also abort on first block.
-          const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
-          if (result.parsed && isBlock(result.parsed)) {
-            controller.abort()
-          }
-          return result
-        })
-      ),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
-    ])
-
-    ctx.signal?.removeEventListener("abort", onDispatchAbort)
-
-    processBlockingResults(results, executions, finalResponse)
-
-    if (canonicalEvent === "stop" && isBlock(finalResponse)) {
-      await tryAutoSteerStopBlock(finalResponse, enrichedPayloadStr)
+    if (canonicalEvent === "stop" && isBlock(response)) {
+      await tryAutoSteerStopBlock(response, enrichedPayloadStr)
     }
 
-    if (!isBlock(finalResponse)) {
-      log(`   result: all passed`)
-    }
-    logSlowHookSummary(executions)
-    if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-    writeResponse(finalResponse)
-    return finalResponse
+    return response
   }
 }
 
@@ -358,59 +352,45 @@ class BlockingStrategy implements HookExecutionStrategy {
  */
 class ContextStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, hookEventName, daemonContext, cwd } = ctx
-
+    const { hookEventName } = ctx
     const contexts: string[] = []
-    const executions: HookExecution[] = []
 
-    // All context hooks are independent — fan out fully, merge results in order.
-    // Async hooks run concurrently with the sync fan-out.
-    // Dispatch-level abort signal is passed through for timeout enforcement.
-    const entries = flatSyncHooks(filteredGroups)
-    const [results] = await Promise.all([
-      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd, ctx.signal))),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
-    ])
+    return runStrategyPipeline(ctx, {
+      processResults: (results, executions) => {
+        for (const { execution, parsed: resp } of results) {
+          if (execution.status === "skipped" || execution.status === "aborted") {
+            executions.push(execution)
+            continue
+          }
+          if (!resp) {
+            log(`   ✓ ${execution.file} (no output)`)
+            executions.push(execution)
+            continue
+          }
+          const ctxText = extractContext(resp)
+          if (ctxText) {
+            execution.status = "allow-with-reason"
+            contexts.push(ctxText)
+            log(`   ✓ ${execution.file} (context: ${ctxText.slice(0, 100)})`)
+          } else {
+            log(`   ✓ ${execution.file} (no context extracted)`)
+          }
+          executions.push(execution)
+        }
 
-    for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped" || execution.status === "aborted") {
-        executions.push(execution)
-        continue
-      }
-      if (!resp) {
-        log(`   ✓ ${execution.file} (no output)`)
-        executions.push(execution)
-        continue
-      }
-      const ctxText = extractContext(resp)
-      if (ctxText) {
-        execution.status = "allow-with-reason"
-        contexts.push(ctxText)
-        log(`   ✓ ${execution.file} (context: ${ctxText.slice(0, 100)})`)
-      } else {
-        log(`   ✓ ${execution.file} (no context extracted)`)
-      }
-      executions.push(execution)
-    }
-
-    const finalResponse: Record<string, unknown> = {}
-
-    if (contexts.length === 0) {
-      log(`   result: no contexts to merge`)
-    } else {
-      log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
-      Object.assign(finalResponse, {
-        hookSpecificOutput: {
-          hookEventName,
-          additionalContext: contexts.join("\n\n"),
-        },
-      })
-    }
-    logSlowHookSummary(executions)
-    if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-    writeResponse(finalResponse)
-    return finalResponse
+        if (contexts.length === 0) {
+          log(`   result: no contexts to merge`)
+          return {}
+        }
+        log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
+        return {
+          hookSpecificOutput: {
+            hookEventName,
+            additionalContext: contexts.join("\n\n"),
+          },
+        }
+      },
+    })
   }
 }
 
