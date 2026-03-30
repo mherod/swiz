@@ -461,12 +461,17 @@ export function blockStopObj(
   reason: string,
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): HookOutput {
+  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
     reason: reason + actionRequired(reason, options),
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
+    systemMessage: preview,
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext: preview,
+    },
   })
 }
 
@@ -479,12 +484,17 @@ export function blockStop(
 }
 
 function blockStopRawObj(reason: string) {
+  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
     reason,
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
+    systemMessage: preview,
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext: preview,
+    },
   })
 }
 
@@ -496,13 +506,18 @@ export function blockStopRaw(reason: string): never {
 /** Inline SwizHook equivalent of {@link blockStopHumanRequired}. */
 export function blockStopHumanRequiredObj(reason: string): HookOutput {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
+  const preview = extractFirstLine(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
     reason: fullReason,
     resolution: "human-required",
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
+    systemMessage: preview,
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext: preview,
+    },
   })
 }
 

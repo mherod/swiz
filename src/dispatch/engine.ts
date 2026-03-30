@@ -537,10 +537,15 @@ export function isBlock(resp: Record<string, unknown>): boolean {
   return hso?.decision === "block" || hso?.decision === "deny" || false
 }
 
+/**
+ * Per-hook context string for merging in blocking/context strategies.
+ * Only `hookSpecificOutput.additionalContext` counts — top-level `systemMessage`
+ * is for the merged dispatch envelope / UI preview, not per-hook aggregation.
+ */
 export function extractContext(resp: Record<string, unknown>): string | null {
   const hso = getHookSpecificOutput(resp)
-  const ctx = hso?.additionalContext ?? resp.systemMessage
-  return typeof ctx === "string" ? ctx : null
+  const ctx = hso?.additionalContext
+  return typeof ctx === "string" && ctx.trim() ? ctx.trim() : null
 }
 
 // ─── Concurrent hook runner ──────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import type { HookDef } from "../hook-types.ts"
 import { hookIdentifier } from "../manifest.ts"
 import {
   classifyHookOutput,
+  extractContext,
   flatSyncHooks,
   type HookEntry,
   type HookStatus,
@@ -12,6 +13,30 @@ import {
   runsInSyncPipeline,
   toolMatchesToken,
 } from "./engine.ts"
+
+// ─── extractContext: per-hook additionalContext only ─────────────────────────
+
+describe("extractContext", () => {
+  it("returns hookSpecificOutput.additionalContext when set", () => {
+    expect(
+      extractContext({
+        hookSpecificOutput: { additionalContext: "  ctx  ", hookEventName: "PostToolUse" },
+      })
+    ).toBe("ctx")
+  })
+
+  it("returns null when only top-level systemMessage is set (aggregation uses additionalContext)", () => {
+    expect(extractContext({ systemMessage: "preview only" })).toBeNull()
+  })
+
+  it("returns null when additionalContext is empty or whitespace", () => {
+    expect(
+      extractContext({
+        hookSpecificOutput: { additionalContext: "   ", hookEventName: "Stop" },
+      })
+    ).toBeNull()
+  })
+})
 
 // ─── classifyHookOutput: pure status classification ─────────────────────────
 

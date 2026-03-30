@@ -7,7 +7,7 @@ import { gh, git } from "../src/git-helpers.ts"
 import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
 import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { prPollHookInputSchema } from "./schemas.ts"
+import { hookOutputSchema, prPollHookInputSchema } from "./schemas.ts"
 
 const BOT_AUTHOR_RE = /^(dependabot|renovate|github-actions|app\/)/i
 const BOT_SUFFIX_RE = /\[bot\]$/i
@@ -94,8 +94,16 @@ export async function evaluatePrpollNotify(input: unknown): Promise<SwizHookOutp
   const summary = formatNotifications(enriched)
   await writePrPollState(home, { lastPolledAt: new Date().toISOString() })
 
-  // `systemMessage` merges in blocking strategy; `reason` preserves legacy stdout shape.
-  return { systemMessage: summary, reason: summary }
+  // Top-level `systemMessage` / `reason` for UIs; `hookSpecificOutput.additionalContext`
+  // is what `extractContext` aggregates in blocking/context strategies.
+  return hookOutputSchema.parse({
+    systemMessage: summary,
+    reason: summary,
+    hookSpecificOutput: {
+      hookEventName: "prPoll",
+      additionalContext: summary,
+    },
+  })
 }
 
 const prpollNotify: SwizHook<Record<string, unknown>> = {

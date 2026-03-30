@@ -209,7 +209,8 @@ function processBlockingResults(
         // First block: copy its entire response as the final response
         Object.assign(finalResponse, resp)
         firstBlockHandled = true
-        // Do NOT extract its context here — its systemMessage is already in finalResponse
+        // Do NOT extractContext here — the full hook payload (including
+        // hookSpecificOutput.additionalContext) is already merged via Object.assign
       } else {
         // Subsequent blocks: only extract their context (if any) for inclusion
         const ctx = extractContext(resp)
@@ -221,7 +222,7 @@ function processBlockingResults(
       continue
     }
 
-    // Non-block hook: extract context (systemMessage / additionalContext)
+    // Non-block hook: extract per-hook additionalContext for merging
     if (resp) {
       const ctx = extractContext(resp)
       if (ctx) contexts.push(ctx)
