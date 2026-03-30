@@ -5,6 +5,9 @@
  * or any module that creates a circular dependency through manifest.ts.
  *
  * Safe to import from manifest.ts via inline hooks.
+ *
+ * NOTE: formatActionPlan here omits translateToolNames support (requires agents.ts).
+ * Hooks that need tool-name translation must remain file-based.
  */
 
 import type { ToolHookInput } from "../../hooks/schemas.ts"
@@ -67,4 +70,50 @@ export const PLACEHOLDER_SUBJECT_RE = /^(?:recovered task|session bootstrap)\b/i
 /** Returns true if the subject is an auto-generated placeholder (not real agent work). */
 export function isPlaceholderSubject(subject: string): boolean {
   return PLACEHOLDER_SUBJECT_RE.test(subject.trim())
+}
+
+// ─── Action plan formatting ─────────────────────────────────────────────────
+// Subset of src/action-plan.ts without agents.ts / translateToolNames support.
+// Hooks that need translateToolNames must remain file-based.
+
+/** A step can be a plain string or an array of sub-steps (recursively nested). */
+export type ActionPlanItem = string | ActionPlanItem[]
+
+/**
+ * Format a numbered action plan string from a list of steps.
+ * Steps can be plain strings or nested arrays for sub-step hierarchies.
+ * Does NOT translate tool names (avoids agents.ts dependency).
+ */
+export function formatActionPlan(steps: ActionPlanItem[], options?: { header?: string }): string {
+  if (steps.length === 0) return ""
+  const lines = renderItems(steps, 1, "  ")
+  const header = options?.header ?? "Action plan:"
+  return `${header}\n${lines}\n`
+}
+
+function renderItems(items: ActionPlanItem[], startIndex: number, indent: string): string {
+  const lines: string[] = []
+  let index = startIndex
+  for (const item of items) {
+    if (typeof item === "string") {
+      lines.push(`${indent}${index}. ${item}`)
+      index++
+    } else {
+      lines.push(...renderSubItems(item, `${indent}   `))
+    }
+  }
+  return lines.join("\n")
+}
+
+function renderSubItems(items: ActionPlanItem[], indent: string): string[] {
+  const lines: string[] = []
+  for (const [i, item] of items.entries()) {
+    if (typeof item === "string") {
+      const letter = String.fromCharCode(97 + (i % 26))
+      lines.push(`${indent}${letter}. ${item}`)
+    } else {
+      lines.push(...renderSubItems(item, `${indent}   `))
+    }
+  }
+  return lines
 }

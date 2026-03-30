@@ -10,68 +10,86 @@
 //
 // This hook prevents accidental privilege escalation by blocking permission edits
 // on feature branches with an explanatory message.
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
+import { git } from "../src/git-helpers.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  getDefaultBranch,
-  git,
-  isFileEditTool,
-} from "../src/utils/hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+} from "../src/SwizHook.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
 
-const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+const pretoolusWorkflowPermissionsGate: SwizHook = {
+  name: "pretooluse-workflow-permissions-gate",
+  event: "preToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
 
-if (!isFileEditTool(input.tool_name ?? "")) process.exit(0)
+  async run(rawInput) {
+    const input = rawInput as Record<string, unknown>
+    if (!isFileEditTool(String(input.tool_name ?? ""))) return {}
 
-const filePath: string = (input.tool_input?.file_path as string | undefined) ?? ""
-if (!filePath) process.exit(0)
+    const toolInput = input.tool_input as Record<string, string | undefined> | undefined
+    const filePath: string = (toolInput?.file_path ?? "").normalize("NFKC")
+    if (!filePath) return {}
 
-// Only check .github/workflows/ YAML files
-const workflowPathRe = /\.github\/workflows\/[^/]+\.ya?ml$/
-if (!workflowPathRe.test(filePath)) process.exit(0)
+    // Only check .github/workflows/ YAML files
+    const workflowPathRe = /\.github\/workflows\/[^/]+\.ya?ml$/
+    if (!workflowPathRe.test(filePath)) return {}
 
-// Get the new content being written — Edit uses new_string, Write uses content
-// NFKC normalization handled by fileEditHookInputSchema.transform()
-const newContent: string = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+    // Get the new content being written — Edit uses new_string, Write uses content
+    const newContent: string = (toolInput?.new_string ?? toolInput?.content ?? "").normalize("NFKC")
 
-// Check if the new content contains a permissions: keyword
-// Match both top-level `permissions:` and job-level `permissions:` in YAML
-const permissionsRe = /^\s*permissions\s*:/m
-if (!permissionsRe.test(newContent)) process.exit(0)
+    // Check if the new content contains a permissions: keyword
+    const permissionsRe = /^\s*permissions\s*:/m
+    if (!permissionsRe.test(newContent)) return {}
 
-// Determine current and default branches
-const cwd = input.cwd ?? process.cwd()
-const currentBranch = await git(["branch", "--show-current"], cwd)
-if (!currentBranch) process.exit(0) // Detached HEAD or not a git repo — allow
+    // Determine current and default branches
+    const cwd = (input.cwd as string | undefined) ?? process.cwd()
+    const currentBranch = await git(["branch", "--show-current"], cwd)
+    if (!currentBranch) return {} // Detached HEAD or not a git repo — allow
 
-const defaultBranch = await getDefaultBranch(cwd)
+    const defaultBranch = await getDefaultBranch(cwd)
 
-// On default branch — allow (direct pushes to main are gated by other hooks)
-if (currentBranch === defaultBranch) {
-  allowPreToolUse(`Workflow permissions edit on default branch '${defaultBranch}' — allowed`)
+    // On default branch — allow (direct pushes to main are gated by other hooks)
+    if (currentBranch === defaultBranch) {
+      return preToolUseAllow(
+        `Workflow permissions edit on default branch '${defaultBranch}' — allowed`
+      )
+    }
+
+    return preToolUseDeny(
+      [
+        "Workflow permission change blocked on non-default branch.",
+        "",
+        `  File: ${filePath}`,
+        `  Current branch: ${currentBranch}`,
+        `  Default branch: ${defaultBranch}`,
+        "",
+        "GitHub Actions security model: workflow `permissions:` changes made in a",
+        "PR branch do NOT take effect until merged to the default branch. This",
+        "creates a dangerous blind spot:",
+        "",
+        "  1. The elevated permissions appear inert during PR CI (runs with",
+        "     existing default-branch permissions)",
+        "  2. Reviewers may not scrutinize the change since 'it didn't break anything'",
+        "  3. Upon merge, the elevated permissions silently activate",
+        "",
+        "Instead of modifying workflow permissions:",
+        "  - Use repository Settings → Actions → General → Workflow permissions",
+        "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on the default branch only",
+        `  - If this change is intentional, make it directly on '${defaultBranch}'`,
+      ].join("\n")
+    )
+  },
 }
 
-denyPreToolUse(
-  [
-    "Workflow permission change blocked on non-default branch.",
-    "",
-    `  File: ${filePath}`,
-    `  Current branch: ${currentBranch}`,
-    `  Default branch: ${defaultBranch}`,
-    "",
-    "GitHub Actions security model: workflow `permissions:` changes made in a",
-    "PR branch do NOT take effect until merged to the default branch. This",
-    "creates a dangerous blind spot:",
-    "",
-    "  1. The elevated permissions appear inert during PR CI (runs with",
-    "     existing default-branch permissions)",
-    "  2. Reviewers may not scrutinize the change since 'it didn't break anything'",
-    "  3. Upon merge, the elevated permissions silently activate",
-    "",
-    "Instead of modifying workflow permissions:",
-    "  - Use repository Settings → Actions → General → Workflow permissions",
-    "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on the default branch only",
-    `  - If this change is intentional, make it directly on '${defaultBranch}'`,
-  ].join("\n")
-)
+export default pretoolusWorkflowPermissionsGate
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusWorkflowPermissionsGate)

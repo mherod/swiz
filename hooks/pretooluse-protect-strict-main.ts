@@ -7,14 +7,18 @@
 //   swiz settings disable strict-no-direct-main
 // This hook denies that command unconditionally — the setting can only be
 // disabled by the user directly at the terminal (where this hook never fires).
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import {
-  allowPreToolUse,
-  buildIssueGuidance,
-  denyPreToolUse,
-  isSettingDisableCommand,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+} from "../src/SwizHook.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 
 // All recognised aliases for the strictNoDirectMain setting
 const STRICT_MAIN_ALIASES = [
@@ -36,19 +40,32 @@ export function isStrictMainDisableCommand(command: string): boolean {
   return isSettingDisableCommand(command, STRICT_MAIN_ALIASES)
 }
 
-if (import.meta.main) {
-  const input = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+const pretoolusePprotectStrictMain: SwizHook = {
+  name: "pretooluse-protect-strict-main",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
 
-  const command: string = input?.tool_input?.command ?? ""
+  run(rawInput) {
+    const input = rawInput as Record<string, unknown>
+    if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
-  if (isStrictMainDisableCommand(command)) {
-    denyPreToolUse(
-      "Disabling strict-no-direct-main is not permitted from agent Bash commands.\n\n" +
-        "This setting enforces the feature-branch workflow for non-trivial changes.\n" +
-        "It can only be disabled by the user directly at the terminal.\n" +
-        buildIssueGuidance(null)
-    )
-  }
-  allowPreToolUse("Command does not disable strict-no-direct-main")
+    const command: string = ((input.tool_input as Record<string, unknown>)?.command as string) ?? ""
+
+    if (isStrictMainDisableCommand(command)) {
+      return preToolUseDeny(
+        "Disabling strict-no-direct-main is not permitted from agent Bash commands.\n\n" +
+          "This setting enforces the feature-branch workflow for non-trivial changes.\n" +
+          "It can only be disabled by the user directly at the terminal.\n" +
+          buildIssueGuidance(null)
+      )
+    }
+
+    return preToolUseAllow("Command does not disable strict-no-direct-main")
+  },
 }
+
+export default pretoolusePprotectStrictMain
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusePprotectStrictMain)

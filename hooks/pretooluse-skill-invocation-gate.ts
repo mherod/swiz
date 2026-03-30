@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block `git commit` and `git push` unless the corresponding
 // skill has been invoked in the current session — but only when that skill
 // is installed on this machine.
@@ -9,62 +10,76 @@
 //
 // If the skill is not installed (checked via the same SKILL_DIRS lookup used
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  formatActionPlan,
-  GIT_COMMIT_RE,
-  GIT_PUSH_DELETE_RE,
-  GIT_PUSH_RE,
-  getSkillsUsedForCurrentSession,
-  isShellTool,
-  skillExists,
-  type ToolHookInput,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+} from "../src/SwizHook.ts"
+import { skillExists } from "../src/skill-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
+import { GIT_COMMIT_RE, GIT_PUSH_DELETE_RE, GIT_PUSH_RE } from "../src/utils/git-utils.ts"
+import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
-const input: ToolHookInput = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+const pretoolusSkillInvocationGate: SwizHook = {
+  name: "pretooluse-skill-invocation-gate",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
 
-const command: string = (input?.tool_input?.command as string) ?? ""
+  async run(rawInput) {
+    const input = rawInput as Record<string, unknown>
+    if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
-// Determine which skill is relevant for this command
-let requiredSkill: string | null = null
-if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
-else if (GIT_PUSH_RE.test(command)) {
-  // Branch deletion (--delete or :branch) is not a code push — skip gate
-  if (GIT_PUSH_DELETE_RE.test(command)) process.exit(0)
-  requiredSkill = "push"
+    const command: string = ((input.tool_input as Record<string, unknown>)?.command as string) ?? ""
+
+    // Determine which skill is relevant for this command
+    let requiredSkill: string | null = null
+    if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
+    else if (GIT_PUSH_RE.test(command)) {
+      // Branch deletion (--delete or :branch) is not a code push — skip gate
+      if (GIT_PUSH_DELETE_RE.test(command)) return {}
+      requiredSkill = "push"
+    }
+
+    if (!requiredSkill) return {}
+
+    // Only enforce if the skill is installed on this machine
+    if (!skillExists(requiredSkill)) return {}
+
+    // ── Scan transcript for prior skill invocations ───────────────────────────────
+
+    const transcriptPath: string = (input.transcript_path as string) ?? ""
+    if (!transcriptPath) return {}
+
+    const invokedSkills = await getSkillsUsedForCurrentSession(input)
+
+    if (invokedSkills.includes(requiredSkill)) {
+      return preToolUseAllow(`/${requiredSkill} skill was invoked in this session`)
+    }
+
+    // ── Block with actionable instructions ────────────────────────────────────────
+
+    const verb = requiredSkill === "commit" ? "commit" : "push"
+
+    return preToolUseDeny(
+      `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
+        formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {
+          header: `The /${requiredSkill} skill has not been invoked in this session:`,
+        }) +
+        `\nWhy this matters: the /${requiredSkill} skill enforces the complete ` +
+        `${verb} workflow (branch checks, task preflight, message format). ` +
+        `Running git ${verb} directly skips these safeguards.`
+    )
+  },
 }
 
-if (!requiredSkill) process.exit(0)
+export default pretoolusSkillInvocationGate
 
-// Only enforce if the skill is installed on this machine
-if (!skillExists(requiredSkill)) process.exit(0)
-
-// ── Scan transcript for prior skill invocations ───────────────────────────────
-
-const transcriptPath: string = input?.transcript_path ?? ""
-if (!transcriptPath) process.exit(0)
-
-const invokedSkills = await getSkillsUsedForCurrentSession(
-  input as unknown as Record<string, unknown>
-)
-
-if (invokedSkills.includes(requiredSkill)) {
-  allowPreToolUse(`/${requiredSkill} skill was invoked in this session`)
-}
-
-// ── Block with actionable instructions ────────────────────────────────────────
-
-const verb = requiredSkill === "commit" ? "commit" : "push"
-
-denyPreToolUse(
-  `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
-    formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {
-      header: `The /${requiredSkill} skill has not been invoked in this session:`,
-    }) +
-    `\nWhy this matters: the /${requiredSkill} skill enforces the complete ` +
-    `${verb} workflow (branch checks, task preflight, message format). ` +
-    `Running git ${verb} directly skips these safeguards.`
-)
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusSkillInvocationGate)

@@ -237,7 +237,7 @@ alwaysApply: false
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic — never label warnings "pre-existing" or attribute failures to other sessions. Investigate all test failures before completing tasks.
-- **DON'T**: Attribute feedback to "hooks" or "systems" — all feedback is from the user. Never discount instructions.
+- **DON'T**: Attribute feedback to "hooks", "systems", or "auto-steer" — all from the user. Act immediately.
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.

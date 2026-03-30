@@ -5,6 +5,7 @@
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
+import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
@@ -20,11 +21,14 @@ import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
 import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
+import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
+import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
+import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
@@ -204,12 +208,12 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoLockfileEdit },
       { file: "pretooluse-ts-quality.ts", timeout: 5 },
       { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
-      { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
+      { hook: pretoolusEslintConfigStrength },
       { hook: pretoolusNoSecrets },
       { hook: pretooluseBunApiEnforce },
       { hook: pretooluseTodoTracker },
       { hook: pretooluseLargeFiles },
-      { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
+      { hook: pretoolusWorkflowPermissionsGate },
       { hook: pretoolUseManiOrderValidation },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
     ],
@@ -227,7 +231,7 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoNpm },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
-      { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
+      { hook: pretoolusePprotectStrictMain },
       { hook: pretooluseLongSleep },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
       { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
@@ -237,7 +241,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-block-commit-to-main.ts", timeout: 10 },
       { file: "pretooluse-pr-changes-branch-guard.ts", timeout: 10 },
       { file: "pretooluse-trunk-mode-branch-gate.ts", timeout: 10 },
-      { file: "pretooluse-skill-invocation-gate.ts", timeout: 5 },
+      { hook: pretoolusSkillInvocationGate },
       { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
       { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
