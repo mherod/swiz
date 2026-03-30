@@ -760,7 +760,8 @@ async function resolveRepoContext(input: {
   cwd?: string
   session_id?: string
 }): Promise<RepoContext | null> {
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = input.cwd
+  if (!cwd) return null // fail open: cwd is required for repo detection
   const sessionId = sanitizeSessionId(input.session_id)
 
   if (!(await isGitRepo(cwd))) return null

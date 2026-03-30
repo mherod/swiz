@@ -4,7 +4,8 @@
 import { emitContext, git } from "../src/utils/hook-utils.ts"
 
 async function main(): Promise<void> {
-  const cwd = process.cwd()
+  const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
+  const cwd = (input?.cwd as string) ?? process.cwd()
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return
 

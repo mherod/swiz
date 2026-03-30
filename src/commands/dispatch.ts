@@ -256,7 +256,15 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
 
   const { payload } = parsePayload(payloadStr)
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-  const cwd = (payload.cwd as string | undefined) ?? process.cwd()
+  // Inject CLI process cwd into payload when agent didn't provide it.
+  // The CLI runs in the project directory (Cursor/Claude launches it there),
+  // so process.cwd() is the correct project path. The daemon's process.cwd()
+  // is the swiz installation root — without this injection, hooks would
+  // operate on the wrong repository.
+  if (!payload.cwd) {
+    payload.cwd = process.cwd()
+  }
+  const cwd = payload.cwd as string
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
 
   // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
