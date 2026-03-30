@@ -24,11 +24,13 @@ import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
+import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
+import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
@@ -202,12 +204,12 @@ export const manifest: HookGroup[] = [
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
       { file: "pretooluse-sandboxed-edits.ts", timeout: 5 },
-      { file: "pretooluse-sandbox-guidance-consolidation.ts", timeout: 5 },
+      { hook: pretooluseSandboxGuidanceConsolidation },
       { hook: pretoolusJsonValidation },
       { hook: pretoolUseNoDirectDeps },
       { hook: pretoolusNoNodeModulesEdit },
       { hook: pretoolusNoLockfileEdit },
-      { file: "pretooluse-ts-quality.ts", timeout: 5 },
+      { hook: pretooluseTsQuality },
       { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
       { hook: pretoolusEslintConfigStrength },
       { hook: pretoolusNoSecrets },

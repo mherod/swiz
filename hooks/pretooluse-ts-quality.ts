@@ -3,9 +3,19 @@
 // PreToolUse hook: Blocks edits that weaken TypeScript quality.
 // Checks for: `as any` casts, lint-disable comments, @ts-expect-error/@ts-nocheck/@ts-expect-error.
 // Merged from pretooluse-no-as-any.ts, pretooluse-no-eslint-disable.ts, pretooluse-no-ts-ignore.ts.
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import { allowPreToolUse, denyPreToolUse, formatActionPlan } from "../src/utils/hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
 // ─── stripNonCode ────────────────────────────────────────────────────────────
 
@@ -167,12 +177,12 @@ function countAsAnyCasts(content: string): number {
   return (stripNonCode(content).match(/\bas\s+any\b/g) || []).length
 }
 
-function checkAsAny(oldString: string, newString: string): void {
-  if (!oldString) return
+function checkAsAny(oldString: string, newString: string): SwizHookOutput | null {
+  if (!oldString) return null
   const oldCount = countAsAnyCasts(oldString)
   const newCount = countAsAnyCasts(newString)
   if (newCount > oldCount) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         "Type safety is non-negotiable. Do not add `as any` casts.",
         "",
@@ -195,11 +205,12 @@ function checkAsAny(oldString: string, newString: string): void {
       ].join("\n")
     )
   }
+  return null
 }
 
 // ─── lint-disable check ──────────────────────────────────────────────────────
 
-function checkLintDisables(content: string): void {
+function checkLintDisables(content: string): SwizHookOutput | null {
   // Keywords split across arrays to avoid self-triggering when editing this hook.
   const eslintKw = ["eslint", "disable"].join("-")
   const biomeKw = ["biome", "ignore"].join("-")
@@ -233,7 +244,7 @@ function checkLintDisables(content: string): void {
 
   const matched = patterns.find((pattern) => pattern.re.test(content))
   if (matched) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         "ESLint is the authority. Do not bypass, ignore, or argue with it.",
         "",
@@ -256,6 +267,7 @@ function checkLintDisables(content: string): void {
       ].join("\n")
     )
   }
+  return null
 }
 
 // ─── ts-ignore / ts-expect-error / ts-nocheck checks ────────────────────────
@@ -302,7 +314,7 @@ function containsBareExpectError(content: string, directive: string): boolean {
   )
 }
 
-function checkTsIgnore(content: string): void {
+function checkTsIgnore(content: string): SwizHookOutput | null {
   // Keywords split across arrays to avoid self-triggering when editing this hook.
   const kwIgnore = ["ts", "ignore"].join("-")
   const kwExpect = ["ts", "expect", "error"].join("-")
@@ -310,7 +322,7 @@ function checkTsIgnore(content: string): void {
 
   // Block @ts-nocheck — disables ALL type checking for the entire file at once.
   if (containsDirective(content, kwNoCheck)) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
         "",
@@ -336,7 +348,7 @@ function checkTsIgnore(content: string): void {
 
   // Block @ts-expect-error unconditionally — it silently accumulates and never self-cleans.
   if (containsDirective(content, kwIgnore)) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
         "",
@@ -366,7 +378,7 @@ function checkTsIgnore(content: string): void {
   // Allow @ts-expect-error only when accompanied by a description.
   // A bare directive with no explanation is as opaque as @ts-expect-error.
   if (containsBareExpectError(content, kwExpect)) {
-    denyPreToolUse(
+    return preToolUseDeny(
       [
         `\`@${kwExpect}\` requires a description explaining why suppression is necessary.`,
         "",
@@ -378,32 +390,40 @@ function checkTsIgnore(content: string): void {
       ].join("\n")
     )
   }
+
+  return null
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── SwizHook ─────────────────────────────────────────────────────────────────
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+const pretooluseTsQuality: SwizHook<FileEditHookInput> = {
+  name: "pretooluse-ts-quality",
+  event: "preToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
 
-  const filePath = input.tool_input?.file_path ?? ""
-  if (!/\.(ts|tsx)$/.test(filePath)) {
-    process.exit(0)
-  }
+  run(rawInput) {
+    const input = rawInput as FileEditHookInput
 
-  // NFKC normalization handled by fileEditHookInputSchema.transform()
-  const oldString = input.tool_input?.old_string ?? ""
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+    const filePath = input.tool_input?.file_path ?? ""
+    if (!/\.(ts|tsx)$/.test(filePath)) return {}
 
-  checkAsAny(oldString, newString)
-  checkLintDisables(newString)
-  checkTsIgnore(newString)
+    // NFKC normalization via schema transform is unavailable in inline path; normalize manually.
+    const oldString = (input.tool_input?.old_string ?? "").normalize("NFKC")
+    const newString = (input.tool_input?.new_string ?? input.tool_input?.content ?? "").normalize(
+      "NFKC"
+    )
 
-  allowPreToolUse("")
+    return (
+      checkAsAny(oldString, newString) ??
+      checkLintDisables(newString) ??
+      checkTsIgnore(newString) ??
+      preToolUseAllow("")
+    )
+  },
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
-}
+export default pretooluseTsQuality
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretooluseTsQuality)
