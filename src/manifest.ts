@@ -30,6 +30,7 @@ import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-val
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
+import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
 import { debugLog } from "./debug.ts"
@@ -210,7 +211,7 @@ export const manifest: HookGroup[] = [
       { hook: pretoolusNoNodeModulesEdit },
       { hook: pretoolusNoLockfileEdit },
       { hook: pretooluseTsQuality },
-      { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
+      { hook: pretooluseTsEditStateGate },
       { hook: pretoolusEslintConfigStrength },
       { hook: pretoolusNoSecrets },
       { hook: pretooluseBunApiEnforce },

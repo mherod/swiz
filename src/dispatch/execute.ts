@@ -17,6 +17,7 @@ import {
   getEffectiveSwizSettings,
   type ProjectSwizSettings,
   readProjectSettings,
+  readProjectState,
   readSwizSettings,
   resolveProjectHooks,
 } from "../settings.ts"
@@ -515,10 +516,14 @@ async function injectEffectiveSettings(
   ctx: ReturnType<typeof buildDispatchContext>,
   projectSettings: ProjectSwizSettings | null
 ): Promise<void> {
-  const globalSettings = await readSwizSettings()
+  const [globalSettings, projectState] = await Promise.all([
+    readSwizSettings(),
+    readProjectState(ctx.cwd),
+  ])
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
   const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
   ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, unknown>
+  ctx.payload._projectState = projectState as unknown
 }
 
 async function prepareDispatchGroups(
