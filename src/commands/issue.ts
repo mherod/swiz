@@ -297,20 +297,20 @@ async function handleSync(args: string[]): Promise<void> {
   const result = await syncUpstreamState(repo, cwd)
 
   const r = result
-  const totalUpserted =
-    r.issues.upserted +
-    r.pullRequests.upserted +
-    r.ciStatuses.upserted +
-    r.comments.upserted +
-    r.labels.upserted +
-    r.milestones.upserted +
-    r.branchCi.upserted +
-    r.prBranchDetail.upserted +
-    r.branchProtection.upserted
+  const allChanges = [
+    ...r.issues.changes,
+    ...r.pullRequests.changes,
+    ...r.ciStatuses.changes,
+    ...r.labels.changes,
+    ...r.milestones.changes,
+    ...r.branchCi.changes,
+    ...r.prBranchDetail.changes,
+    ...r.branchProtection.changes,
+  ]
   const totalUnchanged =
     r.issues.skipped + r.pullRequests.skipped + r.labels.skipped + r.milestones.skipped
 
-  if (totalUpserted === 0 && totalUnchanged > 0) {
+  if (allChanges.length === 0 && totalUnchanged > 0) {
     console.log(`✅ Already up to date (${totalUnchanged} entities unchanged)`)
     return
   }
@@ -319,28 +319,46 @@ async function handleSync(args: string[]): Promise<void> {
 
   type Row = [string, string]
   const rows: Row[] = []
-  const fmtEntity = (name: string, b: { upserted: number; removed: number; skipped: number }) => {
+  type ChangeList = { changes: { kind: string; key: string; reason: string }[] }
+  const fmtEntity = (
+    name: string,
+    b: { upserted: number; removed: number; skipped: number } & ChangeList
+  ) => {
     if (b.upserted === 0 && b.removed === 0 && b.skipped === 0) return
     const parts: string[] = []
     if (b.upserted > 0) parts.push(`\x1b[32m+${b.upserted}\x1b[0m`)
     if (b.removed > 0) parts.push(`\x1b[31m-${b.removed}\x1b[0m`)
     if (b.skipped > 0) parts.push(`\x1b[2m${b.skipped} unchanged\x1b[0m`)
     rows.push([name, parts.join("  ")])
+    for (const c of b.changes) {
+      const icon =
+        c.kind === "new"
+          ? "\x1b[32m+\x1b[0m"
+          : c.kind === "removed"
+            ? "\x1b[31m-\x1b[0m"
+            : "\x1b[33m~\x1b[0m"
+      rows.push(["", `  ${icon} ${c.key} \x1b[2m${c.reason}\x1b[0m`])
+    }
   }
-  const fmtSimple = (name: string, upserted: number) => {
-    if (upserted === 0) return
-    rows.push([name, `\x1b[32m+${upserted}\x1b[0m`])
+  const fmtTracked = (name: string, b: { upserted: number } & ChangeList) => {
+    if (b.upserted === 0) return
+    rows.push([name, `\x1b[32m+${b.upserted}\x1b[0m`])
+    for (const c of b.changes) {
+      const icon = c.kind === "new" ? "\x1b[32m+\x1b[0m" : "\x1b[33m~\x1b[0m"
+      rows.push(["", `  ${icon} ${c.key} \x1b[2m${c.reason}\x1b[0m`])
+    }
   }
   fmtEntity("Issues", r.issues)
   fmtEntity("PRs", r.pullRequests)
-  fmtSimple("CI statuses", r.ciStatuses.upserted)
-  fmtSimple("Comments", r.comments.upserted)
+  fmtTracked("CI statuses", r.ciStatuses)
+  if (r.comments.upserted > 0) rows.push(["Comments", `\x1b[32m+${r.comments.upserted}\x1b[0m`])
   fmtEntity("Labels", r.labels)
   fmtEntity("Milestones", r.milestones)
-  fmtSimple("Branch CI", r.branchCi.upserted)
-  fmtSimple("PR detail", r.prBranchDetail.upserted)
-  fmtSimple("Protection", r.branchProtection.upserted)
+  fmtTracked("Branch CI", r.branchCi)
+  fmtTracked("PR detail", r.prBranchDetail)
+  fmtTracked("Protection", r.branchProtection)
 
+  if (rows.length === 0) return
   const maxLabel = Math.max(...rows.map(([l]) => l.length))
   for (const [label, value] of rows) {
     console.log(`  ${label.padEnd(maxLabel)}  ${value}`)

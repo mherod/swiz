@@ -2,16 +2,32 @@ import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.
 
 // ─── Upstream sync ─────────────────────────────────────────────────────────
 
+/** Describes why a single entity was mutated during sync. */
+export interface SyncChange {
+  kind: "new" | "updated" | "removed"
+  /** Entity identifier — issue/PR number, SHA, branch name, or label name. */
+  key: string
+  /** Human-readable reason for the change. */
+  reason: string
+}
+
+export interface SyncBucket {
+  upserted: number
+  removed: number
+  skipped: number
+  changes: SyncChange[]
+}
+
 export interface UpstreamSyncResult {
-  issues: { upserted: number; removed: number; skipped: number }
-  pullRequests: { upserted: number; removed: number; skipped: number }
-  ciStatuses: { upserted: number }
+  issues: SyncBucket
+  pullRequests: SyncBucket
+  ciStatuses: { upserted: number; changes: SyncChange[] }
   comments: { upserted: number }
-  labels: { upserted: number; removed: number; skipped: number }
-  milestones: { upserted: number; removed: number; skipped: number }
-  branchCi: { upserted: number }
-  prBranchDetail: { upserted: number }
-  branchProtection: { upserted: number }
+  labels: SyncBucket
+  milestones: SyncBucket
+  branchCi: { upserted: number; changes: SyncChange[] }
+  prBranchDetail: { upserted: number; changes: SyncChange[] }
+  branchProtection: { upserted: number; changes: SyncChange[] }
 }
 
 /** Extract the maximum `updatedAt` ISO string from a list of entities. */
@@ -54,7 +70,7 @@ function syncEntityGroup(
   open: { number: number }[] | null,
   closed: { number: number }[] | null,
   ops: EntitySyncOps,
-  bucket: { upserted: number; removed: number; skipped: number }
+  bucket: SyncBucket
 ): void {
   if (open) {
     const changed: { number: number }[] = []
@@ -64,7 +80,13 @@ function syncEntityGroup(
       if (existingJson === newJson) {
         bucket.skipped++
       } else {
+        const isNew = existingJson === null
         changed.push(item)
+        bucket.changes.push({
+          kind: isNew ? "new" : "updated",
+          key: `#${item.number}`,
+          reason: isNew ? "new entity" : "data changed",
+        })
       }
     }
     if (changed.length > 0) ops.upsert(repo, changed)
@@ -72,6 +94,9 @@ function syncEntityGroup(
     bucket.upserted = changed.length
   }
   if (closed?.length) {
+    for (const c of closed) {
+      bucket.changes.push({ kind: "removed", key: `#${c.number}`, reason: "closed upstream" })
+    }
     ops.remove(
       repo,
       closed.map((c) => c.number)
@@ -89,6 +114,13 @@ function syncCiRuns(
   result: UpstreamSyncResult
 ): void {
   if (!runs || runs.length === 0) return
+  // Deduplicate by SHA — keep the run with the highest databaseId (most recent).
+  // Without this, multiple runs per SHA cause oscillation between syncs.
+  const bySha = new Map<string, (typeof runs)[number]>()
+  for (const r of runs) {
+    const existing = bySha.get(r.headSha)
+    if (!existing || r.databaseId > existing.databaseId) bySha.set(r.headSha, r)
+  }
   const changed: {
     sha: string
     run_id: number
@@ -96,7 +128,7 @@ function syncCiRuns(
     conclusion: string
     url: string
   }[] = []
-  for (const r of runs) {
+  for (const r of bySha.values()) {
     const record = {
       sha: r.headSha,
       run_id: r.databaseId,
@@ -108,6 +140,12 @@ function syncCiRuns(
     const existingJson = s.getCiStatusRaw(repo, record.sha)
     if (existingJson !== newJson) {
       changed.push(record)
+      const isNew = existingJson === null
+      result.ciStatuses.changes.push({
+        kind: isNew ? "new" : "updated",
+        key: record.sha.slice(0, 7),
+        reason: isNew ? "new run" : `${record.status}/${record.conclusion}`,
+      })
     }
   }
   if (changed.length > 0) s.upsertCiStatuses(repo, changed)
@@ -129,6 +167,11 @@ function syncLabels(
       const existingJson = s.getLabelRaw(repo, label.name)
       if (existingJson !== newJson) {
         changed.push(label)
+        result.labels.changes.push({
+          kind: existingJson === null ? "new" : "updated",
+          key: label.name,
+          reason: existingJson === null ? "new label" : "data changed",
+        })
       }
     }
     if (changed.length > 0) s.upsertLabels(repo, changed)
@@ -158,6 +201,12 @@ function syncMilestones(
       const existingJson = s.getMilestoneRaw(repo, milestone.number)
       if (existingJson !== newJson) {
         changed.push(milestone)
+        const ms = milestone as { title?: string }
+        result.milestones.changes.push({
+          kind: existingJson === null ? "new" : "updated",
+          key: ms.title ?? `#${milestone.number}`,
+          reason: existingJson === null ? "new milestone" : "data changed",
+        })
       }
     }
     if (changed.length > 0) s.upsertMilestones(repo, changed)
@@ -198,23 +247,31 @@ function upsertBranchCiRuns(
     const branch = branches[i]!
     const runs = runResults[i]
     if (!runs || runs.length === 0) continue
-    const mapped = runs.map((r) => ({
-      databaseId: r.databaseId,
-      status: r.status,
-      conclusion: r.conclusion,
-      workflowName: "",
-      createdAt: "",
-      event: "",
-    }))
+    const mapped = runs
+      .map((r) => ({
+        databaseId: r.databaseId,
+        status: r.status,
+        conclusion: r.conclusion,
+        workflowName: "",
+        createdAt: "",
+        event: "",
+      }))
+      .sort((a, b) => a.databaseId - b.databaseId) // stable ordering for blob comparison
     const newJson = JSON.stringify(mapped)
     const existingJson = s.getCiBranchRunsRaw(repo, branch)
     if (existingJson === newJson) continue
+    const isNew = existingJson === null
     s.upsertCiBranchRuns(repo, branch, mapped)
     result.branchCi.upserted += runs.length
+    result.branchCi.changes.push({
+      kind: isNew ? "new" : "updated",
+      key: branch,
+      reason: isNew ? `${runs.length} runs` : `${runs.length} runs changed`,
+    })
   }
 }
 
-/** Upsert fetched branch protection rules into the store. */
+/** Upsert fetched branch protection rules into the store, skipping unchanged. */
 function syncBranchProtectionResults(
   ctx: SyncContext,
   branches: string[],
@@ -224,8 +281,16 @@ function syncBranchProtectionResults(
     const branch = branches[i]!
     const rules = results[i]
     if (!rules) continue
+    const newJson = JSON.stringify(rules)
+    const existingJson = ctx.store.getBranchProtectionRaw(ctx.repo, branch)
+    if (existingJson === newJson) continue
     ctx.store.upsertBranchProtection(ctx.repo, branch, rules)
     ctx.result.branchProtection.upserted++
+    ctx.result.branchProtection.changes.push({
+      kind: existingJson === null ? "new" : "updated",
+      key: branch,
+      reason: existingJson === null ? "new rules" : "rules changed",
+    })
   }
 }
 
@@ -252,11 +317,20 @@ async function syncBranchData(
     if (!pr.headRefName) continue
     const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
     const prData = pr as { reviewDecision?: string }
-    ctx.store.upsertPrBranchDetail(ctx.repo, pr.headRefName, {
+    const detail = {
       reviewDecision: prData.reviewDecision ?? "",
       commentCount: comments?.length ?? 0,
-    })
+    }
+    const newJson = JSON.stringify(detail)
+    const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
+    if (existingJson === newJson) continue
+    ctx.store.upsertPrBranchDetail(ctx.repo, pr.headRefName, detail)
     ctx.result.prBranchDetail.upserted++
+    ctx.result.prBranchDetail.changes.push({
+      kind: existingJson === null ? "new" : "updated",
+      key: pr.headRefName,
+      reason: existingJson === null ? `PR #${pr.number}` : `review/comments changed`,
+    })
   }
 }
 
@@ -317,16 +391,18 @@ export async function syncUpstreamState(
   const s = opts?.store ?? getIssueStore()
   const gh = opts?.client ?? new GhCliGitHubClient()
 
+  const bucket = (): SyncBucket => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
+  const tracked = () => ({ upserted: 0, changes: [] as SyncChange[] })
   const result: UpstreamSyncResult = {
-    issues: { upserted: 0, removed: 0, skipped: 0 },
-    pullRequests: { upserted: 0, removed: 0, skipped: 0 },
-    ciStatuses: { upserted: 0 },
+    issues: bucket(),
+    pullRequests: bucket(),
+    ciStatuses: tracked(),
     comments: { upserted: 0 },
-    labels: { upserted: 0, removed: 0, skipped: 0 },
-    milestones: { upserted: 0, removed: 0, skipped: 0 },
-    branchCi: { upserted: 0 },
-    prBranchDetail: { upserted: 0 },
-    branchProtection: { upserted: 0 },
+    labels: bucket(),
+    milestones: bucket(),
+    branchCi: tracked(),
+    prBranchDetail: tracked(),
+    branchProtection: tracked(),
   }
 
   // ─── Snapshot existing state for fast-path decisions ────────────────────

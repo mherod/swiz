@@ -454,6 +454,22 @@ export class IssueStore {
     return row ? row.data : null
   }
 
+  /** Return stored raw JSON for PR branch detail, without parsing. */
+  getPrBranchDetailRaw(repo: string, branch: string): string | null {
+    const row = this.db
+      .query("SELECT data FROM pr_branch_detail WHERE repo = ? AND branch = ?")
+      .get(repo, branch) as { data: string } | null
+    return row ? row.data : null
+  }
+
+  /** Return stored raw JSON for branch protection, without parsing. */
+  getBranchProtectionRaw(repo: string, branch: string): string | null {
+    const row = this.db
+      .query("SELECT data FROM branch_protection WHERE repo = ? AND branch = ?")
+      .get(repo, branch) as { data: string } | null
+    return row ? row.data : null
+  }
+
   // ─── Read operations ────────────────────────────────────────────────────
 
   /** List cached issues for a repo. Returns only issues within TTL window. */

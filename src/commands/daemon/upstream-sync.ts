@@ -172,17 +172,19 @@ export class UpstreamSyncRegistry {
       debugLog(
         `[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${err instanceof Error ? err.message : String(err)}`
       )
+      const emptyBucket = () => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
+      const emptyTracked = () => ({ upserted: 0, changes: [] })
       return (
         entry.lastResult ?? {
-          issues: { upserted: 0, removed: 0, skipped: 0 },
-          pullRequests: { upserted: 0, removed: 0, skipped: 0 },
-          ciStatuses: { upserted: 0 },
+          issues: emptyBucket(),
+          pullRequests: emptyBucket(),
+          ciStatuses: emptyTracked(),
           comments: { upserted: 0 },
-          labels: { upserted: 0, removed: 0, skipped: 0 },
-          milestones: { upserted: 0, removed: 0, skipped: 0 },
-          branchCi: { upserted: 0 },
-          prBranchDetail: { upserted: 0 },
-          branchProtection: { upserted: 0 },
+          labels: emptyBucket(),
+          milestones: emptyBucket(),
+          branchCi: emptyTracked(),
+          prBranchDetail: emptyTracked(),
+          branchProtection: emptyTracked(),
         }
       )
     } finally {
