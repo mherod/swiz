@@ -244,17 +244,23 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
   if (!store.hasPending(ctx.safeSession, "on_session_stop")) return false
 
   const { sendAutoSteer } = await import("../utils/hook-utils.ts")
-  const requests = store.consume(ctx.safeSession, "on_session_stop")
   const sent = new Set<string>()
-  for (const req of requests) {
-    if (sent.has(req.message)) continue
-    const ok = await sendAutoSteer(req.message, ctx.terminalApp)
-    if (ok) {
-      log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
+  let deliveredCount = 0
+  // Drain all pending on_session_stop messages using thread-safe consumeOne().
+  let batch = store.consumeOne(ctx.safeSession, "on_session_stop")
+  while (batch.length > 0) {
+    const req = batch[0]!
+    deliveredCount++
+    if (!sent.has(req.message)) {
+      const ok = await sendAutoSteer(req.message, ctx.terminalApp)
+      if (ok) {
+        log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
+      }
+      sent.add(req.message)
     }
-    sent.add(req.message)
+    batch = store.consumeOne(ctx.safeSession, "on_session_stop")
   }
-  log(`   on_session_stop: short-circuited ${requests.length} message(s) — skipping stop hooks`)
+  log(`   on_session_stop: short-circuited ${deliveredCount} message(s) — skipping stop hooks`)
   return true
 }
 
@@ -367,7 +373,7 @@ class ContextStrategy implements HookExecutionStrategy {
     ])
 
     for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped") {
+      if (execution.status === "skipped" || execution.status === "aborted") {
         executions.push(execution)
         continue
       }
