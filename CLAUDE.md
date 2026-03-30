@@ -52,6 +52,7 @@ alwaysApply: false
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
 - **Inline SwizHook migration unit**: Helper extraction and dependent hook migration ship as one commit — run `bun run typecheck` after extraction, then migrate and commit together.
 - **Inline SwizHook output**: Use `preToolUseAllow()`/`preToolUseDeny()` from `SwizHook.ts` — return objects instead of calling `process.exit`. Use `runSwizHookAsMain()` for standalone `import.meta.main` compatibility.
+- **Inline SwizHook import.meta.main**: Replace the old standalone block with `if (import.meta.main) await runSwizHookAsMain(hook)`. DON'T keep a `Bun.stdin.json()` read alongside it — `runSwizHookAsMain` owns stdin; double-read causes null input, silent exit 0, empty subprocess stdout (`JSON.parse(stdout)` throws `Unexpected EOF`).
 - **Debt marker self-detection**: Hook files containing keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` format for headers or dynamic regex construction (`"TO" + "DO"`) to avoid self-detection.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
@@ -61,12 +62,12 @@ alwaysApply: false
   3. Every README hook filename exists on disk.
 - Per new hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, and exit `0`.
-- Output helpers (all return `never`, call `process.exit(0)`, don't write stdout after):
+- Output helpers (call `process.exit(0)`; no stdout after):
   - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with optional hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
   - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, and PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
   - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
-- **DO NOT** write raw `console.log(JSON.stringify(...))` for hook output — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
+- **DO NOT** write raw `console.log(JSON.stringify(...))` — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
 - **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code.
@@ -75,17 +76,17 @@ alwaysApply: false
   - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
   - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
   - DO NOT define Git utilities locally — import from canonical source.
-- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr limit. Exempt: `gh auth status`, `gh run watch`.
+- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr limit. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
-- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns (e.g., `cat`) to `RECOVERY_CMD_RE`.
+- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` on a manifest entry skips re-runs within the window (per hook+cwd).
-- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project-scoped dedup; `await` and branch: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget with `void`; omit `cwd` (falls back to session-only scope). Consumption: use `store.consumeOne()` (thread-safe); `store.consume()` is deprecated. Consumed by `posttooluse-auto-steer.ts`. Gated by `requiredSettings: ["autoSteer"]`. SQLite queue `~/.swiz/auto-steer.db` (`src/auto-steer-store.ts`): two-layer dedup, optional TTL, `project_key` column. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Stop auto-steer in `BlockingStrategy` (`src/dispatch/strategies.ts`). `sendAutoSteer` types text via AppleScript.
-- **DO**: All three memory-threshold checkpoints must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
-- **DO**: Use `computeProjectedContent()` from `hook-utils.ts` for content validation — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
+- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project-scoped dedup; `await` and branch: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget with `void`; omit `cwd` (falls back to session-only scope). Use `store.consumeOne()` (thread-safe); `store.consume()` deprecated. Consumed by `posttooluse-auto-steer.ts`. Gated by `requiredSettings: ["autoSteer"]`. SQLite queue `~/.swiz/auto-steer.db` (`src/auto-steer-store.ts`): two-layer dedup, optional TTL, `project_key` column. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Stop auto-steer in `BlockingStrategy` (`src/dispatch/strategies.ts`). `sendAutoSteer` types text via AppleScript.
+- **DO**: All memory-threshold checkpoints must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
+- **DO**: Use `computeProjectedContent()` from `hook-utils.ts` — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
@@ -96,11 +97,11 @@ alwaysApply: false
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
-- In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
+- In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
-- **DO**: When extracting from a shared module, re-export all types downstream consumers import. Verify with `pnpm typecheck` before committing.
+- **DO**: When extracting from a shared module, re-export all types downstream consumers import. Verify `pnpm typecheck` before committing.
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
@@ -109,7 +110,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
 - Prior-session task blocks: recreate as `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
-- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files or steps in one subject.
+- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
@@ -123,13 +124,13 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `TaskUpdate` with `taskId` and `status: completed`; put structured evidence in `description` using prefixes like `commit:`, `pr:`, `file:`, `test:`, `note:`.
+- **Task completion**: `TaskUpdate` with `taskId`, `status: completed`; structured evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **Subject changes**: use `TaskUpdate` `subject` / `description` — not the CLI.
 - **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
 - Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold.
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
 - Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
@@ -163,9 +164,9 @@ alwaysApply: false
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
 - **DO**: Treat `.swiz/config.json` as authoritative for collaboration/trunk/branch policy; stay on `main` in solo+trunk mode.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
-- CI workflow `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip CI; markdown triggers CI.
+- CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
-  0. **Run Step 0 collaboration guard** (`/push`) before every push to `main`/`master`; read output and never assume repo type.
+  0. **Run Step 0 collaboration guard** (`/push`) before every push; read output, never assume repo type.
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
@@ -176,9 +177,9 @@ alwaysApply: false
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
-- Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` resource exhaustion). Run failing test in isolation; if it passes, retry.
+- Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
-- DO NOT block session waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
+- DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
 - Push-command parsing: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
@@ -188,7 +189,7 @@ alwaysApply: false
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
-- DO NOT use destructive git: `revert`, `restore`, `stash` (mutations), `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
+- DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
@@ -224,7 +225,7 @@ alwaysApply: false
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
-- **DO**: Rename variable/constant declaration and all usages in one edit — splits in PreToolUse hooks cause unrecoverable deadlocks. **DON'T** add unrequested renames to hook changes; change only what was asked for.
+- **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
@@ -233,13 +234,13 @@ alwaysApply: false
 - Settings writes must create `.bak` backups first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
 - Stop-memory prompts must include `Cause to capture: <cause>`.
-- On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, and resolve it immediately.
+- On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic — never label warnings "pre-existing" or attribute failures to other sessions. Investigate all test failures before completing tasks.
 - **DON'T**: Attribute feedback to "hooks", "systems", or "auto-steer" — all from the user. Act immediately.
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
-- Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for directories with valid console usage.
+- Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
@@ -255,11 +256,11 @@ alwaysApply: false
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop; use `/push` for unpushed commits.
+- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop; use `/push` for unpushed.
 - **DON'T**: Rely on `git status` alone for unpush detection; use `git log origin/main..HEAD --oneline`.
-- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls with Codex/Gemini. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
+- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
 - **DON'T**: Work on auto-continue findings without a filed issue.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
-- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks from plan steps before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
+- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
