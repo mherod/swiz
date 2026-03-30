@@ -1,18 +1,28 @@
 #!/usr/bin/env bun
+/**
+ * PreToolUse hook: Block Edit/Write/NotebookEdit operations when the proposed
+ * new content contains likely secret material — API keys, tokens, private keys,
+ * or generic credential assignments.
+ *
+ * Eager counterpart to stop-secret-scanner.ts, which only catches secrets in
+ * committed diffs. This hook fires before the file mutation so that secrets
+ * never land on disk at all.
+ *
+ * Detection logic mirrors stop-secret-scanner.ts to keep the two hooks aligned.
+ * Test files are excluded (same exclusion policy as the stop hook).
+ *
+ * Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
-// PreToolUse hook: Block Edit/Write/NotebookEdit operations when the proposed
-// new content contains likely secret material — API keys, tokens, private keys,
-// or generic credential assignments.
-//
-// Eager counterpart to stop-secret-scanner.ts, which only catches secrets in
-// committed diffs. This hook fires before the file mutation so that secrets
-// never land on disk at all.
-//
-// Detection logic mirrors stop-secret-scanner.ts to keep the two hooks aligned.
-// Test files are excluded (same exclusion policy as the stop hook).
-
-import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
+import { TEST_FILE_RE } from "../src/utils/git-utils.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 
 // ── Secret patterns (mirrored from stop-secret-scanner.ts) ───────────────────
 
@@ -29,8 +39,6 @@ const GENERIC_SECRET_RE =
   /(api_?key|api_?secret|auth_?token|access_?token|secret_?key|private_?key|password|passwd|client_?secret)\s*[:=]\s*["'][^"']{8,}["']/i
 
 // Exclude common placeholder patterns that should not block legitimate edits.
-// "not-needed" is added as it appears in CI/test fixtures; env. prefix
-// covers environment-variable-based references (e.g. `password: env.DB_PASS`).
 const GENERIC_EXCLUDE_RE =
   /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|replace|env\.|not-needed/i
 
@@ -71,28 +79,23 @@ export function scanContentForSecrets(content: string, filePath: string): Secret
   return findings
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Hook implementation ─────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-
+function evaluate(input: FileEditHookInput) {
   const filePath = input.tool_input?.file_path ?? ""
-
   // NFKC normalization handled by fileEditHookInputSchema.transform()
   const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
-  if (!content) {
-    process.exit(0)
-  }
+  if (!content) return preToolUseAllow("")
 
   const findings = scanContentForSecrets(content, filePath)
   if (findings.length === 0) {
-    allowPreToolUse(`No secrets detected in ${filePath.split("/").pop()}`)
+    return preToolUseAllow(`No secrets detected in ${filePath.split("/").pop()}`)
   }
 
   const lines = findings.map((f) => `  [${f.kind}] ${f.line}`).join("\n")
 
-  denyPreToolUse(
+  return preToolUseDeny(
     [
       "Potential secret material detected in the proposed file content.",
       "",
@@ -111,9 +114,18 @@ async function main(): Promise<void> {
   )
 }
 
-if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+const pretoolusNoSecrets: SwizFileEditHook = {
+  name: "pretooluse-no-secrets",
+  event: "preToolUse",
+  matcher: "Edit|Write|NotebookEdit",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input)
+  },
 }
+
+export default pretoolusNoSecrets
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoSecrets)

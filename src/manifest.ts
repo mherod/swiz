@@ -4,10 +4,13 @@
 
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
+import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
+import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
+import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
@@ -287,14 +290,14 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "pretooluse-sandboxed-edits.ts", timeout: 5 },
       { file: "pretooluse-sandbox-guidance-consolidation.ts", timeout: 5 },
-      { file: "pretooluse-json-validation.ts", timeout: 5 },
+      { hook: pretoolusJsonValidation },
       { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
       { hook: pretoolusNoNodeModulesEdit },
       { hook: pretoolusNoLockfileEdit },
       { file: "pretooluse-ts-quality.ts", timeout: 5 },
       { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
-      { file: "pretooluse-no-secrets.ts", timeout: 5 },
+      { hook: pretoolusNoSecrets },
       { file: "pretooluse-bun-api-enforce.ts", timeout: 5, cooldownSeconds: 30 },
       { file: "pretooluse-todo-tracker.ts", timeout: 5 },
       { file: "pretooluse-large-files.ts", timeout: 5 },
@@ -307,7 +310,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
-      { file: "pretooluse-no-mixed-tool-calls.ts", timeout: 5 },
+      { hook: pretoolusNoMixedToolCalls },
       { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { file: "pretooluse-no-merge-conflict-comments.ts", timeout: 5 },

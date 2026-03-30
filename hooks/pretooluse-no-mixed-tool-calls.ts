@@ -1,13 +1,23 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Block Bash/Shell commands that are actually tool invocations.
-// Example failure mode:
-//   Bash(TaskCreate ...; swiz tasks ...)
-// where `TaskCreate` is a tool name, not an executable shell command.
+
+/**
+ * PreToolUse hook: Block Bash/Shell commands that are actually tool invocations.
+ * Example failure mode:
+ *   Bash(TaskCreate ...; swiz tasks ...)
+ * where `TaskCreate` is a tool name, not an executable shell command.
+ *
+ * Dual-mode: exports a SwizShellHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
+ */
 
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
+import {
   EDIT_TOOLS,
   isShellTool,
   NOTEBOOK_TOOLS,
@@ -16,8 +26,9 @@ import {
   SHELL_TOOLS,
   TASK_TOOLS,
   WRITE_TOOLS,
-} from "../src/utils/hook-utils.ts"
+} from "../src/tool-matchers.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
+import type { ShellHookInput } from "./schemas.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
 
@@ -58,21 +69,39 @@ function toolSpecificGuidance(toolName: string): string {
   return `Call \`${toolName}\` directly via the tool interface instead of invoking it as a shell command.`
 }
 
-const input = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+function evaluate(input: ShellHookInput) {
+  // In standalone mode the matcher isn't applied, so guard on tool name.
+  if (!isShellTool(input.tool_name ?? "")) return {}
 
-const rawCommand = String(input?.tool_input?.command ?? "")
-const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
-const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
+  const rawCommand = String(input.tool_input?.command ?? "")
+  const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
+  const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
 
-if (!match?.groups?.tool) allowPreToolUse("No mixed tool call detected")
+  if (!match?.groups?.tool) return preToolUseAllow("No mixed tool call detected")
 
-const toolName = match.groups.tool
-const commandPreview = rawCommand.replace(/\s+/g, " ").trim().slice(0, 140) || toolName
+  const toolName = match.groups.tool
+  const commandPreview = rawCommand.replace(/\s+/g, " ").trim().slice(0, 140) || toolName
 
-denyPreToolUse(
-  `Mixed-up tool call detected: \`${toolName}\` is a tool, not a terminal command.\n\n` +
-    "Do not invoke tools inside Bash/Shell.\n\n" +
-    `Command:\n  ${commandPreview}\n\n` +
-    toolSpecificGuidance(toolName)
-)
+  return preToolUseDeny(
+    `Mixed-up tool call detected: \`${toolName}\` is a tool, not a terminal command.\n\n` +
+      "Do not invoke tools inside Bash/Shell.\n\n" +
+      `Command:\n  ${commandPreview}\n\n` +
+      toolSpecificGuidance(toolName)
+  )
+}
+
+const pretoolusNoMixedToolCalls: SwizShellHook = {
+  name: "pretooluse-no-mixed-tool-calls",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
+
+  run(input) {
+    return evaluate(input as ShellHookInput)
+  },
+}
+
+export default pretoolusNoMixedToolCalls
+
+// ─── Standalone execution (file-based dispatch / manual testing) ────────────
+if (import.meta.main) await runSwizHookAsMain(pretoolusNoMixedToolCalls)
