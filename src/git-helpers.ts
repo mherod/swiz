@@ -639,6 +639,17 @@ export function parseCommitType(message: string): string | null {
   return match?.[1] ?? null
 }
 
+// ─── Branch utilities ────────────────────────────────────────────────────────
+
+/** True if branch matches the configured default branch. */
+export function isDefaultBranch(
+  branch: string,
+  defaultBranches: string | readonly string[] = ["main", "master"]
+): boolean {
+  const candidates = Array.isArray(defaultBranches) ? defaultBranches : [defaultBranches]
+  return candidates.includes(branch)
+}
+
 // ─── Issue helpers ───────────────────────────────────────────────────────────
 
 /**

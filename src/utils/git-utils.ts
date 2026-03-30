@@ -11,14 +11,7 @@ import {
 
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
-/** True if branch matches the configured default branch. */
-export function isDefaultBranch(
-  branch: string,
-  defaultBranches: string | readonly string[] = ["main", "master"]
-): boolean {
-  const candidates = Array.isArray(defaultBranches) ? defaultBranches : [defaultBranches]
-  return candidates.includes(branch)
-}
+export { isDefaultBranch } from "../git-helpers.ts"
 
 /**
  * Resolve the effective default branch for a repository.
@@ -349,12 +342,12 @@ export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<st
 // All GIT_*_RE patterns use gitSubcommandRe() which allows optional global
 // options (e.g. `-C <dir>`, `-c key=val`) between `git` and the subcommand.
 
-/** Matches `git [opts] push` anywhere in a shell command string. */
-export const GIT_PUSH_RE = gitSubcommandRe("push\\b")
-/** Matches `git push --delete` or `git push origin :branch` (remote branch deletion, not a code push). */
-export const GIT_PUSH_DELETE_RE = gitSubcommandRe("push\\b.*?(--delete\\b|\\s:[^\\s])")
-/** Matches `git [opts] commit` anywhere in a shell command string. */
-export const GIT_COMMIT_RE = gitSubcommandRe("commit\\b")
+export {
+  GIT_COMMIT_RE,
+  GIT_PUSH_DELETE_RE,
+  GIT_PUSH_RE,
+  hasGitPushForceFlag,
+} from "./shell-patterns.ts"
 
 /** Matches git read-only subcommands (with optional global opts). */
 export const GIT_READ_RE = gitSubcommandRe(
@@ -501,117 +494,6 @@ export function extractCheckoutNewBranchName(command: string): string | null {
 export const FORCE_PUSH_RE = new RegExp(
   `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\b.*(?:--force(?:-with-lease(?:=[^\\s]+)?|-if-includes)?(?!\\S)|-[a-zA-Z]*f)`
 )
-
-// ── Token-based git push argument parser ──────────────────────────────────────
-
-const FORCE_LONG_FLAG_NAMES = new Set(["--force", "--force-with-lease", "--force-if-includes"])
-const GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
-
-function isGitPushForceToken(token: string): boolean {
-  if (!token.startsWith("-")) return false
-  if (token.startsWith("--")) {
-    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
-    return FORCE_LONG_FLAG_NAMES.has(name)
-  }
-  return token.slice(1).includes("f")
-}
-
-interface TokenizerState {
-  tokens: string[]
-  token: string
-  quote: '"' | "'" | null
-}
-
-function processQuotedChar(state: TokenizerState, ch: string): void {
-  if (ch === state.quote) state.quote = null
-  else state.token += ch
-}
-
-function processUnquotedChar(
-  state: TokenizerState,
-  ch: string,
-  segment: string,
-  i: number
-): number {
-  if (ch === '"' || ch === "'") {
-    state.quote = ch
-  } else if (ch === "\\" && i + 1 < segment.length) {
-    state.token += segment[++i]!
-  } else if (ch === " " || ch === "\t") {
-    if (state.token) {
-      state.tokens.push(state.token)
-      state.token = ""
-    }
-  } else {
-    state.token += ch
-  }
-  return i
-}
-
-function shellTokenize(segment: string): string[] {
-  const state: TokenizerState = { tokens: [], token: "", quote: null }
-  for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i]!
-    if (state.quote) processQuotedChar(state, ch)
-    else i = processUnquotedChar(state, ch, segment, i)
-  }
-  if (state.token) state.tokens.push(state.token)
-  return state.tokens
-}
-
-function skipGitGlobalOptions(tokens: string[], i: number): number {
-  while (i < tokens.length && tokens[i]!.startsWith("-")) {
-    if (GIT_VALUE_OPTS.has(tokens[i]!)) i++
-    i++
-  }
-  return i
-}
-
-function checkPushSegmentForForceFlag(tokens: string[], i: number): boolean {
-  while (i < tokens.length) {
-    const t = tokens[i]!
-    i++
-    if (t === "--") return false
-    if (isGitPushForceToken(t)) return true
-  }
-  return false
-}
-
-function checkSegmentForPushForceFlag(segment: string): boolean {
-  const tokens = shellTokenize(segment)
-  let i = 0
-
-  while (i < tokens.length) {
-    if (tokens[i] !== "git") {
-      i++
-      continue
-    }
-    i++
-
-    i = skipGitGlobalOptions(tokens, i)
-    if (tokens[i] !== "push") continue
-    i++
-
-    if (checkPushSegmentForForceFlag(tokens, i)) return true
-  }
-  return false
-}
-
-/**
- * Token-based detection of force flags in a `git push` command.
- * Handles `git push -- --force` (refspec, not flag), `-C /path push -f`, etc.
- */
-export function hasGitPushForceFlag(command: string): boolean {
-  const segments = command
-    .split(/&&|\|\||;|\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  for (const segment of segments) {
-    if (checkSegmentForPushForceFlag(segment)) return true
-  }
-  return false
-}
 
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
