@@ -31,3 +31,21 @@ export function extractCallerEnv(payloadStr: string): Record<string, string> | n
   }
   return null
 }
+
+/**
+ * Extract `cwd` from the hook JSON payload for `Bun.spawn({ cwd })`.
+ * When set, the hook process runs with that working directory so `process.cwd()`
+ * inside hooks matches the project (e.g. Cursor), not the swiz dispatch directory.
+ */
+export function extractPayloadCwd(payloadStr: string): string | undefined {
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+    const rawCwd = parsed.cwd
+    if (typeof rawCwd === "string" && rawCwd.trim()) {
+      return rawCwd.trim()
+    }
+  } catch {
+    // malformed payload — spawn without cwd override
+  }
+  return undefined
+}

@@ -5,7 +5,12 @@
 
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
-import { type ErrorResult, extractCallerEnv, type RunHookMessage } from "./worker-types.ts"
+import {
+  type ErrorResult,
+  extractCallerEnv,
+  extractPayloadCwd,
+  type RunHookMessage,
+} from "./worker-types.ts"
 
 const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
 const DEFAULT_TIMEOUT = 10 // seconds
@@ -39,7 +44,10 @@ function parseWorkerOutput(
   if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
 
   try {
-    return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
+    return {
+      parsed: JSON.parse(trimmed) as Record<string, unknown>,
+      status: "ok",
+    }
   } catch {
     // Stdout may contain non-JSON lines before or after the hook's JSON object.
     // Scan lines in reverse order so the last JSON-looking line wins.
@@ -47,7 +55,10 @@ function parseWorkerOutput(
       const l = line.trim()
       if (!l.startsWith("{")) continue
       try {
-        return { parsed: JSON.parse(l) as Record<string, unknown>, status: "ok" }
+        return {
+          parsed: JSON.parse(l) as Record<string, unknown>,
+          status: "ok",
+        }
       } catch {}
     }
     return { parsed: null, status: "invalid-json" }
@@ -72,11 +83,13 @@ async function runHookInWorker(
     // hooks inherit the full shell env (LaunchAgent only gets minimal env vars).
     const callerEnv = extractCallerEnv(payloadStr)
     const env = callerEnv ? { ...process.env, ...callerEnv } : undefined
+    const spawnCwd = extractPayloadCwd(payloadStr)
 
     const proc = bunSpawn(cmd, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      cwd: spawnCwd,
       env,
     })
 

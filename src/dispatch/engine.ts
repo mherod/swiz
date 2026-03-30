@@ -25,7 +25,7 @@ import {
 } from "../tool-matchers.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
-import { extractCallerEnv } from "./worker-types.ts"
+import { extractCallerEnv, extractPayloadCwd } from "./worker-types.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────
 
@@ -170,7 +170,10 @@ export function classifyHookOutput({
   if (timedOut) return { parsed: null, status: "timeout" }
   if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
   try {
-    return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
+    return {
+      parsed: JSON.parse(trimmed) as Record<string, unknown>,
+      status: "ok",
+    }
   } catch {
     // Stdout may contain non-JSON lines before or after the hook's JSON object.
     // Scan lines in reverse order so the last JSON-looking line wins.
@@ -178,7 +181,10 @@ export function classifyHookOutput({
       const l = line.trim()
       if (!l.startsWith("{")) continue
       try {
-        return { parsed: JSON.parse(l) as Record<string, unknown>, status: "ok" }
+        return {
+          parsed: JSON.parse(l) as Record<string, unknown>,
+          status: "ok",
+        }
       } catch {
         // Fall through to next line
       }
@@ -334,10 +340,13 @@ export async function runHook(
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(timeoutSec)
 
+  const spawnCwd = extractPayloadCwd(payloadStr)
+
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    cwd: spawnCwd,
     env: buildHookEnv(payloadStr),
   })
 
@@ -383,7 +392,11 @@ export async function runHook(
     return buildAbortedResult(file, startTime, endTime, configuredTimeoutSec, exitCode ?? null)
   }
 
-  const { parsed, status } = classifyHookOutput({ timedOut, trimmed, exitCode })
+  const { parsed, status } = classifyHookOutput({
+    timedOut,
+    trimmed,
+    exitCode,
+  })
 
   const execution: HookExecution = {
     file,
@@ -600,7 +613,10 @@ export async function runEntry(
   payloadStr: string,
   cwd: string,
   signal?: AbortSignal
-): Promise<{ execution: HookExecution; parsed: Record<string, unknown> | null }> {
+): Promise<{
+  execution: HookExecution
+  parsed: Record<string, unknown> | null
+}> {
   const { hook, matcher } = entry
   const id = hookIdentifier(hook)
   const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
@@ -725,7 +741,12 @@ export async function launchAsyncHooks(
       log(`   ⏭ ${id} [async, dispatch aborted]`)
       continue
     }
-    scheduleAsyncHookEntry(hook, payloadStr, { pool, daemonContext, signal, promises })
+    scheduleAsyncHookEntry(hook, payloadStr, {
+      pool,
+      daemonContext,
+      signal,
+      promises,
+    })
   }
   if (daemonContext && promises.length > 0) {
     log(`   awaiting ${promises.length} async hook(s) in daemon context`)
