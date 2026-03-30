@@ -41,6 +41,7 @@ import {
   RECOVERY_CMD_RE,
   SETUP_CMD_RE,
 } from "./git-utils.ts"
+import { messageFromUnknownError } from "./hook-json-helpers.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 
 export type { SessionHookInput, ToolHookInput }
@@ -161,9 +162,19 @@ export {
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
-/** Extract the first line of a multi-line message, limited to 70 chars. */
-function extractFirstLine(text: string): string {
-  return text.slice(0, 70).split("\n").shift()?.trim() || ""
+/** PreToolUse spinner / `suppressOutput` preview — keep short. */
+const PREVIEW_LEN_PRE_TOOL = 70
+/**
+ * Stop / PostToolUse block: `systemMessage` is a first-line preview; full text stays in `reason`.
+ * Cursor and other UIs surface `systemMessage` prominently — 70 chars looked like junk truncation.
+ */
+const PREVIEW_LEN_BLOCK = 4000
+
+/** Extract the first line of a multi-line message, optionally capped for UI previews. */
+function extractFirstLine(text: string, maxLen = PREVIEW_LEN_PRE_TOOL): string {
+  const line = text.split("\n").shift()?.trim() || ""
+  if (maxLen <= 0) return line
+  return line.length > maxLen ? `${line.slice(0, maxLen - 3).trimEnd()}...` : line
 }
 
 function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
@@ -340,7 +351,7 @@ function denyPostToolUseObj(reason: string): HookOutput {
     decision: "block",
     reason,
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
+    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       permissionDecision: "deny",
@@ -452,9 +463,10 @@ export function blockStopObj(
 ): HookOutput {
   return hookOutputSchema.parse({
     decision: "block",
+    continue: true,
     reason: reason + actionRequired(reason, options),
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
+    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
   })
 }
 
@@ -469,9 +481,10 @@ export function blockStop(
 function blockStopRawObj(reason: string) {
   return hookOutputSchema.parse({
     decision: "block",
+    continue: true,
     reason,
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
+    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
   })
 }
 
@@ -485,10 +498,11 @@ export function blockStopHumanRequiredObj(reason: string): HookOutput {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   return hookOutputSchema.parse({
     decision: "block",
+    continue: true,
     reason: fullReason,
     resolution: "human-required",
     suppressOutput: true,
-    systemMessage: extractFirstLine(reason),
+    systemMessage: extractFirstLine(reason, PREVIEW_LEN_BLOCK),
   })
 }
 
@@ -798,7 +812,7 @@ export async function createSessionTask(
   } catch (err) {
     stderrLog(
       "createSessionTask fallback",
-      `[swiz] createSessionTask: in-process creation failed (${err instanceof Error ? err.message : String(err)}), falling back to subprocess`
+      `[swiz] createSessionTask: in-process creation failed (${messageFromUnknownError(err)}), falling back to subprocess`
     )
     await createTaskViaSubprocess(subject, description, sessionId ?? "", sentinel)
   }

@@ -25,6 +25,7 @@ import {
   isTaskUpdateTool,
   isWriteTool,
 } from "../tool-matchers.ts"
+import { hasNonEmptyHookOutput } from "../utils/hook-json-helpers.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
 import {
@@ -624,7 +625,7 @@ async function executeInlineHookWithErrorHandling(
       throw new Error(`Invalid hook input: ${validation.error}`)
     }
     const output = await withInlineSwizHookRun(async () => hook.run(input))
-    if (output && Object.keys(output).length > 0) {
+    if (hasNonEmptyHookOutput(output)) {
       return { parsed: output as Record<string, unknown>, status: "ok" }
     }
     return { parsed: null, status: "no-output" }

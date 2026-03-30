@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { isInlineHookDef, manifest } from "../src/manifest.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type JsonObject, useTempDir } from "../src/utils/test-utils.ts"
-import { hookOutputSchema } from "./schemas.ts"
+import { hookOutputSchema, stopHookOutputSchema } from "./schemas.ts"
 
 const HOOK_CONTRACT_TIMEOUT_MS = 30_000
 
@@ -98,6 +98,74 @@ async function runHookScript(
 
   return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr: stderr.trim() }
 }
+
+describe("stopHookOutputSchema", () => {
+  test("requires continue: true, block decision, or continue: false with stopReason", () => {
+    expect(stopHookOutputSchema.safeParse({ reason: "x", systemMessage: "x" }).success).toBe(false)
+    expect(
+      stopHookOutputSchema.safeParse({
+        continue: true,
+        reason: "x",
+        systemMessage: "x",
+      }).success
+    ).toBe(true)
+    expect(
+      stopHookOutputSchema.safeParse({
+        continue: true,
+        stopReason: "y",
+      }).success
+    ).toBe(true)
+  })
+
+  test("rejects continue: false without stopReason", () => {
+    expect(
+      stopHookOutputSchema.safeParse({
+        continue: false,
+        reason: "x",
+        systemMessage: "x",
+      }).success
+    ).toBe(false)
+  })
+
+  test("accepts continue: false with stopReason (universal Claude output)", () => {
+    expect(
+      stopHookOutputSchema.safeParse({
+        continue: false,
+        stopReason: "Build failed, fix errors before continuing",
+      }).success
+    ).toBe(true)
+  })
+
+  test("rejects additionalContext without reason or stopReason", () => {
+    expect(
+      stopHookOutputSchema.safeParse({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: "Stop",
+          additionalContext: "context only",
+        },
+      }).success
+    ).toBe(false)
+  })
+
+  test("accepts block decision with reason and no continue field", () => {
+    expect(
+      stopHookOutputSchema.safeParse({
+        decision: "block",
+        reason: "Test suite must pass before proceeding",
+      }).success
+    ).toBe(true)
+  })
+
+  test("rejects block decision with only stopReason (reason required for decision: block)", () => {
+    expect(
+      stopHookOutputSchema.safeParse({
+        decision: "block",
+        stopReason: "Narrative only",
+      }).success
+    ).toBe(false)
+  })
+})
 
 describe("hook scripts contracts", () => {
   const hookFiles = [

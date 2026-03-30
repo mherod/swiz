@@ -28,6 +28,10 @@ import {
 } from "../transcript-summary.ts"
 import { type HookExecution, writeResponse } from "./engine.ts"
 import {
+  scheduleIncomingDispatchCapture,
+  shouldCaptureIncomingPayloads,
+} from "./incoming-capture.ts"
+import {
   applyHookSettingFilters,
   countHooks,
   DISPATCH_ROUTES,
@@ -36,7 +40,8 @@ import {
   logHeader,
   withLogBuffer,
 } from "./index.ts"
-import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import { normalizeAgentHookPayload } from "./payload-normalize.ts"
+import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -330,6 +335,14 @@ interface DispatchContext {
 function buildDispatchContext(req: DispatchRequest): DispatchContext {
   const { canonicalEvent, hookEventName, payloadStr } = req
   const { payload, parseError } = parsePayload(payloadStr)
+
+  const captureIncoming = shouldCaptureIncomingPayloads()
+  let incomingBeforeNormalize: Record<string, unknown> | null = null
+  if (captureIncoming && !parseError) {
+    incomingBeforeNormalize = structuredClone(payload) as Record<string, unknown>
+  }
+
+  normalizeAgentHookPayload(payload)
   backfillPayloadDefaults(payload)
   const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
@@ -338,6 +351,20 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
   logPayloadDiagnostics(payloadStr, payload, canonicalEvent)
 
   const cwd = (payload.cwd as string) ?? process.cwd()
+
+  if (captureIncoming) {
+    scheduleIncomingDispatchCapture({
+      canonicalEvent,
+      hookEventName,
+      parseError,
+      payloadStr,
+      incomingBeforeNormalize,
+      normalizedPayload: parseError
+        ? ({} as Record<string, unknown>)
+        : (structuredClone(payload) as Record<string, unknown>),
+    })
+  }
+
   return { canonicalEvent, hookEventName, payload, parseError, payloadStr, cwd, toolName, trigger }
 }
 
@@ -551,7 +578,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response: Record<string, unknown> = {}
-    if (ctx.canonicalEvent === "stop") {
+    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       if (!req.daemonContext) writeResponse(response)
     }
@@ -561,7 +588,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
   if (filteredGroups.length === 0) {
     const response: Record<string, unknown> = {}
-    if (ctx.canonicalEvent === "stop") {
+    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       if (!req.daemonContext) writeResponse(response)
     }
@@ -626,7 +653,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
       void appendHookLogs(logEntries)
     }
 
-    if (ctx.canonicalEvent === "stop") {
+    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
     }
 

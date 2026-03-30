@@ -2,6 +2,7 @@
 
 import type { HookOutput } from "../../hooks/schemas.ts"
 import { stopHookInputSchema } from "../../hooks/schemas.ts"
+import { hasNonEmptyHookOutput } from "./hook-json-helpers.ts"
 import { blockStopObj, exitWithHookObject, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
 
 /** Violation result shared by all diff-scanning stop hooks. */
@@ -60,7 +61,7 @@ export async function evaluateDiffScanStopHook(
 export async function runDiffScanStopHook(opts: DiffScanStopHookOptions): Promise<void> {
   const data = await Bun.stdin.json()
   const out = await evaluateDiffScanStopHook(opts, data)
-  if (out && Object.keys(out).length > 0) {
+  if (hasNonEmptyHookOutput(out)) {
     exitWithHookObject(out as HookOutput)
   }
 }

@@ -13,7 +13,7 @@ import {
   writeResponse,
 } from "./engine.ts"
 import { extractCwd } from "./filters.ts"
-import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import type { DispatchStrategy } from "./types.ts"
 
 /** Context passed to each hook execution strategy. */
@@ -142,7 +142,7 @@ async function runStrategyPipeline(
 
   logSlowHookSummary(executions)
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-  if (ctx.canonicalEvent === "stop") {
+  if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
     normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
   }
   writeResponse(finalResponse)

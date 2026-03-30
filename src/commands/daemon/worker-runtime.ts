@@ -1,3 +1,5 @@
+import { normalizeAgentHookPayload } from "../../dispatch/payload-normalize.ts"
+
 export interface NormalizedDispatchPayload {
   cwd: string | null
   sessionId: string | null
@@ -30,15 +32,14 @@ interface WorkerTransport {
 }
 
 function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPayload | null {
-  const parsed = JSON.parse(payloadStr) as {
-    cwd?: string
-    session_id?: string
-    transcript_path?: string
-    tool_name?: string
-    toolName?: string
-    tool_input?: Record<string, unknown>
-    toolInput?: Record<string, unknown>
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(payloadStr) as Record<string, unknown>
+  } catch {
+    return null
   }
+  normalizeAgentHookPayload(parsed)
+
   const toolName =
     typeof parsed.tool_name === "string"
       ? parsed.tool_name
@@ -47,9 +48,9 @@ function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPay
         : null
   const toolInput =
     parsed.tool_input && typeof parsed.tool_input === "object"
-      ? parsed.tool_input
+      ? (parsed.tool_input as Record<string, unknown>)
       : parsed.toolInput && typeof parsed.toolInput === "object"
-        ? parsed.toolInput
+        ? (parsed.toolInput as Record<string, unknown>)
         : undefined
 
   return {

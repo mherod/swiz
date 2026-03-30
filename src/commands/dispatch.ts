@@ -13,6 +13,7 @@ import {
   formatTrace,
   groupMatches,
   log,
+  normalizeAgentHookPayload,
   parsePayload,
   replayBlocking,
   replayContext,
@@ -247,6 +248,7 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   log(`   ⏱ cli:stdin: ${stdinMs}ms`)
 
   const { payload } = parsePayload(payloadStr)
+  normalizeAgentHookPayload(payload)
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
   // Inject CLI process cwd into payload when agent didn't provide it.
   // The CLI runs in the project directory (Cursor/Claude launches it there),
@@ -360,6 +362,7 @@ export const dispatchCommand: Command = {
       log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
 
       const { payload } = parsePayload(payloadStr)
+      normalizeAgentHookPayload(payload)
       const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
       const matchingGroups = manifest.filter(

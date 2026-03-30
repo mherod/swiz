@@ -1,3 +1,4 @@
+import { normalizeAgentHookPayload } from "../../dispatch/payload-normalize.ts"
 import type {
   DispatchPayloadWorkerRequest,
   DispatchPayloadWorkerResponse,
@@ -5,15 +6,8 @@ import type {
 } from "./worker-runtime.ts"
 
 function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload | null {
-  const parsed = JSON.parse(payloadStr) as {
-    cwd?: string
-    session_id?: string
-    transcript_path?: string
-    tool_name?: string
-    toolName?: string
-    tool_input?: Record<string, unknown>
-    toolInput?: Record<string, unknown>
-  }
+  const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+  normalizeAgentHookPayload(parsed)
   const toolName =
     typeof parsed.tool_name === "string"
       ? parsed.tool_name
@@ -22,9 +16,9 @@ function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload
         : null
   const toolInput =
     parsed.tool_input && typeof parsed.tool_input === "object"
-      ? parsed.tool_input
+      ? (parsed.tool_input as Record<string, unknown>)
       : parsed.toolInput && typeof parsed.toolInput === "object"
-        ? parsed.toolInput
+        ? (parsed.toolInput as Record<string, unknown>)
         : undefined
 
   return {

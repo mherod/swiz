@@ -70,6 +70,7 @@ export {
   markHookCooldown,
   resolvePrMergeActive,
 } from "./filters.ts"
+export { normalizeAgentHookPayload } from "./payload-normalize.ts"
 export {
   formatTrace,
   replayBlocking,

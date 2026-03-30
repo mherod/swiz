@@ -32,6 +32,11 @@ import {
   type ToolHookInput,
 } from "../hooks/schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
+import {
+  hasNonEmptyHookOutput,
+  isJsonLikeRecord,
+  messageFromUnknownError,
+} from "./utils/hook-json-helpers.ts"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -43,6 +48,59 @@ export interface RunSwizHookAsMainOptions {
    * When omitted, the process exits with code 1.
    */
   onStdinJsonError?: (err: unknown) => SwizHookOutput
+}
+
+async function handleSwizHookStdinParseError(
+  err: unknown,
+  options?: RunSwizHookAsMainOptions
+): Promise<never> {
+  if (options?.onStdinJsonError) {
+    const fallback = options.onStdinJsonError(err)
+    if (hasNonEmptyHookOutput(fallback)) {
+      const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+      exitWithHookObject(fallback)
+    }
+    process.exit(0)
+  }
+  process.stderr.write(`Hook error: ${messageFromUnknownError(err)}\n`)
+  process.exit(1)
+}
+
+async function parseSwizHookStdin(
+  options?: RunSwizHookAsMainOptions
+): Promise<Record<string, unknown>> {
+  try {
+    const parsed = (await Bun.stdin.json()) as unknown
+    if (!isJsonLikeRecord(parsed)) process.exit(0)
+    return parsed
+  } catch (err) {
+    return handleSwizHookStdinParseError(err, options)
+  }
+}
+
+/** Subprocess path: inject `_effectiveSettings` when the dispatcher did not. */
+async function injectEffectiveSettingsIfMissing(input: Record<string, unknown>): Promise<void> {
+  if (input._effectiveSettings) return
+  try {
+    const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
+    const sessionId = typeof input.session_id === "string" ? input.session_id : null
+    // Strict parse: do not inject defaults over a present-but-corrupt settings file —
+    // hooks that fail-closed on parse errors must see missing _effectiveSettings.
+    const rawSettings = await readSwizSettings({ strict: true })
+    input._effectiveSettings = getEffectiveSwizSettings(
+      rawSettings,
+      sessionId
+    ) as unknown as Record<string, unknown>
+  } catch {
+    // Settings injection is best-effort; hooks that need settings will
+    // check for their presence and exit early if missing.
+  }
+}
+
+async function emitHookOutputIfNonEmpty(output: SwizHookOutput): Promise<void> {
+  if (!hasNonEmptyHookOutput(output)) return
+  const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+  exitWithHookObject(output)
 }
 
 /**
@@ -61,49 +119,10 @@ export async function runSwizHookAsMain(
   hook: SwizHook<Record<string, unknown>>,
   options?: RunSwizHookAsMainOptions
 ): Promise<void> {
-  let input: Record<string, unknown>
-  try {
-    const parsed = (await Bun.stdin.json()) as unknown
-    if (!parsed || typeof parsed !== "object") process.exit(0)
-    input = parsed as Record<string, unknown>
-  } catch (err) {
-    if (options?.onStdinJsonError) {
-      const fallback = options.onStdinJsonError(err)
-      if (fallback && Object.keys(fallback).length > 0) {
-        const { exitWithHookObject } = await import("./utils/hook-utils.ts")
-        exitWithHookObject(fallback)
-      }
-      process.exit(0)
-    }
-    process.stderr.write(`Hook error: ${err instanceof Error ? err.message : String(err)}\n`)
-    process.exit(1)
-  }
-
-  // Inject effective settings when missing (subprocess path).
-  // Wrapped in try/catch — hooks that don't use settings still work if the
-  // import chain has issues (e.g. circular dependencies in standalone mode).
-  if (!input._effectiveSettings) {
-    try {
-      const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
-      const sessionId = typeof input.session_id === "string" ? input.session_id : null
-      // Strict parse: do not inject defaults over a present-but-corrupt settings file —
-      // hooks that fail-closed on parse errors must see missing _effectiveSettings.
-      const rawSettings = await readSwizSettings({ strict: true })
-      input._effectiveSettings = getEffectiveSwizSettings(
-        rawSettings,
-        sessionId
-      ) as unknown as Record<string, unknown>
-    } catch {
-      // Settings injection is best-effort; hooks that need settings will
-      // check for their presence and exit early if missing.
-    }
-  }
-
+  const input = await parseSwizHookStdin(options)
+  await injectEffectiveSettingsIfMissing(input)
   const output = await hook.run(input)
-  if (output && Object.keys(output).length > 0) {
-    const { exitWithHookObject } = await import("./utils/hook-utils.ts")
-    exitWithHookObject(output)
-  }
+  await emitHookOutputIfNonEmpty(output)
 }
 
 // ─── Output type ─────────────────────────────────────────────────────────────

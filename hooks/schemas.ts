@@ -9,9 +9,50 @@
  *
  * Consumers should call `.safeParse()` for non-critical validation and `.parse()`
  * only where strict enforcement is intentional.
+ *
+ * ## Claude Code hooks (authoritative reference)
+ *
+ * Official hook behavior, event list, and JSON I/O are documented at
+ * [Claude Code — Hooks reference](https://code.claude.com/docs/en/hooks) (see also the
+ * documentation index at `https://code.claude.com/docs/llms.txt`). Swiz mirrors those shapes
+ * for subprocess stdout; merged **Stop** / **SubagentStop** dispatch responses are stricter
+ * ({@link stopHookOutputSchema}).
+ *
+ * ### Universal JSON output (exit 0 + stdout JSON)
+ *
+ * | Field | Default | Description |
+ * | ----- | ------- | ----------- |
+ * | `continue` | `true` | If `false`, Claude stops processing after the hook (pair with `stopReason`). |
+ * | `stopReason` | none | Message shown to the user when `continue` is `false` (not necessarily shown to Claude). |
+ * | `suppressOutput` | `false` | Hide hook stdout from verbose output. |
+ * | `systemMessage` | none | Warning shown to the user. |
+ *
+ * **Top-level `decision` + `reason`** — used by **UserPromptSubmit**, **PostToolUse**,
+ * **PostToolUseFailure**, **Stop**, **SubagentStop**, **ConfigChange** for blocking: the only
+ * decision value is `"block"`. To allow, omit `decision` or emit no JSON.
+ *
+ * ### Stop / SubagentStop (Claude Code)
+ *
+ * Blocking Claude from stopping uses **`decision: "block"`** and a **`reason`** (required when
+ * blocking). Example:
+ *
+ * ```json
+ * { "decision": "block", "reason": "Test suite must pass before proceeding" }
+ * ```
+ *
+ * **PreToolUse** uses **`hookSpecificOutput.permissionDecision`** / **`permissionDecisionReason`**
+ * (not top-level `decision` / `reason` as the primary control).
+ *
+ * ### Swiz validation layers
+ *
+ * - **Per-hook subprocess stdout** — {@link hookOutputSchema} via `classifyHookOutput` in
+ *   `src/dispatch/worker-types.ts` (empty `{}` is valid).
+ * - **Merged Stop / SubagentStop dispatch** — {@link stopHookOutputSchema} after
+ *   `normalizeStopDispatchResponseInPlace` in `src/dispatch/stop-response.ts`.
  */
 
 import { z } from "zod"
+import { isJsonLikeRecord } from "../src/utils/hook-json-helpers.ts"
 
 // ─── Primitive field schemas ──────────────────────────────────────────────────
 // Single-field building blocks reused across every hook envelope.
@@ -56,7 +97,7 @@ function nfkc(s: string | undefined): string | undefined {
 function nfkcDeep(val: unknown): unknown {
   if (typeof val === "string") return val.normalize("NFKC")
   if (Array.isArray(val)) return val.map(nfkcDeep)
-  if (val !== null && typeof val === "object") {
+  if (isJsonLikeRecord(val)) {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(val)) {
       out[k] = nfkcDeep(v)
@@ -809,13 +850,13 @@ export type CodexHookOutput = z.infer<typeof codexHookOutputSchema>
 // ─── Hook output envelope schema ─────────────────────────────────────────────
 
 /**
- * Shape of any output emitted by hooks in this repository.
- * Used by contract tests to validate output envelopes via safeParse.
+ * Per-hook subprocess stdout JSON (all events). See module doc for which fields the
+ * agent honors per event (SessionStart / UserPromptSubmit / Stop vs PreToolUse vs PostToolUse).
  *
- * When a hook allows execution (`continue: true` or absence of block), it should
- * include context about what was verified. Silent allows lose observability.
+ * Empty `{}` is valid (exit 0, no output). Explicit `continue: true` requires accompanying
+ * context (`systemMessage`, `reason`, `stopReason`, or `hookSpecificOutput.additionalContext`).
  */
-export const hookOutputSchema = z
+const hookOutputRefinedSchema = z
   .looseObject({
     decision: z.enum(["approve", "block"]).optional(),
     /** When decision is "block", signals the resolution type.
@@ -834,15 +875,18 @@ export const hookOutputSchema = z
       })
       .optional(),
     ok: z.boolean().optional(),
-    /** Whether the agent proceeds after this hook (default true). */
+    /**
+     * SessionStart / UserPromptSubmit / Stop / PostToolUse: whether the hook run continues.
+     * PreToolUse: not supported in runtime; prefer `hookSpecificOutput` / `decision` patterns.
+     */
     continue: z.boolean().optional(),
     /** Alias for stopReason — message shown when continue is false. */
     reason: z.string().optional(),
-    /** Message shown to the agent when continue is false. */
+    /** SessionStart / UserPromptSubmit / Stop / PostToolUse: reason recorded when stopping. */
     stopReason: z.string().optional(),
-    /** Optional message shown to the user only (not passed to the agent). */
+    /** PreToolUse / PostToolUse / session events: warning surfaced in UI or stream. */
     systemMessage: z.string().optional(),
-    /** When true, suppresses the hook's JSON output from the conversation transcript. */
+    /** Parsed on stdout; runtime support varies by event (see module doc). */
     suppressOutput: z.boolean().optional(),
   })
   .refine(
@@ -888,7 +932,100 @@ export const hookOutputSchema = z
     }
   )
 
+/**
+ * Shape of any output emitted by hooks in this repository.
+ * Used by contract tests to validate output envelopes via safeParse.
+ */
+export const hookOutputSchema = hookOutputRefinedSchema
+
 export type HookOutput = z.infer<typeof hookOutputSchema>
+
+/** Merged stop dispatch must carry an agent-visible stop narrative — not context-only. */
+function stopHookOutputHasReasonOrStopReason(o: Record<string, unknown>): boolean {
+  const r = typeof o.reason === "string" && o.reason.trim()
+  const s = typeof o.stopReason === "string" && o.stopReason.trim()
+  return Boolean(r || s)
+}
+
+function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
+  if (o.decision === "block" || o.decision === "deny") return true
+  const hso = o.hookSpecificOutput
+  if (hso && typeof hso === "object" && !Array.isArray(hso)) {
+    const d = (hso as { decision?: string }).decision
+    return d === "block" || d === "deny"
+  }
+  return false
+}
+
+/**
+ * `continue: true`; or **`continue: false`** with non-empty **`stopReason`** (Claude universal
+ * output); or top-level **`decision: "block"` / `"deny"`** (may omit `continue`).
+ */
+function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
+  if (o.continue === false) {
+    return typeof o.stopReason === "string" && o.stopReason.trim().length > 0
+  }
+  if (o.continue === true) return true
+  return stopHookOutputHasBlockDecision(o)
+}
+
+/** Stop / SubagentStop: `decision: "block"` / `"deny"` requires **`reason`** (not `stopReason` alone). */
+function stopHookOutputBlockDecisionRequiresReason(o: Record<string, unknown>): boolean {
+  if (o.decision === "block" || o.decision === "deny") {
+    return typeof o.reason === "string" && o.reason.trim().length > 0
+  }
+  return true
+}
+
+/**
+ * Stop / SubagentStop **dispatch** merged JSON (after `normalizeStopDispatchResponseInPlace`).
+ *
+ * Aligns with [Claude Code — Hooks](https://code.claude.com/docs/en/hooks): **Stop** blocking uses
+ * **`decision: "block"`** and **`reason`**. Universal fields allow **`continue: false`** with
+ * **`stopReason`** (stops Claude entirely — distinct from the Stop-hook block pattern). At least one
+ * of **`reason`** or **`stopReason`** must be non-empty; **`hookSpecificOutput.additionalContext`**
+ * alone is invalid.
+ *
+ * Individual subprocess hooks still validate with {@link hookOutputSchema} (`{}` is valid).
+ */
+const stopHookOutputRefinedSchema = z
+  .looseObject({
+    decision: z.enum(["approve", "block", "deny"]).optional(),
+    resolution: z.enum(["human-required"]).optional(),
+    hookSpecificOutput: z
+      .looseObject({
+        hookEventName: z.string().optional(),
+        additionalContext: z.string().optional(),
+        permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
+        permissionDecisionReason: z.string().optional(),
+        modifiedInput: z.record(z.string(), z.unknown()).optional(),
+        updatedInput: z.record(z.string(), z.unknown()).optional(),
+        decision: z.string().optional(),
+      })
+      .optional(),
+    ok: z.boolean().optional(),
+    continue: z.boolean().optional(),
+    reason: z.string().optional(),
+    stopReason: z.string().optional(),
+    systemMessage: z.string().optional(),
+    suppressOutput: z.boolean().optional(),
+  })
+  .refine((o) => stopHookOutputContinueValid(o), {
+    message:
+      "Stop dispatch output must set continue: true, or continue: false with stopReason, or decision block/deny",
+  })
+  .refine((o) => stopHookOutputBlockDecisionRequiresReason(o), {
+    message:
+      'When decision is "block" or "deny", reason is required (Claude Code Stop / SubagentStop)',
+  })
+  .refine((o) => stopHookOutputHasReasonOrStopReason(o), {
+    message:
+      "Stop dispatch output must include a non-empty reason or stopReason (additionalContext alone is not sufficient)",
+  })
+
+export const stopHookOutputSchema = stopHookOutputRefinedSchema
+
+export type StopHookOutput = z.infer<typeof stopHookOutputSchema>
 
 // ─── TaskUpdate schema ────────────────────────────────────────────────────────
 /**

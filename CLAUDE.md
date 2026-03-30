@@ -18,8 +18,8 @@ alwaysApply: false
 - Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` instead.
-- **Complexity reduction**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
-- **Consolidate related utilities**: Multiple related functions → single canonical module (e.g., `agent-paths.ts`). Re-export from originals.
+- **Complexity**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
+- **Consolidate utilities**: Multiple functions → single canonical module (e.g., `agent-paths.ts`). Re-export from originals.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -46,7 +46,7 @@ alwaysApply: false
 - DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
-- `classifyHookOutput` (in `src/dispatch/worker-types.ts`) validates hook output against `hookOutputSchema`, returning `"invalid-schema"` on failure. Silent allows (`continue: true` alone) rejected; require `systemMessage`, `reason`, `stopReason`, or `additionalContext`. Empty `{}` valid.
+- `classifyHookOutput` (in `src/dispatch/worker-types.ts`) validates hook subprocess stdout against `hookOutputSchema`, returning `"invalid-schema"` on failure. Silent allows rejected; require `systemMessage`, `reason`, `stopReason`, or `additionalContext`. Empty `{}` valid. **Stop/SubagentStop** responses normalized with `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` module doc for stdout fields by event.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
@@ -57,19 +57,19 @@ alwaysApply: false
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
-  1. `### <EventName> (N)` heading count matches section table rows.
+  1. `### <EventName> (N)` heading count matches section rows.
   2. README intro `**N hooks**` (line 7) matches manifest total.
   3. Every README hook filename exists on disk.
-- Per new hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
-- Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, and exit `0`.
+- Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
+- Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, exit `0`.
 - Output helpers (call `process.exit(0)`; no stdout after):
-  - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with optional hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
+  - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
-  - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, and PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
+  - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
   - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
 - **DO NOT** write raw `console.log(JSON.stringify(...))` — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
-- **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
+- **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with `AbortController` must listen on `ctx.signal`.
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code.
 - **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` in `hook-utils.ts` for file-path PreToolUse hooks.
 - **Git Utilities Policy** — canonical locations:
@@ -82,11 +82,11 @@ alwaysApply: false
 - Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
-- Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
+- Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema`. Module doc at top of `hooks/schemas.ts` lists agent-supported stdout fields by event (SessionStart / UserPromptSubmit / Stop vs PreToolUse vs PostToolUse). Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
-- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project dedup; branch on result: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget or omit `cwd`. Use `store.consumeOne()` (thread-safe). Gated by `requiredSettings: ["autoSteer"]`. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
-- **DO**: All memory-threshold checkpoints must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
-- **DO**: Use `computeProjectedContent()` from `hook-utils.ts` — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. Fail-open on read/parse errors.
+- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` in `hook-utils.ts`. **DO**: Pass `cwd` for project dedup; branch on result: `if (await scheduleAutoSteer(id, reason, undefined, cwd)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Fire-and-forget or omit `cwd`. Use `store.consumeOne()` (thread-safe). Gated by `requiredSettings: ["autoSteer"]`. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
+- **DO**: Memory-threshold checkpoints use `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
+- **DO**: Use `computeProjectedContent()` from `hook-utils.ts` — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `.replace()` directly. Fail-open on errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
