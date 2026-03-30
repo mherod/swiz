@@ -17,41 +17,18 @@
 //   - Stop-hook action plans ("Push N commit(s) to") — system messages
 //   - Skill content (e.g. /push skill header) — auto-loaded by the agent
 //   - Assistant reasoning ("I'll go ahead and push") — agent-generated text
-
-import { getSwizSettingsPath, readSwizSettings } from "../src/settings.ts"
-import {
-  allowPreToolUse,
-  denyPreToolUse,
-  GIT_PUSH_RE,
-  isShellTool,
-  readSessionLines,
-  type ToolHookInput,
-} from "../src/utils/hook-utils.ts"
-
-// ── Feature flag: disabled by default ────────────────────────────────────────
-// Enable with: swiz settings enable push-gate
 //
-// Fail-closed: if settings.json is present but cannot be parsed, the gate
-// remains active (returns true). Silent bypass on parse errors would defeat
-// the purpose of a security guardrail.
-async function isPushGateEnabled(): Promise<boolean> {
-  const path = getSwizSettingsPath()
-  if (!path) return false
+// Dual-mode: exports a SwizHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-  // File absent → gate off (pushGate defaults to false)
-  const file = Bun.file(path)
-  if (!(await file.exists())) return false
-
-  // File present — use strict parsing so malformed JSON throws instead of
-  // silently returning defaults (which include pushGate: false).
-  try {
-    const settings = await readSwizSettings({ strict: true })
-    return settings.pushGate === true
-  } catch {
-    // Parse failure on a present file → fail-closed: keep the gate active.
-    return true
-  }
-}
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import type { ToolHookInput } from "./schemas.ts"
 
 const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
 const PUSH_APPROVAL_PATTERNS = [
@@ -109,56 +86,82 @@ function processTranscriptEntry(entry: Record<string, unknown>, state: PushCheck
   }
 }
 
-async function scanTranscriptForPushBlock(transcriptPath: string): Promise<PushCheckResult> {
-  const state: PushCheckResult = { blockingLine: "", approvedAfter: false }
+const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
+  name: "pretooluse-no-push-when-instructed",
+  event: "preToolUse",
+  matcher: "Bash",
+  timeout: 5,
 
-  try {
-    for (const line of await readSessionLines(transcriptPath)) {
-      if (!line.trim()) continue
-      let entry: Record<string, unknown>
+  async run(input: ToolHookInput): Promise<SwizHookOutput> {
+    // ── Feature flag check ────────────────────────────────────────────────────
+    // Prefer dispatcher-injected settings (fast path). Fall back to disk read
+    // with fail-closed behaviour: malformed settings.json keeps the gate active.
+    const injected = (input as Record<string, unknown>)._effectiveSettings as
+      | Record<string, unknown>
+      | undefined
+    let pushGateEnabled: boolean
+    if (injected && typeof injected.pushGate !== "undefined") {
+      pushGateEnabled = injected.pushGate === true
+    } else {
+      const { getSwizSettingsPath, readSwizSettings } = await import("../src/settings.ts")
+      const path = getSwizSettingsPath()
+      if (!path) return preToolUseAllow("")
+      const file = Bun.file(path)
+      if (!(await file.exists())) return preToolUseAllow("")
       try {
-        entry = JSON.parse(line)
+        const settings = await readSwizSettings({ strict: true })
+        pushGateEnabled = settings.pushGate === true
       } catch {
-        continue
+        // Parse failure on a present file → fail-closed: keep the gate active.
+        pushGateEnabled = true
       }
-      processTranscriptEntry(entry, state)
     }
-  } catch {}
+    if (!pushGateEnabled) return preToolUseAllow("")
 
-  return state
+    // ── Push command check ────────────────────────────────────────────────────
+    const { isShellTool, GIT_PUSH_RE, readSessionLines } = await import(
+      "../src/utils/hook-utils.ts"
+    )
+    if (!isShellTool(input?.tool_name ?? "")) return preToolUseAllow("")
+    const command: string = (input?.tool_input?.command as string) ?? ""
+    if (!GIT_PUSH_RE.test(command)) return preToolUseAllow("")
+
+    // ── Transcript scan ───────────────────────────────────────────────────────
+    const transcriptPath: string = input?.transcript_path ?? ""
+    if (!transcriptPath) return preToolUseAllow("")
+
+    const state: PushCheckResult = { blockingLine: "", approvedAfter: false }
+    try {
+      for (const line of await readSessionLines(transcriptPath)) {
+        if (!line.trim()) continue
+        let entry: Record<string, unknown>
+        try {
+          entry = JSON.parse(line)
+        } catch {
+          continue
+        }
+        processTranscriptEntry(entry, state)
+      }
+    } catch {}
+
+    if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
+    if (state.approvedAfter) return preToolUseAllow("Push approved by user after instruction")
+
+    return preToolUseDeny(
+      `BLOCKED: git push is prohibited by an explicit instruction in this session.\n\n` +
+        `Instruction found in transcript:\n` +
+        `  "${state.blockingLine}"\n\n` +
+        `The /commit skill and other workflows include "DO NOT push" directives that must\n` +
+        `be respected. Pushing without explicit approval after seeing that instruction is\n` +
+        `a procedural violation.\n\n` +
+        `To push, you must receive explicit user approval first (e.g. the user invokes\n` +
+        `/push or says "go ahead and push"). Do not attempt to rationalise around this.`
+    )
+  },
 }
 
-function isPushCommand(input: ToolHookInput): boolean {
-  if (!isShellTool(input?.tool_name ?? "")) return false
-  const command: string = (input?.tool_input?.command as string) ?? ""
-  return GIT_PUSH_RE.test(command)
-}
-
-async function main() {
-  if (!(await isPushGateEnabled())) process.exit(0)
-
-  const input: ToolHookInput = await Bun.stdin.json()
-  if (!isPushCommand(input)) process.exit(0)
-
-  const transcriptPath: string = input?.transcript_path ?? ""
-  if (!transcriptPath) process.exit(0)
-
-  const { blockingLine, approvedAfter } = await scanTranscriptForPushBlock(transcriptPath)
-  if (!blockingLine) allowPreToolUse("No 'do not push' instruction found in transcript")
-  if (approvedAfter) allowPreToolUse("Push approved by user after 'do not push' instruction")
-
-  denyPreToolUse(
-    `BLOCKED: git push is prohibited by an explicit instruction in this session.\n\n` +
-      `Instruction found in transcript:\n` +
-      `  "${blockingLine}"\n\n` +
-      `The /commit skill and other workflows include "DO NOT push" directives that must\n` +
-      `be respected. Pushing without explicit approval after seeing that instruction is\n` +
-      `a procedural violation.\n\n` +
-      `To push, you must receive explicit user approval first (e.g. the user invokes\n` +
-      `/push or says "go ahead and push"). Do not attempt to rationalise around this.`
-  )
-}
+export default pretoolusNoPushWhenInstructed
 
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(pretoolusNoPushWhenInstructed)
 }

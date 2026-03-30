@@ -22,6 +22,7 @@ import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-confl
 import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
 import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
+import pretoolusNoPushWhenInstructed from "../hooks/pretooluse-no-push-when-instructed.ts"
 import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
@@ -249,7 +250,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-pr-changes-branch-guard.ts", timeout: 10 },
       { file: "pretooluse-trunk-mode-branch-gate.ts", timeout: 10 },
       { hook: pretoolusSkillInvocationGate },
-      { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
+      { hook: pretoolusNoPushWhenInstructed },
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
       { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
       { hook: pretoolusNoReadyToBacklog },
