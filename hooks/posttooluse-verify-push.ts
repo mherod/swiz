@@ -8,95 +8,104 @@
  * push failed silently or was skipped — blocks with a hard error so the agent
  * cannot report push success and move on.
  *
- * Exit conditions:
- *   - No git push in command → exit 0 (passthrough)
- *   - Background push (any detection signal fires) → exit 0 (verify via TaskOutput)
- *   - No upstream tracking branch → exit 0 (untracked branch; push-cooldown handles it)
- *   - HEAD matches remote (immediate or after retry) → emits additionalContext confirming push landed
- *   - HEAD does not match remote after ~15s retry window → denyPostToolUse (blocks with error)
+ * Passthrough (no output):
+ *   - No git push in command
+ *   - Background push (any detection signal fires) — verify via TaskOutput
+ *   - No upstream tracking branch — push-cooldown handles it
+ *   - Not a git repo
+ *
+ * Success: additionalContext confirming push landed (immediate or after retry).
+ * Failure after ~15s retry: PostToolUse block via deny payload.
  *
  * Background push detection (multi-signal, first match wins):
- *   1. tool_input.run_in_background === true   — Claude Code explicit background flag
- *   2. command ends with " &" or contains " & " — shell-level backgrounding
- *   3. tool_response string contains "running in background" or "background task"
- *      — Claude Code's response text for async Bash tool calls
+ *   1. tool_input.run_in_background === true
+ *   2. command ends with " &" or contains " & "
+ *   3. tool_response contains "running in background" or "background task"
+ *
+ * Dual-mode: exports a SwizHook for inline dispatch and remains
+ * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import {
-  denyPostToolUse,
-  emitContext,
+  buildContextHookOutput,
+  buildDenyPostToolUseOutput,
   GIT_PUSH_RE,
   git,
   isShellTool,
 } from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as PostToolHookInput
-if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
 
-const command = String(input.tool_input?.command ?? "")
-if (!GIT_PUSH_RE.test(command)) process.exit(0)
+async function evaluate(input: PostToolHookInput): Promise<SwizHookOutput> {
+  if (!input.tool_name || !isShellTool(input.tool_name)) return {}
 
-// Multi-signal background push detection — any signal skips verification.
-// PostToolUse fires when the Bash tool *call* returns; for background pushes
-// that is before the push process has started, so there is nothing to verify yet.
-const isBackground =
-  // Signal 1: Claude Code explicit background flag in tool_input
-  input.tool_input?.run_in_background === true ||
-  // Signal 2: shell-level backgrounding (" &" suffix or " & " inline)
-  /\s+&\s*$|\s+&\s/.test(command) ||
-  // Signal 3: tool_response text indicates Claude Code spawned a background task
-  (typeof input.tool_response === "string" &&
-    /running in background|background task/i.test(input.tool_response))
+  const command = String(input.tool_input?.command ?? "")
+  if (!GIT_PUSH_RE.test(command)) return {}
 
-if (isBackground) process.exit(0)
+  const isBackground =
+    input.tool_input?.run_in_background === true ||
+    /\s+&\s*$|\s+&\s/.test(command) ||
+    (typeof input.tool_response === "string" &&
+      /running in background|background task/i.test(input.tool_response))
 
-const cwd = input.cwd ?? process.cwd()
+  if (isBackground) return {}
 
-// Get local HEAD SHA
-const localHead = await git(["rev-parse", "HEAD"], cwd)
-if (!localHead) process.exit(0) // not a git repo
+  const cwd = input.cwd ?? process.cwd()
 
-// Get remote tracking SHA (@{upstream} resolves the tracked remote branch)
-const getRemoteHead = async (): Promise<string> => {
-  // Fetch latest remote refs before comparing (silent, no stdout spam)
-  await git(["fetch", "--quiet"], cwd)
-  return (await git(["rev-parse", "@{upstream}"], cwd)) ?? ""
-}
+  const localHead = await git(["rev-parse", "HEAD"], cwd)
+  if (!localHead) return {}
 
-const remoteHead = await git(["rev-parse", "@{upstream}"], cwd)
-if (!remoteHead) {
-  // No upstream configured — nothing to verify against
-  process.exit(0)
-}
+  const getRemoteHead = async (): Promise<string> => {
+    await git(["fetch", "--quiet"], cwd)
+    return (await git(["rev-parse", "@{upstream}"], cwd)) ?? ""
+  }
 
-if (localHead === remoteHead) {
-  await emitContext(
-    "PostToolUse",
-    `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+  const remoteHead = await git(["rev-parse", "@{upstream}"], cwd)
+  if (!remoteHead) return {}
+
+  if (localHead === remoteHead) {
+    return buildContextHookOutput(
+      "PostToolUse",
+      `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+    )
+  }
+
+  for (const delayMs of RETRY_DELAYS_MS) {
+    await Bun.sleep(delayMs)
+    const refreshed = await getRemoteHead()
+    if (refreshed === localHead) {
+      return buildContextHookOutput(
+        "PostToolUse",
+        `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+      )
+    }
+  }
+
+  const finalRemote = await getRemoteHead()
+  return buildDenyPostToolUseOutput(
+    `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
+      `Checked after retrying for ~15 seconds. Possible causes:\n` +
+      `  • The push was rejected (non-fast-forward, branch protection, hook failure)\n` +
+      `  • A different branch/ref was pushed than HEAD\n\n` +
+      `Run \`git log origin/$(git branch --show-current)..HEAD --oneline\` to see unpushed commits, then push again.`
   )
 }
 
-// First check failed — could be an in-flight background push.
-// Retry with exponential backoff for up to ~15 seconds before blocking.
-const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
-for (const delayMs of RETRY_DELAYS_MS) {
-  await Bun.sleep(delayMs)
-  const refreshed = await getRemoteHead()
-  if (refreshed === localHead) {
-    await emitContext(
-      "PostToolUse",
-      `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
-    )
-  }
+const posttoolusVerifyPush: SwizHook<PostToolHookInput> = {
+  name: "posttooluse-verify-push",
+  event: "postToolUse",
+  matcher: "Bash",
+  timeout: 20,
+
+  run(input) {
+    return evaluate(input)
+  },
 }
 
-// Exhausted retries — HEAD is not on remote
-const finalRemote = await getRemoteHead()
-denyPostToolUse(
-  `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
-    `Checked after retrying for ~15 seconds. Possible causes:\n` +
-    `  • The push was rejected (non-fast-forward, branch protection, hook failure)\n` +
-    `  • A different branch/ref was pushed than HEAD\n\n` +
-    `Run \`git log origin/$(git branch --show-current)..HEAD --oneline\` to see unpushed commits, then push again.`
-)
+export default posttoolusVerifyPush
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttoolusVerifyPush)
+}

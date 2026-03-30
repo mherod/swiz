@@ -3,30 +3,31 @@
 // Stop hook: Block stop when the remote has too many branches.
 // Fires when `origin` has more than BRANCH_LIMIT remote-tracking branches.
 // Cooldown (cooldownSeconds: 7200 in manifest) is enforced by the dispatcher.
+//
+// Dual-mode: exports a SwizStopHook for inline dispatch and remains
+// executable as a standalone script for backwards compatibility and testing.
 
-import { blockStop, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
+import { blockStopObj, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const BRANCH_LIMIT = 40
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+async function evaluate(input: StopHookInput): Promise<SwizHookOutput> {
   const cwd = input.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
-  // List remote-tracking branches. Fail-open: empty output or git errors skip the check.
   const raw = await git(["branch", "-r"], cwd)
-  if (!raw) return
+  if (!raw) return {}
 
-  // Exclude symbolic refs (e.g. "origin/HEAD -> origin/main") and empty lines.
   const branches = raw
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.includes("->"))
 
   const count = branches.length
-  if (count <= BRANCH_LIMIT) return
+  if (count <= BRANCH_LIMIT) return {}
 
   const excess = count - BRANCH_LIMIT
   const reason =
@@ -42,7 +43,23 @@ async function main(): Promise<void> {
         `sed 's|^\\s*origin/||' | xargs -I{} git push origin --delete {}`
     )
 
-  blockStop(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopUpstreamBranchCount: SwizStopHook = {
+  name: "stop-upstream-branch-count",
+  event: "stop",
+  timeout: 10,
+  cooldownSeconds: 7200,
+
+  run(rawInput) {
+    const input = stopHookInputSchema.parse(rawInput)
+    return evaluate(input)
+  },
+}
+
+export default stopUpstreamBranchCount
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopUpstreamBranchCount)
+}

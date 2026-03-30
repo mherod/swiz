@@ -121,7 +121,7 @@ export function preToolUseDeny(reason: string): SwizHookOutput {
   const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
   return {
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: firstLine || "Denied without reason",
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny" as const,

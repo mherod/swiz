@@ -286,6 +286,11 @@ function denyPostToolUseObj(reason: string): HookOutput {
   })
 }
 
+/** PostToolUse block payload without stdout/exit — use from `SwizHook.run()`. */
+export function buildDenyPostToolUseOutput(reason: string): HookOutput {
+  return denyPostToolUseObj(reason)
+}
+
 export function exitWithHookObject(obj: HookOutput): never {
   if (isInlineSwizHookRun()) {
     throw new SwizHookExit(obj)
@@ -296,8 +301,7 @@ export function exitWithHookObject(obj: HookOutput): never {
 
 /** Emit a PostToolUse block decision and exit. Works across all agents. */
 export function denyPostToolUse(reason: string): never {
-  const obj = denyPostToolUseObj(reason)
-  exitWithHookObject(obj)
+  exitWithHookObject(buildDenyPostToolUseOutput(reason))
 }
 
 /**

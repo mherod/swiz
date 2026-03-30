@@ -8,6 +8,8 @@ import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
+import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
+import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
@@ -43,6 +45,7 @@ import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
+import stopUpstreamBranchCount from "../hooks/stop-upstream-branch-count.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
@@ -150,7 +153,7 @@ export const manifest: HookGroup[] = [
         cooldownSeconds: 30,
         requiredSettings: ["personalRepoIssuesGate"],
       },
-      { file: "stop-upstream-branch-count.ts", timeout: 10, cooldownSeconds: 7200 },
+      { hook: stopUpstreamBranchCount },
       { file: "stop-memory-size.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-dependabot-prs.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-gdpr-data-models.ts", timeout: 10 },
@@ -315,9 +318,9 @@ export const manifest: HookGroup[] = [
       { hook: posttoolusGitContext },
       { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
       { file: "posttooluse-push-cooldown.ts", timeout: 5 },
-      { file: "posttooluse-verify-push.ts", timeout: 20 },
+      { hook: posttoolusVerifyPush },
       { file: "posttooluse-state-transition.ts", timeout: 5 },
-      { file: "posttooluse-upstream-sync-on-push.ts", timeout: 5 },
+      { hook: posttoolusUpstreamSyncOnPush },
     ],
   },
   {

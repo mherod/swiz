@@ -179,35 +179,54 @@ class PreToolUseStrategy implements HookExecutionStrategy {
   }
 }
 
-/** Process blocking hook results, short-circuiting on first block. */
+/** Process blocking hook results, collecting contexts from all hooks.
+ *  For stop events: runs all hooks, forwards first block, merges all contexts.
+ *  For other events: may have been aborted early, but still collects contexts
+ *  from any hooks that completed before abort. */
 function processBlockingResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
   executions: HookExecution[],
   finalResponse: Record<string, unknown>
 ): void {
   const contexts: string[] = []
+  let firstBlockHandled = false
+
   for (const { execution, parsed: resp } of results) {
     if (execution.status === "skipped" || execution.status === "aborted") {
       executions.push(execution)
       continue
     }
+
     if (resp && isBlock(resp)) {
       log(`   ✗ BLOCK from ${execution.file}`)
       execution.status = "block"
+
+      if (!firstBlockHandled) {
+        // First block: copy its entire response as the final response
+        Object.assign(finalResponse, resp)
+        firstBlockHandled = true
+        // Do NOT extract its context here — its systemMessage is already in finalResponse
+      } else {
+        // Subsequent blocks: only extract their context (if any) for inclusion
+        const ctx = extractContext(resp)
+        if (ctx) contexts.push(ctx)
+      }
+
       executions.push(execution)
-      // Keep the first block response exactly as produced.
-      if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
-      break
+      // Continue processing remaining hooks to collect contexts and executions
+      continue
     }
-    // Collect non-blocking context (systemMessage / additionalContext) so it
-    // reaches the model as a system-reminder even from blocking-strategy events.
+
+    // Non-block hook: extract context (systemMessage / additionalContext)
     if (resp) {
       const ctx = extractContext(resp)
       if (ctx) contexts.push(ctx)
     }
+
     log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
     executions.push(execution)
   }
+
   if (contexts.length > 0) {
     finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${contexts.join("\n\n")}`
   }
@@ -330,7 +349,10 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     const response = await runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
-        if (result.parsed && isBlock(result.parsed)) abort()
+        // Stop events should run all hooks to collect all results; only abort for other events
+        if (ctx.canonicalEvent !== "stop" && result.parsed && isBlock(result.parsed)) {
+          abort()
+        }
       },
       processResults: (results, executions) => {
         processBlockingResults(results, executions, finalResponse)
