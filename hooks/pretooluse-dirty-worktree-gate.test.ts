@@ -49,8 +49,8 @@ async function runHook(cwd: string): Promise<{ decision?: string; reason?: strin
     stderr: "pipe",
     env: { ...process.env, HOME: fakeHome },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 

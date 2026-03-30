@@ -46,6 +46,38 @@ describe("executeDispatch", () => {
     expect(result).toBeDefined()
     expect(result.response).toEqual({})
   })
+
+  it("normalizes stop dispatch when cwd is not a git repo", async () => {
+    const req: DispatchRequest = {
+      canonicalEvent: "stop",
+      hookEventName: "Stop",
+      payloadStr: JSON.stringify({
+        cwd: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
+        session_id: "stop-no-git",
+      }),
+      daemonContext: true,
+    }
+    const result = await executeDispatch(req)
+    expect(result.response.continue).toBe(true)
+    expect((result.response.hookSpecificOutput as { hookEventName?: string }).hookEventName).toBe(
+      "Stop"
+    )
+  })
+
+  it("normalizes stop dispatch when manifest yields zero matching hook groups", async () => {
+    const req: DispatchRequest = {
+      canonicalEvent: "stop",
+      hookEventName: "Stop",
+      payloadStr: JSON.stringify({ cwd: process.cwd(), session_id: "stop-empty-manifest" }),
+      manifestProvider: async () => [],
+      daemonContext: true,
+    }
+    const result = await executeDispatch(req)
+    expect(result.response.continue).toBe(true)
+    expect((result.response.hookSpecificOutput as { hookEventName?: string }).hookEventName).toBe(
+      "Stop"
+    )
+  })
 })
 
 describe("transcriptSummaryProvider", () => {

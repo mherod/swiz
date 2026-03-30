@@ -2,17 +2,16 @@
 
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
-import { emitContext, isFileEditTool } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { buildContextHookOutput, isFileEditTool } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
-/** Walk up from filePath to find node_modules/.bin/prettier */
 async function findPrettier(filePath: string, cwd: string): Promise<string | null> {
-  // Check project cwd first
   const cwdBin = joinNodeModulesPath(cwd, ".bin", "prettier")
   if (await Bun.file(cwdBin).exists()) return cwdBin
 
-  // Walk up from file location
   let dir = dirname(filePath)
   for (let i = 0; i < 10; i++) {
     const candidate = joinNodeModulesPath(dir, ".bin", "prettier")
@@ -32,27 +31,43 @@ function resolveTsEditTarget(input: FileEditHookInput): string | null {
   return filePath
 }
 
-async function runPrettier(prettierBin: string, filePath: string, _cwd: string): Promise<void> {
+async function runPrettier(prettierBin: string, filePath: string): Promise<SwizHookOutput> {
   try {
     const result = await spawnWithTimeout([prettierBin, "--write", filePath], { timeoutMs: 10_000 })
     if (!result.timedOut && result.exitCode === 0) {
-      await emitContext("PostToolUse", `Prettier formatted: ${filePath}`)
+      return buildContextHookOutput("PostToolUse", `Prettier formatted: ${filePath}`)
     }
   } catch {
     // Prettier crashed — skip silently
   }
+  return {}
 }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = resolveTsEditTarget(input)
-  if (!filePath) process.exit(0)
+export async function evaluatePosttoolusePrettierTs(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = fileEditHookInputSchema.parse(input)
+  const filePath = resolveTsEditTarget(hookInput)
+  if (!filePath) return {}
 
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = hookInput.cwd ?? process.cwd()
   const prettierBin = await findPrettier(filePath, cwd)
-  if (!prettierBin) process.exit(0)
+  if (!prettierBin) return {}
 
-  await runPrettier(prettierBin, filePath, cwd)
+  return await runPrettier(prettierBin, filePath)
 }
 
-if (import.meta.main) main().catch(() => {})
+const posttoolusePrettierTs: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-prettier-ts",
+  event: "postToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
+  async: true,
+  run(input) {
+    return evaluatePosttoolusePrettierTs(input)
+  },
+}
+
+export default posttoolusePrettierTs
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttoolusePrettierTs)
+}

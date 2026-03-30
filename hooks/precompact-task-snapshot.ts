@@ -9,6 +9,8 @@
 // discovery or the agent's in-context memory.
 
 import { getHomeDirWithFallback } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
   getSessionCompactSnapshotPath,
   isIncompleteTaskStatus,
@@ -97,22 +99,36 @@ function buildSnapshot(sessionId: string, tasks: SnapshotTask[]): CompactSnapsho
   }
 }
 
-async function main(): Promise<void> {
-  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
-  const sessionId = input.session_id ?? ""
-  if (!sessionId) return
+export async function evaluatePrecompactTaskSnapshot(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = sessionHookInputSchema.parse(input)
+  const sessionId = hookInput.session_id ?? ""
+  if (!sessionId) return {}
 
   const home = getHomeDirWithFallback("")
-  if (!home) return
+  if (!home) return {}
 
   const sessionTasks = await readSessionTasks(sessionId, home)
-  if (sessionTasks.length === 0) return
+  if (sessionTasks.length === 0) return {}
   const snapshotTasks = toSnapshotTasks(sessionTasks)
   const snapshot = buildSnapshot(sessionId, snapshotTasks)
 
   const snapshotPath = getSessionCompactSnapshotPath(sessionId, home)
-  if (!snapshotPath) return
+  if (!snapshotPath) return {}
   await Bun.write(snapshotPath, JSON.stringify(snapshot, null, 2))
+  return {}
 }
 
-if (import.meta.main) await main()
+const precompactTaskSnapshot: SwizHook<Record<string, unknown>> = {
+  name: "precompact-task-snapshot",
+  event: "preCompact",
+  timeout: 5,
+  run(input) {
+    return evaluatePrecompactTaskSnapshot(input)
+  },
+}
+
+export default precompactTaskSnapshot
+
+if (import.meta.main) {
+  await runSwizHookAsMain(precompactTaskSnapshot)
+}

@@ -16,13 +16,15 @@
 
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
   getSessionTaskPath,
   getSessionTasksDir,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
-import { emitContext, resolveSafeSessionId } from "../src/utils/hook-utils.ts"
+import { buildContextHookOutput, resolveSafeSessionId } from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -192,16 +194,30 @@ function formatSyncSummary(
   return `TaskList sync: ${parts.join(", ")} (${total} task(s) in response).`
 }
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as PostToolHookInput
-  const resolved = await resolveListSyncInput(input)
-  if (!resolved) return
+export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = input as PostToolHookInput
+  const resolved = await resolveListSyncInput(hookInput)
+  if (!resolved) return {}
 
   const counts = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
   const summary = formatSyncSummary(counts, resolved.tasks.length)
-  if (!summary) return
+  if (!summary) return {}
 
-  await emitContext("PostToolUse", summary)
+  return buildContextHookOutput("PostToolUse", summary)
 }
 
-if (import.meta.main) void main()
+const posttooluseTaskListSync: SwizHook<PostToolHookInput> = {
+  name: "posttooluse-task-list-sync",
+  event: "postToolUse",
+  matcher: "TaskList",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseTaskListSync(input)
+  },
+}
+
+export default posttooluseTaskListSync
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseTaskListSync as SwizHook<Record<string, unknown>>)
+}

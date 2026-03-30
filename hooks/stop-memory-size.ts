@@ -6,6 +6,8 @@
 //
 // Performance: uses an incremental mtime/size index at .swiz/memory-index.json so
 // unchanged files are not re-read on every stop invocation.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { mkdir, readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
@@ -19,9 +21,11 @@ import {
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
-import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { blockStopObj, formatActionPlan, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 interface MemoryViolation {
   filePath: string
@@ -200,23 +204,22 @@ function buildMemoryViolationReason(
   )
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopMemorySize(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
   const thresholds = await resolveThresholds(cwd)
   const home = getHomeDirWithFallback("")
   const allFiles = await collectUniqueMemoryFiles([cwd, join(home, ".claude")].filter(Boolean))
 
-  // Skip if any CLAUDE.md was modified within the last 5 minutes — memory was recently updated.
   const RECENCY_WINDOW_MS = 5 * 60 * 1000
   for (const f of allFiles) {
     if (f.endsWith("CLAUDE.md")) {
       try {
         const s = await stat(f)
-        if (Date.now() - s.mtimeMs < RECENCY_WINDOW_MS) return
+        if (Date.now() - s.mtimeMs < RECENCY_WINDOW_MS) return {}
       } catch {}
     }
   }
@@ -225,10 +228,25 @@ async function main(): Promise<void> {
   const { updatedIndex, violations } = await scanMemoryFiles(allFiles, index, thresholds)
   await saveIndex(cwd, updatedIndex)
 
-  if (violations.length === 0) return
-  blockStop(
+  if (violations.length === 0) return {}
+  return blockStopObj(
     buildMemoryViolationReason(violations, thresholds.lineThreshold, thresholds.wordThreshold)
   )
 }
 
-if (import.meta.main) void main()
+const stopMemorySize: SwizStopHook = {
+  name: "stop-memory-size",
+  event: "stop",
+  timeout: 10,
+  cooldownSeconds: 3600,
+
+  run(input) {
+    return evaluateStopMemorySize(input)
+  },
+}
+
+export default stopMemorySize
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopMemorySize)
+}

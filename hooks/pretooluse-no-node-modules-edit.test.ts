@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { runHook as runHookBase } from "../src/utils/test-utils.ts"
 
 async function runHook(filePath: string) {
-  return runHookBase("hooks/pretooluse-no-node-modules-edit.ts", {
+  return await runHookBase("hooks/pretooluse-no-node-modules-edit.ts", {
     tool_name: "Edit",
     tool_input: { file_path: filePath },
   })

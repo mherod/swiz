@@ -1,17 +1,16 @@
 #!/usr/bin/env bun
 // SessionStart hook: Auto-reinstall swiz if the manifest has drifted since last install.
-// Detects manifest changes by comparing a hash of src/manifest.ts to a stored hash.
-// Runs at startup so agents always get up-to-date hook configurations.
-// Skips entirely while `~/.local/share/swiz/sessionstart-self-heal-paused` exists
-// (set by full `swiz install --uninstall` / `swiz uninstall` so drift does not re-add hooks).
 
 import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { isSessionstartSelfHealPaused } from "../src/sessionstart-self-heal-state.ts"
-import { emitContext } from "../src/utils/hook-utils.ts"
+import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import { sessionStartHookInputSchema } from "./schemas.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 
@@ -39,7 +38,6 @@ async function writeHash(hash: string): Promise<void> {
   await Bun.write(HASH_FILE, hash)
 }
 
-/** Self-heal install should finish within 10s. */
 const INSTALL_TIMEOUT_MS = 10_000
 
 async function runInstall(swizRoot: string): Promise<boolean> {
@@ -49,36 +47,28 @@ async function runInstall(swizRoot: string): Promise<boolean> {
     args.push("--gemini")
   } else if (process.env.CLAUDECODE) {
     args.push("--claude")
-  } else if (process.env.SHELL?.includes("cursor") || process.env.TERM_PROGRAM === "Cursor") {
-    // For Cursor, we usually install globally, but can target if needed.
-    // By default, if no flag is specified, swiz install installs for all detected agents.
   }
 
   const result = await spawnWithTimeout(args, { cwd: swizRoot, timeoutMs: INSTALL_TIMEOUT_MS })
   return !result.timedOut && result.exitCode === 0
 }
 
-async function main(): Promise<void> {
-  await Bun.stdin.json() // consume stdin (required by hook protocol)
+export async function evaluateSessionstartSelfHeal(input: unknown): Promise<SwizHookOutput> {
+  sessionStartHookInputSchema.parse(input)
 
-  // Full `swiz install --uninstall` / `swiz uninstall` pauses self-heal so manifest drift
-  // does not undo an intentional removal.
-  if (await isSessionstartSelfHealPaused()) return
+  if (await isSessionstartSelfHealPaused()) return {}
 
-  // Resolve swiz root from the hook file location
   const swizRoot = dirname(dirname(import.meta.path))
   const currentHash = await computeManifestHash(swizRoot)
-  if (!currentHash) return
+  if (!currentHash) return {}
 
   const storedHash = await readStoredHash()
 
-  if (storedHash === currentHash) return
+  if (storedHash === currentHash) return {}
 
-  // Manifest has changed — reinstall to sync agent configs
   const installed = await runInstall(swizRoot)
-  if (!installed) return
+  if (!installed) return {}
 
-  // Update stored hash so we don't reinstall again next session
   await writeHash(currentHash)
 
   const isFirstInstall = storedHash === null
@@ -86,7 +76,21 @@ async function main(): Promise<void> {
     ? "swiz install: initial agent config written."
     : "swiz self-healed: manifest changed, agent configs updated."
 
-  await emitContext("SessionStart", message)
+  return buildContextHookOutput("SessionStart", message)
 }
 
-if (import.meta.main) void main()
+const sessionstartSelfHeal: SwizHook<Record<string, unknown>> = {
+  name: "sessionstart-self-heal",
+  event: "sessionStart",
+  matcher: "startup",
+  timeout: 15,
+  run(input) {
+    return evaluateSessionstartSelfHeal(input)
+  },
+}
+
+export default sessionstartSelfHeal
+
+if (import.meta.main) {
+  await runSwizHookAsMain(sessionstartSelfHeal)
+}

@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 
 // PostToolUse hook: Remind agents to create/update tasks regularly
-// Provides countdown hints showing remaining calls until mandatory enforcement
-// Uses current-session tool history (daemon-injected when available) to determine position
+// Dual-mode: SwizHook + runSwizHookAsMain.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
-  emitContext,
+  buildContextHookOutput,
   getCurrentSessionTaskToolStats,
   isEditTool,
   isWriteTool,
@@ -14,13 +15,8 @@ import {
 } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
-/** Tool calls in a session with no task tools yet before TaskCreate is required. */
 const CREATION_THRESHOLD = 5
-
-/** Tool calls since the last task tool before staleness messaging escalates. */
 const STALENESS_THRESHOLD = 10
-
-/** Beyond this many calls since a task update, append the severe-stale appendix. */
 const STALE_EXTREME_CALLS = 20
 
 const SEVERE_STALE_APPENDIX =
@@ -29,40 +25,40 @@ const SEVERE_STALE_APPENDIX =
 let advisorSessionId = ""
 let advisorCwd: string | undefined
 
-/**
- * Pushes advisory text to the agent; optionally schedules auto-steer when a session id is set.
- */
 async function emitAdvisorContext(
   message: string,
   opts?: { skipAutoSteer?: boolean }
-): Promise<never> {
+): Promise<SwizHookOutput> {
   if (advisorSessionId && !opts?.skipAutoSteer) {
     await scheduleAutoSteer(advisorSessionId, message, undefined, advisorCwd)
   }
-  return emitContext("PostToolUse", message)
+  return buildContextHookOutput("PostToolUse", message)
 }
 
-function emitCreationCountdown(total: number, threshold: number, taskCreateName: string): void {
+async function emitCreationCountdown(
+  total: number,
+  threshold: number,
+  taskCreateName: string
+): Promise<SwizHookOutput> {
   const remaining = threshold - total
-  if (remaining <= 0) return
+  if (remaining <= 0) return {}
 
   if (remaining <= 1) {
-    void emitAdvisorContext(
+    return await emitAdvisorContext(
       `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
     )
-    return
   }
   if (remaining <= 3) {
-    void emitAdvisorContext(
+    return await emitAdvisorContext(
       `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
     )
-    return
   }
   if (total >= 2) {
-    void emitAdvisorContext(
+    return await emitAdvisorContext(
       `${total}/${threshold} tool calls before ${taskCreateName} is required.`
     )
   }
+  return {}
 }
 
 function stalenessWarningMessage(
@@ -96,33 +92,46 @@ function stalenessWarningMessage(
   return `${base} ${SEVERE_STALE_APPENDIX}`
 }
 
-async function main(): Promise<void> {
-  const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
-  const input = toolHookInputSchema.parse(hookRaw)
+export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
+  const hookRaw =
+    typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {}
+  const parsed = toolHookInputSchema.parse(hookRaw)
 
-  advisorSessionId = input.session_id ?? ""
-  advisorCwd = input.cwd
+  advisorSessionId = parsed.session_id ?? ""
+  advisorCwd = parsed.cwd
 
   const { totalToolCalls, callsSinceLastTaskTool } = await getCurrentSessionTaskToolStats(hookRaw)
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
 
   if (callsSinceLastTaskTool >= totalToolCalls) {
-    emitCreationCountdown(totalToolCalls, CREATION_THRESHOLD, taskCreateName)
-    return
+    return await emitCreationCountdown(totalToolCalls, CREATION_THRESHOLD, taskCreateName)
   }
 
   const staleRemaining = STALENESS_THRESHOLD - callsSinceLastTaskTool
   const message = stalenessWarningMessage(
     callsSinceLastTaskTool,
     staleRemaining,
-    input.tool_name ?? ""
+    parsed.tool_name ?? ""
   )
 
   if (message) {
-    void emitAdvisorContext(message, { skipAutoSteer: true })
+    return await emitAdvisorContext(message, { skipAutoSteer: true })
   }
+  return {}
 }
 
+const posttooluseTaskAdvisor: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-task-advisor",
+  event: "postToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseTaskAdvisor(input)
+  },
+}
+
+export default posttooluseTaskAdvisor
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(posttooluseTaskAdvisor)
 }

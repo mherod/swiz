@@ -1,8 +1,11 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block task updates when the worktree has more than N dirty files.
 // Forces a commit boundary before the task plan can be reshaped further.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
   DEFAULT_DIRTY_WORKTREE_THRESHOLD,
   readProjectSettings,
@@ -11,15 +14,15 @@ import {
 import { skillAdvice } from "../src/skill-utils.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   expandSkillReferences,
   getGitStatusV2,
   git,
   isGitRepo,
   mergeActionPlanIntoTasks,
+  preToolUseAllow,
+  preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 /**
  * When on the default branch in a non-trunk-mode project, return advice
@@ -55,26 +58,33 @@ async function featureBranchHint(cwd: string): Promise<string | null> {
   )
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+export async function evaluatePretooluseDirtyWorktreeGate(
+  raw: Record<string, unknown>
+): Promise<SwizHookOutput> {
+  let input: ToolHookInput
+  try {
+    input = toolHookInputSchema.parse(raw)
+  } catch {
+    return {}
+  }
   const cwd = input.cwd
-  if (!cwd) process.exit(0)
-  if (!(await isGitRepo(cwd))) process.exit(0)
+  if (!cwd) return {}
+  if (!(await isGitRepo(cwd))) return {}
 
   const [gitStatus, threshold] = await Promise.all([
     getGitStatusV2(cwd),
     resolveNumericSetting(cwd, "dirtyWorktreeThreshold", DEFAULT_DIRTY_WORKTREE_THRESHOLD),
   ])
-  if (!gitStatus) process.exit(0)
+  if (!gitStatus) return {}
 
   if (gitStatus.total === 0) {
-    process.exit(0)
+    return {}
   }
 
   if (gitStatus.total <= threshold) {
     const branchHint = await featureBranchHint(cwd)
     const msg = `Worktree has ${gitStatus.total} dirty file(s) (threshold: ${threshold})`
-    allowPreToolUse(branchHint ? `${msg}\n\n${branchHint}` : msg)
+    return preToolUseAllow(branchHint ? `${msg}\n\n${branchHint}` : msg)
   }
 
   const commitSteps = await expandSkillReferences([
@@ -90,11 +100,26 @@ async function main(): Promise<void> {
     await mergeActionPlanIntoTasks(commitSteps, input.session_id, cwd)
   }
 
-  denyPreToolUse(
+  return preToolUseDeny(
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +
       `Commit your current changes before updating the task plan.\n\n` +
       `To adjust: swiz settings set dirty-worktree-threshold <N>`
   )
 }
 
-if (import.meta.main) void main()
+const pretooluseDirtyWorktreeGate: SwizToolHook = {
+  name: "pretooluse-dirty-worktree-gate",
+  event: "preToolUse",
+  timeout: 5,
+  cooldownSeconds: 60,
+
+  async run(input) {
+    return await evaluatePretooluseDirtyWorktreeGate(input as Record<string, unknown>)
+  },
+}
+
+export default pretooluseDirtyWorktreeGate
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseDirtyWorktreeGate)
+}

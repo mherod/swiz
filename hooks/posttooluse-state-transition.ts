@@ -20,6 +20,8 @@
 // so this is safe to run regardless of workflow or whether PRs are used.
 
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "../src/git-helpers.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import {
   extractCheckoutBranch,
@@ -258,27 +260,40 @@ async function handleAsyncTransitions(
   return false
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd
-  if (!cwd) return
+export async function evaluatePosttooluseStateTransition(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const cwd = hookInput.cwd
+  if (!cwd) return {}
 
-  if (input.tool_name !== "Bash" && input.tool_name !== "mcp__ide__runCommand") return
-  if (!(await isGitRepo(cwd))) return
+  if (hookInput.tool_name !== "Bash" && hookInput.tool_name !== "mcp__ide__runCommand") return {}
+  if (!(await isGitRepo(cwd))) return {}
 
-  const command = String(input.tool_input?.command ?? "")
+  const command = String(hookInput.tool_input?.command ?? "")
   const state = (await readProjectState(cwd)) as ProjectState | null
-  if (!state) return
+  if (!state) return {}
 
-  // Synchronous rules first (fast, no API calls)
   const syncRule = matchesSyncRule(command, state)
   if (syncRule) {
     await writeProjectState(cwd, syncRule.to)
-    return
+    return {}
   }
 
-  // Async rules (may involve gh API or git subprocess)
   await handleAsyncTransitions(command, cwd, state)
+  return {}
 }
 
-if (import.meta.main) void main()
+const posttooluseStateTransition: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-state-transition",
+  event: "postToolUse",
+  matcher: "Bash",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseStateTransition(input)
+  },
+}
+
+export default posttooluseStateTransition
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseStateTransition)
+}

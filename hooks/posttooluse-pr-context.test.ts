@@ -111,8 +111,8 @@ describe("posttooluse-pr-context: checkout detection (\\s*git checkout)", () => 
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.write(payload)
-    void proc.stdin.end()
+    await proc.stdin.write(payload)
+    await proc.stdin.end()
 
     const rawOutput = await new Response(proc.stdout).text()
     await proc.exited

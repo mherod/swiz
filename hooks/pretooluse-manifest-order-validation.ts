@@ -14,7 +14,7 @@ import {
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
 function extractStopHookOrder(source: string): string[] {
@@ -93,26 +93,24 @@ const pretooluseManiOrderValidation: SwizFileEditHook = {
     if (!isFileEditForPath(input, "src/manifest.ts")) return preToolUseAllow("")
 
     try {
-      const toolName = input.tool_name ?? ""
-      const filePath = input.tool_input?.file_path ?? ""
-      const projectedContent = await computeProjectedContent(
-        toolName,
-        filePath,
-        input.tool_input ?? {}
-      )
-      if (projectedContent === null) return preToolUseAllow("")
-
-      const projectedOrder = extractStopHookOrder(projectedContent)
-      if (projectedOrder.length === 0) return preToolUseAllow("")
-
-      const denyReason = await checkOrderAgainstTest(projectedOrder, input.cwd ?? process.cwd())
-      if (denyReason) return preToolUseDeny(denyReason)
-
-      return preToolUseAllow("")
+      const denyReason = await validateManifestOrder(input)
+      return denyReason ? preToolUseDeny(denyReason) : preToolUseAllow("")
     } catch {
       return preToolUseAllow("")
     }
   },
+}
+
+async function validateManifestOrder(input: FileEditHookInput): Promise<string | null> {
+  const toolName = input.tool_name ?? ""
+  const filePath = input.tool_input?.file_path ?? ""
+  const projectedContent = await computeProjectedContent(toolName, filePath, input.tool_input ?? {})
+  if (projectedContent === null) return null
+
+  const projectedOrder = extractStopHookOrder(projectedContent)
+  if (projectedOrder.length === 0) return null
+
+  return await checkOrderAgainstTest(projectedOrder, input.cwd ?? process.cwd())
 }
 
 export default pretooluseManiOrderValidation

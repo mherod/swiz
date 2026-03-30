@@ -4,9 +4,13 @@
 //   1. The session has at least two incomplete tasks (pending or in_progress)
 //   2. At least one incomplete task is pending to represent the next intended step
 //   3. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains executable as a subprocess.
 
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -23,9 +27,6 @@ import {
 } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
-  allowPreToolUse,
-  allowPreToolUseWithContext,
-  denyPreToolUse,
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
@@ -36,30 +37,28 @@ import {
   isTerminalTaskStatus,
   isWriteTool,
   mergeActionPlanIntoTasks,
+  preToolUseAllow,
+  preToolUseAllowWithContext,
+  preToolUseDeny,
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
 
-// ── Auto-steer deny wrapper ────────────────────────────────────────────────
-// When auto-steer is available, schedule the denial reason as a steering
-// message and ALLOW the tool call — the guidance will be typed into the
-// terminal on the next PostToolUse cycle. When unavailable, deny as before.
-let _autoSteerSessionId: string | null = null
-let _cwd: string | undefined
-
-async function deny(reason: string): Promise<never> {
-  if (_autoSteerSessionId) {
-    if (await scheduleAutoSteer(_autoSteerSessionId, reason, undefined, _cwd)) {
-      // Auto-steer will deliver the message — allow silently to avoid duplicate guidance.
-      allowPreToolUse("")
+async function denyAutoSteerOrBlock(
+  sessionId: string,
+  cwd: string | undefined,
+  reason: string
+): Promise<SwizHookOutput> {
+  if (sessionId) {
+    if (await scheduleAutoSteer(sessionId, reason, undefined, cwd)) {
+      return preToolUseAllow("")
     }
   }
-  denyPreToolUse(reason)
+  return preToolUseDeny(reason)
 }
 
-async function denyRequiredTasks(reason: string): Promise<never> {
-  // Required-task enforcement must hard-block immediately.
-  denyPreToolUse(reason)
+function denyRequiredTasks(reason: string): SwizHookOutput {
+  return preToolUseDeny(reason)
 }
 
 const STALENESS_THRESHOLD = 20
@@ -104,7 +103,7 @@ export function isLargeContentPayload(input: Record<string, unknown>): boolean {
 
 async function isTaskEnforcementProject(cwd: string): Promise<boolean> {
   if (!(await isGitRepo(cwd))) return false
-  return hasFileInTree(cwd, "CLAUDE.md")
+  return await hasFileInTree(cwd, "CLAUDE.md")
 }
 
 function isBlockedTool(toolName: string): boolean {
@@ -171,9 +170,11 @@ function checkNoTasks(
   cwd: string,
   sessionId: string,
   thresholds: GovernanceThresholds
-): (allTasks: Array<{ id: string; status: string; subject: string }>) => Promise<void> {
+): (
+  allTasks: Array<{ id: string; status: string; subject: string }>
+) => Promise<SwizHookOutput | undefined> {
   return async (allTasks) => {
-    if (allTasks.length !== 0) return
+    if (allTasks.length !== 0) return undefined
     const priorResult = await findPriorSessionTasks(cwd, sessionId)
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
@@ -184,7 +185,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      await denyRequiredTasks(
+      return denyRequiredTasks(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -199,7 +200,7 @@ function checkNoTasks(
       )
     }
 
-    await denyRequiredTasks(
+    return denyRequiredTasks(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
@@ -217,18 +218,18 @@ function checkNoTasks(
   }
 }
 
-async function checkTaskMinimums(
+function checkTaskMinimums(
   toolName: string,
   summary: ReturnType<typeof buildIncompleteTaskSummary>,
   thresholds: GovernanceThresholds
-): Promise<void> {
+): SwizHookOutput | undefined {
   const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
-  if (allTasksDone) return
+  if (allTasksDone) return undefined
   if (
     incompleteTasks.length >= thresholds.minIncomplete &&
     pendingTasks.length >= thresholds.minPending
   )
-    return
+    return undefined
 
   const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteTasks.length)
   const missingPending = Math.max(0, thresholds.minPending - pendingTasks.length)
@@ -246,7 +247,7 @@ async function checkTaskMinimums(
     actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
   }
 
-  await denyRequiredTasks(
+  return denyRequiredTasks(
     `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
       `Current:\n` +
       `  • Incomplete tasks: ${incompleteTasks.length}\n` +
@@ -261,12 +262,16 @@ async function checkTaskMinimums(
 
 async function checkInProgressCap(
   toolName: string,
+  sessionId: string,
+  cwd: string | undefined,
   allTasks: Array<{ id: string; status: string; subject: string }>
-): Promise<void> {
+): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
-  if (inProgressTasks.length <= IN_PROGRESS_CAP) return
+  if (inProgressTasks.length <= IN_PROGRESS_CAP) return undefined
   const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
-  await deny(
+  return await denyAutoSteerOrBlock(
+    sessionId,
+    cwd,
     `STOP. Too many in-progress tasks (${inProgressTasks.length}/${IN_PROGRESS_CAP} max). ${toolName} is BLOCKED.\n\n` +
       `Currently in progress:\n${taskList}\n\n` +
       `Having more than ${IN_PROGRESS_CAP} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
@@ -288,15 +293,19 @@ async function checkInProgressCap(
 
 async function checkDirectMergeIntent(
   toolName: string,
+  sessionId: string,
+  cwd: string | undefined,
   incompleteTasks: Array<{ id: string; status: string; subject: string }>
-): Promise<void> {
+): Promise<SwizHookOutput | undefined> {
   const mergePrTasks = incompleteTasks.filter((t) => DIRECT_MERGE_INTENT_RE.test(t.subject))
-  if (mergePrTasks.length === 0) return
+  if (mergePrTasks.length === 0) return undefined
   try {
     const settings = await readSwizSettings()
-    if (!settings.strictNoDirectMain) return
+    if (!settings.strictNoDirectMain) return undefined
     const taskList = mergePrTasks.map((t) => `  • #${t.id} (${t.status}): ${t.subject}`).join("\n")
-    await deny(
+    return await denyAutoSteerOrBlock(
+      sessionId,
+      cwd,
       `STOP. ${toolName} is BLOCKED because strict-no-direct-main is enabled but the task plan includes "Merge PR" tasks.\n\n` +
         `Conflicting tasks:\n${taskList}\n\n` +
         `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — ` +
@@ -310,7 +319,7 @@ async function checkDirectMergeIntent(
         )
     )
   } catch {
-    // Settings read failure → fail-open; other checks still apply.
+    return undefined
   }
 }
 
@@ -322,6 +331,7 @@ interface CheckTaskStalenessOpts {
   activeTasks: string[]
   allTasksDone: boolean
   cwd: string
+  sessionId: string
 }
 
 function shouldSkipStalenessCheck(opts: {
@@ -345,8 +355,11 @@ function shouldSkipStalenessCheck(opts: {
   return false
 }
 
-async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
-  const { toolName, input, transcriptPath, allTasks, activeTasks, allTasksDone, cwd } = opts
+async function checkTaskStaleness(
+  opts: CheckTaskStalenessOpts
+): Promise<SwizHookOutput | undefined> {
+  const { toolName, input, transcriptPath, allTasks, activeTasks, allTasksDone, cwd, sessionId } =
+    opts
   const { lastTaskToolCallIndex, callsSinceLastTaskTool } =
     await getCurrentSessionTaskToolStats(input)
 
@@ -362,7 +375,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
       hasInProgressTask,
     })
   )
-    return
+    return undefined
 
   const taskList = formatTaskSubjectsForDisplay(allTasks, activeTasks)
   const projectState = await readProjectState(cwd).catch(() => null)
@@ -379,9 +392,11 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
     "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
     stateStep,
   ]
-  const sessionId = (input as Record<string, unknown>).session_id as string | undefined
-  if (sessionId) await mergeActionPlanIntoTasks(stalePlanSteps, sessionId, cwd)
-  await deny(
+  const sid = (input as Record<string, unknown>).session_id as string | undefined
+  if (sid) await mergeActionPlanIntoTasks(stalePlanSteps, sid, cwd)
+  return await denyAutoSteerOrBlock(
+    sessionId,
+    cwd,
     `STOP. Tasks have gone stale. ${callsSinceLastTaskTool} tool calls since last task update. ` +
       `${toolName} is BLOCKED.\n\n` +
       `We currently have these tasks in progress:\n${taskList}\n\n` +
@@ -407,7 +422,7 @@ async function emitSlowTaskWarning(
   allTasks: SlowTaskEntry[],
   sessionId: string,
   cwd: string
-): Promise<void> {
+): Promise<SwizHookOutput | undefined> {
   try {
     const [settings, projectSettings] = await Promise.all([
       readSwizSettings(),
@@ -419,11 +434,12 @@ async function emitSlowTaskWarning(
       effectiveSettings.taskDurationWarningMinutes
     )
     if (slowTaskWarning) {
-      allowPreToolUseWithContext(slowTaskWarning, slowTaskWarning)
+      return preToolUseAllowWithContext(slowTaskWarning, slowTaskWarning)
     }
   } catch {
     // Settings lookup failures should never block or crash the tool call.
   }
+  return undefined
 }
 
 interface ParsedInput {
@@ -464,23 +480,16 @@ function applySyncGuards(input: Record<string, unknown>): ParsedInput | null {
   return { input, toolName, sessionId: sessionId as string, transcriptPath, cwd }
 }
 
-async function parseAndGuard(): Promise<ParsedInput | null> {
-  const input = await Bun.stdin.json()
+async function tryParseAndGuard(input: Record<string, unknown>): Promise<ParsedInput | null> {
   const parsed = applySyncGuards(input)
   if (!parsed) return null
   if (!(await isTaskEnforcementProject(parsed.cwd))) return null
   return parsed
 }
 
-async function runChecks(parsed: ParsedInput): Promise<void> {
+async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
 
-  // Enable auto-steer: if the setting is on, deny() will schedule a
-  // steering message and allow the tool call instead of hard-blocking.
-  _autoSteerSessionId = sessionId
-  _cwd = cwd
-
-  // Resolve governance thresholds from effective settings
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
     const [settings, projectSettings] = await Promise.all([
@@ -498,13 +507,25 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
-  await checkNoTasks(toolName, cwd, sessionId, thresholds)(allTasks)
+  const noTasksOutcome = await checkNoTasks(toolName, cwd, sessionId, thresholds)(allTasks)
+  if (noTasksOutcome) return noTasksOutcome
 
   const summary = buildIncompleteTaskSummary(allTasks)
-  await checkTaskMinimums(toolName, summary, thresholds)
-  await checkInProgressCap(toolName, allTasks)
-  await checkDirectMergeIntent(toolName, summary.incompleteTasks)
-  await checkTaskStaleness({
+  const minOutcome = checkTaskMinimums(toolName, summary, thresholds)
+  if (minOutcome) return minOutcome
+
+  const capOutcome = await checkInProgressCap(toolName, sessionId, cwd, allTasks)
+  if (capOutcome) return capOutcome
+
+  const mergeOutcome = await checkDirectMergeIntent(
+    toolName,
+    sessionId,
+    cwd,
+    summary.incompleteTasks
+  )
+  if (mergeOutcome) return mergeOutcome
+
+  const staleOutcome = await checkTaskStaleness({
     toolName,
     input,
     transcriptPath,
@@ -512,30 +533,60 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
     activeTasks,
     allTasksDone: summary.allTasksDone,
     cwd,
+    sessionId,
   })
-  await emitSlowTaskWarning(allTasks, sessionId, cwd)
+  if (staleOutcome) return staleOutcome
+
+  const slowOutcome = await emitSlowTaskWarning(allTasks, sessionId, cwd)
+  if (slowOutcome) return slowOutcome
+
+  return {}
 }
 
-async function main() {
-  const parsed = await parseAndGuard()
-  if (!parsed) process.exit(0)
-  await runChecks(parsed)
-  process.exit(0)
+function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
+  const message = err instanceof Error ? err.message : String(err)
+  return preToolUseDeny(
+    `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+      `Error: ${message}\n\n` +
+      formatActionPlan(
+        [
+          "Check that the hook file and its dependencies are intact.",
+          "If the error persists, inspect the hook source at hooks/pretooluse-require-tasks.ts.",
+        ],
+        { translateToolNames: true }
+      )
+  )
+}
+
+export async function evaluatePretooluseRequireTasks(
+  input: Record<string, unknown>
+): Promise<SwizHookOutput> {
+  const parsed = await tryParseAndGuard(input)
+  if (!parsed) return {}
+  return await runChecks(parsed)
+}
+
+const pretooluseRequireTasks: SwizToolHook = {
+  name: "pretooluse-require-tasks",
+  event: "preToolUse",
+  matcher: "Edit|Write|Bash",
+  timeout: 5,
+
+  async run(input) {
+    try {
+      return await evaluatePretooluseRequireTasks(input as Record<string, unknown>)
+    } catch (err: unknown) {
+      return unexpectedHookFailureOutput(err)
+    }
+  },
+}
+
+export default pretooluseRequireTasks
+
+const runAsMainOptions: RunSwizHookAsMainOptions = {
+  onStdinJsonError: unexpectedHookFailureOutput,
 }
 
 if (import.meta.main) {
-  void main().catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err)
-    denyPreToolUse(
-      `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
-        `Error: ${message}\n\n` +
-        formatActionPlan(
-          [
-            "Check that the hook file and its dependencies are intact.",
-            "If the error persists, inspect the hook source at hooks/pretooluse-require-tasks.ts.",
-          ],
-          { translateToolNames: true }
-        )
-    )
-  })
+  await runSwizHookAsMain(pretooluseRequireTasks, runAsMainOptions)
 }

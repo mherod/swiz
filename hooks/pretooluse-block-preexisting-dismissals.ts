@@ -22,14 +22,16 @@
 //   - A scoped verification run (e.g. lint on specific files)
 //   - Transcript-visible baseline evidence for the exact diagnostic
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   isCodeChangeTool,
   isGitRepo,
   isShellTool,
+  preToolUseAllow,
+  preToolUseDeny,
   readAllTranscriptLines,
 } from "../src/utils/hook-utils.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
@@ -244,7 +246,7 @@ async function getAllTranscriptLines(
 ): Promise<string[]> {
   // Read full transcript (not just session lines) so cross-session dismissals are detected.
   // Fall back to session lines from the summary if transcript_path is unavailable.
-  if (transcriptPath) return readAllTranscriptLines(transcriptPath)
+  if (transcriptPath) return await readAllTranscriptLines(transcriptPath)
   const summary = getTranscriptSummary(raw)
   return summary?.sessionLines ?? []
 }
@@ -285,20 +287,34 @@ async function resolveTranscriptContext(
   return lines.length > 0 ? lines : null
 }
 
-async function main() {
-  const raw = await Bun.stdin.json()
-  const input = toolHookInputSchema.parse(raw)
+export async function evaluatePretooluseBlockPreexistingDismissals(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const raw = input as Record<string, unknown>
+  const parsed = toolHookInputSchema.parse(raw)
 
-  const lines = await resolveTranscriptContext(raw, input)
-  if (!lines) process.exit(0)
+  const lines = await resolveTranscriptContext(raw, parsed)
+  if (!lines) return {}
 
   const state = scanTranscript(lines)
   const allowReason = resolveAllowReason(state)
-  if (allowReason) allowPreToolUse(allowReason)
+  if (allowReason) return preToolUseAllow(allowReason)
 
-  denyPreToolUse(buildBlockMessage(state))
+  return preToolUseDeny(buildBlockMessage(state))
 }
 
+const pretooluseBlockPreexistingDismissals: SwizToolHook = {
+  name: "pretooluse-block-preexisting-dismissals",
+  event: "preToolUse",
+  timeout: 5,
+
+  run(input) {
+    return evaluatePretooluseBlockPreexistingDismissals(input)
+  },
+}
+
+export default pretooluseBlockPreexistingDismissals
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(pretooluseBlockPreexistingDismissals)
 }

@@ -15,6 +15,8 @@
 
 import { appendFile, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -126,11 +128,26 @@ async function dispatchTaskAudit(resolved: ResolvedTaskInput): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const resolved = resolveTaskInput(input)
-  if (!resolved) return
+export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const resolved = resolveTaskInput(hookInput)
+  if (!resolved) return {}
   await dispatchTaskAudit(resolved)
+  return {}
 }
 
-if (import.meta.main) void main()
+const posttooluseTaskAuditSync: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-task-audit-sync",
+  event: "postToolUse",
+  matcher: "TaskUpdate|TaskCreate|TodoWrite",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseTaskAuditSync(input)
+  },
+}
+
+export default posttooluseTaskAuditSync
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseTaskAuditSync)
+}

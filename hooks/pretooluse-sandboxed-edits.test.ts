@@ -93,8 +93,8 @@ async function runHook(
     // No cwd override — run from project root so the relative HOOK path resolves.
     // The agent's session cwd is passed via the stdin JSON payload instead.
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -372,8 +372,8 @@ describe("pretooluse-sandboxed-edits", () => {
         stderr: "pipe",
         env: { ...process.env, HOME: fakeHome, TMPDIR: fakeTmpDir, SWIZ_DAEMON_PORT: "19999" },
       })
-      void proc.stdin.write(payload)
-      void proc.stdin.end()
+      await proc.stdin.write(payload)
+      await proc.stdin.end()
 
       const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),

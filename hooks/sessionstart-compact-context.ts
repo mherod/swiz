@@ -5,6 +5,8 @@
 
 import { join } from "node:path"
 import { getHomeDirWithFallback } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommand,
@@ -15,13 +17,13 @@ import {
   readSessionTasks,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
-import { emitContext } from "../src/utils/hook-utils.ts"
+import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 import {
   buildCompactSnapshotSummary,
   type CompactSnapshot,
   type CompactSnapshotSummary,
 } from "./precompact-task-snapshot.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
+import { sessionStartHookInputSchema } from "./schemas.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 const TASK_SUBJECT_MAX_CHARS = 120
@@ -218,10 +220,10 @@ async function buildTaskSections(
   return sections
 }
 
-async function main(): Promise<void> {
-  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
-  const matcher = input.matcher ?? input.trigger ?? ""
-  if (matcher !== "compact" && matcher !== "resume") return
+export async function evaluateSessionstartCompactContext(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = sessionStartHookInputSchema.parse(input)
+  const matcher = hookInput.matcher ?? hookInput.trigger ?? ""
+  if (matcher !== "compact" && matcher !== "resume") return {}
 
   const sections: string[] = [
     "Post-compaction context: Always use rg instead of grep. Use Edit tool, not sed/awk. " +
@@ -229,8 +231,8 @@ async function main(): Promise<void> {
       "Run git diff after reaching success.",
   ]
 
-  const cwd = input.cwd ?? process.cwd()
-  const sessionId = input.session_id ?? ""
+  const cwd = hookInput.cwd ?? process.cwd()
+  const sessionId = hookInput.session_id ?? ""
   const home = getHomeDirWithFallback("")
 
   const snapshot = sessionId ? await readCompactSnapshot(sessionId, home) : null
@@ -238,7 +240,21 @@ async function main(): Promise<void> {
   sections.push(...taskSections)
 
   const ctx = joinSectionsWithinBudget(sections, COMPACT_CONTEXT_MAX_CHARS)
-  await emitContext("SessionStart", ctx)
+  return buildContextHookOutput("SessionStart", ctx)
 }
 
-if (import.meta.main) void main()
+const sessionstartCompactContext: SwizHook<Record<string, unknown>> = {
+  name: "sessionstart-compact-context",
+  event: "sessionStart",
+  matcher: "compact",
+  timeout: 5,
+  run(input) {
+    return evaluateSessionstartCompactContext(input)
+  },
+}
+
+export default sessionstartCompactContext
+
+if (import.meta.main) {
+  await runSwizHookAsMain(sessionstartCompactContext)
+}

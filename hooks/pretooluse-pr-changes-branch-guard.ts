@@ -4,22 +4,18 @@
  * PreToolUse hook: Block switching away from a branch that has an open PR
  * with CHANGES_REQUESTED reviews.
  *
- * When a reviewer requests changes on your PR, those changes must be addressed
- * before moving to other work. This hook prevents `git checkout` and
- * `git switch` commands that would leave the branch with unresolved feedback.
- *
- * Policy:
- *   - Only fires on Bash commands matching git checkout/switch
- *   - Only blocks when the current branch has an open PR
- *   - Only blocks when that PR has CHANGES_REQUESTED reviews
- *   - Skips on default branch (no PR to guard)
- *   - Skips when gh CLI is unavailable
+ * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   detectForkTopology,
   type ForkTopology,
   forkPushCmd,
@@ -62,15 +58,15 @@ async function getBranchAndPr(
   cwd: string
 ): Promise<{ branch: string; pr: { number: number; title: string } } | null> {
   const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
-  if (!currentBranch) return null // detached HEAD
+  if (!currentBranch) return null
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(currentBranch, defaultBranch)) return null // no PR on default
+  if (isDefaultBranch(currentBranch, defaultBranch)) return null
   const pr = await getOpenPrForBranch<{ number: number; title: string }>(
     currentBranch,
     cwd,
     "number,title"
   )
-  if (!pr) return null // no open PR
+  if (!pr) return null
   return { branch: currentBranch, pr }
 }
 
@@ -121,30 +117,40 @@ function buildBlockReason(
   )
 }
 
-async function main() {
-  const input = shellHookInputSchema.parse(await Bun.stdin.json())
-  const cwd: string = input.cwd ?? process.cwd()
+export async function evaluatePretoolusePrChangesBranchGuard(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const hookInput = shellHookInputSchema.parse(input)
+  const cwd: string = hookInput.cwd ?? process.cwd()
 
-  if (!(await validateInputs(input as Record<string, unknown>, cwd))) process.exit(0)
+  if (!(await validateInputs(hookInput as Record<string, unknown>, cwd))) return {}
 
   const branchAndPr = await getBranchAndPr(cwd)
-  if (!branchAndPr) process.exit(0)
+  if (!branchAndPr) return {}
 
   const { branch: currentBranch, pr } = branchAndPr
   const changesRequested = await getChangesRequestedReviews(pr, cwd)
-  if (changesRequested === null) process.exit(0)
+  if (changesRequested === null) return {}
   if (changesRequested.length === 0) {
-    allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
+    return preToolUseAllow(`PR #${pr.number} has no changes requested — branch switch allowed`)
   }
 
   const fork = await detectForkTopology(cwd)
   const reason = buildBlockReason(pr, changesRequested, currentBranch, fork)
-  denyPreToolUse(reason)
+  return preToolUseDeny(reason)
 }
 
+const pretoolusePrChangesBranchGuard: SwizToolHook = {
+  name: "pretooluse-pr-changes-branch-guard",
+  event: "preToolUse",
+  timeout: 10,
+  run(input) {
+    return evaluatePretoolusePrChangesBranchGuard(input)
+  },
+}
+
+export default pretoolusePrChangesBranchGuard
+
 if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+  await runSwizHookAsMain(pretoolusePrChangesBranchGuard)
 }

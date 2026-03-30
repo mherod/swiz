@@ -4,6 +4,7 @@
  */
 
 import { join } from "node:path"
+import { hookOutputSchema } from "../../hooks/schemas.ts"
 
 // ─── Shared constants ──────────────────────────────────────────────────────
 
@@ -31,8 +32,29 @@ export interface ErrorResult {
 // ─── Hook output classification ────────────────────────────────────────────
 
 /**
+ * Validate parsed hook output against the hook output schema.
+ * Returns { valid: true } if schema passes, or { valid: false, error: string } if validation fails.
+ * This is the earliest point to catch schema violations (e.g., silent allow without context).
+ */
+function validateHookOutputSchema(
+  parsed: Record<string, unknown>
+): { valid: true } | { valid: false; error: string } {
+  const result = hookOutputSchema.safeParse(parsed)
+  if (result.success) {
+    return { valid: true }
+  }
+  // Extract the first validation error for clarity
+  const firstIssue = result.error.issues[0]
+  const errorMsg = firstIssue?.message ?? "Unknown schema validation error"
+  return { valid: false, error: errorMsg }
+}
+
+/**
  * Pure classification of raw hook output into a status and parsed JSON.
  * Shared between engine.ts (main thread) and hook-worker.ts (worker thread).
+ *
+ * Validates parsed JSON against the hook output schema to catch violations
+ * (e.g., allow without context) at the earliest point.
  */
 export function classifyHookOutput({
   timedOut,
@@ -45,11 +67,10 @@ export function classifyHookOutput({
 }): { parsed: Record<string, unknown> | null; status: string } {
   if (timedOut) return { parsed: null, status: "timeout" }
   if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
+
+  let parsed: Record<string, unknown> | null = null
   try {
-    return {
-      parsed: JSON.parse(trimmed) as Record<string, unknown>,
-      status: "ok",
-    }
+    parsed = JSON.parse(trimmed) as Record<string, unknown>
   } catch {
     // Stdout may contain non-JSON lines before or after the hook's JSON object.
     // Scan lines in reverse order so the last JSON-looking line wins.
@@ -57,16 +78,24 @@ export function classifyHookOutput({
       const l = line.trim()
       if (!l.startsWith("{")) continue
       try {
-        return {
-          parsed: JSON.parse(l) as Record<string, unknown>,
-          status: "ok",
-        }
+        parsed = JSON.parse(l) as Record<string, unknown>
+        break
       } catch {
         // Fall through to next line
       }
     }
-    return { parsed: null, status: "invalid-json" }
+    if (!parsed) {
+      return { parsed: null, status: "invalid-json" }
+    }
   }
+
+  // Validate against schema
+  const validation = validateHookOutputSchema(parsed)
+  if (!validation.valid) {
+    return { parsed, status: "invalid-schema" }
+  }
+
+  return { parsed, status: "ok" }
 }
 
 /** Extract the caller's environment from the enriched payload `_env` field.

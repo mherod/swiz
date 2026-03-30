@@ -84,7 +84,7 @@ async function recordSuggestion(sessionId: string, key: string): Promise<number>
 }
 
 export async function __testOnly_recordSuggestion(sessionId: string, key: string): Promise<number> {
-  return recordSuggestion(sessionId, key)
+  return await recordSuggestion(sessionId, key)
 }
 
 /** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */
@@ -155,7 +155,7 @@ export async function recordSuggestionAndGetCount(
   suggestionText: string
 ): Promise<number> {
   const key = suggestionKey(suggestionText)
-  return recordSuggestion(sessionId, key)
+  return await recordSuggestion(sessionId, key)
 }
 
 /**
@@ -163,5 +163,7 @@ export async function recordSuggestionAndGetCount(
  * Should be called once per hook invocation.
  */
 export function startSuggestionLogCleanup(): void {
-  void pruneOldSuggestionLogs()
+  pruneOldSuggestionLogs().catch(() => {
+    // Fire-and-forget cleanup; failures are non-fatal
+  })
 }

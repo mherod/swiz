@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if git repository has uncommitted changes or unpushed commits.
 // Combines both checks into one cohesive action plan so the agent sees the full
 // commit → pull → push workflow in a single message.
@@ -6,11 +7,15 @@
 // Push cooldown: if we've already prompted the agent to push in this session AND
 // the last remote commit is within PUSH_COOLDOWN_MS, skip the push block.
 // Uncommitted changes are always enforced regardless of cooldown.
+//
+// Dual-mode: exports a SwizStopHook for inline dispatch and remains executable as a subprocess.
 
 import {
   type CollaborationModePolicy,
   getCollaborationModePolicy,
 } from "../src/collaboration-policy.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
@@ -20,7 +25,7 @@ import {
 import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
 import {
   type ActionPlanItem,
-  blockStop,
+  blockStopObj,
   createSessionTask,
   formatActionPlan,
   getDefaultBranch,
@@ -32,7 +37,7 @@ import {
   skillExists,
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
@@ -495,7 +500,13 @@ async function resolveGitContext(input: {
   }
 }
 
-async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<boolean> {
+/**
+ * Push gating short-circuit for stop.
+ * - `null`: no early decision — continue with uncommitted / unpushed enforcement.
+ * - `{}`: push cooldown active — allow stop without blocking on unpushed commits.
+ * - non-empty: block stop (e.g. background `git push` still running).
+ */
+async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<SwizHookOutput | null> {
   const {
     hasUncommitted,
     gitStatus: { ahead, behind },
@@ -510,12 +521,12 @@ async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<boolean> {
         ctx.pushCooldownMinutes
       )
     )
-      return true
+      return {}
   }
 
   if (!hasUncommitted && ahead > 0 && behind === 0) {
     if (await detectBackgroundPush(ctx.cwd)) {
-      blockStop(
+      return blockStopObj(
         "A `git push` is currently running in the background.\n\n" +
           "Wait for it to complete before stopping. " +
           "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
@@ -523,15 +534,16 @@ async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<boolean> {
       )
     }
   }
-  return false
+  return null
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const ctx = await resolveGitContext(input)
-  if (!ctx) return
+export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const ctx = await resolveGitContext(parsed)
+  if (!ctx) return {}
 
-  if (await checkPushCooldownOrInFlight(ctx)) return
+  const pushShortCircuit = await checkPushCooldownOrInFlight(ctx)
+  if (pushShortCircuit !== null) return pushShortCircuit
 
   const { gitStatus, hasUncommitted, hasRemote, upstream, cwd } = ctx
   const { branch, ahead, behind } = gitStatus
@@ -556,7 +568,22 @@ async function main(): Promise<void> {
   const taskDesc = buildTaskDesc({ cwd, hasUncommitted, branch, upstream, behind, ahead })
   await createSessionTask(ctx.sessionId, "stop-git-workflow-task-created", taskSubject, taskDesc)
 
-  blockStop(reason)
+  return blockStopObj(reason)
 }
 
-if (import.meta.main) void main()
+const stopGitStatus: SwizStopHook = {
+  name: "stop-git-status",
+  event: "stop",
+  timeout: 10,
+  requiredSettings: ["gitStatusGate"],
+
+  run(input) {
+    return evaluateStopGitStatus(input)
+  },
+}
+
+export default stopGitStatus
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopGitStatus)
+}

@@ -45,8 +45,8 @@ async function runHook(opts: {
     stdout: "pipe",
     stderr: "pipe",
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -374,8 +374,8 @@ describe("CI check advisory — prHooksActive modes", () => {
       stderr: "pipe",
       env: { ...process.env, HOME: fakeHome },
     })
-    void proc.stdin.write(payload)
-    void proc.stdin.end()
+    await proc.stdin.write(payload)
+    await proc.stdin.end()
     const out = await new Response(proc.stdout).text()
     await proc.exited
     if (!out.trim()) return { blocked: false, reason: "", advisory: false }
@@ -457,8 +457,8 @@ describe("CI check advisory — prHooksActive modes", () => {
       stderr: "pipe",
       env: { ...process.env, HOME: home },
     })
-    void proc.stdin.write(payload)
-    void proc.stdin.end()
+    await proc.stdin.write(payload)
+    await proc.stdin.end()
     const out = await new Response(proc.stdout).text()
     await proc.exited
     expect(out.trim()).toBeTruthy()
@@ -638,8 +638,8 @@ async function runHookInRepo(opts: {
     stderr: "pipe",
     env: { ...process.env, HOME: fakeHome },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (!out.trim()) return { blocked: false, reason: "", advisory: false }

@@ -3,30 +3,30 @@ import { countMarkdownWords } from "../src/markdown-word-count.ts"
 
 describe("CLAUDE.md word-count function", () => {
   describe("basic prose counting", () => {
-    test("counts simple words", async () => {
+    test("counts simple words", () => {
       const count = countMarkdownWords("hello world from claude")
       expect(count).toBe(4)
     })
 
-    test("ignores extra whitespace", async () => {
+    test("ignores extra whitespace", () => {
       const count = countMarkdownWords("hello    world    from    claude")
       expect(count).toBe(4)
     })
 
-    test("trims leading/trailing whitespace", async () => {
+    test("trims leading/trailing whitespace", () => {
       const count = countMarkdownWords("   hello world   ")
       expect(count).toBe(2)
     })
   })
 
   describe("code block exclusion", () => {
-    test("excludes single code block", async () => {
+    test("excludes single code block", () => {
       const text = "This is prose before.\n\n```typescript\nconst x = 42;\n```\n\nAnd prose after."
       const count = countMarkdownWords(text)
       expect(count).toBe(7) // "This", "is", "prose", "before", "And", "prose", "after"
     })
 
-    test("excludes multiple code blocks", async () => {
+    test("excludes multiple code blocks", () => {
       const text = `This is prose.
 
 \`\`\`
@@ -45,7 +45,7 @@ Final prose.`
       expect(count).toBe(8)
     })
 
-    test("excludes code block with many words", async () => {
+    test("excludes code block with many words", () => {
       const prose = "Before and after"
       const codeBlock =
         "const function = () => { return 'this is a code block with many words inside it'; };"
@@ -54,7 +54,7 @@ Final prose.`
       expect(count).toBe(6) // "Before and after" twice = 3 + 3 = 6
     })
 
-    test("handles nested backticks in code block", async () => {
+    test("handles nested backticks in code block", () => {
       const text = "Before.\n\n```\nconst template = `hello ${name}`;\n```\n\nAfter."
       const count = countMarkdownWords(text)
       expect(count).toBe(2) // "Before" and "After"
@@ -62,43 +62,43 @@ Final prose.`
   })
 
   describe("markdown syntax removal", () => {
-    test("removes heading syntax", async () => {
+    test("removes heading syntax", () => {
       const text = "# Main Title\n## Subheading\nThis is content"
       const count = countMarkdownWords(text)
       expect(count).toBe(6) // "Main Title Subheading This is content"
     })
 
-    test("removes emphasis markers", async () => {
+    test("removes emphasis markers", () => {
       const text = "This is **bold** and *italic* and `code` text"
       const count = countMarkdownWords(text)
       expect(count).toBe(8) // "This", "is", "bold", "and", "italic", "and", "code", "text"
     })
 
-    test("removes list markers", async () => {
+    test("removes list markers", () => {
       const text = "- First item\n- Second item\n* Third item\n+ Fourth item"
       const count = countMarkdownWords(text)
       expect(count).toBe(8) // "First item Second item Third item Fourth item"
     })
 
-    test("removes blockquote markers", async () => {
+    test("removes blockquote markers", () => {
       const text = "> This is a quote\n> spanning multiple lines"
       const count = countMarkdownWords(text)
       expect(count).toBe(7) // "This", "is", "a", "quote", "spanning", "multiple", "lines"
     })
 
-    test("extracts text from markdown links", async () => {
+    test("extracts text from markdown links", () => {
       const text = "Check out [this link](https://example.com) for more info."
       const count = countMarkdownWords(text)
       expect(count).toBe(7) // "Check", "out", "this", "link", "for", "more", "info"
     })
 
-    test("removes markdown images", async () => {
+    test("removes markdown images", () => {
       const text = "Here is ![alt text](image.png) in the middle of text"
       const count = countMarkdownWords(text)
       expect(count).toBe(9) // "Here", "is", "alt", "text", "in", "the", "middle", "of", "text"
     })
 
-    test("removes horizontal rules", async () => {
+    test("removes horizontal rules", () => {
       const text = "Before\n---\nAfter\n\n***\n\nMore"
       const count = countMarkdownWords(text)
       expect(count).toBe(3) // "Before After More"
@@ -106,19 +106,19 @@ Final prose.`
   })
 
   describe("HTML removal", () => {
-    test("removes HTML tags", async () => {
+    test("removes HTML tags", () => {
       const text = "This is <em>emphasized</em> with <strong>strong</strong> tags"
       const count = countMarkdownWords(text)
       expect(count).toBe(6) // "This", "is", "emphasized", "with", "strong", "tags"
     })
 
-    test("removes HTML comments", async () => {
+    test("removes HTML comments", () => {
       const text = "Before <!-- This is a comment with many words inside --> After"
       const count = countMarkdownWords(text)
       expect(count).toBe(2) // "Before" and "After"
     })
 
-    test("removes multiline HTML comments", async () => {
+    test("removes multiline HTML comments", () => {
       const text = `Before
 <!-- This is a comment
 spanning multiple lines
@@ -130,23 +130,23 @@ After`
   })
 
   describe("edge cases", () => {
-    test("handles empty string", async () => {
+    test("handles empty string", () => {
       const count = countMarkdownWords("")
       expect(count).toBe(0)
     })
 
-    test("handles only whitespace", async () => {
+    test("handles only whitespace", () => {
       const count = countMarkdownWords("   \n  \t  ")
       expect(count).toBe(0)
     })
 
-    test("handles only code blocks", async () => {
+    test("handles only code blocks", () => {
       const text = "```\nconst x = 42;\nreturn x;\n```"
       const count = countMarkdownWords(text)
       expect(count).toBe(0)
     })
 
-    test("handles mixed content at scale", async () => {
+    test("handles mixed content at scale", () => {
       const text = `
 # Documentation Guide
 
@@ -195,7 +195,7 @@ Final conclusion.
       expect(count).toBeLessThan(50)
     })
 
-    test("preserves word boundaries across removals", async () => {
+    test("preserves word boundaries across removals", () => {
       const text = "Before[link](url)after" // Should become "Beforelinkafter" or "Before link after"?
       const count = countMarkdownWords(text)
       // The regex extracts the link text, so: "Before" + "link" + "after" joined with the replacements
@@ -206,13 +206,13 @@ Final conclusion.
   })
 
   describe("real-world CLAUDE.md patterns", () => {
-    test("handles CLAUDE.md heading and prose pattern", async () => {
+    test("handles CLAUDE.md heading and prose pattern", () => {
       const text = "## Writing Hooks\n\n**DO** update README.md whenever adding a hook."
       const count = countMarkdownWords(text)
       expect(count).toBe(9) // "Writing", "Hooks", "DO", "update", "README.md", "whenever", "adding", "a", "hook"
     })
 
-    test("handles complex multi-section content", async () => {
+    test("handles complex multi-section content", () => {
       const text = `
 ## Section One
 
@@ -239,7 +239,7 @@ Final thoughts.
   })
 
   describe("YAML frontmatter removal", () => {
-    test("removes YAML frontmatter at file start", async () => {
+    test("removes YAML frontmatter at file start", () => {
       const text = `---
 title: Example
 description: Test document
@@ -250,7 +250,7 @@ This is the main content.`
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("preserves content after frontmatter", async () => {
+    test("preserves content after frontmatter", () => {
       const text = `---
 key: value
 ---
@@ -259,13 +259,13 @@ Main content here.`
       expect(count).toBe(3) // "Main", "content", "here"
     })
 
-    test("leaves non-frontmatter dashes alone", async () => {
+    test("leaves non-frontmatter dashes alone", () => {
       const text = `Some content --- divider --- more content`
       const count = countMarkdownWords(text)
       expect(count).toBe(7) // "Some", "content", "---", "divider", "---", "more", "content"
     })
 
-    test("handles empty frontmatter", async () => {
+    test("handles empty frontmatter", () => {
       const text = `---
 ---
 Content after empty frontmatter`
@@ -273,7 +273,7 @@ Content after empty frontmatter`
       expect(count).toBe(4) // "Content", "after", "empty", "frontmatter"
     })
 
-    test("handles UTF-8 BOM at file start", async () => {
+    test("handles UTF-8 BOM at file start", () => {
       const text = `\uFEFF---
 title: Example
 ---
@@ -283,19 +283,19 @@ This is the main content.`
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("handles CRLF line endings in frontmatter", async () => {
+    test("handles CRLF line endings in frontmatter", () => {
       const text = `---\r\ntitle: Example\r\ndescription: Test\r\n---\r\n\r\nThis is the main content.`
       const count = countMarkdownWords(text)
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("handles CR line endings in frontmatter", async () => {
+    test("handles CR line endings in frontmatter", () => {
       const text = `---\rtitle: Example\rdescription: Test\r---\r\rThis is the main content.`
       const count = countMarkdownWords(text)
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("handles multiple dashes in frontmatter delimiter", async () => {
+    test("handles multiple dashes in frontmatter delimiter", () => {
       const text = `-----
 title: Example
 -----
@@ -305,13 +305,13 @@ This is the main content.`
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("handles BOM with CRLF line endings", async () => {
+    test("handles BOM with CRLF line endings", () => {
       const text = `\uFEFF---\r\ntitle: Example\r\n---\r\n\r\nThis is the main content.`
       const count = countMarkdownWords(text)
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
 
-    test("handles mixed line endings (LF/CRLF in same file)", async () => {
+    test("handles mixed line endings (LF/CRLF in same file)", () => {
       const text = `---\r\ntitle: Example\ndescription: Test\r\n---\n\nThis is the main content.`
       const count = countMarkdownWords(text)
       expect(count).toBe(5) // "This", "is", "the", "main", "content"
@@ -319,7 +319,7 @@ This is the main content.`
   })
 
   describe("indented code block removal", () => {
-    test("removes 4-space indented code blocks", async () => {
+    test("removes 4-space indented code blocks", () => {
       const text = `Before indented code.
 
     const x = 42;
@@ -330,7 +330,7 @@ After indented code.`
       expect(count).toBe(6) // "Before", "indented", "code", "After", "indented", "code"
     })
 
-    test("removes tab-indented code blocks", async () => {
+    test("removes tab-indented code blocks", () => {
       const text = `Before tab-indented code.
 
 \t\tfunction test() {
@@ -342,7 +342,7 @@ After tab-indented code.`
       expect(count).toBe(6) // "Before", "tab", "indented", "code", "After", "tab", "indented", "code"
     })
 
-    test("removes multiple consecutive indented blocks", async () => {
+    test("removes multiple consecutive indented blocks", () => {
       const text = `Content.
 
     block one line one
@@ -356,7 +356,7 @@ More content.`
       expect(count).toBe(3) // "Content", "More", "content"
     })
 
-    test("preserves non-indented code-like syntax", async () => {
+    test("preserves non-indented code-like syntax", () => {
       const text = `This is code-like text without indentation.
 const x = 42;
 More text here.`
@@ -364,7 +364,7 @@ More text here.`
       expect(count).toBe(13) // All words counted since no 4+ space indent
     })
 
-    test("mixed indented and fenced code blocks", async () => {
+    test("mixed indented and fenced code blocks", () => {
       const text = `Intro text.
 
 \`\`\`
@@ -383,7 +383,7 @@ Final text.`
   })
 
   describe("combined YAML and indented code", () => {
-    test("removes both YAML and indented code blocks", async () => {
+    test("removes both YAML and indented code blocks", () => {
       const text = `---
 title: Document
 author: Someone
@@ -401,19 +401,19 @@ Conclusion paragraph.`
   })
 
   describe("parametric indented code variants", () => {
-    test("single line with 4 spaces", async () => {
+    test("single line with 4 spaces", () => {
       const text = "Before.\n    code line\nAfter."
       const count = countMarkdownWords(text)
       expect(count).toBe(2) // "Before", "After"
     })
 
-    test("single line with tab", async () => {
+    test("single line with tab", () => {
       const text = "Before.\n\tcode line\nAfter."
       const count = countMarkdownWords(text)
       expect(count).toBe(2) // "Before", "After"
     })
 
-    test("mixed spaces and tabs in same block", async () => {
+    test("mixed spaces and tabs in same block", () => {
       const text = "Before.\n    line1\n\tline2\n  line3\nAfter."
       const count = countMarkdownWords(text)
       // "line3" is only 2 spaces, not 4, so it won't be removed

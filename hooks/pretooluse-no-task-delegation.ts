@@ -3,14 +3,14 @@
 // Tasks created inside a subagent land in a different session and are invisible
 // to pretooluse-require-tasks.ts — the parent session stays blocked as if no
 // tasks exist. TaskCreate must always be called directly in the parent session.
+//
+// Dual-mode: SwizToolHook + runSwizHookAsMain.
 
-import { denyPreToolUse as deny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { preToolUseDeny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input = await Bun.stdin.json()
-const prompt: string = input?.tool_input?.prompt ?? ""
-
-// Match task tool names across agents — tight to avoid false positives on
-// prompts that use "task" as a domain noun (e.g. "create a task queue").
 const delegationPatterns = [
   /\bTaskCreate\b/,
   /\bTaskUpdate\b/,
@@ -21,9 +21,17 @@ const delegationPatterns = [
   /\bupdate_plan\b/,
 ]
 
-if (delegationPatterns.some((p) => p.test(prompt))) {
+export function evaluatePretooluseNoTaskDelegation(input: unknown): SwizHookOutput {
+  const parsed = toolHookInputSchema.parse(input)
+  const prompt: string = (parsed.tool_input as Record<string, unknown> | undefined)
+    ?.prompt as string
+
+  if (!delegationPatterns.some((p) => p.test(String(prompt ?? "")))) {
+    return {}
+  }
+
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-  deny(
+  return preToolUseDeny(
     "NEVER delegate task creation to a subagent.\n\n" +
       "Tasks created inside a subagent land in a different session and are invisible to the " +
       "pretooluse-require-tasks.ts hook. The parent session will remain blocked as if no tasks exist.\n\n" +
@@ -33,4 +41,21 @@ if (delegationPatterns.some((p) => p.test(prompt))) {
       `  Use ${taskCreateName} yourself to create separate tasks for "Implement X", "Run quality checks", and "Commit and push".\n\n` +
       `${taskCreateName} is a tool available directly to you — use it now, in this session, without launching any agent.`
   )
+}
+
+const pretooluseNoTaskDelegation: SwizToolHook = {
+  name: "pretooluse-no-task-delegation",
+  event: "preToolUse",
+  matcher: "Task",
+  timeout: 5,
+
+  run(input) {
+    return evaluatePretooluseNoTaskDelegation(input)
+  },
+}
+
+export default pretooluseNoTaskDelegation
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseNoTaskDelegation)
 }

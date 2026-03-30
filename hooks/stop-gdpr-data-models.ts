@@ -3,13 +3,14 @@
 // Stop hook: When uncommitted changes touch files matching user-data model patterns,
 // suggest the /gdpr-analysis skill via additionalContext (non-blocking advisory).
 // Conservative file-name heuristics to minimize false positives.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { emitContext, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { buildContextHookOutput, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
-// File-path patterns that suggest user/personal data model changes.
-// Intentionally narrow to avoid false positives — matches model/schema files
-// with PII-related names, not general application files.
 const DATA_MODEL_PATTERNS = [
   /\b(?:models?|schemas?|entities|types)\/.*(?:user|account|profile|person|customer|member)\b/i,
   /\b(?:user|account|profile|person|customer|member)[-.]?(?:model|schema|entity|type)\b/i,
@@ -27,20 +28,20 @@ function matchesDataModelPattern(filePath: string): boolean {
   return DATA_MODEL_PATTERNS.some((re) => re.test(filePath))
 }
 
-async function main(): Promise<void> {
-  const raw = await Bun.stdin.json().catch(() => null)
-  if (!raw) return
+export async function evaluateStopGdprDataModels(input: unknown): Promise<SwizHookOutput> {
+  let data: StopHookInput
+  try {
+    data = stopHookInputSchema.parse(input)
+  } catch {
+    return {}
+  }
 
-  const input = stopHookInputSchema.safeParse(raw)
-  if (!input.success) return
+  const cwd = data.cwd ?? process.cwd()
 
-  const cwd = input.data.cwd ?? process.cwd()
+  if (!(await isGitRepo(cwd))) return {}
 
-  if (!(await isGitRepo(cwd))) return
-
-  // Check uncommitted changes (staged + unstaged)
   const statusOutput = await git(["status", "--porcelain"], cwd)
-  if (!statusOutput.trim()) return
+  if (!statusOutput.trim()) return {}
 
   const changedFiles = statusOutput
     .trim()
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
     .filter(Boolean)
 
   const matchingFiles = changedFiles.filter(matchesDataModelPattern)
-  if (matchingFiles.length === 0) return
+  if (matchingFiles.length === 0) return {}
 
   const fileList = matchingFiles
     .slice(0, 10)
@@ -63,10 +64,23 @@ async function main(): Promise<void> {
     `Consider reviewing these changes for data privacy implications:\n  - PII exposure and storage patterns\n  - Data subject access request (DSAR) readiness\n  - Right-to-erasure completeness\n  - Consent management`
   )
 
-  // Non-blocking: emit as additionalContext via emitContext helper
   const context = `Uncommitted changes touch user-data model files:\n${fileList}${truncated}\n\n${advice}`
 
-  await emitContext("Stop", context)
+  return buildContextHookOutput("Stop", context)
 }
 
-if (import.meta.main) void main()
+const stopGdprDataModels: SwizStopHook = {
+  name: "stop-gdpr-data-models",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopGdprDataModels(input)
+  },
+}
+
+export default stopGdprDataModels
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopGdprDataModels)
+}

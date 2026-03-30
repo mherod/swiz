@@ -4,15 +4,17 @@
 
 import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
-  emitContext,
+  buildContextHookOutput,
   ghJson,
   git,
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
 } from "../src/utils/hook-utils.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
+import { sessionStartHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 interface PluginEnvRequirement {
@@ -97,10 +99,10 @@ async function collectGitHubParts(cwd: string, branch: string): Promise<string[]
   return parts
 }
 
-async function main(): Promise<void> {
-  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd
-  if (!cwd) return
+export async function evaluateSessionstartHealthSnapshot(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = sessionStartHookInputSchema.parse(input)
+  const cwd = hookInput.cwd
+  if (!cwd) return {}
 
   const parts: string[] = []
 
@@ -115,8 +117,8 @@ async function main(): Promise<void> {
   }
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
-    if (parts.length > 0) await emitContext("SessionStart", parts.join(" "))
-    return
+    if (parts.length > 0) return buildContextHookOutput("SessionStart", parts.join(" "))
+    return {}
   }
 
   parts.push(await collectGitStatus(cwd))
@@ -124,7 +126,22 @@ async function main(): Promise<void> {
   const branch = await git(["branch", "--show-current"], cwd)
   parts.push(...(await collectGitHubParts(cwd, branch)))
 
-  if (parts.length > 0) await emitContext("SessionStart", parts.join(" "))
+  if (parts.length > 0) return buildContextHookOutput("SessionStart", parts.join(" "))
+  return {}
 }
 
-if (import.meta.main) void main()
+const sessionstartHealthSnapshot: SwizHook<Record<string, unknown>> = {
+  name: "sessionstart-health-snapshot",
+  event: "sessionStart",
+  matcher: "startup",
+  timeout: 10,
+  run(input) {
+    return evaluateSessionstartHealthSnapshot(input)
+  },
+}
+
+export default sessionstartHealthSnapshot
+
+if (import.meta.main) {
+  await runSwizHookAsMain(sessionstartHealthSnapshot)
+}

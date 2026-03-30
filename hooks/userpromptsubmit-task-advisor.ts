@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Inject task-creation context on every prompt.
-// When no pending tasks exist: also surfaces incomplete prior-session tasks.
 
+import { toolNameForCurrentAgent } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommand,
@@ -10,31 +12,26 @@ import {
   isIncompleteTaskStatus,
   readSessionTasks,
 } from "../src/tasks/task-recovery.ts"
-import {
-  emitContext,
-  type SessionHookInput,
-  toolNameForCurrentAgent,
-} from "../src/utils/hook-utils.ts"
+import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "./schemas.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 
-async function main(): Promise<void> {
-  const input: SessionHookInput = await Bun.stdin.json()
-  const sessionId = input.session_id
-  if (!sessionId) return
+export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
+  const hookInput: UserPromptSubmitHookInput = userPromptSubmitHookInputSchema.parse(input)
+  const sessionId = hookInput.session_id
+  if (!sessionId) return {}
 
   const home = getHomeDirOrNull()
-  if (!home) return
+  if (!home) return {}
 
   const tasks = await readSessionTasks(sessionId, home)
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = hookInput.cwd ?? process.cwd()
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
   let additionalContext: string
 
   if (pendingCount === 0) {
-    // Check if the prior session had incomplete tasks the agent should resume
     const priorResult = await findPriorSessionTasks(cwd, sessionId, home)
 
     if (priorResult && priorResult.tasks.length > 0) {
@@ -52,11 +49,23 @@ async function main(): Promise<void> {
       additionalContext = `No pending tasks in this session. Use ${taskCreateName} to create a task for this prompt before starting work.`
     }
   } else {
-    // Tasks exist — still remind the agent to create one for the new message.
     additionalContext = `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
   }
 
-  await emitContext("UserPromptSubmit", additionalContext)
+  return buildContextHookOutput("UserPromptSubmit", additionalContext)
 }
 
-if (import.meta.main) void main()
+const userpromptsubmitTaskAdvisor: SwizHook<Record<string, unknown>> = {
+  name: "userpromptsubmit-task-advisor",
+  event: "userPromptSubmit",
+  timeout: 5,
+  run(input) {
+    return evaluateUserpromptsubmitTaskAdvisor(input)
+  },
+}
+
+export default userpromptsubmitTaskAdvisor
+
+if (import.meta.main) {
+  await runSwizHookAsMain(userpromptsubmitTaskAdvisor)
+}

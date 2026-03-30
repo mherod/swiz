@@ -1,25 +1,41 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Validate JSON files after writing
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = input.tool_input?.file_path as string | undefined
+export async function evaluatePosttooluseJsonValidation(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const filePath = hookInput.tool_input?.file_path as string | undefined
 
-  if (!filePath || !filePath.endsWith(".json")) return
+  if (!filePath || !filePath.endsWith(".json")) return {}
 
   try {
     const content = await Bun.file(filePath).text()
     JSON.parse(content)
   } catch {
-    console.log(
-      JSON.stringify({
-        decision: "block",
-        reason: "JSON validation failed — the file is not valid JSON. Fix the syntax errors.",
-      })
+    return buildDenyPostToolUseOutput(
+      "JSON validation failed — the file is not valid JSON. Fix the syntax errors."
     )
   }
+
+  return {}
 }
 
-if (import.meta.main) void main()
+const posttooluseJsonValidation: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-json-validation",
+  event: "postToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseJsonValidation(input)
+  },
+}
+
+export default posttooluseJsonValidation
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseJsonValidation)
+}

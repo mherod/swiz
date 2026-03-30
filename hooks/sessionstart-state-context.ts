@@ -2,19 +2,21 @@
 
 // SessionStart hook: inject current project state into session context
 
-import { emitContext, isGitRepo } from "../src/utils/hook-utils.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { buildContextHookOutput, isGitRepo } from "../src/utils/hook-utils.ts"
+import { sessionStartHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
-async function main(): Promise<void> {
-  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd
-  if (!cwd) return
+export async function evaluateSessionstartStateContext(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = sessionStartHookInputSchema.parse(input)
+  const cwd = hookInput.cwd
+  if (!cwd) return {}
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
   const stateInfo = await readSessionStartStateInfo(cwd)
-  if (!stateInfo) return
+  if (!stateInfo) return {}
 
   const parts: string[] = [
     `Project state: ${stateInfo.state}.`,
@@ -29,7 +31,21 @@ async function main(): Promise<void> {
     parts.push(`State description: ${stateInfo.description}`)
   }
 
-  await emitContext("SessionStart", parts.join(" "))
+  return buildContextHookOutput("SessionStart", parts.join(" "))
 }
 
-if (import.meta.main) await main()
+const sessionstartStateContext: SwizHook<Record<string, unknown>> = {
+  name: "sessionstart-state-context",
+  event: "sessionStart",
+  matcher: "startup",
+  timeout: 5,
+  run(input) {
+    return evaluateSessionstartStateContext(input)
+  },
+}
+
+export default sessionstartStateContext
+
+if (import.meta.main) {
+  await runSwizHookAsMain(sessionstartStateContext)
+}

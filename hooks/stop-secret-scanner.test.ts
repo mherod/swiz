@@ -6,7 +6,7 @@ import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils
 const tmp = useTempDir("swiz-secret-scanner-")
 
 async function makeRepo(): Promise<string> {
-  return makeTempGitRepo(tmp, { seedCommits: 0 })
+  return await makeTempGitRepo(tmp, { seedCommits: 0 })
 }
 
 async function runHook(dir: string): Promise<{ blocked: boolean; reason?: string; raw: string }> {

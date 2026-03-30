@@ -1,10 +1,19 @@
 #!/usr/bin/env bun
+
 // PostToolUse hook: Remind about sibling test file when editing source files
+//
+// Dual-mode: exports a SwizHook for inline dispatch and remains executable as a subprocess.
 
 import { stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
-import { emitContext, isFileEditTool, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  isFileEditTool,
+  scheduleAutoSteer,
+} from "../src/utils/hook-utils.ts"
+import { type PostToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs)$/
 const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__/
@@ -47,19 +56,36 @@ function resolveEditTarget(input: ReturnType<typeof toolHookInputSchema.parse>):
   return file
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const file = resolveEditTarget(input)
-  if (!file) return
+export async function evaluatePosttooluseTestPairing(
+  input: PostToolHookInput
+): Promise<SwizHookOutput> {
+  const parsed = toolHookInputSchema.parse(input)
+  const file = resolveEditTarget(parsed)
+  if (!file) return {}
 
   const foundTest = await findSiblingTest(file)
-  if (!foundTest) return
-  if (!(await isTestFileStale(foundTest))) return
+  if (!foundTest) return {}
+  if (!(await isTestFileStale(foundTest))) return {}
 
   const message = `Test file exists for this source file: ${foundTest} _ check if it needs updating to reflect your changes.`
-  const sessionId = (input.session_id as string) ?? ""
-  if (sessionId) await scheduleAutoSteer(sessionId, message, "after_commit", input.cwd)
-  await emitContext("PostToolUse", message)
+  const sessionId = (parsed.session_id as string) ?? ""
+  if (sessionId) await scheduleAutoSteer(sessionId, message, "after_commit", parsed.cwd)
+  return buildContextHookOutput("PostToolUse", message)
 }
 
-if (import.meta.main) void main()
+const posttooluseTestPairing: SwizHook<PostToolHookInput> = {
+  name: "posttooluse-test-pairing",
+  event: "postToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
+
+  run(input) {
+    return evaluatePosttooluseTestPairing(input)
+  },
+}
+
+export default posttooluseTestPairing
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseTestPairing)
+}

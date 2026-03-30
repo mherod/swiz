@@ -4,44 +4,55 @@
 // patterns. Defense-in-depth backstop for pretooluse-offensive-language.ts —
 // catches patterns that slipped past the PreToolUse gate (e.g., when the agent
 // produced the offending text in its final message before attempting to stop).
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { blockStop } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { blockStopObj } from "../src/utils/hook-utils.ts"
 import {
   extractLastAssistantText,
   findAllLazyPatterns,
   formatAllDenialMessages,
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
-async function main() {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const transcriptPath = input.transcript_path ?? ""
+export async function evaluateStopOffensiveLanguage(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const transcriptPath = parsed.transcript_path ?? ""
 
   const lines = await readTranscriptLines(transcriptPath)
-  if (lines.length === 0) process.exit(0)
+  if (lines.length === 0) return {}
 
   const assistantText = extractLastAssistantText(lines)
-  if (!assistantText) process.exit(0)
+  if (!assistantText) return {}
 
   const matches = findAllLazyPatterns(assistantText)
-  if (matches.length > 0) {
-    blockStop(
-      formatAllDenialMessages(
-        matches,
-        "Avoidance behavior detected. Produce a corrected message that " +
-          "demonstrates action, not words."
-      )
-    )
-  }
+  if (matches.length === 0) return {}
 
-  // No match — allow stop
-  process.exit(0)
+  return blockStopObj(
+    formatAllDenialMessages(
+      matches,
+      "Avoidance behavior detected. Produce a corrected message that " +
+        "demonstrates action, not words."
+    ),
+    { includeUpdateMemoryAdvice: false }
+  )
 }
 
+const stopOffensiveLanguage: SwizStopHook = {
+  name: "stop-offensive-language",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopOffensiveLanguage(input)
+  },
+}
+
+export default stopOffensiveLanguage
+
 if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+  await runSwizHookAsMain(stopOffensiveLanguage)
 }

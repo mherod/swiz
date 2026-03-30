@@ -1,18 +1,34 @@
 #!/usr/bin/env bun
-// UserPromptSubmit hook: Inject git branch and uncommitted file count
 
-import { emitContext, git } from "../src/utils/hook-utils.ts"
+import { git } from "../src/git-helpers.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import { userPromptSubmitHookInputSchema } from "./schemas.ts"
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
-  const cwd = (input?.cwd as string) ?? process.cwd()
-  const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return
+export async function evaluateUserpromptsubmitGitContext(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = userPromptSubmitHookInputSchema.parse(input)
+  const cwd = hookInput.cwd ?? process.cwd()
 
-  const porcelain = await git(["status", "--porcelain"], cwd)
-  const dirty = porcelain ? porcelain.split("\n").length : 0
+  const branch = (await git(["branch", "--show-current"], cwd)) || "(unknown)"
+  const dirty = (await git(["status", "--porcelain"], cwd))?.split("\n").filter(Boolean).length ?? 0
 
-  await emitContext("UserPromptSubmit", `[git] branch: ${branch} | uncommitted files: ${dirty}`)
+  return buildContextHookOutput(
+    "UserPromptSubmit",
+    `[git] branch: ${branch} | uncommitted files: ${dirty}`
+  )
 }
 
-if (import.meta.main) void main()
+const userpromptsubmitGitContext: SwizHook<Record<string, unknown>> = {
+  name: "userpromptsubmit-git-context",
+  event: "userPromptSubmit",
+  timeout: 5,
+  run(input) {
+    return evaluateUserpromptsubmitGitContext(input)
+  },
+}
+
+export default userpromptsubmitGitContext
+
+if (import.meta.main) {
+  await runSwizHookAsMain(userpromptsubmitGitContext)
+}

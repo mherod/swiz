@@ -6,7 +6,7 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
-import { stderrLog } from "../debug.ts"
+import { debugLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
   DISPATCH_ROUTES,
@@ -65,10 +65,7 @@ async function tryDaemonDispatch(
   payloadStr: string
 ): Promise<Record<string, unknown> | null> {
   if (process.env.SWIZ_NO_DAEMON === "1") {
-    stderrLog(
-      "daemon dispatch routing diagnostic",
-      `   daemon dispatch: skipped (SWIZ_NO_DAEMON=1)`
-    )
+    debugLog("daemon dispatch: skipped (SWIZ_NO_DAEMON=1)")
     return null
   }
 
@@ -86,25 +83,20 @@ async function tryDaemonDispatch(
     )
 
     if (!resp.ok) {
-      stderrLog(
-        "daemon dispatch routing diagnostic",
-        `   daemon dispatch: failed (status ${resp.status}), falling back to local`
-      )
+      debugLog(`daemon dispatch: failed (status ${resp.status}), falling back to local`)
       return null
     }
 
-    const json = (await resp.json()) as Record<string, unknown>
-    stderrLog(
-      "daemon dispatch routing diagnostic",
-      `   daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`
-    )
+    const raw: unknown = await resp.json()
+    const json =
+      raw !== null && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {}
+    debugLog(`daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
     return json
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    stderrLog(
-      "daemon dispatch routing diagnostic",
-      `   daemon dispatch: error (${msg}), falling back to local`
-    )
+    debugLog(`daemon dispatch: error (${msg}), falling back to local`)
     return null
   }
 }
@@ -300,9 +292,8 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
 
   if (daemonResponse !== null) {
-    if (Object.keys(daemonResponse).length > 0) {
-      process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
-    }
+    // Mirror engine `writeResponse`: always emit one JSON line (even `{}`).
+    process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
     const totalMs = Math.round(performance.now() - t0)
     log(`   ⏱ cli:total: ${totalMs}ms`)
     void appendCliTimingLog({ ...timing, totalMs, daemonMs, route: "daemon" })

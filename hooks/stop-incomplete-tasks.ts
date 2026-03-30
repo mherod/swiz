@@ -1,25 +1,37 @@
 #!/usr/bin/env bun
 // Block stop when incomplete tasks remain in the current session.
 // Runs before the completion auditor so incomplete tasks are caught early.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { getHomeDirOrNull } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
-async function main(): Promise<void> {
-  const raw = (await Bun.stdin.json()) as Record<string, unknown>
-  const input = stopHookInputSchema.parse(raw)
-  const sessionId = input.session_id ?? ""
+export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const sessionId = parsed.session_id ?? ""
   const home = getHomeDirOrNull()
-  if (!home) return
+  if (!home) return {}
 
   const result = await checkIncompleteTasks(sessionId, home)
-  if (result) {
-    console.log(JSON.stringify(result))
-    process.exit(0)
-  }
+  return result ?? {}
 }
 
+const stopIncompleteTasks: SwizStopHook = {
+  name: "stop-incomplete-tasks",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopIncompleteTasks(input)
+  },
+}
+
+export default stopIncompleteTasks
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(stopIncompleteTasks)
 }

@@ -50,12 +50,16 @@ const posttoolusPrContext: SwizShellHook = {
   timeout: 10,
 
   async run(input: ShellHookInput): Promise<SwizHookOutput> {
-    const parsed = shellHookInputSchema.safeParse(input)
-    if (!parsed.success) return {}
+    let parsed: ShellHookInput
+    try {
+      parsed = shellHookInputSchema.parse(input)
+    } catch {
+      return {}
+    }
 
-    const toolName: string = parsed.data.tool_name ?? ""
-    const cwd: string = parsed.data.cwd ?? ""
-    const command: string = (parsed.data.tool_input?.command as string) ?? ""
+    const toolName: string = parsed.tool_name ?? ""
+    const cwd: string = parsed.cwd ?? ""
+    const command: string = (parsed.tool_input?.command as string) ?? ""
 
     if (!isShellTool(toolName) || !cwd || !command) return {}
 

@@ -12,12 +12,19 @@
 //
 // Rationale: gives team members time to review or raise concerns before a PR
 // is merged, preventing premature merges that bypass team visibility.
+//
+// Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   extractMergeBranch,
   extractPrNumber,
   GH_PR_MERGE_RE,
@@ -28,8 +35,8 @@ import {
   ghJson,
   git,
   isShellTool,
-  type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 /** Format milliseconds as "Xm Ys". */
 export function formatRemaining(ms: number): string {
@@ -40,54 +47,53 @@ export function formatRemaining(ms: number): string {
   return `${minutes}m ${seconds}s`
 }
 
-function blockMerge(remaining: string, graceMinutes: number): never {
-  denyPreToolUse(
+function buildMergeBlockReason(remaining: string, graceMinutes: number): string {
+  return (
     `BLOCKED: PR is in its visibility grace period (${remaining} remaining).\n\n` +
-      `PRs must be open for at least ${graceMinutes} minutes before merging to give ` +
-      `team members time to review or raise concerns.\n\n` +
-      `Do not wait or retry — move on to your next task or issue. ` +
-      `The merge will be allowed after the grace period expires.`
+    `PRs must be open for at least ${graceMinutes} minutes before merging to give ` +
+    `team members time to review or raise concerns.\n\n` +
+    `Do not wait or retry — move on to your next task or issue. ` +
+    `The merge will be allowed after the grace period expires.`
   )
 }
 
-async function checkPrAge(
+function checkPrAge(
   createdAtStr: string,
   gracePeriodMs: number,
   graceMinutes: number
-): Promise<void> {
+): SwizHookOutput | null {
   const createdAt = new Date(createdAtStr).getTime()
-  if (Number.isNaN(createdAt)) return
+  if (Number.isNaN(createdAt)) return null
 
   const elapsed = Date.now() - createdAt
 
   if (elapsed < gracePeriodMs) {
     const remaining = formatRemaining(gracePeriodMs - elapsed)
-    blockMerge(remaining, graceMinutes)
+    return preToolUseDeny(buildMergeBlockReason(remaining, graceMinutes))
   }
+  return null
 }
 
-if (import.meta.main) {
-  const input: ToolHookInput = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizHookOutput> {
+  const parsed = toolHookInputSchema.parse(input)
+  if (!isShellTool(parsed.tool_name ?? "")) return {}
 
-  const command: string = (input?.tool_input?.command as string) ?? ""
+  const toolInput = (parsed.tool_input ?? {}) as Record<string, unknown>
+  const command: string = String(toolInput.command ?? "")
 
   const isGhPrMerge = GH_PR_MERGE_RE.test(command)
   const isGitMerge = GIT_MERGE_RE.test(command)
 
-  // Only gate on merge commands
-  if (!isGhPrMerge && !isGitMerge) process.exit(0)
+  if (!isGhPrMerge && !isGitMerge) return {}
 
-  // Read configured grace period from settings (0 = disabled)
   const settings = await readSwizSettings()
   const graceMinutes = settings.prAgeGateMinutes
-  if (graceMinutes <= 0) process.exit(0)
+  if (graceMinutes <= 0) return {}
   const gracePeriodMs = graceMinutes * 60 * 1000
 
-  const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
+  const cwd: string = (toolInput.cwd as string) ?? parsed.cwd ?? process.cwd()
 
   if (isGhPrMerge) {
-    // Vector 1: gh pr merge — fetch PR createdAt; check store first to avoid a gh call
     const prNumber = extractPrNumber(command)
     const repo = await getRepoSlug(cwd)
     let createdAtStr: string | null = null
@@ -101,7 +107,6 @@ if (import.meta.main) {
     }
 
     if (!createdAtStr) {
-      // Fetch as structured JSON so we can write back to the store
       const viewArgs = prNumber
         ? [
             "pr",
@@ -123,24 +128,20 @@ if (import.meta.main) {
       createdAtStr = pr?.createdAt ?? null
     }
 
-    if (!createdAtStr) process.exit(0)
-    await checkPrAge(createdAtStr, gracePeriodMs, graceMinutes)
+    if (!createdAtStr) return {}
+    const blocked = checkPrAge(createdAtStr, gracePeriodMs, graceMinutes)
+    if (blocked) return blocked
   } else if (isGitMerge) {
-    // Vector 2: git merge <branch> — look up the PR for the branch being merged
     const branch = extractMergeBranch(command)
-    if (!branch) process.exit(0)
+    if (!branch) return {}
 
-    // Strip remote prefix (origin/) to get the branch name for PR lookup
     const branchName = branch.replace(/^origin\//, "")
 
-    // Skip merging default branch into feature branches (that's pulling upstream, not merging a PR)
     const currentBranch = await git(["branch", "--show-current"], cwd)
     const defaultBranch = await getDefaultBranch(cwd)
-    if (branchName === defaultBranch) process.exit(0)
-    // Also skip if merging the current branch into itself (no-op)
-    if (branchName === currentBranch) process.exit(0)
+    if (branchName === defaultBranch) return {}
+    if (branchName === currentBranch) return {}
 
-    // Check store first (by headRefName), then fall back to gh
     let prCreatedAt: string | null = null
     const branchRepo = await getRepoSlug(cwd)
     if (branchRepo) {
@@ -164,9 +165,26 @@ if (import.meta.main) {
       prCreatedAt = pr?.createdAt ?? null
     }
 
-    if (!prCreatedAt) process.exit(0)
-    await checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
+    if (!prCreatedAt) return {}
+    const blocked = checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
+    if (blocked) return blocked
   }
 
-  allowPreToolUse("PR age grace period has elapsed — merge allowed")
+  return preToolUseAllow("PR age grace period has elapsed — merge allowed")
+}
+
+const pretoolusePrAgeGate: SwizToolHook = {
+  name: "pretooluse-pr-age-gate",
+  event: "preToolUse",
+  timeout: 10,
+
+  run(input) {
+    return evaluatePretoolusePrAgeGate(input)
+  },
+}
+
+export default pretoolusePrAgeGate
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretoolusePrAgeGate)
 }

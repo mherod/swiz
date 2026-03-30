@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 // Stop hook: Run lint-staged if configured in project
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { join } from "node:path"
-import { blockStop } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { blockStopObj } from "../src/utils/hook-utils.ts"
 import type { PackageManager } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const PM_LOCKFILE_MAP: Array<{ pm: PackageManager; files: string[] }> = [
   { pm: "bun", files: ["bun.lockb", "bun.lock"] },
@@ -42,7 +46,6 @@ async function detectLintStaged(
   return { hasScript, hasDep }
 }
 
-/** Lint-staged should finish well within 25s. */
 const LINT_STAGED_TIMEOUT_MS = 25_000
 
 async function runLintStaged(
@@ -61,18 +64,18 @@ async function runLintStaged(
   return { exitCode: result.exitCode ?? 1, output: result.stdout + result.stderr }
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopLintStaged(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
   const detected = await detectLintStaged(cwd)
-  if (!detected) return
+  if (!detected) return {}
 
   const { exitCode, output } = await runLintStaged(cwd, detected)
-  if (exitCode === 0) return
-  if (/could not find any staged files|no staged files/i.test(output)) return
+  if (exitCode === 0) return {}
+  if (/could not find any staged files|no staged files/i.test(output)) return {}
 
-  blockStop(
+  return blockStopObj(
     "The linter is the authority. Lint-staged checks failed—do not ignore them.\n\n" +
       "Linting failures must be fixed. You cannot postpone, negotiate with, or work around them.\n\n" +
       `Failures:\n${output}\n\n` +
@@ -81,4 +84,18 @@ async function main(): Promise<void> {
   )
 }
 
-if (import.meta.main) void main()
+const stopLintStaged: SwizStopHook = {
+  name: "stop-lint-staged",
+  event: "stop",
+  timeout: 30,
+
+  run(input) {
+    return evaluateStopLintStaged(input)
+  },
+}
+
+export default stopLintStaged
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopLintStaged)
+}

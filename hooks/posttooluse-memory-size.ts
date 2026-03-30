@@ -12,6 +12,8 @@ import {
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -19,7 +21,7 @@ import {
   readSwizSettings,
 } from "../src/settings.ts"
 import {
-  emitContext,
+  buildContextHookOutput,
   formatActionPlan,
   isFileEditTool,
   skillAdvice,
@@ -93,25 +95,39 @@ function buildViolationContext(filePath: string, violations: string[]): string {
   ].join("\n\n")
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = resolveMemoryEditTarget(input)
-  if (!filePath) return
+export async function evaluatePosttooluseMemorySize(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const filePath = resolveMemoryEditTarget(hookInput)
+  if (!filePath) return {}
 
-  const cwd = input.cwd ?? process.cwd()
+  const cwd = hookInput.cwd ?? process.cwd()
   const { lineThreshold, wordThreshold } = await resolveThresholds(cwd)
 
   const file = Bun.file(filePath)
-  if (!(await file.exists())) return
+  if (!(await file.exists())) return {}
   const { lines, words } = countStats(await file.text())
 
   const violations = getMemoryThresholdViolations(
     { lines, words },
     { lineThreshold, wordThreshold }
   )
-  if (violations.length === 0) return
+  if (violations.length === 0) return {}
 
-  await emitContext("PostToolUse", buildViolationContext(filePath, violations))
+  return buildContextHookOutput("PostToolUse", buildViolationContext(filePath, violations))
 }
 
-if (import.meta.main) void main()
+const posttooluseMemorySize: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-memory-size",
+  event: "postToolUse",
+  matcher: "Edit|Write",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseMemorySize(input)
+  },
+}
+
+export default posttooluseMemorySize
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseMemorySize)
+}

@@ -14,8 +14,13 @@
 //
 // Policy: only blocks on non-default branches. On the default branch, changes
 // are intentional (gated by code review and other hooks).
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { type DiffViolation, runDiffScanStopHook } from "../src/utils/diff-scanner.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { type DiffViolation, evaluateDiffScanStopHook } from "../src/utils/diff-scanner.ts"
+import type { StopHookInput } from "./schemas.ts"
 
 export type { DiffViolation } from "../src/utils/diff-scanner.ts"
 /** @deprecated Use DiffViolation from utils/diff-scanner.ts */
@@ -102,8 +107,6 @@ export function scanDiffForSuppressions(diffOutput: string): SuppressionViolatio
   }
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
-
 const SOURCE_PATHSPECS = [
   "*.ts",
   "*.tsx",
@@ -119,31 +122,56 @@ const SOURCE_PATHSPECS = [
   ":!*.spec.js",
 ]
 
+const SUPPRESSION_SCAN = {
+  diffPathspecs: SOURCE_PATHSPECS,
+  scanDiff: scanDiffForSuppressions,
+  buildBlockMessage: (
+    branch: string,
+    defaultBranch: string,
+    mergeBase: string,
+    violation: DiffViolation
+  ) => {
+    const patternNames = SUPPRESSION_PATTERNS.map((p) => `  - ${p.name}`).join("\n")
+    return [
+      "Suppression patterns detected in committed diffs on non-default branch.",
+      "",
+      `  Current branch: ${branch}`,
+      `  Default branch: ${defaultBranch}`,
+      `  Affected files: ${violation.affectedFiles.join(", ") || "unknown"}`,
+      "",
+      "The following suppression patterns are prohibited in source code:",
+      patternNames,
+      "",
+      "These suppressions were introduced in this branch's commits and bypass",
+      "type-safety and lint enforcement. The PreToolUse gates exist to catch",
+      "them at write time — this Stop hook catches what slipped through.",
+      "",
+      "Review and remove the suppressions:",
+      `  git diff ${mergeBase.slice(0, 8)}..HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'`,
+      "",
+      "Fix the underlying type errors or lint violations instead of suppressing them.",
+    ].join("\n")
+  },
+}
+
+export async function evaluateStopSuppressionPatterns(
+  input: StopHookInput
+): Promise<SwizHookOutput> {
+  return await evaluateDiffScanStopHook(SUPPRESSION_SCAN, input)
+}
+
+const stopSuppressionPatterns: SwizStopHook = {
+  name: "stop-suppression-patterns",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopSuppressionPatterns(input)
+  },
+}
+
+export default stopSuppressionPatterns
+
 if (import.meta.main) {
-  void runDiffScanStopHook({
-    diffPathspecs: SOURCE_PATHSPECS,
-    scanDiff: scanDiffForSuppressions,
-    buildBlockMessage: (branch, defaultBranch, mergeBase, violation) => {
-      const patternNames = SUPPRESSION_PATTERNS.map((p) => `  - ${p.name}`).join("\n")
-      return [
-        "Suppression patterns detected in committed diffs on non-default branch.",
-        "",
-        `  Current branch: ${branch}`,
-        `  Default branch: ${defaultBranch}`,
-        `  Affected files: ${violation.affectedFiles.join(", ") || "unknown"}`,
-        "",
-        "The following suppression patterns are prohibited in source code:",
-        patternNames,
-        "",
-        "These suppressions were introduced in this branch's commits and bypass",
-        "type-safety and lint enforcement. The PreToolUse gates exist to catch",
-        "them at write time — this Stop hook catches what slipped through.",
-        "",
-        "Review and remove the suppressions:",
-        `  git diff ${mergeBase.slice(0, 8)}..HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'`,
-        "",
-        "Fix the underlying type errors or lint violations instead of suppressing them.",
-      ].join("\n")
-    },
-  })
+  await runSwizHookAsMain(stopSuppressionPatterns)
 }

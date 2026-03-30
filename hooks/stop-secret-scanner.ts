@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
 
 // Stop hook: Block stop if secrets/credentials detected in recent commits
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { blockStop, git, isGitRepo, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { blockStopObj, git, isGitRepo, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const PRIVATE_KEY_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY/i
 const TOKEN_RE =
@@ -57,16 +61,30 @@ function formatSecretReason(findings: string[]): string {
   return reason
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopSecretScanner(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
   const findings = await findSecretFindings(cwd)
-  if (findings.length === 0) return
+  if (findings.length === 0) return {}
 
-  blockStop(formatSecretReason(findings), { includeUpdateMemoryAdvice: false })
+  return blockStopObj(formatSecretReason(findings), { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopSecretScanner: SwizStopHook = {
+  name: "stop-secret-scanner",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopSecretScanner(input)
+  },
+}
+
+export default stopSecretScanner
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopSecretScanner)
+}

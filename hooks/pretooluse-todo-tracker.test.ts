@@ -68,7 +68,7 @@ async function runHook(opts: {
   content?: string
   toolName?: string
 }) {
-  return runFileEditHook(HOOK, opts)
+  return await runFileEditHook(HOOK, opts)
 }
 
 // ─── Integration tests ────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ import {
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { isInlineSwizHookRun, SwizHookExit } from "../inline-hook-context.ts"
+import { buildContextHookOutput, type SwizHookOutput } from "../SwizHook.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
@@ -160,11 +161,15 @@ export {
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
+/** Extract the first line of a multi-line message, limited to 70 chars. */
+function extractFirstLine(text: string): string {
+  return text.slice(0, 70).split("\n").shift()?.trim() || ""
+}
+
 function denyPreToolUseObj(reason: string, options: ActionRequiredOptions) {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
@@ -179,10 +184,9 @@ export function denyPreToolUse(reason: string, options: ActionRequiredOptions = 
 }
 
 function allowPreToolUseObj(reason: string): HookOutput {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
@@ -222,10 +226,9 @@ function allowPreToolUseWithUpdatedInputObj(
   updatedInput: Record<string, unknown>,
   reason?: string
 ): HookOutput {
-  const firstLine = (reason ?? "").slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason ?? ""),
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
@@ -242,6 +245,59 @@ export function allowPreToolUseWithUpdatedInput(
   reason?: string
 ): never {
   exitWithHookObject(allowPreToolUseWithUpdatedInputObj(updatedInput, reason))
+}
+
+// ── SwizHook inline output builders (return objects, do not exit) ─────────────
+// These mirror the above helpers but return HookOutput directly for use in
+// SwizHook.run() implementations. They enable inline hooks to participate in
+// cooldown tracking and multi-hook result merging.
+
+/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
+export function preToolUseAllow(reason = ""): SwizHookOutput {
+  return {
+    suppressOutput: true,
+    systemMessage: extractFirstLine(reason),
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow" as const,
+      permissionDecisionReason: reason,
+    },
+  }
+}
+
+const PRE_TOOL_ACTION_REQUIRED =
+  "\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause."
+
+/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). Appends ACTION REQUIRED footer. */
+export function preToolUseDeny(reason: string): SwizHookOutput {
+  const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
+  return {
+    suppressOutput: true,
+    systemMessage: extractFirstLine(reason) || "Denied without reason",
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny" as const,
+      permissionDecisionReason: fullReason,
+    },
+  }
+}
+
+/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
+export function preToolUseAllowWithContext(
+  reason: string,
+  additionalContext: string
+): SwizHookOutput {
+  const effectiveReason = reason || additionalContext
+  return {
+    suppressOutput: true,
+    ...(additionalContext && { systemMessage: additionalContext }),
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow" as const,
+      ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
+      ...(additionalContext && { additionalContext }),
+    },
+  }
 }
 
 /**
@@ -262,23 +318,29 @@ export function filePathGuardHook(
   denyReason: string,
   allowMsg?: string | ((filePath: string) => string)
 ): () => Promise<void> {
-  return async () => {
+  return async (): Promise<void> => {
+    // Load input schema dynamically to avoid circular dependencies
     const { fileEditHookInputSchema } = await import("../../hooks/schemas.ts")
     const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
     const filePath = input.tool_input?.file_path ?? ""
-    if (predicate(filePath)) denyPreToolUse(denyReason)
-    const msg = typeof allowMsg === "function" ? allowMsg(filePath) : (allowMsg ?? "")
-    allowPreToolUse(msg)
+
+    // If the file matches the deny predicate, block immediately
+    if (predicate(filePath)) {
+      denyPreToolUse(denyReason)
+    }
+
+    // Resolve the allow message (function -> result, string -> direct, undefined -> empty)
+    const message = typeof allowMsg === "function" ? allowMsg(filePath) : (allowMsg ?? "")
+    allowPreToolUse(message)
   }
 }
 
 function denyPostToolUseObj(reason: string): HookOutput {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
     reason,
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext: reason,
@@ -304,28 +366,14 @@ export function denyPostToolUse(reason: string): never {
   exitWithHookObject(buildDenyPostToolUseOutput(reason))
 }
 
-/**
- * Build additionalContext / systemMessage payload for SessionStart, PostToolUse, etc.
- * Does not write stdout or exit — use from `SwizHook.run()`; subprocess hooks may use
- * {@link emitContext} instead.
- */
-export function buildContextHookOutput(eventName: string, context: string): HookOutput {
-  return hookOutputSchema.parse({
-    systemMessage: context,
-    suppressOutput: true,
-    hookSpecificOutput: {
-      hookEventName: eventName,
-      additionalContext: context,
-    },
-  })
-}
+export { buildContextHookOutput }
 
 /**
  * Emit additional context for a hook event. **Subprocess-only:** calls `process.exit(0)`.
  * From `SwizHook.run()` (inline dispatch), return {@link buildContextHookOutput} instead
  * so the dispatcher can record cooldowns and merge results with other hooks.
  */
-export function emitContext(eventName: string, context: string): Promise<never> {
+export function emitContext(eventName: string, context: string): never {
   exitWithHookObject(buildContextHookOutput(eventName, context))
 }
 
@@ -400,12 +448,11 @@ export function blockStopObj(
   reason: string,
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): HookOutput {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
     reason: reason + actionRequired(reason, options),
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
   })
 }
 
@@ -418,12 +465,11 @@ export function blockStop(
 }
 
 function blockStopRawObj(reason: string) {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
   return hookOutputSchema.parse({
     decision: "block",
     reason,
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
   })
 }
 
@@ -432,15 +478,15 @@ export function blockStopRaw(reason: string): never {
   exitWithHookObject(blockStopRawObj(reason))
 }
 
-function blockStopHumanRequiredObj(reason: string) {
-  const firstLine = reason.slice(0, 70).split("\n").shift()
+/** Inline SwizHook equivalent of {@link blockStopHumanRequired}. */
+export function blockStopHumanRequiredObj(reason: string): HookOutput {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   return hookOutputSchema.parse({
     decision: "block",
     reason: fullReason,
     resolution: "human-required",
     suppressOutput: true,
-    systemMessage: firstLine || "",
+    systemMessage: extractFirstLine(reason),
   })
 }
 
@@ -472,25 +518,31 @@ export interface FollowUpIssueOptions {
   sessionId?: string | null
 }
 
+export type FileFollowUpIssueResult =
+  | { status: "blocked"; output: HookOutput }
+  | { status: "filed"; issueNum: number | null }
+
 /**
- * File a GitHub issue for a follow-up finding and allow stop.
- * Returns the created issue number on success, or null if filing failed.
- * On failure, falls back to blocking stop so the finding is not lost.
+ * Try to file a follow-up GitHub issue. Returns a structured result so SwizHook
+ * `run()` can return `output` without `process.exit`; subprocess callers use
+ * {@link fileFollowUpIssue} which applies `exitWithHookObject` / `blockStop`.
  */
-export async function fileFollowUpIssue(
+export async function tryFileFollowUpIssue(
   options: FollowUpIssueOptions,
   blockReason: string
-): Promise<number | null> {
+): Promise<FileFollowUpIssueResult> {
   const { title, body, labels = ["backlog", "enhancement"], cwd, sessionId } = options
 
   if (!hasGhCli()) {
-    // Can't file — fall back to blocking
-    blockStop(`${blockReason}\n\n(Could not auto-file follow-up issue: gh CLI unavailable)`, {
-      includeUpdateMemoryAdvice: false,
-    })
+    return {
+      status: "blocked",
+      output: blockStopObj(
+        `${blockReason}\n\n(Could not auto-file follow-up issue: gh CLI unavailable)`,
+        { includeUpdateMemoryAdvice: false }
+      ),
+    }
   }
 
-  // Build the issue body with session context
   const commitSha = await git(["rev-parse", "--short", "HEAD"], cwd)
   const contextLines = [body, "", "---", `Filed automatically by stop hook.`]
   if (commitSha) contextLines.push(`Commit: ${commitSha}`)
@@ -506,29 +558,45 @@ export async function fileFollowUpIssue(
       cwd
     )
 
-    // Extract issue number from gh output (URL like https://github.com/owner/repo/issues/123)
     const match = output.match(/\/issues\/(\d+)/)
     const issueNum = match?.[1] ? Number.parseInt(match[1], 10) : null
 
-    // Clean up temp file
     try {
       await Bun.file(bodyFile).unlink()
     } catch {
       // Best-effort cleanup
     }
 
-    return issueNum
+    return { status: "filed", issueNum }
   } catch {
-    // Filing failed — fall back to blocking so finding isn't lost
     try {
       await Bun.file(bodyFile).unlink()
     } catch {
       // Best-effort cleanup
     }
-    blockStop(`${blockReason}\n\n(Failed to auto-file follow-up issue)`, {
-      includeUpdateMemoryAdvice: false,
-    })
+    return {
+      status: "blocked",
+      output: blockStopObj(`${blockReason}\n\n(Failed to auto-file follow-up issue)`, {
+        includeUpdateMemoryAdvice: false,
+      }),
+    }
   }
+}
+
+/**
+ * File a GitHub issue for a follow-up finding and allow stop.
+ * Returns the created issue number on success, or null if filing failed.
+ * On failure, falls back to blocking stop so the finding is not lost.
+ */
+export async function fileFollowUpIssue(
+  options: FollowUpIssueOptions,
+  blockReason: string
+): Promise<number | null> {
+  const r = await tryFileFollowUpIssue(options, blockReason)
+  if (r.status === "blocked") {
+    exitWithHookObject(r.output)
+  }
+  return r.issueNum
 }
 
 // ─── Git / CLI helpers ──────────────────────────────────────────────────

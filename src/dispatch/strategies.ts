@@ -13,6 +13,7 @@ import {
   writeResponse,
 } from "./engine.ts"
 import { extractCwd } from "./filters.ts"
+import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import type { DispatchStrategy } from "./types.ts"
 
 /** Context passed to each hook execution strategy. */
@@ -141,6 +142,9 @@ async function runStrategyPipeline(
 
   logSlowHookSummary(executions)
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
+  if (ctx.canonicalEvent === "stop") {
+    normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
+  }
   writeResponse(finalResponse)
   return finalResponse
 }
@@ -340,6 +344,7 @@ class BlockingStrategy implements HookExecutionStrategy {
       const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
       if (shortCircuited) {
         const response: Record<string, unknown> = {}
+        normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
         writeResponse(response)
         return response
       }

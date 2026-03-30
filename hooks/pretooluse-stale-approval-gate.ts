@@ -5,9 +5,14 @@
 // Fires once per 5 minutes (cooldownSeconds: 300 in manifest).
 // Fails open on all error paths — missing gh, no PR, no protection, API 404.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
+  preToolUseAllow,
+  preToolUseDeny,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import {
   formatActionPlan,
   GIT_COMMIT_RE,
   getDefaultBranch,
@@ -22,6 +27,7 @@ import {
   isShellTool,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 interface PrWithReviews {
   number: number
@@ -121,25 +127,41 @@ function resolveGitCommitContext(input: ToolHookInput): string | null {
   return extractCwd(input)
 }
 
-async function main(): Promise<void> {
-  const input: ToolHookInput = await Bun.stdin.json()
-  const cwd = resolveGitCommitContext(input)
-  if (!cwd) process.exit(0)
+export async function evaluatePretooluseStaleApprovalGate(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input) as ToolHookInput
+  const cwd = resolveGitCommitContext(hookInput)
+  if (!cwd) return {}
 
   const branch = await resolveFeatureBranch(cwd)
-  if (!branch) process.exit(0)
+  if (!branch) return {}
 
   const result = await findApprovedPr(branch, cwd)
-  if (!result) allowPreToolUse(`No approved PR on branch '${branch}'`)
+  if (!result) return preToolUseAllow(`No approved PR on branch '${branch}'`)
 
-  if (!(await hasDismissStaleReviews(cwd, result!.pr.baseRefName))) {
-    allowPreToolUse(
-      `PR #${result!.pr.number} approved but branch protection does not dismiss stale reviews`
+  if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) {
+    return preToolUseAllow(
+      `PR #${result.pr.number} approved but branch protection does not dismiss stale reviews`
     )
   }
 
-  const approverList = formatApproverList(result!.approvals)
-  denyPreToolUse(buildDenyMessage(result!.pr, approverList))
+  const approverList = formatApproverList(result.approvals)
+  return preToolUseDeny(buildDenyMessage(result.pr, approverList))
 }
 
-if (import.meta.main) main().catch(() => process.exit(0))
+const pretooluseStaleApprovalGate: SwizToolHook = {
+  name: "pretooluse-stale-approval-gate",
+  event: "preToolUse",
+  timeout: 10,
+  cooldownSeconds: 300,
+  run(input) {
+    return evaluatePretooluseStaleApprovalGate(input)
+  },
+}
+
+export default pretooluseStaleApprovalGate
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseStaleApprovalGate, {
+    onStdinJsonError: () => ({}),
+  })
+}

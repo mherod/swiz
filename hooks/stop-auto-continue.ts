@@ -11,6 +11,8 @@ import { resolveCwd } from "../src/cwd.ts"
 import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import {
   type AmbitionMode,
   getEffectiveSwizSettings,
@@ -28,7 +30,14 @@ import {
   resolveTranscriptText,
   type TranscriptResolution,
 } from "../src/transcript-utils.ts"
-import { git, hasGhCli, isGitHubRemote, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import {
+  blockStopObj,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+  skillAdvice,
+} from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { buildPrompt } from "./stop-auto-continue/prompt.ts"
 import { writeReflections } from "./stop-auto-continue/reflections.ts"
@@ -302,17 +311,26 @@ async function checkRefinementNeeds(cwd: string): Promise<string> {
 // ─── Termination helper ─────────────────────────────────────────────────────
 
 /**
+ * Thrown to unwind the auto-continue pipeline; {@link evaluateStopAutoContinue}
+ * converts this into a {@link SwizHookOutput} for inline dispatch. Subprocess
+ * path uses {@link runSwizHookAsMain}, which applies the same output via
+ * `exitWithHookObject`.
+ */
+export class AutoContinueExit extends Error {
+  readonly output: SwizHookOutput
+
+  constructor(output: SwizHookOutput) {
+    super("AutoContinueExit")
+    this.name = "AutoContinueExit"
+    this.output = output
+  }
+}
+
+/**
  * Single termination point for all exits in this hook.
  *
- * "skip"  → log one structured reason code to stderr, exit 0 (allow stop).
- * "block" → emit one JSON decision object to stdout, exit 0 (block stop).
- *
- * Returning `never` is a compiler-enforced guarantee: no code after any
- * terminate() call can execute, making dual-emission structurally impossible.
- *
- * The runtime implementation is defensively hardened: unknown actions default
- * to "block" (safe — prevents accidental stop), and empty/missing payloads
- * are normalised to stable fallback values so output is always well-formed.
+ * "skip"  → log one structured reason code to stderr, then throw {@link AutoContinueExit} with `{}`.
+ * "block" → throw {@link AutoContinueExit} with `blockStopObj(reason)` (subprocess: exit via runSwizHookAsMain).
  */
 /**
  * Pure normalization step — exported for unit testing.
@@ -340,10 +358,10 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
   const { safeAction, normalizedArgs } = normalizeTerminateArgs(action, args)
   if (safeAction === "skip") {
     console.error(`[stop-auto-continue:${normalizedArgs[0]}] ${normalizedArgs[1]}`)
-  } else {
-    console.log(JSON.stringify({ decision: "block", reason: normalizedArgs[0] }))
+    throw new AutoContinueExit({})
   }
-  process.exit(0)
+  const reason = normalizedArgs[0]!
+  throw new AutoContinueExit(blockStopObj(reason, { includeUpdateMemoryAdvice: false }))
 }
 
 // ─── Filler suggestion ───────────────────────────────────────────────────────
@@ -353,16 +371,14 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
-  const parsedInput = stopHookInputSchema.safeParse(hookRaw)
-  if (!parsedInput.success) {
-    console.error(
-      "[stop-auto-continue] stopHookInputSchema parse failed:",
-      JSON.stringify(parsedInput.error.issues)
-    )
+  try {
+    const input = stopHookInputSchema.parse(hookRaw)
+    return { input, cwd: resolveCwd(input.cwd) }
+  } catch (err) {
+    const issues = err instanceof z.ZodError ? err.issues : []
+    console.error("[stop-auto-continue] stopHookInputSchema parse failed:", JSON.stringify(issues))
     terminate("block", "Auto-continue received malformed stop-hook input.")
   }
-  const input = parsedInput.data
-  return { input, cwd: resolveCwd(input.cwd) }
 }
 
 async function handleNoTranscript(
@@ -706,15 +722,8 @@ async function validateResponseAndChecks(
   }
 }
 
-async function main(): Promise<void> {
+async function runStopAutoContinueMain(hookRaw: Record<string, unknown>): Promise<void> {
   startSuggestionLogCleanup() // Fire-and-forget cleanup
-
-  let hookRaw: Record<string, unknown>
-  try {
-    hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
-  } catch {
-    terminate("block", "Auto-continue could not parse stop-hook input JSON.")
-  }
 
   const { input, cwd } = parseStopInput(hookRaw)
   const { effective } = await validateMainInputsAndSettings(hookRaw, cwd)
@@ -741,11 +750,36 @@ async function main(): Promise<void> {
     effective.critiquesEnabled ?? false
   )
 
-  // Auto-steer intercept is handled at the dispatch level (BlockingStrategy).
-  // This hook just blocks as usual; the dispatcher converts it to a terminal
-  // steering prompt when autoSteer is enabled.
   terminate("block", finalMessage)
 }
 
-// Guard: only run main() when this file is the entry point, not when imported for testing.
-if (import.meta.main) void main()
+export async function evaluateStopAutoContinue(input: StopHookInput): Promise<SwizHookOutput> {
+  try {
+    await runStopAutoContinueMain(input as unknown as Record<string, unknown>)
+    return {}
+  } catch (err) {
+    if (err instanceof AutoContinueExit) return err.output
+    throw err
+  }
+}
+
+const stopAutoContinue: SwizStopHook = {
+  name: "stop-auto-continue",
+  event: "stop",
+  timeout: 120,
+
+  run(input) {
+    return evaluateStopAutoContinue(input)
+  },
+}
+
+export default stopAutoContinue
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopAutoContinue, {
+    onStdinJsonError: () =>
+      blockStopObj("Auto-continue could not parse stop-hook input JSON.", {
+        includeUpdateMemoryAdvice: false,
+      }),
+  })
+}

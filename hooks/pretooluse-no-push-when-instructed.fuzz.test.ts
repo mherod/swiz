@@ -64,8 +64,8 @@ async function runHook(transcriptContent: string): Promise<SimpleHookResult> {
     stderr: "pipe",
     env: { ...process.env, HOME: fakeHome, SWIZ_DAEMON_PORT: "19999" },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 

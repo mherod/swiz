@@ -4,21 +4,45 @@
 // Hooks may set `async: true` for concurrent scheduling; optional `asyncMode` chooses
 // fire-and-forget (default) vs block-until-complete (sync pipeline). See SwizHookMeta.
 
+import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"
+import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
+import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
+import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
+import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
+import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
+import posttoolusePostPushCooldown from "../hooks/posttooluse-push-cooldown.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
+import posttooluseSpeakNarrator from "../hooks/posttooluse-speak-narrator.ts"
+import posttooluseStateTransition from "../hooks/posttooluse-state-transition.ts"
+import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
+import posttooluseTaskAuditSync from "../hooks/posttooluse-task-audit-sync.ts"
+import posttooluseTaskListSync from "../hooks/posttooluse-task-list-sync.ts"
+import posttooluseTaskOutput from "../hooks/posttooluse-task-output.ts"
+import posttooluseTaskSubjectValidation from "../hooks/posttooluse-task-subject-validation.ts"
+import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
+import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
+import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
+import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
+import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
+import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
 import pretoolusClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
+import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
+import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
+import pretooluseEnforceTaskupdate from "../hooks/pretooluse-enforce-taskupdate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
+import pretooluseMainBranchScopeGate from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
 import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
@@ -28,24 +52,67 @@ import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-confl
 import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
 import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
+import pretooluseNoPhantomTaskCompletion from "../hooks/pretooluse-no-phantom-task-completion.ts"
 import pretoolusNoPushWhenInstructed from "../hooks/pretooluse-no-push-when-instructed.ts"
 import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
+import pretooluseNoTaskDelegation from "../hooks/pretooluse-no-task-delegation.ts"
+import pretooluseOffensiveLanguage from "../hooks/pretooluse-offensive-language.ts"
+import pretoolusePrAgeGate from "../hooks/pretooluse-pr-age-gate.ts"
+import pretoolusePrChangesBranchGuard from "../hooks/pretooluse-pr-changes-branch-guard.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
+import pretoolusePushChecksGate from "../hooks/pretooluse-push-checks-gate.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-guard.ts"
+import pretooluseRepeatedLintTest from "../hooks/pretooluse-repeated-lint-test.ts"
+import pretooluseRequireTasks from "../hooks/pretooluse-require-tasks.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
+import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
+import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
 import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
+import pretooluseTrunkModeBranchGate from "../hooks/pretooluse-trunk-mode-branch-gate.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
+import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory-enforcement.ts"
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
+import prpollNotify from "../hooks/prpoll-notify.ts"
+import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
+import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
+import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
+import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
+import stopAutoContinue from "../hooks/stop-auto-continue.ts"
+import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
+import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
+import stopDependabotPrs from "../hooks/stop-dependabot-prs.ts"
+import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
+import stopGitStatus from "../hooks/stop-git-status.ts"
+import stopGithubCi from "../hooks/stop-github-ci.ts"
+import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
+import stopLargeFiles from "../hooks/stop-large-files.ts"
+import stopLintStaged from "../hooks/stop-lint-staged.ts"
+import stopLockfileDrift from "../hooks/stop-lockfile-drift.ts"
+import stopMemorySize from "../hooks/stop-memory-size.ts"
+import stopMemoryUpdateReminder from "../hooks/stop-memory-update-reminder.ts"
+import stopNonDefaultBranch from "../hooks/stop-non-default-branch.ts"
+import stopOffensiveLanguage from "../hooks/stop-offensive-language.ts"
+import stopPersonalRepoIssues from "../hooks/stop-personal-repo-issues.ts"
+import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
+import stopPrDescription from "../hooks/stop-pr-description.ts"
+import stopQualityChecks from "../hooks/stop-quality-checks.ts"
+import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
+import stopSuppressionPatterns from "../hooks/stop-suppression-patterns.ts"
+import stopTodoTracker from "../hooks/stop-todo-tracker.ts"
 import stopUpstreamBranchCount from "../hooks/stop-upstream-branch-count.ts"
+import stopWorkflowPermissions from "../hooks/stop-workflow-permissions.ts"
+import userpromptsubmitGitContext from "../hooks/userpromptsubmit-git-context.ts"
+import userpromptsubmitSkillSteps from "../hooks/userpromptsubmit-skill-steps.ts"
+import userpromptsubmitTaskAdvisor from "../hooks/userpromptsubmit-task-advisor.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
@@ -122,59 +189,41 @@ export const manifest: HookGroup[] = [
   {
     event: "stop",
     hooks: [
-      { file: "stop-offensive-language.ts", timeout: 10 },
-      { file: "stop-incomplete-tasks.ts", timeout: 10 },
-      { file: "stop-completion-auditor.ts", timeout: 10 },
-      { file: "stop-secret-scanner.ts", timeout: 10 },
-      { file: "stop-workflow-permissions.ts", timeout: 10 },
-      { file: "stop-large-files.ts", timeout: 10 },
-      { file: "stop-suppression-patterns.ts", timeout: 10 },
-      { file: "stop-git-status.ts", timeout: 10, requiredSettings: ["gitStatusGate"] },
-      { file: "stop-lockfile-drift.ts", timeout: 10 },
-      { file: "stop-lint-staged.ts", timeout: 30 },
-      { file: "stop-quality-checks.ts", timeout: 60, requiredSettings: ["qualityChecksGate"] },
-      { file: "stop-branch-conflicts.ts", timeout: 10 },
-      { file: "stop-pr-description.ts", timeout: 10 },
-      {
-        file: "stop-pr-changes-requested.ts",
-        timeout: 10,
-        requiredSettings: ["changesRequestedGate"],
-      },
-      { file: "stop-github-ci.ts", timeout: 45, requiredSettings: ["githubCiGate"] },
-      { file: "stop-todo-tracker.ts", timeout: 10 },
-      {
-        file: "stop-non-default-branch.ts",
-        timeout: 10,
-        requiredSettings: ["nonDefaultBranchGate"],
-      },
-      {
-        file: "stop-personal-repo-issues.ts",
-        timeout: 10,
-        cooldownSeconds: 30,
-        requiredSettings: ["personalRepoIssuesGate"],
-      },
+      { hook: stopOffensiveLanguage },
+      { hook: stopIncompleteTasks },
+      { hook: stopCompletionAuditor },
+      { hook: stopSecretScanner },
+      { hook: stopWorkflowPermissions },
+      { hook: stopLargeFiles },
+      { hook: stopSuppressionPatterns },
+      { hook: stopGitStatus },
+      { hook: stopLockfileDrift },
+      { hook: stopLintStaged },
+      { hook: stopQualityChecks },
+      { hook: stopBranchConflicts },
+      { hook: stopPrDescription },
+      { hook: stopPrChangesRequested },
+      { hook: stopGithubCi },
+      { hook: stopTodoTracker },
+      { hook: stopNonDefaultBranch },
+      { hook: stopPersonalRepoIssues },
       { hook: stopUpstreamBranchCount },
-      { file: "stop-memory-size.ts", timeout: 10, cooldownSeconds: 3600 },
-      { file: "stop-dependabot-prs.ts", timeout: 10, cooldownSeconds: 3600 },
-      { file: "stop-gdpr-data-models.ts", timeout: 10 },
-      {
-        file: "stop-memory-update-reminder.ts",
-        timeout: 10,
-        cooldownSeconds: 600,
-        requiredSettings: ["memoryUpdateReminder"],
-      },
-      { file: "stop-auto-continue.ts", timeout: 120 },
-      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+      { hook: stopMemorySize },
+      { hook: stopDependabotPrs },
+      { hook: stopGdprDataModels },
+      { hook: stopMemoryUpdateReminder },
+      { hook: stopAutoContinue },
+      { hook: posttooluseSpeakNarrator },
     ],
   },
   {
     event: "preToolUse",
-    hooks: [{ file: "posttooluse-speak-narrator.ts", timeout: 30, async: true }],
+    hooks: [{ hook: posttooluseSpeakNarrator }],
   },
   {
     event: "preToolUse",
     matcher: "Task",
-    hooks: [{ file: "pretooluse-no-task-delegation.ts", timeout: 5 }],
+    hooks: [{ hook: pretooluseNoTaskDelegation }],
   },
   {
     event: "preToolUse",
@@ -186,9 +235,9 @@ export const manifest: HookGroup[] = [
     matcher: "TaskUpdate|update_plan",
     hooks: [
       { hook: pretoolusTaskupdateSchema },
-      { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
-      { file: "pretooluse-no-phantom-task-completion.ts", timeout: 5 },
-      { file: "pretooluse-dirty-worktree-gate.ts", timeout: 5, cooldownSeconds: 60 },
+      { hook: pretooluseEnforceTaskupdate },
+      { hook: pretooluseNoPhantomTaskCompletion },
+      { hook: pretooluseDirtyWorktreeGate },
     ],
   },
   {
@@ -199,18 +248,15 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit|Bash",
-    hooks: [
-      { file: "pretooluse-offensive-language.ts", timeout: 5, cooldownSeconds: 60 },
-      { file: "pretooluse-update-memory-enforcement.ts", timeout: 5, cooldownSeconds: 300 },
-    ],
+    hooks: [{ hook: pretooluseOffensiveLanguage }, { hook: pretooluseUpdateMemoryEnforcement }],
   },
   {
     event: "preToolUse",
     matcher: "Edit|Write|Bash",
     hooks: [
-      { file: "pretooluse-require-tasks.ts", timeout: 5 },
-      { file: "pretooluse-state-gate.ts", timeout: 5 },
-      { file: "pretooluse-block-preexisting-dismissals.ts", timeout: 5 },
+      { hook: pretooluseRequireTasks },
+      { hook: pretooluseStateGate },
+      { hook: pretooluseBlockPreexistingDismissals },
     ],
   },
   {
@@ -240,8 +286,8 @@ export const manifest: HookGroup[] = [
     matcher: "Bash",
     hooks: [
       { hook: pretoolusNoMixedToolCalls },
-      { file: "pretooluse-enforce-taskupdate.ts", timeout: 5 },
-      { file: "pretooluse-banned-commands.ts", timeout: 5 },
+      { hook: pretooluseEnforceTaskupdate },
+      { hook: pretooluseBannedCommands },
       { hook: pretoolusNoMergeConflictComments },
       { hook: pretoolusNoCp },
       { hook: pretooluseGitIndexLock },
@@ -250,18 +296,18 @@ export const manifest: HookGroup[] = [
       { hook: pretoolUseProtectSandbox },
       { hook: pretoolusePprotectStrictMain },
       { hook: pretooluseLongSleep },
-      { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
-      { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
-      { file: "pretooluse-claude-word-limit.ts", timeout: 5 },
+      { hook: pretooluseStaleApprovalGate },
+      { hook: pretoolusePushChecksGate },
+      { hook: pretooluseClaudeWordLimit },
       { hook: pretoolusePushCooldown },
-      { file: "pretooluse-main-branch-scope-gate.ts", timeout: 10 },
-      { file: "pretooluse-block-commit-to-main.ts", timeout: 10 },
-      { file: "pretooluse-pr-changes-branch-guard.ts", timeout: 10 },
-      { file: "pretooluse-trunk-mode-branch-gate.ts", timeout: 10 },
+      { hook: pretooluseMainBranchScopeGate },
+      { hook: pretooluseBlockCommitToMain },
+      { hook: pretoolusePrChangesBranchGuard },
+      { hook: pretooluseTrunkModeBranchGate },
       { hook: pretoolusSkillInvocationGate },
       { hook: pretoolusNoPushWhenInstructed },
-      { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
-      { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
+      { hook: pretoolusePrAgeGate },
+      { hook: pretooluseRepeatedLintTest },
       { hook: pretoolusNoReadyToBacklog },
       { hook: pretoolusNoIssueClose },
     ],
@@ -275,34 +321,29 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttoolusGitStatus },
-      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
-      {
-        file: "posttooluse-auto-steer.ts",
-        timeout: 10,
-        async: true,
-        requiredSettings: ["autoSteer"],
-      },
+      { hook: posttooluseSpeakNarrator },
+      { hook: posttooluseAutoSteer },
     ],
   },
   {
     event: "postToolUse",
     matcher: "TaskCreate|TodoWrite",
-    hooks: [{ file: "posttooluse-task-subject-validation.ts", timeout: 5 }],
+    hooks: [{ hook: posttooluseTaskSubjectValidation }],
   },
   {
     event: "postToolUse",
     matcher: "TaskList",
-    hooks: [{ file: "posttooluse-task-list-sync.ts", timeout: 5 }],
+    hooks: [{ hook: posttooluseTaskListSync }],
   },
   {
     event: "postToolUse",
     matcher: "TaskUpdate|TaskCreate|TodoWrite",
-    hooks: [{ file: "posttooluse-task-audit-sync.ts", timeout: 5 }],
+    hooks: [{ hook: posttooluseTaskAuditSync }],
   },
   {
     event: "postToolUse",
     matcher: "TaskOutput",
-    hooks: [{ file: "posttooluse-task-output.ts", timeout: 15 }],
+    hooks: [{ hook: posttooluseTaskOutput }],
   },
   {
     event: "postToolUse",
@@ -314,12 +355,12 @@ export const manifest: HookGroup[] = [
     matcher: "Bash",
     hooks: [
       { hook: posttoolusPrContext },
-      { file: "posttooluse-pr-create-refine.ts", timeout: 10 },
+      { hook: posttoolusePrCreateRefine },
       { hook: posttoolusGitContext },
-      { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
-      { file: "posttooluse-push-cooldown.ts", timeout: 5 },
+      { hook: posttooluseGitTaskAutocomplete },
+      { hook: posttoolusePostPushCooldown },
       { hook: posttoolusVerifyPush },
-      { file: "posttooluse-state-transition.ts", timeout: 5 },
+      { hook: posttooluseStateTransition },
       { hook: posttoolusUpstreamSyncOnPush },
     ],
   },
@@ -327,43 +368,43 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "Edit|Write",
     hooks: [
-      { file: "posttooluse-json-validation.ts", timeout: 5 },
-      { file: "posttooluse-test-pairing.ts", timeout: 5 },
-      { file: "posttooluse-task-advisor.ts", timeout: 5 },
-      { file: "posttooluse-memory-size.ts", timeout: 5 },
-      { file: "posttooluse-prettier-ts.ts", timeout: 5, async: true },
+      { hook: posttooluseJsonValidation },
+      { hook: posttooluseTestPairing },
+      { hook: posttooluseTaskAdvisor },
+      { hook: posttooluseMemorySize },
+      { hook: posttoolusePrettierTs },
     ],
   },
   {
     event: "sessionStart",
     matcher: "startup",
     hooks: [
-      { file: "sessionstart-self-heal.ts", timeout: 15 },
-      { file: "sessionstart-health-snapshot.ts", timeout: 10 },
-      { file: "sessionstart-state-context.ts", timeout: 5 },
-      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+      { hook: sessionstartSelfHeal },
+      { hook: sessionstartHealthSnapshot },
+      { hook: sessionstartStateContext },
+      { hook: posttooluseSpeakNarrator },
     ],
   },
   {
     event: "sessionStart",
     matcher: "compact",
-    hooks: [{ file: "sessionstart-compact-context.ts", timeout: 5 }],
+    hooks: [{ hook: sessionstartCompactContext }],
   },
   {
     event: "preCompact",
     hooks: [
-      { file: "precompact-task-snapshot.ts", timeout: 5 },
+      { hook: precompactTaskSnapshot },
       { hook: precompactSpeak },
-      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+      { hook: posttooluseSpeakNarrator },
     ],
   },
   {
     event: "userPromptSubmit",
     hooks: [
-      { file: "userpromptsubmit-git-context.ts", timeout: 5 },
-      { file: "userpromptsubmit-task-advisor.ts", timeout: 5 },
-      { file: "userpromptsubmit-skill-steps.ts", timeout: 10 },
-      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+      { hook: userpromptsubmitGitContext },
+      { hook: userpromptsubmitTaskAdvisor },
+      { hook: userpromptsubmitSkillSteps },
+      { hook: posttooluseSpeakNarrator },
     ],
   },
   {
@@ -385,12 +426,12 @@ export const manifest: HookGroup[] = [
   {
     event: "prPoll",
     scheduled: true,
-    hooks: [{ file: "prpoll-notify.ts", timeout: 15 }],
+    hooks: [{ hook: prpollNotify }],
   },
   {
     event: "preCommit",
     scheduled: true,
-    hooks: [{ file: "precommit-staged-validation.ts", timeout: 10 }],
+    hooks: [{ hook: precommitStagedValidation }],
   },
 ]
 

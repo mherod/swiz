@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 // Stop hook: Remind to update memory if CLAUDE.md / MEMORY.md haven't been
 // touched recently. Runs with its own cooldown independent of stop-auto-continue.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { blockStop, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { blockStopObj, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 
@@ -31,12 +35,14 @@ async function memoryRecentlyUpdated(cwd: string): Promise<boolean> {
   return false
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-  if (!(await isGitRepo(cwd))) return
+export async function evaluateStopMemoryUpdateReminder(
+  input: StopHookInput
+): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
+  if (!(await isGitRepo(cwd))) return {}
 
-  if (await memoryRecentlyUpdated(cwd)) return
+  if (await memoryRecentlyUpdated(cwd)) return {}
 
   const reflectAdvice = skillAdvice(
     "reflect-on-session-mistakes",
@@ -44,11 +50,27 @@ async function main(): Promise<void> {
     "review the session transcript for patterns to avoid"
   )
 
-  blockStop(
+  return blockStopObj(
     `Next step: Reflect on this session's work: ${reflectAdvice}\n\n` +
       "review the session transcript for patterns to avoid, " +
       "then update MEMORY.md with any confirmed directives from this session."
   )
 }
 
-if (import.meta.main) void main()
+const stopMemoryUpdateReminder: SwizStopHook = {
+  name: "stop-memory-update-reminder",
+  event: "stop",
+  timeout: 10,
+  cooldownSeconds: 600,
+  requiredSettings: ["memoryUpdateReminder"],
+
+  run(input) {
+    return evaluateStopMemoryUpdateReminder(input)
+  },
+}
+
+export default stopMemoryUpdateReminder
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopMemoryUpdateReminder)
+}

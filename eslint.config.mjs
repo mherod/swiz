@@ -143,6 +143,17 @@ export default tseslint.config(
     },
   },
   {
+    files: ["hooks/**/*.ts"],
+    rules: {
+      /** Every floating promise in a hook is a silent failure — no void escape hatch. */
+      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: false }],
+      /** Force `return await` everywhere so rejections always surface with correct stack. */
+      "@typescript-eslint/return-await": ["error", "always"],
+      /** Async functions without await are likely missing error handling. */
+      "@typescript-eslint/require-await": "error",
+    },
+  },
+  {
     files: ["**/*.test.{ts,tsx,js,jsx}"],
     rules: {
       complexity: "off",

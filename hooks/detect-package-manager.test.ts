@@ -8,7 +8,7 @@ const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
 
 const _tmp = useTempDir()
 async function makeTempDir(suffix = ""): Promise<string> {
-  return _tmp.create(`swiz-detect-pm${suffix}-`)
+  return await _tmp.create(`swiz-detect-pm${suffix}-`)
 }
 
 /**
@@ -26,8 +26,8 @@ async function npmDecisionInDir(
     stderr: "pipe",
     cwd: dir,
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (!out.trim()) return { decision: undefined, reason: undefined }
@@ -48,8 +48,8 @@ async function pnpmDecisionInDir(dir: string): Promise<string | undefined> {
     stderr: "pipe",
     cwd: dir,
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (!out.trim()) return undefined

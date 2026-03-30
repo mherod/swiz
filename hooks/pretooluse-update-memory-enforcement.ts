@@ -10,9 +10,10 @@ import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
-  denyPreToolUse,
   extractToolBlocksFromEntry,
   formatActionPlan,
   hasFileInTree,
@@ -20,9 +21,10 @@ import {
   isGitRepo,
   isNotebookTool,
   isWriteTool,
+  preToolUseDeny,
   readSessionLines,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
@@ -79,7 +81,6 @@ function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
 async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
   const candidates: string[] = []
 
-  // Walk up from cwd collecting CLAUDE.md paths
   let dir = cwd
   while (true) {
     candidates.push(join(dir, "CLAUDE.md"))
@@ -88,7 +89,6 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
     dir = parent
   }
 
-  // Also check the project auto-memory file
   const home = getHomeDirOrNull()
   if (home) {
     const encodedCwd = projectKeyFromCwd(cwd)
@@ -112,7 +112,6 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
  * Returns true if the current session has at least one task with status
  * "in_progress". When true, enforcement is deferred — the agent is actively
  * working on a task and should not be interrupted by memory-update detours.
- * Enforcement resumes naturally when no active task remains.
  */
 async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   if (!sessionId) return false
@@ -233,26 +232,48 @@ function isCurrentToolSatisfying(
   return false
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+export async function evaluatePretooluseUpdateMemoryEnforcement(
+  raw: Record<string, unknown>
+): Promise<SwizHookOutput> {
+  let input: ToolHookInput
+  try {
+    input = toolHookInputSchema.parse(raw)
+  } catch {
+    return {}
+  }
   const transcriptPath = input.transcript_path ?? ""
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}
   const cwd = input.cwd ?? process.cwd()
 
-  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return
+  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return {}
 
   const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
-  if (lines.length === 0) return
+  if (lines.length === 0) return {}
 
   const lastTriggerIndex = findLastTriggerIndex(lines)
-  if (lastTriggerIndex < 0) return
-  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return
+  if (lastTriggerIndex < 0) return {}
+  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
 
   const state = scanTranscript(lines, lastTriggerIndex)
-  if (isCurrentToolSatisfying(state, toolName, toolInput)) return
+  if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
 
-  denyPreToolUse(buildDenialReason(toolName, !state.skillReadComplete))
+  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
 }
 
-if (import.meta.main) await main()
+const pretooluseUpdateMemoryEnforcement: SwizToolHook = {
+  name: "pretooluse-update-memory-enforcement",
+  event: "preToolUse",
+  timeout: 5,
+  cooldownSeconds: 300,
+
+  async run(input) {
+    return await evaluatePretooluseUpdateMemoryEnforcement(input as Record<string, unknown>)
+  },
+}
+
+export default pretooluseUpdateMemoryEnforcement
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseUpdateMemoryEnforcement)
+}

@@ -5,7 +5,7 @@
  *
  * All detection logic (patterns, scanning, formatting) lives in
  * offensive-language-patterns.ts. This file is a thin shell that reads the
- * transcript, runs detection, and calls denyPreToolUse/allowPreToolUse.
+ * transcript, runs detection, and returns allow/deny outputs.
  *
  * When an AI provider is available, generates a refined denial message that
  * uses transcript context to directly challenge the specific objection —
@@ -13,7 +13,9 @@
  */
 
 import { z } from "zod"
-import { allowPreToolUse, denyPreToolUse, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { preToolUseAllow, preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -78,41 +80,65 @@ async function tryRefinedFeedback(
 
 const BLOCKING_SUFFIX = "Demonstrate corrected behavior through action, not words."
 
-async function main() {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
+  const message = err instanceof Error ? err.message : String(err)
+  return preToolUseDeny(
+    `Hook error: pretooluse-offensive-language encountered an unexpected error.\n\n${message}`
+  )
+}
+
+export async function evaluatePretooluseOffensiveLanguage(
+  raw: Record<string, unknown>
+): Promise<SwizHookOutput> {
+  const input = toolHookInputSchema.parse(raw)
   const transcriptPath = input.transcript_path ?? ""
 
-  if (!transcriptPath) process.exit(0)
+  if (!transcriptPath) return {}
 
   const lines = await readTranscriptLines(transcriptPath)
-  if (lines.length === 0) process.exit(0)
+  if (lines.length === 0) return {}
 
   const assistantText = extractLastAssistantText(lines)
-  if (!assistantText) process.exit(0)
+  if (!assistantText) return {}
 
   const matches = findAllLazyPatterns(assistantText)
   if (matches.length > 0) {
-    // Try AI-refined feedback; fall back to static messages
     const refined = await tryRefinedFeedback(assistantText, matches)
     const reason = refined
       ? `${refined}\n\n${BLOCKING_SUFFIX}`
       : formatAllDenialMessages(matches, BLOCKING_SUFFIX)
 
     const sessionId = (input.session_id as string) ?? ""
-    // Auto-steer delivers the message — allow silently to avoid duplicate guidance.
-    // If auto-steer unavailable, deny as usual.
     if (sessionId && (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd))) {
-      allowPreToolUse("")
+      return preToolUseAllow("")
     }
-    denyPreToolUse(reason)
+    return preToolUseDeny(reason)
   }
 
-  allowPreToolUse("")
+  return preToolUseAllow("")
+}
+
+const pretooluseOffensiveLanguage: SwizToolHook = {
+  name: "pretooluse-offensive-language",
+  event: "preToolUse",
+  timeout: 5,
+  cooldownSeconds: 60,
+
+  async run(input) {
+    try {
+      return await evaluatePretooluseOffensiveLanguage(input as Record<string, unknown>)
+    } catch (err: unknown) {
+      return unexpectedHookFailureOutput(err)
+    }
+  },
+}
+
+export default pretooluseOffensiveLanguage
+
+const runAsMainOptions: RunSwizHookAsMainOptions = {
+  onStdinJsonError: unexpectedHookFailureOutput,
 }
 
 if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+  await runSwizHookAsMain(pretooluseOffensiveLanguage, runAsMainOptions)
 }

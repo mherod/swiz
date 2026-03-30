@@ -16,13 +16,15 @@
 //      transcript — task may have been set in_progress in a prior session.
 //      Fail-open; we can only verify what the transcript contains.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   extractToolBlocksFromEntry,
   formatActionPlan,
   isGitRepo,
   isTaskTool,
+  preToolUseAllow,
+  preToolUseDeny,
   readSessionLines,
   resolveSafeSessionId,
 } from "../src/utils/hook-utils.ts"
@@ -156,40 +158,53 @@ function buildDenialMessage(taskId: string, sessionId: string | undefined): stri
   )
 }
 
-async function main(): Promise<void> {
-  const raw = toolHookInputSchema.parse(await Bun.stdin.json())
+export async function evaluatePretooluseNoPhantomTaskCompletion(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const raw = toolHookInputSchema.parse(input)
   const { toolName, toolInput, cwd, transcriptPath, sessionId } = extractRawFields(raw)
 
-  if (!isCompletionCall(toolName, toolInput)) return
+  if (!isCompletionCall(toolName, toolInput)) return {}
 
   const { taskId, description } = extractTaskFields(toolInput)
-  if (!taskId) return
+  if (!taskId) return {}
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
-  // Evidence in the completion description bypasses the work-count gate.
   if (hasTrackedEvidence(description)) {
-    allowPreToolUse(`Task #${taskId} completion includes traceable evidence.`)
+    return preToolUseAllow(`Task #${taskId} completion includes traceable evidence.`)
   }
 
-  if (!transcriptPath) return
+  if (!transcriptPath) return {}
 
   const lines = (await readSessionLines(transcriptPath)).filter((l) => l.trim())
-  if (lines.length === 0) return
+  if (lines.length === 0) return {}
 
   const { workCallCount, anchorFound } = scanTranscript(lines, taskId)
 
-  // No in_progress transition found → cannot verify → fail-open.
-  if (!anchorFound) return
+  if (!anchorFound) return {}
 
   if (workCallCount >= 1) {
-    allowPreToolUse(
+    return preToolUseAllow(
       `Task #${taskId}: ${workCallCount} work tool call(s) after in_progress — completion allowed.`
     )
   }
 
-  // Zero work calls after the in_progress anchor → phantom completion.
-  denyPreToolUse(buildDenialMessage(taskId, sessionId))
+  return preToolUseDeny(buildDenialMessage(taskId, sessionId))
 }
 
-if (import.meta.main) await main()
+const pretooluseNoPhantomTaskCompletion: SwizToolHook = {
+  name: "pretooluse-no-phantom-task-completion",
+  event: "preToolUse",
+  timeout: 5,
+
+  run(input) {
+    return evaluatePretooluseNoPhantomTaskCompletion(input)
+  },
+}
+
+export default pretooluseNoPhantomTaskCompletion
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseNoPhantomTaskCompletion)
+}

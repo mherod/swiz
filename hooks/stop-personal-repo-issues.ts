@@ -20,12 +20,14 @@ import {
   getIssueStoreReader,
   replayPendingMutations,
 } from "../src/issue-store.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import type { ProjectState } from "../src/settings"
 import { readProjectState } from "../src/settings"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import {
   type ActionPlanItem,
-  blockStop,
+  blockStopObj,
   formatActionPlan,
   getCanonicalPathHash,
   getRepoSlug,
@@ -38,7 +40,7 @@ import {
   skillAdvice,
   skillExists,
 } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 export { missingRefinementCategories, needsRefinement }
 
@@ -388,7 +390,7 @@ const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
  * Returns true if the issue has had recent activity (comment or update) within the last 24 hours.
  * Checks the comment store first (most accurate), then falls back to updatedAt on the issue itself.
  */
-async function recentlyCommented(issue: Issue, repoSlug: string): Promise<boolean> {
+function recentlyCommented(issue: Issue, repoSlug: string): boolean {
   // Store-backed check: look for the most recent comment timestamp
   try {
     const store = getIssueStore()
@@ -405,17 +407,13 @@ async function recentlyCommented(issue: Issue, repoSlug: string): Promise<boolea
 }
 
 /** Issues with reviewable block labels (blocked, upstream, on-hold, waiting). */
-async function filterBlockedIssues(
-  issues: Issue[],
-  repoSlug: string,
-  filterUser?: string
-): Promise<Issue[]> {
+function filterBlockedIssues(issues: Issue[], repoSlug: string, filterUser?: string): Issue[] {
   const candidates = filterByUser(issues, filterUser).filter((i) =>
     (i.labels ?? []).some((l) => REVIEWABLE_BLOCK_NORM.has(normaliseLabel(l.name)))
   )
   const results: Issue[] = []
   for (const issue of candidates) {
-    if (!(await recentlyCommented(issue, repoSlug))) {
+    if (!recentlyCommented(issue, repoSlug)) {
       results.push(issue)
     }
   }
@@ -736,7 +734,7 @@ async function gatherStopContext(
   // Only surface blocked issues when there are no ready issues to work on
   const blockedIssues =
     sortedIssues.length === 0
-      ? sortIssuesByScoreAndNumber(await filterBlockedIssues(rawIssues, repoSlug ?? "", filterUser))
+      ? sortIssuesByScoreAndNumber(filterBlockedIssues(rawIssues, repoSlug ?? "", filterUser))
       : []
 
   return {
@@ -846,11 +844,11 @@ function extractAllOpenPRIssueNumbers(prs: PR[]): Set<number> {
   return issueNumbers
 }
 
-async function main(): Promise<void> {
+async function runPersonalRepoIssuesBody(input: StopHookInput): Promise<SwizHookOutput> {
   try {
-    const input = stopHookInputSchema.parse(await Bun.stdin.json())
-    const ctx = await resolveRepoContext(input)
-    if (!ctx) return
+    const parsed = stopHookInputSchema.parse(input)
+    const ctx = await resolveRepoContext(parsed)
+    if (!ctx) return {}
 
     const { getEffectiveSwizSettings, readSwizSettings } = await import("../src/settings.ts")
     const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
@@ -871,7 +869,7 @@ async function main(): Promise<void> {
 
     const projectState = await readProjectState(ctx.cwd)
     const stopCtx = buildStopContext(ctx, prs, gathered, projectState, strictNoDirectMain)
-    if (!stopCtx) return
+    if (!stopCtx) return {}
 
     const planSteps = buildStopPlanSteps(stopCtx)
     const headerParts = [
@@ -886,10 +884,6 @@ async function main(): Promise<void> {
     })
 
     if (ctx.sessionId) {
-      // Guard: only create tasks when the session is registered in this cwd's project.
-      // If the session transcript lives in a different project (e.g. the agent started
-      // in project A but cwd at stop time is project B), merging tasks here would
-      // surface project-B action items in project A's task view.
       const { getSessionIdsForProject } = await import("../src/tasks/task-resolver.ts")
       const { projectKeyFromCwd } = await import("../src/project-key.ts")
       const projectKey = projectKeyFromCwd(ctx.cwd)
@@ -901,12 +895,32 @@ async function main(): Promise<void> {
 
     if (shouldUpdateStopCooldown(stopCtx)) await updateCooldown(ctx.sessionId, ctx.cwd)
 
-    blockStop(reason, { includeUpdateMemoryAdvice: false })
+    return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
   } catch {
-    // On error, allow stop (fail open)
+    return {}
   }
 }
 
+export async function evaluateStopPersonalRepoIssues(
+  input: StopHookInput
+): Promise<SwizHookOutput> {
+  return await runPersonalRepoIssuesBody(input)
+}
+
+const stopPersonalRepoIssues: SwizStopHook = {
+  name: "stop-personal-repo-issues",
+  event: "stop",
+  timeout: 10,
+  cooldownSeconds: 30,
+  requiredSettings: ["personalRepoIssuesGate"],
+
+  run(input) {
+    return evaluateStopPersonalRepoIssues(input)
+  },
+}
+
+export default stopPersonalRepoIssues
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(stopPersonalRepoIssues)
 }

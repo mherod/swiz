@@ -31,8 +31,8 @@ async function runHook(
     stderr: "pipe",
     env: { ...process.env, ...extraEnv },
   })
-  void proc.stdin.write(JSON.stringify(stdinPayload))
-  void proc.stdin.end()
+  await proc.stdin.write(JSON.stringify(stdinPayload))
+  await proc.stdin.end()
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

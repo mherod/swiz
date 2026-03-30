@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -11,8 +11,22 @@ interface HookResult {
   exitedCleanly: boolean
 }
 
-// Isolated temp HOME so tests don't pick up real user settings
-const _testHome = mkdtempSync(join(tmpdir(), "swiz-test-home-"))
+// Lazy-initialize temp HOME so tests don't pick up real user settings
+let _testHome: string | null = null
+
+async function getTestHome(): Promise<string> {
+  if (_testHome === null) {
+    _testHome = (await Bun.file(join(tmpdir(), `swiz-test-home-${Date.now()}`))
+      .json()
+      .catch(() => null)) as string | null
+    if (!_testHome) {
+      const tempDir = join(tmpdir(), `swiz-test-home-${Date.now()}`)
+      await mkdir(tempDir, { recursive: true })
+      _testHome = tempDir
+    }
+  }
+  return _testHome
+}
 
 async function runHook(
   command: string,
@@ -21,13 +35,14 @@ async function runHook(
   envOverrides: Record<string, string | undefined> = {},
   cwd = "/tmp"
 ): Promise<HookResult> {
+  const testHome = await getTestHome()
   const payload = JSON.stringify({
     tool_name: toolName,
     tool_input: { command },
     cwd,
     session_id: sessionId,
   })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: _testHome }
+  const env: Record<string, string | undefined> = { ...process.env, HOME: testHome }
   delete env.CLAUDECODE
   delete env.CURSOR_TRACE_ID
   delete env.GEMINI_CLI
@@ -41,8 +56,8 @@ async function runHook(
     stderr: "pipe",
     env: { ...env, ...envOverrides },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
 
   const rawOutput = await new Response(proc.stdout).text()
   await proc.exited
@@ -62,10 +77,10 @@ async function runHook(
   }
 }
 
-function createTempHomeWithSettings(settings: Record<string, unknown>): string {
-  const home = mkdtempSync(join(tmpdir(), "swiz-posttooluse-git-task-"))
-  mkdirSync(join(home, ".swiz"), { recursive: true })
-  writeFileSync(join(home, ".swiz", "settings.json"), `${JSON.stringify(settings)}\n`)
+async function createTempHomeWithSettings(settings: Record<string, unknown>): Promise<string> {
+  const home = join(tmpdir(), `swiz-posttooluse-git-task-${Date.now()}`)
+  await mkdir(join(home, ".swiz"), { recursive: true })
+  await Bun.write(join(home, ".swiz", "settings.json"), `${JSON.stringify(settings)}\n`)
   return home
 }
 
@@ -96,7 +111,7 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
   })
 
   test("git push emits PR creation context when pr-merge-mode is disabled", async () => {
-    const home = createTempHomeWithSettings({ prMergeMode: false })
+    const home = await createTempHomeWithSettings({ prMergeMode: false })
 
     try {
       const result = await runHook("git push origin main", "Bash", "test-session-id", {
@@ -107,12 +122,12 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.additionalContext).toContain("Open PR for this branch")
       expect(result.additionalContext).not.toContain("Wait for CI")
     } finally {
-      rmSync(home, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
     }
   })
 
   test("git push with ignore-ci omits CI and PR workflow guidance", async () => {
-    const home = createTempHomeWithSettings({ ignoreCi: true })
+    const home = await createTempHomeWithSettings({ ignoreCi: true })
     try {
       const result = await runHook("git push origin main", "Bash", "test-session-id", {
         HOME: home,
@@ -120,14 +135,14 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.exitedCleanly).toBe(true)
       expect(result.additionalContext).toBe("git push succeeded.")
     } finally {
-      rmSync(home, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
     }
   })
 
   test("git push with project trunk mode omits open-PR guidance", async () => {
-    const repo = mkdtempSync(join(tmpdir(), "swiz-trunk-push-ctx-"))
-    mkdirSync(join(repo, ".swiz"), { recursive: true })
-    writeFileSync(join(repo, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
+    const repo = join(tmpdir(), `swiz-trunk-push-ctx-${Date.now()}`)
+    await mkdir(join(repo, ".swiz"), { recursive: true })
+    await Bun.write(join(repo, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
     try {
       const result = await runHook("git push origin main", "Bash", "test-session-id", {}, repo)
       expect(result.exitedCleanly).toBe(true)
@@ -135,7 +150,7 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.additionalContext).toMatch(/trunk mode/i)
       expect(result.additionalContext).not.toContain("Open PR for this branch")
     } finally {
-      rmSync(repo, { recursive: true, force: true })
+      await rm(repo, { recursive: true, force: true })
     }
   })
 

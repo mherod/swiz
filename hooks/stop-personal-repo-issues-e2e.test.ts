@@ -21,7 +21,7 @@ const HOOK_PATH = resolve(process.cwd(), "hooks/stop-personal-repo-issues.ts")
 const tmp = useTempDir()
 
 async function createTempDir(suffix = ""): Promise<string> {
-  return tmp.create(`swiz-issues-e2e${suffix}-`)
+  return await tmp.create(`swiz-issues-e2e${suffix}-`)
 }
 
 /**
@@ -242,8 +242,8 @@ describe("E2E stop-personal-repo-issues: early-exit guards", () => {
       stderr: "pipe",
       env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
     })
-    void proc.stdin.write(JSON.stringify({ cwd: dir, session_id: "test" }))
-    void proc.stdin.end()
+    await proc.stdin.write(JSON.stringify({ cwd: dir, session_id: "test" }))
+    await proc.stdin.end()
     const raw = await new Response(proc.stdout).text()
     await proc.exited
     expect(raw.trim()).toBe("")

@@ -55,8 +55,8 @@ async function runHook(
     stderr: "pipe",
     env,
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const raw = (await new Response(proc.stdout).text()).trim()
   const stderr = (await new Response(proc.stderr).text()).trim()
   const exitCode = await proc.exited

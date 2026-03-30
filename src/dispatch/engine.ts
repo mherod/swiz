@@ -8,6 +8,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
+import { hookBaseSchema } from "../../hooks/schemas.ts"
 import { debugLog } from "../debug.ts"
 import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
@@ -46,6 +47,34 @@ export { classifyHookOutput, DEFAULT_TIMEOUT }
  *  Configurable via SWIZ_SLOW_HOOK_THRESHOLD_MS env var. Default: 3 seconds. */
 const SLOW_HOOK_THRESHOLD_MS = Number(process.env.SWIZ_SLOW_HOOK_THRESHOLD_MS) || 3_000
 
+// ─── Hook property accessors ───────────────────────────────────────────────
+// Consolidate the pattern of extracting properties that differ between inline
+// and subprocess hooks: isInlineHookDef(hook) ? hook.hook.property : hook.property
+
+function getHookTimeout(hook: HookDef): number | undefined {
+  return isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+}
+
+function getHookCondition(hook: HookDef): string | undefined {
+  return isInlineHookDef(hook) ? hook.hook.condition : hook.condition
+}
+
+function getHookCooldownSeconds(hook: HookDef): number | undefined {
+  return isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+}
+
+function getHookCooldownMode(hook: HookDef): "block-only" | "always" | undefined {
+  return isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
+}
+
+function isHookAsync(hook: HookDef): boolean {
+  return isInlineHookDef(hook) ? !!hook.hook.async : !!hook.async
+}
+
+function getHookAsyncMode(hook: HookDef): "block-until-complete" | "fire-and-forget" | undefined {
+  return isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
+}
+
 // ─── Hook execution types ────────────────────────────────────────────────────
 
 export type HookStatus =
@@ -57,6 +86,7 @@ export type HookStatus =
   | "slow"
   | "timeout"
   | "invalid-json"
+  | "invalid-schema"
   | "error"
   | "skipped"
   | "aborted"
@@ -178,8 +208,7 @@ export function toolMatchesToken(toolName: string, token: string): boolean {
   if (token === "Task" && isTaskTool(toolName)) return true
   if (toolName === "Task" && isTaskTool(token)) return true
   // Unknown tools only match exact
-  if (toolName === token) return true
-  return false
+  return toolName === token
 }
 
 export function groupMatches(
@@ -318,8 +347,8 @@ export async function runHook(
     env: buildHookEnv(payloadStr),
   })
 
-  void proc.stdin.write(payloadStr)
-  void proc.stdin.end()
+  await proc.stdin.write(payloadStr)
+  await proc.stdin.end()
 
   let aborted = false
 
@@ -383,14 +412,14 @@ function createSkippedExecution(
   skipReason: SkipReason
 ): HookExecution {
   const now = Date.now()
-  const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+  const timeoutSec = getHookTimeout(hook) ?? DEFAULT_TIMEOUT
   return {
     file: hookIdentifier(hook),
     ...(matcher && { matcher }),
     startTime: now,
     endTime: now,
     durationMs: 0,
-    configuredTimeoutSec: timeout ?? DEFAULT_TIMEOUT,
+    configuredTimeoutSec: timeoutSec,
     status: "skipped",
     skipReason,
     exitCode: null,
@@ -406,13 +435,13 @@ async function tryRecordSkippedHook(
   executions: HookExecution[]
 ): Promise<boolean> {
   const id = hookIdentifier(hook)
-  const condition = isInlineHookDef(hook) ? hook.hook.condition : hook.condition
-  const cooldownSeconds = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
+  const condition = getHookCondition(hook)
   if (!(await evalCondition(condition))) {
     log(`   ⏭ ${id} [condition false, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "condition-false"))
     return true
   }
+  const cooldownSeconds = getHookCooldownSeconds(hook)
   if (cooldownSeconds && (await isWithinCooldown(id, cooldownSeconds, cwd))) {
     log(`   ⏭ ${id} [cooldown active, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "cooldown-active"))
@@ -441,14 +470,15 @@ function finalizeExecution(
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
     execution.status = "slow"
   }
-  const cooldownSeconds = isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds
-  const cooldownMode = isInlineHookDef(hook) ? hook.hook.cooldownMode : hook.cooldownMode
-  if (cooldownSeconds) {
-    const alwaysMode = cooldownMode === "always"
-    const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
-    if (alwaysMode || blockResult) {
-      void markHookCooldown(hookIdentifier(hook), cwd)
-    }
+
+  const cooldownSeconds = getHookCooldownSeconds(hook)
+  if (!cooldownSeconds) return execution
+
+  const cooldownMode = getHookCooldownMode(hook)
+  const alwaysMode = cooldownMode === "always"
+  const blockResult = parsed !== null && (isDeny(parsed) || isBlock(parsed))
+  if (alwaysMode || blockResult) {
+    void markHookCooldown(hookIdentifier(hook), cwd)
   }
   return execution
 }
@@ -460,13 +490,21 @@ export function writeResponse(response: Record<string, unknown>): void {
 
 // ─── Response classification ────────────────────────────────────────────────
 
+/** Safely extract hookSpecificOutput from a response. */
+function getHookSpecificOutput(resp: Record<string, unknown>): Record<string, unknown> | undefined {
+  const hso = resp.hookSpecificOutput
+  return hso && typeof hso === "object" && !Array.isArray(hso)
+    ? (hso as Record<string, unknown>)
+    : undefined
+}
+
 /**
  * PreToolUse denial: checks `permissionDecision` in hookSpecificOutput
  * (the PreToolUse-specific pattern) and falls back to top-level `decision`
  * for hooks that use the generic deny/block format.
  */
 export function isDeny(resp: Record<string, unknown>): boolean {
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   if (hso?.permissionDecision === "deny") return true
   if (resp.decision === "deny" || resp.decision === "block") return true
   if (resp.continue === false) return true
@@ -474,12 +512,12 @@ export function isDeny(resp: Record<string, unknown>): boolean {
 }
 
 export function isAllowWithReason(resp: Record<string, unknown>): boolean {
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   return hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string"
 }
 
 export function extractAllowReason(resp: Record<string, unknown>): string | null {
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   if (hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string") {
     return hso.permissionDecisionReason as string
   }
@@ -494,12 +532,12 @@ export function extractAllowReason(resp: Record<string, unknown>): string | null
 export function isBlock(resp: Record<string, unknown>): boolean {
   if (resp.decision === "block" || resp.decision === "deny") return true
   if (resp.continue === false) return true
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   return hso?.decision === "block" || hso?.decision === "deny" || false
 }
 
 export function extractContext(resp: Record<string, unknown>): string | null {
-  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = getHookSpecificOutput(resp)
   const ctx = hso?.additionalContext ?? resp.systemMessage
   return typeof ctx === "string" ? ctx : null
 }
@@ -517,18 +555,14 @@ export interface HookEntry {
 
 /** True when the hook runs in the sync pipeline (non-async or `async` + block-until-complete). */
 export function runsInSyncPipeline(hook: HookDef): boolean {
-  const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
-  if (!isAsync) return true
-  const mode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
-  return mode === "block-until-complete"
+  if (!isHookAsync(hook)) return true
+  return getHookAsyncMode(hook) === "block-until-complete"
 }
 
 /** True when the hook is async and should use `launchAsyncHooks` (fire-and-forget path). */
 export function isAsyncFireAndForgetHook(hook: HookDef): boolean {
-  const isAsync = isInlineHookDef(hook) ? hook.hook.async : hook.async
-  if (!isAsync) return false
-  const mode = isInlineHookDef(hook) ? hook.hook.asyncMode : hook.asyncMode
-  return mode !== "block-until-complete"
+  if (!isHookAsync(hook)) return false
+  return getHookAsyncMode(hook) !== "block-until-complete"
 }
 
 /** Collect all sync hooks from all groups into a flat ordered list. Exported for unit tests. */
@@ -559,27 +593,9 @@ async function runInlineHook(
 
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(hook.timeout)
-  let parsed: Record<string, unknown> | null = null
-  let status: HookStatus = "no-output"
-
-  try {
-    const input = JSON.parse(payloadStr) as Parameters<typeof hook.run>[0]
-    const output = await withInlineSwizHookRun(async () => hook.run(input))
-    if (output && Object.keys(output).length > 0) {
-      parsed = output as Record<string, unknown>
-      status = "ok"
-    }
-  } catch (err) {
-    if (err instanceof SwizHookExit) {
-      parsed = err.output as Record<string, unknown>
-      status = "ok"
-    } else {
-      log(`   ⚠ ${hook.name} [inline error: ${err}]`)
-      status = "error"
-    }
-  }
-
+  const { parsed, status } = await executeInlineHookWithErrorHandling(hook, payloadStr)
   const endTime = Date.now()
+
   return {
     parsed,
     execution: {
@@ -593,6 +609,51 @@ async function runInlineHook(
       stdoutSnippet: parsed ? JSON.stringify(parsed).slice(0, 500) : "",
       stderrSnippet: "",
     },
+  }
+}
+
+/** Helper to isolate error handling and parsing logic from runInlineHook. */
+async function executeInlineHookWithErrorHandling(
+  hook: SwizHook,
+  payloadStr: string
+): Promise<{ parsed: Record<string, unknown> | null; status: HookStatus }> {
+  try {
+    const input = JSON.parse(payloadStr)
+    const validation = hookBaseSchema.safeParse(input)
+    if (!validation.success) {
+      throw new Error(`Invalid hook input: ${validation.error}`)
+    }
+    const output = await withInlineSwizHookRun(async () => hook.run(input))
+    if (output && Object.keys(output).length > 0) {
+      return { parsed: output as Record<string, unknown>, status: "ok" }
+    }
+    return { parsed: null, status: "no-output" }
+  } catch (err) {
+    if (err instanceof SwizHookExit) {
+      return { parsed: err.output as Record<string, unknown>, status: "ok" }
+    }
+    log(`   ⚠ ${hook.name} [inline error: ${err}]`)
+    return { parsed: null, status: "error" }
+  }
+}
+
+/** Helper to create an aborted HookExecution with the right timeout value. */
+function createAbortedExecution(
+  id: string,
+  hook: HookDef,
+  now: number = Date.now()
+): HookExecution {
+  const timeoutSec = getHookTimeout(hook) ?? DEFAULT_TIMEOUT
+  return {
+    file: id,
+    startTime: now,
+    endTime: now,
+    durationMs: 0,
+    configuredTimeoutSec: timeoutSec,
+    status: "aborted",
+    exitCode: null,
+    stdoutSnippet: "",
+    stderrSnippet: "",
   }
 }
 
@@ -613,35 +674,25 @@ export async function runEntry(
 }> {
   const { hook, matcher } = entry
   const id = hookIdentifier(hook)
-  const timeout = isInlineHookDef(hook) ? hook.hook.timeout : hook.timeout
+
   // Check abort before skip-condition evaluation to avoid unnecessary work.
   if (signal?.aborted) {
-    const now = Date.now()
-    return {
-      execution: {
-        file: id,
-        startTime: now,
-        endTime: now,
-        durationMs: 0,
-        configuredTimeoutSec: timeout ?? DEFAULT_TIMEOUT,
-        status: "aborted",
-        exitCode: null,
-        stdoutSnippet: "",
-        stderrSnippet: "",
-      },
-      parsed: null,
-    }
+    return { execution: createAbortedExecution(id, hook), parsed: null }
   }
+
   const skipExecs: HookExecution[] = []
   if (await tryRecordSkippedHook(hook, matcher, cwd, skipExecs)) {
     return { execution: skipExecs[0]!, parsed: null }
   }
+
   log(`   → ${formatHookTarget(id, matcher)}`)
+
   if (isInlineHookDef(hook)) {
     const { parsed, execution } = await runInlineHook(hook.hook, payloadStr, signal)
     finalizeExecution(execution, matcher, hook, cwd, parsed)
     return { execution, parsed }
   }
+
   const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal)
   finalizeExecution(execution, matcher, hook, cwd, parsed)
   return { execution, parsed }

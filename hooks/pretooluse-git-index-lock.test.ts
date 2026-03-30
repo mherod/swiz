@@ -51,8 +51,8 @@ async function runHook(
     stdout: "pipe",
     stderr: "pipe",
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const [out] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -175,8 +175,8 @@ describe("pretooluse-git-index-lock", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      void proc.stdin.write(payload)
-      void proc.stdin.end()
+      await proc.stdin.write(payload)
+      await proc.stdin.end()
       const [out] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),

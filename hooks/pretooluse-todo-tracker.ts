@@ -73,7 +73,7 @@ const pretooluseTodoTracker: SwizFileEditHook = {
   matcher: "Edit|Write|NotebookEdit",
   timeout: 5,
 
-  async run(input) {
+  run(input) {
     const normalized = fileEditHookInputSchema.parse(input)
     const delta = resolveEditDelta(normalized, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
     if (!delta) return preToolUseAllow("")

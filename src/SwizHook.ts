@@ -22,17 +22,28 @@
  * run() inputs without manually specifying the generic parameter.
  */
 
-import type {
-  FileEditHookInput,
-  HookOutput,
-  SessionHookInput,
-  ShellHookInput,
-  StopHookInput,
-  ToolHookInput,
+import {
+  type FileEditHookInput,
+  type HookOutput,
+  hookOutputSchema,
+  type SessionHookInput,
+  type ShellHookInput,
+  type StopHookInput,
+  type ToolHookInput,
 } from "../hooks/schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
+
+/** Options for `runSwizHookAsMain`. */
+export interface RunSwizHookAsMainOptions {
+  /**
+   * Called when stdin JSON parsing fails. Return a fallback output object
+   * to emit instead of crashing (e.g. a block-stop response).
+   * When omitted, the process exits with code 1.
+   */
+  onStdinJsonError?: (err: unknown) => SwizHookOutput
+}
 
 /**
  * Run a SwizHook as a standalone main script (file-based dispatch / manual testing).
@@ -46,13 +57,24 @@ import type { EffectiveSwizSettings } from "./settings"
  * if (import.meta.main) await runSwizHookAsMain(myHook)
  * ```
  */
-export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>): Promise<void> {
+export async function runSwizHookAsMain(
+  hook: SwizHook<Record<string, unknown>>,
+  options?: RunSwizHookAsMainOptions
+): Promise<void> {
   let input: Record<string, unknown>
   try {
     const parsed = (await Bun.stdin.json()) as unknown
     if (!parsed || typeof parsed !== "object") process.exit(0)
     input = parsed as Record<string, unknown>
   } catch (err) {
+    if (options?.onStdinJsonError) {
+      const fallback = options.onStdinJsonError(err)
+      if (fallback && Object.keys(fallback).length > 0) {
+        const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+        exitWithHookObject(fallback)
+      }
+      process.exit(0)
+    }
     process.stderr.write(`Hook error: ${err instanceof Error ? err.message : String(err)}\n`)
     process.exit(1)
   }
@@ -92,6 +114,21 @@ export async function runSwizHookAsMain(hook: SwizHook<Record<string, unknown>>)
 
 // biome-ignore lint/complexity/noBannedTypes: Allow empty object
 export type SwizHookOutput = HookOutput | {}
+
+/**
+ * Build additionalContext / systemMessage payload for SessionStart, UserPromptSubmit,
+ * PostToolUse, etc. Safe for manifest-linked inline hooks (no hook-utils import).
+ */
+export function buildContextHookOutput(eventName: string, context: string): SwizHookOutput {
+  return hookOutputSchema.parse({
+    systemMessage: context,
+    suppressOutput: true,
+    hookSpecificOutput: {
+      hookEventName: eventName,
+      additionalContext: context,
+    },
+  })
+}
 
 // ─── PreToolUse output builders ─────────────────────────────────────────────
 // Inline equivalents of the process.exit-based helpers in hook-utils.ts.
@@ -192,6 +229,11 @@ export interface SwizHookMeta {
    * Evaluated by the dispatcher before calling run() — zero-cost fast path.
    */
   requiredSettings?: (keyof EffectiveSwizSettings)[]
+  /**
+   * When true, this hook is a non-agent/scheduled event (e.g. preCommit, prPoll).
+   * Skips agent eventMap validation and `swiz install`.
+   */
+  scheduled?: boolean
 }
 
 // ─── Core interface ───────────────────────────────────────────────────────────

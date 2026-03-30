@@ -185,8 +185,9 @@ export const stopHookInputSchema = hookBaseSchema.extend({
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
 
 /**
- * SessionStart / UserPromptSubmit / PreCompact hook input envelope.
- * Mirrors the `SessionHookInput` interface in hook-utils.ts with runtime validation.
+ * PreCompact hook input envelope (and legacy session-shaped events).
+ * For SessionStart, prefer {@link sessionStartHookInputSchema}.
+ * For UserPromptSubmit, prefer {@link userPromptSubmitHookInputSchema}.
  */
 export const sessionHookInputSchema = hookBaseSchema.extend({
   trigger: z.string().optional(),
@@ -207,6 +208,13 @@ export const preCommitHookInputSchema = z.looseObject({
 })
 
 export type PreCommitHookInput = z.infer<typeof preCommitHookInputSchema>
+
+/**
+ * PrPoll scheduled hook input. Dispatcher sends hook base fields (typically `cwd`).
+ */
+export const prPollHookInputSchema = hookBaseSchema
+
+export type PrPollHookInput = z.infer<typeof prPollHookInputSchema>
 
 // ─── Updated existing schemas with missing fields ───────────────────────────
 
@@ -803,6 +811,9 @@ export type CodexHookOutput = z.infer<typeof codexHookOutputSchema>
 /**
  * Shape of any output emitted by hooks in this repository.
  * Used by contract tests to validate output envelopes via safeParse.
+ *
+ * When a hook allows execution (`continue: true` or absence of block), it should
+ * include context about what was verified. Silent allows lose observability.
  */
 export const hookOutputSchema = z
   .looseObject({
@@ -814,8 +825,8 @@ export const hookOutputSchema = z
       .looseObject({
         hookEventName: z.string().optional(),
         additionalContext: z.string().optional(),
-        permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
-        permissionDecisionReason: z.string().optional(),
+        permissionDecision: z.enum(["allow", "deny", "ask"]),
+        permissionDecisionReason: z.string(),
         /** PreToolUse: rewritten tool input fields. */
         modifiedInput: z.record(z.string(), z.unknown()).optional(),
         updatedInput: z.record(z.string(), z.unknown()).optional(),
@@ -834,13 +845,46 @@ export const hookOutputSchema = z
     suppressOutput: z.boolean().optional(),
   })
   .refine(
-    (o) =>
-      "decision" in o ||
-      "hookSpecificOutput" in o ||
-      "ok" in o ||
-      "continue" in o ||
-      "systemMessage" in o,
+    (o) => {
+      // Empty output {} is valid — no opinion, proceed with defaults
+      const hasAnyControlField =
+        "decision" in o ||
+        "hookSpecificOutput" in o ||
+        "ok" in o ||
+        "continue" in o ||
+        "systemMessage" in o
+
+      if (hasAnyControlField) return true // Has control field, may need further validation below
+
+      // No control fields = empty output, which is valid
+      return true
+    },
     { message: "Hook output must contain at least one known control field" }
+  )
+  .refine(
+    (o) => {
+      // Silent allows (continue: true without any context) are invalid
+      // Only reject when continue is EXPLICITLY true AND there's no explanation
+      if (o.continue === true) {
+        const hasSystemMsg = typeof o.systemMessage === "string" && o.systemMessage.trim()
+        const hasReason = typeof o.reason === "string" && o.reason.trim()
+        const hasStopReason = typeof o.stopReason === "string" && o.stopReason.trim()
+        const hso = o.hookSpecificOutput as Record<string, unknown> | undefined
+        const hasHsoContext =
+          hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim()
+
+        // continue: true requires at least one context field
+        if (!hasSystemMsg && !hasReason && !hasStopReason && !hasHsoContext) {
+          return false
+        }
+      }
+
+      return true
+    },
+    {
+      message:
+        "Hook output with continue: true must include context (systemMessage, reason, stopReason, or hookSpecificOutput.additionalContext). Omitting continue: true (empty output {}) is valid.",
+    }
   )
 
 export type HookOutput = z.infer<typeof hookOutputSchema>

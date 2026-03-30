@@ -2,9 +2,11 @@
 
 // PreCommit hook: Validate staged files for merge conflict markers and focused tests.
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
-// Uses the blocking strategy — returns { decision: "block", reason } to fail the commit.
+// Uses the blocking strategy — returns blockStopObj to fail the commit.
 
-import { blockStop, git, isGitRepo } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { blockStopObj, git, isGitRepo } from "../src/utils/hook-utils.ts"
 import { preCommitHookInputSchema } from "./schemas.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
@@ -84,32 +86,39 @@ function formatReason(findings: Finding[]): string {
   return parts.join("\n")
 }
 
-async function main(): Promise<void> {
-  const raw = await new Response(Bun.stdin.stream()).text()
-  const parsed = preCommitHookInputSchema.safeParse(JSON.parse(raw || "{}"))
-  const cwd = parsed.success ? (parsed.data.cwd ?? process.cwd()) : process.cwd()
+export async function evaluatePrecommitStagedValidation(input: unknown): Promise<SwizHookOutput> {
+  try {
+    const parsed = preCommitHookInputSchema.parse(input)
+    const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) {
-    process.exit(0)
+    if (!(await isGitRepo(cwd))) return {}
+
+    const stagedFiles = await getStagedFiles(cwd)
+    if (stagedFiles.length === 0) return {}
+
+    const diff = await getStagedDiff(cwd)
+    const findings = scanDiff(diff)
+
+    if (findings.length === 0) return {}
+
+    return blockStopObj(formatReason(findings))
+  } catch {
+    return {}
   }
-
-  const stagedFiles = await getStagedFiles(cwd)
-  if (stagedFiles.length === 0) {
-    process.exit(0)
-  }
-
-  const diff = await getStagedDiff(cwd)
-  const findings = scanDiff(diff)
-
-  if (findings.length === 0) {
-    process.exit(0)
-  }
-
-  const reason = formatReason(findings)
-  blockStop(reason)
 }
 
-main().catch(() => {
-  // Fail open — don't block commits on hook errors
-  process.exit(0)
-})
+const precommitStagedValidation: SwizHook<Record<string, unknown>> = {
+  name: "precommit-staged-validation",
+  event: "preCommit",
+  scheduled: true,
+  timeout: 10,
+  run(input) {
+    return evaluatePrecommitStagedValidation(input)
+  },
+}
+
+export default precommitStagedValidation
+
+if (import.meta.main) {
+  await runSwizHookAsMain(precommitStagedValidation)
+}

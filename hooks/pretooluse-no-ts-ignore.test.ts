@@ -14,7 +14,7 @@ async function runHook(opts: {
   content?: string
   toolName?: string
 }) {
-  return runFileEditHook(HOOK, opts)
+  return await runFileEditHook(HOOK, opts)
 }
 
 // ─── @ts-expect-error blocking ──────────────────────────────────────────────────────

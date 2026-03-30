@@ -1,10 +1,20 @@
 #!/usr/bin/env bun
 // Stop hook: Surfaces open Dependabot PRs and blocks stop when any are older than 7 days.
 // Reuses isAutomationLogin() from collaboration-policy.ts for Dependabot detection.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
-import { blockStop, ghJson, hasGhCli, isGitHubRemote, isGitRepo } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import {
+  blockStopObj,
+  ghJson,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+} from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const STALE_DAYS = 7
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000
@@ -24,13 +34,13 @@ function ageDays(createdAt: string, now: number): number {
   return Math.floor((now - created) / (24 * 60 * 60 * 1000))
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopDependabotPrs(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return
-  if (!(await isGitHubRemote(cwd))) return
-  if (!hasGhCli()) return
+  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitHubRemote(cwd))) return {}
+  if (!hasGhCli()) return {}
 
   const prs = await ghJson<DependabotPr[]>(
     [
@@ -45,14 +55,14 @@ async function main(): Promise<void> {
     ],
     cwd
   )
-  if (!prs || prs.length === 0) return
+  if (!prs || prs.length === 0) return {}
 
   const now = Date.now()
   const dependabotPrs = prs.filter((pr) => pr.author?.login && isAutomationLogin(pr.author.login))
-  if (dependabotPrs.length === 0) return
+  if (dependabotPrs.length === 0) return {}
 
   const stalePrs = dependabotPrs.filter((pr) => now - Date.parse(pr.createdAt) > STALE_MS)
-  if (stalePrs.length === 0) return
+  if (stalePrs.length === 0) return {}
 
   const lines = [
     `${stalePrs.length} open Dependabot PR(s) older than ${STALE_DAYS} days need attention:`,
@@ -69,7 +79,22 @@ async function main(): Promise<void> {
   lines.push("  • Close if superseded:  gh pr close <number>")
   lines.push("  • Checkout to inspect:  gh pr checkout <number>")
 
-  blockStop(lines.join("\n"), { includeUpdateMemoryAdvice: false })
+  return blockStopObj(lines.join("\n"), { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopDependabotPrs: SwizStopHook = {
+  name: "stop-dependabot-prs",
+  event: "stop",
+  timeout: 10,
+  cooldownSeconds: 3600,
+
+  run(input) {
+    return evaluateStopDependabotPrs(input)
+  },
+}
+
+export default stopDependabotPrs
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopDependabotPrs)
+}

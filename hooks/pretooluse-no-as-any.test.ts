@@ -183,8 +183,8 @@ describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () 
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.write(JSON.stringify(payload))
-    void proc.stdin.end()
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     return { stdout, exitCode: proc.exitCode ?? -1 }
@@ -602,8 +602,8 @@ describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.write(JSON.stringify(payload))
-    void proc.stdin.end()
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     return { stdout, exitCode: proc.exitCode ?? -1 }

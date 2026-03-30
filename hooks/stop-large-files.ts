@@ -1,7 +1,12 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if large files exceeding the configured threshold were committed without LFS.
 // Threshold is configurable via `swiz settings set large-file-size-kb <N>`.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
   getEffectiveSwizSettings,
@@ -9,8 +14,8 @@ import {
   readSwizSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import { blockStop, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 async function checkFileSize(
   filePath: string,
@@ -36,10 +41,8 @@ async function checkFileSize(
   return `${sizeKb}KB — ${filePath}`
 }
 
-/** Check if a file path matches any of the allow patterns (simple glob: * matches within segment, ** matches across segments). */
 function isAllowed(filePath: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
-    // Convert simple glob to regex: ** → .*, * → [^/]*, ? → [^/]
     const re = new RegExp(
       `^${pattern
         .replace(/[.+^${}()|[\]\\]/g, "\\$&")
@@ -83,13 +86,12 @@ function formatLargeFilesReason(largeFiles: string[], sizeLimitKb: number): stri
   return reason
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopLargeFiles(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
-  // Skip large-file enforcement in collaborative repos unless LFS is already configured
   const [globalSettings, projectSettings] = await Promise.all([
     readSwizSettings(),
     readProjectSettings(cwd),
@@ -97,7 +99,7 @@ async function main(): Promise<void> {
   const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
   if (effective.collaborationMode === "team") {
     const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
-    if (!gitattributes?.includes("filter=lfs")) return
+    if (!gitattributes?.includes("filter=lfs")) return {}
   }
 
   const sizeLimitKb = await resolveNumericSetting(
@@ -107,9 +109,25 @@ async function main(): Promise<void> {
   )
   const allowPatterns = projectSettings?.largeFileAllowPatterns ?? []
   const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns)
-  if (largeFiles.length === 0) return
+  if (largeFiles.length === 0) return {}
 
-  blockStop(formatLargeFilesReason(largeFiles, sizeLimitKb), { includeUpdateMemoryAdvice: false })
+  return blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb), {
+    includeUpdateMemoryAdvice: false,
+  })
 }
 
-if (import.meta.main) void main()
+const stopLargeFiles: SwizStopHook = {
+  name: "stop-large-files",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopLargeFiles(input)
+  },
+}
+
+export default stopLargeFiles
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopLargeFiles)
+}

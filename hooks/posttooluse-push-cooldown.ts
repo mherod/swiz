@@ -14,6 +14,8 @@
 // until the background task completes; the cooldown is handled by the
 // pretooluse hook reading the stale sentinel.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
   GIT_PUSH_RE,
@@ -24,35 +26,49 @@ import {
 } from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as PostToolHookInput
-if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
+export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = input as PostToolHookInput
+  if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return {}
 
-const command = String(input.tool_input?.command ?? "")
-if (!GIT_PUSH_RE.test(command)) process.exit(0)
+  const command = String(hookInput.tool_input?.command ?? "")
+  if (!GIT_PUSH_RE.test(command)) return {}
 
-// Force-flag pushes bypass cooldown entirely — no sentinel needed.
-if (hasGitPushForceFlag(command)) process.exit(0)
+  if (hasGitPushForceFlag(command)) return {}
 
-// Background push detection — mirror the logic from posttooluse-verify-push.ts.
-// For background pushes, PostToolUse fires before the push process starts;
-// don't write the sentinel here (the cooldown period would start too early).
-const isBackground =
-  input.tool_input?.run_in_background === true ||
-  /\s+&\s*$|\s+&\s/.test(command) ||
-  (typeof input.tool_response === "string" &&
-    /running in background|background task/i.test(input.tool_response))
+  const isBackground =
+    hookInput.tool_input?.run_in_background === true ||
+    /\s+&\s*$|\s+&\s/.test(command) ||
+    (typeof hookInput.tool_response === "string" &&
+      /running in background|background task/i.test(hookInput.tool_response))
 
-if (isBackground) process.exit(0)
+  if (isBackground) return {}
 
-// Derive the same per-repo sentinel path as pretooluse-push-cooldown.ts.
-const cwd = input.cwd ?? process.cwd()
-const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-const repoKey = getCanonicalPathHash(repoRoot || cwd)
-const sentinelPath = swizPushCooldownSentinelPath(repoKey)
+  const cwd = hookInput.cwd ?? process.cwd()
+  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
+  const repoKey = getCanonicalPathHash(repoRoot || cwd)
+  const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
-// Write the timestamp — this arms the cooldown for subsequent push attempts.
-try {
-  await Bun.write(sentinelPath, String(Date.now()))
-} catch {
-  // Non-fatal: if we can't write the sentinel, cooldown simply won't apply.
+  try {
+    await Bun.write(sentinelPath, String(Date.now()))
+  } catch {
+    // Non-fatal: if we can't write the sentinel, cooldown simply won't apply.
+  }
+
+  return {}
+}
+
+const posttoolusePushCooldown: SwizHook<PostToolHookInput> = {
+  name: "posttooluse-push-cooldown",
+  event: "postToolUse",
+  matcher: "Bash",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttoolusePushCooldown(input)
+  },
+}
+
+export default posttoolusePushCooldown
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttoolusePushCooldown as SwizHook<Record<string, unknown>>)
 }

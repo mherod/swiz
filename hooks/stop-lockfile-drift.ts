@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if package.json was modified but lockfile was not
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { dirname, join } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { stopLockfileDriftBlockedFlagPath } from "../src/temp-paths.ts"
-import { blockStop, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {
   "pnpm-lock.yaml": "pnpm install",
@@ -83,38 +87,35 @@ async function findDriftedPackages(
   return drifted
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-  const sessionId = input.session_id
+export async function evaluateStopLockfileDrift(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
+  const sessionId = parsed.session_id
 
-  // Only block once per session
   if (sessionId) {
     const sentinel = stopLockfileDriftBlockedFlagPath(sessionId)
-    if (await Bun.file(sentinel).exists()) return
+    if (await Bun.file(sentinel).exists()) return {}
   }
 
-  if (!(await isGitRepo(cwd))) return
+  if (!(await isGitRepo(cwd))) return {}
 
   const range = await recentHeadRange(cwd, 10)
 
   const changedRaw = await git(["diff", "--name-only", range], cwd)
-  if (!changedRaw) return
+  if (!changedRaw) return {}
 
   const changedFiles = new Set(changedRaw.split("\n").filter((l) => l.trim()))
 
-  // Find changed package.json files (not in node_modules)
   const changedPkgs = [...changedFiles].filter(
     (f) => f.endsWith("package.json") && !isNodeModulesPath(f)
   )
 
-  if (changedPkgs.length === 0) return
+  if (changedPkgs.length === 0) return {}
 
   const drifted = await findDriftedPackages(cwd, changedFiles, changedPkgs, range)
 
-  if (drifted.length === 0) return
+  if (drifted.length === 0) return {}
 
-  // Mark as blocked for this session
   if (sessionId) {
     await Bun.write(stopLockfileDriftBlockedFlagPath(sessionId), "")
   }
@@ -124,8 +125,21 @@ async function main(): Promise<void> {
   for (const d of drifted) reason += `  ${d}\n`
   reason += "\nRun the install command to regenerate the lockfile, then commit it before stopping."
 
-  // Dependency/lockfile consistency is a quality gate, not memory-capture enforcement.
-  blockStop(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopLockfileDrift: SwizStopHook = {
+  name: "stop-lockfile-drift",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopLockfileDrift(input)
+  },
+}
+
+export default stopLockfileDrift
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopLockfileDrift)
+}

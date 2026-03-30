@@ -23,7 +23,7 @@ import {
 import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
 const STALL_THRESHOLD = 30
@@ -35,13 +35,17 @@ function isReadOrSearchTool(name: string): boolean {
 async function getToolNamesAndValidate(
   raw: unknown
 ): Promise<{ toolNames: string[]; toolName: string } | null> {
-  const parsed = toolHookInputSchema.safeParse(raw)
-  if (!parsed.success) return null
+  let parsed: ToolHookInput
+  try {
+    parsed = toolHookInputSchema.parse(raw)
+  } catch {
+    return null
+  }
 
-  const { tool_name: toolName } = parsed.data
+  const { tool_name: toolName } = parsed
   if (!toolName || !isReadOrSearchTool(toolName)) return null
 
-  const toolNames = await getToolsUsedForCurrentSession(raw as Record<string, unknown>)
+  const toolNames = await getToolsUsedForCurrentSession(parsed as Record<string, unknown>)
 
   if (toolNames.length === 0) return null
 

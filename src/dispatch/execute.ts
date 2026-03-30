@@ -26,7 +26,7 @@ import {
   computeTranscriptSummary,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
-import type { HookExecution } from "./engine.ts"
+import { type HookExecution, writeResponse } from "./engine.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -36,6 +36,7 @@ import {
   logHeader,
   withLogBuffer,
 } from "./index.ts"
+import { normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -438,12 +439,14 @@ async function executeStrategyWithTimeout(
     dispatchAbort.abort()
   }, budgetMs)
 
+  let sentinelTimer: ReturnType<typeof setTimeout> | undefined
+
   try {
     const result = await Promise.race([
       strategy.execute(params),
-      new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) =>
-        setTimeout(() => resolve(DISPATCH_TIMEOUT_SENTINEL), budgetMs)
-      ),
+      new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) => {
+        sentinelTimer = setTimeout(() => resolve(DISPATCH_TIMEOUT_SENTINEL), budgetMs)
+      }),
     ])
 
     if (result === DISPATCH_TIMEOUT_SENTINEL) {
@@ -456,6 +459,7 @@ async function executeStrategyWithTimeout(
     return result
   } finally {
     clearTimeout(budgetTimer)
+    if (sentinelTimer) clearTimeout(sentinelTimer)
   }
 }
 
@@ -545,11 +549,23 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    return { response: {} }
+    const response: Record<string, unknown> = {}
+    if (ctx.canonicalEvent === "stop") {
+      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+      if (!req.daemonContext) writeResponse(response)
+    }
+    return { response }
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
-  if (filteredGroups.length === 0) return { response: {} }
+  if (filteredGroups.length === 0) {
+    const response: Record<string, unknown> = {}
+    if (ctx.canonicalEvent === "stop") {
+      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+      if (!req.daemonContext) writeResponse(response)
+    }
+    return { response }
+  }
 
   await injectEffectiveSettings(ctx, projectSettings ?? null)
 
@@ -607,6 +623,10 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
       const dispatchDurationMs = Math.round(performance.now() - dispatchStart)
       const logEntries = buildDispatchLogEntries(executions, ctx, dispatchDurationMs)
       void appendHookLogs(logEntries)
+    }
+
+    if (ctx.canonicalEvent === "stop") {
+      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
     }
 
     log(

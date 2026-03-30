@@ -19,11 +19,12 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { orderBy } from "lodash-es"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import { preToolUseDeny, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
   collectBlockedToolUseIds,
-  denyPreToolUse,
   formatActionPlan,
   isCodeChangeTool,
   isGitRepo,
@@ -723,32 +724,46 @@ function resolveCommandAndKind(input: {
   return { command, currentKind }
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-  const transcriptPath = input.transcript_path ?? ""
+export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const cwd = hookInput.cwd ?? process.cwd()
+  const transcriptPath = hookInput.transcript_path ?? ""
 
-  const parsed = resolveCommandAndKind(input)
-  if (!parsed) return
+  const parsed = resolveCommandAndKind(hookInput)
+  if (!parsed) return {}
 
   const { command, currentKind } = parsed
 
   const overfilterIssue = detectOverfiltering(command, currentKind)
-  if (overfilterIssue) denyPreToolUse(overfilterIssue)
+  if (overfilterIssue) return preToolUseDeny(overfilterIssue)
 
-  if (!(await isGitRepo(cwd))) return
-  if (!transcriptPath) return
+  if (!(await isGitRepo(cwd))) return {}
+  if (!transcriptPath) return {}
 
   const cachedSessionLines = getTranscriptSummary(
-    input as unknown as Record<string, unknown>
+    hookInput as unknown as Record<string, unknown>
   )?.sessionLines
 
   const events = await parseTranscriptEvents(transcriptPath, cachedSessionLines)
   const match = findConsecutiveRepeat(events, command, currentKind)
-  if (!match) return
+  if (!match) return {}
 
   const blockMessage = await buildBlockMessage(command, match, transcriptPath, cachedSessionLines)
-  denyPreToolUse(blockMessage)
+  return preToolUseDeny(blockMessage)
 }
 
-if (import.meta.main) void main()
+const pretooluseRepeatedLintTest: SwizToolHook = {
+  name: "pretooluse-repeated-lint-test",
+  event: "preToolUse",
+  timeout: 5,
+  cooldownSeconds: 120,
+  run(input) {
+    return evaluatePretooluseRepeatedLintTest(input)
+  },
+}
+
+export default pretooluseRepeatedLintTest
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseRepeatedLintTest)
+}

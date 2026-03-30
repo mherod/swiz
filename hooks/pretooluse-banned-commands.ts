@@ -4,12 +4,13 @@
 // Rules with severity "deny" (default) block the command entirely.
 
 import {
-  allowPreToolUse,
-  denyPreToolUse,
-  detectPackageManager,
-  isShellTool,
-  skillExists,
-} from "../src/utils/hook-utils.ts"
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { detectPackageManager, isShellTool, skillExists } from "../src/utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,
@@ -21,6 +22,7 @@ import {
   stripQuotedShellStrings,
 } from "../src/utils/shell-patterns.ts"
 import { extractReadFilePaths } from "../src/utils/transcript.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 interface Rule {
   /** Returns true if this rule matches the command. */
@@ -277,7 +279,7 @@ const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
 const BUN_TEST_SEGMENT_RE = new RegExp(`${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b([^|;&]*)`, "g")
 const REPORTER_FLAG_RE = /(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/g
 
-function checkBunTestReporter(command: string): void {
+function checkBunTestReporter(command: string): SwizHookOutput | null {
   for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
     const segment = segMatch[1] ?? ""
     const reporterMatches = [...segment.matchAll(REPORTER_FLAG_RE)]
@@ -288,15 +290,18 @@ function checkBunTestReporter(command: string): void {
         /(?:--reporter|-r)(?:=|\s+)\\?['"]?[a-z][a-z0-9-]*\\?['"]?/g,
         "--reporter=dots"
       )
-      denyPreToolUse(
+      return preToolUseDeny(
         `Bun only supports 'dots' and 'junit' reporters — '${reporter}' is not valid.\n\n` +
           `Use this corrected command instead:\n  ${corrected}`
       )
     }
   }
+  return null
 }
 
-function evaluateRules(rules: Rule[], command: string, strippedCommand: string): string[] {
+type RuleEvalResult = { ok: true; warnings: string[] } | { ok: false; output: SwizHookOutput }
+
+function evaluateRules(rules: Rule[], command: string, strippedCommand: string): RuleEvalResult {
   const warnings: string[] = []
   for (const rule of rules) {
     // Content-inspection rules (useRawCommand) see the original command so they
@@ -307,10 +312,10 @@ function evaluateRules(rules: Rule[], command: string, strippedCommand: string):
     if (rule.severity === "warn") {
       warnings.push(rule.message)
     } else {
-      denyPreToolUse(rule.message)
+      return { ok: false, output: preToolUseDeny(rule.message) }
     }
   }
-  return warnings
+  return { ok: true, warnings }
 }
 
 async function isRedirectExempt(
@@ -337,30 +342,44 @@ function parseHookInput(input: Record<string, unknown>): {
   }
 }
 
-async function main() {
+export async function evaluatePretooluseBannedCommands(input: unknown): Promise<SwizHookOutput> {
   const PM = await detectPackageManager()
   const RUNTIME: "bun" | "node" = PM === "bun" ? "bun" : "node"
   const RULES = buildRules(PM, RUNTIME)
 
-  const input = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+  const parsed = toolHookInputSchema.parse(input)
+  if (!isShellTool(parsed.tool_name ?? "")) return {}
 
-  const { command, transcriptPath, cwd } = parseHookInput(input)
+  const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, unknown>)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
 
   const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))
     ? RULES.filter((r) => r.match !== isShellFileWrite)
     : RULES
 
-  const warnings = evaluateRules(effectiveRules, command, strippedCommand)
+  const reporterBlock = checkBunTestReporter(command)
+  if (reporterBlock) return reporterBlock
 
-  checkBunTestReporter(command)
+  const ruleResult = evaluateRules(effectiveRules, command, strippedCommand)
+  if (!ruleResult.ok) return ruleResult.output
 
-  if (warnings.length > 0) {
-    allowPreToolUse(warnings.join("\n\n"))
+  if (ruleResult.warnings.length > 0) {
+    return preToolUseAllow(ruleResult.warnings.join("\n\n"))
   }
+  return {}
 }
 
+const pretooluseBannedCommands: SwizToolHook = {
+  name: "pretooluse-banned-commands",
+  event: "preToolUse",
+  timeout: 5,
+  run(input) {
+    return evaluatePretooluseBannedCommands(input)
+  },
+}
+
+export default pretooluseBannedCommands
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(pretooluseBannedCommands)
 }

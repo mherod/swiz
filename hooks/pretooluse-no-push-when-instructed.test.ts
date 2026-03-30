@@ -55,8 +55,8 @@ async function runHook(opts: {
     stderr: "pipe",
     env: { ...process.env, HOME: opts.home ?? fakeHome },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 

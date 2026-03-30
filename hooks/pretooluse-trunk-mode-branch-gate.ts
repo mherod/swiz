@@ -5,10 +5,11 @@
  * out any branch other than the repository default branch, block `gh pr checkout`,
  * and block `gh pr create` (no new pull requests on trunk).
  *
- * Allows switching to the default branch, detached SHAs, HEAD-relative refs, `.`, `-`,
- * and remote forms like `origin/<default>`.
+ * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import { preToolUseDeny, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import {
   collectCheckoutNewBranchNames,
@@ -17,7 +18,6 @@ import {
   isDefaultBranch,
 } from "../src/utils/git-utils.ts"
 import {
-  denyPreToolUse,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   GIT_CHECKOUT_RE,
@@ -48,9 +48,9 @@ function isTrunkModeRelevantShellCommand(command: string): boolean {
   )
 }
 
-function denyPrCreateWhenTrunk(command: string, defaultBranch: string): void {
-  if (!GH_PR_CREATE_RE.test(command)) return
-  denyPreToolUse(
+function denyPrCreateWhenTrunk(command: string, defaultBranch: string): SwizHookOutput | null {
+  if (!GH_PR_CREATE_RE.test(command)) return null
+  return preToolUseDeny(
     `Trunk mode is enabled — opening a new pull request is not allowed.\n\n` +
       `Push directly to the default branch (\`${defaultBranch}\`).`
   )
@@ -69,71 +69,90 @@ async function denyPrCheckoutWhenTrunk(
   defaultBranch: string,
   cwd: string,
   projectState: string | null
-): Promise<void> {
-  if (!GH_PR_CHECKOUT_RE.test(command)) return
-  if (projectState === "reviewing" && (await hasOpenPullRequests(cwd))) return
+): Promise<SwizHookOutput | null> {
+  if (!GH_PR_CHECKOUT_RE.test(command)) return null
+  if (projectState === "reviewing" && (await hasOpenPullRequests(cwd))) return null
 
   if (projectState === "developing") {
-    denyPreToolUse(
+    return preToolUseDeny(
       `Trunk mode is enabled and project state is \`developing\` — checking out a pull request branch is not allowed.\n\n` +
         `Stay on the default branch (\`${defaultBranch}\`) while developing.`
     )
   }
 
-  denyPreToolUse(
+  return preToolUseDeny(
     `Trunk mode is enabled for this project — checking out a pull request branch is not allowed.\n\n` +
       `Work on the default branch (\`${defaultBranch}\`) only.`
   )
 }
 
-function denyNonDefaultNewBranches(command: string, defaultBranch: string): void {
+function denyNonDefaultNewBranches(command: string, defaultBranch: string): SwizHookOutput | null {
   for (const name of collectCheckoutNewBranchNames(command)) {
     if (isDefaultBranch(name, defaultBranch)) continue
-    denyPreToolUse(
+    return preToolUseDeny(
       `Trunk mode is enabled — creating a new branch other than the default branch (\`${defaultBranch}\`) is not allowed.\n\n` +
         `Attempted new branch: \`${name}\`\n\n` +
         `Stay on \`${defaultBranch}\`.`
     )
   }
+  return null
 }
 
-function denyNonDefaultPlainCheckouts(command: string, defaultBranch: string): void {
+function denyNonDefaultPlainCheckouts(
+  command: string,
+  defaultBranch: string
+): SwizHookOutput | null {
   for (const target of collectPlainCheckoutSwitchTargets(command)) {
     if (isAllowedTrunkCheckoutTarget(target, defaultBranch)) continue
-    denyPreToolUse(
+    return preToolUseDeny(
       `Trunk mode is enabled — switching to a branch other than the default (\`${defaultBranch}\`) is not allowed.\n\n` +
         `Attempted ref: \`${target}\`\n\n` +
         `Use \`git checkout ${defaultBranch}\` (or equivalent).`
     )
   }
+  return null
 }
 
-async function main() {
-  const input = shellHookInputSchema.parse(await Bun.stdin.json())
-  const cwd: string = input.cwd ?? process.cwd()
-  const command = String(input.tool_input?.command ?? "")
+export async function evaluatePretooluseTrunkModeBranchGate(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const hookInput = shellHookInputSchema.parse(input)
+  const cwd: string = hookInput.cwd ?? process.cwd()
+  const command = String(hookInput.tool_input?.command ?? "")
 
-  if (!isShellTool(input.tool_name ?? "")) process.exit(0)
-  if (!isTrunkModeRelevantShellCommand(command)) process.exit(0)
-  if (!(await isGitRepo(cwd))) process.exit(0)
+  if (!isShellTool(hookInput.tool_name ?? "")) return {}
+  if (!isTrunkModeRelevantShellCommand(command)) return {}
+  if (!(await isGitRepo(cwd))) return {}
 
   const project = await readProjectSettings(cwd)
-  if (!project?.trunkMode) process.exit(0)
+  if (!project?.trunkMode) return {}
   const projectState = await readProjectState(cwd)
 
   const defaultBranch = await getDefaultBranch(cwd)
 
-  denyPrCreateWhenTrunk(command, defaultBranch)
-  await denyPrCheckoutWhenTrunk(command, defaultBranch, cwd, projectState)
-  denyNonDefaultNewBranches(command, defaultBranch)
-  denyNonDefaultPlainCheckouts(command, defaultBranch)
+  const a = denyPrCreateWhenTrunk(command, defaultBranch)
+  if (a) return a
+  const b = await denyPrCheckoutWhenTrunk(command, defaultBranch, cwd, projectState)
+  if (b) return b
+  const c = denyNonDefaultNewBranches(command, defaultBranch)
+  if (c) return c
+  const d = denyNonDefaultPlainCheckouts(command, defaultBranch)
+  if (d) return d
 
-  process.exit(0)
+  return {}
 }
 
+const pretooluseTrunkModeBranchGate: SwizToolHook = {
+  name: "pretooluse-trunk-mode-branch-gate",
+  event: "preToolUse",
+  timeout: 10,
+  run(input) {
+    return evaluatePretooluseTrunkModeBranchGate(input)
+  },
+}
+
+export default pretooluseTrunkModeBranchGate
+
 if (import.meta.main) {
-  main().catch((e) => {
-    console.error("Hook error:", e)
-    process.exit(1)
-  })
+  await runSwizHookAsMain(pretooluseTrunkModeBranchGate)
 }

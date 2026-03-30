@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
 // Stop hook: Verify task creation and CI evidence after all tasks are complete.
 // Incomplete-task blocking is handled by the higher-priority stop-incomplete-tasks hook.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   getSessionTasksDir,
@@ -15,7 +19,7 @@ import {
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
 import {
-  blockStop,
+  blockStopObj,
   computeTranscriptSummary,
   deriveCurrentSessionTaskToolStats,
   formatActionPlan,
@@ -71,14 +75,14 @@ function anyTaskHasCiEvidence(tasks: TaskFile[]): boolean {
   return tasks.filter((t) => t.status === "completed").some(taskHasCiEvidence)
 }
 
-/** Check audit log when no live task files exist; returns true if stop is allowed. */
+/** Check audit log when no live task files exist; returns null if stop is allowed. */
 async function checkAuditLogAllowsStop(
   tasksDir: string,
   taskToolUsed: boolean,
   toolCallCount: number,
   sessionId?: string,
   cwd?: string
-): Promise<boolean> {
+): Promise<SwizHookOutput | null> {
   const auditLog = join(tasksDir, ".audit-log.jsonl")
   try {
     const auditText = await Bun.file(auditLog).text()
@@ -105,10 +109,10 @@ async function checkAuditLogAllowsStop(
       isIncompleteTaskStatus(s)
     ).length
 
-    if (created > 0 && incomplete === 0) return true
+    if (created > 0 && incomplete === 0) return null
   } catch {}
 
-  if (taskToolUsed) return true
+  if (taskToolUsed) return null
 
   if (toolCallCount >= TOOL_CALL_THRESHOLD) {
     const planSteps = [
@@ -116,13 +120,13 @@ async function checkAuditLogAllowsStop(
       "Use TaskUpdate to mark each task completed after recording the work",
     ]
     if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-    blockStop(
+    return blockStopObj(
       `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
         "Create tasks to record the work done.\n\n" +
         formatActionPlan(planSteps, { translateToolNames: true })
     )
   }
-  return true
+  return null
 }
 
 /** Search sibling sessions (by transcript) for CI evidence. */
@@ -181,29 +185,29 @@ async function blockNoTasks(
   toolCallCount: number,
   sessionId?: string,
   cwd?: string
-): Promise<void> {
+): Promise<SwizHookOutput> {
   const planSteps = [
     "Use TaskCreate to create one task for each significant piece of work",
     "Use TaskUpdate to mark each task completed after recording the work",
   ]
   if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-  blockStop(
+  return blockStopObj(
     `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
       "Create tasks to record the work done.\n\n" +
       formatActionPlan(planSteps, { translateToolNames: true })
   )
 }
 
-/** Returns true if stop should proceed, false if blocked. */
+/** Returns a block payload or null when stop may proceed. */
 async function handleNoTasksDir(
   taskToolUsed: boolean,
   toolCallCount: number,
   sessionId?: string,
   cwd?: string
-): Promise<boolean> {
-  if (taskToolUsed) return true
-  if (toolCallCount >= TOOL_CALL_THRESHOLD) await blockNoTasks(toolCallCount, sessionId, cwd)
-  return true
+): Promise<SwizHookOutput | null> {
+  if (taskToolUsed) return null
+  if (toolCallCount >= TOOL_CALL_THRESHOLD) return await blockNoTasks(toolCallCount, sessionId, cwd)
+  return null
 }
 
 async function enforceCiEvidence(
@@ -212,9 +216,9 @@ async function enforceCiEvidence(
   sessionId: string,
   home: string,
   summary: TranscriptSummary | null
-): Promise<void> {
+): Promise<SwizHookOutput | null> {
   const effectiveSummary = summary ?? (await computeTranscriptSummary(transcript))
-  if (!(effectiveSummary?.hasGitPush ?? false)) return
+  if (!(effectiveSummary?.hasGitPush ?? false)) return null
 
   let hasCiEvidence = anyTaskHasCiEvidence(allTasks)
   if (!hasCiEvidence) hasCiEvidence = await findCiEvidenceInSiblings(transcript, sessionId, home)
@@ -227,13 +231,14 @@ async function enforceCiEvidence(
       "Mark the task completed via TaskUpdate (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>",
     ]
     if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId)
-    blockStop(
+    return blockStopObj(
       "All tasks are completed but none have CI verification evidence.\n\n" +
         "The push+CI lifecycle rule requires a completed task with evidence " +
         "confirming CI passed (e.g. 'CI green', 'conclusion: success').\n\n" +
         formatActionPlan(planSteps, { translateToolNames: true })
     )
   }
+  return null
 }
 
 async function resolveToolCallStats(
@@ -255,14 +260,16 @@ interface CiEvidenceAfterPushCtx {
   allTasks: TaskFile[]
 }
 
-async function maybeEnforceCiEvidenceAfterPush(ctx: CiEvidenceAfterPushCtx): Promise<void> {
+async function maybeEnforceCiEvidenceAfterPush(
+  ctx: CiEvidenceAfterPushCtx
+): Promise<SwizHookOutput | null> {
   const [globalSettings, projectSettings] = await Promise.all([
     readSwizSettings(),
     readProjectSettings(ctx.cwd),
   ])
   const effective = getEffectiveSwizSettings(globalSettings, ctx.sessionId, projectSettings)
-  if (effective.ignoreCi) return
-  await enforceCiEvidence(ctx.allTasks, ctx.transcript, ctx.sessionId, ctx.home, ctx.summary)
+  if (effective.ignoreCi) return null
+  return await enforceCiEvidence(ctx.allTasks, ctx.transcript, ctx.sessionId, ctx.home, ctx.summary)
 }
 
 async function runStopCompletionWhenTasksDirReady(opts: {
@@ -272,7 +279,7 @@ async function runStopCompletionWhenTasksDirReady(opts: {
   transcript: string
   home: string
   tasksDir: string
-}): Promise<void> {
+}): Promise<SwizHookOutput> {
   const { raw, input, sessionId, transcript, home, tasksDir } = opts
   const summary = getTranscriptSummary(raw)
   const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(
@@ -285,19 +292,24 @@ async function runStopCompletionWhenTasksDirReady(opts: {
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   if (!tasksDirExists) {
-    await handleNoTasksDir(taskToolUsed, toolCallCount, sessionId, input.cwd ?? process.cwd())
-    return
+    const block = await handleNoTasksDir(
+      taskToolUsed,
+      toolCallCount,
+      sessionId,
+      input.cwd ?? process.cwd()
+    )
+    return block ?? {}
   }
 
   if (allTasks.length === 0) {
-    await checkAuditLogAllowsStop(
+    const block = await checkAuditLogAllowsStop(
       tasksDir,
       taskToolUsed,
       toolCallCount,
       sessionId,
       input.cwd ?? process.cwd()
     )
-    return
+    return block ?? {}
   }
 
   // Incomplete-task blocking is handled by stop-incomplete-tasks.ts (higher priority).
@@ -305,10 +317,10 @@ async function runStopCompletionWhenTasksDirReady(opts: {
   const hasIncomplete = allTasks.some(
     (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
   )
-  if (hasIncomplete) return
+  if (hasIncomplete) return {}
 
   if (transcript) {
-    await maybeEnforceCiEvidenceAfterPush({
+    const block = await maybeEnforceCiEvidenceAfterPush({
       cwd: input.cwd ?? process.cwd(),
       sessionId,
       transcript,
@@ -316,22 +328,24 @@ async function runStopCompletionWhenTasksDirReady(opts: {
       summary,
       allTasks,
     })
+    if (block) return block
   }
+  return {}
 }
 
-async function main(): Promise<void> {
-  const raw = (await Bun.stdin.json()) as Record<string, unknown>
-  const input = stopHookInputSchema.parse(raw)
-  const sessionId = input.session_id ?? ""
-  const transcript = input.transcript_path ?? ""
+export async function evaluateStopCompletionAuditor(input: StopHookInput): Promise<SwizHookOutput> {
+  const raw = input as Record<string, unknown>
+  const parsed = stopHookInputSchema.parse(raw)
+  const sessionId = parsed.session_id ?? ""
+  const transcript = parsed.transcript_path ?? ""
   const home = getHomeDirOrNull()
-  if (!home) return
+  if (!home) return {}
   const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return
+  if (!tasksDir) return {}
 
-  await runStopCompletionWhenTasksDirReady({
+  return await runStopCompletionWhenTasksDirReady({
     raw,
-    input,
+    input: parsed,
     sessionId,
     transcript,
     home,
@@ -339,6 +353,18 @@ async function main(): Promise<void> {
   })
 }
 
+const stopCompletionAuditor: SwizStopHook = {
+  name: "stop-completion-auditor",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopCompletionAuditor(input)
+  },
+}
+
+export default stopCompletionAuditor
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(stopCompletionAuditor)
 }

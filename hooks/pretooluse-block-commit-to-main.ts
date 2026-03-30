@@ -2,20 +2,19 @@
 
 // PreToolUse hook: Block `git commit` when on the default branch in a collaborative repository.
 //
-// Rationale: Committing directly to main/master in a shared repo bypasses code review.
-// The correct workflow is to use a feature branch and open a PR.
-//
-// Policy:
-//   Collaborative repo + on default branch → BLOCKED (must use feature branch)
-//   Solo repo + on default branch          → allowed
-//   Any repo + on feature branch           → allowed
+// Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  allowPreToolUse,
-  denyPreToolUse,
   detectForkTopology,
   forkPrCreateCmd,
   forkPushCmd,
@@ -24,64 +23,61 @@ import {
   isShellTool,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input: ToolHookInput = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+export async function evaluatePretooluseBlockCommitToMain(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input) as ToolHookInput
+  if (!isShellTool(hookInput.tool_name ?? "")) return {}
 
-const command: string = (input?.tool_input?.command as string) ?? ""
-const cwd: string = input.cwd ?? process.cwd()
+  const command: string = (hookInput.tool_input?.command as string) ?? ""
+  const cwd: string = hookInput.cwd ?? process.cwd()
 
-if (!GIT_COMMIT_RE.test(command)) process.exit(0)
+  if (!GIT_COMMIT_RE.test(command)) return {}
 
-// ── Trunk mode bypass ────────────────────────────────────────────────────────
-const projectSettings = await readProjectSettings(cwd)
-if (projectSettings?.trunkMode) {
-  allowPreToolUse("Trunk mode enabled — direct commit to default branch allowed")
-}
+  const projectSettings = await readProjectSettings(cwd)
+  if (projectSettings?.trunkMode) {
+    return preToolUseAllow("Trunk mode enabled — direct commit to default branch allowed")
+  }
 
-// ── Check current branch ──────────────────────────────────────────────────────
-let currentBranch: string
-try {
-  currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
-} catch {
-  process.exit(0) // can't determine branch — allow
-}
+  let currentBranch: string
+  try {
+    currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+  } catch {
+    return {}
+  }
 
-if (!currentBranch) process.exit(0) // detached HEAD — allow
+  if (!currentBranch) return {}
 
-// ── Check if on default branch ───────────────────────────────────────────────
-let defaultBranch: string
-try {
-  defaultBranch = await getDefaultBranch(cwd)
-} catch {
-  process.exit(0) // no git remote — allow
-}
+  let defaultBranch: string
+  try {
+    defaultBranch = await getDefaultBranch(cwd)
+  } catch {
+    return {}
+  }
 
-if (!isDefaultBranch(currentBranch, defaultBranch)) {
-  allowPreToolUse(`On feature branch '${currentBranch}', not default '${defaultBranch}'`)
-}
+  if (!isDefaultBranch(currentBranch, defaultBranch)) {
+    return preToolUseAllow(`On feature branch '${currentBranch}', not default '${defaultBranch}'`)
+  }
 
-// ── Check collaboration policy ───────────────────────────────────────────────
-let collaboration: Awaited<ReturnType<typeof detectProjectCollaborationPolicy>>
-try {
-  collaboration = await detectProjectCollaborationPolicy(cwd)
-} catch {
-  process.exit(0) // can't determine — allow
-}
+  let collaboration: Awaited<ReturnType<typeof detectProjectCollaborationPolicy>>
+  try {
+    collaboration = await detectProjectCollaborationPolicy(cwd)
+  } catch {
+    return {}
+  }
 
-if (!collaboration.isCollaborative) {
-  allowPreToolUse(`Solo repo — direct commit to '${currentBranch}' allowed`)
-}
+  if (!collaboration.isCollaborative) {
+    return preToolUseAllow(`Solo repo — direct commit to '${currentBranch}' allowed`)
+  }
 
-// ── Block: collaborative repo, committing to default branch ─────────────────
-const signals = collaboration.signals.map((s) => `  - ${s}`).join("\n")
-const owner = collaboration.repoOwner
-const repo = collaboration.repoName
-const repoRef = owner && repo ? `${owner}/${repo}` : "this repository"
+  const signals = collaboration.signals.map((s) => `  - ${s}`).join("\n")
+  const owner = collaboration.repoOwner
+  const repo = collaboration.repoName
+  const repoRef = owner && repo ? `${owner}/${repo}` : "this repository"
 
-const fork = await detectForkTopology(cwd)
+  const fork = await detectForkTopology(cwd)
 
-denyPreToolUse(`
+  return preToolUseDeny(`
 Committing directly to '${defaultBranch}' is blocked in ${repoRef} (collaborative repository).
 
 Collaboration signals:
@@ -95,3 +91,19 @@ Use the feature branch workflow instead:
 
 This ensures code review and prevents unreviewed changes from landing on the default branch.
 `)
+}
+
+const pretooluseBlockCommitToMain: SwizToolHook = {
+  name: "pretooluse-block-commit-to-main",
+  event: "preToolUse",
+  timeout: 10,
+  run(input) {
+    return evaluatePretooluseBlockCommitToMain(input)
+  },
+}
+
+export default pretooluseBlockCommitToMain
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseBlockCommitToMain)
+}

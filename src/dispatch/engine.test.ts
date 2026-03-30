@@ -148,7 +148,14 @@ describe("classifyHookOutput", () => {
   })
 
   describe("status taxonomy completeness", () => {
-    const allClassifiable: HookStatus[] = ["ok", "no-output", "timeout", "invalid-json", "error"]
+    const allClassifiable: HookStatus[] = [
+      "ok",
+      "no-output",
+      "timeout",
+      "invalid-json",
+      "invalid-schema",
+      "error",
+    ]
     it("classifyHookOutput can produce all raw statuses", () => {
       // timeout
       expect(classifyHookOutput({ timedOut: true, trimmed: "", exitCode: null }).status).toBe(
@@ -164,10 +171,14 @@ describe("classifyHookOutput", () => {
       expect(classifyHookOutput({ timedOut: false, trimmed: "not-json", exitCode: 0 }).status).toBe(
         "invalid-json"
       )
-      // ok
+      // invalid-schema (silent allow without context)
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: '{"continue":true}', exitCode: 0 }).status
+      ).toBe("invalid-schema")
+      // ok (empty output is valid)
       expect(classifyHookOutput({ timedOut: false, trimmed: "{}", exitCode: 0 }).status).toBe("ok")
-      // All 5 raw statuses are covered
-      expect(allClassifiable).toHaveLength(5)
+      // All 6 raw statuses are covered
+      expect(allClassifiable).toHaveLength(6)
     })
   })
 })

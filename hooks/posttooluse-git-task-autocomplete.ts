@@ -14,12 +14,14 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { getSessionTasksDir, readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"
 import {
   autoTransitionForComplete,
-  emitContext,
+  buildContextHookOutput,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
   isShellTool,
@@ -88,23 +90,40 @@ function resolveGitOp(
   return { sessionId, isCommit, isPush }
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const op = resolveGitOp(input)
-  if (!op) return
+export async function evaluatePosttooluseGitTaskAutocomplete(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input)
+  const op = resolveGitOp(hookInput)
+  if (!op) return {}
 
   const home = homedir()
   const tasksDir = getSessionTasksDir(op.sessionId, home)
-  if (!tasksDir) return
+  if (!tasksDir) return {}
   const tasks = await readSessionTasks(op.sessionId, home)
 
   const settings = await readSwizSettings()
   await completeTasks(tasksDir, tasks, op.isCommit, op.isPush, settings.autoTransition)
 
   if (op.isPush) {
-    const cwd = input.cwd ?? process.cwd()
-    await emitContext("PostToolUse", await buildPushContext(op.sessionId, cwd))
+    const cwd = hookInput.cwd ?? process.cwd()
+    return buildContextHookOutput("PostToolUse", await buildPushContext(op.sessionId, cwd))
   }
+  return {}
 }
 
-if (import.meta.main) void main()
+const posttooluseGitTaskAutocomplete: SwizHook<Record<string, unknown>> = {
+  name: "posttooluse-git-task-autocomplete",
+  event: "postToolUse",
+  matcher: "Bash",
+  timeout: 5,
+  run(input) {
+    return evaluatePosttooluseGitTaskAutocomplete(input)
+  },
+}
+
+export default posttooluseGitTaskAutocomplete
+
+if (import.meta.main) {
+  await runSwizHookAsMain(posttooluseGitTaskAutocomplete)
+}

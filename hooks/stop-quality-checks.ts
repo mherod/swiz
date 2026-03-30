@@ -1,19 +1,26 @@
 #!/usr/bin/env bun
 // Stop hook: Run project lint and typecheck scripts before allowing stop
 // Uses git state and settings to provide context-aware remediation guidance.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { join } from "node:path"
 import { getOpenPrForBranch } from "../src/git-helpers.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
-import { blockStop, detectPackageManager, formatActionPlan, git } from "../src/utils/hook-utils.ts"
+import {
+  blockStopObj,
+  detectPackageManager,
+  formatActionPlan,
+  git,
+} from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
-// Script names probed in priority order for each quality category
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const
 export const TYPECHECK_SCRIPTS = ["typecheck", "type-check", "tsc", "check:types"] as const
 
-/** Return the first script name that exists in the package.json scripts map, or null. */
 export function findScript(
   scripts: Record<string, unknown>,
   candidates: readonly string[]
@@ -24,7 +31,6 @@ export function findScript(
   return null
 }
 
-/** Per-script timeout: lint/typecheck can be slow but should never take > 45s. */
 const SCRIPT_TIMEOUT_MS = 45_000
 
 async function runScript(
@@ -165,21 +171,36 @@ async function collectFailures(
   return failures
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  if (!isQualityChecksEnabled(input as Record<string, unknown>)) return
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopQualityChecks(input: StopHookInput): Promise<SwizHookOutput> {
+  const raw = input as Record<string, unknown>
+  if (!isQualityChecksEnabled(raw)) return {}
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
   const resolved = await resolveScripts(cwd)
-  if (!resolved) return
+  if (!resolved) return {}
 
   const failures = await collectFailures(resolved, cwd)
-  if (failures.length === 0) return
+  if (failures.length === 0) return {}
 
-  const settings =
-    ((input as Record<string, unknown>)._effectiveSettings as Record<string, unknown>) ?? {}
-  blockStop(await buildQualityBlockReason(failures, { cwd, settings }), {
+  const settings = (raw._effectiveSettings as Record<string, unknown>) ?? {}
+  return blockStopObj(await buildQualityBlockReason(failures, { cwd, settings }), {
     includeUpdateMemoryAdvice: false,
   })
 }
 
-if (import.meta.main) void main()
+const stopQualityChecks: SwizStopHook = {
+  name: "stop-quality-checks",
+  event: "stop",
+  timeout: 60,
+  requiredSettings: ["qualityChecksGate"],
+
+  run(input) {
+    return evaluateStopQualityChecks(input)
+  },
+}
+
+export default stopQualityChecks
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopQualityChecks)
+}

@@ -19,7 +19,7 @@ const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-push-checks-gate.ts")
 
 const _tmp = useTempDir()
 async function makeTempDir(suffix = ""): Promise<string> {
-  return _tmp.create(`push-gate-e2e${suffix}-`)
+  return await _tmp.create(`push-gate-e2e${suffix}-`)
 }
 
 // ─── Transcript builder ──────────────────────────────────────────────────────
@@ -90,8 +90,8 @@ async function runGate(opts: {
     stdout: "pipe",
     stderr: "pipe",
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -540,7 +540,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      void proc.stdin.end()
+      await proc.stdin.end()
 
       await proc.exited
 
@@ -561,7 +561,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      void proc.stdin.end()
+      await proc.stdin.end()
 
       let capturedStdout = ""
       let capturedStderr = ""
@@ -590,7 +590,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.end()
+    await proc.stdin.end()
 
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -663,8 +663,8 @@ describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.write(JSON.stringify(payload))
-    void proc.stdin.end()
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     return { stdout, exitCode: proc.exitCode ?? -1 }

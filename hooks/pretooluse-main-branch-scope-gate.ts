@@ -5,17 +5,16 @@
 // Blocks non-trivial work on the default branch in collaborative repositories.
 // Trivial work is allowed directly to the default branch in solo projects.
 //
-// Classification:
-//   Trivial: ≤ 3 files, ≤ 20 lines changed, only docs/config, or single small fix
-//   Non-trivial: > 3 files, > 20 lines, new features, major refactors, breaking changes
-//
-// Enforcement:
-//   Solo repo + trivial: allowed
-//   Solo repo + non-trivial: allowed (user controls their own policy)
-//   Collaborative + trivial: allowed
-//   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
+// Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -23,9 +22,7 @@ import {
   resolvePolicy,
 } from "../src/settings.ts"
 import {
-  allowPreToolUse,
   classifyChangeScope,
-  denyPreToolUse,
   detectForkTopology,
   extractPrNumber,
   forkPrCreateCmd,
@@ -39,61 +36,55 @@ import {
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
 import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input: ToolHookInput = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+export async function evaluatePretooluseMainBranchScopeGate(
+  input: unknown
+): Promise<SwizHookOutput> {
+  const hookInput = toolHookInputSchema.parse(input) as ToolHookInput
+  if (!isShellTool(hookInput.tool_name ?? "")) return {}
 
-const command: string = (input?.tool_input?.command as string) ?? ""
-// Use the canonical top-level cwd from the hook payload.
-// Some tool payloads may not mirror cwd inside tool_input, and falling back
-// to process.cwd() can evaluate policy against the wrong repository.
-const cwd: string = input?.cwd ?? (input?.tool_input?.cwd as string) ?? process.cwd()
+  const command: string = (hookInput.tool_input?.command as string) ?? ""
+  const cwd: string = hookInput.cwd ?? (hookInput.tool_input?.cwd as string) ?? process.cwd()
 
-// ── Trunk mode bypass ────────────────────────────────────────────────────────
-const trunkModeSettings = await readProjectSettings(cwd)
-if (trunkModeSettings?.trunkMode) {
-  allowPreToolUse("Trunk mode enabled — direct push to default branch allowed")
-}
+  const trunkModeSettings = await readProjectSettings(cwd)
+  if (trunkModeSettings?.trunkMode) {
+    return preToolUseAllow("Trunk mode enabled — direct push to default branch allowed")
+  }
 
-const defaultBranch = await getDefaultBranch(cwd)
+  const defaultBranch = await getDefaultBranch(cwd)
 
-// Only check git push commands that target the effective default branch,
-// or `gh pr merge` commands (which are functionally equivalent to a push to main).
-// Uses GIT_GLOBAL_OPTS to handle `git -C <dir> push origin main`.
-const pushToDefaultRe = new RegExp(
-  `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\s+(?:-\\w+\\s+)*origin\\s+(${escapeRegex(defaultBranch)})\\b`
-)
-const pushMatch = command.match(pushToDefaultRe)
-const prMergeMatch = GH_PR_MERGE_RE.test(command)
-
-if (!pushMatch && !prMergeMatch) process.exit(0)
-
-// ── gh pr merge fast-path ──────────────────────────────────────────────
-// `gh pr merge` lands code on the default branch. When strict mode or collaborative
-// mode is active, block it with the same policy message as a direct push.
-if (prMergeMatch) {
-  const collaboration = await detectProjectCollaborationPolicy(cwd)
-  const owner = collaboration.repoOwner
-  const repo = collaboration.repoName
-  if (!owner || !repo) process.exit(0)
-  const isCollaborative = collaboration.isCollaborative
-  const globalSettings = await readSwizSettings()
-  const effectiveSettings = getEffectiveSwizSettings(
-    globalSettings,
-    null,
-    await readProjectSettings(cwd)
+  const pushToDefaultRe = new RegExp(
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\s+(?:-\\w+\\s+)*origin\\s+(${escapeRegex(defaultBranch)})\\b`
   )
-  const strictMode = effectiveSettings.strictNoDirectMain
+  const pushMatch = command.match(pushToDefaultRe)
+  const prMergeMatch = GH_PR_MERGE_RE.test(command)
 
-  if (!isCollaborative && !strictMode) process.exit(0)
+  if (!pushMatch && !prMergeMatch) return {}
 
-  const prNumber = extractPrNumber(command)
-  const prRef = prNumber ? `PR #${prNumber}` : "this PR"
-  const repoContext = isCollaborative
-    ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
-    : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
+  if (prMergeMatch) {
+    const collaboration = await detectProjectCollaborationPolicy(cwd)
+    const owner = collaboration.repoOwner
+    const repo = collaboration.repoName
+    if (!owner || !repo) return {}
+    const isCollaborative = collaboration.isCollaborative
+    const globalSettings = await readSwizSettings()
+    const effectiveSettings = getEffectiveSwizSettings(
+      globalSettings,
+      null,
+      await readProjectSettings(cwd)
+    )
+    const strictMode = effectiveSettings.strictNoDirectMain
 
-  denyPreToolUse(`
+    if (!isCollaborative && !strictMode) return {}
+
+    const prNumber = extractPrNumber(command)
+    const prRef = prNumber ? `PR #${prNumber}` : "this PR"
+    const repoContext = isCollaborative
+      ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
+      : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
+
+    return preToolUseDeny(`
 Merging ${prRef} via \`gh pr merge\` is blocked in ${repoContext}
 
 \`gh pr merge\` lands code directly on '${defaultBranch}', bypassing the intended review workflow.
@@ -105,73 +96,49 @@ Allowed merge paths:
 
 Repository: ${owner}/${repo}
 `)
-}
-
-// Determine the effective branch: prefer current branch, fall back to push target.
-// Detached HEAD (CI runners, specific SHA checkouts) returns "" from --show-current,
-// but the push command explicitly names the target branch.
-const checkedOutBranch = await git(["branch", "--show-current"], cwd)
-const targetBranch = pushMatch![1]!
-const currentBranch = checkedOutBranch || targetBranch
-
-if (!isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
-
-// ─── Resolve diff range once, use everywhere ─────────────────────────
-
-// Determine the correct diff range by trying progressively weaker strategies.
-// All git diff queries MUST use this resolved range to avoid data source mismatch.
-//
-// Candidate order:
-//   1. origin/branch..HEAD       — normal case (remote ref exists, linear history)
-//   2. merge-base..HEAD          — rebased or diverged history (finds common ancestor)
-//   3. HEAD~1..HEAD              — no remote ref (single-commit fallback)
-const remoteRef = `origin/${currentBranch}`
-
-async function resolveDiffRange(): Promise<string> {
-  // Pre-step: attempt to deepen shallow clones so diff/merge-base have full
-  // history. If unshallow fails (no network, origin unavailable), the
-  // strategies below still try with whatever local history is available.
-  const isShallow = await git(["rev-parse", "--is-shallow-repository"], cwd)
-  if (isShallow === "true") {
-    await git(["fetch", "--unshallow", "origin"], cwd)
   }
 
-  // 1. Direct remote ref comparison
-  if ((await git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
-    return `${remoteRef}..HEAD`
+  const checkedOutBranch = await git(["branch", "--show-current"], cwd)
+  const targetBranch = pushMatch![1]!
+  const currentBranch = checkedOutBranch || targetBranch
+
+  if (!isDefaultBranch(currentBranch, defaultBranch)) return {}
+
+  const remoteRef = `origin/${currentBranch}`
+
+  async function resolveDiffRange(): Promise<string> {
+    const isShallow = await git(["rev-parse", "--is-shallow-repository"], cwd)
+    if (isShallow === "true") {
+      await git(["fetch", "--unshallow", "origin"], cwd)
+    }
+
+    if ((await git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
+      return `${remoteRef}..HEAD`
+    }
+
+    const mergeBase = await git(["merge-base", remoteRef, "HEAD"], cwd)
+    if (mergeBase) {
+      return `${mergeBase}..HEAD`
+    }
+
+    if ((await git(["rev-parse", "--verify", "HEAD~1"], cwd)) !== "") {
+      return "HEAD~1..HEAD"
+    }
+
+    const countStr = await git(["rev-list", "--count", "HEAD"], cwd)
+    const count = parseInt(countStr, 10)
+    if (count > 1) {
+      return `HEAD~${count - 1}..HEAD`
+    }
+
+    return ""
   }
 
-  // 2. Merge-base fallback for rebased/diverged histories
-  const mergeBase = await git(["merge-base", remoteRef, "HEAD"], cwd)
-  if (mergeBase) {
-    return `${mergeBase}..HEAD`
-  }
+  const diffRange = await resolveDiffRange()
+  const fork = await detectForkTopology(cwd)
 
-  // 3. Single parent fallback
-  if ((await git(["rev-parse", "--verify", "HEAD~1"], cwd)) !== "") {
-    return "HEAD~1..HEAD"
-  }
-
-  // 4. Conservative local-history fallback: use all locally available commits.
-  // In shallow clones where unshallow failed and no remote ref exists, git
-  // may still have N > 1 commits locally. Diff against the oldest available.
-  const countStr = await git(["rev-list", "--count", "HEAD"], cwd)
-  const count = parseInt(countStr, 10)
-  if (count > 1) {
-    return `HEAD~${count - 1}..HEAD`
-  }
-
-  return ""
-}
-
-const diffRange = await resolveDiffRange()
-
-const fork = await detectForkTopology(cwd)
-
-// If no valid diff range could be resolved, block with actionable guidance.
-// This can happen on repos with only one commit and no remote tracking branch.
-if (!diffRange) {
-  denyPreToolUse(`
+  if (!diffRange) {
+    return preToolUseDeny(`
 Push blocked: could not determine diff range for change analysis.
 
 No valid comparison ref found (tried origin/${currentBranch}, merge-base, HEAD~N, local history).
@@ -183,50 +150,51 @@ Remediation:
   3. If this is the initial push, use a feature branch:
      git checkout -b feat/description && ${forkPushCmd("feat/description", fork)} && ${forkPrCreateCmd(currentBranch, fork)}
 `)
-}
+  }
 
-const diffStat = await git(["diff", diffRange, "--stat"], cwd)
-const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
-const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
+  const diffStat = await git(["diff", diffRange, "--stat"], cwd)
+  const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
+  const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
-const projectSettings = await readProjectSettings(cwd)
-const policy = resolvePolicy(projectSettings)
+  const projectSettings = await readProjectSettings(cwd)
+  const policy = resolvePolicy(projectSettings)
 
-const { statParsingFailed, isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =
-  classifyChangeScope(parseGitStatSummary(diffStat), changedFiles, {
+  const {
+    statParsingFailed,
+    isTrivial,
+    isDocsOnly,
+    scopeDescription,
+    fileCount,
+    totalLinesChanged,
+  } = classifyChangeScope(parseGitStatSummary(diffStat), changedFiles, {
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
   })
 
-// ─── Check collaborator activity ──────────────────────────────────────
-const collaboration = await detectProjectCollaborationPolicy(cwd)
-const owner = collaboration.repoOwner
-const repo = collaboration.repoName
-if (!owner || !repo) process.exit(0) // Can't parse GitHub repo, allow push
-const isCollaborative = collaboration.isCollaborative
+  const collaboration = await detectProjectCollaborationPolicy(cwd)
+  const owner = collaboration.repoOwner
+  const repo = collaboration.repoName
+  if (!owner || !repo) return {}
+  const isCollaborative = collaboration.isCollaborative
 
-// ─── Check strict mode ────────────────────────────────────────────────
-const globalSettings = await readSwizSettings()
-const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
-const strictMode = effectiveSettings.strictNoDirectMain
+  const globalSettings = await readSwizSettings()
+  const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  const strictMode = effectiveSettings.strictNoDirectMain
 
-// ─── Enforce policy ────────────────────────────────────────────────────
+  if (!isCollaborative && !strictMode) {
+    return preToolUseAllow(
+      `Solo repo without strict mode — push to '${defaultBranch}' allowed (${scopeDescription})`
+    )
+  }
 
-if (!isCollaborative && !strictMode) {
-  allowPreToolUse(
-    `Solo repo without strict mode — push to '${defaultBranch}' allowed (${scopeDescription})`
-  )
-}
+  if (isDocsOnly || isTrivial) {
+    return preToolUseAllow(
+      `Scope is ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines) — allowed on '${defaultBranch}'`
+    )
+  }
 
-if (isDocsOnly || isTrivial) {
-  allowPreToolUse(
-    `Scope is ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines) — allowed on '${defaultBranch}'`
-  )
-}
-
-// Fail-closed: stat parsing failed but files were detected
-if (statParsingFailed) {
-  denyPreToolUse(`
+  if (statParsingFailed) {
+    return preToolUseDeny(`
 Push blocked: git diff --stat could not be parsed, but ${changedFiles.length} file(s) were detected via --name-only.
 
 Scope: ${scopeDescription}
@@ -243,14 +211,13 @@ Remediation:
   4. If this is a false positive, use a feature branch instead:
      git checkout -b feat/description && ${forkPushCmd("feat/description", fork)} && ${forkPrCreateCmd(currentBranch, fork)}
 `)
-}
+  }
 
-// Non-trivial work: BLOCK (collaborative repo, or strict mode active)
-const repoContext = isCollaborative
-  ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
-  : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
+  const repoContext = isCollaborative
+    ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
+    : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
 
-const reason = `
+  const reason = `
 Non-trivial changes to '${defaultBranch}' in ${repoContext}
 
 Change scope: ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines)
@@ -266,4 +233,20 @@ For substantive work, use the feature branch workflow:
 This ensures code review, CI validation, and team coordination.
 `
 
-denyPreToolUse(reason)
+  return preToolUseDeny(reason)
+}
+
+const pretooluseMainBranchScopeGate: SwizToolHook = {
+  name: "pretooluse-main-branch-scope-gate",
+  event: "preToolUse",
+  timeout: 10,
+  run(input) {
+    return evaluatePretooluseMainBranchScopeGate(input)
+  },
+}
+
+export default pretooluseMainBranchScopeGate
+
+if (import.meta.main) {
+  await runSwizHookAsMain(pretooluseMainBranchScopeGate)
+}

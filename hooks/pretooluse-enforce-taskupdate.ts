@@ -2,23 +2,26 @@
 
 // PreToolUse hook: Block `swiz tasks` CLI in Claude Code; native task tools only.
 // TaskCreate, TaskUpdate, TaskList, and TaskGet are the supported channel.
+//
+// Dual-mode: SwizToolHook + runSwizHookAsMain.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
-  allowPreToolUse,
   buildLastTaskStandingDenial,
-  denyPreToolUse,
   isRunningInAgent,
   isShellTool,
+  preToolUseAllow,
+  preToolUseDeny,
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
 import { shellTokenCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-// Only enforce in agent/Claude Code context
 const isClaudeCode = isRunningInAgent() || process.env.CLAUDECODE === "1"
-let _cwd: string | undefined
 
 const SWIZ_TASKS_CLI_RE = shellTokenCommandRe(String.raw`swiz\s+tasks(?:\s|$)`)
 const SWIZ_TASKS_ADOPT_RE = shellTokenCommandRe(String.raw`swiz\s+tasks\s+adopt(?:\s|$)`)
@@ -36,7 +39,6 @@ function shouldInspectShellInput(input: { tool_name?: string }): boolean {
   return isClaudeCode && isShellTool(input?.tool_name ?? "")
 }
 
-/** True when Bash runs swiz tasks, except `swiz tasks adopt`. */
 function isBlockedSwizTasksCliCommand(command: string): boolean {
   const stripped = stripQuotedShellStrings(command)
   if (!SWIZ_TASKS_CLI_RE.test(stripped)) return false
@@ -44,63 +46,87 @@ function isBlockedSwizTasksCliCommand(command: string): boolean {
   return true
 }
 
-/** Shared guard: read tasks, validate, deny if last standing. */
-async function denyIfLastTaskStanding(taskId: string, sessionId: string): Promise<void> {
+async function denyIfLastTaskStanding(
+  taskId: string,
+  sessionId: string
+): Promise<SwizHookOutput | null> {
   const allTasks = await readSessionTasks(sessionId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
-    denyPreToolUse(buildLastTaskStandingDenial(taskId))
+    return preToolUseDeny(buildLastTaskStandingDenial(taskId))
   }
+  return null
 }
 
-async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<void> {
+async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<SwizHookOutput> {
   const command = String((input.tool_input as Record<string, unknown> | undefined)?.command ?? "")
   const sessionId = String(input.session_id ?? "")
-  _cwd = (input.cwd as string) ?? undefined
+  const cwd = (input.cwd as string) ?? undefined
 
   if (!isBlockedSwizTasksCliCommand(command)) {
-    allowPreToolUse("")
+    return preToolUseAllow("")
   }
 
   if (
     sessionId &&
-    (await scheduleAutoSteer(sessionId, SWIZ_TASKS_CLI_DENY_MESSAGE, undefined, _cwd))
+    (await scheduleAutoSteer(sessionId, SWIZ_TASKS_CLI_DENY_MESSAGE, undefined, cwd))
   ) {
-    allowPreToolUse(SWIZ_TASKS_CLI_DENY_MESSAGE)
+    return preToolUseAllow(SWIZ_TASKS_CLI_DENY_MESSAGE)
   }
-  denyPreToolUse(SWIZ_TASKS_CLI_DENY_MESSAGE)
+  return preToolUseDeny(SWIZ_TASKS_CLI_DENY_MESSAGE)
 }
 
-async function checkNativeTaskUpdateCompletion(input: Record<string, unknown>): Promise<void> {
+type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
+
+async function checkNativeTaskUpdateCompletion(
+  input: Record<string, unknown>
+): Promise<NativeTaskUpdateResult> {
   const toolInput = (input.tool_input ?? {}) as Record<string, unknown>
-  if (toolInput.status !== "completed") process.exit(0)
+  if (toolInput.status !== "completed") return "early_exit"
 
   const taskId = String(toolInput.taskId ?? "")
-  if (!taskId) process.exit(0)
+  if (!taskId) return "early_exit"
 
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
-  if (!sessionId) process.exit(0)
+  if (!sessionId) return "early_exit"
 
-  await denyIfLastTaskStanding(taskId, sessionId)
-  allowPreToolUse("")
+  const denied = await denyIfLastTaskStanding(taskId, sessionId)
+  if (denied) return denied
+  return "continue"
 }
 
 function isNativeTaskTool(toolName: string): boolean {
   return toolName === "TaskUpdate" || toolName === "update_plan"
 }
 
-async function main() {
-  const input = await Bun.stdin.json()
-  const toolName = String(input?.tool_name ?? "")
+export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promise<SwizHookOutput> {
+  const parsed = toolHookInputSchema.parse(input)
+  const rec = parsed as unknown as Record<string, unknown>
+  const toolName = String(rec.tool_name ?? "")
 
   if (isNativeTaskTool(toolName)) {
-    await checkNativeTaskUpdateCompletion(input as Record<string, unknown>)
+    const n = await checkNativeTaskUpdateCompletion(rec)
+    if (n === "early_exit") return {}
+    if (n !== "continue") return n
   }
 
-  if (!shouldInspectShellInput(input)) process.exit(0)
-  await runSwizTasksEnforcement(input as Record<string, unknown>)
+  if (!shouldInspectShellInput(parsed)) return {}
+
+  return await runSwizTasksEnforcement(rec)
 }
 
+const pretooluseEnforceTaskupdate: SwizToolHook = {
+  name: "pretooluse-enforce-taskupdate",
+  event: "preToolUse",
+  timeout: 5,
+
+  run(input) {
+    return evaluatePretooluseEnforceTaskupdate(input)
+  },
+}
+
+export default pretooluseEnforceTaskupdate
+
 if (import.meta.main) {
-  void main()
+  await runSwizHookAsMain(pretooluseEnforceTaskupdate)
 }

@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
 
 // Stop hook: Block stop if open PR has empty or placeholder description
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import {
-  blockStop,
+  blockStopObj,
   getDefaultBranch,
   getOpenPrForBranch,
   git,
@@ -13,7 +17,7 @@ import {
   isGitRepo,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const PLACEHOLDER_PATTERNS = [
   "Describe your changes",
@@ -23,11 +27,6 @@ const PLACEHOLDER_PATTERNS = [
   "[Add description]",
   "Your description here",
 ]
-
-function blockPrDescription(reason: string): never {
-  // PR-description refinement is triage/completion work, not memory-capture follow-through.
-  return blockStop(reason, { includeUpdateMemoryAdvice: false })
-}
 
 function hasSummaryPlaceholder(body: string): boolean {
   const lines = body.split("\n")
@@ -60,7 +59,7 @@ async function fetchOpenPr(
   if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return null
-  return getOpenPrForBranch<{ number: number; title: string; body: string }>(
+  return await getOpenPrForBranch<{ number: number; title: string; body: string }>(
     branch,
     cwd,
     "number,title,body"
@@ -95,12 +94,12 @@ function validatePrDescription(
   return null
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopPrDescription(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
   const pr = await fetchOpenPr(cwd)
-  if (!pr) return
+  if (!pr) return {}
 
   const prAdvice = skillAdvice(
     "refine-pr",
@@ -120,7 +119,23 @@ async function main(): Promise<void> {
   )
 
   const violation = validatePrDescription(pr, prAdvice)
-  if (violation) blockPrDescription(violation)
+  if (!violation) return {}
+
+  return blockStopObj(violation, { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopPrDescription: SwizStopHook = {
+  name: "stop-pr-description",
+  event: "stop",
+  timeout: 10,
+
+  run(input) {
+    return evaluateStopPrDescription(input)
+  },
+}
+
+export default stopPrDescription
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopPrDescription)
+}

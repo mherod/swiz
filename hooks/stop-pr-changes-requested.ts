@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { min, uniq } from "lodash-es"
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
-  blockStop,
-  blockStopHumanRequired,
+  blockStopHumanRequiredObj,
+  blockStopObj,
   detectForkTopology,
   forkPushCmd,
   getCurrentGitHubUser,
@@ -21,7 +25,7 @@ import {
   isGitRepo,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 function isSelfAuthored(pr: { author?: { login?: string } }, currentUser: string | null): boolean {
   return (
@@ -33,7 +37,7 @@ async function checkSelfAuthoredNoReviewer(
   pr: { number: number },
   repo: string,
   cwd: string
-): Promise<void> {
+): Promise<SwizHookOutput | null> {
   type PullDetails = {
     requested_reviewers?: Array<{ login: string }>
     requested_teams?: Array<{ slug: string }>
@@ -41,7 +45,7 @@ async function checkSelfAuthoredNoReviewer(
   const pullDetails = await ghJson<PullDetails>(["api", `repos/${repo}/pulls/${pr.number}`], cwd)
   const reviewerCount =
     (pullDetails?.requested_reviewers?.length ?? 0) + (pullDetails?.requested_teams?.length ?? 0)
-  if (reviewerCount > 0) return
+  if (reviewerCount > 0) return null
   const reason =
     `PR #${pr.number} is awaiting first review on a self-authored PR.\n\n` +
     `You cannot request changes on your own PR. An external reviewer must be assigned by a human.\n\n` +
@@ -49,7 +53,7 @@ async function checkSelfAuthoredNoReviewer(
     `  gh pr edit ${pr.number} --add-reviewer <github-handle>\n\n` +
     `Current status:\n` +
     `  gh pr view ${pr.number}`
-  blockStopHumanRequired(reason)
+  return blockStopHumanRequiredObj(reason)
 }
 
 async function handleNoReviews(
@@ -57,9 +61,10 @@ async function handleNoReviews(
   repo: string,
   cwd: string,
   currentUser: string | null
-): Promise<void> {
+): Promise<SwizHookOutput> {
   if (isSelfAuthored(pr, currentUser)) {
-    await checkSelfAuthoredNoReviewer(pr, repo, cwd)
+    const humanBlock = await checkSelfAuthoredNoReviewer(pr, repo, cwd)
+    if (humanBlock) return humanBlock
   }
 
   const reason =
@@ -77,7 +82,7 @@ async function handleNoReviews(
         `  b) Self-review: leave a detailed comment summarising the changes and close any open questions.`,
       ].join("\n")
     )
-  blockStop(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
 }
 
 async function fetchReviewData(
@@ -199,20 +204,22 @@ async function resolvePrContext(input: {
   return { cwd, sessionId: input.session_id, pr, repo, currentUser }
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const ctx = await resolvePrContext(input)
-  if (!ctx) return
+export async function evaluateStopPrChangesRequested(
+  input: StopHookInput
+): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const ctx = await resolvePrContext(parsed)
+  if (!ctx) return {}
 
   const { cwd, pr, repo, currentUser } = ctx
 
   const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
-  if (!reviews) return
+  if (!reviews) return {}
 
   const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
   if (changesRequested.length === 0) {
-    if (reviews.length === 0) await handleNoReviews(pr, repo, cwd, currentUser)
-    return
+    if (reviews.length === 0) return await handleNoReviews(pr, repo, cwd, currentUser)
+    return {}
   }
 
   const { reviewComments, issueComments } = await fetchReviewData(
@@ -230,8 +237,22 @@ async function main(): Promise<void> {
     fork
   )
 
-  // Review-feedback triage is actionable queue work, not a memory-capture miss.
-  blockStop(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) void main()
+const stopPrChangesRequested: SwizStopHook = {
+  name: "stop-pr-changes-requested",
+  event: "stop",
+  timeout: 10,
+  requiredSettings: ["changesRequestedGate"],
+
+  run(input) {
+    return evaluateStopPrChangesRequested(input)
+  },
+}
+
+export default stopPrChangesRequested
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopPrChangesRequested)
+}

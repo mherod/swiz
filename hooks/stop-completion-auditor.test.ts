@@ -137,7 +137,7 @@ async function createFixture(): Promise<{
   tasksDir: string
   transcriptPath: string
 }> {
-  return createFixtureWithTools(Array.from({ length: 12 }, () => "Read"))
+  return await createFixtureWithTools(Array.from({ length: 12 }, () => "Read"))
 }
 
 async function createFixtureWithTools(toolNames: string[]): Promise<{
@@ -196,8 +196,8 @@ async function runAuditor(
     stderr: "pipe",
     env: { ...env, ...envOverrides },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const raw = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -591,8 +591,8 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
       stderr: "pipe",
       env,
     })
-    void proc.stdin.write(payload)
-    void proc.stdin.end()
+    await proc.stdin.write(payload)
+    await proc.stdin.end()
     const raw = await new Response(proc.stdout).text()
     await proc.exited
 

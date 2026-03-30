@@ -2,13 +2,17 @@
 // Stop hook: Block stop if GitHub CI checks are pending or failing.
 // When CI is in_progress, polls up to MAX_POLL_MS before blocking — avoids
 // false-positive blocks for short CI runs that complete within seconds.
+//
+// Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   type ActionPlanItem,
-  blockStop,
+  blockStopObj,
   formatActionPlan,
   getDefaultBranch,
   getRepoSlug,
@@ -21,7 +25,7 @@ import {
   mergeActionPlanIntoTasks,
   skillExists,
 } from "../src/utils/hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const POLL_INTERVAL_MS = 5_000
 const MAX_POLL_MS = 30_000
@@ -160,31 +164,47 @@ function buildActiveResult(branch: string, active: CIRun[]): CIBlockResult {
   return { reason, planSteps }
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+export async function evaluateStopGithubCi(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const cwd = parsed.cwd ?? process.cwd()
 
-  const branch = await resolveTargetBranch(cwd, input.session_id)
-  if (!branch) return
+  const branch = await resolveTargetBranch(cwd, parsed.session_id)
+  if (!branch) return {}
 
   const relevant = await pollUntilComplete(branch, cwd)
-  if (!relevant.length) return
+  if (!relevant.length) return {}
 
-  const sessionId = input.session_id
+  const sessionId = parsed.session_id
 
   const failing = findFailing(relevant)
   if (failing.length > 0) {
     const { reason, planSteps } = buildFailingResult(branch, failing)
     if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-    blockStop(reason)
+    return blockStopObj(reason)
   }
 
   const stillActive = findActive(relevant)
   if (stillActive.length > 0) {
     const { reason, planSteps } = buildActiveResult(branch, stillActive)
     if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-    blockStop(reason)
+    return blockStopObj(reason)
   }
+  return {}
 }
 
-if (import.meta.main) void main()
+const stopGithubCi: SwizStopHook = {
+  name: "stop-github-ci",
+  event: "stop",
+  timeout: 45,
+  requiredSettings: ["githubCiGate"],
+
+  run(input) {
+    return evaluateStopGithubCi(input)
+  },
+}
+
+export default stopGithubCi
+
+if (import.meta.main) {
+  await runSwizHookAsMain(stopGithubCi)
+}
