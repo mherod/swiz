@@ -34,6 +34,11 @@ describe("hookCooldownPath", () => {
   test("different cwds produce different paths for the same hook", () => {
     expect(hookCooldownPath(TEST_HOOK, "/repo/a")).not.toBe(hookCooldownPath(TEST_HOOK, "/repo/b"))
   })
+
+  test("stable hash: known hook+cwd yields fixed path (regression for Bun.hash instability)", () => {
+    const cwd = "/tmp/swiz-cooldown-golden"
+    expect(hookCooldownPath(TEST_HOOK, cwd)).toBe("/tmp/swiz-hook-cooldown-cb5998f7.timestamp")
+  })
 })
 
 describe("isWithinCooldown", () => {

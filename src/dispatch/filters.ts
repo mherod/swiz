@@ -36,9 +36,24 @@ const PR_MERGE_MODE_DISABLED_HOOKS = new Set([
 
 // ─── Per-hook cooldown ──────────────────────────────────────────────────────
 
+/**
+ * Deterministic 32-bit string hash for cooldown sentinel filenames.
+ *
+ * We avoid `Bun.hash()` here: it is not documented as stable across Bun versions
+ * or platforms, so upgrading Bun could change sentinel paths and silently break
+ * cooldown throttling (orphaned old files, hooks re-running too often).
+ */
+function stableCooldownKeyHex(hookFile: string, cwd: string): string {
+  const input = hookFile + cwd
+  let hash = 5381
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(i)
+  }
+  return (hash >>> 0).toString(16)
+}
+
 export function hookCooldownPath(hookFile: string, cwd: string): string {
-  const key = Bun.hash(hookFile + cwd).toString(16)
-  return swizHookCooldownPath(key)
+  return swizHookCooldownPath(stableCooldownKeyHex(hookFile, cwd))
 }
 
 export async function isWithinCooldown(
