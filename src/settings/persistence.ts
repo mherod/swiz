@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
-import { type FileHookDef, type HookGroup, isInlineHookDef } from "../manifest.ts"
+import { type FileHookDef, type HookGroup, isInlineHookDef } from "../hook-types.ts"
 import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,

@@ -19,115 +19,19 @@ import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
-import type { SwizHook } from "./SwizHook.ts"
-import type { EffectiveSwizSettings } from "./settings"
 
-export type { SwizHook }
-
-/**
- * File-based hook definition — the original format.
- * The dispatcher spawns `bun hooks/<file>` as a subprocess and communicates
- * via JSON stdin/stdout.
- */
-export interface FileHookDef {
-  file: string
-  timeout?: number
-  async?: boolean
-  /**
-   * Minimum seconds between successive runs of this hook (scoped per hook+cwd).
-   *
-   * How the timer starts depends on `cooldownMode`:
-   * - `"block-only"` (default): timer only starts when the hook **denies or blocks**.
-   *   Allow responses do not start the timer, so the hook keeps running until it blocks.
-   * - `"always"`: timer starts after **every** run regardless of outcome, so the hook
-   *   is skipped for the full cooldown window whether it allowed or denied.
-   */
-  cooldownSeconds?: number
-  /**
-   * Controls when the cooldown timer is activated after a hook run.
-   *
-   * - `"block-only"` (default): cooldown only activates when the hook returns a deny/block.
-   *   The hook continues to run on every invocation until it blocks, then cools down.
-   * - `"always"`: cooldown activates after every run regardless of result.
-   *   Use this for expensive hooks that should run at most once per window.
-   *
-   * Has no effect when `cooldownSeconds` is not set.
-   */
-  cooldownMode?: "block-only" | "always"
-  /**
-   * Optional environment-based skip condition. Evaluated before the hook process
-   * is spawned; when the condition evaluates to false the hook is skipped entirely.
-   *
-   * Supported expressions:
-   *   `env:<VAR>`           — true when VAR is set to a non-empty string
-   *   `env:<VAR>=<value>`   — true when VAR equals value (exact match)
-   *   `env:<VAR>!=<value>`  — true when VAR does not equal value
-   *
-   * Unknown syntax is treated as true (fail-open) with a console warning.
-   *
-   * Example: `"env:CI!=true"` — skip hook when running in CI
-   */
-  condition?: string
-  /**
-   * Optional list of project stacks that activate this hook.
-   * When present, the hook only runs when `detectProjectStack(cwd)` returns
-   * at least one stack in this list.  Hooks with no `stacks` field run for
-   * all projects (backwards-compatible default).
-   *
-   * Supported stack names: "bun", "node", "go", "python", "ruby", "rust", "java", "php"
-   *
-   * Example: `stacks: ["bun", "node"]` — skip for Go / Python / Rust projects
-   */
-  stacks?: string[]
-  /**
-   * Optional list of settings keys (from EffectiveSwizSettings) that must all
-   * be truthy for this hook to run.  Evaluated by the dispatcher before spawning
-   * the hook process — when any listed setting is falsy the hook is skipped
-   * entirely (zero-cost fast path).
-   *
-   * Example: `requiredSettings: ["qualityChecksGate"]`
-   */
-  requiredSettings?: (keyof EffectiveSwizSettings)[]
-}
-
-/**
- * Inline hook definition — the new SOLID format.
- * The dispatcher calls `hook.run(input)` directly in-process; no subprocess.
- * All execution metadata (timeout, cooldown, requiredSettings, etc.) is carried
- * by the SwizHook instance itself via SwizHookMeta.
- */
-export interface InlineHookDef {
-  hook: SwizHook
-}
-
-/**
- * A manifest hook entry — either a file-based or inline definition.
- *
- * Discriminate with `isInlineHookDef(def)` or `'hook' in def`.
- * All existing `{ file: "..." }` entries satisfy `FileHookDef` and remain valid.
- */
-export type HookDef = FileHookDef | InlineHookDef
-
-/** Type guard: narrows a HookDef to InlineHookDef. */
-export function isInlineHookDef(def: HookDef): def is InlineHookDef {
-  return "hook" in def
-}
-
-/**
- * Returns the canonical identifier for a hook — used for logging, cooldown
- * keying, disabled-hook matching, and README cross-referencing.
- * Always includes the `.ts` extension so identifiers are consistent across
- * file-based and inline formats.
- * - File-based: the `file` field (e.g. `"pretooluse-no-npm.ts"`)
- * - Inline: the `hook.name` field with `.ts` appended (e.g. `"pretooluse-no-npm.ts"`)
- */
-export function hookIdentifier(def: HookDef): string {
-  if (isInlineHookDef(def)) {
-    const name = def.hook.name
-    return name.endsWith(".ts") ? name : `${name}.ts`
-  }
-  return def.file
-}
+// Hook type definitions live in hook-types.ts to break the circular dependency:
+// manifest.ts → hook files → git-utils.ts → settings.ts → persistence.ts → manifest.ts
+// Re-exported here for backward-compatible access.
+export {
+  type FileHookDef,
+  type HookDef,
+  type HookGroup,
+  hookIdentifier,
+  type InlineHookDef,
+  isInlineHookDef,
+  type SwizHook,
+} from "./hook-types.ts"
 
 /**
  * Evaluate a HookDef `condition` expression against the current environment.
@@ -182,17 +86,8 @@ export async function evalCondition(condition: string | undefined): Promise<bool
   return true
 }
 
-export interface HookGroup {
-  event: string
-  matcher?: string
-  hooks: HookDef[]
-  /**
-   * When true, this group is dispatched on a schedule (e.g. via a LaunchAgent),
-   * not triggered by an agent's hook system. `swiz install` skips scheduled groups
-   * when generating agent configs, and agent eventMap validation ignores them.
-   */
-  scheduled?: boolean
-}
+// Local import for types used in this file (re-exports don't create local bindings).
+import type { HookGroup } from "./hook-types.ts"
 
 export const manifest: HookGroup[] = [
   {

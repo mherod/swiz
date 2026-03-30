@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { HookGroup } from "../manifest.ts"
+import type { HookGroup } from "../hook-types.ts"
 
 // ─── Central Zod enums — single source of truth for all domain types ─────────
 
