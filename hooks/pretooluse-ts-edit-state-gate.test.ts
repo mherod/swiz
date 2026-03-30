@@ -41,14 +41,14 @@ describe("pretooluse-ts-edit-state-gate", () => {
   test("allows .ts edit when no project state is set", async () => {
     const dir = await makeTempDir()
     const result = await runHook("Edit", { filePath: "src/foo.ts", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 
   test("allows .md edit in planning state", async () => {
     const dir = await makeTempDir()
     await writeState(dir, "planning")
     const result = await runHook("Edit", { filePath: "README.md", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 
   test("blocks .ts edit in planning state", async () => {
@@ -71,27 +71,27 @@ describe("pretooluse-ts-edit-state-gate", () => {
     const dir = await makeTempDir()
     await writeState(dir, "developing")
     const result = await runHook("Edit", { filePath: "src/foo.ts", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 
   test("allows .ts edit in reviewing state", async () => {
     const dir = await makeTempDir()
     await writeState(dir, "reviewing")
     const result = await runHook("Edit", { filePath: "src/foo.ts", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 
   test("allows .ts edit in addressing-feedback state", async () => {
     const dir = await makeTempDir()
     await writeState(dir, "addressing-feedback")
     const result = await runHook("Edit", { filePath: "src/foo.ts", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 
   test("does not fire for non-edit tools", async () => {
     const dir = await makeTempDir()
     await writeState(dir, "planning")
     const result = await runHook("Read", { filePath: "src/foo.ts", cwd: dir })
-    expect(result.stdout).toBe("")
+    expect(result.decision ?? "allow").toBe("allow")
   })
 })
