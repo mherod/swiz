@@ -173,7 +173,7 @@ alwaysApply: false
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
   4. `git push origin main` (lefthook pre-push runs full `bun test`).
-  5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'`.
+  5. **CI** run id from `gh run list --commit "$SHA" --limit 15`—row `[0]` may be Dependabot (**MEMORY.md**).
   6. `gh run watch <run-id> --exit-status`.
   7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'`.
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
@@ -181,6 +181,7 @@ alwaysApply: false
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
+- **DO**: Before **stop** after push: **MEMORY.md** triad (CI **completed** + jobs, **TaskUpdate** if shipped). **DON'T** skip for **`task #unkn-1`** / **missing or unstructured workflow**.
 - DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
@@ -221,12 +222,12 @@ alwaysApply: false
 - `src/commands/continue.ts`: stream Agent SDK messages; `process.exitCode = 1` on non-success.
 - Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
 - In CI/hook scripts, do not use `console.log` for status/debug; use `console.error`.
-- `src/debug-logging.test.ts` enforces allowlists for `console.error`/`console.warn` (STDERR_ALLOWLIST) and `console.log`/`console.info` (STDOUT_ALLOWLIST). Files not on an allowlist must use `import { debugLog } from "./debug.ts"` for diagnostics. Adding to an allowlist requires a justification comment in the test.
+- `src/debug-logging.test.ts` allowlists `console.*`; elsewhere use `debugLog` from `./debug.ts`. Allowlist edits need a justification comment in the test.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
-- When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
+- When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
@@ -257,8 +258,7 @@ alwaysApply: false
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop; use `/push` for unpushed.
-- **DON'T**: Rely on `git status` alone for unpush detection; use `git log origin/main..HEAD --oneline`.
+- **DO**: After every commit, `git log origin/main..HEAD --oneline` before stop; `/push` if unpushed. **DON'T** use `git status` alone for unpushed detection.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
