@@ -632,36 +632,36 @@ describe("swiz settings", () => {
 
   test("disable-hook adds filename to user-level disabledHooks", async () => {
     const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    const result = await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Disabled hook: stop-github-ci.ts")
+    expect(result.stdout).toContain("Disabled hook: stop-ship-checklist.ts")
 
     const configPath = join(home, ".swiz", "settings.json")
     const text = await readFile(configPath, "utf-8")
     const json = JSON.parse(text) as { disabledHooks?: string[] }
-    expect(json.disabledHooks).toEqual(["stop-github-ci.ts"])
+    expect(json.disabledHooks).toEqual(["stop-ship-checklist.ts"])
   })
 
   test("disable-hook is idempotent when hook already disabled", async () => {
     const home = await createTempHome()
-    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
-    const result = await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
+    const result = await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("already disabled")
 
     const configPath = join(home, ".swiz", "settings.json")
     const text = await readFile(configPath, "utf-8")
     const json = JSON.parse(text) as { disabledHooks?: string[] }
-    expect(json.disabledHooks).toEqual(["stop-github-ci.ts"])
+    expect(json.disabledHooks).toEqual(["stop-ship-checklist.ts"])
   })
 
   test("enable-hook removes filename from disabledHooks", async () => {
     const home = await createTempHome()
-    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     await runSwiz(["settings", "disable-hook", "stop-lint-staged.ts"], home)
-    const result = await runSwiz(["settings", "enable-hook", "stop-github-ci.ts"], home)
+    const result = await runSwiz(["settings", "enable-hook", "stop-ship-checklist.ts"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Re-enabled hook: stop-github-ci.ts")
+    expect(result.stdout).toContain("Re-enabled hook: stop-ship-checklist.ts")
 
     const configPath = join(home, ".swiz", "settings.json")
     const text = await readFile(configPath, "utf-8")
@@ -671,26 +671,26 @@ describe("swiz settings", () => {
 
   test("enable-hook is a no-op when hook is not in the disabled list", async () => {
     const home = await createTempHome()
-    const result = await runSwiz(["settings", "enable-hook", "stop-github-ci.ts"], home)
+    const result = await runSwiz(["settings", "enable-hook", "stop-ship-checklist.ts"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("not in the disabled list")
   })
 
   test("settings show includes disabled-hooks line when hooks are disabled", async () => {
     const home = await createTempHome()
-    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-github-ci\.ts \(global\)/)
+    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-ship-checklist\.ts \(global\)/)
   })
 
   test("settings show lists multiple disabled hooks", async () => {
     const home = await createTempHome()
-    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     await runSwiz(["settings", "disable-hook", "stop-lint-staged.ts"], home)
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("stop-github-ci.ts, stop-lint-staged.ts")
+    expect(result.stdout).toContain("stop-ship-checklist.ts, stop-lint-staged.ts")
   })
 
   test("collaboration-mode set/reject/show", async () => {
@@ -846,10 +846,10 @@ describe("readProjectSettings", () => {
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(
       join(dir, ".swiz", "config.json"),
-      JSON.stringify({ disabledHooks: ["stop-github-ci.ts", "stop-lint-staged.ts"] })
+      JSON.stringify({ disabledHooks: ["stop-ship-checklist.ts", "stop-lint-staged.ts"] })
     )
     const settings = await readProjectSettings(dir)
-    expect(settings?.disabledHooks).toEqual(["stop-github-ci.ts", "stop-lint-staged.ts"])
+    expect(settings?.disabledHooks).toEqual(["stop-ship-checklist.ts", "stop-lint-staged.ts"])
   })
 
   test("ignores disabledHooks when entries contain non-string values", async () => {
@@ -857,7 +857,7 @@ describe("readProjectSettings", () => {
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(
       join(dir, ".swiz", "config.json"),
-      JSON.stringify({ disabledHooks: ["stop-github-ci.ts", 42] })
+      JSON.stringify({ disabledHooks: ["stop-ship-checklist.ts", 42] })
     )
     const settings = await readProjectSettings(dir)
     expect(settings?.disabledHooks).toBeUndefined()
@@ -1459,7 +1459,7 @@ describe("readSwizSettings schema constraint enforcement", () => {
 
   test("disabledHooks with empty string entries falls back to undefined", async () => {
     const home = await createTempHome()
-    await writeSettings(home, { disabledHooks: ["stop-github-ci.ts", ""] })
+    await writeSettings(home, { disabledHooks: ["stop-ship-checklist.ts", ""] })
     const settings = await readSwizSettings({ home })
     // Empty string fails z.string().min(1) → entire disabledHooks falls back to undefined
     expect(settings.disabledHooks).toBeUndefined()
@@ -1467,9 +1467,9 @@ describe("readSwizSettings schema constraint enforcement", () => {
 
   test("disabledHooks with all valid entries is accepted", async () => {
     const home = await createTempHome()
-    await writeSettings(home, { disabledHooks: ["stop-github-ci.ts", "stop-git-status.ts"] })
+    await writeSettings(home, { disabledHooks: ["stop-ship-checklist.ts", "stop-git-status.ts"] })
     const settings = await readSwizSettings({ home })
-    expect(settings.disabledHooks).toEqual(["stop-github-ci.ts", "stop-git-status.ts"])
+    expect(settings.disabledHooks).toEqual(["stop-ship-checklist.ts", "stop-git-status.ts"])
   })
 
   test("memoryLineThreshold non-integer falls back to default", async () => {
@@ -1492,14 +1492,14 @@ describe("readSwizSettings schema constraint enforcement", () => {
       narratorSpeed: 300,
       prAgeGateMinutes: 5,
       pushCooldownMinutes: 10,
-      disabledHooks: ["stop-github-ci.ts"],
+      disabledHooks: ["stop-ship-checklist.ts"],
       pushGate: true,
     })
     const settings = await readSwizSettings({ home })
     expect(settings.narratorSpeed).toBe(300)
     expect(settings.prAgeGateMinutes).toBe(5)
     expect(settings.pushCooldownMinutes).toBe(10)
-    expect(settings.disabledHooks).toEqual(["stop-github-ci.ts"])
+    expect(settings.disabledHooks).toEqual(["stop-ship-checklist.ts"])
     expect(settings.pushGate).toBe(true)
   })
 })

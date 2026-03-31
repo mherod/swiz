@@ -686,8 +686,8 @@ describe("stop-git-status (extended)", () => {
   })
 })
 
-describe("stop-github-ci", () => {
-  const HOOK = "hooks/stop-github-ci.ts"
+describe("stop-ship-checklist", () => {
+  const HOOK = "hooks/stop-ship-checklist.ts"
 
   test("non-git directory exits cleanly", async () => {
     const tmp = await createTempDir()

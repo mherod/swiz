@@ -1311,8 +1311,8 @@ describe("stop-pr-description: positive paths", () => {
   })
 })
 
-describe("stop-github-ci: positive paths", () => {
-  const HOOK = "hooks/stop-github-ci.ts"
+describe("stop-ship-checklist: positive paths", () => {
+  const HOOK = "hooks/stop-ship-checklist.ts"
 
   test("repo without GitHub remote allows stop", async () => {
     const repo = await createGitRepo()

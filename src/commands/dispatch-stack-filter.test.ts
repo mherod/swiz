@@ -10,7 +10,7 @@ describe("filterStackHooks", () => {
   it("returns groups unchanged when detectedStacks is empty", () => {
     const groups = makeGroups([
       { file: "stop-lint-staged.ts", stacks: ["bun", "node"] },
-      { file: "stop-github-ci.ts" },
+      { file: "stop-ship-checklist.ts" },
     ])
     const result = filterStackHooks(groups, [])
     expect(result).toEqual(groups)

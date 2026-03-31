@@ -103,21 +103,21 @@ describe("disableHook", () => {
   test("adds hook to global disabled list", () =>
     withTmpHome(async (home) => {
       const store = new SettingsStore({ home })
-      const { alreadyDisabled } = await store.disableHook("global", "stop-github-ci.ts")
+      const { alreadyDisabled } = await store.disableHook("global", "stop-ship-checklist.ts")
       expect(alreadyDisabled).toBe(false)
       const settings = await store.readGlobal()
-      expect(settings.disabledHooks).toContain("stop-github-ci.ts")
+      expect(settings.disabledHooks).toContain("stop-ship-checklist.ts")
     }))
 
   test("returns alreadyDisabled=true when hook is already in global list", () =>
     withTmpHome(async (home) => {
       const store = new SettingsStore({ home })
-      await store.disableHook("global", "stop-github-ci.ts")
-      const { alreadyDisabled } = await store.disableHook("global", "stop-github-ci.ts")
+      await store.disableHook("global", "stop-ship-checklist.ts")
+      const { alreadyDisabled } = await store.disableHook("global", "stop-ship-checklist.ts")
       expect(alreadyDisabled).toBe(true)
       // List should not have duplicate entries
       const settings = await store.readGlobal()
-      expect(settings.disabledHooks?.filter((h) => h === "stop-github-ci.ts")).toHaveLength(1)
+      expect(settings.disabledHooks?.filter((h) => h === "stop-ship-checklist.ts")).toHaveLength(1)
     }))
 
   test("adds hook to project disabled list", () =>
@@ -138,11 +138,11 @@ describe("enableHook", () => {
   test("removes hook from global disabled list", () =>
     withTmpHome(async (home) => {
       const store = new SettingsStore({ home })
-      await store.disableHook("global", "stop-github-ci.ts")
-      const { wasEnabled } = await store.enableHook("global", "stop-github-ci.ts")
+      await store.disableHook("global", "stop-ship-checklist.ts")
+      const { wasEnabled } = await store.enableHook("global", "stop-ship-checklist.ts")
       expect(wasEnabled).toBe(true)
       const settings = await store.readGlobal()
-      expect(settings.disabledHooks ?? []).not.toContain("stop-github-ci.ts")
+      expect(settings.disabledHooks ?? []).not.toContain("stop-ship-checklist.ts")
     }))
 
   test("returns wasEnabled=false when hook is not in global list", () =>
