@@ -171,7 +171,10 @@ interface ProjectHealth {
 
 async function spawnLine(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(proc.stdout).text()
+  const [out] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   return out.trim()
 }

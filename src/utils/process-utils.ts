@@ -63,8 +63,8 @@ export async function spawnWithTimeout(
       stdout: "pipe",
       stderr: "pipe",
     })
-    void proc.stdin.write(stdin)
-    void proc.stdin.end()
+    await proc.stdin.write(stdin)
+    await proc.stdin.end()
     return finish(proc)
   }
 

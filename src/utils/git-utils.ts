@@ -330,6 +330,7 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
 
 /**
  * Single-line git summary for agent context (PostToolUse / status line style).
+ * @param gitStatus
  * @param collabMode - When `"auto"`, the collaboration suffix is omitted.
  */
 export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {

@@ -19,6 +19,7 @@ export interface SessionDeletionResult {
 
 export async function defaultTrashPath(path: string): Promise<boolean> {
   const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode === 0
 }

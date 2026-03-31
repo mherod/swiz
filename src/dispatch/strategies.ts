@@ -1,5 +1,5 @@
 import { merge, unset } from "lodash-es"
-import { hookOutputSchema } from "../../hooks/schemas.ts"
+import { type HookOutput, hookOutputSchema } from "../../hooks/schemas.ts"
 import type { HookGroup } from "../manifest.ts"
 import {
   getHookSpecificOutput,
@@ -39,8 +39,8 @@ export interface HookStrategyContext {
 }
 
 /** Interface for hook execution strategies. */
-export interface HookExecutionStrategy {
-  execute(ctx: HookStrategyContext): Promise<Record<string, unknown>>
+export interface HookExecutionStrategy<T = Record<string, unknown>> {
+  execute(ctx: HookStrategyContext): Promise<T>
 }
 
 /**
@@ -202,7 +202,7 @@ class PreToolUseStrategy implements HookExecutionStrategy {
 export function processBlockingResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
   executions: HookExecution[],
-  finalResponse: Record<string, unknown>,
+  finalResponse: HookOutput,
   hookEventName: string
 ): void {
   const contexts: string[] = []

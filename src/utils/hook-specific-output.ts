@@ -6,15 +6,27 @@
  */
 
 import { merge } from "lodash-es"
+import {
+  type HookSpecificOutput,
+  hookOutputSchema,
+  hookSpecificOutputSchema,
+} from "../../hooks/schemas.ts"
 
 /** Non-array plain object `hookSpecificOutput` from a hook or dispatch envelope. */
-export function getHookSpecificOutput(
-  resp: Record<string, unknown>
-): Record<string, unknown> | undefined {
+export function getHookSpecificOutput(resp: {
+  hookSpecificOutput?: unknown
+  [key: string]: unknown
+}): HookSpecificOutput | undefined {
   const hso = resp.hookSpecificOutput
-  return hso && typeof hso === "object" && !Array.isArray(hso)
-    ? (hso as Record<string, unknown>)
-    : undefined
+  if (hso && typeof hso === "object")
+    if (!Array.isArray(hso)) {
+      return hso as Record<string, unknown>
+    } else {
+      return undefined
+    }
+  else {
+    return undefined
+  }
 }
 
 /**
@@ -50,38 +62,41 @@ export function mergeHookSpecificOutputClone(
   return base
 }
 
-export function hsoPreToolUseAllow(permissionDecisionReason: string): Record<string, unknown> {
-  return {
+export function hsoPreToolUseAllow(permissionDecisionReason: string): HookSpecificOutput {
+  return hookOutputSchema.parse({
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
     permissionDecisionReason,
-  }
+  })
 }
 
-export function hsoPreToolUseDeny(permissionDecisionReason: string): Record<string, unknown> {
-  return {
+export function hsoPreToolUseDeny(permissionDecisionReason: string): HookSpecificOutput {
+  return hookOutputSchema.parse({
     hookEventName: "PreToolUse",
     permissionDecision: "deny",
     permissionDecisionReason,
-  }
+  })
 }
 
 export function hsoPreToolUseAllowContextual(
   effectiveReason: string | undefined,
   additionalContext: string | undefined
-): Record<string, unknown> {
-  return {
+): HookSpecificOutput {
+  return hookSpecificOutputSchema.parse({
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
     ...(effectiveReason ? { permissionDecisionReason: effectiveReason } : {}),
     ...(additionalContext ? { additionalContext } : {}),
-  }
+  })
 }
 
 export function hsoPreToolUseAllowWithUpdatedInput(
   updatedInput: Record<string, unknown>,
   reason?: string
-): Record<string, unknown> {
+): HookSpecificOutput & {
+  updatedInput: Record<string, unknown>
+  modifiedInput: Record<string, unknown>
+} {
   return {
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
@@ -94,28 +109,28 @@ export function hsoPreToolUseAllowWithUpdatedInput(
 export function hsoContextEvent(
   hookEventName: string,
   additionalContext: string
-): Record<string, unknown> {
-  return { hookEventName, additionalContext }
+): Partial<HookSpecificOutput> {
+  return hookSpecificOutputSchema.parse({ hookEventName, additionalContext })
 }
 
-export function hsoPostToolUseDenyBlock(reason: string): Record<string, unknown> {
-  return {
+export function hsoPostToolUseDenyBlock(reason: string): HookSpecificOutput {
+  return hookSpecificOutputSchema.parse({
     hookEventName: "PostToolUse",
     permissionDecision: "deny",
     permissionDecisionReason: reason,
     additionalContext: reason,
-  }
+  })
 }
 
 /** Merged PreToolUse allow envelope from aggregated hints / contexts (dispatch strategy). */
 export function hsoPreToolUseMergedAllow(fields: {
   hintsJoined?: string
   contextsJoined?: string
-}): Record<string, unknown> {
-  return {
+}): HookSpecificOutput {
+  return hookSpecificOutputSchema.parse({
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
     ...(fields.hintsJoined ? { permissionDecisionReason: fields.hintsJoined } : {}),
     ...(fields.contextsJoined ? { additionalContext: fields.contextsJoined } : {}),
-  }
+  })
 }

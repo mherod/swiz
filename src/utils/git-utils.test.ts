@@ -681,3 +681,107 @@ describe("classifyChangeScope", () => {
     expect(result.isSmallFix).toBe(true)
   })
 })
+
+// ── buildGitContextLine ─────────────────────────────────────────────────────
+
+function makeStatus(overrides: Partial<GitStatusV2> = {}): GitStatusV2 {
+  return {
+    branch: "main",
+    total: 0,
+    modified: 0,
+    added: 0,
+    deleted: 0,
+    untracked: 0,
+    lines: [],
+    ahead: 0,
+    behind: 0,
+    upstream: "origin/main",
+    upstreamGone: false,
+    ...overrides,
+  }
+}
+
+import { buildGitContextLine, type GitStatusV2 } from "./git-utils.ts"
+
+describe("buildGitContextLine", () => {
+  test("includes branch name", () => {
+    const result = buildGitContextLine(makeStatus({ branch: "feat/foo" }))
+    expect(result).toContain("[git] branch: feat/foo")
+  })
+
+  test("includes upstream ref when available", () => {
+    const result = buildGitContextLine(makeStatus({ upstream: "origin/main" }))
+    expect(result).toContain("upstream: origin/main")
+    expect(result).not.toContain("no upstream")
+    expect(result).not.toContain("(gone)")
+  })
+
+  test("shows no upstream when upstream is null", () => {
+    const result = buildGitContextLine(makeStatus({ upstream: null }))
+    expect(result).toContain("no upstream")
+  })
+
+  test("shows gone upstream", () => {
+    const result = buildGitContextLine(
+      makeStatus({ upstream: "origin/deleted-branch", upstreamGone: true })
+    )
+    expect(result).toContain("upstream: origin/deleted-branch (gone)")
+  })
+
+  test("includes uncommitted file count", () => {
+    const result = buildGitContextLine(makeStatus({ total: 3 }))
+    expect(result).toContain("uncommitted files: 3")
+  })
+
+  test("shows clean state with zero uncommitted", () => {
+    const result = buildGitContextLine(makeStatus({ total: 0 }))
+    expect(result).toContain("uncommitted files: 0")
+  })
+
+  test("shows ahead count as unpushed commits", () => {
+    const result = buildGitContextLine(makeStatus({ ahead: 2 }))
+    expect(result).toContain("2 unpushed commit(s)")
+  })
+
+  test("shows behind count", () => {
+    const result = buildGitContextLine(makeStatus({ behind: 5 }))
+    expect(result).toContain("5 behind remote")
+  })
+
+  test("shows diverged when both ahead and behind", () => {
+    const result = buildGitContextLine(makeStatus({ ahead: 3, behind: 2 }))
+    expect(result).toContain("diverged: 3 ahead, 2 behind")
+  })
+
+  test("omits ahead/behind when both zero", () => {
+    const result = buildGitContextLine(makeStatus({ ahead: 0, behind: 0 }))
+    expect(result).not.toContain("unpushed")
+    expect(result).not.toContain("behind")
+    expect(result).not.toContain("diverged")
+  })
+
+  test("omits collab mode when auto", () => {
+    const result = buildGitContextLine(makeStatus(), "auto")
+    expect(result).not.toContain("collab:")
+  })
+
+  test("includes collab mode when not auto", () => {
+    const result = buildGitContextLine(makeStatus(), "solo")
+    expect(result).toContain("collab: solo")
+  })
+
+  test("combines all fields for a full status line", () => {
+    const result = buildGitContextLine(
+      makeStatus({
+        branch: "feat/issue-42",
+        upstream: "origin/feat/issue-42",
+        total: 2,
+        ahead: 1,
+      }),
+      "team"
+    )
+    expect(result).toBe(
+      "[git] branch: feat/issue-42 | upstream: origin/feat/issue-42 | uncommitted files: 2 | 1 unpushed commit(s) | collab: team"
+    )
+  })
+})

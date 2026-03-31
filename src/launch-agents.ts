@@ -18,6 +18,7 @@ export async function isLaunchAgentLoaded(label: string): Promise<boolean> {
     stdout: "pipe",
     stderr: "pipe",
   })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode === 0
 }
@@ -27,6 +28,7 @@ export async function loadLaunchAgent(plistPath: string): Promise<number> {
     stdout: "pipe",
     stderr: "pipe",
   })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode ?? 1
 }
@@ -36,6 +38,7 @@ export async function unloadLaunchAgent(plistPath: string): Promise<number> {
     stdout: "pipe",
     stderr: "pipe",
   })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode ?? 1
 }

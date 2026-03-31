@@ -26,6 +26,12 @@ import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { GIT_COMMIT_RE, GIT_PUSH_DELETE_RE, GIT_PUSH_RE } from "../src/utils/git-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
+/** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
+function formatSessionSkillsForReason(skills: string[]): string {
+  if (skills.length === 0) return "Skills used this session: (none)"
+  return `Skills used this session: ${skills.map((s) => `/${s}`).join(", ")}`
+}
+
 const pretoolusSkillInvocationGate: SwizHook = {
   name: "pretooluse-skill-invocation-gate",
   event: "preToolUse",
@@ -60,7 +66,9 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const invokedSkills = await getSkillsUsedForCurrentSession(input)
 
     if (invokedSkills.includes(requiredSkill)) {
-      return preToolUseAllow(`/${requiredSkill} skill was invoked in this session`)
+      return preToolUseAllow(
+        `/${requiredSkill} skill was invoked in this session.\n${formatSessionSkillsForReason(invokedSkills)}`
+      )
     }
 
     // ── Block with actionable instructions ────────────────────────────────────────
@@ -69,6 +77,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     return preToolUseDeny(
       `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
+        `${formatSessionSkillsForReason(invokedSkills)}\n\n` +
         formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {
           header: `The /${requiredSkill} skill has not been invoked in this session:`,
         }) +

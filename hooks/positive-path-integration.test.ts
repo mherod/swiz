@@ -340,8 +340,8 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
 // PostToolUse hooks: positive paths — context injection
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("posttooluse-git-status: positive paths", () => {
-  const HOOK = "hooks/posttooluse-git-status.ts"
+describe("posttooluse-git-context: status injection", () => {
+  const HOOK = "hooks/posttooluse-git-context.ts"
 
   test("emits branch and uncommitted count in git repo", async () => {
     const repo = await createGitRepo()

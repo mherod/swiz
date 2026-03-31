@@ -343,8 +343,8 @@ describe("pretooluse-task-subject-validation", () => {
 // PostToolUse hooks: negative paths
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("posttooluse-git-status", () => {
-  const HOOK = "hooks/posttooluse-git-status.ts"
+describe("posttooluse-git-context: status negative paths", () => {
+  const HOOK = "hooks/posttooluse-git-context.ts"
 
   test("empty cwd exits cleanly", async () => {
     const r = await runHook(HOOK, { cwd: "" })

@@ -653,6 +653,7 @@ export function isTerminalTaskStatus(status: string): boolean {
 
 const defaultTaskExecutor: (args: string[]) => Promise<number> = async (args) => {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode ?? 1
 }

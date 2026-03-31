@@ -26,9 +26,10 @@ export async function spawnSpeak(
   try {
     const proc = Bun.spawn(speakArgs, {
       stdin: new Response(text).body!,
+      stdout: "pipe",
       stderr: "pipe",
     })
-    await new Response(proc.stderr).text()
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
     await proc.exited
   } catch {
     // Silent failure — TTS errors must not affect hook or command behaviour

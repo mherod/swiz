@@ -49,6 +49,7 @@ if (!text && !diagnose) {
 async function binaryExists(name: string): Promise<boolean> {
   try {
     const proc = Bun.spawn(["which", name], { stdout: "pipe", stderr: "pipe" })
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
     await proc.exited
     return proc.exitCode === 0
   } catch {
@@ -59,8 +60,11 @@ async function binaryExists(name: string): Promise<boolean> {
 /** Safely spawn a command, returning false on failure. */
 async function safeSpawn(cmd: string[]): Promise<boolean> {
   try {
-    const proc = Bun.spawn(cmd, { stderr: "pipe" })
-    const stderr = await new Response(proc.stderr).text()
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+    const [_stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     if (proc.exitCode !== 0) {
       process.stderr.write(`${cmd[0]} exited ${proc.exitCode}: ${stderr.trim()}\n`)

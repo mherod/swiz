@@ -38,7 +38,7 @@ describe("filterDisabledHooks", () => {
       {
         event: "postToolUse",
         matcher: "Bash",
-        hooks: [{ file: "posttooluse-pr-context.ts" }, { file: "posttooluse-git-status.ts" }],
+        hooks: [{ file: "posttooluse-pr-context.ts" }, { file: "posttooluse-git-context.ts" }],
       },
     ]
     const result = filterDisabledHooks(
@@ -47,7 +47,7 @@ describe("filterDisabledHooks", () => {
     )
     expect(result).toHaveLength(2)
     expect(result[0]?.hooks.map((h) => hookIdentifier(h))).toEqual(["stop-git-status.ts"])
-    expect(result[1]?.hooks.map((h) => hookIdentifier(h))).toEqual(["posttooluse-git-status.ts"])
+    expect(result[1]?.hooks.map((h) => hookIdentifier(h))).toEqual(["posttooluse-git-context.ts"])
   })
 
   it("preserves group matcher when filtering", () => {

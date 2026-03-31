@@ -36,8 +36,8 @@ async function dispatch(
       },
     }
   )
-  void proc.stdin.write(JSON.stringify(payload))
-  void proc.stdin.end()
+  await proc.stdin.write(JSON.stringify(payload))
+  await proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
   const stderr = await new Response(proc.stderr).text()
   await proc.exited
@@ -225,8 +225,8 @@ describe("dispatch replay", () => {
         AI_TEST_NO_BACKEND: "1",
       },
     })
-    void proc.stdin.write(JSON.stringify(payload))
-    void proc.stdin.end()
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     const stderr = await new Response(proc.stderr).text()
     await proc.exited

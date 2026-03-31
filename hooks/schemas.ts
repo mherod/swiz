@@ -684,6 +684,15 @@ export const geminiNotificationInputSchema = hookBaseSchema.extend({
 
 export type GeminiNotificationInput = z.infer<typeof geminiNotificationInputSchema>
 
+export const hookSpecificOutputSchema = z.looseObject({
+  hookEventName: z.string().optional(),
+  additionalContext: z.string().optional(),
+  permissionDecision: z.enum(["allow", "deny"]).optional(),
+  permissionDecisionReason: z.string().optional(),
+})
+
+export type HookSpecificOutput = z.infer<typeof hookSpecificOutputSchema>
+
 /**
  * Gemini hook output envelope.
  * Decision uses `"allow"/"deny"` (not `"approve"/"block"` like Claude).
@@ -706,14 +715,7 @@ export const geminiHookOutputSchema = z
     updatedInput: z.record(z.string(), z.unknown()).optional(),
     /** BeforeModel: mock response to use instead of calling LLM. */
     mockResponse: z.string().optional(),
-    hookSpecificOutput: z
-      .looseObject({
-        hookEventName: z.string().optional(),
-        additionalContext: z.string().optional(),
-        permissionDecision: z.enum(["allow", "deny"]).optional(),
-        permissionDecisionReason: z.string().optional(),
-      })
-      .optional(),
+    hookSpecificOutput: hookSpecificOutputSchema.optional(),
   })
   .refine(
     (o) =>

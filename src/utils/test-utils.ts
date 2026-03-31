@@ -89,8 +89,8 @@ export async function runHook(
     stderr: "pipe",
     env,
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -177,8 +177,8 @@ export async function runBashHook(
     cwd: opts.cwd,
     env: { ...process.env, SWIZ_DAEMON_PORT: "19999" },
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -223,8 +223,8 @@ export async function runFileEditHook(
     stdout: "pipe",
     stderr: "pipe",
   })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
 
   const rawOutput = await new Response(proc.stdout).text()
   await proc.exited

@@ -6,8 +6,8 @@
 // Respects per-gate settings: gitStatusGate, githubCiGate, personalRepoIssuesGate.
 
 import type { ActionPlanItem } from "../src/action-plan.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettingsForToolHook } from "../src/utils/hook-effective-settings.ts"
 import {
   blockStopObj,

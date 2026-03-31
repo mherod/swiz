@@ -57,10 +57,6 @@ async function denyAutoSteerOrBlock(
   return preToolUseDeny(reason)
 }
 
-function denyRequiredTasks(reason: string): SwizHookOutput {
-  return preToolUseDeny(reason)
-}
-
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
@@ -185,7 +181,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      return denyRequiredTasks(
+      return preToolUseDeny(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -200,7 +196,7 @@ function checkNoTasks(
       )
     }
 
-    return denyRequiredTasks(
+    return preToolUseDeny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
@@ -247,7 +243,7 @@ function checkTaskMinimums(
     actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
   }
 
-  return denyRequiredTasks(
+  return preToolUseDeny(
     `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
       `Current:\n` +
       `  • Incomplete tasks: ${incompleteTasks.length}\n` +

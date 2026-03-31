@@ -153,9 +153,9 @@ describe("manifest.ts", () => {
       expect(basePostToolUse).toBeDefined()
     })
 
-    it("postToolUse has git-status hook", () => {
+    it("postToolUse has git-context hook", () => {
       const basePostToolUse = manifest.find((g) => g.event === "postToolUse" && !g.matcher)
-      expect(basePostToolUse?.hooks.some((h) => hookIdentifier(h).includes("git-status"))).toBe(
+      expect(basePostToolUse?.hooks.some((h) => hookIdentifier(h).includes("git-context"))).toBe(
         true
       )
     })

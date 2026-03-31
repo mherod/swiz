@@ -24,8 +24,8 @@ async function runHook(
     cwd: process.cwd(),
     env: { ...process.env, ...env },
   })
-  void proc.stdin.write(JSON.stringify(payload))
-  void proc.stdin.end()
+  await proc.stdin.write(JSON.stringify(payload))
+  await proc.stdin.end()
   const [stdout] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -191,8 +191,8 @@ describe("pretooluse-require-tasks hook", () => {
       stderr: "pipe",
       cwd: process.cwd(),
     })
-    void proc.stdin.write("not valid json {{{")
-    void proc.stdin.end()
+    await proc.stdin.write("not valid json {{{")
+    await proc.stdin.end()
     const [stdout] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),

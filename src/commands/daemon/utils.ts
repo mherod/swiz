@@ -54,7 +54,10 @@ export async function listDaemonPids(port: number): Promise<number[]> {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const out = await new Response(proc.stdout).text()
+  const [out] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   if (proc.exitCode !== 0) return []
   return [

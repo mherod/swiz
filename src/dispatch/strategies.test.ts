@@ -285,7 +285,7 @@ describe("processBlockingResults", () => {
   it("sets hookSpecificOutput for PostToolUse-style context-only aggregation", () => {
     const results = [
       {
-        execution: makeHookExecution("posttooluse-git-status.ts"),
+        execution: makeHookExecution("posttooluse-git-context.ts"),
         parsed: {
           hookSpecificOutput: {
             hookEventName: "PostToolUse",

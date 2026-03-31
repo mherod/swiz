@@ -179,14 +179,13 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts`             | Blocks all `swiz tasks` CLI usage in Claude Code except `swiz tasks adopt` (orphan recovery). Requires native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) for every other task operation.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-### PostToolUse (21)
+### PostToolUse (20)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
 | Hook | What it does |
 |------|-------------|
-| `posttooluse-git-status.ts` | Injects current git status context after every tool use — branch, upstream tracking ref (including no-upstream and gone-upstream states), uncommitted file count, and ahead/behind/diverged relationship. Rich enough that the agent rarely needs follow-up `git status` or `git branch` calls. |
-| `posttooluse-git-context.ts` | After any git Bash command, injects the active swiz git settings (trunk mode, push gate, collaboration mode, strict-no-direct-main) and locally-synced branch protection rules from the SQLite issue store. Keeps the agent aware of repo policy without repeated settings queries. |
+| `posttooluse-git-context.ts` | Injects current git status context after every tool use (branch, upstream, uncommitted count, ahead/behind). After git Bash commands, also injects active swiz settings (trunk mode, push gate, collab mode) and synced branch protection rules. Keeps the agent informed of repo state and policy without repeated status/settings queries. |
 | `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |

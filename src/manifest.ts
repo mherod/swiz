@@ -6,7 +6,6 @@
 
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
-import posttoolusGitStatus from "../hooks/posttooluse-git-status.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
 import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
@@ -316,7 +315,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     hooks: [
-      { hook: posttoolusGitStatus },
+      { hook: posttoolusGitContext },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
     ],
@@ -352,7 +351,6 @@ export const manifest: HookGroup[] = [
     hooks: [
       { hook: posttoolusPrContext },
       { hook: posttoolusePrCreateRefine },
-      { hook: posttoolusGitContext },
       { hook: posttooluseGitTaskAutocomplete },
       { hook: posttoolusePostPushCooldown },
       { hook: posttoolusVerifyPush },
