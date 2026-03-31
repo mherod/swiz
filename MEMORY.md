@@ -4,6 +4,8 @@ Prescriptive workflow rules for this repository (complements `CLAUDE.md`).
 
 **Stop-hook triad (verbatim mapping):** **(1)** “Wait for CI to complete, then check results” (including `task #unkn-1`) → § steps **1–2** below; **(2)** “If the work is already done, use TaskUpdate…” → § step **3** + evidence prefixes; **(3)** “If the work is still needed…” → ship or task work before stop. **DO** run **(1)–(3)** right after push, not only when this banner appears.
 
+**DO** (workflow enforcement): If a hook (e.g. `stop-ship-checklist`) presents a **Single action plan**, you MUST follow all steps in the listed order (e.g. commit, push, update-memory) before attempting to stop again. Treat this structured sequence as a mandatory gate for session closure. **DON'T** skip steps or rearrange the plan unless the hook explicitly allows it.
+
 **DO (proactive habit):** Treat **push → poll CI for that SHA → read `conclusion`/jobs → reconcile or complete tasks** as one chained routine—same three steps the banner lists—so “finish session” never means “push and walk away.” **DON'T** treat CI wait + task closure as a separate phase you’ll “do before stop”; do them **with** the push while context is fresh.
 
 **DO** (for **Cause to capture** / **update-memory** when a hook reports *missing or unstructured workflow behavior* and the three “tasks need your attention” lines): treat that text as an order to run § **Git and session closure** + § **Stop hook** numbered steps **1–3** immediately—same sequence as a proactive post-push close. **DON'T** treat **`task #unkn-1`** or an informal cause line as permission to skip CI polling, **`gh run view` job JSON**, or **TaskUpdate** / task evidence.
