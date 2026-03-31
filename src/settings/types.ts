@@ -119,7 +119,7 @@ export interface ProjectSwizSettings {
   auditStrictness?: AuditStrictness
   /** Warn when an in-progress task exceeds this runtime. */
   taskDurationWarningMinutes?: number
-  /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
+  /** Hook filenames to skip for this project (e.g. "stop-ship-checklist.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
   plugins?: string[]
@@ -212,7 +212,7 @@ export interface SwizSettings {
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>
-  /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
+  /** Global hook filenames to skip (e.g. "stop-ship-checklist.ts") */
   disabledHooks?: string[]
   /**
    * Optional HMAC secret used to verify `X-Hub-Signature-256` on incoming GitHub webhook payloads

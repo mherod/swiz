@@ -1356,38 +1356,135 @@ async function skillDiffSummary(activePath: string, overriddenPath: string): Pro
   }
 }
 
-async function fixSkillConflicts(conflicts: SkillConflict[]): Promise<void> {
+async function fixSkillConflicts(conflicts: SkillConflict[], fix: boolean): Promise<void> {
   if (conflicts.length === 0) return
-  console.log(`  ${BOLD}Skill conflicts detected...${RESET}\n`)
 
-  for (const conflict of conflicts) {
-    for (const overridden of conflict.overridden) {
-      if (await areSkillsSame(conflict.active, overridden)) {
-        console.log(
-          `  ${YELLOW}!${RESET} ${conflict.name}: redundant version at ${displayPath(dirname(overridden.path))} — remove manually`
-        )
-      } else {
-        const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
-        const diffSuffix = diffStats ? ` (${diffStats})` : ""
-        console.log(
-          `  ${YELLOW}!${RESET} ${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version${diffSuffix} — resolve manually`
-        )
+  if (!fix) {
+    for (const conflict of conflicts) {
+      for (const overridden of conflict.overridden) {
+        if (await areSkillsSame(conflict.active, overridden)) {
+          console.log(
+            `  ${YELLOW}!${RESET} ${conflict.name}: redundant version at ${displayPath(dirname(overridden.path))} — remove manually`
+          )
+        } else {
+          const diffStats = await skillDiffSummary(conflict.active.path, overridden.path)
+          const diffSuffix = diffStats ? ` (${diffStats})` : ""
+          console.log(
+            `  ${YELLOW}!${RESET} ${conflict.name}: version at ${displayPath(dirname(overridden.path))} differs from active version${diffSuffix} — resolve manually`
+          )
+        }
       }
     }
+    console.log()
+    return
   }
-  console.log()
+
+  console.log(`  ${BOLD}Skill conflicts detected${RESET}. Removing overridden versions...\n`)
+  for (const conflict of conflicts) {
+    for (const overridden of conflict.overridden) {
+      const skillDir = dirname(overridden.path)
+      console.log(
+        `  ${GREEN}✓${RESET} Removed ${displayPath(skillDir)} (shadowed by ${displayPath(dirname(conflict.active.path))})`
+      )
+      await defaultTrashPath(skillDir)
+    }
+  }
+  console.log(`  ${GREEN}✓${RESET} Skill conflicts resolved${RESET}\n`)
 }
 
-async function fixOrphanedHookScripts(scripts: string[]): Promise<void> {
+async function fixOrphanedHookScripts(scripts: string[], fix: boolean): Promise<void> {
   if (scripts.length === 0) return
-  console.log(`  ${BOLD}Orphaned hook scripts detected...${RESET}\n`)
+
+  if (!fix) {
+    for (const script of scripts) {
+      console.log(
+        `  ${YELLOW}!${RESET} ${script}: not referenced by manifest or agent config — remove manually`
+      )
+    }
+    console.log()
+    return
+  }
+
+  console.log(`  ${BOLD}Orphaned hook scripts detected${RESET}. Adding to manifest...\n`)
+
+  const manifestPath = join(process.cwd(), "src", "manifest.ts")
+  let manifestContent: string
+  try {
+    manifestContent = await Bun.file(manifestPath).text()
+  } catch (err) {
+    console.log(`  ${RED}✗${RESET} Failed to read manifest.ts: ${err}`)
+    return
+  }
 
   for (const script of scripts) {
-    console.log(
-      `  ${YELLOW}!${RESET} ${script}: not referenced by manifest or agent config — remove manually`
+    // Derive variable name from filename: stop-git-status.ts -> stopGitStatus
+    const varName = script
+      .replace(/\.[^.]+$/, "") // remove extension
+      .replace(/-(\w)/g, (_, c) => c.toUpperCase())
+    const importLine = `import ${varName} from "../hooks/${script}"`
+
+    // Add import if not present
+    if (!manifestContent.includes(importLine)) {
+      const debugLogImport = 'import { debugLog } from "./debug.ts"'
+      if (manifestContent.includes(debugLogImport)) {
+        manifestContent = manifestContent.replace(
+          debugLogImport,
+          `${importLine}\n${debugLogImport}`
+        )
+      } else {
+        // Append at end of imports
+        manifestContent = `${manifestContent}\n${importLine}`
+      }
+    }
+
+    // Determine event from hook file content
+    const hookPath = join(process.cwd(), "hooks", script)
+    let hookContent: string
+    try {
+      hookContent = await Bun.file(hookPath).text()
+    } catch {
+      console.log(`  ${YELLOW}!${RESET} Cannot read ${script}, skipping`)
+      continue
+    }
+    const eventMatch = hookContent.match(/event:\s*"([^"]+)"/)
+    const event = eventMatch ? eventMatch[1] : null
+    if (!event) {
+      console.log(`  ${YELLOW}!${RESET} Could not determine event for ${script}, skipping`)
+      continue
+    }
+
+    // Add hook entry to the appropriate group in manifest
+    const groupPattern = new RegExp(
+      `(\\{\\s*event:\\s*"${event}"[^}]*?hooks:\\s*\\[)(.*?)(\\])`,
+      "s"
     )
+    if (!groupPattern.test(manifestContent)) {
+      console.log(`  ${YELLOW}!${RESET} No event group for "${event}" in manifest, skipping`)
+      continue
+    }
+
+    // Check if hook already present
+    if (manifestContent.includes(`hook: ${varName}`)) {
+      console.log(`  ${YELLOW}!${RESET} ${script} already in manifest, skipping`)
+      continue
+    }
+
+    manifestContent = manifestContent.replace(groupPattern, (_match, p1, p2, p3) => {
+      // Insert new entry before closing bracket, preserving indentation
+      const newEntry = `\n      { hook: ${varName} },`
+      return p1 + p2 + newEntry + p3
+    })
+
+    console.log(`  ${GREEN}✓${RESET} Added ${script} to manifest (event: ${event})`)
   }
-  console.log()
+
+  // Write updated manifest
+  try {
+    await Bun.write(manifestPath, manifestContent)
+    console.log(`  ${GREEN}✓${RESET} Orphaned hooks added to manifest${RESET}\n`)
+  } catch (err) {
+    console.log(`  ${RED}✗${RESET} Failed to write manifest.ts: ${err}`)
+  }
 }
 
 async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<void> {
@@ -1419,8 +1516,8 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
   if (fix) {
     await fixStaleConfigs(results)
     await fixMissingConfigs()
-    await fixOrphanedHookScripts(orphanedScripts)
-    await fixSkillConflicts(skillConflicts)
+    await fixOrphanedHookScripts(orphanedScripts, fix)
+    await fixSkillConflicts(skillConflicts, fix)
     await fixInvalidSkills(invalidSkillEntries)
     await fixStalePluginCache(pluginCacheInfos)
     return

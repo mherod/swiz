@@ -6,13 +6,13 @@
 //
 // Agent tool-name equivalences:
 //   Claude Code  | Cursor       | Codex              | Gemini
-//   Bash         | Shell        | run_shell_command  | shell / shell_command / exec_command
-//   Edit         | StrReplace   | replace            | apply_patch
-//   Write        | Write        | write_file         | apply_patch
+//   Bash         | Shell        | run_shell_command  | run_shell_command
+//   Edit         | StrReplace   | replace            | replace
+//   Write        | Write        | write_file         | write_file
 //   Read         | Read         | read_file          | read_file
-//   Grep         | Grep         | grep_search        | grep_files
-//   Glob         | Glob         | glob               | list_dir
-//   NotebookEdit | EditNotebook | —                  | apply_patch
+//   Grep         | Grep         | grep_search        | grep_search
+//   Glob         | Glob         | glob               | glob
+//   NotebookEdit | EditNotebook | —                  | —
 //   TaskCreate   | TodoWrite    | write_todos        | update_plan
 
 export const SHELL_TOOLS = new Set([

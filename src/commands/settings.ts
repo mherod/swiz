@@ -112,7 +112,7 @@ function usage(): string {
     `Settings (--global): ${aliasesForScope("global")}\n` +
     `Settings (--project): ${aliasesForScope("project")}\n` +
     `Settings (--session): ${aliasesForScope("session")}\n` +
-    "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
+    "Hook management: disable-hook <filename> (e.g. stop-ship-checklist.ts), enable-hook <filename>"
   )
 }
 

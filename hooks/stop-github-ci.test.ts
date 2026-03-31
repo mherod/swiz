@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { findActive, findFailing } from "./stop-github-ci.ts"
+import { findActive, findFailing } from "./stop-ship-checklist.ts"
 
 const base = {
   databaseId: 1,

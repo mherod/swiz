@@ -8,7 +8,12 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import { preToolUseDeny, runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+} from "../src/SwizHook.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 
 const pretoolUseTaskSubjectValidation: SwizHook = {
@@ -27,7 +32,7 @@ const pretoolUseTaskSubjectValidation: SwizHook = {
       return preToolUseDeny(formatMessage(result))
     }
 
-    return {}
+    return preToolUseAllow()
   },
 }
 
