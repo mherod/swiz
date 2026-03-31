@@ -8,6 +8,7 @@ import {
 import type { Command } from "../types.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
+import { PrReviewMonitor } from "./daemon/pr-review-monitor.ts"
 import {
   CooldownRegistry,
   createMetrics,
@@ -120,6 +121,7 @@ function createDaemonCaches() {
   const projectSettingsCache = new ProjectSettingsCache()
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
+  const prReviewMonitor = new PrReviewMonitor()
 
   return {
     watchers,
@@ -134,6 +136,7 @@ function createDaemonCaches() {
     projectSettingsCache,
     manifestCache,
     snapshots,
+    prReviewMonitor,
   }
 }
 
@@ -337,6 +340,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     watchers: caches.watchers,
     snapshots: caches.snapshots,
     workerRuntime: caches.workerRuntime,
+    prReviewMonitor: caches.prReviewMonitor,
   })
 
   // Register initial project for periodic upstream sync

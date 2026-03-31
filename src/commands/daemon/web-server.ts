@@ -37,6 +37,7 @@ import {
   normalizeDashboardPr,
   STALE_ISSUES_TTL_MS,
 } from "./dashboard-types.ts"
+import type { PrReviewMonitor } from "./pr-review-monitor.ts"
 import {
   type CooldownRegistry,
   createMetrics,
@@ -225,6 +226,7 @@ export interface DaemonWebServerContext {
   watchers: FileWatcherRegistry
   snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
   workerRuntime: DaemonWorkerRuntime
+  prReviewMonitor: PrReviewMonitor
 }
 
 /** Hard request-level timeout for daemon dispatch (ms).
@@ -271,8 +273,34 @@ function kickUpstreamSyncWhenEmpty(
   isEmpty: boolean
 ): boolean {
   if (!isEmpty) return false
-  void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+  void ctx.upstreamSyncRegistry
+    .register(cwd)
+    .then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+    .then((result) => {
+      if (result) {
+        // Process PR review changes for any active sessions in this project
+        void processPrReviewChanges(ctx, cwd, result)
+      }
+    })
   return true
+}
+
+async function processPrReviewChanges(
+  ctx: DaemonWebServerContext,
+  cwd: string,
+  syncResult: import("../../issue-store.ts").UpstreamSyncResult
+): Promise<void> {
+  // Get the repo slug for store lookups
+  const { getRepoSlug } = await import("../../git-helpers.ts")
+  const repo = await getRepoSlug(cwd)
+  if (!repo) return
+
+  // Find active sessions that might be interested in this project
+  // For now, we defer auto-steer scheduling to active dispatch cycles
+  // where we have explicit sessionId context
+  for (const [sessionId] of ctx.sessionActivity) {
+    await ctx.prReviewMonitor.processSyncResult(cwd, sessionId, repo, syncResult)
+  }
 }
 
 function clampDashboardListLimit(raw: number | undefined): number {

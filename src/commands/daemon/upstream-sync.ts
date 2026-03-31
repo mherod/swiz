@@ -1,3 +1,5 @@
+// noinspection JSUnusedGlobalSymbols
+
 import { debugLog } from "../../debug.ts"
 import {
   getIssueStore,
@@ -31,10 +33,10 @@ type RepoSlugResolver = (cwd: string) => Promise<string | null>
 
 export class UpstreamSyncRegistry {
   private entries = new Map<string, SyncEntry>()
-  private intervalMs: number
-  private timeoutMs: number
-  private resolveSlug: RepoSlugResolver
-  private store: IssueStore | null
+  private readonly intervalMs: number
+  private readonly timeoutMs: number
+  private readonly resolveSlug: RepoSlugResolver
+  private readonly store: IssueStore | null
 
   constructor(opts?: {
     intervalMs?: number
