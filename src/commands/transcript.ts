@@ -21,6 +21,7 @@ import { loadSessionContent, type Turn, turnsToDisplayTurns } from "../transcrip
 import type { Session } from "../transcript-utils.ts"
 import { extractText } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { scheduleAutoSteer } from "../utils/auto-steer-helpers.ts"
 
 // ─── Monitor-based mode runners ──────────────────────────────────────────────
 
@@ -110,6 +111,17 @@ async function runAutoReplyMode(
     for (const t of replyDisplayTurns) {
       monitor.pushTurn(t)
     }
+
+    // Schedule auto-replies as auto-steer messages for next session turn
+    const allReplies = replies.concat(replies2)
+    for (const reply of allReplies) {
+      const replyText = extractText(reply.entry.message?.content).trim()
+      if (replyText) {
+        await scheduleAutoSteer(sessionId, replyText, "next_turn", process.cwd())
+        monitor.pushEvent(`Scheduled auto-reply: "${replyText.slice(0, 50)}..."`)
+      }
+    }
+
     monitor.setPhase("complete")
     monitor.pushEvent("Auto-reply generation complete")
   } finally {
