@@ -114,11 +114,37 @@ async function runAutoReplyMode(
 
     // Schedule auto-replies as auto-steer messages for next session turn
     const allReplies = replies.concat(replies2)
+    const scheduledMessages = new Set<string>()
+    let scheduledCount = 0
+
     for (const reply of allReplies) {
       const replyText = extractText(reply.entry.message?.content).trim()
-      if (replyText) {
-        await scheduleAutoSteer(sessionId, replyText, "next_turn", process.cwd())
-        monitor.pushEvent(`Scheduled auto-reply: "${replyText.slice(0, 50)}..."`)
+      if (!replyText) continue
+
+      // Idempotency guard: dedup within batch to prevent duplicate messages in queue
+      if (scheduledMessages.has(replyText)) {
+        monitor.pushEvent(`[Auto-Steer] Skipped duplicate reply (already scheduled in batch)`)
+        continue
+      }
+
+      scheduledMessages.add(replyText)
+
+      try {
+        const scheduled = await scheduleAutoSteer(sessionId, replyText, "next_turn", process.cwd())
+        if (scheduled) {
+          scheduledCount++
+          monitor.pushEvent(
+            `[Auto-Steer] ✓ Scheduled reply #${scheduledCount}: "${replyText.slice(0, 60)}..."`
+          )
+        } else {
+          monitor.pushEvent(
+            `[Auto-Steer] ⊘ Reply not scheduled (auto-steer disabled or terminal unsupported): "${replyText.slice(0, 60)}..."`
+          )
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        monitor.pushEvent(`[Auto-Steer] ✗ Failed to schedule reply: ${errorMsg}`)
+        // Fail-open: continue processing remaining replies
       }
     }
 
