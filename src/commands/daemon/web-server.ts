@@ -296,8 +296,6 @@ async function processPrReviewChanges(
   if (!repo) return
 
   // Find active sessions that might be interested in this project
-  // For now, we defer auto-steer scheduling to active dispatch cycles
-  // where we have explicit sessionId context
   for (const [sessionId] of ctx.sessionActivity) {
     await ctx.prReviewMonitor.processSyncResult(cwd, sessionId, repo, syncResult)
   }
