@@ -93,7 +93,8 @@ async function isPushCooldownActive(
   return Date.now() - remoteCommitTime * 1000 < cooldownMs
 }
 
-async function markPushPrompted(sessionId: string | undefined): Promise<void> {
+/** Exported for `stop-ship-checklist` composition. */
+export async function markPushPrompted(sessionId: string | undefined): Promise<void> {
   const safeSession = sanitizeSessionId(sessionId)
   if (!safeSession) return
   try {
@@ -274,7 +275,7 @@ function buildPushSteps(p: PushStepParams): [string, ActionPlanItem[]] {
   return [pushHeader, subSteps]
 }
 
-function buildReason(opts: {
+function buildGitWorkflowSections(opts: {
   gitStatus: {
     total: number
     modified: number
@@ -296,7 +297,7 @@ function buildReason(opts: {
   collabMode: CollaborationMode
   trunkMode: boolean
   defaultBranch: string
-}): string {
+}): { summary: string; steps: ActionPlanItem[] } {
   const {
     gitStatus,
     branch,
@@ -309,7 +310,7 @@ function buildReason(opts: {
     trunkMode,
     defaultBranch,
   } = opts
-  let reason = hasUncommitted
+  const summary = hasUncommitted
     ? buildUncommittedReason(gitStatus, branch, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
 
@@ -321,8 +322,7 @@ function buildReason(opts: {
     steps.push(...buildPushSteps({ branch, upstream, ahead, collabMode, trunkMode, defaultBranch }))
   }
 
-  reason += formatActionPlan(steps)
-  return reason
+  return { summary, steps }
 }
 
 function buildTaskDesc(opts: {
@@ -463,11 +463,7 @@ function gitStatusWarrantsStopHook(
   return gitStatus.ahead > 0 || gitStatus.behind > 0
 }
 
-async function resolveGitContext(input: {
-  cwd?: string
-  session_id?: string
-  _effectiveSettings?: Record<string, unknown>
-}): Promise<GitContext | null> {
+async function resolveGitContext(input: StopHookInput): Promise<GitContext | null> {
   const cwd = input.cwd ?? process.cwd()
   if (!(await isGitRepo(cwd))) return null
 
@@ -537,19 +533,38 @@ async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<SwizHookOut
   return null
 }
 
-export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
-  const parsed = stopHookInputSchema.parse(input)
-  const ctx = await resolveGitContext(parsed)
-  if (!ctx) return {}
+/** Result of git workflow gating for composition with other stop checks. */
+export type GitWorkflowCollectResult =
+  | { kind: "ok" }
+  | { kind: "hookOutput"; output: SwizHookOutput }
+  | {
+      kind: "block"
+      summary: string
+      steps: ActionPlanItem[]
+      willNeedPush: boolean
+      sessionId: string | undefined
+      cwd: string
+      taskSubject: string
+      taskDesc: string
+    }
+
+/**
+ * Evaluate git status / push / pull requirements without emitting a stop response.
+ * Used by `stop-ship-checklist` to merge git, CI, and issues into one action plan.
+ */
+export async function collectGitWorkflowStop(
+  input: StopHookInput
+): Promise<GitWorkflowCollectResult> {
+  const ctx = await resolveGitContext(input)
+  if (!ctx) return { kind: "ok" }
 
   const pushShortCircuit = await checkPushCooldownOrInFlight(ctx)
-  if (pushShortCircuit !== null) return pushShortCircuit
+  if (pushShortCircuit !== null) return { kind: "hookOutput", output: pushShortCircuit }
 
   const { gitStatus, hasUncommitted, hasRemote, upstream, cwd } = ctx
   const { branch, ahead, behind } = gitStatus
 
-  const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
-  const reason = buildReason({
+  const { summary, steps } = buildGitWorkflowSections({
     gitStatus,
     branch,
     upstream,
@@ -562,13 +577,31 @@ export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizH
     defaultBranch: ctx.defaultBranch,
   })
 
-  if (willNeedPush) await markPushPrompted(ctx.sessionId)
-
+  const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
   const taskSubject = selectTaskSubject(hasUncommitted, ahead, behind)
   const taskDesc = buildTaskDesc({ cwd, hasUncommitted, branch, upstream, behind, ahead })
-  await createSessionTask(ctx.sessionId, "stop-git-workflow-task-created", taskSubject, taskDesc)
 
-  return blockStopObj(reason)
+  return {
+    kind: "block",
+    summary,
+    steps,
+    willNeedPush,
+    sessionId: ctx.sessionId,
+    cwd,
+    taskSubject,
+    taskDesc,
+  }
+}
+
+export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
+  const parsed = stopHookInputSchema.parse(input)
+  const r = await collectGitWorkflowStop(parsed)
+  if (r.kind === "ok") return {}
+  if (r.kind === "hookOutput") return r.output
+
+  if (r.willNeedPush) await markPushPrompted(r.sessionId)
+  await createSessionTask(r.sessionId, "stop-git-workflow-task-created", r.taskSubject, r.taskDesc)
+  return blockStopObj(r.summary + formatActionPlan(r.steps))
 }
 
 const stopGitStatus: SwizStopHook = {

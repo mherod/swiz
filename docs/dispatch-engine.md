@@ -193,7 +193,7 @@ collaborationMode = "solo"          → always remove PR hooks
 collaborationMode = "auto"          → use prMergeMode boolean
 ```
 
-Hooks disabled in non-PR-merge mode: `posttooluse-pr-context.ts`, `pretooluse-pr-age-gate.ts`, `stop-branch-conflicts.ts`, `stop-pr-description.ts`, `stop-pr-changes-requested.ts`, `stop-github-ci.ts`.
+Hooks disabled in non-PR-merge mode: `posttooluse-pr-context.ts`, `pretooluse-pr-age-gate.ts`, `stop-branch-conflicts.ts`, `stop-pr-description.ts`, `stop-pr-changes-requested.ts`. (`stop-ship-checklist.ts` stays active: its CI slice no-ops when peer review is not required; git and issues slices still run.)
 
 Exception: `pretooluse-pr-age-gate.ts` is preserved when `prAgeGateMinutes > 0` even if PR-merge mode is otherwise off.
 

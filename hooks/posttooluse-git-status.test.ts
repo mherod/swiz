@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { GitStatusV2 } from "../src/utils/git-utils.ts"
-import { buildGitContextLine } from "./posttooluse-git-status.ts"
+import { buildGitContextLine, type GitStatusV2 } from "../src/utils/git-utils.ts"
 
 function makeStatus(overrides: Partial<GitStatusV2> = {}): GitStatusV2 {
   return {

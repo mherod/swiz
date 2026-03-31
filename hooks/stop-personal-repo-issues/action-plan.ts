@@ -182,15 +182,20 @@ export function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
   return planSteps
 }
 
-export function formatStopReason(planSteps: ActionPlanItem[], stopCtx: StopContext): string {
+/** Intro paragraphs for issues/PR stop messaging (before numbered steps). */
+export function formatStopIssuesIntro(stopCtx: StopContext): string {
   const headerParts = [
     "There are open issues and PRs that need your attention before we can finish the session.",
   ]
   if (stopCtx.projectState != null) {
     headerParts.push(statePriorityHint(stopCtx.projectState))
   }
+  return headerParts.join("\n")
+}
+
+export function formatStopReason(planSteps: ActionPlanItem[], stopCtx: StopContext): string {
   return formatActionPlan(planSteps, {
     translateToolNames: true,
-    header: headerParts.join("\n"),
+    header: formatStopIssuesIntro(stopCtx),
   })
 }

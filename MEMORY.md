@@ -2,6 +2,8 @@
 
 Prescriptive workflow rules for this repository (complements `CLAUDE.md`).
 
+**At-a-glance (standard workflow before stop—same as the hook’s “tasks need your attention” list):** after a trunk push, **(1)** wait until CI shows **`status: completed`**, then **read** **`conclusion`** and job JSON; **(2)** if the work is already done, **TaskUpdate** / `swiz tasks complete` every open session task; **(3)** if not, finish the work before stop. **`task #unkn-1` does not waive (1)–(3).** Details below.
+
 ## Git and session closure
 
 - **DO**: After finishing a coding task, stage all intended paths (`git add` on modified and new files), run `bun run typecheck` and `bun run lint` (or the scoped tests you touched), then commit with Conventional Commits (`<type>(<scope>): <summary>`, summary under ~50 characters; types: `feat`, `fix`, `refactor`, `docs`, `style`, `test`, `chore`).
@@ -21,7 +23,7 @@ When stop reports **tasks needing attention** (e.g. “wait for CI”, “mark t
 - **DON'T**: Skip the checklist because a line shows **`task #unkn-1`** (or similar)—that usually means the hook could not bind a stable task id; CI + task hygiene still apply.
 - **DO**: Map the hook’s literal lines to this section: **“Wait for CI to complete, then check results”** → steps **1–2**; **“use TaskUpdate to mark each current-session task as completed”** → step **3** when work is already done; **“If the work is still needed, complete it before stopping”** → step **3**’s **in_progress** / **pending** path until shipped.
 
-1. **CI for your SHA** — After push: `git fetch origin main`, `SHA=$(git rev-parse origin/main)`, `gh run list --repo mherod/swiz --commit "$SHA" --limit 1 --json databaseId,status,conclusion`, then `gh run watch <databaseId> --repo mherod/swiz --exit-status` (or `swiz ci-wait $SHA --timeout 600`). If the run is **`cancelled`** on a long Test step, check `.github/workflows/ci.yml` `timeout-minutes` on the `ci` job versus full `bun test --concurrent` duration. Confirm green with `gh run view <id> --json conclusion,status,jobs` (not `gh run watch` alone).
+1. **CI for your SHA** — After push: `git fetch origin main`, `SHA=$(git rev-parse origin/main)`, `gh run list --repo mherod/swiz --commit "$SHA" --limit 1 --json databaseId,status,conclusion`, then `gh run watch <databaseId> --repo mherod/swiz --exit-status` (or `swiz ci-wait $SHA --timeout 600`). If the run is **`cancelled`** on a long Test step, check `.github/workflows/ci.yml` `timeout-minutes` on the `ci` job versus full `bun test --concurrent` duration. **“Wait for CI to complete, then check results”** means: poll `gh run view <id> --json status,conclusion` until **`status`** is **`completed`** (not only `in_progress`), then read **`conclusion`** and full job JSON with `gh run view <id> --json conclusion,status,jobs`—**DON'T** treat **`gh run watch`** alone as “checked results”. On non-success, use **`--log-failed`** (step 2).
 2. **Read results** — On failure: `gh run view <id> --log-failed`; fix, commit, push, and re-check CI for the new `HEAD`.
 3. **Native tasks** — If work is already shipped, use **TaskUpdate** / `swiz tasks complete` so every current-session task is **`completed`** with accepted evidence (`commit:`, `test:`, `file:`, `note:`—only those prefixes are accepted by `swiz tasks complete`; use `note:` for CI-green confirmation if no test artifact applies). If work remains, keep or create **`in_progress`** / **`pending`** tasks and finish the implementation before stop.
 

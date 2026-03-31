@@ -115,19 +115,20 @@ async function pollUntilComplete(branch: string, cwd: string): Promise<CIRun[]> 
 }
 
 interface CIBlockResult {
-  reason: string
+  summary: string
   planSteps: ActionPlanItem[]
 }
 
 function buildFailingResult(branch: string, failing: CIRun[]): CIBlockResult {
   const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
-  let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
-  reason += `Failing checks (${failing.length}): ${names}\n\n`
-  reason += "To view failure logs:\n"
+  let summary = `GitHub CI is failing on branch '${branch}'.\n\n`
+  summary += `Failing checks (${failing.length}): ${names}\n\n`
+  summary += "To view failure logs:\n"
   for (const r of failing)
-    reason += r.databaseId
+    summary += r.databaseId
       ? `  gh run view ${r.databaseId} --log-failed\n`
       : `  gh run list --branch ${branch}\n`
+  summary += "\n"
 
   const fixSubSteps: ActionPlanItem[] = []
   if (skillExists("ci-status")) {
@@ -141,14 +142,13 @@ function buildFailingResult(branch: string, failing: CIRun[]): CIBlockResult {
     "Wait for CI to go green: gh run watch <run-id> --exit-status"
   )
   const planSteps: ActionPlanItem[] = ["Analyze and fix CI failures before stopping:", fixSubSteps]
-  reason += `\n${formatActionPlan(planSteps, { translateToolNames: true })}`
-  return { reason, planSteps }
+  return { summary, planSteps }
 }
 
 function buildActiveResult(branch: string, active: CIRun[]): CIBlockResult {
   const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
-  let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
-  reason += `Active checks (${active.length}): ${names}\n\n`
+  let summary = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
+  summary += `Active checks (${active.length}): ${names}\n\n`
 
   const waitSubSteps: ActionPlanItem[] = []
   if (skillExists("ci-status")) {
@@ -160,36 +160,43 @@ function buildActiveResult(branch: string, active: CIRun[]): CIBlockResult {
     "Once complete: if passing → stop. If failing → fix before stopping."
   )
   const planSteps: ActionPlanItem[] = ["Wait for CI to complete, then check results:", waitSubSteps]
-  reason += formatActionPlan(planSteps, { translateToolNames: true })
-  return { reason, planSteps }
+  return { summary, planSteps }
+}
+
+/**
+ * Evaluate CI gate without emitting stop output — for `stop-ship-checklist` composition.
+ */
+export async function collectGithubCiStopParsed(
+  parsed: StopHookInput
+): Promise<CIBlockResult | null> {
+  const cwd = parsed.cwd ?? process.cwd()
+
+  const branch = await resolveTargetBranch(cwd, parsed.session_id)
+  if (!branch) return null
+
+  const relevant = await pollUntilComplete(branch, cwd)
+  if (!relevant.length) return null
+
+  const failing = findFailing(relevant)
+  if (failing.length > 0) return buildFailingResult(branch, failing)
+
+  const stillActive = findActive(relevant)
+  if (stillActive.length > 0) return buildActiveResult(branch, stillActive)
+  return null
 }
 
 export async function evaluateStopGithubCi(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
-
-  const branch = await resolveTargetBranch(cwd, parsed.session_id)
-  if (!branch) return {}
-
-  const relevant = await pollUntilComplete(branch, cwd)
-  if (!relevant.length) return {}
-
   const sessionId = parsed.session_id
 
-  const failing = findFailing(relevant)
-  if (failing.length > 0) {
-    const { reason, planSteps } = buildFailingResult(branch, failing)
-    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-    return blockStopObj(reason)
-  }
+  const collected = await collectGithubCiStopParsed(parsed)
+  if (!collected) return {}
 
-  const stillActive = findActive(relevant)
-  if (stillActive.length > 0) {
-    const { reason, planSteps } = buildActiveResult(branch, stillActive)
-    if (sessionId) await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
-    return blockStopObj(reason)
-  }
-  return {}
+  const reason =
+    collected.summary + formatActionPlan(collected.planSteps, { translateToolNames: true })
+  if (sessionId) await mergeActionPlanIntoTasks(collected.planSteps, sessionId, cwd)
+  return blockStopObj(reason)
 }
 
 const stopGithubCi: SwizStopHook = {

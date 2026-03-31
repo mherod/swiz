@@ -9,7 +9,10 @@
 import { missingRefinementCategories, needsRefinement } from "../src/issue-refinement.ts"
 import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizStopHook } from "../src/SwizHook.ts"
-import { evaluateStopPersonalRepoIssues } from "./stop-personal-repo-issues/evaluate.ts"
+import {
+  collectPersonalRepoIssuesStopParsed,
+  evaluateStopPersonalRepoIssues,
+} from "./stop-personal-repo-issues/evaluate.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues/issues.ts"
 import {
   planSectionOrderForProjectState,
@@ -30,9 +33,10 @@ export {
   selectRebaseSuggestionPRs,
   getActionableIssues,
 }
-export { evaluateStopPersonalRepoIssues }
+export { collectPersonalRepoIssuesStopParsed, evaluateStopPersonalRepoIssues }
 
-const stopPersonalRepoIssues: SwizStopHook = {
+/** Subprocess/E2E entry only — manifest uses `stop-ship-checklist.ts`. */
+const stopPersonalRepoIssuesLegacy: SwizStopHook = {
   name: "stop-personal-repo-issues",
   event: "stop",
   timeout: 10,
@@ -44,8 +48,8 @@ const stopPersonalRepoIssues: SwizStopHook = {
   },
 }
 
-export default stopPersonalRepoIssues
+export default stopPersonalRepoIssuesLegacy
 
 if (import.meta.main) {
-  await runSwizHookAsMain(stopPersonalRepoIssues)
+  await runSwizHookAsMain(stopPersonalRepoIssuesLegacy)
 }

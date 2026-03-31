@@ -91,8 +91,6 @@ import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
 import stopDependabotPrs from "../hooks/stop-dependabot-prs.ts"
 import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
-import stopGitStatus from "../hooks/stop-git-status.ts"
-import stopGithubCi from "../hooks/stop-github-ci.ts"
 import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
 import stopLargeFiles from "../hooks/stop-large-files.ts"
 import stopLintStaged from "../hooks/stop-lint-staged.ts"
@@ -101,11 +99,11 @@ import stopMemorySize from "../hooks/stop-memory-size.ts"
 import stopMemoryUpdateReminder from "../hooks/stop-memory-update-reminder.ts"
 import stopNonDefaultBranch from "../hooks/stop-non-default-branch.ts"
 import stopOffensiveLanguage from "../hooks/stop-offensive-language.ts"
-import stopPersonalRepoIssues from "../hooks/stop-personal-repo-issues.ts"
 import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
 import stopPrDescription from "../hooks/stop-pr-description.ts"
 import stopQualityChecks from "../hooks/stop-quality-checks.ts"
 import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
+import stopShipChecklist from "../hooks/stop-ship-checklist.ts"
 import stopSuppressionPatterns from "../hooks/stop-suppression-patterns.ts"
 import stopTodoTracker from "../hooks/stop-todo-tracker.ts"
 import stopUpstreamBranchCount from "../hooks/stop-upstream-branch-count.ts"
@@ -196,17 +194,15 @@ export const manifest: HookGroup[] = [
       { hook: stopWorkflowPermissions },
       { hook: stopLargeFiles },
       { hook: stopSuppressionPatterns },
-      { hook: stopGitStatus },
+      { hook: stopShipChecklist },
       { hook: stopLockfileDrift },
       { hook: stopLintStaged },
       { hook: stopQualityChecks },
       { hook: stopBranchConflicts },
       { hook: stopPrDescription },
       { hook: stopPrChangesRequested },
-      { hook: stopGithubCi },
       { hook: stopTodoTracker },
       { hook: stopNonDefaultBranch },
-      { hook: stopPersonalRepoIssues },
       { hook: stopUpstreamBranchCount },
       { hook: stopMemorySize },
       { hook: stopDependabotPrs },
@@ -501,7 +497,7 @@ export function validateDispatchRoutes(
 // Per-event timeout budget for the dispatcher (seconds).
 // Sync hooks run concurrently (Promise.all); budget equals the slowest single hook, not the sum.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 180, // dominated by stop-auto-continue AI call (~120s) + stop-github-ci CI polling (~30s)
+  stop: 180, // dominated by stop-auto-continue AI call (~120s) + stop-ship-checklist CI polling (~30s)
   preToolUse: 15, // concurrent: budget = slowest hook (~5s) + overhead
   postToolUse: 15, // concurrent: budget = slowest hook (~10s) + overhead
   sessionStart: 20,

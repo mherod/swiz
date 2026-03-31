@@ -786,6 +786,10 @@ export {
 // Implementations live in ./utils/git-utils.ts; re-exported here for
 // backward-compatible access via the single hook-utils.ts import.
 
+export {
+  fetchGitStatusFromDaemon,
+  parseDaemonGitStateRecord,
+} from "./daemon-git-state.ts"
 export type {
   ChangeScopeResult,
   ClassifyChangeScopeOptions,
@@ -795,6 +799,7 @@ export type {
 } from "./git-utils.ts"
 export {
   BRANCH_CHECK_RE,
+  buildGitContextLine,
   CI_WAIT_RE,
   classifyChangeScope,
   collectCheckoutNewBranchNames,
@@ -840,6 +845,7 @@ export {
   SWIZ_ISSUE_RE,
   TEST_FILE_RE,
 } from "./git-utils.ts"
+export { getEffectiveSwizSettingsForToolHook } from "./hook-effective-settings.ts"
 
 // ─── Transcript parsing ─────────────────────────────────────────────────
 // Implementations live in ./utils/transcript.ts; re-exported here for

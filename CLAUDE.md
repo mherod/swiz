@@ -96,7 +96,7 @@ alwaysApply: false
 - DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
-- Reference implementation: `hooks/stop-git-status.ts`.
+- Reference implementation: `hooks/stop-ship-checklist.ts` (git + CI + issues); `hooks/stop-git-status.ts` still exports `collectGitWorkflowStop` / `evaluateStopGitStatus` for tests.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
 - In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
@@ -253,7 +253,6 @@ alwaysApply: false
 - DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; they are external repos. For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
 - Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-min `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
-- Cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
@@ -263,6 +262,5 @@ alwaysApply: false
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
-- **DON'T**: Work on auto-continue findings without a filed issue.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
 - **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.

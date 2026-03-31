@@ -328,6 +328,40 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   return parseGitStatusV2Output(out)
 }
 
+/**
+ * Single-line git summary for agent context (PostToolUse / status line style).
+ * @param collabMode - When `"auto"`, the collaboration suffix is omitted.
+ */
+export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {
+  const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
+
+  let status = `[git] branch: ${branch}`
+
+  if (upstreamGone) {
+    status += ` | upstream: ${upstream} (gone)`
+  } else if (upstream) {
+    status += ` | upstream: ${upstream}`
+  } else {
+    status += ` | no upstream`
+  }
+
+  status += ` | uncommitted files: ${uncommitted}`
+
+  if (ahead > 0 && behind > 0) {
+    status += ` | diverged: ${ahead} ahead, ${behind} behind`
+  } else if (ahead > 0) {
+    status += ` | ${ahead} unpushed commit(s)`
+  } else if (behind > 0) {
+    status += ` | ${behind} behind remote`
+  }
+
+  if (collabMode !== "auto") {
+    status += ` | collab: ${collabMode}`
+  }
+
+  return status
+}
+
 /** Canonical empty-tree hash used when repos have fewer than N commits. */
 export const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 

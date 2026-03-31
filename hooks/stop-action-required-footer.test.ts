@@ -6,7 +6,7 @@
  * Intentionally excluded:
  * - stop-auto-continue.ts: uses blockStopRaw() by design — no footer appended
  * - stop-personal-repo-issues.ts: covered by its own E2E suite with a mock gh binary
- * - GitHub API hooks (stop-pr-*, stop-branch-conflicts, stop-github-ci): require live API
+ * - GitHub API hooks (stop-pr-*, stop-branch-conflicts, stop-ship-checklist CI slice): require live API
  */
 
 import { describe, expect, test } from "bun:test"

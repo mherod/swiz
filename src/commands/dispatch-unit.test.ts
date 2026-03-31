@@ -130,7 +130,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
         {
           event: "postToolUse",
@@ -157,7 +157,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
       ]
 
@@ -170,7 +170,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
       ]
 
@@ -186,7 +186,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
       ]
 
@@ -199,7 +199,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
       ]
 
@@ -212,7 +212,7 @@ describe("dispatch.ts unit tests", () => {
       const groups = [
         {
           event: "stop",
-          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+          hooks: [{ file: "stop-pr-description.ts" }, { file: "stop-non-default-branch.ts" }],
         },
       ]
 
@@ -465,11 +465,10 @@ describe("dispatch.ts unit tests", () => {
       })
     })
 
-    it("stop-personal-repo-issues has a 30-second cooldown", () => {
-      const stopGroup = manifest.find((g) => g.event === "stop")
-      const hook = stopGroup?.hooks.find(
-        (h) => hookIdentifier(h) === "stop-personal-repo-issues.ts"
-      )
+    it("pretooluse-bun-api-enforce has a 30-second cooldown", () => {
+      const hook = manifest
+        .flatMap((g) => g.hooks)
+        .find((h) => hookIdentifier(h) === "pretooluse-bun-api-enforce.ts")
       expect(hook).toBeDefined()
       const cs = hook && (isInlineHookDef(hook) ? hook.hook.cooldownSeconds : hook.cooldownSeconds)
       expect(cs).toBe(30)

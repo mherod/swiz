@@ -32,7 +32,6 @@ const PR_MERGE_MODE_DISABLED_HOOKS = new Set([
   "stop-branch-conflicts.ts",
   "stop-pr-description.ts",
   "stop-pr-changes-requested.ts",
-  "stop-github-ci.ts",
 ])
 
 // ─── Per-hook cooldown ──────────────────────────────────────────────────────
