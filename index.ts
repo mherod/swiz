@@ -87,4 +87,35 @@ registerCommand(emergencyBypassCommand)
 registerCommand(usageCommand)
 registerCommand(daemonCommand)
 
+// Signal listeners for tidy exit and cleanup.
+const handleSignal = (signal: string) => {
+  // Use stderr to avoid polluting stdout if the output is being piped.
+  process.stderr.write(`\nReceived ${signal}. Cleaning up...\n`)
+
+  // Standard exit codes: 128 + signal number
+  // SIGINT (2) -> 130, SIGTERM (15) -> 143, SIGHUP (1) -> 129, SIGQUIT (3) -> 131
+  const exitCodes: Record<string, number> = {
+    SIGINT: 130,
+    SIGTERM: 143,
+    SIGHUP: 129,
+    SIGQUIT: 131,
+  }
+  process.exit(exitCodes[signal] ?? 1)
+}
+
+process.on("SIGINT", () => handleSignal("SIGINT"))
+process.on("SIGTERM", () => handleSignal("SIGTERM"))
+process.on("SIGHUP", () => handleSignal("SIGHUP"))
+process.on("SIGQUIT", () => handleSignal("SIGQUIT"))
+
+// Global timeout: ensure the CLI terminates if it exceeds a requested budget.
+// Useful for CI environments or automated runs where a hang is unacceptable.
+const timeoutSeconds = parseInt(process.env.SWIZ_TIMEOUT ?? "0", 10)
+if (timeoutSeconds > 0) {
+  setTimeout(() => {
+    process.stderr.write(`\nGlobal timeout reached (${timeoutSeconds}s). Exiting...\n`)
+    process.exit(1)
+  }, timeoutSeconds * 1000).unref()
+}
+
 await run()

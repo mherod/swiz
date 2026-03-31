@@ -18,6 +18,7 @@
 // remain in gemini.ts for backward compatibility and direct use when needed.
 
 import type { LanguageModel } from "ai"
+import { memoize } from "lodash-es"
 import type { ZodType } from "zod"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resetShutdownController, resolveSignal } from "./ai-signal.ts"
@@ -146,13 +147,14 @@ async function runObject<T>(
   const { generateText, Output } = await import("ai")
   const { signal, cleanup } = resolveSignal(options)
   try {
-    const { output } = await generateText({
+    const { text } = await generateText({
       model,
-      output: Output.object({ schema }),
+      output: Output.json(),
       prompt,
       abortSignal: signal,
     })
-    return output
+    const parsed = JSON.parse(text)
+    return schema.parse(parsed) as T
   } finally {
     cleanup()
   }
@@ -162,14 +164,23 @@ async function runObject<T>(
 
 async function getClaudeModel(modelId?: string): Promise<LanguageModel> {
   const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  return createClaudeCode().languageModel(modelId ?? CLAUDE_DEFAULT_MODEL)
+  return createClaudeCode({
+    defaultSettings: {
+      executable: "bun",
+      permissionMode: "dontAsk",
+      mcpServers: {},
+    },
+  }).languageModel(modelId ?? CLAUDE_DEFAULT_MODEL)
 }
 
-async function getOpenRouterModel(modelId?: string): Promise<LanguageModel> {
+const getOpenRouter = memoize(async () => {
   const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  return createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
-    modelId ?? OPENROUTER_DEFAULT_MODEL
-  )
+  return createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+})
+
+async function getOpenRouterChatModel(modelId?: string): Promise<LanguageModel> {
+  const openRouterProvider = await getOpenRouter()
+  return openRouterProvider.chat(modelId ?? OPENROUTER_DEFAULT_MODEL)
 }
 
 // ─── Provider capability registry ────────────────────────────────────────────
@@ -179,18 +190,6 @@ interface ProviderCapabilities {
   streamText: (prompt: string, options?: PromptStreamOptions) => Promise<string>
   // ZodType<unknown> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
   object: (prompt: string, schema: ZodType<unknown>, options?: PromptOptions) => Promise<unknown>
-}
-
-function makeProviderCapabilities(
-  getModel: (modelId?: string) => Promise<LanguageModel>
-): ProviderCapabilities {
-  return {
-    text: (prompt, options) => getModel(options?.model).then((m) => runText(m, prompt, options)),
-    streamText: (prompt, options) =>
-      getModel(options?.model).then((m) => runStreamText(m, prompt, options)),
-    object: (prompt, schema, options) =>
-      getModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
-  }
 }
 
 /**
@@ -205,8 +204,22 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     object: (prompt, schema, options) =>
       promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
   },
-  claude: makeProviderCapabilities(getClaudeModel),
-  openrouter: makeProviderCapabilities(getOpenRouterModel),
+  claude: {
+    text: (prompt, options) =>
+      getClaudeModel(options?.model).then((m) => runText(m, prompt, options)),
+    streamText: (prompt, options) =>
+      getClaudeModel(options?.model).then((m) => runStreamText(m, prompt, options)),
+    object: (prompt, schema, options) =>
+      getClaudeModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
+  },
+  openrouter: {
+    text: (prompt, options) =>
+      getOpenRouterChatModel(options?.model).then((m) => runText(m, prompt, options)),
+    streamText: (prompt, options) =>
+      getOpenRouterChatModel(options?.model).then((m) => runStreamText(m, prompt, options)),
+    object: (prompt, schema, options) =>
+      getOpenRouterChatModel(options?.model).then((m) => runObject(m, prompt, schema, options)),
+  },
 }
 
 // ─── Provider selection ───────────────────────────────────────────────────────

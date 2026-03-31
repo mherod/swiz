@@ -15,7 +15,7 @@ import {
   appendBranchProtectionFromStore,
   buildGitRelevantSettingLines,
 } from "../src/utils/git-post-tool-directives.ts"
-import { buildGitContextLine } from "../src/utils/git-utils.ts"
+import { buildGitContextLine, type GitStatusV2 } from "../src/utils/git-utils.ts"
 import type { ToolHookInput } from "./schemas.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
@@ -36,6 +36,14 @@ async function refineDirectives(lines: string[]): Promise<{
       directives: lines || [],
     }
   }
+}
+
+async function getGitStatus(
+  cwd: string,
+  fetchGitStatusFromDaemon: (cwd: string) => Promise<GitStatusV2 | null>,
+  getGitStatusV2: (cwd: string) => Promise<GitStatusV2 | null>
+) {
+  return (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
 }
 
 const posttoolusGitContext: SwizHook<ToolHookInput> = {
@@ -69,7 +77,7 @@ const posttoolusGitContext: SwizHook<ToolHookInput> = {
       session_id: input.session_id,
       payload: input as Record<string, unknown>,
     })
-    const gitStatus = (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
+    const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
     const statusLine = gitStatus ? buildGitContextLine(gitStatus, effective.collaborationMode) : ""
     let directives: string[] = []
     const isGitBash =

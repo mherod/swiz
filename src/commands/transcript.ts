@@ -1,7 +1,6 @@
 import { join, resolve } from "node:path"
 import { format } from "date-fns"
 import { orderBy } from "lodash-es"
-import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -74,6 +73,8 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
+import { generateText, type ModelMessage } from "ai"
 /**
  * Strip ANSI escape sequences so wordWrap measures visual width correctly.
  * Debug log lines can embed ANSI colour codes (e.g. ESC[33mpendingESC[0m).
@@ -505,31 +506,60 @@ function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[
 
 // ─── Auto-reply generation ────────────────────────────────────────────────────
 
-async function generateAutoReply(turns: Turn[]): Promise<void> {
+async function generateAutoReply(
+  turns: Turn[],
+  opts?: { sessionId?: string; flipRoles?: boolean }
+): Promise<void> {
   // Build a plain-text representation of the conversation for LLM context
+  const messages: ModelMessage[] = []
   const lines: string[] = []
   for (const { entry, role } of turns) {
     if (role === "user") {
       const text = extractText(entry.message?.content).trim()
-      if (text) lines.push(`User: ${text}\n`)
+      if (text) {
+        lines.push(`User: ${text}\n`)
+        messages.push({
+          role: opts?.flipRoles ? "assistant" : "user",
+          content: text,
+        })
+      }
     } else {
       const blocks = toContentBlocks(entry.message?.content)
       const textParts = blocks.filter(isVisibleTextBlock).map((b) => b.text.trim())
       if (textParts.length > 0) {
         lines.push(`Assistant: ${textParts.join("\n")}\n`)
+        messages.push({
+          role: opts?.flipRoles ? "user" : "assistant",
+          content: textParts.join("\n"),
+        })
       }
     }
   }
 
-  const context = lines.join("\n").trim()
-  const prompt =
-    `Based on the conversation below, write a single natural follow-up message ` +
-    `that the user might send to continue the conversation. ` +
-    `Write ONLY the message itself — no prefix, no explanation, no metadata.\n\n` +
-    `<conversation>\n${context}\n</conversation>`
+  const provider = createOpenRouter()
+  const { response } = await generateText({
+    model: provider.languageModel("stepfun/step-3.5-flash"),
+    // model: claudeCode("haiku", {
+    //   strictMcpConfig: true,
+    //   mcpServers: {},
+    // }),
+    messages: messages.slice(-5),
+    system: [
+      "You are providing a follow-up directive to ensure the assistant can continue making confident progress.",
+      "Your follow-up should be written as a direct instruction in the second person tense (You Must, You Should, You May), or if referring to us both, the first person tense (We, Our, Us).",
+    ].join(),
+  })
 
-  const output = await promptAgent(prompt)
-  console.log(output)
+  const messageReplies = response.messages
+    .filter((m) => "content" in m)
+    .flatMap((m: { content: unknown }) => {
+      return Array.isArray(m.content) ? m.content : [m.content]
+    })
+    .filter((m) => m.type === "text")
+    .map((m) => m.text)
+    .join("\n")
+
+  console.log(messageReplies)
 }
 
 // ─── Arg Parsing ─────────────────────────────────────────────────────────────
@@ -856,7 +886,11 @@ export const transcriptCommand: Command = {
       hasTimeFilter
     )
 
-    if (parsed.autoReply) await generateAutoReply(turns)
-    else renderTurns(turns, session.id, debugEvents)
+    if (parsed.autoReply) {
+      await generateAutoReply(turns, {
+        sessionId: session.id,
+        flipRoles: true,
+      })
+    } else renderTurns(turns, session.id, debugEvents)
   },
 }
