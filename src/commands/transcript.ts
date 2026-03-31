@@ -74,7 +74,7 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
-import { generateText, type ModelMessage } from "ai"
+import { type ModelMessage, streamText } from "ai"
 /**
  * Strip ANSI escape sequences so wordWrap measures visual width correctly.
  * Debug log lines can embed ANSI colour codes (e.g. ESC[33mpendingESC[0m).
@@ -508,8 +508,8 @@ function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[
 
 async function generateAutoReply(
   turns: Turn[],
-  opts?: { sessionId?: string; flipRoles?: boolean }
-): Promise<void> {
+  opts?: { sessionId?: string; cwd: string; flipRoles?: boolean }
+): Promise<Turn[]> {
   // Build a plain-text representation of the conversation for LLM context
   const messages: ModelMessage[] = []
   const lines: string[] = []
@@ -536,30 +536,66 @@ async function generateAutoReply(
     }
   }
 
+  messages.push({
+    role: "user",
+    content: "Continue - the session is NOT ready to finish.",
+  })
+
   const provider = createOpenRouter()
-  const { response } = await generateText({
-    model: provider.languageModel("stepfun/step-3.5-flash"),
+  const { response, fullStream } = streamText({
+    model: provider.languageModel("qwen/qwen3.6-plus-preview:free"),
+    // model: provider.languageModel("stepfun/step-3.5-flash"),
     // model: claudeCode("haiku", {
     //   strictMcpConfig: true,
     //   mcpServers: {},
     // }),
-    messages: messages.slice(-5),
+    messages: messages.slice(-20),
     system: [
-      "You are providing a follow-up directive to ensure the assistant can continue making confident progress.",
+      "You are providing a follow-up directive to ensure the assistant (You) can continue making confident progress.",
       "Your follow-up should be written as a direct instruction in the second person tense (You Must, You Should, You May), or if referring to us both, the first person tense (We, Our, Us).",
+      "Correct any self-direction or assistant direction which has finalisation intent. The session is far from over!",
     ].join(),
   })
 
-  const messageReplies = response.messages
+  const reader = fullStream.getReader()
+  const chunks = []
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      if ("text" in value) {
+        process.stdout.write(value.text)
+      }
+    }
+  } finally {
+    // Finally, we release the lock on the stream
+    reader.releaseLock()
+  }
+
+  const awaitedResponse = await response
+  const newTurns = awaitedResponse.messages
     .filter((m) => "content" in m)
     .flatMap((m: { content: unknown }) => {
       return Array.isArray(m.content) ? m.content : [m.content]
     })
     .filter((m) => m.type === "text")
     .map((m) => m.text)
-    .join("\n")
 
-  console.log(messageReplies)
+  return newTurns.map((t) => {
+    return {
+      role: "user",
+      entry: {
+        cwd: opts?.cwd || process.cwd(),
+        type: "text",
+        timestamp: Date.now().toString(),
+        message: {
+          role: "user",
+          content: t,
+        },
+      },
+    } as Turn
+  })
 }
 
 // ─── Arg Parsing ─────────────────────────────────────────────────────────────
@@ -887,10 +923,27 @@ export const transcriptCommand: Command = {
     )
 
     if (parsed.autoReply) {
-      await generateAutoReply(turns, {
+      // get replies with flipped roles - rebalances the assistant / user motivations
+      const replies = await generateAutoReply(turns, {
         sessionId: session.id,
         flipRoles: true,
+        cwd: process.cwd(),
       })
+      if (!replies.length) {
+        throw new Error("No response turns were generated.")
+      }
+      renderTurns(replies, session.id, debugEvents)
+      const allTurns = turns.concat(replies)
+      // get replies after flipping roles - should result in a balanced reframing
+      const replies2 = await generateAutoReply(allTurns, {
+        sessionId: session.id,
+        flipRoles: false,
+        cwd: process.cwd(),
+      })
+      if (!replies2.length) {
+        throw new Error("No response turns were generated.")
+      }
+      renderTurns(replies2, session.id, debugEvents)
     } else renderTurns(turns, session.id, debugEvents)
   },
 }
