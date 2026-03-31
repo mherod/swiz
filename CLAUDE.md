@@ -61,7 +61,7 @@ alwaysApply: false
   2. README intro `**N hooks**` (line 7) matches manifest total.
   3. Every README hook filename exists on disk.
 - Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
-- Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, exit `0`.
+- Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
 - Output helpers (call `process.exit(0)`; no stdout after):
   - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
@@ -69,10 +69,10 @@ alwaysApply: false
   - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
 - **DO NOT** write raw `console.log(JSON.stringify(...))` — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
-- **Dispatch abort**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with `AbortController` must listen on `ctx.signal`.
-- **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. **DO**: Read from payload. **DON'T**: Call `detectTerminal()` in daemon code.
-- **Cursor cwd + captures**: `normalizeAgentHookPayload`: first `workspace_roots` if cwd empty/outside roots; strip `…/.cursor` (not `…/projects/`); `swiz dispatch` injects `process.cwd()` if cwd missing. `/tmp/swiz-incoming/` (`SWIZ_INCOMING_ROOT`, `incoming-capture.ts`, `execute.ts` `buildDispatchContext`); `incoming` / `afterNormalizeAndBackfill`; `_envKeys` only; `SWIZ_CAPTURE_INCOMING=0`; ~10m; file may exist before git skip.
-- **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` in `hook-utils.ts` for file-path PreToolUse hooks.
+- **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
+- **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. Read from payload; don't call `detectTerminal()` in daemon code.
+- **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts`, `execute.ts` `buildDispatchContext`. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
+- **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
 - **Git Utilities Policy** — canonical locations:
   - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
   - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
@@ -95,8 +95,8 @@ alwaysApply: false
 - Use `sanitizeSessionId()` for `/tmp` names.
 - DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
-- For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
-- Reference implementation: `hooks/stop-ship-checklist.ts` (git + CI + issues); `hooks/stop-git-status.ts` still exports `collectGitWorkflowStop` / `evaluateStopGitStatus` for tests.
+- For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
+- Reference implementation: `hooks/stop-ship-checklist.ts` (git + CI + issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop` / `evaluateStopGitStatus` for tests.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
 - In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
@@ -227,16 +227,16 @@ alwaysApply: false
 ## Conventions
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
-- When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching.
+- When parsing bun test output, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting counts; if absent, emit "unknown number of" (output truncated). Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
-- Settings writes must create `.bak` backups first.
+- Settings writes must create `.bak` backup first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
-- Stop-memory prompts must include `Cause to capture: <cause>`.
+- Stop-memory prompts must include `Cause: <cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
@@ -262,5 +262,6 @@ alwaysApply: false
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
+- **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as each step finishes. Ensures stop hooks see explicit workflow state.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
 - **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
