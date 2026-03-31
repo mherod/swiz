@@ -40,6 +40,9 @@
  * { "decision": "block", "reason": "Test suite must pass before proceeding" }
  * ```
  *
+ * Do not emit **`hookSpecificOutput`** on Stop (Claude only allows it for PreToolUse,
+ * UserPromptSubmit, and PostToolUse). Use top-level **`reason`** and **`systemMessage`**.
+ *
  * **PreToolUse** uses **`hookSpecificOutput.permissionDecision`** / **`permissionDecisionReason`**
  * (not top-level `decision` / `reason` as the primary control).
  *
@@ -1008,7 +1011,8 @@ function stopHookOutputBlockDecisionRequiresReason(o: Record<string, unknown>): 
  * **`decision: "block"`** and **`reason`**. Universal fields allow **`continue: false`** with
  * **`stopReason`** (stops Claude entirely — distinct from the Stop-hook block pattern). At least one
  * of **`reason`** or **`stopReason`** must be non-empty; **`hookSpecificOutput.additionalContext`**
- * alone is invalid.
+ * alone is invalid. After normalization, Stop-style **`hookSpecificOutput`** is stripped so the
+ * agent-visible JSON matches Claude’s allowed **`hookSpecificOutput`** events.
  *
  * Individual subprocess hooks still validate with {@link hookOutputSchema} (`{}` is valid).
  */

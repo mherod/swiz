@@ -53,7 +53,6 @@ import {
   hsoPreToolUseAllowContextual,
   hsoPreToolUseAllowWithUpdatedInput,
   hsoPreToolUseDeny,
-  hsoStopWithAdditionalContext,
 } from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 
@@ -395,16 +394,14 @@ export function blockStopObj(
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): HookOutput {
   const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
+  // Omit hookSpecificOutput: Claude Code only allows hookSpecificOutput for PreToolUse,
+  // UserPromptSubmit, and PostToolUse — hookEventName "Stop" fails JSON validation.
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
     reason: reason + actionRequired(reason, options),
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: {
-      hookEventName: "Stop",
-      additionalContext: preview,
-    },
   })
 }
 
@@ -424,10 +421,6 @@ function blockStopRawObj(reason: string) {
     reason,
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: {
-      hookEventName: "Stop",
-      additionalContext: preview,
-    },
   })
 }
 
@@ -447,7 +440,6 @@ export function blockStopHumanRequiredObj(reason: string): HookOutput {
     resolution: "human-required",
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: hsoStopWithAdditionalContext(preview),
   })
 }
 

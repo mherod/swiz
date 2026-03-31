@@ -11,9 +11,7 @@ describe("normalizeStopDispatchResponseInPlace", () => {
     normalizeStopDispatchResponseInPlace(r, "Stop")
     expect(r.continue).toBe(true)
     expect(stopHookOutputSchema.safeParse(r).success).toBe(true)
-    expect((r.hookSpecificOutput as { additionalContext: string }).additionalContext).toBe(
-      DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT
-    )
+    expect(r.hookSpecificOutput).toBeUndefined()
     expect(r.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     expect(r.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
   })

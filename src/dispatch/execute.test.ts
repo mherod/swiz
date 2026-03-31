@@ -74,12 +74,7 @@ describe("dispatch execute integration", () => {
       }
       const result = await executeDispatch(req)
       expect(result.response.continue).toBe(true)
-      expect((result.response.hookSpecificOutput as { hookEventName?: string }).hookEventName).toBe(
-        "Stop"
-      )
-      expect(
-        (result.response.hookSpecificOutput as { additionalContext?: string }).additionalContext
-      ).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+      expect(result.response.hookSpecificOutput).toBeUndefined()
       expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     })
@@ -94,12 +89,7 @@ describe("dispatch execute integration", () => {
       }
       const result = await executeDispatch(req)
       expect(result.response.continue).toBe(true)
-      expect((result.response.hookSpecificOutput as { hookEventName?: string }).hookEventName).toBe(
-        "Stop"
-      )
-      expect(
-        (result.response.hookSpecificOutput as { additionalContext?: string }).additionalContext
-      ).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+      expect(result.response.hookSpecificOutput).toBeUndefined()
       expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     })

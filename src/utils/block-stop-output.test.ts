@@ -10,6 +10,6 @@ describe("blockStopObj", () => {
     expect(out.systemMessage).toContain(" end")
     expect(out.systemMessage?.includes("line two")).toBe(false)
     expect((out.systemMessage ?? "").length).toBeGreaterThan(70)
-    expect(out.hookSpecificOutput?.additionalContext).toBe(out.systemMessage)
+    expect(out.hookSpecificOutput).toBeUndefined()
   })
 })

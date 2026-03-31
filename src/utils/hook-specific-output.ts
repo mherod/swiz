@@ -107,13 +107,6 @@ export function hsoPostToolUseDenyBlock(reason: string): Record<string, unknown>
   }
 }
 
-export function hsoStopWithAdditionalContext(additionalContext: string): Record<string, unknown> {
-  return {
-    hookEventName: "Stop",
-    additionalContext,
-  }
-}
-
 /** Merged PreToolUse allow envelope from aggregated hints / contexts (dispatch strategy). */
 export function hsoPreToolUseMergedAllow(fields: {
   hintsJoined?: string

@@ -126,6 +126,17 @@ export function normalizeStopDispatchResponseInPlace(
 
   backfillStopDispatchReasonFields(envelope)
 
+  // Claude Code rejects hookSpecificOutput unless hookEventName is PreToolUse, UserPromptSubmit,
+  // or PostToolUse. Normalization may merge { hookEventName: "Stop" | "SubagentStop", ... } —
+  // strip it; reason / stopReason / systemMessage carry the narrative.
+  const hsoAfter = envelope.hookSpecificOutput
+  if (isPlainRecord(hsoAfter)) {
+    const name = typeof hsoAfter.hookEventName === "string" ? hsoAfter.hookEventName.trim() : ""
+    if (name === "Stop" || name === "SubagentStop") {
+      unset(envelope, "hookSpecificOutput")
+    }
+  }
+
   stopHookOutputSchema.parse(envelope)
 }
 
