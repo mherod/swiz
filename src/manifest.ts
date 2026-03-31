@@ -90,6 +90,7 @@ import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
 import stopDependabotPrs from "../hooks/stop-dependabot-prs.ts"
 import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
+import stopGitStatus from "../hooks/stop-git-status.ts"
 import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
 import stopLargeFiles from "../hooks/stop-large-files.ts"
 import stopLintStaged from "../hooks/stop-lint-staged.ts"
@@ -98,6 +99,7 @@ import stopMemorySize from "../hooks/stop-memory-size.ts"
 import stopMemoryUpdateReminder from "../hooks/stop-memory-update-reminder.ts"
 import stopNonDefaultBranch from "../hooks/stop-non-default-branch.ts"
 import stopOffensiveLanguage from "../hooks/stop-offensive-language.ts"
+import stopPersonalRepoIssues from "../hooks/stop-personal-repo-issues.ts"
 import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
 import stopPrDescription from "../hooks/stop-pr-description.ts"
 import stopQualityChecks from "../hooks/stop-quality-checks.ts"
@@ -209,6 +211,8 @@ export const manifest: HookGroup[] = [
       { hook: stopMemoryUpdateReminder },
       { hook: stopAutoContinue },
       { hook: posttooluseSpeakNarrator },
+      { hook: stopGitStatus },
+      { hook: stopPersonalRepoIssues },
     ],
   },
   {

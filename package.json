@@ -26,6 +26,7 @@
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "applescript-node": "^1.0.3",
     "date-fns": "^4.1.0",
+    "ink": "^6.8.0",
     "lodash-es": "^4.17.23",
     "lru-cache": "^11.2.6",
     "motion": "^12.36.0",
