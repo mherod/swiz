@@ -6,10 +6,10 @@
 import { join } from "node:path"
 import { z } from "zod"
 import { hasAiProvider, promptObject } from "../ai-providers.ts"
-import { expandInlineCommands, substituteArgs } from "../commands/skill.ts"
 import { extractStepsFromSkill, filterQualitySteps, SKILL_DIRS } from "../skill-utils.ts"
 import type { Task } from "../tasks/task-repository.ts"
 import { type MergeStep, mergeIntoTasks } from "../tasks/task-service.ts"
+import { expandInlineCommands, substituteArgs } from "./skill-content.ts"
 
 export interface SkillStepsResult {
   skillName: string

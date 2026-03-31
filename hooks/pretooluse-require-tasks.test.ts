@@ -593,6 +593,17 @@ describe("pretooluse-require-tasks", () => {
       })
       expect(result.decision).toBe("deny")
     })
+
+    test("allows Edit when running in Gemini CLI (GEMINI_CLI=1) even with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        filePath: "/Users/test/project/src/index.ts",
+        envOverrides: { GEMINI_CLI: "1" },
+      })
+      expect(result.decision).toBeUndefined()
+    })
   })
 
   describe("git repo + CLAUDE.md guard", () => {

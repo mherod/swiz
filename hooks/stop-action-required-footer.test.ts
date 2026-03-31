@@ -30,12 +30,19 @@ async function runStopHook(
   payload: unknown,
   opts: { env?: Record<string, string>; cwd?: string } = {}
 ): Promise<HookResult> {
+  const env: Record<string, string | undefined> = { ...process.env, ...opts.env }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
   const proc = Bun.spawn(["bun", join(HOOKS_DIR, hookFile)], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...opts.env },
+    env: env as Record<string, string>,
   })
   await proc.stdin.write(JSON.stringify(payload))
   await proc.stdin.end()

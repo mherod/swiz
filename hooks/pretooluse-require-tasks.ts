@@ -30,6 +30,7 @@ import {
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
+  isCurrentAgent,
   isEditTool,
   isGitRepo,
   isShellTool,
@@ -461,6 +462,7 @@ function validateGuardConditions(
   input: Record<string, unknown>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
+  if (isCurrentAgent("gemini")) return false
   if (isExemptToolCall(input, toolName)) return false
   return true
 }

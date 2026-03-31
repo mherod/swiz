@@ -1,7 +1,7 @@
 import { chmod, cp, mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
-import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
+import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, getAgent, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
 import { getHomeDir, getHomeDirWithFallback } from "../home.ts"
 import {
@@ -27,10 +27,10 @@ import {
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
+import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import type { CheckResult } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
-import { convertSkillContent } from "./skill.ts"
 
 /**
  * Built-in allowed values for the `category:` frontmatter field in SKILL.md files.
@@ -1282,8 +1282,9 @@ async function areSkillsSame(
   // If the overridden version matches the active version after conversion, they are redundant
   const { content: converted } = convertSkillContent(
     overriddenRaw,
-    overriddenAgentId,
-    activeAgentId
+    getAgent(overriddenAgentId)!,
+    getAgent(activeAgentId)!,
+    AGENTS
   )
 
   return activeNormalized === normalizeSkillContent(converted)

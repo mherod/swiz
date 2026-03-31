@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { AGENTS, getAgent } from "../agents.ts"
+import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { useTempDir } from "../utils/test-utils.ts"
-import { convertSkillContent, parseFrontmatterField, stripFrontmatter } from "./skill.ts"
+import { parseFrontmatterField, stripFrontmatter } from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────
 
@@ -364,14 +366,17 @@ describe("swiz skill --sync-gemini", () => {
 describe("convertSkillContent", () => {
   test("no-op when from and to are the same agent", () => {
     const content = "---\nallowed-tools: Bash, Edit\n---\nUse Bash to run commands.\n"
-    const { content: result, unmapped } = convertSkillContent(content, "claude", "claude")
+    const claude = getAgent("claude")!
+    const { content: result, unmapped } = convertSkillContent(content, claude, claude, AGENTS)
     expect(result).toBe(content)
     expect(unmapped).toHaveLength(0)
   })
 
   test("rewrites frontmatter allowed-tools for claude → gemini", () => {
     const content = "---\nallowed-tools: Bash, Edit, Write\n---\n# Body\n"
-    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("run_shell_command")
     expect(result).toContain("replace")
     expect(result).toContain("write_file")
@@ -380,14 +385,18 @@ describe("convertSkillContent", () => {
 
   test("rewrites frontmatter allowed-tools for claude → cursor", () => {
     const content = "---\nallowed-tools: Bash, Edit\n---\n# Body\n"
-    const { content: result } = convertSkillContent(content, "claude", "cursor")
+    const claude = getAgent("claude")!
+    const cursor = getAgent("cursor")!
+    const { content: result } = convertSkillContent(content, claude, cursor, AGENTS)
     expect(result).toContain("Shell")
     expect(result).toContain("StrReplace")
   })
 
   test("rewrites body tool name references whole-word (claude → gemini)", () => {
     const content = "---\n---\nUse Bash to run commands. Do not use BashExtra.\n"
-    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("run_shell_command")
     // BashExtra should not be partially rewritten
     expect(result).toContain("BashExtra")
@@ -395,7 +404,9 @@ describe("convertSkillContent", () => {
 
   test("rewrites TaskCreate and TaskUpdate to gemini equivalents", () => {
     const content = "---\n---\nCall TaskCreate to plan. Then use TaskUpdate to track.\n"
-    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("write_todos")
     expect(result).not.toContain("TaskCreate")
     expect(result).not.toContain("TaskUpdate")
@@ -403,7 +414,9 @@ describe("convertSkillContent", () => {
 
   test("rewrites TaskList and TaskGet to codex equivalent via conversion supplement", () => {
     const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
-    const { content: result } = convertSkillContent(content, "claude", "codex")
+    const claude = getAgent("claude")!
+    const codex = getAgent("codex")!
+    const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
     // Conversion supplement maps TaskList/TaskGet → update_plan (same as TaskCreate)
     expect(result).toContain("update_plan")
     expect(result).not.toContain("TaskList")
@@ -412,7 +425,9 @@ describe("convertSkillContent", () => {
 
   test("rewrites TaskList and TaskGet to gemini equivalent via conversion supplement", () => {
     const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
-    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("write_todos")
     expect(result).not.toContain("TaskList")
     expect(result).not.toContain("TaskGet")
@@ -421,7 +436,9 @@ describe("convertSkillContent", () => {
   test("rewrites YAML-list allowed-tools entries including TaskList/TaskGet during conversion", () => {
     const content =
       '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
-    const { content: result } = convertSkillContent(content, "claude", "codex")
+    const claude = getAgent("claude")!
+    const codex = getAgent("codex")!
+    const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
     expect(result).toContain('  - "update_plan"')
     expect(result).not.toContain('"TaskList"')
     expect(result).not.toContain('"TaskGet"')
@@ -434,7 +451,9 @@ describe("convertSkillContent", () => {
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {
     const content =
       "---\nallowed-tools: run_shell_command, write_file\n---\nUse run_shell_command.\n"
-    const { content: result } = convertSkillContent(content, "gemini", "claude")
+    const gemini = getAgent("gemini")!
+    const claude = getAgent("claude")!
+    const { content: result } = convertSkillContent(content, gemini, claude, AGENTS)
     expect(result).toContain("Bash")
     expect(result).toContain("Write")
     expect(result).not.toContain("run_shell_command")
@@ -443,7 +462,9 @@ describe("convertSkillContent", () => {
   test("surface unmapped tool names without data loss", () => {
     // NotebookEdit has no Gemini equivalent (maps to 'NotebookEdit' itself)
     const content = "---\nallowed-tools: Bash, NotebookEdit\n---\n"
-    const { content: result, unmapped } = convertSkillContent(content, "claude", "gemini")
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("run_shell_command")
     // NotebookEdit preserved as-is (no Gemini equivalent)
     expect(result).toContain("NotebookEdit")
@@ -454,7 +475,9 @@ describe("convertSkillContent", () => {
 
   test("converts codex tool names to claude (codex → claude)", () => {
     const content = "---\nallowed-tools: shell_command, read_file\n---\nUse shell_command.\n"
-    const { content: result } = convertSkillContent(content, "codex", "claude")
+    const codex = getAgent("codex")!
+    const claude = getAgent("claude")!
+    const { content: result } = convertSkillContent(content, codex, claude, AGENTS)
     expect(result).toContain("Bash")
     expect(result).toContain("Read")
     expect(result).not.toContain("shell_command")

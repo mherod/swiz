@@ -25,6 +25,7 @@ import { validateTransition } from "../tasks/task-service.ts"
 import {
   autoTransitionForComplete,
   blockStopObj,
+  isCurrentAgent,
   normalizeSubject,
   subjectsOverlap,
 } from "./hook-utils.ts"
@@ -113,6 +114,8 @@ export async function checkIncompleteTasks(
   home: string,
   autoTransitionEnabled = true
 ): Promise<HookOutput | null> {
+  if (isCurrentAgent("gemini")) return null
+
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return null
 

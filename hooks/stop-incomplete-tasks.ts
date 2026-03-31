@@ -7,6 +7,7 @@
 import { getHomeDirOrNull } from "../src/home.ts"
 import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { isCurrentAgent } from "../src/utils/hook-utils.ts"
 import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
@@ -15,6 +16,8 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   const sessionId = parsed.session_id ?? ""
   const home = getHomeDirOrNull()
   if (!home) return {}
+
+  if (isCurrentAgent("gemini")) return {}
 
   const result = await checkIncompleteTasks(sessionId, home)
   return result ?? {}

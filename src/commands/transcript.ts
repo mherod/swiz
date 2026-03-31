@@ -77,44 +77,44 @@ async function runAutoReplyMode(
   })
   await monitor.start()
   try {
-    monitor.setPhase("streaming-pass-1")
-    monitor.pushEvent("Starting pass 1/2 (flipped roles)")
-    const replies = await streamAutoReply(turns, {
-      sessionId,
-      flipRoles: true,
-      cwd: process.cwd(),
-      passNumber: 1,
-    })
-    if (!replies.length) throw new Error("No response turns were generated.")
+    const allReplies: Turn[] = []
+    const cwd = process.cwd()
+    let passNumber = 0
 
-    monitor.updateStats({
-      currentPass: 1,
-      repliesGenerated: replies.length,
-    })
+    while (true) {
+      passNumber++
+      const flipRoles = passNumber % 2 === 0
+      monitor.setPhase(`streaming-pass-${passNumber}`)
+      const allTurns = turns.concat(allReplies)
+      monitor.pushEvent(
+        `Starting pass ${passNumber}${flipRoles ? " (flipped roles)" : " (original roles)"}`
+      )
+      const replies = await streamAutoReply(allTurns, {
+        sessionId,
+        flipRoles,
+        cwd,
+        passNumber,
+      })
 
-    const allTurns = turns.concat(replies)
-    monitor.setPhase("streaming-pass-2")
-    monitor.pushEvent("Starting pass 2/2 (normal roles)")
-    const replies2 = await streamAutoReply(allTurns, {
-      sessionId,
-      flipRoles: false,
-      cwd: process.cwd(),
-      passNumber: 2,
-    })
-    if (!replies2.length) throw new Error("No response turns were generated.")
+      if (replies.length) {
+        allReplies.push(...replies)
+        monitor.updateStats({
+          currentPass: passNumber,
+          repliesGenerated: allReplies.length,
+        })
 
-    monitor.updateStats({
-      currentPass: 2,
-      repliesGenerated: replies.length + replies2.length,
-    })
+        const replyDisplayTurns = turnsToDisplayTurns(replies).displayTurns
+        for (const t of replyDisplayTurns) {
+          monitor.pushTurn(t)
+        }
 
-    const replyDisplayTurns = turnsToDisplayTurns(replies.concat(replies2)).displayTurns
-    for (const t of replyDisplayTurns) {
-      monitor.pushTurn(t)
+        if (flipRoles) break
+      }
     }
 
+    if (!allReplies.length) throw new Error("No response turns were generated.")
+
     // Schedule auto-replies as auto-steer messages for next session turn
-    const allReplies = replies.concat(replies2)
     const scheduledMessages = new Set<string>()
     let scheduledCount = 0
 
