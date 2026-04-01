@@ -540,7 +540,7 @@ interface GhFetchResults {
   projectState: ProjectState | null | undefined
 }
 
-/** Worst fetch status wins — error > stale > ok. */
+/** Worst fetch status wins — error > stale > OK. */
 function computeFetchStatus(
   issueResult: { status: FetchStatus } | null,
   prResult: { status: FetchStatus } | null

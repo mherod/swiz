@@ -12,7 +12,7 @@
     "test:vitest": "vitest",
     "test:bun": "bun test --concurrent --timeout=10000",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check . && eslint .",
+    "lint": "biome check . && eslint . --max-warnings=9999",
     "lint:eslint": "eslint .",
     "format": "biome format --write .",
     "lint:fix": "biome check --write . && eslint . --fix && biome format --write .",

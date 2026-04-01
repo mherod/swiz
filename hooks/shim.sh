@@ -81,9 +81,11 @@ _swiz_guard() {
   shift 3
 
   if _swiz_is_agent; then
+    # shellcheck disable=SC2016
     printf 'swiz: Do not use `%s`. %s\n' "$cmd" "$msg" >&2
     return 0
   else
+    # shellcheck disable=SC2016
     printf '\033[33mswiz: consider `%s` instead of `%s`\033[0m\n' "$alt" "$cmd" >&2
     return 1
   fi

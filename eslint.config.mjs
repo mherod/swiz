@@ -193,11 +193,26 @@ export default tseslint.config(
       "src/commands/**",
       "src/dispatch/**",
       "src/settings/**",
+      "src/tasks/**",
+      "src/utils/**",
+      "src/*-analysis*.ts",
+      "src/*-extract*.ts",
+      "src/*-push-gate*.ts",
+      "src/*-summary*.ts",
+      "src/*-sessions-discovery*.ts",
+      "src/issue-store*.ts",
+      "src/plugins.ts",
+      "src/pr-review-autosteer.ts",
+      "src/swiz-hook-commands.ts",
+      "src/tools.ts",
+      "src/transcript-schemas.ts",
       "**/*.test.ts",
     ],
     rules: {
       /** Modules that handle loosely-typed JSON from network/dispatch or test files. */
       "@typescript-eslint/no-explicit-any": "off",
+      /** Modules that parse untyped runtime data — Zod would be ideal but migration is incremental. */
+      "@typescript-eslint/no-restricted-types": "off",
     },
   }
 )

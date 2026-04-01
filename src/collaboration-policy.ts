@@ -62,7 +62,7 @@ export interface ProjectCollaborationDetectionResult extends CollaborationPolicy
   resolved: boolean
 }
 
-const BOT_OR_AUTOMATION_LOGIN_RE = /(?:\[bot\]|dependabot|^claude$|^cursoragent$)/i
+const BOT_OR_AUTOMATION_LOGIN_RE = /(?:\[bot]|dependabot|^claude$|^cursoragent$)/i
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 function normalizeLogin(login: string): string {
