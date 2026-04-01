@@ -79,7 +79,7 @@ export async function evaluateStopDependabotPrs(input: StopHookInput): Promise<S
   lines.push("  • Close if superseded:  gh pr close <number>")
   lines.push("  • Checkout to inspect:  gh pr checkout <number>")
 
-  return blockStopObj(lines.join("\n"), { includeUpdateMemoryAdvice: false })
+  return blockStopObj(lines.join("\n"))
 }
 
 const stopDependabotPrs: SwizStopHook = {

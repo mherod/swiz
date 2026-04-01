@@ -361,7 +361,7 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
     throw new AutoContinueExit({})
   }
   const reason = normalizedArgs[0]!
-  throw new AutoContinueExit(blockStopObj(reason, { includeUpdateMemoryAdvice: false }))
+  throw new AutoContinueExit(blockStopObj(reason))
 }
 
 // ─── Filler suggestion ───────────────────────────────────────────────────────
@@ -777,9 +777,6 @@ export default stopAutoContinue
 
 if (import.meta.main) {
   await runSwizHookAsMain(stopAutoContinue, {
-    onStdinJsonError: () =>
-      blockStopObj("Auto-continue could not parse stop-hook input JSON.", {
-        includeUpdateMemoryAdvice: false,
-      }),
+    onStdinJsonError: () => blockStopObj("Auto-continue could not parse stop-hook input JSON."),
   })
 }

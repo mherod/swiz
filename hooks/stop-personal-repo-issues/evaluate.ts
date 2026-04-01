@@ -95,7 +95,7 @@ async function runPersonalRepoIssuesBody(input: StopHookInput): Promise<SwizHook
 
     if (shouldUpdateCooldown) await updateCooldown(sessionId, cwd)
 
-    return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+    return blockStopObj(reason)
   } catch {
     return {}
   }

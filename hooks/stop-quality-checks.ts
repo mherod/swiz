@@ -183,9 +183,7 @@ export async function evaluateStopQualityChecks(input: StopHookInput): Promise<S
   if (failures.length === 0) return {}
 
   const settings = (raw._effectiveSettings as Record<string, unknown>) ?? {}
-  return blockStopObj(await buildQualityBlockReason(failures, { cwd, settings }), {
-    includeUpdateMemoryAdvice: false,
-  })
+  return blockStopObj(await buildQualityBlockReason(failures, { cwd, settings }))
 }
 
 const stopQualityChecks: SwizStopHook = {

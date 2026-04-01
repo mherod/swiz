@@ -43,7 +43,7 @@ async function evaluate(input: StopHookInput): Promise<SwizHookOutput> {
         `sed 's|^\\s*origin/||' | xargs -I{} git push origin --delete {}`
     )
 
-  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason)
 }
 
 const stopUpstreamBranchCount: SwizStopHook = {

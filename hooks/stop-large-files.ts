@@ -111,9 +111,7 @@ export async function evaluateStopLargeFiles(input: StopHookInput): Promise<Swiz
   const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns)
   if (largeFiles.length === 0) return {}
 
-  return blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb), {
-    includeUpdateMemoryAdvice: false,
-  })
+  return blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb))
 }
 
 const stopLargeFiles: SwizStopHook = {

@@ -79,8 +79,7 @@ export async function evaluateStopLintStaged(input: StopHookInput): Promise<Swiz
     "The linter is the authority. Lint-staged checks failed—do not ignore them.\n\n" +
       "Linting failures must be fixed. You cannot postpone, negotiate with, or work around them.\n\n" +
       `Failures:\n${output}\n\n` +
-      "Fix every linting issue, then try stopping again.",
-    { includeUpdateMemoryAdvice: false }
+      "Fix every linting issue, then try stopping again."
   )
 }
 

@@ -100,7 +100,7 @@ export async function evaluateStopTodoTracker(input: StopHookInput): Promise<Swi
     return {}
   }
 
-  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason)
 }
 
 const stopTodoTracker: SwizStopHook = {

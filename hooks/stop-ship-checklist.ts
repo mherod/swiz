@@ -288,7 +288,7 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
     translateToolNames: true,
   })
 
-  return blockStopObj(preamble + plan, { includeUpdateMemoryAdvice: !issuesSection })
+  return blockStopObj(preamble + plan)
 }
 
 const stopShipChecklist: SwizStopHook = {

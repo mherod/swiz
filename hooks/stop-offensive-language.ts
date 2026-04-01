@@ -36,8 +36,7 @@ export async function evaluateStopOffensiveLanguage(input: StopHookInput): Promi
       matches,
       "Avoidance behavior detected. Produce a corrected message that " +
         "demonstrates action, not words."
-    ),
-    { includeUpdateMemoryAdvice: false }
+    )
   )
 }
 

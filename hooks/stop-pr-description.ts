@@ -121,7 +121,7 @@ export async function evaluateStopPrDescription(input: StopHookInput): Promise<S
   const violation = validatePrDescription(pr, prAdvice)
   if (!violation) return {}
 
-  return blockStopObj(violation, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(violation)
 }
 
 const stopPrDescription: SwizStopHook = {

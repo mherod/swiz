@@ -82,7 +82,7 @@ async function handleNoReviews(
         `  b) Self-review: leave a detailed comment summarising the changes and close any open questions.`,
       ].join("\n")
     )
-  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason)
 }
 
 async function fetchReviewData(
@@ -237,7 +237,7 @@ export async function evaluateStopPrChangesRequested(
     fork
   )
 
-  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason)
 }
 
 const stopPrChangesRequested: SwizStopHook = {

@@ -70,7 +70,7 @@ export async function evaluateStopSecretScanner(input: StopHookInput): Promise<S
   const findings = await findSecretFindings(cwd)
   if (findings.length === 0) return {}
 
-  return blockStopObj(formatSecretReason(findings), { includeUpdateMemoryAdvice: false })
+  return blockStopObj(formatSecretReason(findings))
 }
 
 const stopSecretScanner: SwizStopHook = {

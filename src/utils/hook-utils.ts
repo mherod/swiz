@@ -189,9 +189,7 @@ function denyPreToolUseObj(reason: string) {
   return hookOutputSchema.parse({
     suppressOutput: true,
     systemMessage: extractHookSystemMessagePreview(reason),
-    hookSpecificOutput: hsoPreToolUseDeny(
-      reason + preToolActionRequired(reason, { includeUpdateMemoryAdvice: true })
-    ),
+    hookSpecificOutput: hsoPreToolUseDeny(reason + preToolActionRequired()),
   })
 }
 
@@ -335,83 +333,32 @@ export { SwizHookExit } from "../inline-hook-context.ts"
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
-function summarizeUpdateMemoryCause(reason: string): string {
-  const firstParagraph = reason
-    .replace(/\r/g, "")
-    .split(/\n\s*\n/)[0]
-    ?.replace(/\s+/g, " ")
-    .trim()
-
-  const cleaned = (firstParagraph ?? "")
-    .replace(/^STOP\.\s*/i, "")
-    .replace(/^ACTION REQUIRED:\s*/i, "")
-    .trim()
-
-  if (!cleaned) {
-    return "A required workflow step or explicit instruction was not followed."
-  }
-
-  return cleaned.length > 180 ? `${cleaned.slice(0, 177).trimEnd()}...` : cleaned
-}
-
-function describeUpdateMemoryCause(reason: string): string {
-  const summary = summarizeUpdateMemoryCause(reason)
-  if (/\b(user|instruction|requested|asked|told)\b/i.test(reason)) {
-    return `A user instruction was missed: ${summary}`
-  }
-  return `A hook detected missing or unstructured workflow behavior: ${summary}`
-}
-
-function updateMemoryAdvice(reason: string): string {
-  const cause = describeUpdateMemoryCause(reason)
-  return skillAdvice(
-    "update-memory",
-    `Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow. Cause to capture: ${cause}`,
-    `Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow. Cause to capture: ${cause}`
-  )
-}
-
-function isUpdateMemoryFooterEnabled(): boolean {
-  return true
-}
-
-interface ActionRequiredOptions {
-  includeUpdateMemoryAdvice?: boolean
-}
-
-function memoryAdvice(include: boolean, reason: string): string {
-  if (!include || !isUpdateMemoryFooterEnabled()) return ""
-  return `\n\n${updateMemoryAdvice(reason)}`
-}
-
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */
-export function preToolActionRequired(reason = "", options: ActionRequiredOptions = {}): string {
-  const base = `\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause.`
-  return base + memoryAdvice(options.includeUpdateMemoryAdvice !== false, reason)
+export function preToolActionRequired(): string {
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause.`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
-export function actionRequired(reason = "", options: ActionRequiredOptions = {}): string {
-  const base = `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.`
-  return base + memoryAdvice(options.includeUpdateMemoryAdvice !== false, reason)
+export function actionRequired(): string {
+  return `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.`
 }
 
-export function blockStopObj(reason: string, options: ActionRequiredOptions = {}): HookOutput {
+export function blockStopObj(reason: string): HookOutput {
   const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   // Omit hookSpecificOutput: Claude Code only allows hookSpecificOutput for PreToolUse,
   // UserPromptSubmit, and PostToolUse — hookEventName "Stop" fails JSON validation.
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
-    reason: reason + actionRequired(reason, options),
+    reason: reason + actionRequired(),
     suppressOutput: true,
     systemMessage: preview,
   })
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
-export function blockStop(reason: string, options: ActionRequiredOptions = {}): never {
-  exitWithHookObject(blockStopObj(reason, options))
+export function blockStop(reason: string): never {
+  exitWithHookObject(blockStopObj(reason))
 }
 
 function blockStopRawObj(reason: string) {

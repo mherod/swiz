@@ -125,7 +125,7 @@ export async function evaluateStopLockfileDrift(input: StopHookInput): Promise<S
   for (const d of drifted) reason += `  ${d}\n`
   reason += "\nRun the install command to regenerate the lockfile, then commit it before stopping."
 
-  return blockStopObj(reason, { includeUpdateMemoryAdvice: false })
+  return blockStopObj(reason)
 }
 
 const stopLockfileDrift: SwizStopHook = {
