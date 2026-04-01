@@ -34,11 +34,13 @@ export { findSessions } from "./transcript-sessions-discovery.ts"
  *
  * @param projectDir - Project directory (used to compute Claude projectKey)
  * @param home
+ * @param limit - Maximum number of sessions to return (returns most recent first). If undefined, returns all.
  * @returns Aggregated sessions from all providers, sorted by mtime descending
  */
 export async function findAllProviderSessions(
   projectDir: string,
-  home?: string
+  home?: string,
+  limit?: number
 ): Promise<Session[]> {
   const targetDir = resolve(projectDir)
   const effectiveHome = home ?? getHomeDir()
@@ -62,7 +64,8 @@ export async function findAllProviderSessions(
     findJunieSessions(targetDir, effectiveHome),
   ])
 
-  const merged: Session[] = [
+  // Merge sessions from all providers, using CappedMap to bound memory when a limit is requested.
+  const allSessions: Session[] = [
     ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     ...geminiSessions,
     ...cursorSessions,
@@ -71,7 +74,8 @@ export async function findAllProviderSessions(
     ...codexSessions,
     ...junieSessions,
   ]
-  return sortSessionsDeterministic(merged)
+  const sorted = sortSessionsDeterministic(allSessions)
+  return limit !== undefined ? sorted.slice(0, limit) : sorted
 }
 
 export function isUnsupportedTranscriptFormat(format: Session["format"] | undefined): boolean {

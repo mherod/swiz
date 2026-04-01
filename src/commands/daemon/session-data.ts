@@ -1,6 +1,5 @@
 import { LRUCache } from "lru-cache"
 import { readTasks } from "../../tasks/task-repository.ts"
-
 import { getSessions } from "../../tasks/task-resolver.ts"
 import {
   findAllProviderSessions,
@@ -10,6 +9,7 @@ import {
   type Session,
   type TranscriptEntry,
 } from "../../transcript-utils.ts"
+import { CappedMap } from "../../utils/capped-map.ts"
 import {
   buildProjectTasksView,
   buildSessionTasksView,
@@ -30,6 +30,11 @@ interface SessionScanResult {
   lastMessageAt: number
 }
 
+/** Max transcripts to parse per session. */
+const MAX_TRANSCRIPT_ENTRIES = 2000
+/** Max messages cached per session. */
+const MAX_SESSION_MESSAGES = 200
+
 interface CachedSessionData {
   mtimeMs: number
   size: number
@@ -37,7 +42,7 @@ interface CachedSessionData {
   lastMessageAt: number
   messages: SessionMessage[]
   toolStats: Array<{ name: string; count: number }>
-  fallbackTimestamps: Map<string, string>
+  fallbackTimestamps: CappedMap<string, string>
   lastAssignedFallbackMs: number
   /** Fingerprint of the last tool call detected in this session. */
   lastToolCallFingerprint?: string
@@ -83,7 +88,7 @@ class SessionDataCache {
     } = extraction
     let { startedAt, lastMessageAt } = extraction
 
-    const fallbackTimestamps = new Map<string, string>()
+    const fallbackTimestamps = new CappedMap<string, string>(500)
     let lastAssignedFallbackMs = prev?.lastAssignedFallbackMs ?? 0
 
     const fallbackResult = SessionDataCache.assignFallbackTimestamps({
@@ -158,7 +163,11 @@ class SessionDataCache {
     let lastToolCallFingerprint: string | undefined
     let lastMessageFingerprint: string | undefined
 
-    for (let i = 0; i < entries.length; i++) {
+    // Cap entries to prevent OOM on huge transcripts. Keep only the last N entries.
+    const startIdx =
+      entries.length > MAX_TRANSCRIPT_ENTRIES ? entries.length - MAX_TRANSCRIPT_ENTRIES : 0
+
+    for (let i = startIdx; i < entries.length; i++) {
       const entry = entries[i]!
       const built = SessionDataCache.buildMessage(entry)
       if (!built) continue
@@ -187,6 +196,17 @@ class SessionDataCache {
         messages.length - 1
       )
     }
+
+    // Trim messages and fallback to cap in-memory growth.
+    const trimOffset =
+      messages.length > MAX_SESSION_MESSAGES ? messages.length - MAX_SESSION_MESSAGES : 0
+    if (trimOffset > 0) {
+      messages.splice(0, trimOffset)
+      for (let i = 0; i < pendingFallback.length; i++) {
+        pendingFallback[i]!.messageIndex -= trimOffset
+      }
+    }
+
     return {
       messages,
       toolCounts,
@@ -201,7 +221,7 @@ class SessionDataCache {
   private static assignFallbackTimestamps(opts: {
     pendingFallback: Array<{ messageIndex: number; key: string }>
     messages: SessionMessage[]
-    fallbackTimestamps: Map<string, string>
+    fallbackTimestamps: CappedMap<string, string>
     fileMtimeMs: number
     initialSeed: number
     prev?: CachedSessionData

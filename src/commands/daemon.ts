@@ -475,7 +475,7 @@ class TranscriptMonitor {
     const speakEnabled = settings?.speak ?? globalSettings.speak
     if (!autoSteerEnabled && !speakEnabled) return
 
-    const sessions = await findAllProviderSessions(cwd)
+    const sessions = await findAllProviderSessions(cwd, undefined, 1)
     // Only check the most recent session for performance
     const latestSession = sessions[0]
     if (!latestSession) return
