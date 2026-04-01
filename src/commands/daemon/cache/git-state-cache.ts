@@ -1,4 +1,5 @@
 import { type GitBranchStatus, getGitBranchStatus } from "../../../git-helpers.ts"
+import { CappedMap } from "./capped-map.ts"
 
 export interface CachedGitState {
   status: GitBranchStatus
@@ -6,7 +7,7 @@ export interface CachedGitState {
 }
 
 export class GitStateCache {
-  private entries = new Map<string, CachedGitState>()
+  private entries = new CappedMap<string, CachedGitState>(200)
   private inFlight = new Map<string, Promise<CachedGitState | null>>()
 
   async get(cwd: string): Promise<CachedGitState | null> {

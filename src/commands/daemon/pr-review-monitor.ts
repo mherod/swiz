@@ -15,8 +15,11 @@ import { debugLog } from "../../debug.ts"
 import { git } from "../../git-helpers.ts"
 import type { IssueStore, UpstreamSyncResult } from "../../issue-store.ts"
 import { getIssueStore } from "../../issue-store.ts"
+import { CappedMap } from "./cache/capped-map.ts"
 
 const BRANCH_CACHE_TTL_MS = 15_000
+/** Max age for unconsumed auto-steer payloads before eviction (2 hours) */
+const QUEUE_PAYLOAD_MAX_AGE_MS = 2 * 60 * 60 * 1000
 
 interface BranchCacheEntry {
   branch: string
@@ -25,11 +28,12 @@ interface BranchCacheEntry {
 
 interface SessionAutoSteerQueue {
   payloads: ReturnType<typeof trackPrReviewTransitions>
+  addedAt: number
 }
 
 export class PrReviewMonitor {
-  private branchCache = new Map<string, BranchCacheEntry>()
-  private sessionQueues = new Map<string, SessionAutoSteerQueue>()
+  private branchCache = new CappedMap<string, BranchCacheEntry>(200)
+  private sessionQueues = new CappedMap<string, SessionAutoSteerQueue>(500)
   private store: IssueStore
 
   constructor(store?: IssueStore) {
@@ -84,9 +88,12 @@ export class PrReviewMonitor {
       // Build integration context and process
       const ctx = createSyncIntegrationContext(sessionId, true, (payloads) => {
         if (sessionId && payloads.length > 0) {
-          const existing = this.sessionQueues.get(sessionId) ?? { payloads: [] }
-          existing.payloads.push(...payloads)
-          this.sessionQueues.set(sessionId, existing)
+          let queue = this.sessionQueues.get(sessionId)
+          if (!queue) {
+            queue = { payloads: [], addedAt: Date.now() }
+          }
+          queue.payloads.push(...payloads)
+          this.sessionQueues.set(sessionId, queue)
         }
       })
 
@@ -122,10 +129,18 @@ export class PrReviewMonitor {
     return queue.payloads
   }
 
-  /** Remove queued payloads for sessions no longer active. */
+  /** Remove queued payloads for sessions no longer active, and evict stale queues. */
   pruneOldSessions(activeSessions: Set<string>): void {
+    const now = Date.now()
     for (const sessionId of this.sessionQueues.keys()) {
+      const queue = this.sessionQueues.get(sessionId)
+      // Delete inactive sessions entirely
       if (!activeSessions.has(sessionId)) {
+        this.sessionQueues.delete(sessionId)
+        continue
+      }
+      // For active sessions, evict payloads older than max age (unconsumed)
+      if (queue && now - queue.addedAt > QUEUE_PAYLOAD_MAX_AGE_MS) {
         this.sessionQueues.delete(sessionId)
       }
     }

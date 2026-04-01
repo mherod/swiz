@@ -13,6 +13,7 @@
 import { access } from "node:fs/promises"
 import { join } from "node:path"
 import { resolveCwd } from "./cwd.ts"
+import { CappedMap } from "./utils/capped-map.ts"
 
 /** Async file-existence check using `access()`. */
 export async function fileExists(path: string): Promise<boolean> {
@@ -35,7 +36,7 @@ export async function fileExists(path: string): Promise<boolean> {
  */
 export type ProjectStack = "bun" | "node" | "go" | "python" | "ruby" | "rust" | "java" | "php"
 
-const _stackCache = new Map<string, Promise<ProjectStack[]>>()
+const _stackCache = new CappedMap<string, Promise<ProjectStack[]>>(200)
 
 export type Framework =
   // JS/TS frameworks
@@ -55,7 +56,7 @@ export type Framework =
   | "java"
   | "php"
 
-const _frameworkCache = new Map<string, Promise<Set<Framework>>>()
+const _frameworkCache = new CappedMap<string, Promise<Set<Framework>>>(200)
 
 const JS_TS_EXTENSIONS = ["js", "ts", "mjs", "cjs"] as const
 const PYTHON_INDICATOR_FILES = ["pyproject.toml", "setup.py", "requirements.txt"] as const

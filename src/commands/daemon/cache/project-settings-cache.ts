@@ -4,6 +4,7 @@ import {
   readProjectSettings,
   resolveProjectHooks,
 } from "../../../settings.ts"
+import { CappedMap } from "./capped-map.ts"
 
 export interface CachedProjectSettings {
   settings: ProjectSwizSettings | null
@@ -13,7 +14,7 @@ export interface CachedProjectSettings {
 }
 
 export class ProjectSettingsCache {
-  private entries = new Map<string, CachedProjectSettings>()
+  private entries = new CappedMap<string, CachedProjectSettings>(200)
   private inFlight = new Map<string, Promise<CachedProjectSettings>>()
 
   async get(cwd: string): Promise<CachedProjectSettings> {

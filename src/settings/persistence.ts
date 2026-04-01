@@ -5,6 +5,7 @@ import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { type FileHookDef, type HookGroup, isInlineHookDef } from "../hook-types.ts"
+import { CappedMap } from "../utils/capped-map.ts"
 import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
@@ -405,7 +406,7 @@ interface ProjectSettingsCacheEntry {
   expiresAt: number
 }
 
-const _projectSettingsCache = new Map<string, ProjectSettingsCacheEntry>()
+const _projectSettingsCache = new CappedMap<string, ProjectSettingsCacheEntry>(200)
 
 function invalidateProjectSettingsCache(path: string): void {
   _projectSettingsCache.delete(path)

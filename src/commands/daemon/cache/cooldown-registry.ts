@@ -1,5 +1,7 @@
+import { CappedMap } from "./capped-map.ts"
+
 export class CooldownRegistry {
-  private entries = new Map<string, number>()
+  private entries = new CappedMap<string, number>(2000)
 
   private key(hookFile: string, cwd: string): string {
     return `${hookFile}\x00${cwd}`

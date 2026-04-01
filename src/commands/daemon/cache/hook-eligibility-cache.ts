@@ -15,6 +15,7 @@ import {
   resolveProjectHooks,
 } from "../../../settings.ts"
 import { getWorkflowIntent } from "../../../state-machine.ts"
+import { CappedMap } from "./capped-map.ts"
 
 export interface EligibilitySnapshot {
   disabledHooks: string[]
@@ -26,7 +27,7 @@ export interface EligibilitySnapshot {
 }
 
 export class HookEligibilityCache {
-  private entries = new Map<string, EligibilitySnapshot>()
+  private entries = new CappedMap<string, EligibilitySnapshot>(200)
   private inFlight = new Map<string, Promise<EligibilitySnapshot>>()
 
   async compute(cwd: string): Promise<EligibilitySnapshot> {

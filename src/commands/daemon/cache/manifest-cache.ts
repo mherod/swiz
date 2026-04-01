@@ -1,4 +1,5 @@
 import type { HookGroup } from "../../../manifest.ts"
+import { CappedMap } from "./capped-map.ts"
 import type { ProjectSettingsCache } from "./project-settings-cache.ts"
 
 export interface CachedManifest {
@@ -7,7 +8,7 @@ export interface CachedManifest {
 }
 
 export class ManifestCache {
-  private entries = new Map<string, CachedManifest>()
+  private entries = new CappedMap<string, CachedManifest>(200)
   private inFlight = new Map<string, Promise<HookGroup[]>>()
   private projectSettingsCache: ProjectSettingsCache
 

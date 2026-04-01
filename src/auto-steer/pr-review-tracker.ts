@@ -6,6 +6,8 @@
  * then emits auto-steer payloads for queue injection.
  */
 
+import { CappedMap } from "../utils/capped-map.ts"
+
 export type PrReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null
 
 export interface PrReviewState {
@@ -24,7 +26,7 @@ export interface AutoSteerPayload {
 }
 
 /** In-memory state tracker persisted across sync cycles. */
-const prStateHistory = new Map<number, PrReviewState>()
+const prStateHistory = new CappedMap<number, PrReviewState>(1000)
 
 /** Evict entries not seen in the last 7 days. */
 const PR_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000

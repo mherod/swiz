@@ -28,6 +28,7 @@ import {
   getProcessCommand,
   isCursorMacProcess,
 } from "./agent-process-discovery.ts"
+import { CappedMap } from "./cache/capped-map.ts"
 import { type CiWatchRegistry, verifyWebhookSignature } from "./ci-watch-registry.ts"
 import {
   type DashboardIssueRecord,
@@ -117,7 +118,7 @@ interface CachedWebAsset {
   contentType: string
 }
 
-const webAssetCache = new Map<string, CachedWebAsset>()
+const webAssetCache = new CappedMap<string, CachedWebAsset>(200)
 
 async function buildWebAsset(
   filePath: string,

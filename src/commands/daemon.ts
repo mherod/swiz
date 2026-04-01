@@ -16,6 +16,7 @@ import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { PrReviewMonitor } from "./daemon/pr-review-monitor.ts"
 import {
+  CappedMap,
   CooldownRegistry,
   createMetrics,
   type DaemonMetrics,
@@ -82,12 +83,12 @@ async function handleDaemonSubcommand(args: string[], port: number): Promise<boo
 
 function createDaemonState() {
   const globalMetrics = createMetrics()
-  const projectMetrics = new Map<string, DaemonMetrics>()
-  const projectLastSeen = new Map<string, number>()
-  const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
-  const sessionToolCalls = new Map<string, CapturedToolCall[]>()
-  const sessionToolUsage = new Map<string, SessionToolUsageState>()
-  const activeHookDispatches = new Map<string, ActiveHookDispatch>()
+  const projectMetrics = new CappedMap<string, DaemonMetrics>(200)
+  const projectLastSeen = new CappedMap<string, number>(200)
+  const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(500)
+  const sessionToolCalls = new CappedMap<string, CapturedToolCall[]>(500)
+  const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(500)
+  const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(500)
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {
     let m = projectMetrics.get(cwd)
@@ -405,8 +406,8 @@ async function logPseudoHook(message: string) {
  * Monitors session transcripts for new tool calls and triggers auto-steer.
  */
 class TranscriptMonitor {
-  private lastToolCallFingerprints = new Map<string, string>()
-  private lastMessageFingerprints = new Map<string, string>()
+  private lastToolCallFingerprints = new CappedMap<string, string>(500)
+  private lastMessageFingerprints = new CappedMap<string, string>(500)
 
   constructor(private caches: ReturnType<typeof createDaemonCaches>) {}
 

@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { z } from "zod"
 import { sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { CappedMap } from "../utils/capped-map.ts"
 import { parseJsonl } from "../utils/jsonl.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
@@ -237,7 +238,7 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
  * In-process cache for session metadata. Avoids repeated filesystem reads
  * within a single CLI invocation. Invalidated per-session by writeTask.
  */
-const sessionMetaCache = new Map<string, SessionMeta | null>()
+const sessionMetaCache = new CappedMap<string, SessionMeta | null>(500)
 
 /** Cache key for sessionMetaCache. */
 function metaCacheKey(sessionId: string, tasksDir: string): string {
