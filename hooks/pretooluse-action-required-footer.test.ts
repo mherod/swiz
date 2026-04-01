@@ -1,3 +1,5 @@
+// noinspection GrazieInspectionRunner
+
 /**
  * Regression tests: every pretooluse denial path must include the ACTION REQUIRED footer.
  * Each test fires the actual hook subprocess with a minimal triggering payload and asserts
