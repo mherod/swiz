@@ -489,6 +489,33 @@ describe("TranscriptIndexCache", () => {
     expect(index!.blockedToolUseIds).toContain("tu_1")
   })
 
+  it("strips sessionLines from cached summary to prevent GB-scale memory leak", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const tp = join(dir, "transcript.jsonl")
+    // Large-ish line simulating a tool_result with file content
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "/a" } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "tu_1", content: "x".repeat(1000) }],
+        },
+      }),
+    ]
+    await writeFile(tp, lines.join("\n"))
+    const cache = new TranscriptIndexCache()
+    const index = await cache.get(tp)
+    expect(index).not.toBeNull()
+    // sessionLines must be stripped — raw JSONL lines can be GB for large sessions
+    expect(index!.summary.sessionLines).toEqual([])
+    // Derived fields must still be populated
+    expect(index!.summary.toolCallCount).toBe(1)
+    expect(index!.summary.toolNames).toEqual(["Read"])
+  })
+
   it("invalidateAll clears all entries", async () => {
     const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
     const tp = join(dir, "transcript.jsonl")

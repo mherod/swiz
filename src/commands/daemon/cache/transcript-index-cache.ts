@@ -74,8 +74,12 @@ export class TranscriptIndexCache {
       const text = await file.text()
       const summary = parseTranscriptSummary(text)
       const blockedIds = extractBlockedToolUseIds(summary.sessionLines)
+      // Strip sessionLines before caching — raw JSONL lines can be GB-scale for large sessions
+      // (tool_result blocks embed full file content). All derived data (toolNames, bashCommands, etc.)
+      // is already extracted. The daemon dispatch path sets disableTranscriptSummaryFallback=true
+      // so sessionLines is never consumed from the cached index.
       const index: TranscriptIndex = {
-        summary,
+        summary: { ...summary, sessionLines: [] },
         blockedToolUseIds: blockedIds,
         mtimeMs,
         computedAt: Date.now(),
