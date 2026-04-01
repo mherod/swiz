@@ -362,9 +362,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return [join(this.getHomeDir(), "skills")]
     },
     getTaskRoots() {
-      // Junie uses per-session task dirs with .matterhorn exit_status markers,
-      // not Claude-style JSON task files. Return null to indicate no task tracking.
-      return null
+      return {
+        tasksDir: join(this.getHomeDir(), "sessions"),
+        projectsDir: join(this.getHomeDir(), "sessions"),
+      }
     },
   },
 }

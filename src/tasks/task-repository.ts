@@ -6,8 +6,10 @@
 
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { z } from "zod"
 import { sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { parseJsonl } from "../utils/jsonl.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { sessionPrefix }
@@ -105,6 +107,52 @@ export async function readTasks(
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
   const dir = join(tasksDir, sessionId)
+
+  // Junie fallback: if events.jsonl exists, parse tasks from AgentPlanUpdatedEvent
+  const eventsPath = join(dir, "events.jsonl")
+  try {
+    const text = await readFile(eventsPath, "utf-8")
+    const schema = z.looseObject({
+      kind: z.string(),
+      event: z.looseObject({
+        agentEvent: z.looseObject({
+          kind: z.string(),
+          items: z
+            .array(
+              z.looseObject({
+                status: z.string(),
+                description: z.string(),
+              })
+            )
+            .optional(),
+        }),
+      }),
+    })
+    const entries = parseJsonl(text, schema)
+    const planEvents = entries.filter((e) => e.event?.agentEvent?.kind === "AgentPlanUpdatedEvent")
+    if (planEvents.length > 0) {
+      const lastPlan = planEvents[planEvents.length - 1]!.event!.agentEvent!.items!
+      return lastPlan.map((item, i) => {
+        const statusMap: Record<string, Task["status"]> = {
+          IN_PROGRESS: "in_progress",
+          COMPLETED: "completed",
+          PENDING: "pending",
+          CANCELLED: "cancelled",
+        }
+        return {
+          id: String(i + 1),
+          subject: item.description,
+          description: item.description,
+          status: statusMap[item.status] || "pending",
+          blocks: [],
+          blockedBy: [],
+        }
+      })
+    }
+  } catch {
+    // Fall back to Claude-style tasks if events.jsonl doesn't exist or is invalid
+  }
+
   try {
     const files = await readdir(dir)
     const taskFiles = files.filter(

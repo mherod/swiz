@@ -12,7 +12,7 @@ import { DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { parseJsonlHead } from "../utils/jsonl.ts"
+import { parseJsonl, parseJsonlHead } from "../utils/jsonl.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -48,6 +48,19 @@ async function getAllProjectSessionIds(
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
+
+  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
+  // Junie: projectsDir is sessions/
+  if (normProjectsDir.endsWith("/sessions")) {
+    try {
+      const files = await readdir(projectsDir)
+      for (const f of files) {
+        if (f.startsWith("session-")) ids.add(f)
+      }
+    } catch {}
+    return ids
+  }
+
   let projectDirs: string[]
   try {
     projectDirs = await readdir(projectsDir)
@@ -105,6 +118,44 @@ async function scanTranscriptsForCwd(
   projectsDir: string,
   ids: Set<string>
 ): Promise<void> {
+  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
+  // Junie: projectsDir is sessions/
+  if (normProjectsDir.endsWith("/sessions")) {
+    for (const sessionId of remaining) {
+      const eventsPath = join(projectsDir, sessionId, "events.jsonl")
+      try {
+        const text = await readFile(eventsPath, "utf-8")
+        const schema = z.looseObject({
+          kind: z.string(),
+          event: z.looseObject({
+            agentEvent: z.looseObject({
+              kind: z.string(),
+              blob: z.string().optional(),
+            }),
+          }),
+        })
+        const entries = parseJsonl(text, schema)
+        // Similar to findJunieSessions in transcript-sessions-discovery.ts
+        for (const entry of entries) {
+          if (
+            (entry.kind === "SessionA2uxEvent" || entry.kind === "SessionEvent") &&
+            entry.event?.agentEvent?.kind === "AgentStateUpdatedEvent" &&
+            entry.event.agentEvent.blob
+          ) {
+            const blob = JSON.parse(entry.event.agentEvent.blob)
+            if (blob.currentDirectory === filterCwd) {
+              ids.add(sessionId)
+              break
+            }
+          }
+        }
+      } catch (_e) {
+        // Silent
+      }
+    }
+    return
+  }
+
   let dirs: string[]
   try {
     dirs = await readdir(projectsDir)
@@ -154,6 +205,13 @@ async function matchSessionsByCwd(
   projectsDir: string,
   tasksDir: string
 ): Promise<Set<string>> {
+  const normProjectsDir = projectsDir.endsWith("/") ? projectsDir.slice(0, -1) : projectsDir
+  // Junie: projectsDir is sessions/
+  if (normProjectsDir.endsWith("/sessions")) {
+    const matched = await getSessionIdsByCwdScan(filterCwd, entries, projectsDir, tasksDir)
+    return matched
+  }
+
   const projectSessionIds = await getSessionIdsForProject(projectKeyFromCwd(filterCwd), projectsDir)
   const matched = new Set<string>()
   for (const s of entries) {
