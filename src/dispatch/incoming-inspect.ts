@@ -20,8 +20,8 @@ interface CaptureEnvelope {
     capturedAt: string
     parseError: boolean
   }
-  incoming?: Record<string, unknown>
-  afterNormalizeAndBackfill?: Record<string, unknown>
+  incoming?: Record<string, any>
+  afterNormalizeAndBackfill?: Record<string, any>
   rawPayload?: string
 }
 

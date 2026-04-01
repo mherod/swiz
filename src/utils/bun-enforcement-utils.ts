@@ -12,13 +12,13 @@ export function usesBunApis(content: string): boolean {
 }
 
 /** Parse tool input and extract file path. Returns null if not a TS/JS file. */
-export function parseBunEnforcementInput(input: Record<string, unknown>): {
+export function parseBunEnforcementInput(input: Record<string, any>): {
   toolName: string
   filePath: string
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, any>
 } | null {
   const toolName: string = (input.tool_name as string) ?? ""
-  const ti = (input.tool_input ?? {}) as Record<string, unknown>
+  const ti = (input.tool_input ?? {}) as Record<string, any>
   const filePath: string = (ti.file_path as string) ?? (ti.path as string) ?? ""
   if (!filePath || !/\.(ts|tsx|js|jsx|mjs)$/.test(filePath)) return null
   return { toolName, filePath, toolInput: ti }

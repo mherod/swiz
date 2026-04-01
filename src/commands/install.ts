@@ -43,10 +43,10 @@ import { uninstallSwizFromAgents } from "./uninstall.ts"
 function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
   const kept: unknown[] = []
   for (const group of groups) {
-    const g = group as Record<string, unknown>
+    const g = group as Record<string, any>
     if (Array.isArray(g.hooks)) {
       const userHooks = g.hooks.filter(
-        (h) => !isManagedSwizCommand((h as Record<string, unknown>).command)
+        (h) => !isManagedSwizCommand((h as Record<string, any>).command)
       )
       if (userHooks.length > 0) {
         kept.push({ ...g, hooks: userHooks })
@@ -60,7 +60,7 @@ function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
 
 // Strip swiz-managed and legacy hooks from a flat hook array.
 function stripManagedFromFlatList(entries: unknown[]): unknown[] {
-  return entries.filter((e) => !isManagedSwizCommand((e as Record<string, unknown>).command))
+  return entries.filter((e) => !isManagedSwizCommand((e as Record<string, any>).command))
 }
 
 function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
@@ -116,7 +116,7 @@ function addAdditionalDispatchEntries(
 
 function mergeNestedConfig(
   agent: AgentDef,
-  existingHooks: Record<string, unknown>
+  existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
   const merged: Record<string, unknown[]> = {}
   for (const [event, groups] of Object.entries(existingHooks)) {
@@ -132,7 +132,7 @@ function mergeNestedConfig(
 
 function mergeFlatConfig(
   agent: AgentDef,
-  existingHooks: Record<string, unknown>
+  existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
   const merged: Record<string, unknown[]> = {}
   for (const [event, entries] of Object.entries(existingHooks)) {
@@ -150,7 +150,7 @@ function mergeFlatConfig(
 
 function mergeConfig(
   agent: AgentDef,
-  existingHooks: Record<string, unknown>
+  existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
   return agent.configStyle === "nested"
     ? mergeNestedConfig(agent, existingHooks)
@@ -325,7 +325,7 @@ async function readFileText(path: string): Promise<string> {
   return (await f.exists()) ? await f.text() : ""
 }
 
-async function readJsonFile(path: string): Promise<Record<string, unknown>> {
+async function readJsonFile(path: string): Promise<Record<string, any>> {
   const f = Bun.file(path)
   return (await f.exists()) ? await f.json() : {}
 }
@@ -343,17 +343,17 @@ async function backup(path: string): Promise<boolean> {
 
 function collectNestedHooks(hooks: unknown[], cmds: Set<string>): void {
   for (const h of hooks) {
-    const hh = h as Record<string, unknown>
+    const hh = h as Record<string, any>
     if (hh.command) cmds.add(String(hh.command))
   }
 }
 
-function collectCommands(hooks: Record<string, unknown>): Set<string> {
+function collectCommands(hooks: Record<string, any>): Set<string> {
   const cmds = new Set<string>()
   for (const entries of Object.values(hooks)) {
     if (!Array.isArray(entries)) continue
     for (const entry of entries) {
-      const e = entry as Record<string, unknown>
+      const e = entry as Record<string, any>
       if (e.command) cmds.add(String(e.command))
       if (Array.isArray(e.hooks)) collectNestedHooks(e.hooks, cmds)
     }
@@ -374,17 +374,17 @@ function logUnconfigurableAgent(agent: AgentDef): void {
 }
 
 function extractOldHooks(
-  existing: Record<string, unknown>,
+  existing: Record<string, any>,
   agent: AgentDef
-): Record<string, unknown> {
+): Record<string, any> {
   const raw = agent.wrapsHooks
-    ? (((existing as Record<string, unknown>).hooks as Record<string, unknown>) ?? {})
-    : ((existing[agent.hooksKey] as Record<string, unknown>) ?? {})
+    ? (((existing as Record<string, any>).hooks as Record<string, any>) ?? {})
+    : ((existing[agent.hooksKey] as Record<string, any>) ?? {})
   return typeof raw === "object" && !Array.isArray(raw) ? raw : {}
 }
 
 function buildProposedAgentSettings(
-  existing: Record<string, unknown>,
+  existing: Record<string, any>,
   agent: AgentDef,
   config: Record<string, unknown[]>
 ): string {
@@ -396,7 +396,7 @@ function buildProposedAgentSettings(
 
 function reportDryRunAgentInstall(
   agent: AgentDef,
-  oldHooks: Record<string, unknown>,
+  oldHooks: Record<string, any>,
   config: Record<string, unknown[]>,
   oldText: string,
   newText: string
@@ -516,7 +516,7 @@ async function installStatusLine(dryRun: boolean): Promise<void> {
   const existing = await readJsonFile(settingsPath)
   const oldText = (await readFileText(settingsPath)).trimEnd()
 
-  const current = existing.statusLine as Record<string, unknown> | undefined
+  const current = existing.statusLine as Record<string, any> | undefined
   const alreadySet = current?.command === STATUS_LINE_CMD
 
   if (dryRun) {
@@ -711,7 +711,7 @@ async function uninstallStatusLine(dryRun: boolean): Promise<void> {
   const existing = await readJsonFile(settingsPath)
   const oldText = (await readFileText(settingsPath)).trimEnd()
 
-  const current = existing.statusLine as Record<string, unknown> | undefined
+  const current = existing.statusLine as Record<string, any> | undefined
   const isSwiz = current?.command === STATUS_LINE_CMD
 
   if (dryRun) {

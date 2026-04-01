@@ -43,7 +43,7 @@ async function runHook({
   if (!out.trim()) return {}
 
   const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
   return {
     decision: (hso?.decision ?? parsed.decision) as string | undefined,
     reason: (hso?.reason ?? parsed.reason) as string | undefined,

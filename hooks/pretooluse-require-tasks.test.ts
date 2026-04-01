@@ -67,7 +67,7 @@ async function runHook({
   if (!out.trim()) return {}
 
   const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
   return {
     decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
     reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
@@ -133,7 +133,7 @@ async function writeTask(
   )
 }
 
-async function writeSwizSettings(homeDir: string, settings: Record<string, unknown>) {
+async function writeSwizSettings(homeDir: string, settings: Record<string, any>) {
   const dir = join(homeDir, ".swiz")
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, "settings.json"), JSON.stringify(settings, null, 2))

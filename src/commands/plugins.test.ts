@@ -101,7 +101,7 @@ describe("swiz plugins", () => {
 
     const installedPath = join(home, ".claude", "plugins", "installed_plugins.json")
     const payload = (await Bun.file(installedPath).json()) as {
-      plugins: Record<string, unknown>
+      plugins: Record<string, any>
     }
     expect(payload.plugins["alpha@claude-plugins-official"]).toBeUndefined()
     expect(payload.plugins["beta@custom"]).toBeDefined()

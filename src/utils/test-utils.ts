@@ -7,7 +7,7 @@ import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 import { extractPreToolSurfaceDecision } from "./hook-specific-output.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
-export type JsonObject = Record<string, unknown>
+export type JsonObject = Record<string, any>
 
 /** Simplified hook result for tests that check blocked/allowed state. */
 export interface SimpleHookResult {
@@ -66,7 +66,7 @@ export interface HookResult {
   stdout: string
   stderr: string
   /** Parsed JSON from stdout, if parseable. */
-  json?: Record<string, unknown> | null
+  json?: Record<string, any> | null
   decision?: string
   reason?: string
 }
@@ -77,7 +77,7 @@ export interface HookResult {
  */
 export async function runHook(
   script: string,
-  stdinPayload: Record<string, unknown>,
+  stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
@@ -100,11 +100,11 @@ export async function runHook(
 
   let decision: string | undefined
   let reason: string | undefined
-  let json: Record<string, unknown> | null = null
+  let json: Record<string, any> | null = null
 
   if (stdout.trim()) {
     try {
-      const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>
+      const parsed = JSON.parse(stdout.trim()) as Record<string, any>
       json = parsed
       const surface = extractPreToolSurfaceDecision(parsed)
       decision = surface.decision
@@ -153,7 +153,7 @@ function parsePreToolUseHookStdout(stdout: string): {
   reason?: string
 } | null {
   try {
-    const parsed = JSON.parse(stdout) as Record<string, unknown>
+    const parsed = JSON.parse(stdout) as Record<string, any>
     return extractPreToolSurfaceDecision(parsed)
   } catch {
     return null
@@ -231,7 +231,7 @@ export async function runFileEditHook(
 
   if (!rawOutput.trim()) return { rawOutput }
   try {
-    const parsed = JSON.parse(rawOutput.trim()) as Record<string, unknown>
+    const parsed = JSON.parse(rawOutput.trim()) as Record<string, any>
     return {
       ...extractPreToolSurfaceDecision(parsed),
       rawOutput,

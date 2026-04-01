@@ -45,7 +45,7 @@ async function getToolNamesAndValidate(
   const { tool_name: toolName } = parsed
   if (!toolName || !isReadOrSearchTool(toolName)) return null
 
-  const toolNames = await getToolsUsedForCurrentSession(parsed as Record<string, unknown>)
+  const toolNames = await getToolsUsedForCurrentSession(parsed as Record<string, any>)
 
   if (toolNames.length === 0) return null
 

@@ -231,9 +231,9 @@ const AUDIT_RECOVERY_MAX_SESSIONS = 10
  * tasks created by the native TaskCreate tool survive compaction but their
  * file-store entries are in a session directory that's no longer resolvable.
  */
-function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Record<string, unknown> {
+function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Record<string, any> {
   if (typeof entry !== "object" || !entry) return false
-  const e = entry as Record<string, unknown>
+  const e = entry as Record<string, any>
   const subject = e.subject
   return (
     e.taskId === taskId &&
@@ -267,7 +267,7 @@ async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mt
 function tryParseAuditEntry(line: string, taskId: string): string | null {
   const entry = tryParseJsonLine(line)
   if (entry === undefined || typeof entry !== "object" || Array.isArray(entry)) return null
-  const e = entry as Record<string, unknown>
+  const e = entry as Record<string, any>
   if (!isValidRecoveredSubject(e, taskId)) return null
   return typeof e.subject === "string" ? e.subject : null
 }

@@ -971,7 +971,7 @@ async function handleSettingsRoutes(
 }
 
 async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as { updates?: Record<string, unknown> } | null
+  const body = (await req.json().catch(() => null)) as { updates?: Record<string, any> } | null
   if (!body?.updates || typeof body.updates !== "object") {
     return Response.json({ error: "Missing required field: updates (object)" }, { status: 400 })
   }
@@ -1016,9 +1016,9 @@ async function handleProjectSettingsGet(
 
 async function applyProjectSettingsUpdates(
   cwd: string,
-  normalized: Record<string, unknown>
+  normalized: Record<string, any>
 ): Promise<void> {
-  const projectUpdates: Record<string, unknown> = {}
+  const projectUpdates: Record<string, any> = {}
   for (const key of Object.keys(normalized)) {
     if (key !== "prMergeMode") projectUpdates[key] = normalized[key]
   }
@@ -1080,7 +1080,7 @@ async function handleProjectSettingsUpdate(
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
 }
 
-function validateBooleanField(updates: Record<string, unknown>, key: string): string | null {
+function validateBooleanField(updates: Record<string, any>, key: string): string | null {
   if (key in updates && typeof updates[key] !== "boolean") {
     return `${key} must be a boolean`
   }
@@ -1088,9 +1088,9 @@ function validateBooleanField(updates: Record<string, unknown>, key: string): st
 }
 
 function normalizeProjectSettingsUpdates(
-  updates: Record<string, unknown>
-): Record<string, unknown> | { error: string } {
-  const result: Record<string, unknown> = {}
+  updates: Record<string, any>
+): Record<string, any> | { error: string } {
+  const result: Record<string, any> = {}
   const validModes = new Set(["auto", "solo", "team", "relaxed-collab"])
   const optionalKeys = [
     "trivialMaxFiles",

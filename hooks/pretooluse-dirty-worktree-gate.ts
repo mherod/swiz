@@ -59,7 +59,7 @@ async function featureBranchHint(cwd: string): Promise<string | null> {
 }
 
 export async function evaluatePretooluseDirtyWorktreeGate(
-  raw: Record<string, unknown>
+  raw: Record<string, any>
 ): Promise<SwizHookOutput> {
   let input: ToolHookInput
   try {
@@ -114,7 +114,7 @@ const pretooluseDirtyWorktreeGate: SwizToolHook = {
   cooldownSeconds: 60,
 
   async run(input) {
-    return await evaluatePretooluseDirtyWorktreeGate(input as Record<string, unknown>)
+    return await evaluatePretooluseDirtyWorktreeGate(input as Record<string, any>)
   },
 }
 

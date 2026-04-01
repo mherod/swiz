@@ -111,7 +111,7 @@ function nfkcDeep(val: unknown): unknown {
   if (typeof val === "string") return val.normalize("NFKC")
   if (Array.isArray(val)) return val.map(nfkcDeep)
   if (isJsonLikeRecord(val)) {
-    const out: Record<string, unknown> = {}
+    const out: Record<string, any> = {}
     for (const [k, v] of Object.entries(val)) {
       out[k] = nfkcDeep(v)
     }
@@ -192,7 +192,7 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  */
 export const toolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
   if (val.tool_input) {
-    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
   }
   return val
 })
@@ -236,7 +236,7 @@ export const postToolUseHookInputSchema = toolHookBaseObjectSchema
   })
   .transform((val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
   })
@@ -639,7 +639,7 @@ export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSele
  */
 export const geminiBeforeToolInputSchema = toolHookBaseObjectSchema.transform((val) => {
   if (val.tool_input) {
-    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
   }
   return val
 })
@@ -657,7 +657,7 @@ export const geminiAfterToolInputSchema = toolHookBaseObjectSchema
   })
   .transform((val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
   })
@@ -945,7 +945,7 @@ const hookOutputRefinedSchema = z
         const hasSystemMsg = typeof o.systemMessage === "string" && o.systemMessage.trim()
         const hasReason = typeof o.reason === "string" && o.reason.trim()
         const hasStopReason = typeof o.stopReason === "string" && o.stopReason.trim()
-        const hso = getHookSpecificOutput(o as Record<string, unknown>)
+        const hso = getHookSpecificOutput(o as Record<string, any>)
         const hasHsoContext =
           hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim()
 
@@ -972,13 +972,13 @@ export const hookOutputSchema = hookOutputRefinedSchema
 export type HookOutput = z.infer<typeof hookOutputSchema>
 
 /** Merged stop dispatch must carry an agent-visible stop narrative — not context-only. */
-function stopHookOutputHasReasonOrStopReason(o: Record<string, unknown>): boolean {
+function stopHookOutputHasReasonOrStopReason(o: Record<string, any>): boolean {
   const r = typeof o.reason === "string" && o.reason.trim()
   const s = typeof o.stopReason === "string" && o.stopReason.trim()
   return Boolean(r || s)
 }
 
-function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
+function stopHookOutputHasBlockDecision(o: Record<string, any>): boolean {
   if (o.decision === "block" || o.decision === "deny") return true
   const hso = getHookSpecificOutput(o)
   if (!hso) return false
@@ -990,7 +990,7 @@ function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
  * `continue: true`; or **`continue: false`** with non-empty **`stopReason`** (Claude universal
  * output); or top-level **`decision: "block"` / `"deny"`** (may omit `continue`).
  */
-function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
+function stopHookOutputContinueValid(o: Record<string, any>): boolean {
   if (o.continue === false) {
     return typeof o.stopReason === "string" && o.stopReason.trim().length > 0
   }
@@ -999,7 +999,7 @@ function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
 }
 
 /** Stop / SubagentStop: `decision: "block"` / `"deny"` requires **`reason`** (not `stopReason` alone). */
-function stopHookOutputBlockDecisionRequiresReason(o: Record<string, unknown>): boolean {
+function stopHookOutputBlockDecisionRequiresReason(o: Record<string, any>): boolean {
   if (o.decision === "block" || o.decision === "deny") {
     return typeof o.reason === "string" && o.reason.trim().length > 0
   }

@@ -977,7 +977,7 @@ export function isGraphQLRateLimited(stderr: string): boolean {
   return isGraphQLRateLimitedImpl(stderr)
 }
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, any> | null {
   return asRecordImpl(value)
 }
 

@@ -237,7 +237,7 @@ function applyFilterPipeline(
 }
 
 async function loadFilterSettings(
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   preloadedProjectSettings?: ProjectSwizSettings | null
 ) {
   const cwd = (payload.cwd as string | undefined) ?? ""
@@ -262,7 +262,7 @@ async function loadFilterSettings(
 
 export async function applyHookSettingFilters(
   groups: HookGroup[],
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   preloadedProjectSettings?: ProjectSwizSettings | null
 ): Promise<HookGroup[]> {
   const { cwd, effective, disabledSet, detectedStacks } = await loadFilterSettings(

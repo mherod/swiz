@@ -28,7 +28,7 @@ function extractGeminiText(content: unknown): string {
     const textResult = geminiTextItemSchema.safeParse(content)
     if (textResult.success) return textResult.data.text.trim()
 
-    const obj = content as Record<string, unknown>
+    const obj = content as Record<string, any>
     if (Array.isArray(obj.parts)) {
       const texts = obj.parts
         .map((part) => {
@@ -66,14 +66,14 @@ function parseGeminiToolCallBlocks(toolCalls: unknown): ContentBlock[] {
       toolResult.data.args &&
       typeof toolResult.data.args === "object" &&
       !Array.isArray(toolResult.data.args)
-        ? (toolResult.data.args as Record<string, unknown>)
+        ? (toolResult.data.args as Record<string, any>)
         : {}
     blocks.push({ type: "tool_use", name: toolResult.data.name, input })
   }
   return blocks
 }
 
-function classifyGeminiRole(m: Record<string, unknown>): string {
+function classifyGeminiRole(m: Record<string, any>): string {
   if (typeof m.type === "string") return m.type
   if (typeof m.role === "string") return m.role
   return ""
@@ -82,7 +82,7 @@ function classifyGeminiRole(m: Record<string, unknown>): string {
 const GEMINI_ASSISTANT_ROLES = new Set(["gemini", "assistant", "model"])
 
 function classifyGeminiMessage(
-  m: Record<string, unknown>,
+  m: Record<string, any>,
   sessionId: string | undefined,
   entries: TranscriptEntry[]
 ): void {
@@ -130,7 +130,7 @@ function parseGeminiEntries(text: string): TranscriptEntry[] {
 
   for (const msg of sessionResult.data.messages) {
     if (!msg || typeof msg !== "object") continue
-    classifyGeminiMessage(msg as Record<string, unknown>, sessionId, entries)
+    classifyGeminiMessage(msg as Record<string, any>, sessionId, entries)
   }
 
   return entries
@@ -175,12 +175,12 @@ function findMatchingBrace(text: string, startIndex: number): number {
   return -1
 }
 
-function parseJsonObjectAt(text: string, startIndex: number): Record<string, unknown> | null {
+function parseJsonObjectAt(text: string, startIndex: number): Record<string, any> | null {
   if (text[startIndex] !== "{") return null
   const endIndex = findMatchingBrace(text, startIndex)
   if (endIndex < 0) return null
   try {
-    const parsed = JSON.parse(text.slice(startIndex, endIndex + 1)) as Record<string, unknown>
+    const parsed = JSON.parse(text.slice(startIndex, endIndex + 1)) as Record<string, any>
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null
   } catch {
     return null
@@ -216,7 +216,7 @@ function normalizeCursorItem(item: unknown): ContentBlock | null {
   if (toolCallResult.success) {
     const p = toolCallResult.data.params
     const input =
-      p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, unknown>) : {}
+      p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, any>) : {}
     return { type: "tool_use", name: toolCallResult.data.toolName, input }
   }
 
@@ -236,7 +236,7 @@ function normalizeCursorContent(content: unknown): string | ContentBlock[] {
 
 const CURSOR_ROLES = new Set(["user", "assistant", "tool"])
 
-function classifyCursorObject(obj: Record<string, unknown>, entries: TranscriptEntry[]): void {
+function classifyCursorObject(obj: Record<string, any>, entries: TranscriptEntry[]): void {
   const role = typeof obj.role === "string" ? obj.role : ""
   if (!CURSOR_ROLES.has(role)) return
 

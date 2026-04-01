@@ -282,7 +282,7 @@ export async function evaluatePosttooluseStateTransition(input: unknown): Promis
   return {}
 }
 
-const posttooluseStateTransition: SwizHook<Record<string, unknown>> = {
+const posttooluseStateTransition: SwizHook<Record<string, any>> = {
   name: "posttooluse-state-transition",
   event: "postToolUse",
   matcher: "Bash",

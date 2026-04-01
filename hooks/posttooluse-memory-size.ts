@@ -116,7 +116,7 @@ export async function evaluatePosttooluseMemorySize(input: unknown): Promise<Swi
   return buildContextHookOutput("PostToolUse", buildViolationContext(filePath, violations))
 }
 
-const posttooluseMemorySize: SwizHook<Record<string, unknown>> = {
+const posttooluseMemorySize: SwizHook<Record<string, any>> = {
   name: "posttooluse-memory-size",
   event: "postToolUse",
   matcher: "Edit|Write",

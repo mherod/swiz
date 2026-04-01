@@ -21,7 +21,7 @@ import {
 interface HookResult {
   id: string
   type: "hook-result"
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
   execution: HookExecution
 }
 

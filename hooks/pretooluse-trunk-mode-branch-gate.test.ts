@@ -17,7 +17,7 @@ async function runHook(
   command: string,
   toolName = "Bash",
   envOverrides: Record<string, string | undefined> = {}
-): Promise<{ raw: string; parsed: Record<string, unknown> | null; decision?: string }> {
+): Promise<{ raw: string; parsed: Record<string, any> | null; decision?: string }> {
   const payload = JSON.stringify({
     tool_name: toolName,
     tool_input: { command, cwd },
@@ -40,8 +40,8 @@ async function runHook(
     throw new Error(`hook exited with ${exitCode}: ${stderr || "(no stderr)"}`)
   }
   if (!raw) return { raw, parsed: null }
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+  const parsed = JSON.parse(raw) as Record<string, any>
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
   const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
   return { raw, parsed, decision }
 }
@@ -86,7 +86,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     try {
       const result = await runHook(repo, "git checkout -b feat/trunk-block")
       expect(result.decision).toBe("deny")
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("feat/trunk-block")
     } finally {
@@ -137,7 +137,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     try {
       const result = await runHook(repo, "gh pr checkout 42")
       expect(result.decision).toBe("deny")
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
     } finally {
       await rm(repo, { recursive: true, force: true })
@@ -189,7 +189,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         SWIZ_DAEMON_ORIGIN: "http://127.0.0.1:1",
       })
       expect(result.decision).toBe("deny")
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("developing")
     } finally {
       await rm(mockGhBin, { recursive: true, force: true })
@@ -203,7 +203,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     try {
       const result = await runHook(repo, "gh pr create --fill")
       expect(result.decision).toBe("deny")
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/trunk mode/i)
     } finally {

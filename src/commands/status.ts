@@ -12,37 +12,37 @@ import { isIncompleteTaskStatus } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 
 function forEachHookEntry(
-  hooks: Record<string, unknown>,
-  visit: (event: string, entry: Record<string, unknown>) => void
+  hooks: Record<string, any>,
+  visit: (event: string, entry: Record<string, any>) => void
 ): void {
   for (const [event, entries] of Object.entries(hooks)) {
     if (!Array.isArray(entries)) continue
     for (const rawEntry of entries) {
-      visit(event, rawEntry as Record<string, unknown>)
+      visit(event, rawEntry as Record<string, any>)
     }
   }
 }
 
-function entryContainsSwizCommand(entry: Record<string, unknown>): boolean {
+function entryContainsSwizCommand(entry: Record<string, any>): boolean {
   if (isSwizCommand(entry.command)) return true
   if (!Array.isArray(entry.hooks)) return false
-  return entry.hooks.some((rawHook) => isSwizCommand((rawHook as Record<string, unknown>).command))
+  return entry.hooks.some((rawHook) => isSwizCommand((rawHook as Record<string, any>).command))
 }
 
-function collectSwizCommands(hooks: Record<string, unknown>): Set<string> {
+function collectSwizCommands(hooks: Record<string, any>): Set<string> {
   const cmds = new Set<string>()
   forEachHookEntry(hooks, (_event, entry) => {
     if (isSwizCommand(entry.command)) cmds.add(String(entry.command))
     if (!Array.isArray(entry.hooks)) return
     for (const rawHook of entry.hooks) {
-      const nestedHook = rawHook as Record<string, unknown>
+      const nestedHook = rawHook as Record<string, any>
       if (isSwizCommand(nestedHook.command)) cmds.add(String(nestedHook.command))
     }
   })
   return cmds
 }
 
-function countAllHooks(hooks: Record<string, unknown>): number {
+function countAllHooks(hooks: Record<string, any>): number {
   let total = 0
   forEachHookEntry(hooks, (_event, entry) => {
     total += Array.isArray(entry.hooks) ? entry.hooks.length : 1
@@ -83,7 +83,7 @@ async function checkAgent(agent: AgentDef) {
   const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
   const settingsPaths = getAgentSettingsSearchPaths(agentId)
   const foundPaths: string[] = []
-  const allHooks = new Map<string, Record<string, unknown>>()
+  const allHooks = new Map<string, Record<string, any>>()
 
   for (const path of settingsPaths) {
     const file = Bun.file(path)
@@ -93,7 +93,7 @@ async function checkAgent(agent: AgentDef) {
       const json = await file.json()
       const hooks = json[agent.hooksKey] ?? json.hooks
       if (hooks && typeof hooks === "object") {
-        allHooks.set(path, hooks as Record<string, unknown>)
+        allHooks.set(path, hooks as Record<string, any>)
       }
     } catch {
       // Ignore parse errors, continue to next path
@@ -126,7 +126,7 @@ async function checkAgent(agent: AgentDef) {
   console.log()
 }
 
-function printAgentHooksInfo(allHooks: Map<string, Record<string, unknown>>): void {
+function printAgentHooksInfo(allHooks: Map<string, Record<string, any>>): void {
   let totalHooks = 0
   const allSwizCmds = new Set<string>()
   const allEvents = new Set<string>()

@@ -118,7 +118,7 @@ export async function evaluatePrecompactTaskSnapshot(input: unknown): Promise<Sw
   return {}
 }
 
-const precompactTaskSnapshot: SwizHook<Record<string, unknown>> = {
+const precompactTaskSnapshot: SwizHook<Record<string, any>> = {
   name: "precompact-task-snapshot",
   event: "preCompact",
   timeout: 5,

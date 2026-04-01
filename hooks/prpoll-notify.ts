@@ -104,7 +104,7 @@ export async function evaluatePrpollNotify(input: unknown): Promise<SwizHookOutp
   })
 }
 
-const prpollNotify: SwizHook<Record<string, unknown>> = {
+const prpollNotify: SwizHook<Record<string, any>> = {
   name: "prpoll-notify",
   event: "prPoll",
   scheduled: true,

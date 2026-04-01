@@ -98,7 +98,7 @@ export function annotateSessionsWithLiveness(
   })
 }
 
-function parseProjectsListBody(raw: Record<string, unknown> | null) {
+function parseProjectsListBody(raw: Record<string, any> | null) {
   if (!raw) return null
   return {
     limitProjects:
@@ -114,7 +114,7 @@ function parseProjectsListBody(raw: Record<string, unknown> | null) {
 
 async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
   try {
-    const rawBody = (await req.json().catch(() => null)) as Record<string, unknown> | null
+    const rawBody = (await req.json().catch(() => null)) as Record<string, any> | null
     const body = parseProjectsListBody(rawBody)
 
     const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))

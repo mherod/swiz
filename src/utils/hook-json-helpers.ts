@@ -6,7 +6,7 @@
  */
 
 /** Non-null `typeof value === "object"` (includes arrays and Dates). */
-export function isJsonLikeRecord(value: unknown): value is Record<string, unknown> {
+export function isJsonLikeRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object"
 }
 
@@ -19,7 +19,7 @@ export function messageFromUnknownError(err: unknown): string {
  * Hook envelopes treat `{}` as "no output". Matches
  * `output && Object.keys(output).length > 0` used before emitting stdout.
  */
-export function hasNonEmptyHookOutput(output: unknown): output is Record<string, unknown> {
+export function hasNonEmptyHookOutput(output: unknown): output is Record<string, any> {
   return isJsonLikeRecord(output) && Object.keys(output).length > 0
 }
 

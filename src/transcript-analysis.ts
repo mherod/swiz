@@ -309,7 +309,7 @@ const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
 const SHELL_TOOLS = new Set(["Bash", "Shell"])
 
 function collectEditToolPath(
-  input: Record<string, unknown> | undefined,
+  input: Record<string, any> | undefined,
   editedPaths: Set<string>
 ): void {
   const pathVal = input?.file_path ?? input?.path
@@ -317,7 +317,7 @@ function collectEditToolPath(
 }
 
 function collectShellToolPaths(
-  input: Record<string, unknown> | undefined,
+  input: Record<string, any> | undefined,
   editedPaths: Set<string>
 ): void {
   const cmd = input?.command
@@ -327,7 +327,7 @@ function collectShellToolPaths(
 }
 
 function collectEditedPath(
-  b: { name?: string; input?: Record<string, unknown> },
+  b: { name?: string; input?: Record<string, any> },
   editedPaths: Set<string>
 ): void {
   if (!b.name) return

@@ -24,7 +24,7 @@ export async function evaluatePosttooluseJsonValidation(input: unknown): Promise
   return {}
 }
 
-const posttooluseJsonValidation: SwizHook<Record<string, unknown>> = {
+const posttooluseJsonValidation: SwizHook<Record<string, any>> = {
   name: "posttooluse-json-validation",
   event: "postToolUse",
   matcher: "Edit|Write",

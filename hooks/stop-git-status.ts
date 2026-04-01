@@ -426,7 +426,7 @@ interface GitContext {
 }
 
 async function resolveEffectiveSettings(
-  input: { _effectiveSettings?: Record<string, unknown>; session_id?: string },
+  input: { _effectiveSettings?: Record<string, any>; session_id?: string },
   cwd: string
 ): Promise<{
   collaborationMode: CollaborationMode

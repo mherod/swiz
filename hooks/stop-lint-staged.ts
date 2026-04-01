@@ -31,15 +31,15 @@ async function detectLintStaged(
 ): Promise<{ hasScript: boolean; hasDep: boolean } | null> {
   const pkgPath = join(cwd, "package.json")
   if (!(await Bun.file(pkgPath).exists())) return null
-  let pkg: Record<string, unknown>
+  let pkg: Record<string, any>
   try {
-    pkg = (await Bun.file(pkgPath).json()) as Record<string, unknown>
+    pkg = (await Bun.file(pkgPath).json()) as Record<string, any>
   } catch {
     return null
   }
-  const scripts = pkg.scripts as Record<string, unknown> | undefined
-  const devDeps = pkg.devDependencies as Record<string, unknown> | undefined
-  const deps = pkg.dependencies as Record<string, unknown> | undefined
+  const scripts = pkg.scripts as Record<string, any> | undefined
+  const devDeps = pkg.devDependencies as Record<string, any> | undefined
+  const deps = pkg.dependencies as Record<string, any> | undefined
   const hasScript = !!scripts?.["lint-staged"]
   const hasDep = !!devDeps?.["lint-staged"] || !!deps?.["lint-staged"]
   if (!hasScript && !hasDep) return null

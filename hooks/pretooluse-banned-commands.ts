@@ -330,13 +330,13 @@ async function isRedirectExempt(
   return readPaths.has(target)
 }
 
-function parseHookInput(input: Record<string, unknown>): {
+function parseHookInput(input: Record<string, any>): {
   command: string
   transcriptPath: string
   cwd: string
 } {
   return {
-    command: ((input?.tool_input as Record<string, unknown>)?.command as string) ?? "",
+    command: ((input?.tool_input as Record<string, any>)?.command as string) ?? "",
     transcriptPath: (input?.transcript_path as string) ?? "",
     cwd: (input?.cwd as string) ?? process.cwd(),
   }
@@ -350,7 +350,7 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
   const parsed = toolHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return {}
 
-  const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, unknown>)
+  const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
 
   const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))

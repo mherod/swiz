@@ -307,7 +307,7 @@ describe("dispatch.ts unit tests", () => {
           permissionDecisionReason: "Not allowed",
         },
       }
-      const hso = response.hookSpecificOutput as Record<string, unknown>
+      const hso = response.hookSpecificOutput as Record<string, any>
       expect(hso.permissionDecision).toBe("deny")
     })
 
@@ -318,7 +318,7 @@ describe("dispatch.ts unit tests", () => {
           permissionDecisionReason: "Allowed with hints",
         },
       }
-      const hso = response.hookSpecificOutput as Record<string, unknown>
+      const hso = response.hookSpecificOutput as Record<string, any>
       expect(hso.permissionDecision).toBe("allow")
       expect(typeof hso.permissionDecisionReason).toBe("string")
     })
@@ -344,7 +344,7 @@ describe("dispatch.ts unit tests", () => {
           additionalContext: "More context for the session",
         },
       }
-      const hso = response.hookSpecificOutput as Record<string, unknown>
+      const hso = response.hookSpecificOutput as Record<string, any>
       expect(typeof hso.additionalContext).toBe("string")
     })
   })

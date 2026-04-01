@@ -92,7 +92,7 @@ exit 0
 async function runHook(
   cwd: string,
   pathOverride?: string
-): Promise<{ raw: string; parsed: Record<string, unknown> | null }> {
+): Promise<{ raw: string; parsed: Record<string, any> | null }> {
   const payload = JSON.stringify({ session_id: "test-session", cwd, transcript_path: "" })
   const env = {
     ...process.env,
@@ -110,7 +110,7 @@ async function runHook(
   const raw = (await new Response(proc.stdout).text()).trim()
   await proc.exited
   if (!raw) return { raw, parsed: null }
-  return { raw, parsed: JSON.parse(raw) as Record<string, unknown> }
+  return { raw, parsed: JSON.parse(raw) as Record<string, any> }
 }
 
 describe("stop-pr-changes-requested", () => {

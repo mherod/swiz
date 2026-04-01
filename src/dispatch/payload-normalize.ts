@@ -19,7 +19,7 @@
  */
 import { unset } from "lodash-es"
 
-export function normalizeAgentHookPayload(payload: Record<string, unknown>): void {
+export function normalizeAgentHookPayload(payload: Record<string, any>): void {
   const sid = payload.session_id
   if (typeof sid !== "string" || !sid.trim()) {
     const conv = payload.conversation_id
@@ -60,7 +60,7 @@ function isCursorGlobalUserDataCwd(cwd: string): boolean {
  * Cursor IDE shell events use `{ command: "..." }` at the top level. Swiz hooks expect
  * `tool_name` + `tool_input.command` like Claude Code PreToolUse.
  */
-function normalizeCursorShellCommandShape(payload: Record<string, unknown>): void {
+function normalizeCursorShellCommandShape(payload: Record<string, any>): void {
   const cmd = payload.command
   if (typeof cmd !== "string" || !cmd.trim()) return
 
@@ -71,12 +71,12 @@ function normalizeCursorShellCommandShape(payload: Record<string, unknown>): voi
 
   const ti = payload.tool_input ?? payload.toolInput
   if (ti && typeof ti === "object" && !Array.isArray(ti)) {
-    const t = ti as Record<string, unknown>
+    const t = ti as Record<string, any>
     if (typeof t.command === "string" && t.command.trim()) return
     if (Object.keys(t).length > 0) return
   }
 
-  const toolInput: Record<string, unknown> = { command: cmd.trim() }
+  const toolInput: Record<string, any> = { command: cmd.trim() }
   if (payload.sandbox === true) {
     toolInput.sandbox = true
   }

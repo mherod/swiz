@@ -79,7 +79,7 @@ export async function evaluateSessionstartSelfHeal(input: unknown): Promise<Swiz
   return buildContextHookOutput("SessionStart", message)
 }
 
-const sessionstartSelfHeal: SwizHook<Record<string, unknown>> = {
+const sessionstartSelfHeal: SwizHook<Record<string, any>> = {
   name: "sessionstart-self-heal",
   event: "sessionStart",
   matcher: "startup",

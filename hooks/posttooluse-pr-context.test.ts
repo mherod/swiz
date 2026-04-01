@@ -15,7 +15,7 @@ async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
     tool_input: { command },
     cwd,
   })
-  const hookSpecificOutput = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+  const hookSpecificOutput = result.json?.hookSpecificOutput as Record<string, any> | undefined
   return {
     context:
       typeof hookSpecificOutput?.additionalContext === "string"

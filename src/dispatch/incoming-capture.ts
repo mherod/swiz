@@ -77,13 +77,13 @@ export function normalizeEventNameToCanonical(eventName: string): string {
  * `process.env` as `_env` — that must not be persisted in `/tmp`.
  */
 export function sanitizeDispatchPayloadForCapture(
-  o: Record<string, unknown>
-): Record<string, unknown> {
-  let out = structuredClone(o) as Record<string, unknown>
+  o: Record<string, any>
+): Record<string, any> {
+  let out = structuredClone(o) as Record<string, any>
   if (out._env && typeof out._env === "object" && !Array.isArray(out._env)) {
     out = omit(
       merge({}, out, {
-        _envKeys: Object.keys(out._env as Record<string, unknown>).sort(),
+        _envKeys: Object.keys(out._env as Record<string, any>).sort(),
       }),
       ["_env"]
     )
@@ -142,9 +142,9 @@ export interface IncomingDispatchCaptureArgs {
   parseError: boolean
   payloadStr: string
   /** Clone of payload before `normalizeAgentHookPayload`; null when `parseError`. */
-  incomingBeforeNormalize: Record<string, unknown> | null
+  incomingBeforeNormalize: Record<string, any> | null
   /** Clone of payload after normalize + backfill. */
-  normalizedPayload: Record<string, unknown>
+  normalizedPayload: Record<string, any>
 }
 
 /** Caller should invoke only when `shouldCaptureIncomingPayloads()` is true. */
@@ -160,7 +160,7 @@ async function writeIncomingDispatchCapture(args: IncomingDispatchCaptureArgs): 
   const filename = buildIncomingCaptureFilename(args.hookEventName)
   const path = join(SWIZ_INCOMING_ROOT, filename)
 
-  const envelope: Record<string, unknown> = {
+  const envelope: Record<string, any> = {
     _swizIncomingCapture: {
       canonicalEvent: args.canonicalEvent,
       hookEventName: args.hookEventName,

@@ -824,7 +824,7 @@ describe("ghListToRestFallback", () => {
         pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/99" },
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result).toHaveLength(1)
     expect(result[0]!.number).toBe(42)
     expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
@@ -850,7 +850,7 @@ describe("ghListToRestFallback", () => {
         mergeable: true,
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result).toHaveLength(1)
     expect(result[0]!.number).toBe(7)
     expect(result[0]!.headRefName).toBe("feature-branch")
@@ -923,7 +923,7 @@ describe("ghListToRestFallback", () => {
         created_at: "2024-01-01T00:00:00Z",
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.tagName).toBe("v1.2.3")
     expect(result[0]!.isDraft).toBe(false)
     expect(result[0]!.isPrerelease).toBe(false)
@@ -942,7 +942,7 @@ describe("ghListToRestFallback", () => {
         created_at: "2023-06-15T12:00:00Z",
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.publishedAt).toBe("2023-06-15T12:00:00Z")
     expect(result[0]!.isDraft).toBe(true)
   })
@@ -974,7 +974,7 @@ describe("ghListToRestFallback", () => {
         closed_issues: 10,
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.number).toBe(3)
     expect(result[0]!.title).toBe("v2.0")
     expect(result[0]!.dueOn).toBe("2024-12-31T00:00:00Z")
@@ -995,7 +995,7 @@ describe("ghListToRestFallback", () => {
         closed_issues: 0,
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.dueOn).toBeNull()
     expect(result[0]!.description).toBe("")
   })
@@ -1018,7 +1018,7 @@ describe("ghListToRestFallback", () => {
         html_url: "https://github.com/owner/my-repo",
       },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.name).toBe("my-repo")
     expect(result[0]!.nameWithOwner).toBe("owner/my-repo")
     expect(result[0]!.isPrivate).toBe(false)
@@ -1030,7 +1030,7 @@ describe("ghListToRestFallback", () => {
     const raw = [
       { name: "bare", full_name: "owner/bare", description: null, private: true, html_url: "" },
     ]
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.description).toBe("")
     expect(result[0]!.isPrivate).toBe(true)
   })
@@ -1047,7 +1047,7 @@ describe("ghListToRestFallback", () => {
     const raw = {
       workflows: [{ id: 1, name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
     }
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.id).toBe(1)
     expect(result[0]!.name).toBe("CI")
     expect(result[0]!.path).toBe(".github/workflows/ci.yml")
@@ -1074,7 +1074,7 @@ describe("ghListToRestFallback", () => {
         { name: "TOKEN", created_at: "2024-01-01T00:00:00Z", updated_at: "2024-06-01T00:00:00Z" },
       ],
     }
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.name).toBe("TOKEN")
     expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
     expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
@@ -1099,7 +1099,7 @@ describe("ghListToRestFallback", () => {
         },
       ],
     }
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.name).toBe("NODE_ENV")
     expect(result[0]!.value).toBe("production")
     expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
@@ -1124,7 +1124,7 @@ describe("ghListToRestFallback", () => {
         },
       ],
     }
-    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    const result = mapping.normalize!(raw) as Array<Record<string, any>>
     expect(result[0]!.id).toBe(42)
     expect(result[0]!.name).toBe("production")
     expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")

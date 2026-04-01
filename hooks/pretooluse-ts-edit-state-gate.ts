@@ -26,7 +26,7 @@ function isTsOrTsxPath(raw: string): boolean {
 
 function resolveTsEditPath(input: FileEditHookInput): string | null {
   if (!isCodeChangeTool(input.tool_name ?? "")) return null
-  const toolInput = input.tool_input as Record<string, unknown> | undefined
+  const toolInput = input.tool_input as Record<string, any> | undefined
   const filePath = String(toolInput?.file_path ?? toolInput?.path ?? "")
   return filePath && isTsOrTsxPath(filePath) ? filePath : null
 }

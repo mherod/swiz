@@ -37,7 +37,7 @@ interface NormalizedTask {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
+function parseNormalizedTask(t: Record<string, any>): NormalizedTask | null {
   const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
   const subject = typeof t.subject === "string" ? t.subject : ""
   const status = typeof t.status === "string" ? t.status : "pending"
@@ -56,7 +56,7 @@ function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[] | nul
     }
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
-  const items = (parsed as Record<string, unknown>).tasks
+  const items = (parsed as Record<string, any>).tasks
   return Array.isArray(items) ? items : null
 }
 
@@ -66,7 +66,7 @@ function parseToolResponse(raw: PostToolHookInput["tool_response"]): NormalizedT
   const result: NormalizedTask[] = []
   for (const item of items) {
     if (typeof item !== "object" || item === null) continue
-    const normalized = parseNormalizedTask(item as Record<string, unknown>)
+    const normalized = parseNormalizedTask(item as Record<string, any>)
     if (normalized) result.push(normalized)
   }
   return result
@@ -219,5 +219,5 @@ const posttooluseTaskListSync: SwizHook<PostToolHookInput> = {
 export default posttooluseTaskListSync
 
 if (import.meta.main) {
-  await runSwizHookAsMain(posttooluseTaskListSync as SwizHook<Record<string, unknown>>)
+  await runSwizHookAsMain(posttooluseTaskListSync as SwizHook<Record<string, any>>)
 }

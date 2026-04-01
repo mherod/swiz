@@ -680,7 +680,7 @@ function collectCommandStrings(value: unknown): string[] {
   }
   if (value !== null && typeof value === "object") {
     const results: string[] = []
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(value as Record<string, any>)) {
       if (SHELL_STRING_KEYS.has(k)) {
         if (typeof v === "string") {
           results.push(v)
@@ -697,7 +697,7 @@ function collectCommandStrings(value: unknown): string[] {
 }
 
 /** Collect all command strings from a hooks config object at any nesting depth. */
-function collectHookCommands(hooks: Record<string, unknown>): string[] {
+function collectHookCommands(hooks: Record<string, any>): string[] {
   return collectCommandStrings(hooks)
 }
 
@@ -743,15 +743,15 @@ async function extractPathsFromSettingsFile(
 ): Promise<string[]> {
   const file = Bun.file(settingsPath)
   if (!(await file.exists())) return []
-  let settings: Record<string, unknown>
+  let settings: Record<string, any>
   try {
     settings = await file.json()
   } catch {
     return []
   }
   const hooksRaw = agent.wrapsHooks
-    ? ((settings.hooks as Record<string, unknown>) ?? {})
-    : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+    ? ((settings.hooks as Record<string, any>) ?? {})
+    : ((settings[agent.hooksKey] as Record<string, any>) ?? {})
   const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
   return [...collectHookCommands(hooks)].flatMap((cmd) => extractScriptPaths(cmd))
 }
@@ -917,7 +917,7 @@ async function checkScriptExecutePermissions(fix: boolean): Promise<CheckResult>
 // ─── Config sync check ──────────────────────────────────────────────────────
 
 /** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
-function extractDispatchEvents(hooks: Record<string, unknown>): Set<string> {
+function extractDispatchEvents(hooks: Record<string, any>): Set<string> {
   const events = new Set<string>()
   const dispatchRe = /swiz dispatch (\S+)/
   for (const cmd of collectCommandStrings(hooks)) {
@@ -936,7 +936,7 @@ function getExpectedCanonicalEvents(): Set<string> {
   return events
 }
 
-async function loadAgentSettings(agent: AgentDef): Promise<Record<string, unknown> | CheckResult> {
+async function loadAgentSettings(agent: AgentDef): Promise<Record<string, any> | CheckResult> {
   const file = Bun.file(agent.settingsPath)
   if (!(await file.exists())) {
     return {
@@ -962,8 +962,8 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
   const settings = result
 
   const hooksRaw = agent.wrapsHooks
-    ? ((settings.hooks as Record<string, unknown>) ?? {})
-    : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+    ? ((settings.hooks as Record<string, any>) ?? {})
+    : ((settings[agent.hooksKey] as Record<string, any>) ?? {})
   const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
 
   const installed = extractDispatchEvents(hooks)

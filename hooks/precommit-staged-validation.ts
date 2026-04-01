@@ -107,7 +107,7 @@ export async function evaluatePrecommitStagedValidation(input: unknown): Promise
   }
 }
 
-const precommitStagedValidation: SwizHook<Record<string, unknown>> = {
+const precommitStagedValidation: SwizHook<Record<string, any>> = {
   name: "precommit-staged-validation",
   event: "preCommit",
   scheduled: true,

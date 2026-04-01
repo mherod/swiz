@@ -92,8 +92,8 @@ export const DIRECT_MERGE_INTENT_RE =
  * Blocking a large payload throws away expensive work — better to let it through
  * and rely on post-tool advisory for stale-task guidance.
  */
-export function isLargeContentPayload(input: Record<string, unknown>): boolean {
-  const toolInput = input?.tool_input as Record<string, unknown> | undefined
+export function isLargeContentPayload(input: Record<string, any>): boolean {
+  const toolInput = input?.tool_input as Record<string, any> | undefined
   const content = ((toolInput?.new_string ?? toolInput?.content) as string) ?? ""
   return content.split("\n").length >= LARGE_CONTENT_LINE_THRESHOLD
 }
@@ -107,10 +107,10 @@ function isBlockedTool(toolName: string): boolean {
   return isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
 }
 
-function isMemoryMarkdownEdit(input: Record<string, unknown>, toolName: string): boolean {
+function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boolean {
   if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
   const filePath = String(
-    (input.tool_input as Record<string, unknown> | undefined)?.file_path ?? ""
+    (input.tool_input as Record<string, any> | undefined)?.file_path ?? ""
   )
   return MEMORY_MARKDOWN_RE.test(filePath)
 }
@@ -322,7 +322,7 @@ async function checkDirectMergeIntent(
 
 interface CheckTaskStalenessOpts {
   toolName: string
-  input: Record<string, unknown>
+  input: Record<string, any>
   transcriptPath: string
   allTasks: Array<{ id: string; status: string; subject: string }>
   activeTasks: string[]
@@ -337,7 +337,7 @@ function shouldSkipStalenessCheck(opts: {
   allTasksDone: boolean
   callsSinceTask: number
   toolName: string
-  input: Record<string, unknown>
+  input: Record<string, any>
   hasInProgressTask: boolean
 }): boolean {
   if (!opts.transcriptPath) return true
@@ -389,7 +389,7 @@ async function checkTaskStaleness(
     "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
     stateStep,
   ]
-  const sid = (input as Record<string, unknown>).session_id as string | undefined
+  const sid = (input as Record<string, any>).session_id as string | undefined
   if (sid) await mergeActionPlanIntoTasks(stalePlanSteps, sid, cwd)
   return await denyAutoSteerOrBlock(
     sessionId,
@@ -440,16 +440,16 @@ async function emitSlowTaskWarning(
 }
 
 interface ParsedInput {
-  input: Record<string, unknown>
+  input: Record<string, any>
   toolName: string
   sessionId: string
   transcriptPath: string
   cwd: string
 }
 
-function isExemptToolCall(input: Record<string, unknown>, toolName: string): boolean {
+function isExemptToolCall(input: Record<string, any>, toolName: string): boolean {
   if (isShellTool(toolName)) {
-    const toolInput = input?.tool_input as Record<string, unknown> | undefined
+    const toolInput = input?.tool_input as Record<string, any> | undefined
     const command = String(toolInput?.command ?? "")
     if (isTaskTrackingExemptShellCommand(command)) return true
   }
@@ -459,7 +459,7 @@ function isExemptToolCall(input: Record<string, unknown>, toolName: string): boo
 function validateGuardConditions(
   sessionId: string | null | undefined,
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, any>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
   if (isCurrentAgent("gemini")) return false
@@ -467,7 +467,7 @@ function validateGuardConditions(
   return true
 }
 
-function applySyncGuards(input: Record<string, unknown>): ParsedInput | null {
+function applySyncGuards(input: Record<string, any>): ParsedInput | null {
   const toolName: string = (input?.tool_name as string) ?? ""
   const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
   const transcriptPath: string = (input?.transcript_path as string) ?? ""
@@ -478,7 +478,7 @@ function applySyncGuards(input: Record<string, unknown>): ParsedInput | null {
   return { input, toolName, sessionId: sessionId as string, transcriptPath, cwd }
 }
 
-async function tryParseAndGuard(input: Record<string, unknown>): Promise<ParsedInput | null> {
+async function tryParseAndGuard(input: Record<string, any>): Promise<ParsedInput | null> {
   const parsed = applySyncGuards(input)
   if (!parsed) return null
   if (!(await isTaskEnforcementProject(parsed.cwd))) return null
@@ -557,7 +557,7 @@ function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
 }
 
 export async function evaluatePretooluseRequireTasks(
-  input: Record<string, unknown>
+  input: Record<string, any>
 ): Promise<SwizHookOutput> {
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
@@ -572,7 +572,7 @@ const pretooluseRequireTasks: SwizToolHook = {
 
   async run(input) {
     try {
-      return await evaluatePretooluseRequireTasks(input as Record<string, unknown>)
+      return await evaluatePretooluseRequireTasks(input as Record<string, any>)
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err)
     }

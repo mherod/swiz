@@ -804,5 +804,5 @@ const posttooluseTaskOutput: SwizHook<PostToolHookInput> = {
 export default posttooluseTaskOutput
 
 if (import.meta.main) {
-  await runSwizHookAsMain(posttooluseTaskOutput as SwizHook<Record<string, unknown>>)
+  await runSwizHookAsMain(posttooluseTaskOutput as SwizHook<Record<string, any>>)
 }

@@ -14,7 +14,7 @@ import { getIssueStore } from "../../issue-store.ts"
 
 interface ProjectPrReviewState {
   /** Current branch PR review state */
-  prDetail: Record<string, unknown> | null
+  prDetail: Record<string, any> | null
 }
 
 interface SessionAutoSteerQueue {

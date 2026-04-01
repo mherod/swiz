@@ -24,7 +24,7 @@ type BunWorker = Pick<globalThis.Worker, "postMessage" | "onmessage" | "onerror"
 interface HookResult {
   id: string
   type: "hook-result"
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
   execution: HookExecution
 }
 
@@ -39,7 +39,7 @@ interface QueuedHook {
   workerIndex?: number
   /** Supervisor-level timeout timer — fires if worker doesn't respond in time. */
   supervisorTimer?: ReturnType<typeof setTimeout>
-  resolve: (result: { parsed: Record<string, unknown> | null; execution: HookExecution }) => void
+  resolve: (result: { parsed: Record<string, any> | null; execution: HookExecution }) => void
   reject: (error: Error) => void
 }
 
@@ -178,7 +178,7 @@ export class WorkerPool {
     payloadStr: string,
     timeoutSec?: number,
     signal?: AbortSignal
-  ): Promise<{ parsed: Record<string, unknown> | null; execution: HookExecution }> {
+  ): Promise<{ parsed: Record<string, any> | null; execution: HookExecution }> {
     if (!this.initialized) {
       await this.initialize()
     }
@@ -351,6 +351,6 @@ export async function runHookInWorker(
   payloadStr: string,
   timeoutSec?: number,
   signal?: AbortSignal
-): Promise<{ parsed: Record<string, unknown> | null; execution: HookExecution }> {
+): Promise<{ parsed: Record<string, any> | null; execution: HookExecution }> {
   return getWorkerPool().runHook(file, payloadStr, timeoutSec, signal)
 }

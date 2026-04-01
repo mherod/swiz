@@ -75,7 +75,7 @@ const posttoolusGitContext: SwizHook<ToolHookInput> = {
     const effective = await getEffectiveSwizSettingsForToolHook({
       cwd,
       session_id: input.session_id,
-      payload: input as Record<string, unknown>,
+      payload: input as Record<string, any>,
     })
     const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
     const statusLine = gitStatus ? buildGitContextLine(gitStatus, effective.collaborationMode) : ""
@@ -83,7 +83,7 @@ const posttoolusGitContext: SwizHook<ToolHookInput> = {
     const isGitBash =
       tool_name &&
       isShellTool(tool_name) &&
-      GIT_ANY_CMD_RE.test(((input.tool_input as Record<string, unknown>)?.command as string) ?? "")
+      GIT_ANY_CMD_RE.test(((input.tool_input as Record<string, any>)?.command as string) ?? "")
     if (isGitBash && gitStatus && gitStatus.total > 0) {
       const lines = buildGitRelevantSettingLines(effective)
       const repoSlug = await getRepoSlug(cwd)

@@ -202,7 +202,7 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
   const eff = await getEffectiveSwizSettingsForToolHook({
     cwd,
     session_id: parsed.session_id,
-    payload: parsed as Record<string, unknown>,
+    payload: parsed as Record<string, any>,
   })
 
   let git: GitWorkflowCollectResult = { kind: "ok" }

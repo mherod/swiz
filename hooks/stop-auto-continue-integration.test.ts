@@ -61,7 +61,7 @@ interface RunResult {
 
 /** Run the hook with a raw JSON payload (caller controls every field). */
 async function runHookRaw(
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   extraEnv: Record<string, string> = {}
 ): Promise<RunResult> {
   // Ensure an isolated HOME with autoContinue:true so the hook doesn't

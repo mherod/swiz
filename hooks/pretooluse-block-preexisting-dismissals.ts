@@ -90,29 +90,29 @@ interface ScanState {
   lastToolWasDiagnostic: boolean
 }
 
-function extractAssistantText(entry: Record<string, unknown>): string {
+function extractAssistantText(entry: Record<string, any>): string {
   if (entry?.type !== "assistant") return ""
   const content = (entry as { message?: { content?: unknown } })?.message?.content
   return extractTextFromUnknownContent(content)
 }
 
-function extractToolResultText(entry: Record<string, unknown>): string {
+function extractToolResultText(entry: Record<string, any>): string {
   if (entry?.type !== "tool_result") return ""
   const content = (entry as { content?: unknown })?.content
   return extractTextFromUnknownContent(content)
 }
 
 function parseToolUseBlock(block: unknown): { toolName: string; command: string } | null {
-  const b = block as Record<string, unknown>
+  const b = block as Record<string, any>
   if (b?.type !== "tool_use") return null
   return {
     toolName: String(b.name ?? ""),
-    command: String((b.input as Record<string, unknown>)?.command ?? ""),
+    command: String((b.input as Record<string, any>)?.command ?? ""),
   }
 }
 
 function extractToolUse(
-  entry: Record<string, unknown>
+  entry: Record<string, any>
 ): { toolName: string; command: string } | null {
   if (entry?.type !== "assistant") return null
   const content = (entry as { message?: { content?: unknown[] } })?.message?.content
@@ -168,7 +168,7 @@ function isProofCommand(toolName: string, command: string): boolean {
   return SCOPED_VERIFICATION_RE.test(command) || BASELINE_EVIDENCE_RE.test(command)
 }
 
-function processEntry(entry: Record<string, unknown>, state: ScanState): void {
+function processEntry(entry: Record<string, any>, state: ScanState): void {
   const resultText = extractToolResultText(entry)
   if (resultText) processToolResult(resultText, state)
 
@@ -208,7 +208,7 @@ function scanTranscript(lines: string[]): ScanState {
 
   for (const line of lines) {
     if (!line.trim()) continue
-    let entry: Record<string, unknown>
+    let entry: Record<string, any>
     try {
       entry = JSON.parse(line)
     } catch {
@@ -234,14 +234,14 @@ function isExemptShellCommand(command: string): boolean {
   return false
 }
 
-function shouldSkipTool(toolName: string, toolInput: Record<string, unknown>): boolean {
+function shouldSkipTool(toolName: string, toolInput: Record<string, any>): boolean {
   if (!isShellTool(toolName) && !isCodeChangeTool(toolName)) return true
   if (isShellTool(toolName) && isExemptShellCommand(String(toolInput?.command ?? ""))) return true
   return false
 }
 
 async function getAllTranscriptLines(
-  raw: Record<string, unknown>,
+  raw: Record<string, any>,
   transcriptPath: string
 ): Promise<string[]> {
   // Read full transcript (not just session lines) so cross-session dismissals are detected.
@@ -276,7 +276,7 @@ function resolveAllowReason(state: ScanState): string | null {
 }
 
 async function resolveTranscriptContext(
-  raw: Record<string, unknown>,
+  raw: Record<string, any>,
   input: ReturnType<typeof toolHookInputSchema.parse>
 ): Promise<string[] | null> {
   const cwd = input.cwd ?? process.cwd()
@@ -290,7 +290,7 @@ async function resolveTranscriptContext(
 export async function evaluatePretooluseBlockPreexistingDismissals(
   input: unknown
 ): Promise<SwizHookOutput> {
-  const raw = input as Record<string, unknown>
+  const raw = input as Record<string, any>
   const parsed = toolHookInputSchema.parse(raw)
 
   const lines = await resolveTranscriptContext(raw, parsed)

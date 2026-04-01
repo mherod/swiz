@@ -39,10 +39,10 @@ const pretoolusSkillInvocationGate: SwizHook = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as Record<string, unknown>
+    const input = rawInput as Record<string, any>
     if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
-    const command: string = ((input.tool_input as Record<string, unknown>)?.command as string) ?? ""
+    const command: string = ((input.tool_input as Record<string, any>)?.command as string) ?? ""
 
     // Determine which skill is relevant for this command
     let requiredSkill: string | null = null

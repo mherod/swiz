@@ -39,9 +39,9 @@ type Review = {
   body?: string
 }
 
-function isValidShellCommand(input: Record<string, unknown>): boolean {
+function isValidShellCommand(input: Record<string, any>): boolean {
   if (!isShellTool((input?.tool_name as string) ?? "")) return false
-  const command: string = ((input?.tool_input as Record<string, unknown>)?.command as string) ?? ""
+  const command: string = ((input?.tool_input as Record<string, any>)?.command as string) ?? ""
   return GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command)
 }
 
@@ -49,7 +49,7 @@ async function isValidEnvironment(cwd: string): Promise<boolean> {
   return (await isGitRepo(cwd)) && (await isGitHubRemote(cwd)) && hasGhCli()
 }
 
-async function validateInputs(input: Record<string, unknown>, cwd: string): Promise<boolean> {
+async function validateInputs(input: Record<string, any>, cwd: string): Promise<boolean> {
   if (!isValidShellCommand(input)) return false
   return await isValidEnvironment(cwd)
 }
@@ -123,7 +123,7 @@ export async function evaluatePretoolusePrChangesBranchGuard(
   const hookInput = shellHookInputSchema.parse(input)
   const cwd: string = hookInput.cwd ?? process.cwd()
 
-  if (!(await validateInputs(hookInput as Record<string, unknown>, cwd))) return {}
+  if (!(await validateInputs(hookInput as Record<string, any>, cwd))) return {}
 
   const branchAndPr = await getBranchAndPr(cwd)
   if (!branchAndPr) return {}

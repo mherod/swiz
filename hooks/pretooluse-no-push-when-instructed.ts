@@ -41,8 +41,8 @@ const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
     // ── Feature flag check ────────────────────────────────────────────────────
     // Prefer dispatcher-injected settings (fast path). Fall back to disk read
     // with fail-closed behaviour: malformed settings.json keeps the gate active.
-    const injected = (input as Record<string, unknown>)._effectiveSettings as
-      | Record<string, unknown>
+    const injected = (input as Record<string, any>)._effectiveSettings as
+      | Record<string, any>
       | undefined
     let pushGateEnabled: boolean
     if (injected && typeof injected.pushGate !== "undefined") {

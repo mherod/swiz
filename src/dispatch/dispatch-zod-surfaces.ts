@@ -35,20 +35,20 @@ const fallbackInboundSchema = dispatchInboundObjectSchema
  */
 export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<
   string,
-  z.ZodType<Record<string, unknown>>
+  z.ZodType<Record<string, any>>
 > = {
-  preToolUse: toolHookInputSchema as z.ZodType<Record<string, unknown>>,
-  postToolUse: postToolUseHookInputSchema as z.ZodType<Record<string, unknown>>,
-  stop: stopHookExtendedInputSchema as z.ZodType<Record<string, unknown>>,
-  subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, unknown>>,
-  sessionStart: sessionStartHookInputSchema as z.ZodType<Record<string, unknown>>,
-  userPromptSubmit: userPromptSubmitHookInputSchema as z.ZodType<Record<string, unknown>>,
-  preCompact: postCompactHookInputSchema as z.ZodType<Record<string, unknown>>,
-  notification: notificationHookInputSchema as z.ZodType<Record<string, unknown>>,
-  subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, unknown>>,
-  sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, unknown>>,
-  prPoll: prPollHookInputSchema as z.ZodType<Record<string, unknown>>,
-  preCommit: preCommitHookInputSchema as z.ZodType<Record<string, unknown>>,
+  preToolUse: toolHookInputSchema as z.ZodType<Record<string, any>>,
+  postToolUse: postToolUseHookInputSchema as z.ZodType<Record<string, any>>,
+  stop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
+  subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
+  sessionStart: sessionStartHookInputSchema as z.ZodType<Record<string, any>>,
+  userPromptSubmit: userPromptSubmitHookInputSchema as z.ZodType<Record<string, any>>,
+  preCompact: postCompactHookInputSchema as z.ZodType<Record<string, any>>,
+  notification: notificationHookInputSchema as z.ZodType<Record<string, any>>,
+  subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, any>>,
+  sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, any>>,
+  prPoll: prPollHookInputSchema as z.ZodType<Record<string, any>>,
+  preCommit: preCommitHookInputSchema as z.ZodType<Record<string, any>>,
 }
 
 export class DispatchPayloadValidationError extends Error {
@@ -84,7 +84,7 @@ export function assertDispatchInboundNotParseError(
 
 /** Parse stdin JSON and require a top-level object record. */
 export function parseDispatchPayloadString(payloadStr: string): {
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   parseError: boolean
 } {
   let raw: unknown
@@ -107,25 +107,25 @@ export function parseDispatchPayloadString(payloadStr: string): {
  */
 export function assertNormalizedDispatchPayload(
   canonicalEvent: string,
-  payload: Record<string, unknown>
-): Record<string, unknown> {
+  payload: Record<string, any>
+): Record<string, any> {
   const schema = DISPATCH_CANONICAL_INBOUND_SCHEMAS[canonicalEvent] ?? fallbackInboundSchema
   const r = schema.safeParse(payload)
   if (!r.success) {
     debugLog("[dispatch] normalized payload failed schema:", canonicalEvent, r.error.flatten())
     throw new DispatchPayloadValidationError(canonicalEvent, r.error)
   }
-  return r.data as Record<string, unknown>
+  return r.data as Record<string, any>
 }
 
 /** Enrichment must still yield an object record before hooks receive stdin. */
-export function assertEnrichedDispatchPayloadRecord(value: unknown): Record<string, unknown> {
+export function assertEnrichedDispatchPayloadRecord(value: unknown): Record<string, any> {
   return dispatchInboundObjectSchema.parse(value)
 }
 
 function replaceAgentKeysWithParsed(
-  response: Record<string, unknown>,
-  parsed: Record<string, unknown>
+  response: Record<string, any>,
+  parsed: Record<string, any>
 ): void {
   const hookExec = response.hookExecutions
   for (const k of Object.keys(response)) unset(response, k)
@@ -138,7 +138,7 @@ function replaceAgentKeysWithParsed(
  * Preserves `hookExecutions`. Skips coercion for internal timeout envelopes `{ error: string }`.
  */
 export function coerceDispatchAgentEnvelopeInPlace(
-  response: Record<string, unknown>,
+  response: Record<string, any>,
   canonicalEvent: string,
   _hookEventName: string
 ): void {
@@ -146,27 +146,27 @@ export function coerceDispatchAgentEnvelopeInPlace(
     return
   }
 
-  const agent = omit(response, ["hookExecutions"]) as Record<string, unknown>
+  const agent = omit(response, ["hookExecutions"]) as Record<string, any>
 
   if (isStopLikeDispatchEvent(canonicalEvent)) {
-    const parsed = stopHookOutputSchema.parse(agent) as Record<string, unknown>
+    const parsed = stopHookOutputSchema.parse(agent) as Record<string, any>
     replaceAgentKeysWithParsed(response, parsed)
   } else {
-    const parsed = hookOutputSchema.parse(agent) as Record<string, unknown>
+    const parsed = hookOutputSchema.parse(agent) as Record<string, any>
     replaceAgentKeysWithParsed(response, parsed)
   }
 }
 
 /** Agent-visible JSON for HTTP/stdout — strip internals then parse to enforce schema. */
 export function parseValidatedAgentDispatchWireJson(
-  response: Record<string, unknown>,
+  response: Record<string, any>,
   canonicalEvent: string,
   _hookEventName: string
-): Record<string, unknown> {
+): Record<string, any> {
   if (typeof response.error === "string" && response.error.length > 0) {
     return z.object({ error: z.string().min(1) }).parse(stripInternalDispatchFields(response))
   }
   const agent = stripInternalDispatchFields(response)
   const schema = isStopLikeDispatchEvent(canonicalEvent) ? stopHookOutputSchema : hookOutputSchema
-  return schema.parse(agent) as Record<string, unknown>
+  return schema.parse(agent) as Record<string, any>
 }

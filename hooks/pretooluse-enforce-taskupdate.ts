@@ -58,8 +58,8 @@ async function denyIfLastTaskStanding(
   return null
 }
 
-async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<SwizHookOutput> {
-  const command = String((input.tool_input as Record<string, unknown> | undefined)?.command ?? "")
+async function runSwizTasksEnforcement(input: Record<string, any>): Promise<SwizHookOutput> {
+  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
   const sessionId = String(input.session_id ?? "")
   const cwd = (input.cwd as string) ?? undefined
 
@@ -79,9 +79,9 @@ async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
 async function checkNativeTaskUpdateCompletion(
-  input: Record<string, unknown>
+  input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
-  const toolInput = (input.tool_input ?? {}) as Record<string, unknown>
+  const toolInput = (input.tool_input ?? {}) as Record<string, any>
   if (toolInput.status !== "completed") return "early_exit"
 
   const taskId = String(toolInput.taskId ?? "")
@@ -101,7 +101,7 @@ function isNativeTaskTool(toolName: string): boolean {
 
 export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
-  const rec = parsed as unknown as Record<string, unknown>
+  const rec = parsed as unknown as Record<string, any>
   const toolName = String(rec.tool_name ?? "")
 
   if (isNativeTaskTool(toolName)) {

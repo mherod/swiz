@@ -125,7 +125,7 @@ export class GhCliGitHubClient implements GitHubClient {
       return null
     }
     try {
-      const raw = JSON.parse(stdout) as Record<string, unknown>
+      const raw = JSON.parse(stdout) as Record<string, any>
       return normalizeBranchProtection(branch, raw)
     } catch {
       return null
@@ -139,7 +139,7 @@ function enabledFlag(value: unknown): boolean {
 }
 
 function normalizeRequiredReviews(
-  raw: Record<string, unknown> | undefined
+  raw: Record<string, any> | undefined
 ): GitHubBranchProtectionRecord["requiredReviews"] {
   if (!raw) return undefined
   return {
@@ -150,7 +150,7 @@ function normalizeRequiredReviews(
 }
 
 function normalizeRequiredStatusChecks(
-  raw: Record<string, unknown> | undefined
+  raw: Record<string, any> | undefined
 ): GitHubBranchProtectionRecord["requiredStatusChecks"] {
   if (!raw) return undefined
   return {
@@ -162,15 +162,15 @@ function normalizeRequiredStatusChecks(
 /** Normalize GitHub REST branch protection response to our record shape. */
 function normalizeBranchProtection(
   branch: string,
-  raw: Record<string, unknown>
+  raw: Record<string, any>
 ): GitHubBranchProtectionRecord {
   return {
     branch,
     requiredReviews: normalizeRequiredReviews(
-      raw.required_pull_request_reviews as Record<string, unknown> | undefined
+      raw.required_pull_request_reviews as Record<string, any> | undefined
     ),
     requiredStatusChecks: normalizeRequiredStatusChecks(
-      raw.required_status_checks as Record<string, unknown> | undefined
+      raw.required_status_checks as Record<string, any> | undefined
     ),
     enforceAdmins: enabledFlag(raw.enforce_admins),
     requiredLinearHistory: enabledFlag(raw.required_linear_history),

@@ -88,7 +88,7 @@ function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
 }
 
 export async function evaluatePretooluseOffensiveLanguage(
-  raw: Record<string, unknown>
+  raw: Record<string, any>
 ): Promise<SwizHookOutput> {
   const input = toolHookInputSchema.parse(raw)
   const transcriptPath = input.transcript_path ?? ""
@@ -126,7 +126,7 @@ const pretooluseOffensiveLanguage: SwizToolHook = {
 
   async run(input) {
     try {
-      return await evaluatePretooluseOffensiveLanguage(input as Record<string, unknown>)
+      return await evaluatePretooluseOffensiveLanguage(input as Record<string, any>)
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err)
     }

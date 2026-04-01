@@ -102,7 +102,7 @@ async function runHook(
   ])
   await proc.exited
 
-  let json: Record<string, unknown> | null = null
+  let json: Record<string, any> | null = null
   try {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
@@ -115,7 +115,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const cwd = await createTempDir()
     const result = await runHook(cwd, "Edit", join(cwd, "src", "app.ts"))
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -123,7 +123,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const cwd = await createTempDir()
     const result = await runHook(cwd, "Edit", "/tmp/scratch.ts")
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -134,7 +134,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
     const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -144,7 +144,7 @@ describe("pretooluse-sandboxed-edits", () => {
     // outside is NOT a git repo — no cross-repo hint expected
     const result = await runHook(cwd, "Edit", join(outside, "file.ts"))
     expect(result.exitCode).toBe(0)
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     expect(reason?.permissionDecision).toBe("deny")
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
@@ -158,7 +158,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
     expect(result.exitCode).toBe(0)
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     expect(reason?.permissionDecision).toBe("deny")
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
@@ -172,7 +172,7 @@ describe("pretooluse-sandboxed-edits", () => {
     await initGitRepo(otherRepo, "git@github.com:acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("acme/widget")
     expect(msg).toContain("gh issue create --repo acme/widget")
@@ -184,7 +184,7 @@ describe("pretooluse-sandboxed-edits", () => {
     await initGitRepo(otherRepo, "https://gitlab.com/acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
     expect(msg).not.toContain("different repository")
@@ -196,7 +196,7 @@ describe("pretooluse-sandboxed-edits", () => {
     await initGitRepo(otherRepo) // no remote
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
     expect(msg).not.toContain("different repository")
@@ -208,7 +208,7 @@ describe("pretooluse-sandboxed-edits", () => {
     await initGitRepo(otherRepo, "ssh://git@github.com/acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("acme/widget")
     expect(msg).toContain("gh issue create --repo acme/widget")
@@ -231,7 +231,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
       fakeHomeOverride: fakeHome,
     })
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("acme/widget")
     expect(msg).toContain("--hostname github.example.com")
@@ -252,7 +252,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
       fakeHomeOverride: fakeHome,
     })
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("acme/widget")
     expect(msg).toContain("--hostname github.example.com")
@@ -269,7 +269,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
       fakeHomeOverride: fakeHome,
     })
-    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const reason = result.json?.hookSpecificOutput as Record<string, any>
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
     expect(msg).not.toContain("different repository")
@@ -285,7 +285,7 @@ describe("pretooluse-sandboxed-edits", () => {
       // Agent tries to edit through the symlink — realpath resolves it to outside
       const result = await runHook(cwd, "Edit", join(cwd, "link", "evil.ts"))
       expect(result.exitCode).toBe(0)
-      const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+      const reason = result.json?.hookSpecificOutput as Record<string, any>
       expect(reason?.permissionDecision).toBe("deny")
       const msg = String(reason?.permissionDecisionReason)
       expect(msg).toContain("File edit blocked")
@@ -299,7 +299,7 @@ describe("pretooluse-sandboxed-edits", () => {
       // The session cwd is the real dir; target is inside the real dir
       const result = await runHook(real, "Edit", join(real, "src", "app.ts"))
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("allow")
     })
   })
@@ -313,7 +313,7 @@ describe("pretooluse-sandboxed-edits", () => {
       sandboxedEdits: false,
     })
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -382,7 +382,7 @@ describe("pretooluse-sandboxed-edits", () => {
       ])
       await proc.exited
 
-      let json: Record<string, unknown> | null = null
+      let json: Record<string, any> | null = null
       try {
         if (stdout.trim()) json = JSON.parse(stdout.trim())
       } catch {}
@@ -396,7 +396,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
       const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), true)
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("deny")
       const msg = String(hso?.permissionDecisionReason)
       expect(msg).toContain("Trunk mode is enabled")
@@ -410,7 +410,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
       const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), true)
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("allow")
     })
 
@@ -420,7 +420,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
       const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), false)
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("allow")
     })
   })
@@ -430,7 +430,7 @@ describe("pretooluse-sandboxed-edits", () => {
       const cwd = await createTempDir()
       const result = await runHook(cwd, "Edit", join(cwd, ".swiz", "config.json"))
       expect(result.exitCode).toBe(0)
-      const decision = (result.json?.hookSpecificOutput as Record<string, unknown>)
+      const decision = (result.json?.hookSpecificOutput as Record<string, any>)
         ?.permissionDecision
       expect(decision).toBe("deny")
     })
@@ -439,7 +439,7 @@ describe("pretooluse-sandboxed-edits", () => {
       const cwd = await createTempDir()
       const result = await runHook(cwd, "Write", join(cwd, ".swiz", "config.json"))
       expect(result.exitCode).toBe(0)
-      const decision = (result.json?.hookSpecificOutput as Record<string, unknown>)
+      const decision = (result.json?.hookSpecificOutput as Record<string, any>)
         ?.permissionDecision
       expect(decision).toBe("deny")
     })
@@ -450,7 +450,7 @@ describe("pretooluse-sandboxed-edits", () => {
         sandboxedEdits: false,
       })
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("allow")
     })
   })

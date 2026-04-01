@@ -226,7 +226,7 @@ export function parseToolCallDetail(name: string, detail: string): ParsedToolCal
     }
   }
 
-  const payload = parsed as Record<string, unknown>
+  const payload = parsed as Record<string, any>
   const command = typeof payload.command === "string" ? payload.command : null
   const description = typeof payload.description === "string" ? payload.description : null
   const fieldMap = [
@@ -293,7 +293,7 @@ export function parseSkillToolCallName(detail: string): string | null {
     return null
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
-  const skill = (parsed as Record<string, unknown>).skill
+  const skill = (parsed as Record<string, any>).skill
   return typeof skill === "string" && skill.trim().length > 0 ? skill.trim() : null
 }
 
@@ -393,13 +393,13 @@ export function skillExchangeMergeAt(
   return { user: userG!, assistant: assistantG! }
 }
 
-export function parseJsonObject(detail: string): Record<string, unknown> | null {
+export function parseJsonObject(detail: string): Record<string, any> | null {
   const trimmed = detail.trim()
   if (!trimmed) return null
   try {
     const parsed = JSON.parse(trimmed) as unknown
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
-    return parsed as Record<string, unknown>
+    return parsed as Record<string, any>
   } catch {
     return null
   }
@@ -493,7 +493,7 @@ export interface ParsedTaskToolCall {
 }
 
 function extractTaskCallFields(
-  payload: Record<string, unknown>
+  payload: Record<string, any>
 ): Omit<ParsedTaskToolCall, "action"> {
   return {
     taskId:
@@ -526,7 +526,7 @@ export interface ParsedFileToolCall {
   limit?: number | null
 }
 
-function extractFilePath(payload: Record<string, unknown>): string | null {
+function extractFilePath(payload: Record<string, any>): string | null {
   if (typeof payload.file_path === "string") return payload.file_path
   if (typeof payload.path === "string") return payload.path
   if (typeof payload.pattern === "string") return payload.pattern
@@ -534,7 +534,7 @@ function extractFilePath(payload: Record<string, unknown>): string | null {
 }
 
 function extractFileToolFields(
-  payload: Record<string, unknown>
+  payload: Record<string, any>
 ): Omit<ParsedFileToolCall, "filePath" | "action"> {
   return {
     oldString: typeof payload.old_string === "string" ? payload.old_string : null,

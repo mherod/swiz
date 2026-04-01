@@ -9,7 +9,7 @@ function removeSwizHooks(obj: unknown): unknown {
     return obj.map((item) => removeSwizHooks(item)).filter((item) => item !== null)
   }
   if (obj && typeof obj === "object") {
-    const rec = obj as Record<string, unknown>
+    const rec = obj as Record<string, any>
 
     if (isManagedSwizCommand(rec.command)) {
       return null
@@ -17,14 +17,14 @@ function removeSwizHooks(obj: unknown): unknown {
 
     if (Array.isArray(rec.hooks)) {
       const filtered = rec.hooks.filter((h) => {
-        const hh = h as Record<string, unknown>
+        const hh = h as Record<string, any>
         return !isManagedSwizCommand(hh.command)
       })
       if (filtered.length === 0) return null
       return { ...rec, hooks: filtered }
     }
 
-    const result: Record<string, unknown> = {}
+    const result: Record<string, any> = {}
     for (const [k, v] of Object.entries(rec)) {
       result[k] = removeSwizHooks(v)
     }
@@ -66,7 +66,7 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
 
   const cleaned = cleanEmptyEvents(removeSwizHooks(hooks) as Record<string, unknown[]>)
 
-  let proposed: Record<string, unknown>
+  let proposed: Record<string, any>
   if (agent.wrapsHooks) {
     proposed = { ...agent.wrapsHooks, hooks: cleaned }
   } else {
@@ -75,7 +75,7 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
 
   const newText = JSON.stringify(proposed, null, 2)
 
-  const oldCount = countSwizHooks(hooks as Record<string, unknown>)
+  const oldCount = countSwizHooks(hooks as Record<string, any>)
 
   if (oldCount === 0) {
     console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}no swiz hooks found${RESET}\n`)
@@ -94,23 +94,23 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
   console.log(`    ${GREEN}✓${RESET} written (backup at ${agent.settingsPath}.bak)\n`)
 }
 
-function countEntryHooks(entry: Record<string, unknown>): number {
+function countEntryHooks(entry: Record<string, any>): number {
   let count = isManagedSwizCommand(entry.command) ? 1 : 0
   if (Array.isArray(entry.hooks)) {
     for (const h of entry.hooks) {
-      const hh = h as Record<string, unknown>
+      const hh = h as Record<string, any>
       if (isManagedSwizCommand(hh.command)) count++
     }
   }
   return count
 }
 
-function countSwizHooks(hooks: Record<string, unknown>): number {
+function countSwizHooks(hooks: Record<string, any>): number {
   let count = 0
   for (const entries of Object.values(hooks)) {
     if (!Array.isArray(entries)) continue
     for (const entry of entries) {
-      count += countEntryHooks(entry as Record<string, unknown>)
+      count += countEntryHooks(entry as Record<string, any>)
     }
   }
   return count

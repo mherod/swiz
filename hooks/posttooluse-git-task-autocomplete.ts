@@ -112,7 +112,7 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
   return {}
 }
 
-const posttooluseGitTaskAutocomplete: SwizHook<Record<string, unknown>> = {
+const posttooluseGitTaskAutocomplete: SwizHook<Record<string, any>> = {
   name: "posttooluse-git-task-autocomplete",
   event: "postToolUse",
   matcher: "Bash",

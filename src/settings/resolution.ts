@@ -138,7 +138,7 @@ function resolveProjectOverrides(
   settings: SwizSettings,
   projectSettings?: ProjectSwizSettings | null
 ): Pick<SwizSettings, (typeof PROJECT_OVERRIDABLE_KEYS)[number]> {
-  const result = {} as Record<string, unknown>
+  const result = {} as Record<string, any>
   for (const key of PROJECT_OVERRIDABLE_KEYS) {
     result[key] = projectSettings?.[key] ?? settings[key]
   }

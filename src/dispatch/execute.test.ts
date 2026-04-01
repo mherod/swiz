@@ -113,7 +113,7 @@ describe("dispatch execute integration", () => {
     })
 
     it("throws when coercing stop envelope that violates stopHookOutputSchema", () => {
-      const r: Record<string, unknown> = { continue: true }
+      const r: Record<string, any> = { continue: true }
       expect(() => coerceDispatchAgentEnvelopeInPlace(r, "stop", "Stop")).toThrow()
     })
   })
@@ -346,7 +346,7 @@ describe("dispatch execute integration", () => {
         body: "{}",
       })
       expect(resp.status).toBe(400)
-      const json = (await resp.json()) as Record<string, unknown>
+      const json = (await resp.json()) as Record<string, any>
       expect(json.error).toContain("Missing")
     })
 

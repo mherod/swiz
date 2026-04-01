@@ -39,7 +39,7 @@ export interface ErrorResult {
  * This is the earliest point to catch schema violations (e.g., silent allow without context).
  */
 function validateHookOutputSchema(
-  parsed: Record<string, unknown>
+  parsed: Record<string, any>
 ): { valid: true } | { valid: false; error: string } {
   try {
     hookOutputSchema.parse(parsed)
@@ -58,14 +58,14 @@ function validateHookOutputSchema(
  * Parse a JSON object substring when the full stdout string is not valid JSON
  * (prefix/suffix log lines, pretty-printed multi-line objects, etc.).
  */
-function parseJsonFromPollutedStdout(trimmed: string): Record<string, unknown> | null {
+function parseJsonFromPollutedStdout(trimmed: string): Record<string, any> | null {
   const fromLastBrace = tryParseJsonObjectFromLastBrace(trimmed)
   if (fromLastBrace !== null) return fromLastBrace
 
   const balanced = extractFirstBalancedJsonObject(trimmed)
   if (balanced !== null) {
     try {
-      return JSON.parse(balanced) as Record<string, unknown>
+      return JSON.parse(balanced) as Record<string, any>
     } catch {
       return null
     }
@@ -74,11 +74,11 @@ function parseJsonFromPollutedStdout(trimmed: string): Record<string, unknown> |
 }
 
 /** Last `{` through end of string — handles prefix logs + pretty-printed JSON at the end. */
-function tryParseJsonObjectFromLastBrace(trimmed: string): Record<string, unknown> | null {
+function tryParseJsonObjectFromLastBrace(trimmed: string): Record<string, any> | null {
   const lastBrace = trimmed.lastIndexOf("{")
   if (lastBrace < 0) return null
   try {
-    return JSON.parse(trimmed.slice(lastBrace)) as Record<string, unknown>
+    return JSON.parse(trimmed.slice(lastBrace)) as Record<string, any>
   } catch {
     return null
   }
@@ -141,13 +141,13 @@ export function classifyHookOutput({
   timedOut: boolean
   trimmed: string
   exitCode: number | null
-}): { parsed: Record<string, unknown> | null; status: HookStatus } {
+}): { parsed: Record<string, any> | null; status: HookStatus } {
   if (timedOut) return { parsed: null, status: "timeout" }
   if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
 
-  let parsed: Record<string, unknown> | null = null
+  let parsed: Record<string, any> | null = null
   try {
-    parsed = JSON.parse(trimmed) as Record<string, unknown>
+    parsed = JSON.parse(trimmed) as Record<string, any>
   } catch {
     parsed = parseJsonFromPollutedStdout(trimmed)
     if (!parsed) {
@@ -186,7 +186,7 @@ export function extractCallerEnv(payloadStr: string): Record<string, string> | n
  */
 export function extractPayloadCwd(payloadStr: string): string | undefined {
   try {
-    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+    const parsed = JSON.parse(payloadStr) as Record<string, any>
     const rawCwd = parsed.cwd
     if (typeof rawCwd === "string" && rawCwd.trim()) {
       return rawCwd.trim()

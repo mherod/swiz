@@ -29,19 +29,19 @@ export function stripAnsi(s: string): string {
  * Returns [] when the line is not an assistant message, is malformed, or has no tool_use blocks.
  * Never throws — malformed JSON is handled via tryParseJsonLine.
  */
-export function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>> {
+export function extractToolBlocksFromEntry(line: string): Array<Record<string, any>> {
   const entry = tryParseJsonLine(line)
   if (entry === undefined || typeof entry !== "object" || Array.isArray(entry)) return []
-  const e = entry as Record<string, unknown>
+  const e = entry as Record<string, any>
   if (e?.type !== "assistant") return []
-  const message = (e?.message as Record<string, unknown> | undefined) ?? {}
+  const message = (e?.message as Record<string, any> | undefined) ?? {}
   const content = message?.content
   if (!Array.isArray(content)) return []
-  return content.filter((block: Record<string, unknown>) => block?.type === "tool_use")
+  return content.filter((block: Record<string, any>) => block?.type === "tool_use")
 }
 
-function collectToolBlocksFromLines(lines: string[]): Array<Record<string, unknown>> {
-  const blocks: Array<Record<string, unknown>> = []
+function collectToolBlocksFromLines(lines: string[]): Array<Record<string, any>> {
+  const blocks: Array<Record<string, any>> = []
   for (const line of lines) {
     if (!line.trim()) continue
     blocks.push(...extractToolBlocksFromEntry(line))
@@ -49,7 +49,7 @@ function collectToolBlocksFromLines(lines: string[]): Array<Record<string, unkno
   return blocks
 }
 
-async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
+async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, any>>> {
   const lines = await readSessionLines(path)
   return collectToolBlocksFromLines(lines)
 }
@@ -87,7 +87,7 @@ export async function extractReadFilePaths(path: string): Promise<Set<string>> {
   const paths = new Set<string>()
   for (const block of blocks) {
     if (block.name !== "Read") continue
-    const filePath = String((block.input as Record<string, unknown>)?.file_path ?? "")
+    const filePath = String((block.input as Record<string, any>)?.file_path ?? "")
     if (filePath) paths.add(filePath)
   }
   return paths
@@ -105,10 +105,10 @@ export async function extractReadFilePaths(path: string): Promise<Set<string>> {
 function collectBlockedIdsFromContent(content: unknown[]): string[] {
   const ids: string[] = []
   for (const block of content) {
-    if ((block as Record<string, unknown>)?.type !== "tool_result") continue
-    const text = extractTextFromUnknownContent((block as Record<string, unknown>).content)
+    if ((block as Record<string, any>)?.type !== "tool_result") continue
+    const text = extractTextFromUnknownContent((block as Record<string, any>).content)
     if (text.includes("ACTION REQUIRED:"))
-      ids.push(String((block as Record<string, unknown>).tool_use_id ?? ""))
+      ids.push(String((block as Record<string, any>).tool_use_id ?? ""))
   }
   return ids
 }

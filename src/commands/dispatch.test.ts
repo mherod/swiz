@@ -7,13 +7,13 @@ import { join } from "node:path"
 
 async function dispatch(
   event: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   options: { env?: Record<string, string | undefined> } = {}
 ): Promise<{
   stdout: string
   stderr: string
   exitCode: number | null
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 }> {
   const proc = Bun.spawn(
     [
@@ -69,7 +69,7 @@ describe("dispatch preToolUse", () => {
     })
     // Should either be empty (all pass) or allow-with-reason (from require-tasks)
     if (result.parsed) {
-      const hso = result.parsed.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.parsed.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).not.toBe("deny")
     }
   }, 30_000)
@@ -80,7 +80,7 @@ describe("dispatch preToolUse", () => {
       tool_input: { command: "sed -i 's/a/b/' file.ts" },
     })
     expect(result.parsed).not.toBeNull()
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any> | undefined
     const decision = hso?.permissionDecision ?? result.parsed!.decision
     expect(decision).toBe("deny")
   }, 30_000)
@@ -91,7 +91,7 @@ describe("dispatch preToolUse", () => {
       tool_input: { command: "grep -r TODO src/" },
     })
     expect(result.parsed).not.toBeNull()
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any> | undefined
     // Could be allow from banned-commands or deny from require-tasks
     // If require-tasks fires first, it may deny — that's fine
     const decision = (hso?.permissionDecision ?? result.parsed!.decision) as string
@@ -210,7 +210,7 @@ describe("dispatch routing", () => {
 describe("dispatch replay", () => {
   async function replay(
     event: string,
-    payload: Record<string, unknown>,
+    payload: Record<string, any>,
     extraArgs: string[] = []
   ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", event, ...extraArgs], {
@@ -241,12 +241,12 @@ describe("dispatch replay", () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stdout).not.toBe("")
-    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
     expect(parsed.event).toBe("preToolUse")
     expect(parsed.strategy).toBe("preToolUse")
-    const resultField = parsed.result as Record<string, unknown>
+    const resultField = parsed.result as Record<string, any>
     expect(resultField.blocked).toBe(true)
-    const hooks = parsed.hooks as Array<Record<string, unknown>>
+    const hooks = parsed.hooks as Array<Record<string, any>>
     const blocked = hooks.find((h) => h.status === "deny")
     expect(blocked).toBeDefined()
   })
@@ -259,13 +259,13 @@ describe("dispatch replay", () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stdout).not.toBe("")
-    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
     expect(parsed.event).toBe("preToolUse")
-    const resultField = parsed.result as Record<string, unknown>
+    const resultField = parsed.result as Record<string, any>
     // git status is exempt from banned-commands and require-tasks hooks
     // result.blocked may be false or true depending on session state; just verify structure
     expect(typeof resultField.blocked).toBe("boolean")
-    const hooks = parsed.hooks as Array<Record<string, unknown>>
+    const hooks = parsed.hooks as Array<Record<string, any>>
     expect(Array.isArray(hooks)).toBe(true)
     // Each hook entry must have file, status, and duration_ms
     for (const hook of hooks) {
@@ -326,7 +326,7 @@ describe("dispatch replay", () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stdout).not.toBe("")
-    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
     expect(parsed.event).toBe("stop")
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
@@ -388,8 +388,8 @@ describe("dispatch replay", () => {
       ])
       expect(result.exitCode).toBe(0)
 
-      const parsed = JSON.parse(result.stdout) as Record<string, unknown>
-      const hooks = parsed.hooks as Array<Record<string, unknown>>
+      const parsed = JSON.parse(result.stdout) as Record<string, any>
+      const hooks = parsed.hooks as Array<Record<string, any>>
       expect(Array.isArray(hooks)).toBe(true)
 
       // Blocking replay short-circuits: hooks after the first block don't run
@@ -399,7 +399,7 @@ describe("dispatch replay", () => {
       // The last hook in the trace is the blocker (replay returns immediately)
       expect(hooks[hooks.length - 1]?.file).toBe("stop-secret-scanner.ts")
 
-      const resultField = parsed.result as Record<string, unknown>
+      const resultField = parsed.result as Record<string, any>
       expect(resultField.blocked).toBe(true)
       expect(resultField.by).toBe("stop-secret-scanner.ts")
     } finally {

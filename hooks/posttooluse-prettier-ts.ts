@@ -55,7 +55,7 @@ export async function evaluatePosttoolusePrettierTs(input: unknown): Promise<Swi
   return await runPrettier(prettierBin, filePath)
 }
 
-const posttoolusePrettierTs: SwizHook<Record<string, unknown>> = {
+const posttoolusePrettierTs: SwizHook<Record<string, any>> = {
   name: "posttooluse-prettier-ts",
   event: "postToolUse",
   matcher: "Edit|Write",

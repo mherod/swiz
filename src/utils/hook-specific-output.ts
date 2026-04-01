@@ -20,7 +20,7 @@ export function getHookSpecificOutput(resp: {
   const hso = resp.hookSpecificOutput
   if (hso && typeof hso === "object")
     if (!Array.isArray(hso)) {
-      return hso as Record<string, unknown>
+      return hso as Record<string, any>
     } else {
       return undefined
     }
@@ -33,7 +33,7 @@ export function getHookSpecificOutput(resp: {
  * PreToolUse-style `permissionDecision` / `permissionDecisionReason` merged with top-level
  * `decision` / `reason` (used by tests and trace parsing).
  */
-export function extractPreToolSurfaceDecision(parsed: Record<string, unknown>): {
+export function extractPreToolSurfaceDecision(parsed: Record<string, any>): {
   decision?: string
   reason?: string
 } {
@@ -49,11 +49,11 @@ export function extractPreToolSurfaceDecision(parsed: Record<string, unknown>): 
  * otherwise normalizes a non-empty existing name with `.trim()`.
  */
 export function mergeHookSpecificOutputClone(
-  response: Record<string, unknown>,
+  response: Record<string, any>,
   hookEventName: string
-): Record<string, unknown> {
+): Record<string, any> {
   const existing = getHookSpecificOutput(response)
-  const base = existing ? (merge({}, existing) as Record<string, unknown>) : {}
+  const base = existing ? (merge({}, existing) as Record<string, any>) : {}
   const existingName = base.hookEventName
   base.hookEventName =
     typeof existingName === "string" && existingName.trim()
@@ -91,11 +91,11 @@ export function hsoPreToolUseAllowContextual(
 }
 
 export function hsoPreToolUseAllowWithUpdatedInput(
-  updatedInput: Record<string, unknown>,
+  updatedInput: Record<string, any>,
   reason?: string
 ): HookSpecificOutput & {
-  updatedInput: Record<string, unknown>
-  modifiedInput: Record<string, unknown>
+  updatedInput: Record<string, any>
+  modifiedInput: Record<string, any>
 } {
   return {
     hookEventName: "PreToolUse",

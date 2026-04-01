@@ -26,7 +26,7 @@ function isInjectedEffectiveSettings(value: unknown): value is EffectiveSwizSett
 export async function getEffectiveSwizSettingsForToolHook(input: {
   cwd: string
   session_id?: string
-  payload: Record<string, unknown>
+  payload: Record<string, any>
 }): Promise<EffectiveSwizSettings> {
   const injected = input.payload._effectiveSettings
   if (isInjectedEffectiveSettings(injected)) {

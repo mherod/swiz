@@ -131,7 +131,7 @@ describe("manage mcp command", () => {
     expect(remove.stdout).toContain('Removed "figma"')
 
     const jsonText = await readFile(join(cursorDir, "mcp.json"), "utf-8")
-    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, unknown> }
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, any> }
     expect(json.mcpServers).toEqual({})
   })
 
@@ -224,7 +224,7 @@ describe("manage mcp --project (cursor: .cursor/mcp.json)", () => {
     expect(remove.stdout).toContain('Removed "figma"')
 
     const jsonText = await readFile(join(cursorDir, "mcp.json"), "utf-8")
-    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, unknown> }
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, any> }
     expect(json.mcpServers).toEqual({})
   })
 
@@ -293,7 +293,7 @@ describe("manage mcp --project (claude: .mcp.json)", () => {
     expect(remove.stdout).toContain('Removed "context7"')
 
     const jsonText = await readFile(join(projectDir, ".mcp.json"), "utf-8")
-    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, unknown> }
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, any> }
     expect(json.mcpServers).toEqual({})
   })
 })
@@ -401,7 +401,7 @@ describe("manage mcp --claude-desktop (global Claude Desktop config)", () => {
     expect(remove.stdout).toContain('Removed "magic-ui"')
 
     const jsonText = await readFile(join(desktopDir, "claude_desktop_config.json"), "utf-8")
-    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, unknown> }
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, any> }
     expect(json.mcpServers).toEqual({})
   })
 

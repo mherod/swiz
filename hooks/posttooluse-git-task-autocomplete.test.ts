@@ -77,7 +77,7 @@ async function runHook(
   }
 }
 
-async function createTempHomeWithSettings(settings: Record<string, unknown>): Promise<string> {
+async function createTempHomeWithSettings(settings: Record<string, any>): Promise<string> {
   const home = join(
     tmpdir(),
     `swiz-posttooluse-git-task-${Date.now()}-${Math.random().toString(36).slice(2)}`

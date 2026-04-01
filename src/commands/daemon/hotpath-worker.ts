@@ -6,7 +6,7 @@ import type {
 } from "./worker-runtime.ts"
 
 function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload | null {
-  const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+  const parsed = JSON.parse(payloadStr) as Record<string, any>
   normalizeAgentHookPayload(parsed)
   const toolName =
     typeof parsed.tool_name === "string"
@@ -16,9 +16,9 @@ function normalizeDispatchPayload(payloadStr: string): NormalizedDispatchPayload
         : null
   const toolInput =
     parsed.tool_input && typeof parsed.tool_input === "object"
-      ? (parsed.tool_input as Record<string, unknown>)
+      ? (parsed.tool_input as Record<string, any>)
       : parsed.toolInput && typeof parsed.toolInput === "object"
-        ? (parsed.toolInput as Record<string, unknown>)
+        ? (parsed.toolInput as Record<string, any>)
         : undefined
 
   return {

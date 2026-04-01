@@ -172,7 +172,7 @@ function deriveToolCallStats(summary: TranscriptSummary): {
 }
 
 async function countToolCalls(
-  source: string | Record<string, unknown>
+  source: string | Record<string, any>
 ): Promise<{ total: number; taskToolUsed: boolean }> {
   const stats = await getCurrentSessionTaskToolStats(source)
   return {
@@ -242,7 +242,7 @@ async function enforceCiEvidence(
 }
 
 async function resolveToolCallStats(
-  raw: Record<string, unknown>,
+  raw: Record<string, any>,
   summary: TranscriptSummary | null,
   transcript: string
 ): Promise<{ total: number; taskToolUsed: boolean }> {
@@ -273,7 +273,7 @@ async function maybeEnforceCiEvidenceAfterPush(
 }
 
 async function runStopCompletionWhenTasksDirReady(opts: {
-  raw: Record<string, unknown>
+  raw: Record<string, any>
   input: StopHookInput
   sessionId: string
   transcript: string
@@ -334,7 +334,7 @@ async function runStopCompletionWhenTasksDirReady(opts: {
 }
 
 export async function evaluateStopCompletionAuditor(input: StopHookInput): Promise<SwizHookOutput> {
-  const raw = input as Record<string, unknown>
+  const raw = input as Record<string, any>
   const parsed = stopHookInputSchema.parse(raw)
   const sessionId = parsed.session_id ?? ""
   const transcript = parsed.transcript_path ?? ""

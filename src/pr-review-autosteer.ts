@@ -21,7 +21,7 @@ export interface PrReviewState {
  */
 export function extractPrReviewState(prBranchDetail: unknown): PrReviewState | null {
   if (!prBranchDetail || typeof prBranchDetail !== "object") return null
-  const detail = prBranchDetail as Record<string, unknown>
+  const detail = prBranchDetail as Record<string, any>
   return {
     reviewDecision: (detail.reviewDecision as string) ?? null,
     commentCount: (detail.commentCount as number) ?? 0,

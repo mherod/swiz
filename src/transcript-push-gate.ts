@@ -27,11 +27,11 @@ export interface PushGateScanResult {
 const CONVERSATION_ROLES = new Set(["user", "assistant"])
 
 function isTextBlock(block: unknown): string | null {
-  const b = block as Record<string, unknown>
+  const b = block as Record<string, any>
   return b?.type === "text" && typeof b?.text === "string" ? String(b.text) : null
 }
 
-function extractTextBlocks(entry: Record<string, unknown>): Array<{ role: string; text: string }> {
+function extractTextBlocks(entry: Record<string, any>): Array<{ role: string; text: string }> {
   const role: string = (entry?.type as string) ?? ""
   if (!CONVERSATION_ROLES.has(role)) return []
   const content = (entry as { message?: { content?: unknown[] } })?.message?.content
@@ -56,7 +56,7 @@ function extractBlockingSnippet(text: string): string {
 }
 
 function applyEntryToPushGateState(
-  entry: Record<string, unknown>,
+  entry: Record<string, any>,
   state: PushGateScanResult
 ): void {
   for (const { role, text } of extractTextBlocks(entry)) {
@@ -83,9 +83,9 @@ export function scanPushGateFromJsonlLines(lines: string[]): PushGateScanResult 
   try {
     for (const line of lines) {
       if (!line.trim()) continue
-      let entry: Record<string, unknown>
+      let entry: Record<string, any>
       try {
-        entry = JSON.parse(line) as Record<string, unknown>
+        entry = JSON.parse(line) as Record<string, any>
       } catch {
         continue
       }

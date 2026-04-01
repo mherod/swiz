@@ -97,7 +97,7 @@ interface ResolvedTaskInput {
   tasksDir: string
   toolName: string
   subject: string
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, any>
 }
 
 function resolveTaskInput(
@@ -113,7 +113,7 @@ function resolveTaskInput(
     tasksDir,
     toolName: input.tool_name ?? "",
     subject,
-    toolInput: (input.tool_input ?? {}) as Record<string, unknown>,
+    toolInput: (input.tool_input ?? {}) as Record<string, any>,
   }
 }
 
@@ -136,7 +136,7 @@ export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<
   return {}
 }
 
-const posttooluseTaskAuditSync: SwizHook<Record<string, unknown>> = {
+const posttooluseTaskAuditSync: SwizHook<Record<string, any>> = {
   name: "posttooluse-task-audit-sync",
   event: "postToolUse",
   matcher: "TaskUpdate|TaskCreate|TodoWrite",

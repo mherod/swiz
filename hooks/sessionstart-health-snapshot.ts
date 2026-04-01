@@ -130,7 +130,7 @@ export async function evaluateSessionstartHealthSnapshot(input: unknown): Promis
   return {}
 }
 
-const sessionstartHealthSnapshot: SwizHook<Record<string, unknown>> = {
+const sessionstartHealthSnapshot: SwizHook<Record<string, any>> = {
   name: "sessionstart-health-snapshot",
   event: "sessionStart",
   matcher: "startup",

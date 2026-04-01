@@ -46,16 +46,16 @@ interface ScanResult {
 
 interface RawInputFields {
   toolName: string
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, any>
   cwd: string
   transcriptPath: string
   sessionId: string | undefined
 }
 
 /** True when block is a TaskUpdate/update_plan setting this task to in_progress. */
-function isInProgressTransition(block: Record<string, unknown>, taskId: string): boolean {
+function isInProgressTransition(block: Record<string, any>, taskId: string): boolean {
   const name = String(block.name ?? "")
-  const inp = (block.input ?? {}) as Record<string, unknown>
+  const inp = (block.input ?? {}) as Record<string, any>
   const isTaskUpdateName = name === "TaskUpdate" || name === "update_plan"
   if (!isTaskUpdateName) return false
   const matchesTask = String(inp.taskId ?? "") === taskId
@@ -63,7 +63,7 @@ function isInProgressTransition(block: Record<string, unknown>, taskId: string):
 }
 
 /** True when this call targets completing a task (TaskUpdate/update_plan, status=completed). */
-function isCompletionCall(toolName: string, toolInput: Record<string, unknown>): boolean {
+function isCompletionCall(toolName: string, toolInput: Record<string, any>): boolean {
   const isTaskUpdateName = toolName === "TaskUpdate" || toolName === "update_plan"
   if (!isTaskUpdateName) return false
   return String(toolInput.status ?? "") === "completed"
@@ -79,7 +79,7 @@ function extractRawFields(raw: {
 }): RawInputFields {
   return {
     toolName: raw.tool_name ?? "",
-    toolInput: (raw.tool_input ?? {}) as Record<string, unknown>,
+    toolInput: (raw.tool_input ?? {}) as Record<string, any>,
     cwd: raw.cwd ?? process.cwd(),
     transcriptPath: raw.transcript_path ?? "",
     sessionId: resolveSafeSessionId(raw.session_id) ?? undefined,
@@ -87,7 +87,7 @@ function extractRawFields(raw: {
 }
 
 /** Extract task-specific fields from a tool_input record. */
-function extractTaskFields(toolInput: Record<string, unknown>): {
+function extractTaskFields(toolInput: Record<string, any>): {
   taskId: string
   description: string
 } {

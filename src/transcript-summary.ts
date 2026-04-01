@@ -290,17 +290,17 @@ async function readSessionToolUsage(transcriptPath: string): Promise<SummaryAccu
   }
 }
 
-function transcriptPathFromUsageSource(source: string | Record<string, unknown>): string {
+function transcriptPathFromUsageSource(source: string | Record<string, any>): string {
   if (typeof source === "string") return source
   return typeof source.transcript_path === "string" ? source.transcript_path : ""
 }
 
 export function getCurrentSessionToolUsage(
-  input: Record<string, unknown>
+  input: Record<string, any>
 ): CurrentSessionToolUsage | null {
   const usage = input?._currentSessionToolUsage
   if (usage && typeof usage === "object") {
-    const candidate = usage as Record<string, unknown>
+    const candidate = usage as Record<string, any>
     if (Array.isArray(candidate.toolNames) && Array.isArray(candidate.skillInvocations)) {
       return {
         toolNames: candidate.toolNames.filter((v): v is string => typeof v === "string"),
@@ -348,7 +348,7 @@ export function deriveCurrentSessionTaskToolStats(
  * Only lines after the last compaction boundary are considered.
  */
 export async function getToolsUsedForCurrentSession(
-  source: string | Record<string, unknown>
+  source: string | Record<string, any>
 ): Promise<string[]> {
   if (typeof source !== "string") {
     const usage = getCurrentSessionToolUsage(source)
@@ -363,7 +363,7 @@ export async function getToolsUsedForCurrentSession(
  * Only lines after the last compaction boundary are considered.
  */
 export async function getSkillsUsedForCurrentSession(
-  source: string | Record<string, unknown>
+  source: string | Record<string, any>
 ): Promise<string[]> {
   if (typeof source !== "string") {
     const usage = getCurrentSessionToolUsage(source)
@@ -374,7 +374,7 @@ export async function getSkillsUsedForCurrentSession(
 }
 
 export async function getCurrentSessionTaskToolStats(
-  source: string | Record<string, unknown>
+  source: string | Record<string, any>
 ): Promise<CurrentSessionTaskToolStats> {
   return deriveCurrentSessionTaskToolStats(await getToolsUsedForCurrentSession(source))
 }
@@ -428,10 +428,10 @@ export async function computeTranscriptSummary(
  * Extract the TranscriptSummary from a hook input payload (injected by dispatch).
  * Returns null if the summary is not present.
  */
-export function getTranscriptSummary(input: Record<string, unknown>): TranscriptSummary | null {
+export function getTranscriptSummary(input: Record<string, any>): TranscriptSummary | null {
   const summary = input?._transcriptSummary
   if (!summary || typeof summary !== "object") return null
-  const s = summary as Record<string, unknown>
+  const s = summary as Record<string, any>
   if (!Array.isArray(s.toolNames)) return null
   return summary as TranscriptSummary
 }

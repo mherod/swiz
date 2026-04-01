@@ -197,6 +197,6 @@ describe("Gemini hook schema contracts", () => {
       future_field: "preserved",
     })
     expect(result.success).toBe(true)
-    expect((result.data as Record<string, unknown>).future_field).toBe("preserved")
+    expect((result.data as Record<string, any>).future_field).toBe("preserved")
   })
 })

@@ -18,37 +18,37 @@ export function resolveClaudeSettingsPath(
   return join(targetDir, ".claude", "settings.local.json")
 }
 
-export async function readClaudeSettingsObject(path: string): Promise<Record<string, unknown>> {
+export async function readClaudeSettingsObject(path: string): Promise<Record<string, any>> {
   try {
     const raw = await Bun.file(path).text()
     if (!raw.trim()) return {}
     const parsed: unknown = JSON.parse(raw)
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
+      ? (parsed as Record<string, any>)
       : {}
   } catch {
     return {}
   }
 }
 
-export function readModelFromClaudeSettings(obj: Record<string, unknown>): string | undefined {
+export function readModelFromClaudeSettings(obj: Record<string, any>): string | undefined {
   const m = obj.model
   return typeof m === "string" && m.trim() !== "" ? m : undefined
 }
 
 export async function writeClaudeSettingsWithMutation(
   path: string,
-  mutator: (obj: Record<string, unknown>) => void
+  mutator: (obj: Record<string, any>) => void
 ): Promise<void> {
   const prev = existsSync(path) ? await Bun.file(path).text() : ""
-  let obj: Record<string, unknown>
+  let obj: Record<string, any>
   if (prev.trim()) {
     try {
       const parsed: unknown = JSON.parse(prev)
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new Error(`Invalid JSON at ${path}: top level must be an object.`)
       }
-      obj = parsed as Record<string, unknown>
+      obj = parsed as Record<string, any>
     } catch (e) {
       const msg = e instanceof SyntaxError ? e.message : e instanceof Error ? e.message : String(e)
       throw new Error(`Invalid JSON at ${path}: ${msg}`)
@@ -89,9 +89,9 @@ export async function setClaudeSettingsModel(
 }
 
 export function effectiveClaudeModelFromLayers(
-  globalObj: Record<string, unknown>,
-  projectObj: Record<string, unknown>,
-  localObj: Record<string, unknown>
+  globalObj: Record<string, any>,
+  projectObj: Record<string, any>,
+  localObj: Record<string, any>
 ): string | undefined {
   const l = readModelFromClaudeSettings(localObj)
   if (l !== undefined) return l

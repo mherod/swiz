@@ -37,7 +37,7 @@ async function runHook(
   cwd: string,
   command: string,
   pathOverride?: string
-): Promise<{ raw: string; parsed: Record<string, unknown> | null; decision?: string }> {
+): Promise<{ raw: string; parsed: Record<string, any> | null; decision?: string }> {
   const payload = JSON.stringify({
     tool_name: "Bash",
     tool_input: { command, cwd },
@@ -64,8 +64,8 @@ async function runHook(
     throw new Error(`hook exited with ${exitCode}: ${stderr || "(no stderr)"}`)
   }
   if (!raw) return { raw, parsed: null }
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+  const parsed = JSON.parse(raw) as Record<string, any>
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
   const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
   return { raw, parsed, decision }
 }
@@ -77,7 +77,7 @@ describe("pretooluse-block-commit-to-main", () => {
     try {
       const result = await runHook(repo, 'git commit -m "test"', fakeBin)
       expect(result.parsed).not.toBeNull()
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(hso.permissionDecision).toBe("deny")
       expect(String(hso.permissionDecisionReason ?? "")).toContain(
         "Committing directly to 'main' is blocked"

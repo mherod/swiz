@@ -268,7 +268,7 @@ function validateServerEnv(name: string, env: unknown, issues: string[]): void {
     issues.push(`Server "${name}" has invalid env (must be object of strings)`)
     return
   }
-  for (const [envKey, envVal] of Object.entries(env as Record<string, unknown>)) {
+  for (const [envKey, envVal] of Object.entries(env as Record<string, any>)) {
     if (typeof envVal !== "string") issues.push(`Server "${name}" env "${envKey}" must be a string`)
   }
 }
@@ -278,7 +278,7 @@ function validateServerShape(name: string, server: unknown, issues: string[]): v
     issues.push(`Server "${name}" is not an object`)
     return
   }
-  const value = server as Record<string, unknown>
+  const value = server as Record<string, any>
   if (typeof value.command !== "string" || value.command.trim() === "") {
     issues.push(`Server "${name}" is missing a non-empty command`)
   }

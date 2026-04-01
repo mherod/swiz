@@ -7,7 +7,7 @@ import {
 
 describe("normalizeStopDispatchResponseInPlace", () => {
   test("coerces empty object to a stopHookOutputSchema-valid envelope", () => {
-    const r: Record<string, unknown> = {}
+    const r: Record<string, any> = {}
     normalizeStopDispatchResponseInPlace(r, "Stop")
     expect(r.continue).toBe(true)
     expect(stopHookOutputSchema.safeParse(r).success).toBe(true)
@@ -17,7 +17,7 @@ describe("normalizeStopDispatchResponseInPlace", () => {
   })
 
   test("replaces continue: false with true when context is present", () => {
-    const r: Record<string, unknown> = {
+    const r: Record<string, any> = {
       continue: false,
       systemMessage: "ok",
       reason: "r",
@@ -29,7 +29,7 @@ describe("normalizeStopDispatchResponseInPlace", () => {
   })
 
   test("preserves stop hook block with stopReason — does not inject generic allow context", () => {
-    const r: Record<string, unknown> = {
+    const r: Record<string, any> = {
       continue: false,
       stopReason: "Uncommitted changes must be resolved before stopping.",
     }

@@ -74,7 +74,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
 ])
 
 export function parsePayload(payloadStr: string): {
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   parseError: boolean
 } {
   return parseDispatchPayloadString(payloadStr)
@@ -84,7 +84,7 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 3)}...` : s
 }
 
-const TOOL_INPUT_EXTRACTORS: Array<(i: Record<string, unknown>) => string | undefined> = [
+const TOOL_INPUT_EXTRACTORS: Array<(i: Record<string, any>) => string | undefined> = [
   (i) => (typeof i.subject === "string" ? truncate(i.subject, 60) : undefined),
   (i) => {
     if (typeof i.taskId !== "string") return undefined
@@ -112,7 +112,7 @@ const TOOL_INPUT_EXTRACTORS: Array<(i: Record<string, unknown>) => string | unde
       : undefined,
 ]
 
-export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
+export function summarizeToolInput(input: Record<string, any> | undefined): string {
   if (!input) return ""
   for (const extract of TOOL_INPUT_EXTRACTORS) {
     const result = extract(input)
@@ -123,7 +123,7 @@ export function summarizeToolInput(input: Record<string, unknown> | undefined): 
 
 function getHookContext(
   canonicalEvent: string,
-  payload: Record<string, unknown>
+  payload: Record<string, any>
 ): { toolName: string | undefined; trigger: string | undefined } {
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
   const trigger =
@@ -133,7 +133,7 @@ function getHookContext(
   return { toolName, trigger }
 }
 
-function backfillPayloadDefaults(payload: Record<string, unknown>): void {
+function backfillPayloadDefaults(payload: Record<string, any>): void {
   if (!payload.cwd) {
     payload.cwd =
       process.env.GEMINI_CWD ||
@@ -183,7 +183,7 @@ async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult
 }
 
 interface EnrichPayloadOptions {
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
   currentSessionToolUsageProvider?: (
     sessionId: string,
@@ -207,7 +207,7 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
   if (currentSessionToolUsageProvider && sessionId) {
     const usage = await currentSessionToolUsageProvider(sessionId, transcriptPath)
     if (usage) {
-      enriched = merge({}, enriched, { _currentSessionToolUsage: usage }) as Record<string, unknown>
+      enriched = merge({}, enriched, { _currentSessionToolUsage: usage }) as Record<string, any>
       log(
         `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
       )
@@ -220,7 +220,7 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     disableTranscriptSummaryFallback
   )
   if (summary) {
-    enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, unknown>
+    enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, any>
     log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   }
 
@@ -270,7 +270,7 @@ export interface DispatchRequest {
 }
 
 export interface DispatchResult {
-  response: Record<string, unknown>
+  response: Record<string, any>
 }
 
 export interface DispatchLifecycleUpdate {
@@ -288,7 +288,7 @@ export interface DispatchLifecycleUpdate {
 
 function logPayloadDiagnostics(
   payloadStr: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   canonicalEvent: string
 ): void {
   if (payloadStr.length === 0) {
@@ -317,7 +317,7 @@ function logPayloadDiagnostics(
 interface DispatchContext {
   canonicalEvent: string
   hookEventName: string
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   payloadStr: string
   cwd: string
   toolName: string | undefined
@@ -330,9 +330,9 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
 
   const captureIncoming = shouldCaptureIncomingPayloads()
-  let incomingBeforeNormalize: Record<string, unknown> | null = null
+  let incomingBeforeNormalize: Record<string, any> | null = null
   if (captureIncoming) {
-    incomingBeforeNormalize = structuredClone(payload) as Record<string, unknown>
+    incomingBeforeNormalize = structuredClone(payload) as Record<string, any>
   }
 
   normalizeAgentHookPayload(payload)
@@ -355,7 +355,7 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
       parseError: false,
       payloadStr,
       incomingBeforeNormalize,
-      normalizedPayload: structuredClone(payload) as Record<string, unknown>,
+      normalizedPayload: structuredClone(payload) as Record<string, any>,
     })
   }
 
@@ -413,7 +413,7 @@ function buildLifecycleEvent(
     group.hooks.map((hook) => hookIdentifier(hook))
   )
   const toolInput = (ctx.payload.tool_input ?? ctx.payload.toolInput) as
-    | Record<string, unknown>
+    | Record<string, any>
     | undefined
   return {
     phase,
@@ -446,7 +446,7 @@ async function executeStrategyWithTimeout(
   strategy: (typeof STRATEGY_REGISTRY)[keyof typeof STRATEGY_REGISTRY],
   params: Parameters<typeof strategy.execute>[0],
   budget: { ms: number; sec: number | undefined; abort: AbortController; event: string }
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   const { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: canonicalEvent } = budget
   if (budgetMs <= 0) {
     return await strategy.execute(params)
@@ -539,7 +539,7 @@ async function injectEffectiveSettings(
   ])
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
   const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
-  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, unknown>
+  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, any>
   ctx.payload._projectState = projectState as unknown
 }
 
@@ -557,7 +557,7 @@ async function prepareDispatchGroups(
   return result
 }
 
-function resolveLifecycleRequestId(payload: Record<string, unknown>): string {
+function resolveLifecycleRequestId(payload: Record<string, any>): string {
   return (
     (payload.request_id as string | undefined) ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -565,7 +565,7 @@ function resolveLifecycleRequestId(payload: Record<string, unknown>): string {
 }
 
 function assertDispatchResponseMatchesWire(
-  response: Record<string, unknown>,
+  response: Record<string, any>,
   canonicalEvent: string,
   hookEventName: string
 ): void {
@@ -579,7 +579,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    const response: Record<string, unknown> = {}
+    const response: Record<string, any> = {}
     if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
@@ -591,7 +591,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
   if (filteredGroups.length === 0) {
-    const response: Record<string, unknown> = {}
+    const response: Record<string, any> = {}
     if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
       normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)

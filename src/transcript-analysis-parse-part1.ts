@@ -3,7 +3,7 @@ import type { ContentBlock, TranscriptEntry } from "./transcript-schemas.ts"
 import { toolResultBlockSchema, toolUseBlockSchema } from "./transcript-schemas.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
-function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }): string {
+function toolCallLabel(block: { name?: string; input?: Record<string, any> }): string {
   const name = block.name ?? "unknown"
   const input = block.input
   if (!input) return name
@@ -29,7 +29,7 @@ function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }
 function isToolUseSummaryBlock(block: unknown): block is {
   type: "tool_use"
   name: string
-  input?: Record<string, unknown>
+  input?: Record<string, any>
 } {
   const result = toolUseBlockSchema.safeParse(block)
   return result.success && typeof result.data.name === "string"
@@ -93,7 +93,7 @@ export function parseJsonlEntries(text: string): TranscriptEntry[] {
 
 /**
  * Schema for Codex message content parts (input_text, output_text).
- * Replaces manual `as Record<string, unknown>` casts with type-safe validation.
+ * Replaces manual `as Record<string, any>` casts with type-safe validation.
  */
 const codexContentPartSchema = z.looseObject({
   type: z.string(),
@@ -112,8 +112,8 @@ function extractCodexMessageText(content: unknown, textType: "input_text" | "out
   return texts.join("\n").trim()
 }
 
-function parseCodexToolInput(raw: unknown): Record<string, unknown> {
-  const normalize = (value: Record<string, unknown>): Record<string, unknown> => {
+function parseCodexToolInput(raw: unknown): Record<string, any> {
+  const normalize = (value: Record<string, any>): Record<string, any> => {
     if (typeof value.command !== "string" && typeof value.cmd === "string") {
       return { ...value, command: value.cmd }
     }
@@ -121,11 +121,11 @@ function parseCodexToolInput(raw: unknown): Record<string, unknown> {
   }
 
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return normalize(raw as Record<string, unknown>)
+    return normalize(raw as Record<string, any>)
   }
   if (typeof raw !== "string") return {}
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const parsed = JSON.parse(raw) as Record<string, any>
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return normalize(parsed)
     }

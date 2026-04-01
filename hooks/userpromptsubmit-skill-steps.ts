@@ -64,7 +64,7 @@ export async function evaluateUserpromptsubmitSkillSteps(input: unknown): Promis
   return {}
 }
 
-const userpromptsubmitSkillSteps: SwizHook<Record<string, unknown>> = {
+const userpromptsubmitSkillSteps: SwizHook<Record<string, any>> = {
   name: "userpromptsubmit-skill-steps",
   event: "userPromptSubmit",
   timeout: 10,

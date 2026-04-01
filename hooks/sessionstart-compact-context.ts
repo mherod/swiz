@@ -243,7 +243,7 @@ export async function evaluateSessionstartCompactContext(input: unknown): Promis
   return buildContextHookOutput("SessionStart", ctx)
 }
 
-const sessionstartCompactContext: SwizHook<Record<string, unknown>> = {
+const sessionstartCompactContext: SwizHook<Record<string, any>> = {
   name: "sessionstart-compact-context",
   event: "sessionStart",
   matcher: "compact",

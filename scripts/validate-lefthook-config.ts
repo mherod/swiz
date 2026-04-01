@@ -15,17 +15,17 @@ if (!existsSync(CONFIG_PATH)) {
 
 // Parse YAML — use the project's yaml dependency
 const { parse } = await import("yaml")
-const config = parse(await Bun.file(CONFIG_PATH).text()) as Record<string, unknown>
+const config = parse(await Bun.file(CONFIG_PATH).text()) as Record<string, any>
 
 // Extract `run` values from all hook groups → commands
 function extractRunCommands(
-  obj: Record<string, unknown>
+  obj: Record<string, any>
 ): { hook: string; name: string; run: string }[] {
   const results: { hook: string; name: string; run: string }[] = []
   for (const [hookName, hookValue] of Object.entries(obj)) {
     if (!hookValue || typeof hookValue !== "object") continue
-    const hookObj = hookValue as Record<string, unknown>
-    const commands = hookObj.commands as Record<string, Record<string, unknown>> | undefined
+    const hookObj = hookValue as Record<string, any>
+    const commands = hookObj.commands as Record<string, Record<string, any>> | undefined
     if (!commands) continue
     for (const [cmdName, cmdValue] of Object.entries(commands)) {
       if (cmdValue?.run && typeof cmdValue.run === "string") {

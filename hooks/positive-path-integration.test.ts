@@ -18,7 +18,7 @@ const { create: createTempDir } = useTempDir("swiz-pospath-")
 
 async function runHook(
   script: string,
-  stdinPayload: Record<string, unknown>,
+  stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
@@ -45,7 +45,7 @@ async function runHook(
   const stderr = await new Response(proc.stderr).text()
   await proc.exited
 
-  let json: Record<string, unknown> | null = null
+  let json: Record<string, any> | null = null
   try {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
@@ -104,7 +104,7 @@ describe("pretooluse-eslint-config-strength: positive paths", () => {
     })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
     expect(hso?.permissionDecision).toBe("allow")
   })
@@ -120,7 +120,7 @@ describe("pretooluse-eslint-config-strength: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -135,7 +135,7 @@ describe("pretooluse-eslint-config-strength: positive paths", () => {
     })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
     expect(hso?.permissionDecision).toBe("deny")
     expect(typeof hso?.permissionDecisionReason).toBe("string")
@@ -158,7 +158,7 @@ describe("pretooluse-json-validation: positive paths", () => {
       tool_input: { file_path: settingsPath },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = r.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -175,7 +175,7 @@ describe("pretooluse-json-validation: positive paths", () => {
     })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
     expect(hso?.permissionDecision).toBe("deny")
   })
@@ -194,7 +194,7 @@ describe("pretooluse-no-as-any: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
     expect(hso?.permissionDecision).toBe("allow")
   })
@@ -209,7 +209,7 @@ describe("pretooluse-no-as-any: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -223,7 +223,7 @@ describe("pretooluse-no-as-any: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     expect(hso?.permissionDecisionReason).toContain("Type safety")
   })
@@ -241,7 +241,7 @@ describe("pretooluse-no-direct-deps: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = r.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 
@@ -254,7 +254,7 @@ describe("pretooluse-no-direct-deps: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     expect(hso?.permissionDecisionReason).toContain("package manager")
   })
@@ -269,7 +269,7 @@ describe("pretooluse-no-task-delegation: positive paths", () => {
       tool_input: { prompt: "Use TodoWrite to plan the upcoming work" },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     expect(hso?.permissionDecisionReason).toContain("NEVER delegate")
   })
@@ -280,7 +280,7 @@ describe("pretooluse-no-task-delegation: positive paths", () => {
       tool_input: { prompt: "Mark all tasks complete with TaskUpdate" },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
   })
 
@@ -303,7 +303,7 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
       tool_input: { subject: "Fix authentication and update deploy pipeline" },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
     expect(hso?.permissionDecision).toBe("deny")
     expect(typeof hso?.permissionDecisionReason).toBe("string")
@@ -318,7 +318,7 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
       tool_input: { subject: "Fix #12 and #34" },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     const reason = hso?.permissionDecisionReason as string
     expect(reason).toContain("#12")
@@ -331,7 +331,7 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
       tool_input: { subject: "Implement user authentication flow" },
     })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    const hso = r.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("allow")
   })
 })
@@ -348,7 +348,7 @@ describe("posttooluse-git-context: status injection", () => {
     const r = await runHook(HOOK, { cwd: repo })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PostToolUse")
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("[git] branch:")
@@ -361,7 +361,7 @@ describe("posttooluse-git-context: status injection", () => {
     await writeFile(join(repo, "file2.txt"), "b")
     const r = await runHook(HOOK, { cwd: repo })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("uncommitted files: 2")
   })
@@ -369,7 +369,7 @@ describe("posttooluse-git-context: status injection", () => {
   test("reports zero uncommitted for clean repo", async () => {
     const repo = await createGitRepo()
     const r = await runHook(HOOK, { cwd: repo })
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("uncommitted files: 0")
   })
@@ -415,7 +415,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PostToolUse")
     expect(hso?.additionalContext).toContain("TaskCreate required")
   })
@@ -426,7 +426,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     const transcript = await createTranscript(tmp, ["Read", "Glob", "Read", "Bash"])
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("1 tool call(s)")
     expect(ctx).toContain("blocked")
@@ -441,7 +441,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
       { CODEX_THREAD_ID: "test-codex" }
     )
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("update_plan required")
   })
@@ -462,7 +462,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     const transcript = await createTranscript(tmp, tools)
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("Task update required")
   })
@@ -477,7 +477,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
       { CODEX_THREAD_ID: "test-codex" }
     )
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("Task update required")
   })
@@ -604,7 +604,7 @@ describe("sessionstart-compact-context: positive paths", () => {
     const r = await runHook(HOOK, { matcher: "compact", cwd: process.cwd() })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("SessionStart")
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("rg instead of grep")
@@ -632,7 +632,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).toContain("Implement feature A")
     expect(ctx).toContain("Write tests for A")
     expect(ctx).toContain("2 incomplete task(s)")
@@ -658,7 +658,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).not.toContain("Already done work")
     expect(ctx).toContain("Still pending work")
     expect(ctx).toContain("1 incomplete task(s)")
@@ -684,7 +684,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).not.toContain("Finished task X")
     expect(ctx).not.toContain("Finished task Y")
     expect(ctx).not.toContain("incomplete task(s)")
@@ -720,7 +720,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).not.toContain("Done: set up DB")
     expect(ctx).not.toContain("Done: write schema")
     expect(ctx).toContain("WIP: add migrations")
@@ -748,7 +748,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).toContain("5 incomplete task(s)")
     expect(ctx).toContain("Task one")
     expect(ctx).toContain("Task two")
@@ -791,7 +791,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).toContain("Post-compaction context")
     expect(ctx).toContain("Compaction context truncated to stay within budget.")
     expect(ctx.length).toBeLessThanOrEqual(2400)
@@ -827,7 +827,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).not.toContain("Prior completed work")
     expect(ctx).toContain("Prior incomplete work")
     expect(ctx).toContain("1 incomplete task(s)")
@@ -864,7 +864,7 @@ describe("sessionstart-compact-context: positive paths", () => {
       { HOME: home }
     )
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).not.toContain("All done A")
     expect(ctx).not.toContain("All done B")
     expect(ctx).not.toContain("Prior session")
@@ -882,7 +882,7 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     const r = await runHook(HOOK, { cwd: repo })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("SessionStart")
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("Git:")
@@ -893,7 +893,7 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     const r = await runHook(HOOK, { cwd: process.cwd() })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("SessionStart")
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("Git:")
@@ -928,7 +928,7 @@ describe("userpromptsubmit-task-advisor: positive paths", () => {
 
     const r = await runHook(HOOK, { cwd, session_id: currentSessionId }, { HOME: home })
     expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).toContain("5 incomplete task(s)")
     expect(ctx).toContain("TaskUpdate")
     expect(ctx).toContain(priorSessionId)
@@ -1334,7 +1334,7 @@ describe("userpromptsubmit-git-context: positive paths", () => {
     const r = await runHook(HOOK, { session_id: "test" })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
-    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("UserPromptSubmit")
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("[git] branch:")

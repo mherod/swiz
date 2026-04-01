@@ -16,7 +16,7 @@ import {
 
 export async function evaluatePosttoolusePrCreateRefine(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
-  const rec = input as Record<string, unknown>
+  const rec = input as Record<string, any>
 
   const toolName: string = (rec.tool_name as string) ?? ""
   const cwd: string = (rec.cwd as string) ?? process.cwd()
@@ -49,7 +49,7 @@ export async function evaluatePosttoolusePrCreateRefine(input: unknown): Promise
   return buildContextHookOutput("PostToolUse", advice)
 }
 
-const posttoolusePrCreateRefine: SwizHook<Record<string, unknown>> = {
+const posttoolusePrCreateRefine: SwizHook<Record<string, any>> = {
   name: "posttooluse-pr-create-refine",
   event: "postToolUse",
   matcher: "Bash",

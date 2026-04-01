@@ -70,5 +70,5 @@ const posttoolusePushCooldown: SwizHook<PostToolHookInput> = {
 export default posttoolusePushCooldown
 
 if (import.meta.main) {
-  await runSwizHookAsMain(posttoolusePushCooldown as SwizHook<Record<string, unknown>>)
+  await runSwizHookAsMain(posttoolusePushCooldown as SwizHook<Record<string, any>>)
 }

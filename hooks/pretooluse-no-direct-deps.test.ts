@@ -15,7 +15,7 @@ interface HookResult {
 }
 
 async function runHook(
-  stdinPayload: Record<string, unknown>,
+  stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)

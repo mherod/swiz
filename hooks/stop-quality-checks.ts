@@ -22,7 +22,7 @@ export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as c
 export const TYPECHECK_SCRIPTS = ["typecheck", "type-check", "tsc", "check:types"] as const
 
 export function findScript(
-  scripts: Record<string, unknown>,
+  scripts: Record<string, any>,
   candidates: readonly string[]
 ): string | null {
   for (const name of candidates) {
@@ -52,19 +52,19 @@ async function runScript(
 }
 
 async function resolveScripts(cwd: string): Promise<{
-  scripts: Record<string, unknown>
+  scripts: Record<string, any>
   lint: string | null
   typecheck: string | null
 } | null> {
   const pkgPath = join(cwd, "package.json")
   if (!(await Bun.file(pkgPath).exists())) return null
-  let pkg: Record<string, unknown>
+  let pkg: Record<string, any>
   try {
-    pkg = (await Bun.file(pkgPath).json()) as Record<string, unknown>
+    pkg = (await Bun.file(pkgPath).json()) as Record<string, any>
   } catch {
     return null
   }
-  const scripts = pkg.scripts as Record<string, unknown> | undefined
+  const scripts = pkg.scripts as Record<string, any> | undefined
   if (!scripts) return null
   const lint = findScript(scripts, LINT_SCRIPTS)
   const typecheck = findScript(scripts, TYPECHECK_SCRIPTS)
@@ -72,8 +72,8 @@ async function resolveScripts(cwd: string): Promise<{
   return { scripts, lint, typecheck }
 }
 
-export function isQualityChecksEnabled(raw: Record<string, unknown>): boolean {
-  const settings = raw._effectiveSettings as Record<string, unknown> | undefined
+export function isQualityChecksEnabled(raw: Record<string, any>): boolean {
+  const settings = raw._effectiveSettings as Record<string, any> | undefined
   return !!settings?.qualityChecksGate
 }
 
@@ -109,7 +109,7 @@ async function buildFeatureBranchSteps(
 
 interface QualityBlockContext {
   cwd: string
-  settings: Record<string, unknown>
+  settings: Record<string, any>
 }
 
 async function buildQualityBlockReason(
@@ -172,7 +172,7 @@ async function collectFailures(
 }
 
 export async function evaluateStopQualityChecks(input: StopHookInput): Promise<SwizHookOutput> {
-  const raw = input as Record<string, unknown>
+  const raw = input as Record<string, any>
   if (!isQualityChecksEnabled(raw)) return {}
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
@@ -182,7 +182,7 @@ export async function evaluateStopQualityChecks(input: StopHookInput): Promise<S
   const failures = await collectFailures(resolved, cwd)
   if (failures.length === 0) return {}
 
-  const settings = (raw._effectiveSettings as Record<string, unknown>) ?? {}
+  const settings = (raw._effectiveSettings as Record<string, any>) ?? {}
   return blockStopObj(await buildQualityBlockReason(failures, { cwd, settings }))
 }
 

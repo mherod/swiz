@@ -41,7 +41,7 @@ async function writeOutputFile(cwd: string, taskId: string, content: string): Pr
   return filePath
 }
 
-async function runHook(stdinPayload: Record<string, unknown>): Promise<HookResult> {
+async function runHook(stdinPayload: Record<string, any>): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
 
   const proc = Bun.spawn(["bun", "hooks/posttooluse-task-output.ts"], {

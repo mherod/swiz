@@ -31,7 +31,7 @@ const pretoolusWorkflowPermissionsGate: SwizHook = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as Record<string, unknown>
+    const input = rawInput as Record<string, any>
     if (!isFileEditTool(String(input.tool_name ?? ""))) return {}
 
     const toolInput = input.tool_input as Record<string, string | undefined> | undefined

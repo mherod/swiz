@@ -5,7 +5,7 @@
 
 import type { GitStatusV2 } from "./git-utils.ts"
 
-function numField(s: Record<string, unknown>, key: string): number {
+function numField(s: Record<string, any>, key: string): number {
   const v = s[key]
   return typeof v === "number" ? v : 0
 }
@@ -14,7 +14,7 @@ function numField(s: Record<string, unknown>, key: string): number {
  * Map a daemon `/git/state` response `status` object to {@link GitStatusV2}.
  * Returns null when required fields are missing.
  */
-export function parseDaemonGitStateRecord(s: Record<string, unknown>): GitStatusV2 | null {
+export function parseDaemonGitStateRecord(s: Record<string, any>): GitStatusV2 | null {
   if (typeof s.branch !== "string") return null
   const staged = numField(s, "staged")
   const unstaged = numField(s, "unstaged")
@@ -64,7 +64,7 @@ export async function fetchGitStatusFromDaemon(
       signal,
     })
     if (!res.ok) return null
-    const data = (await res.json()) as { status?: Record<string, unknown> } | null
+    const data = (await res.json()) as { status?: Record<string, any> } | null
     return data?.status ? parseDaemonGitStateRecord(data.status) : null
   } catch {
     return null

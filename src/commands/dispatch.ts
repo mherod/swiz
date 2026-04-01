@@ -66,7 +66,7 @@ async function tryDaemonDispatch(
   canonicalEvent: string,
   hookEventName: string,
   payloadStr: string
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, any> | null> {
   if (process.env.SWIZ_NO_DAEMON === "1") {
     debugLog("daemon dispatch: skipped (SWIZ_NO_DAEMON=1)")
     return null
@@ -93,7 +93,7 @@ async function tryDaemonDispatch(
     const raw: unknown = await resp.json()
     const json =
       raw !== null && typeof raw === "object" && !Array.isArray(raw)
-        ? (raw as Record<string, unknown>)
+        ? (raw as Record<string, any>)
         : {}
     debugLog(`daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
     return json
@@ -154,7 +154,7 @@ async function readStdinPayloadWithTimeout(
   }
 }
 
-function getHookContext(canonicalEvent: string, payload: Record<string, unknown>): HookContext {
+function getHookContext(canonicalEvent: string, payload: Record<string, any>): HookContext {
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
   const trigger =
     canonicalEvent === "sessionStart"

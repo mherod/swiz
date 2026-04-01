@@ -80,7 +80,7 @@ interface RunOptions {
   /** full open issue list returned by the mock gh */
   issues?: object[]
   /** swiz settings to inject via ~/.swiz/settings.json */
-  swizSettings?: Record<string, unknown>
+  swizSettings?: Record<string, any>
 }
 
 /**

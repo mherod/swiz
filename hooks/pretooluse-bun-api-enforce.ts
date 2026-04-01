@@ -105,7 +105,7 @@ const pretooluseBunApiEnforce: SwizToolHook = {
   cooldownSeconds: 30,
 
   async run(rawInput) {
-    const parsed = parseBunEnforcementInput(rawInput as Record<string, unknown>)
+    const parsed = parseBunEnforcementInput(rawInput as Record<string, any>)
     if (!parsed) return preToolUseAllow("")
 
     const projectedContent = await computeProjectedContent(

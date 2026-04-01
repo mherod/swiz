@@ -17,8 +17,8 @@ export interface RestFallbackMapping {
   normalize?: (raw: unknown) => unknown
 }
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+export function asRecord(value: unknown): Record<string, any> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, any>) : null
 }
 
 function getGhFlagValue(args: string[], flag: string): string | null {
@@ -97,7 +97,7 @@ function normalizeRestIssues(raw: unknown): Array<{
   return raw
     .map((entry) => asRecord(entry))
     .filter(
-      (issue): issue is Record<string, unknown> => issue !== null && !("pull_request" in issue)
+      (issue): issue is Record<string, any> => issue !== null && !("pull_request" in issue)
     )
     .map((issue) => {
       const number = typeof issue.number === "number" ? issue.number : null
@@ -137,7 +137,7 @@ function normalizeMergeable(value: unknown): string {
   return "UNKNOWN"
 }
 
-function extractRequiredPRFields(pr: Record<string, unknown>): {
+function extractRequiredPRFields(pr: Record<string, any>): {
   number: number | null
   title: string | null
   url: string | null
@@ -153,7 +153,7 @@ function extractRequiredPRFields(pr: Record<string, unknown>): {
   }
 }
 
-function extractOptionalPRFields(pr: Record<string, unknown>): {
+function extractOptionalPRFields(pr: Record<string, any>): {
   state: string
   headRefName: string | null
 } {
@@ -163,7 +163,7 @@ function extractOptionalPRFields(pr: Record<string, unknown>): {
   return { state, headRefName }
 }
 
-function validatePullRequestFields(pr: Record<string, unknown>): {
+function validatePullRequestFields(pr: Record<string, any>): {
   number: number
   title: string
   state: string
@@ -197,7 +197,7 @@ function validatePullRequestFields(pr: Record<string, unknown>): {
   }
 }
 
-function normalizePullRequest(pr: Record<string, unknown>) {
+function normalizePullRequest(pr: Record<string, any>) {
   const fields = validatePullRequestFields(pr)
   if (!fields) return null
 
@@ -232,7 +232,7 @@ function normalizeRestPullRequests(raw: unknown): Array<{
   if (!Array.isArray(raw)) return []
   return raw
     .map((entry) => asRecord(entry))
-    .filter((pr): pr is Record<string, unknown> => pr !== null)
+    .filter((pr): pr is Record<string, any> => pr !== null)
     .map((pr) => normalizePullRequest(pr))
     .filter(
       (
@@ -504,7 +504,7 @@ function buildCreateMutationArgs(
   repo: string
 ): { args: string[]; stdin: Response } | null {
   if (!mutation.title) return null
-  const payload: Record<string, unknown> = { title: mutation.title }
+  const payload: Record<string, any> = { title: mutation.title }
   if (mutation.body) payload.body = mutation.body
   if (mutation.labels?.length) payload.labels = mutation.labels
   return {

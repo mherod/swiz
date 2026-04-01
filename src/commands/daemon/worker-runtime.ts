@@ -5,7 +5,7 @@ export interface NormalizedDispatchPayload {
   sessionId: string | null
   transcriptPath: string | null
   toolName: string | null
-  toolInput?: Record<string, unknown>
+  toolInput?: Record<string, any>
 }
 
 export interface DispatchPayloadWorkerRequest {
@@ -32,9 +32,9 @@ interface WorkerTransport {
 }
 
 function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPayload | null {
-  let parsed: Record<string, unknown>
+  let parsed: Record<string, any>
   try {
-    parsed = JSON.parse(payloadStr) as Record<string, unknown>
+    parsed = JSON.parse(payloadStr) as Record<string, any>
   } catch {
     return null
   }
@@ -48,9 +48,9 @@ function parseDispatchPayloadInThread(payloadStr: string): NormalizedDispatchPay
         : null
   const toolInput =
     parsed.tool_input && typeof parsed.tool_input === "object"
-      ? (parsed.tool_input as Record<string, unknown>)
+      ? (parsed.tool_input as Record<string, any>)
       : parsed.toolInput && typeof parsed.toolInput === "object"
-        ? (parsed.toolInput as Record<string, unknown>)
+        ? (parsed.toolInput as Record<string, any>)
         : undefined
 
   return {

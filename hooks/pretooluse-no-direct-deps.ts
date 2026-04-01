@@ -28,7 +28,7 @@ const DEP_FIELDS = [
   "optionalDependencies",
 ] as const
 
-function depsSnapshot(parsed: Record<string, unknown>): Record<string, Record<string, string>> {
+function depsSnapshot(parsed: Record<string, any>): Record<string, Record<string, string>> {
   const snap: Record<string, Record<string, string>> = {}
   for (const field of DEP_FIELDS) {
     const block = parsed[field]
@@ -58,13 +58,13 @@ function depsChanged(
   return false
 }
 
-function hasDependencyBlocks(parsed: Record<string, unknown>): boolean {
+function hasDependencyBlocks(parsed: Record<string, any>): boolean {
   return DEP_FIELDS.some(
     (f) => parsed[f] && typeof parsed[f] === "object" && Object.keys(parsed[f] as object).length > 0
   )
 }
 
-function parseContentSafely(content: string): Record<string, unknown> | null {
+function parseContentSafely(content: string): Record<string, any> | null {
   try {
     return JSON.parse(content)
   } catch {
@@ -86,7 +86,7 @@ const pretoolUseNoDirectDeps: SwizToolHook = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as Record<string, unknown>
+    const input = rawInput as Record<string, any>
     const toolName: string = (input.tool_name as string) ?? ""
     if (!isFileEditTool(toolName)) return preToolUseAllow("")
 

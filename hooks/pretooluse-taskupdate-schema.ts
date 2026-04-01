@@ -16,8 +16,8 @@ const pretoolusTaskupdateSchema: SwizHook = {
   timeout: 5,
 
   run(rawInput) {
-    const input = rawInput as Record<string, unknown>
-    const toolInput: Record<string, unknown> = (input.tool_input as Record<string, unknown>) ?? {}
+    const input = rawInput as Record<string, any>
+    const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
     const unsupported = Object.keys(toolInput).filter((k) => !ALLOWED_FIELDS.has(k))
     if (unsupported.length > 0) {

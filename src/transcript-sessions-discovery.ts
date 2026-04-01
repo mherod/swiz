@@ -55,7 +55,7 @@ async function readProjectRoot(path: string): Promise<string | null> {
 
 async function readGeminiSessionId(sessionPath: string): Promise<string | null> {
   try {
-    const parsed = (await Bun.file(sessionPath).json()) as Record<string, unknown>
+    const parsed = (await Bun.file(sessionPath).json()) as Record<string, any>
     const sessionId = parsed.sessionId
     if (typeof sessionId === "string" && sessionId.trim()) {
       return sessionId
@@ -166,7 +166,7 @@ function parseCodexIdFromFilename(name: string): string {
 
 const CODEX_META_TYPES = new Set(["session_meta", "turn_context"])
 
-function extractCodexMetaPayload(line: string): Record<string, unknown> | null {
+function extractCodexMetaPayload(line: string): Record<string, any> | null {
   const trimmed = line.trim()
   if (!trimmed) return null
   let parsed: unknown
@@ -176,14 +176,14 @@ function extractCodexMetaPayload(line: string): Record<string, unknown> | null {
     return null
   }
   if (!parsed || typeof parsed !== "object") return null
-  const record = parsed as Record<string, unknown>
+  const record = parsed as Record<string, any>
   if (!CODEX_META_TYPES.has(record.type as string)) return null
   const payload = record.payload
   if (!payload || typeof payload !== "object") return null
-  return payload as Record<string, unknown>
+  return payload as Record<string, any>
 }
 
-function extractStringMeta(payload: Record<string, unknown>, key: string): string | null {
+function extractStringMeta(payload: Record<string, any>, key: string): string | null {
   const val = payload[key]
   return typeof val === "string" && val.trim() ? (val as string) : null
 }

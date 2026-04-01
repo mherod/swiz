@@ -20,7 +20,7 @@ const { create: createTempDir } = useTempDir("swiz-negpath-")
  */
 async function runHook(
   script: string,
-  stdinPayload: Record<string, unknown>,
+  stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)

@@ -232,7 +232,7 @@ export function allowPreToolUseWithContext(reason: string, additionalContext: st
 }
 
 function allowPreToolUseWithUpdatedInputObj(
-  updatedInput: Record<string, unknown>,
+  updatedInput: Record<string, any>,
   reason?: string
 ): HookOutput {
   return hookOutputSchema.parse({
@@ -244,7 +244,7 @@ function allowPreToolUseWithUpdatedInputObj(
 
 /** Emit a PreToolUse allow with modified tool input and exit. Works across all agents. */
 export function allowPreToolUseWithUpdatedInput(
-  updatedInput: Record<string, unknown>,
+  updatedInput: Record<string, any>,
   reason?: string
 ): never {
   exitWithHookObject(allowPreToolUseWithUpdatedInputObj(updatedInput, reason))
@@ -890,7 +890,7 @@ export function forkRemoteRef(
 //   cwd?: string
 //   session_id?: string
 //   tool_name?: string
-//   tool_input?: Record<string, unknown>
+//   tool_input?: Record<string, any>
 //   transcript_path?: string
 // }
 
@@ -939,7 +939,7 @@ export interface TaskToolInput extends ToolHookInput {
     subject?: string
     description?: string
     activeForm?: string
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, any>
     [key: string]: unknown
   }
 }

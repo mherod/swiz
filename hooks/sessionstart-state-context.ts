@@ -34,7 +34,7 @@ export async function evaluateSessionstartStateContext(input: unknown): Promise<
   return buildContextHookOutput("SessionStart", parts.join(" "))
 }
 
-const sessionstartStateContext: SwizHook<Record<string, unknown>> = {
+const sessionstartStateContext: SwizHook<Record<string, any>> = {
   name: "sessionstart-state-context",
   event: "sessionStart",
   matcher: "startup",

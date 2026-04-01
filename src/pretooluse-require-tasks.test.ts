@@ -10,11 +10,11 @@ const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-require-tasks
 interface HookResult {
   stdout: string
   exitCode: number | null
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 }
 
 async function runHook(
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   env?: Record<string, string>
 ): Promise<HookResult> {
   const proc = Bun.spawn(["bun", HOOK_PATH], {
@@ -84,8 +84,8 @@ describe("pretooluse-require-tasks hook", () => {
       // Hook should deny and require explicit task creation
       expect(result.exitCode).toBe(0)
       expect(result.parsed).not.toBeNull()
-      const reason = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
-        | Record<string, unknown>
+      const reason = (result.parsed as Record<string, any>)?.hookSpecificOutput as
+        | Record<string, any>
         | undefined
       expect(reason?.permissionDecision).toBe("deny")
       expect(String(reason?.permissionDecisionReason ?? "")).toContain("no incomplete tasks")
@@ -132,8 +132,8 @@ describe("pretooluse-require-tasks hook", () => {
       )
       expect(result.exitCode).toBe(0)
       expect(result.parsed).not.toBeNull()
-      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
-        | Record<string, unknown>
+      const hookOutput = (result.parsed as Record<string, any>)?.hookSpecificOutput as
+        | Record<string, any>
         | undefined
       expect(hookOutput?.permissionDecision).toBe("deny")
       // Hook now blocks on missing pending tasks before checking cap
@@ -175,8 +175,8 @@ describe("pretooluse-require-tasks hook", () => {
       // Hook blocks when no pending tasks exist, even at cap boundary
       expect(result.exitCode).toBe(0)
       expect(result.parsed).not.toBeNull()
-      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
-        | Record<string, unknown>
+      const hookOutput = (result.parsed as Record<string, any>)?.hookSpecificOutput as
+        | Record<string, any>
         | undefined
       expect(hookOutput?.permissionDecision).toBe("deny")
     } finally {
@@ -201,13 +201,13 @@ describe("pretooluse-require-tasks hook", () => {
     // On malformed JSON, Bun.stdin.json() throws — hook must deny, not allow
     // (Some JSON parse errors may result in empty tool_name which exits 0 — acceptable fallback)
     // The important thing is that the hook does NOT produce an "allow" decision
-    let parsed: Record<string, unknown> | null = null
+    let parsed: Record<string, any> | null = null
     try {
       parsed = JSON.parse(stdout.trim())
     } catch {}
     if (parsed !== null) {
-      const hookOutput = (parsed as Record<string, unknown>)?.hookSpecificOutput as
-        | Record<string, unknown>
+      const hookOutput = (parsed as Record<string, any>)?.hookSpecificOutput as
+        | Record<string, any>
         | undefined
       expect(hookOutput?.permissionDecision).not.toBe("allow")
     }

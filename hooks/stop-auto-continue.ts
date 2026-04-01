@@ -598,7 +598,7 @@ async function resolveSessionContext(
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function validateMainInputsAndSettings(
-  hookRaw: Record<string, unknown>,
+  hookRaw: Record<string, any>,
   cwd: string
 ): Promise<{
   input: StopHookInput
@@ -722,7 +722,7 @@ async function validateResponseAndChecks(
   }
 }
 
-async function runStopAutoContinueMain(hookRaw: Record<string, unknown>): Promise<void> {
+async function runStopAutoContinueMain(hookRaw: Record<string, any>): Promise<void> {
   startSuggestionLogCleanup() // Fire-and-forget cleanup
 
   const { input, cwd } = parseStopInput(hookRaw)
@@ -755,7 +755,7 @@ async function runStopAutoContinueMain(hookRaw: Record<string, unknown>): Promis
 
 export async function evaluateStopAutoContinue(input: StopHookInput): Promise<SwizHookOutput> {
   try {
-    await runStopAutoContinueMain(input as unknown as Record<string, unknown>)
+    await runStopAutoContinueMain(input as unknown as Record<string, any>)
     return {}
   } catch (err) {
     if (err instanceof AutoContinueExit) return err.output

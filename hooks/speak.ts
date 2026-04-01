@@ -89,7 +89,7 @@ const linuxEngines = [
 // ── Diagnose mode ──────────────────────────────────────────────────
 
 if (diagnose) {
-  const diag: Record<string, unknown> = {
+  const diag: Record<string, any> = {
     platform,
     arch: process.arch,
     bun: Bun.version,
@@ -108,7 +108,7 @@ if (diagnose) {
     diag.engines = []
     for (const engine of linuxEngines) {
       const found = await binaryExists(engine.name)
-      ;(diag.engines as Array<Record<string, unknown>>).push({
+      ;(diag.engines as Array<Record<string, any>>).push({
         name: engine.name,
         found,
         install: engine.install,

@@ -75,7 +75,7 @@ async function handleSwizHookStdinParseError(
 
 async function parseSwizHookStdin(
   options?: RunSwizHookAsMainOptions
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   try {
     const parsed = (await Bun.stdin.json()) as unknown
     if (!isJsonLikeRecord(parsed)) process.exit(0)
@@ -86,7 +86,7 @@ async function parseSwizHookStdin(
 }
 
 /** Subprocess path: inject `_effectiveSettings` when the dispatcher did not. */
-async function injectEffectiveSettingsIfMissing(input: Record<string, unknown>): Promise<void> {
+async function injectEffectiveSettingsIfMissing(input: Record<string, any>): Promise<void> {
   if (input._effectiveSettings) return
   try {
     const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
@@ -97,7 +97,7 @@ async function injectEffectiveSettingsIfMissing(input: Record<string, unknown>):
     input._effectiveSettings = getEffectiveSwizSettings(
       rawSettings,
       sessionId
-    ) as unknown as Record<string, unknown>
+    ) as unknown as Record<string, any>
   } catch {
     // Settings injection is best-effort; hooks that need settings will
     // check for their presence and exit early if missing.
@@ -123,7 +123,7 @@ async function emitHookOutputIfNonEmpty(output: SwizHookOutput): Promise<void> {
  * ```
  */
 export async function runSwizHookAsMain(
-  hook: SwizHook<Record<string, unknown>>,
+  hook: SwizHook<Record<string, any>>,
   options?: RunSwizHookAsMainOptions
 ): Promise<void> {
   const input = await parseSwizHookStdin(options)

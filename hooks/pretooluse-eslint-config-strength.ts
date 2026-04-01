@@ -53,8 +53,8 @@ const pretoolusEslintConfigStrength: SwizHook = {
   timeout: 5,
 
   run(rawInput) {
-    const input = rawInput as Record<string, unknown>
-    const toolInput = input.tool_input as Record<string, unknown> | undefined
+    const input = rawInput as Record<string, any>
+    const toolInput = input.tool_input as Record<string, any> | undefined
     const filePath = String(toolInput?.file_path ?? "").normalize("NFKC")
     if (!isEslintConfigFile(filePath)) return {}
 

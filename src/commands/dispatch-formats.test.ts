@@ -9,7 +9,7 @@ interface DispatchResult {
   stdout: string
   stderr: string
   exitCode: number | null
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 }
 
 const _tmp = useTempDir()
@@ -44,7 +44,7 @@ async function dispatch({
 }: {
   event: string
   hookEventName: string
-  payload: Record<string, unknown>
+  payload: Record<string, any>
   homeDir: string
 }): Promise<DispatchResult> {
   const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
@@ -70,10 +70,10 @@ async function dispatch({
   const stderr = await new Response(proc.stderr).text()
   await proc.exited
 
-  let parsed: Record<string, unknown> | null = null
+  let parsed: Record<string, any> | null = null
   if (stdout) {
     try {
-      parsed = JSON.parse(stdout) as Record<string, unknown>
+      parsed = JSON.parse(stdout) as Record<string, any>
     } catch {
       parsed = null
     }
@@ -131,7 +131,7 @@ describe("dispatch output formats", () => {
     expect(result.exitCode).toBe(0)
     expect(result.parsed).not.toBeNull()
 
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown>
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any>
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("deny")
     expect(typeof hso.permissionDecisionReason).toBe("string")
@@ -159,7 +159,7 @@ describe("dispatch output formats", () => {
     expect(result.exitCode).toBe(0)
     expect(result.parsed).not.toBeNull()
 
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown>
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any>
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("allow")
     expect(typeof hso.permissionDecisionReason).toBe("string")
@@ -221,7 +221,7 @@ describe("dispatch output formats", () => {
     expect(result.exitCode).toBe(0)
     expect(result.parsed).not.toBeNull()
 
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown>
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any>
     expect(hso.hookEventName).toBe("SessionStart")
     expect(typeof hso.additionalContext).toBe("string")
     expect(hso.additionalContext as string).toContain("Post-compaction context")
@@ -245,7 +245,7 @@ describe("dispatch output formats", () => {
     expect(result.exitCode).toBe(0)
     expect(result.parsed).not.toBeNull()
 
-    const hso = result.parsed!.hookSpecificOutput as Record<string, unknown>
+    const hso = result.parsed!.hookSpecificOutput as Record<string, any>
     expect(hso.hookEventName).toBe("UserPromptSubmit")
     expect(typeof hso.additionalContext).toBe("string")
     expect((hso.additionalContext as string).length).toBeGreaterThan(0)

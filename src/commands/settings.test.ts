@@ -227,7 +227,7 @@ describe("swiz settings", () => {
         const result = await runSwiz(["settings", ...args], home)
         expect(result.exitCode).toBe(0)
         const text = await readFile(join(home, ".swiz", "settings.json"), "utf-8")
-        const json = JSON.parse(text) as Record<string, unknown>
+        const json = JSON.parse(text) as Record<string, any>
         expect(json[key]).toBe(expected)
       })
     )
@@ -404,7 +404,7 @@ describe("swiz settings", () => {
         expect(result.exitCode).toBe(0)
         if (stdout) expect(result.stdout).toContain(stdout)
         const text = await readFile(join(home, ".swiz", "settings.json"), "utf-8")
-        const json = JSON.parse(text) as Record<string, unknown>
+        const json = JSON.parse(text) as Record<string, any>
         expect(json[key]).toBe(expected)
       })
     )
@@ -1416,7 +1416,7 @@ describe("collaborationMode settings", () => {
 // instead of the looser normalizeSettings() field-by-field checks.
 
 describe("readSwizSettings schema constraint enforcement", () => {
-  async function writeSettings(home: string, settings: Record<string, unknown>): Promise<void> {
+  async function writeSettings(home: string, settings: Record<string, any>): Promise<void> {
     const configDir = join(home, ".swiz")
     await mkdir(configDir, { recursive: true })
     await writeFile(join(configDir, "settings.json"), JSON.stringify(settings))

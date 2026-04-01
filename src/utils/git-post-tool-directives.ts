@@ -46,9 +46,9 @@ function valueDirective(key: string, value: unknown): string {
  * One line per relevant setting that is defined on `settings`.
  */
 export function buildGitRelevantSettingLines(
-  settings: EffectiveSwizSettings | Record<string, unknown>
+  settings: EffectiveSwizSettings | Record<string, any>
 ): string[] {
-  const rec = settings as Record<string, unknown>
+  const rec = settings as Record<string, any>
   const lines: string[] = []
   for (const key of GIT_RELEVANT_SETTING_KEYS) {
     const value = rec[key]

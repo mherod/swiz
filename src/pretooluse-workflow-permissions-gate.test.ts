@@ -8,10 +8,10 @@ const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-workflow-perm
 interface HookResult {
   stdout: string
   exitCode: number | null
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 }
 
-async function runHook(payload: Record<string, unknown>): Promise<HookResult> {
+async function runHook(payload: Record<string, any>): Promise<HookResult> {
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
     stdout: "pipe",
@@ -84,7 +84,7 @@ describe("pretooluse-workflow-permissions-gate", () => {
         cwd: tmpDir,
       })
       expect(result.exitCode).toBe(0)
-      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown> | undefined
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
       expect(hso?.permissionDecision).toBe("allow")
     } finally {
       await rm(tmpDir, { recursive: true, force: true })

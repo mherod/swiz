@@ -108,7 +108,7 @@ const VALID_AMBITION_MODES = new Set(["standard", "aggressive", "creative", "ref
 
 function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  const obj = value as Record<string, unknown>
+  const obj = value as Record<string, any>
   const session: SessionSwizSettings = {}
   if (typeof obj.autoContinue === "boolean") session.autoContinue = obj.autoContinue
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
@@ -123,7 +123,7 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
 
 function normalizeSettings(value: unknown): SwizSettings {
   if (!value || typeof value !== "object" || Array.isArray(value)) return cloneDefaults()
-  const obj = value as Record<string, unknown>
+  const obj = value as Record<string, any>
   const rawSessions = obj.sessions
   const sessions: Record<string, SessionSwizSettings> = {}
 
@@ -146,34 +146,34 @@ export function getProjectSettingsPath(cwd: string): string {
 
 /** Copy positive-number fields from obj into result. */
 function applyPositiveNumberFields(
-  obj: Record<string, unknown>,
+  obj: Record<string, any>,
   result: ProjectSwizSettings,
   keys: (keyof ProjectSwizSettings)[]
 ): void {
   for (const key of keys) {
     const val = obj[key]
     if (typeof val === "number" && val > 0) {
-      ;(result as Record<string, unknown>)[key] = val
+      ;(result as Record<string, any>)[key] = val
     }
   }
 }
 
 /** Copy boolean fields from obj into result. */
 function applyBooleanFields(
-  obj: Record<string, unknown>,
+  obj: Record<string, any>,
   result: ProjectSwizSettings,
   keys: (keyof ProjectSwizSettings)[]
 ): void {
   for (const key of keys) {
     if (typeof obj[key] === "boolean") {
-      ;(result as Record<string, unknown>)[key] = obj[key]
+      ;(result as Record<string, any>)[key] = obj[key]
     }
   }
 }
 
 /** Copy string-array fields from obj into result. */
 function applyStringArrayFields(
-  obj: Record<string, unknown>,
+  obj: Record<string, any>,
   result: ProjectSwizSettings,
   keys: (keyof ProjectSwizSettings)[]
 ): void {
@@ -182,7 +182,7 @@ function applyStringArrayFields(
       Array.isArray(obj[key]) &&
       (obj[key] as unknown[]).every((v: unknown) => typeof v === "string")
     ) {
-      ;(result as Record<string, unknown>)[key] = obj[key]
+      ;(result as Record<string, any>)[key] = obj[key]
     }
   }
 }
@@ -193,7 +193,7 @@ function parseDefaultBranch(value: unknown): string | undefined {
   return branch && !/\s/.test(branch) ? branch : undefined
 }
 
-function applySchemaFields(obj: Record<string, unknown>, result: ProjectSwizSettings): void {
+function applySchemaFields(obj: Record<string, any>, result: ProjectSwizSettings): void {
   const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
   if (ambitionMode.success) result.ambitionMode = ambitionMode.data
   const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)
@@ -202,7 +202,7 @@ function applySchemaFields(obj: Record<string, unknown>, result: ProjectSwizSett
   if (auditStrictness.success) result.auditStrictness = auditStrictness.data
 }
 
-function applyHooksAndCategories(obj: Record<string, unknown>, result: ProjectSwizSettings): void {
+function applyHooksAndCategories(obj: Record<string, any>, result: ProjectSwizSettings): void {
   if (Array.isArray(obj.hooks)) {
     const validated = normalizeProjectHooks(obj.hooks as unknown[])
     if (validated.length > 0) result.hooks = validated
@@ -213,7 +213,7 @@ function applyHooksAndCategories(obj: Record<string, unknown>, result: ProjectSw
 
 function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  const obj = value as Record<string, unknown>
+  const obj = value as Record<string, any>
   const result: ProjectSwizSettings = {}
 
   const profile = obj.profile
@@ -262,16 +262,16 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
   const groups: HookGroup[] = []
   for (const item of raw) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
-    const g = item as Record<string, unknown>
+    const g = item as Record<string, any>
     if (typeof g.event !== "string") continue
     if (!Array.isArray(g.hooks)) continue
     const hooks = (g.hooks as unknown[])
       .filter(
-        (h): h is Record<string, unknown> =>
+        (h): h is Record<string, any> =>
           !!h &&
           typeof h === "object" &&
           !Array.isArray(h) &&
-          typeof (h as Record<string, unknown>).file === "string"
+          typeof (h as Record<string, any>).file === "string"
       )
       .map((h): FileHookDef => {
         const def: FileHookDef = { file: h.file as string }
@@ -381,11 +381,11 @@ export async function writeProjectSettings(
 ): Promise<string> {
   const path = getProjectSettingsPath(cwd)
   await mkdir(dirname(path), { recursive: true })
-  let existing: Record<string, unknown> = {}
+  let existing: Record<string, any> = {}
   const file = Bun.file(path)
   if (await file.exists()) {
     try {
-      existing = (await file.json()) as Record<string, unknown>
+      existing = (await file.json()) as Record<string, any>
     } catch {
       // Ignore parse errors — overwrite with clean object
     }

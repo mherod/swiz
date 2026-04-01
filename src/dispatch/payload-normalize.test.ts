@@ -3,7 +3,7 @@ import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 
 describe("normalizeAgentHookPayload", () => {
   it("maps Cursor conversation_id and workspace_roots to session_id and cwd", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       conversation_id: "4ed177ce-8642-4533-a539-2746a66351bd",
       generation_id: "5b15e1e1-5a8a-4781-9e51-a1100e6f42ef",
       hook_event_name: "stop",
@@ -17,7 +17,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("does not overwrite existing session_id", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       session_id: "prior-session",
       cwd: "/prior/cwd",
       conversation_id: "cursor-id",
@@ -29,7 +29,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("keeps cwd when it lies under workspace_roots", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       cwd: "/repo/packages/foo",
       workspace_roots: ["/repo"],
     }
@@ -38,7 +38,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("clears global Cursor user-data cwd when workspace_roots is absent", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       cwd: "/Users/someone/.cursor",
     }
     normalizeAgentHookPayload(payload)
@@ -46,7 +46,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("maps Cursor beforeShellExecution shape to Bash + tool_input.command", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       conversation_id: "4ed177ce-8642-4533-a539-2746a66351bd",
       generation_id: "7324709e-7f5d-4e14-a8a2-08fe4c919273",
       model: "default",
@@ -70,7 +70,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("does not set Bash when tool_name is already present", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       tool_name: "mcp__x__y",
       command: "echo hi",
       workspace_roots: ["/proj"],
@@ -81,7 +81,7 @@ describe("normalizeAgentHookPayload", () => {
   })
 
   it("adds sandbox to tool_input when Cursor sends sandbox: true", () => {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, any> = {
       command: "npm test",
       cwd: "",
       workspace_roots: ["/repo"],

@@ -176,7 +176,7 @@ const autoApprove: CanUseTool = async (toolName, input, _options) => {
   return { behavior: "allow", updatedInput: input }
 }
 
-const TOOL_INPUT_FORMATTERS: Record<string, (input: Record<string, unknown>) => string> = {
+const TOOL_INPUT_FORMATTERS: Record<string, (input: Record<string, any>) => string> = {
   Bash: (input) => {
     const cmd = input.command as string | undefined
     return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
@@ -203,7 +203,7 @@ const TOOL_INPUT_FORMATTERS: Record<string, (input: Record<string, unknown>) => 
   },
 }
 
-function formatToolInput(toolName: string, input: Record<string, unknown>): string {
+function formatToolInput(toolName: string, input: Record<string, any>): string {
   return TOOL_INPUT_FORMATTERS[toolName]?.(input) ?? ""
 }
 

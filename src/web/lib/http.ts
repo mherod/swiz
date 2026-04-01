@@ -96,7 +96,7 @@ export async function fetchJson<T>(url: string): Promise<T> {
   return requestJson<T>(url)
 }
 
-export async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
+export async function postJson<T>(url: string, body: Record<string, any>): Promise<T> {
   return requestJson<T>(url, {
     method: "POST",
     headers: { "content-type": "application/json" },

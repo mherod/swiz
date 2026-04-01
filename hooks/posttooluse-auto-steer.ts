@@ -34,7 +34,7 @@ import { detectTerminal } from "../src/utils/terminal-detection.ts"
 
 export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
-  const rec = input as Record<string, unknown>
+  const rec = input as Record<string, any>
 
   const sessionId = (rec.session_id as string) ?? ""
   if (!sessionId) return {}
@@ -89,7 +89,7 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
   return {}
 }
 
-const posttooluseAutoSteer: SwizHook<Record<string, unknown>> = {
+const posttooluseAutoSteer: SwizHook<Record<string, any>> = {
   name: "posttooluse-auto-steer",
   event: "postToolUse",
   timeout: 10,

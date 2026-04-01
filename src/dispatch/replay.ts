@@ -186,7 +186,7 @@ function formatTraceStatus(status: HookStatus): string {
 
 function extractBlockReason(output: string): string | null {
   try {
-    const parsed = JSON.parse(output) as Record<string, unknown>
+    const parsed = JSON.parse(output) as Record<string, any>
     const hso = getHookSpecificOutput(parsed)
     return (
       (parsed.reason as string | undefined) ??

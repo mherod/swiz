@@ -18,7 +18,7 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
   )
 }
 
-const userpromptsubmitGitContext: SwizHook<Record<string, unknown>> = {
+const userpromptsubmitGitContext: SwizHook<Record<string, any>> = {
   name: "userpromptsubmit-git-context",
   event: "userPromptSubmit",
   timeout: 5,

@@ -230,7 +230,7 @@ export function groupMatches(
 // ─── Hook execution ─────────────────────────────────────────────────────────
 
 export interface HookRunResult {
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
   execution: HookExecution
 }
 
@@ -468,7 +468,7 @@ function finalizeExecution(
   matcher: string | undefined,
   hook: HookDef,
   cwd: string,
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 ): HookExecution {
   if (matcher) execution.matcher = matcher
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
@@ -490,7 +490,7 @@ function finalizeExecution(
 export { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields }
 
 /** Write the final hook response to process.stdout. Exported for strategies. */
-export function writeResponse(response: Record<string, unknown>): void {
+export function writeResponse(response: Record<string, any>): void {
   const agent = stripInternalDispatchFields(response)
   process.stdout.write(`${JSON.stringify(agent)}\n`)
 }
@@ -502,7 +502,7 @@ export function writeResponse(response: Record<string, unknown>): void {
  * (the PreToolUse-specific pattern) and falls back to top-level `decision`
  * for hooks that use the generic deny/block format.
  */
-export function isDeny(resp: Record<string, unknown>): boolean {
+export function isDeny(resp: Record<string, any>): boolean {
   const hso = getHookSpecificOutput(resp)
   if (hso?.permissionDecision === "deny") return true
   if (resp.decision === "deny" || resp.decision === "block") return true
@@ -510,12 +510,12 @@ export function isDeny(resp: Record<string, unknown>): boolean {
   return hso?.decision === "deny" || hso?.decision === "block" || false
 }
 
-export function isAllowWithReason(resp: Record<string, unknown>): boolean {
+export function isAllowWithReason(resp: Record<string, any>): boolean {
   const hso = getHookSpecificOutput(resp)
   return hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string"
 }
 
-export function extractAllowReason(resp: Record<string, unknown>): string | null {
+export function extractAllowReason(resp: Record<string, any>): string | null {
   const hso = getHookSpecificOutput(resp)
   if (hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string") {
     return hso.permissionDecisionReason as string
@@ -528,7 +528,7 @@ export function extractAllowReason(resp: Record<string, unknown>): string | null
  * (the blocking-strategy pattern). Does not check `permissionDecision`
  * which is PreToolUse-specific.
  */
-export function isBlock(resp: Record<string, unknown>): boolean {
+export function isBlock(resp: Record<string, any>): boolean {
   if (resp.decision === "block" || resp.decision === "deny") return true
   if (resp.continue === false) return true
   const hso = getHookSpecificOutput(resp)
@@ -540,7 +540,7 @@ export function isBlock(resp: Record<string, unknown>): boolean {
  * Only `hookSpecificOutput.additionalContext` counts — top-level `systemMessage`
  * is for the merged dispatch envelope / UI preview, not per-hook aggregation.
  */
-export function extractContext(resp: Record<string, unknown>): string | null {
+export function extractContext(resp: Record<string, any>): string | null {
   const hso = getHookSpecificOutput(resp)
   const ctx = hso?.additionalContext
   return typeof ctx === "string" && ctx.trim() ? ctx.trim() : null
@@ -624,7 +624,7 @@ async function executeInlineHookWithErrorHandling(
   hook: SwizHook,
   payloadStr: string
 ): Promise<{
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
   status: HookStatus
   stderrSnippet: string
 }> {
@@ -636,25 +636,25 @@ async function executeInlineHookWithErrorHandling(
     }
     const output = await withInlineSwizHookRun(async () => hook.run(input))
     if (hasNonEmptyHookOutput(output)) {
-      const out = output as Record<string, unknown>
+      const out = output as Record<string, any>
       const outParsed = hookOutputSchema.safeParse(out)
       if (!outParsed.success) {
         log(`   ⚠ ${hook.name} [inline hook output failed hookOutputSchema]`)
         return { parsed: out, status: "invalid-schema", stderrSnippet: "" }
       }
-      return { parsed: outParsed.data as Record<string, unknown>, status: "ok", stderrSnippet: "" }
+      return { parsed: outParsed.data as Record<string, any>, status: "ok", stderrSnippet: "" }
     }
     return { parsed: null, status: "no-output", stderrSnippet: "" }
   } catch (err) {
     if (err instanceof SwizHookExit) {
-      const o = err.output as Record<string, unknown>
+      const o = err.output as Record<string, any>
       const op = hookOutputSchema.safeParse(o)
       if (!op.success) {
         log(`   ⚠ ${hook.name} [SwizHookExit output failed hookOutputSchema]`)
         return { parsed: o, status: "invalid-schema", stderrSnippet: "" }
       }
       return {
-        parsed: op.data as Record<string, unknown>,
+        parsed: op.data as Record<string, any>,
         status: "ok",
         stderrSnippet: "",
       }
@@ -698,7 +698,7 @@ export async function runEntry(
   signal?: AbortSignal
 ): Promise<{
   execution: HookExecution
-  parsed: Record<string, unknown> | null
+  parsed: Record<string, any> | null
 }> {
   const { hook, matcher } = entry
   const id = hookIdentifier(hook)

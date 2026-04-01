@@ -1837,7 +1837,7 @@ describe("transcript-utils.ts", () => {
         const result = textBlockSchema.safeParse({ type: "text", text: "hi", extra: "field" })
         expect(result.success).toBe(true)
         if (result.success) {
-          expect((result.data as Record<string, unknown>).extra).toBe("field")
+          expect((result.data as Record<string, any>).extra).toBe("field")
         }
       })
     })

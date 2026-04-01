@@ -69,7 +69,7 @@ async function heartbeat(lockFile: string): Promise<void> {
 export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
 
-  const record = input as Record<string, unknown>
+  const record = input as Record<string, any>
   const transcriptPath: string = (record.transcript_path as string) ?? ""
   const sessionId: string = (record.session_id as string) ?? ""
 
@@ -147,7 +147,7 @@ export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<
   return {}
 }
 
-const posttooluseSpeakNarrator: SwizHook<Record<string, unknown>> = {
+const posttooluseSpeakNarrator: SwizHook<Record<string, any>> = {
   name: "posttooluse-speak-narrator",
   event: "postToolUse",
   timeout: 30,

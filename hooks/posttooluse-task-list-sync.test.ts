@@ -24,7 +24,7 @@ function taskPath(id: string): string {
   )
 }
 
-async function readTask(id: string): Promise<Record<string, unknown>> {
+async function readTask(id: string): Promise<Record<string, any>> {
   return JSON.parse(await Bun.file(taskPath(id)).text())
 }
 

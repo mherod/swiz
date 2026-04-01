@@ -49,7 +49,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
   timeout: 5,
 
   run(rawInput) {
-    const input = rawInput as Record<string, unknown>
+    const input = rawInput as Record<string, any>
     const toolName: string = (input.tool_name as string) ?? ""
     const toolInput = input.tool_input as Record<string, string> | undefined
 

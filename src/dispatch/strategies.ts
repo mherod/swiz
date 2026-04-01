@@ -39,7 +39,7 @@ export interface HookStrategyContext {
 }
 
 /** Interface for hook execution strategies. */
-export interface HookExecutionStrategy<T = Record<string, unknown>> {
+export interface HookExecutionStrategy<T = Record<string, any>> {
   execute(ctx: HookStrategyContext): Promise<T>
 }
 
@@ -50,7 +50,7 @@ export interface HookExecutionStrategy<T = Record<string, unknown>> {
 type PreToolResult = "deny" | "hint" | "pass"
 
 function classifyAllowHint(
-  resp: Record<string, unknown>,
+  resp: Record<string, any>,
   execution: HookExecution,
   hints: string[],
   contexts: string[]
@@ -68,7 +68,7 @@ function classifyAllowHint(
 
 function classifyPreToolResult(
   execution: HookExecution,
-  resp: Record<string, unknown> | null,
+  resp: Record<string, any> | null,
   hints: string[],
   contexts: string[]
 ): PreToolResult {
@@ -82,7 +82,7 @@ function classifyPreToolResult(
   return "pass"
 }
 
-function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, unknown> {
+function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, any> {
   if (hints.length === 0 && contexts.length === 0) {
     log(`   result: all passed`)
     return hookOutputSchema.parse({})
@@ -102,7 +102,7 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
 
 // ─── Shared strategy pipeline ──────────────────────────────────────────────
 
-type HookResult = { execution: HookExecution; parsed: Record<string, unknown> | null }
+type HookResult = { execution: HookExecution; parsed: Record<string, any> | null }
 
 /**
  * Shared scaffolding for all three strategies: sets up an AbortController,
@@ -120,9 +120,9 @@ async function runStrategyPipeline(
   ctx: HookStrategyContext,
   opts: {
     onResult?: (result: HookResult, abort: () => void) => void
-    processResults: (results: HookResult[], executions: HookExecution[]) => Record<string, unknown>
+    processResults: (results: HookResult[], executions: HookExecution[]) => Record<string, any>
   }
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
   const entries = flatSyncHooks(filteredGroups)
   const controller = new AbortController()
@@ -162,10 +162,10 @@ async function runStrategyPipeline(
 // ─── Strategy implementations ──────────────────────────────────────────────
 
 class PreToolUseStrategy implements HookExecutionStrategy {
-  async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
+  async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const hints: string[] = []
     const contexts: string[] = []
-    const finalResponse: Record<string, unknown> = {}
+    const finalResponse: Record<string, any> = {}
 
     return runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
@@ -200,7 +200,7 @@ class PreToolUseStrategy implements HookExecutionStrategy {
  *
  *  Exported for unit tests (see `strategies.test.ts`). */
 export function processBlockingResults(
-  results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
+  results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
   executions: HookExecution[],
   finalResponse: HookOutput,
   hookEventName: string
@@ -262,10 +262,10 @@ export function processBlockingResults(
  * Used for stop and postToolUse events.
  */
 async function resolveAutoSteerEnabled(
-  payload: Record<string, unknown>,
+  payload: Record<string, any>,
   sessionId: string
 ): Promise<boolean> {
-  const injected = payload._effectiveSettings as Record<string, unknown> | undefined
+  const injected = payload._effectiveSettings as Record<string, any> | undefined
   if (injected && typeof injected.autoSteer === "boolean") return injected.autoSteer
   const { isAutoSteerAvailable } = await import("../utils/hook-utils.ts")
   return (await isAutoSteerAvailable(sessionId)) !== null
@@ -282,7 +282,7 @@ interface StopAutoSteerContext {
 async function resolveStopAutoSteerContext(
   enrichedPayloadStr: string
 ): Promise<StopAutoSteerContext | null> {
-  const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
+  const payload = JSON.parse(enrichedPayloadStr) as Record<string, any>
   const sessionId = (payload.session_id as string) ?? ""
   if (!sessionId) return null
 
@@ -333,7 +333,7 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
 }
 
 async function tryAutoSteerStopBlock(
-  finalResponse: Record<string, unknown>,
+  finalResponse: Record<string, any>,
   enrichedPayloadStr: string
 ): Promise<void> {
   const blockReason = (finalResponse as { reason?: string }).reason ?? ""
@@ -357,14 +357,14 @@ async function tryAutoSteerStopBlock(
 }
 
 class BlockingStrategy implements HookExecutionStrategy {
-  async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
+  async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const { canonicalEvent, enrichedPayloadStr } = ctx
 
     // on_session_stop: short-circuit all stop hooks if pending messages exist.
     if (canonicalEvent === "stop") {
       const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
       if (shortCircuited) {
-        const response: Record<string, unknown> = {}
+        const response: Record<string, any> = {}
         normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
         coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
         writeResponse(response)
@@ -372,7 +372,7 @@ class BlockingStrategy implements HookExecutionStrategy {
       }
     }
 
-    const finalResponse: Record<string, unknown> = {}
+    const finalResponse: Record<string, any> = {}
 
     const response = await runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
@@ -403,7 +403,7 @@ class BlockingStrategy implements HookExecutionStrategy {
  * sessionStart and userPromptSubmit events.
  */
 class ContextStrategy implements HookExecutionStrategy {
-  async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
+  async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const { hookEventName } = ctx
     const contexts: string[] = []
 
@@ -457,7 +457,7 @@ export async function runPreToolUse(
   groups: HookGroup[],
   payloadStr: string,
   daemonContext?: boolean
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   return STRATEGY_REGISTRY.preToolUse.execute({
     filteredGroups: groups,
     enrichedPayloadStr: payloadStr,
@@ -474,7 +474,7 @@ export async function runBlocking(
   payloadStr: string,
   canonicalEvent?: string,
   daemonContext?: boolean
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   return STRATEGY_REGISTRY.blocking.execute({
     filteredGroups: groups,
     enrichedPayloadStr: payloadStr,
@@ -491,7 +491,7 @@ export async function runContext(
   payloadStr: string,
   hookEventName: string,
   daemonContext?: boolean
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, any>> {
   return STRATEGY_REGISTRY.context.execute({
     filteredGroups: groups,
     enrichedPayloadStr: payloadStr,

@@ -313,7 +313,7 @@ function extractShellEvents(cmd: string, lineIdx: number): TranscriptEvent[] {
 }
 
 function extractEventsFromBlock(
-  block: Record<string, unknown>,
+  block: Record<string, any>,
   blockedIds: Set<string>,
   lineIdx: number
 ): TranscriptEvent[] {
@@ -322,7 +322,7 @@ function extractEventsFromBlock(
   const name = String(block.name ?? "")
 
   if (isShellTool(name)) {
-    const inp = block.input as Record<string, unknown> | undefined
+    const inp = block.input as Record<string, any> | undefined
     const cmd = String(inp?.command ?? "").normalize("NFKC")
     return extractShellEvents(cmd, lineIdx)
   }
@@ -371,7 +371,7 @@ export async function parseTranscriptEvents(
     if (content) {
       for (const block of content) {
         events.push(
-          ...extractEventsFromBlock(block as Record<string, unknown>, blockedIds, lineIdx)
+          ...extractEventsFromBlock(block as Record<string, any>, blockedIds, lineIdx)
         )
       }
     }
@@ -387,17 +387,17 @@ export async function parseTranscriptEvents(
 // to the block message so the agent knows exactly what to edit.
 
 function isMatchingToolUseBlock(block: unknown, kind: CommandKind): boolean {
-  const b = block as Record<string, unknown>
+  const b = block as Record<string, any>
   if (b?.type !== "tool_use") return false
   if (!isShellTool(String(b.name ?? ""))) return false
-  const cmd = String((b.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
+  const cmd = String((b.input as Record<string, any>)?.command ?? "").normalize("NFKC")
   return classifyCommand(cmd) === kind
 }
 
 function findMatchingToolUseId(content: unknown[], kind: CommandKind): string | null {
   for (const block of content) {
     if (isMatchingToolUseBlock(block, kind)) {
-      const b = block as Record<string, unknown>
+      const b = block as Record<string, any>
       return String(b.id ?? "") || null
     }
   }
@@ -440,8 +440,8 @@ function extractUserContent(entry: unknown): unknown[] | null {
 
 function findToolResultInBlocks(content: unknown[], toolUseId: string): string | null {
   for (const block of content) {
-    if ((block as Record<string, unknown>)?.tool_use_id === toolUseId) {
-      return extractTextFromUnknownContent((block as Record<string, unknown>).content) || null
+    if ((block as Record<string, any>)?.tool_use_id === toolUseId) {
+      return extractTextFromUnknownContent((block as Record<string, any>).content) || null
     }
   }
   return null
@@ -713,7 +713,7 @@ function resolveCommandAndKind(input: {
   const toolName = input.tool_name ?? ""
   if (!isShellTool(toolName)) return null
 
-  const command = String((input.tool_input as Record<string, unknown>)?.command ?? "").normalize(
+  const command = String((input.tool_input as Record<string, any>)?.command ?? "").normalize(
     "NFKC"
   )
 
@@ -741,7 +741,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   if (!transcriptPath) return {}
 
   const cachedSessionLines = getTranscriptSummary(
-    hookInput as unknown as Record<string, unknown>
+    hookInput as unknown as Record<string, any>
   )?.sessionLines
 
   const events = await parseTranscriptEvents(transcriptPath, cachedSessionLines)

@@ -84,7 +84,7 @@ function backfillStopDispatchReasonFields(response: DispatchJsonRecord): void {
  * Ensures merged stop/subagentStop dispatch JSON satisfies {@link stopHookOutputSchema}.
  * Mutates `response` in place.
  *
- * Parameter is `object` so callers may pass `Record<string, unknown>` without a cast; internally
+ * Parameter is `object` so callers may pass `Record<string, any>` without a cast; internally
  * treated as {@link DispatchJsonRecord} until Zod validates.
  */
 export function normalizeStopDispatchResponseInPlace(
@@ -109,7 +109,7 @@ export function normalizeStopDispatchResponseInPlace(
     }
   } else if (!hasNonEmptyContext(envelope)) {
     const hso = mergeHookSpecificOutputClone(
-      envelope as Record<string, unknown>,
+      envelope as Record<string, any>,
       hookEventName
     ) as DispatchJsonRecord
     // Match prior coercion: non-strings (e.g. numbers) stringify before trim.
@@ -119,7 +119,7 @@ export function normalizeStopDispatchResponseInPlace(
     envelope.hookSpecificOutput = hso
   } else {
     envelope.hookSpecificOutput = mergeHookSpecificOutputClone(
-      envelope as Record<string, unknown>,
+      envelope as Record<string, any>,
       hookEventName
     ) as DispatchJsonRecord
   }

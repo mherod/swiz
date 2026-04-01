@@ -178,7 +178,7 @@ export interface ProjectTaskPreview extends SessionTaskPreview {
 
 const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
 
-function formatToolInputForDisplay(input: Record<string, unknown> | undefined): string {
+function formatToolInputForDisplay(input: Record<string, any> | undefined): string {
   if (!input) return ""
   try {
     return JSON.stringify(input, null, 2)
@@ -191,7 +191,7 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
 }
 
-function summarizeTaskInput(input: Record<string, unknown>): string | null {
+function summarizeTaskInput(input: Record<string, any>): string | null {
   if (typeof input.subject === "string") return truncate(input.subject, 60)
   if (typeof input.taskId === "string") {
     const parts = [`#${input.taskId}`]
@@ -201,12 +201,12 @@ function summarizeTaskInput(input: Record<string, unknown>): string | null {
   return null
 }
 
-function extractPathValue(input: Record<string, unknown>): string | undefined {
+function extractPathValue(input: Record<string, any>): string | undefined {
   const v = input.path ?? input.file_path ?? input.file ?? input.filePath
   return typeof v === "string" ? v : undefined
 }
 
-function summarizeFileOrCommandInput(input: Record<string, unknown>): string | null {
+function summarizeFileOrCommandInput(input: Record<string, any>): string | null {
   if (typeof input.skill === "string") {
     return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
   }
@@ -222,7 +222,7 @@ function summarizeFileOrCommandInput(input: Record<string, unknown>): string | n
   return null
 }
 
-export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
+export function summarizeToolInput(input: Record<string, any> | undefined): string {
   if (!input) return ""
   return summarizeTaskInput(input) ?? summarizeFileOrCommandInput(input) ?? ""
 }
@@ -231,7 +231,7 @@ export function captureSessionToolCall(
   sessionToolCalls: Map<string, CapturedToolCall[]>,
   sessionId: string,
   toolName: string,
-  toolInput: Record<string, unknown> | undefined,
+  toolInput: Record<string, any> | undefined,
   nowMs: number
 ): void {
   const list = sessionToolCalls.get(sessionId) ?? []
@@ -265,7 +265,7 @@ export function captureSessionToolUsage(
   sessionToolUsage: Map<string, SessionToolUsageState>,
   sessionId: string,
   toolName: string,
-  toolInput: Record<string, unknown> | undefined,
+  toolInput: Record<string, any> | undefined,
   nowMs: number
 ): SessionToolUsageState {
   const existing = sessionToolUsage.get(sessionId)
@@ -346,7 +346,7 @@ export function extractToolCalls(content: unknown): ToolCallSummary[] {
   if (!Array.isArray(content)) return []
   return content
     .filter(
-      (block): block is { type: string; name?: string; input?: Record<string, unknown> } =>
+      (block): block is { type: string; name?: string; input?: Record<string, any> } =>
         !!block &&
         typeof block === "object" &&
         block.type === "tool_use" &&

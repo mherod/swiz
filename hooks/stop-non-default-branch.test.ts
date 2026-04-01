@@ -41,7 +41,7 @@ async function runHook(cwd: string): Promise<HookResult> {
   ])
   await proc.exited
 
-  let json: Record<string, unknown> | null = null
+  let json: Record<string, any> | null = null
   try {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}

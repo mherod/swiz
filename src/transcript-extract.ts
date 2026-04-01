@@ -55,7 +55,7 @@ export function stripQuotedText(text: string): string {
 }
 
 /** Extract joined text from a parsed assistant transcript entry, or empty string. */
-function extractTextFromEntry(entry: Record<string, unknown>): string {
+function extractTextFromEntry(entry: Record<string, any>): string {
   if (entry?.type !== "assistant") return ""
   const content = (entry as { message?: { content?: unknown[] } })?.message?.content
   if (!Array.isArray(content)) return ""
@@ -64,8 +64,8 @@ function extractTextFromEntry(entry: Record<string, unknown>): string {
       (block): block is { type: string; text: string } =>
         typeof block === "object" &&
         block !== null &&
-        (block as Record<string, unknown>).type === "text" &&
-        typeof (block as Record<string, unknown>).text === "string"
+        (block as Record<string, any>).type === "text" &&
+        typeof (block as Record<string, any>).text === "string"
     )
     .map((block) => block.text)
   return texts.length > 0 ? texts.join(" ") : ""
@@ -81,7 +81,7 @@ export function extractLastAssistantText(lines: string[]): string {
     if (!line?.trim()) continue
     const parsed = tryParseJsonLine(line)
     if (parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) continue
-    const text = extractTextFromEntry(parsed as Record<string, unknown>)
+    const text = extractTextFromEntry(parsed as Record<string, any>)
     if (text) return text
   }
   return ""

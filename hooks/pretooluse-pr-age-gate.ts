@@ -78,7 +78,7 @@ export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizH
   const parsed = toolHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return {}
 
-  const toolInput = (parsed.tool_input ?? {}) as Record<string, unknown>
+  const toolInput = (parsed.tool_input ?? {}) as Record<string, any>
   const command: string = String(toolInput.command ?? "")
 
   const isGhPrMerge = GH_PR_MERGE_RE.test(command)

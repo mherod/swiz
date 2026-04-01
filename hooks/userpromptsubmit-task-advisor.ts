@@ -55,7 +55,7 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
   return buildContextHookOutput("UserPromptSubmit", additionalContext)
 }
 
-const userpromptsubmitTaskAdvisor: SwizHook<Record<string, unknown>> = {
+const userpromptsubmitTaskAdvisor: SwizHook<Record<string, any>> = {
   name: "userpromptsubmit-task-advisor",
   event: "userPromptSubmit",
   timeout: 5,

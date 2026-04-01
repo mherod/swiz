@@ -22,7 +22,7 @@ async function createTranscript(dir: string, lines: unknown[]): Promise<string> 
 }
 
 async function runHook(
-  stdinPayload: Record<string, unknown>,
+  stdinPayload: Record<string, any>,
   extraEnv?: Record<string, string>
 ): Promise<HookResult> {
   const proc = Bun.spawn(["bun", HOOK], {
@@ -40,7 +40,7 @@ async function runHook(
   ])
   await proc.exited
 
-  let json: Record<string, unknown> | null = null
+  let json: Record<string, any> | null = null
   try {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
@@ -48,7 +48,7 @@ async function runHook(
   return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
-function hookFeedback(text: string): Record<string, unknown> {
+function hookFeedback(text: string): Record<string, any> {
   return {
     type: "user",
     message: {
@@ -57,7 +57,7 @@ function hookFeedback(text: string): Record<string, unknown> {
   }
 }
 
-function toolUse(name: string, input: Record<string, unknown>): Record<string, unknown> {
+function toolUse(name: string, input: Record<string, any>): Record<string, any> {
   return {
     type: "assistant",
     message: {
@@ -83,7 +83,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = result.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     expect(String(hso?.permissionDecisionReason)).toContain(SELF_SENTINEL)
     expect(String(hso?.permissionDecisionReason)).toContain("Read the /update-memory skill")
@@ -234,7 +234,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     expect(result.exitCode).toBe(0)
-    const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+    const hso = result.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny") // new post-compact trigger must enforce
   })
 
@@ -319,7 +319,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       )
 
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.json?.hookSpecificOutput as Record<string, any>
       expect(hso?.permissionDecision).toBe("deny") // enforcement active — no in_progress tasks
     })
 
@@ -345,7 +345,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       )
 
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.json?.hookSpecificOutput as Record<string, any>
       expect(hso?.permissionDecision).toBe("deny") // enforcement active — no task directory
     })
 
@@ -440,7 +440,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       })
 
       expect(result.exitCode).toBe(0)
-      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      const hso = result.json?.hookSpecificOutput as Record<string, any>
       expect(hso?.permissionDecision).toBe("deny") // enforcement active
     })
   })

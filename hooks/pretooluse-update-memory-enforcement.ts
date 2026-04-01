@@ -121,7 +121,7 @@ async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   return tasks.some((task) => task.status === "in_progress")
 }
 
-function updateStateFromToolUse(block: Record<string, unknown>, state: EnforcementState): void {
+function updateStateFromToolUse(block: Record<string, any>, state: EnforcementState): void {
   const name = String(block.name)
   const input = block.input
   if (!state.skillReadComplete && toolReadsUpdateMemorySkill(name, input)) {
@@ -233,7 +233,7 @@ function isCurrentToolSatisfying(
 }
 
 export async function evaluatePretooluseUpdateMemoryEnforcement(
-  raw: Record<string, unknown>
+  raw: Record<string, any>
 ): Promise<SwizHookOutput> {
   let input: ToolHookInput
   try {
@@ -268,7 +268,7 @@ const pretooluseUpdateMemoryEnforcement: SwizToolHook = {
   cooldownSeconds: 300,
 
   async run(input) {
-    return await evaluatePretooluseUpdateMemoryEnforcement(input as Record<string, unknown>)
+    return await evaluatePretooluseUpdateMemoryEnforcement(input as Record<string, any>)
   },
 }
 

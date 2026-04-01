@@ -74,7 +74,7 @@ async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
 async function checkFileSizeAllowed(
   toolName: string,
   filePath: string,
-  toolInput: Record<string, unknown>,
+  toolInput: Record<string, any>,
   cwd: string
 ): Promise<{ allowed: boolean; projectedKb?: number; sizeLimitKb?: number }> {
   if (!isEditTool(toolName) && !isWriteTool(toolName)) {

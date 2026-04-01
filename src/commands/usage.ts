@@ -31,7 +31,7 @@ interface ClaudeUsageFile {
   installMethod?: string
   autoUpdates?: boolean
   promptQueueUseCount?: number
-  mcpServers?: Record<string, unknown>
+  mcpServers?: Record<string, any>
   projects?: Record<string, ProjectUsageStat>
   skillUsage?: Record<string, SkillUsageStat>
 }

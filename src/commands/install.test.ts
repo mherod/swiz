@@ -134,7 +134,7 @@ describe("install.ts statusMessage field", () => {
         type: "command",
         command: "test",
         timeout: 30,
-      } as Record<string, unknown>
+      } as Record<string, any>
 
       const message = hook?.statusMessage
       expect(message).toBeUndefined()
@@ -177,7 +177,7 @@ describe("install.ts statusMessage field", () => {
       }
 
       expect(hook.statusMessage).toBe("Swizzling...")
-      expect((hook as Record<string, unknown>).optional).toBeUndefined()
+      expect((hook as Record<string, any>).optional).toBeUndefined()
     })
 
     it("prevents accessing array element beyond bounds", () => {
