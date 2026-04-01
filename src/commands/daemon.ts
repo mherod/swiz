@@ -3,6 +3,7 @@ import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { executeDispatch } from "../dispatch/execute.ts"
 import { hookIdentifier, isInlineHookDef } from "../hook-types.ts"
+import { pruneTempLogs } from "../log-rotation.ts"
 import {
   getProjectSettingsPath,
   getSwizSettingsPath,
@@ -372,6 +373,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Start periodic transcript monitoring for all registered projects
   void logPseudoHook(`Transcript monitor starting for initial project: ${process.cwd()}`)
   let isMonitoring = false
+  let lastLogPruneMs = 0
+  const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000 // Prune every 5 minutes
   setInterval(() => {
     if (isMonitoring) return
     isMonitoring = true
@@ -379,6 +382,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
       try {
         for (const cwd of registeredProjects) {
           await transcriptMonitor.checkProject(cwd)
+        }
+        // Rate-limit log pruning to every LOG_PRUNE_INTERVAL_MS
+        const now = Date.now()
+        if (now - lastLogPruneMs > LOG_PRUNE_INTERVAL_MS) {
+          lastLogPruneMs = now
+          void pruneTempLogs()
         }
       } catch (err) {
         console.error(`[daemon] Transcript monitor error: ${err}`)
