@@ -56,7 +56,9 @@ describe("denyPreToolUse", () => {
     const hso = parsed.hookSpecificOutput as JsonObject
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("deny")
-    expect(hso.permissionDecisionReason).toBe("blocked for testing")
+    expect(hso.permissionDecisionReason).toBe(
+      "blocked for testing\n\nYou must act on this now. Do not try to stop again without completing the required action."
+    )
   })
 })
 
@@ -145,7 +147,9 @@ describe("denyPreToolUse edge cases", () => {
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
     expect(hso.permissionDecision).toBe("deny")
-    expect(hso.permissionDecisionReason).toBe("")
+    expect(hso.permissionDecisionReason).toBe(
+      "\n\nYou must act on this now. Do not try to stop again without completing the required action."
+    )
   })
 
   test("handles reason with special characters", async () => {
@@ -154,7 +158,9 @@ describe("denyPreToolUse edge cases", () => {
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
-    expect(hso.permissionDecisionReason).toBe('Line1\nLine2\t"quoted"\\backslash')
+    expect(hso.permissionDecisionReason).toBe(
+      'Line1\nLine2\t"quoted"\\backslash\n\nYou must act on this now. Do not try to stop again without completing the required action.'
+    )
   })
 
   test("handles very long reason string", async () => {
@@ -163,7 +169,10 @@ describe("denyPreToolUse edge cases", () => {
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
-    expect(hso.permissionDecisionReason).toBe("x".repeat(10000))
+    expect(hso.permissionDecisionReason).toBe(
+      "x".repeat(10000) +
+        "\n\nYou must act on this now. Do not try to stop again without completing the required action."
+    )
   })
 
   test("handles reason with unicode characters", async () => {
@@ -260,7 +269,9 @@ describe("PreToolUse helper isolation (integration)", () => {
       )
       results.push(parsed)
     }
-    const reasons = ["reason-A", "reason-B", "reason-C"]
+    const footer =
+      "\n\nYou must act on this now. Do not try to stop again without completing the required action."
+    const reasons = ["reason-A", "reason-B", "reason-C"].map((r) => r + footer)
     for (const [i, result] of results.entries()) {
       const hso = result.hookSpecificOutput as JsonObject
       expect(hso.permissionDecision).toBe("deny")
