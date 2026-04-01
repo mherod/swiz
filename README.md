@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**106 hooks. 12 event types. Every agent. Zero compromises.**
+**108 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -88,7 +88,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (23)
+### Stop (25)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -117,6 +117,8 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-memory-update-reminder.ts` | Checks whether CLAUDE.md or MEMORY.md was recently updated. If not, blocks with a suggestion to reflect on session learnings and update memory. 30-minute cooldown prevents nagging.                                                                                                                                                                                                                     |
 | `stop-auto-continue.ts`          | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop.                                                                                                                                                                                                     |
 | `posttooluse-speak-narrator.ts`  | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session.                                                                                      |
+| `stop-git-status.ts` | Blocks stop if there are uncommitted changes in the git worktree. |
+| `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
 ### PreToolUse (54)
 

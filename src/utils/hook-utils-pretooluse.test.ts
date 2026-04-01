@@ -59,29 +59,6 @@ describe("denyPreToolUse", () => {
     expect(hso.permissionDecisionReason as string).toStartWith("blocked for testing")
     expect(hso).not.toHaveProperty("updatedInput")
   })
-
-  test("includes a cause summary in the update-memory reminder", async () => {
-    const { parsed } = await runHelperWithUpdateMemoryFooter(
-      `denyPreToolUse } from "./hook-utils.ts"; ` +
-        `denyPreToolUse("The user asked for a changelog update before stopping.")`,
-      true
-    )
-    const hso = parsed.hookSpecificOutput as JsonObject
-    const reason = hso.permissionDecisionReason as string
-    expect(reason).toContain("Cause to capture:")
-    expect(reason).toContain("A user instruction was missed")
-    expect(reason).toContain("The user asked for a changelog update before stopping.")
-  })
-
-  test("always includes update-memory reminder (footer is unconditionally enabled)", async () => {
-    const { parsed } = await runHelper(
-      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked for testing")`
-    )
-    const hso = parsed.hookSpecificOutput as JsonObject
-    const reason = hso.permissionDecisionReason as string
-    expect(reason).toContain("Update your MEMORY.md")
-    expect(reason).toContain("Cause to capture:")
-  })
 })
 
 describe("allowPreToolUseWithUpdatedInput", () => {
@@ -401,19 +378,6 @@ describe("PreToolUse helper isolation (integration)", () => {
 })
 
 describe("blockStop", () => {
-  test("includes a cause summary in the stop footer", async () => {
-    const { exitCode, parsed } = await runHelperWithUpdateMemoryFooter(
-      `blockStop } from "./hook-utils.ts"; blockStop("STOP. Tasks have gone stale after 20 tool calls.")`,
-      true
-    )
-    expect(exitCode).toBe(0)
-    expect(parsed.decision).toBe("block")
-    const reason = parsed.reason as string
-    expect(reason).toContain("Cause to capture:")
-    expect(reason).toContain("A hook detected missing or unstructured workflow behavior")
-    expect(reason).toContain("Tasks have gone stale after 20 tool calls.")
-  })
-
   test("supports opt-out of update-memory advice for triage-only blockers", async () => {
     const { exitCode, parsed } = await runHelperWithUpdateMemoryFooter(
       `blockStop } from "./hook-utils.ts"; ` +

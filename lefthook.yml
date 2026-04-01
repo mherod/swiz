@@ -5,6 +5,26 @@ skip:
 
 pre-commit:
   commands:
+    disk-space:
+      priority: 1
+      run: bun scripts/check-disk-space.ts
+      skip:
+        - merge
+        - rebase
+    # lint-staged fixes staged files; `bun run lint` verifies the whole tree (same as CI).
+    lint:
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
+      run: bunx lint-staged && bun run lint
+      stage_fixed: true
+      skip:
+        - merge
+        - rebase
+    typecheck:
+      glob: "*.ts"
+      run: bunx tsc --noEmit
+      skip:
+        - merge
+        - rebase
     similar:
       run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.96 --strict --skip-same-file --same-name-only --min-lines=12
       skip:
@@ -15,19 +35,17 @@ pre-commit:
       skip:
         - merge
         - rebase
-
-pre-push:
-  commands:
-    typecheck:
-      glob: "*.ts"
-      run: bunx tsc --noEmit
+    swiz-precommit:
+      run: echo '{"cwd":"'$(pwd)'"}' | SWIZ_DIRECT=1 bun run index.ts dispatch preCommit
       skip:
         - merge
         - rebase
-    lint:
-      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
-      run: bunx lint-staged && bun run lint
-      stage_fixed: true
+
+pre-push:
+  commands:
+    disk-space:
+      priority: 1
+      run: bun scripts/check-disk-space.ts
       skip:
         - merge
         - rebase
