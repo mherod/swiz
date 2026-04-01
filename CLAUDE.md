@@ -227,8 +227,9 @@ alwaysApply: false
 ## Conventions
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
-- When parsing bun test output, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting counts; if absent, emit "unknown number of" (output truncated). Strip ANSI before matching.
+- When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
+- **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
@@ -240,7 +241,7 @@ alwaysApply: false
 - On `MEMORY CAPTURE ENFORCEMENT`, read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - When unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- **DO**: Own every diagnostic — never label warnings "pre-existing" or attribute failures to other sessions. Investigate all test failures before completing tasks.
+- **DO**: Own every diagnostic — never label warnings "pre-existing". Investigate all test failures before completing tasks.
 - **DON'T**: Attribute feedback to "hooks", "systems", or "auto-steer" — all from the user. Act immediately.
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
@@ -262,6 +263,6 @@ alwaysApply: false
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
-- **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as each step finishes. Ensures stop hooks see explicit workflow state.
+- **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as steps finish.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
 - **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.

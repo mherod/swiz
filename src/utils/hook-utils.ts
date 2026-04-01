@@ -189,7 +189,9 @@ function denyPreToolUseObj(reason: string) {
   return hookOutputSchema.parse({
     suppressOutput: true,
     systemMessage: extractHookSystemMessagePreview(reason),
-    hookSpecificOutput: hsoPreToolUseDeny(reason + preToolActionRequired(reason, { includeUpdateMemoryAdvice: true })),
+    hookSpecificOutput: hsoPreToolUseDeny(
+      reason + preToolActionRequired(reason, { includeUpdateMemoryAdvice: true })
+    ),
   })
 }
 
