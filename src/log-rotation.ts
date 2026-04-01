@@ -46,7 +46,7 @@ async function pruneSingleLog(logPath: string): Promise<void> {
 
     // Keep only the last MAX_LOG_LINES
     const trimmed = lines.slice(-MAX_LOG_LINES)
-    await Bun.write(logPath, trimmed.join("\n") + "\n")
+    await Bun.write(logPath, `${trimmed.join("\n")}\n`)
   } catch {
     // Fail silently — log rotation must not affect system operation
   }
