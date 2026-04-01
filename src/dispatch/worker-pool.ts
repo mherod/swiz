@@ -53,6 +53,7 @@ export class WorkerPool {
   private workerBusy: boolean[] = []
   private pendingMessages = new Map<string, QueuedHook>()
   private initialized = false
+  private processing = false
 
   async initialize(): Promise<void> {
     if (this.initialized) return
@@ -124,47 +125,54 @@ export class WorkerPool {
   }
 
   private processQueue(): void {
-    if (this.queue.length === 0) return
+    if (this.processing || this.queue.length === 0) return
+    this.processing = true
 
-    // Find idle worker
-    const idleIndex = this.workerBusy.findIndex((busy) => !busy)
-    if (idleIndex === -1) return
+    try {
+      while (this.queue.length > 0) {
+        // Find idle worker
+        const idleIndex = this.workerBusy.findIndex((busy) => !busy)
+        if (idleIndex === -1) break
 
-    const hook = this.queue.shift()
-    if (!hook) return
+        const hook = this.queue.shift()
+        if (!hook) break
 
-    this.workerBusy[idleIndex] = true
-    hook.workerIndex = idleIndex
-    this.pendingMessages.set(hook.id, hook)
-    const worker = this.workers[idleIndex]!
+        this.workerBusy[idleIndex] = true
+        hook.workerIndex = idleIndex
+        this.pendingMessages.set(hook.id, hook)
+        const worker = this.workers[idleIndex]!
 
-    // Start supervisor timeout — if the worker doesn't respond within
-    // hookTimeout + grace, reject the promise and free the worker slot.
-    const supervisorMs = ((hook.timeoutSec ?? 10) + SUPERVISOR_GRACE_SEC) * 1000
-    hook.supervisorTimer = setTimeout(() => {
-      if (!this.pendingMessages.has(hook.id)) return // already resolved
-      this.pendingMessages.delete(hook.id)
-      this.workerBusy[idleIndex] = false
-      debugLog(`Worker pool: supervisor timeout for ${hook.file} (${supervisorMs}ms)`)
-      hook.reject(
-        new Error(
-          `Supervisor timeout: worker did not respond within ${supervisorMs}ms for ${hook.file}`
-        )
-      )
-      // Terminate and replace the stuck worker
-      this.replaceWorker(idleIndex)
-      this.processQueue()
-    }, supervisorMs)
+        // Start supervisor timeout — if the worker doesn't respond within
+        // hookTimeout + grace, reject the promise and free the worker slot.
+        const supervisorMs = ((hook.timeoutSec ?? 10) + SUPERVISOR_GRACE_SEC) * 1000
+        hook.supervisorTimer = setTimeout(() => {
+          if (!this.pendingMessages.has(hook.id)) return // already resolved
+          this.pendingMessages.delete(hook.id)
+          this.workerBusy[idleIndex] = false
+          debugLog(`Worker pool: supervisor timeout for ${hook.file} (${supervisorMs}ms)`)
+          hook.reject(
+            new Error(
+              `Supervisor timeout: worker did not respond within ${supervisorMs}ms for ${hook.file}`
+            )
+          )
+          // Terminate and replace the stuck worker
+          this.replaceWorker(idleIndex)
+          this.processQueue()
+        }, supervisorMs)
 
-    const msg: RunHookMessage = {
-      id: hook.id,
-      type: "run-hook",
-      file: hook.file,
-      payloadStr: hook.payloadStr,
-      timeoutSec: hook.timeoutSec,
+        const msg: RunHookMessage = {
+          id: hook.id,
+          type: "run-hook",
+          file: hook.file,
+          payloadStr: hook.payloadStr,
+          timeoutSec: hook.timeoutSec,
+        }
+
+        worker.postMessage(msg)
+      }
+    } finally {
+      this.processing = false
     }
-
-    worker.postMessage(msg)
   }
 
   /**
