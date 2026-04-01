@@ -4,7 +4,14 @@ import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import type { Session } from "./transcript-schemas.ts"
 
-const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "cursor", "antigravity", "codex"] as const
+const SESSION_PROVIDER_PRECEDENCE = [
+  "claude",
+  "gemini",
+  "cursor",
+  "antigravity",
+  "codex",
+  "junie",
+] as const
 
 function providerRank(provider: Session["provider"] | undefined): number {
   if (!provider) return SESSION_PROVIDER_PRECEDENCE.length
@@ -41,6 +48,14 @@ export async function findSessions(projectDir: string): Promise<Session[]> {
   }
 
   return sortSessionsDeterministic(sessions)
+}
+
+function tryParseJsonLine(line: string): any | undefined {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return undefined
+  }
 }
 
 async function readProjectRoot(path: string): Promise<string | null> {
@@ -102,6 +117,60 @@ async function matchesBucketTarget(
   const historyRoot = await readProjectRoot(join(geminiHistory, bucketName, ".project_root"))
   if (historyRoot) roots.add(historyRoot)
   return roots.size > 0 ? [...roots].some((root) => root === target) : bucketName === fallbackName
+}
+
+export async function findJunieSessions(targetDir: string, home?: string): Promise<Session[]> {
+  home = home ?? getHomeDir()
+  const junieSessionsDir = join(home, ".junie", "sessions")
+  const target = resolve(targetDir)
+  const sessions: Session[] = []
+
+  let sessionDirs: import("node:fs").Dirent[]
+  try {
+    sessionDirs = await readdir(junieSessionsDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  for (const dir of sessionDirs) {
+    if (!dir.isDirectory()) continue
+    const eventsPath = join(junieSessionsDir, dir.name, "events.jsonl")
+    try {
+      const s = await stat(eventsPath)
+      // Read first 20 lines to check if it's for this project
+      const lines = await readLines(eventsPath, 20)
+      for (const line of lines) {
+        if (!line) continue
+        const parsed = tryParseJsonLine(line)
+        if (
+          parsed?.cwd === target ||
+          parsed?.payload?.cwd === target ||
+          (parsed?.kind === "SessionA2uxEvent" && parsed.event?.agentEvent?.blob?.includes(target))
+        ) {
+          sessions.push({
+            id: dir.name,
+            path: eventsPath,
+            mtime: s.mtimeMs,
+            provider: "junie",
+            format: "junie-events",
+          })
+          break
+        }
+      }
+    } catch {}
+  }
+
+  return sessions
+}
+
+async function readLines(path: string, count: number): Promise<string[]> {
+  try {
+    const file = Bun.file(path)
+    const text = await file.text()
+    return text.split("\n").slice(0, count)
+  } catch {
+    return []
+  }
 }
 
 export async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {

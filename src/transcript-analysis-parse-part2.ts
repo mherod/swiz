@@ -1,5 +1,9 @@
 import { z } from "zod"
-import { parseCodexJsonlEntries, parseJsonlEntries } from "./transcript-analysis-parse-part1.ts"
+import {
+  parseCodexJsonlEntries,
+  parseJsonlEntries,
+  parseJunieEvents,
+} from "./transcript-analysis-parse-part1.ts"
 import { extractTextFromUnknownContent } from "./transcript-extract.ts"
 import type { ContentBlock, Session, TranscriptEntry } from "./transcript-schemas.ts"
 
@@ -275,6 +279,7 @@ const FORMAT_PARSERS: Record<string, (text: string) => TranscriptEntry[]> = {
   "cursor-agent-jsonl": parseJsonlEntries,
   "gemini-json": parseGeminiEntries,
   "codex-jsonl": parseCodexJsonlEntries,
+  "junie-events": parseJunieEvents,
   jsonl: parseJsonlEntries,
 }
 
@@ -287,6 +292,10 @@ function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
   if (geminiEntries.length > 0) return geminiEntries
   const codexEntries = parseCodexJsonlEntries(text)
   if (codexEntries.length > 0) return codexEntries
+  if (text.includes('"type":"event"') && text.includes('"payload":')) {
+    const junieEntries = parseJunieEvents(text)
+    if (junieEntries.length > 0) return junieEntries
+  }
   return parseJsonlEntries(text)
 }
 

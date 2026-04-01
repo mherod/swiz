@@ -100,6 +100,292 @@ const codexContentPartSchema = z.looseObject({
   text: z.string().optional(),
 })
 
+export function parseJunieEvents(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = []
+  const lines = splitJsonlLines(text)
+
+  // 1. Pass: Find all AgentStateUpdatedEvent to track state changes
+  // and pick the latest one for the base history.
+  let latestBlob: any = null
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (line === undefined) continue
+    const parsed: any = tryParseJsonLine(line)
+    if (
+      parsed?.event?.agentEvent?.kind === "AgentStateUpdatedEvent" &&
+      parsed.event.agentEvent.blob
+    ) {
+      try {
+        latestBlob = JSON.parse(parsed.event.agentEvent.blob)
+        if (latestBlob) break
+      } catch {}
+    }
+  }
+
+  const processedStepIds = new Set<string>()
+
+  if (latestBlob) {
+    const lastState = latestBlob.lastAgentState
+
+    // Extract prompt from issueDescription if available
+    if (lastState && Array.isArray(lastState.issueDescription)) {
+      for (const msg of lastState.issueDescription) {
+        const content = msg.parts?.map((p: any) => p.text).join("")
+        if (content) {
+          entries.push({
+            type: "user",
+            message: { role: "user", content },
+          })
+        }
+      }
+    }
+
+    // Extract conversation history from observations if available
+    const observations = lastState?.issue?.previousTasksInfo?.agentState?.observations
+    if (Array.isArray(observations)) {
+      for (const obs of observations) {
+        // Assistant request part
+        if (obs.assistantRequest?.content) {
+          entries.push({
+            type: "assistant",
+            message: { role: "assistant", content: obs.assistantRequest.content },
+          })
+        }
+
+        // User response part
+        if (obs.userResponse?.parts) {
+          const content = obs.userResponse.parts.map((p: any) => p.text).join("")
+          if (content) {
+            entries.push({
+              type: "user",
+              message: { role: "user", content },
+            })
+          }
+        }
+      }
+    }
+
+    // Extract conversation history from lastSessionHistorySnapshot if available,
+    // otherwise fallback to blob.history or lastAgentState.history
+    const history =
+      lastState?.history ?? latestBlob?.history ?? latestBlob?.lastSessionHistorySnapshot?.history
+    if (Array.isArray(history)) {
+      for (const msg of history) {
+        if (msg.kind === "User") {
+          const content = msg.parts?.map((p: any) => p.text).join("")
+          if (content) {
+            entries.push({
+              type: "user",
+              message: { role: "user", content },
+            })
+          }
+        } else if (msg.kind === "Agent") {
+          const content: ContentBlock[] = []
+          for (const part of msg.parts ?? []) {
+            if (part.type === "text" && part.text) {
+              content.push({ type: "text", text: part.text })
+            } else if (part.type === "tool_call") {
+              content.push({
+                type: "tool_use",
+                id: part.id,
+                name: part.name,
+                input:
+                  typeof part.arguments === "string" ? JSON.parse(part.arguments) : part.arguments,
+              })
+            }
+          }
+          if (content.length > 0) {
+            entries.push({
+              type: "assistant",
+              message: { role: "assistant", content },
+            })
+          }
+        } else if (msg.kind === "ToolOutput") {
+          entries.push({
+            type: "user",
+            message: {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: msg.toolCallId,
+                  content: msg.output,
+                  is_error: msg.isError,
+                },
+              ],
+            },
+          })
+        }
+      }
+    }
+  }
+
+  // 2. Pass: Parse individual events to fill in current turn details
+  // and handle streaming thoughts/tool calls.
+  for (const line of lines) {
+    const parsed: any = tryParseJsonLine(line)
+    if (!parsed) continue
+
+    // Handle UserPromptEvent
+    if (parsed.kind === "UserPromptEvent" && parsed.prompt) {
+      entries.push({
+        type: "user",
+        timestamp: parsed.timestamp,
+        message: { role: "user", content: parsed.prompt },
+      })
+      continue
+    }
+
+    // Handle streamed Assistant content
+    if (parsed.event?.agentEvent) {
+      const agentEvent = parsed.event.agentEvent
+      const kind = agentEvent.kind
+      const stepId = agentEvent.stepId
+
+      // Avoid double-processing the same step ID in same session
+      if (stepId && processedStepIds.has(stepId)) {
+        // We only care about the latest state of a step
+        // But in JSONL, later events for same step override earlier ones.
+        // For simplicity, we'll collect them and only push when status is COMPLETED or CANCELED
+        // OR we just keep track of the latest text for each step and push at the end.
+      }
+
+      if (
+        (kind === "MarkdownBlockUpdatedEvent" || kind === "AgentThoughtBlockUpdatedEvent") &&
+        agentEvent.text
+      ) {
+        entries.push({
+          type: "assistant",
+          timestamp: parsed.timestamp,
+          message: { role: "assistant", content: agentEvent.text },
+        })
+      } else if (kind === "ToolBlockUpdatedEvent") {
+        const content: ContentBlock[] = []
+        if (agentEvent.text) {
+          content.push({ type: "text", text: agentEvent.text })
+        }
+        // If it's a tool call, we might want to represent it as tool_use
+        // but Junie events don't always have full tool_use structure here.
+        // We can at least show the text.
+        if (content.length > 0) {
+          entries.push({
+            type: "assistant",
+            timestamp: parsed.timestamp,
+            message: { role: "assistant", content },
+          })
+        }
+      } else if (kind === "ResultBlockUpdatedEvent" && agentEvent.output) {
+        entries.push({
+          type: "user",
+          timestamp: parsed.timestamp,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                content: agentEvent.output,
+              },
+            ],
+          },
+        })
+      }
+      continue
+    }
+
+    // Handle legacy/other formats
+    const result = junieEventSchema.safeParse(parsed)
+    if (!result.success) continue
+
+    const event = result.data
+    const payload = event.payload
+    const timestamp = event.timestamp
+    const cwd = event.cwd
+
+    if (payload.type === "user-prompt") {
+      entries.push({
+        type: "user",
+        timestamp,
+        cwd,
+        message: { role: "user", content: payload.content as string },
+      })
+    } else if (payload.type === "agent-response") {
+      // Map tool calls if present, else just text
+      const content: ContentBlock[] = []
+      if (typeof payload.content === "string") {
+        content.push({ type: "text", text: payload.content })
+      }
+      if (Array.isArray(payload.tool_calls)) {
+        for (const call of payload.tool_calls) {
+          content.push({
+            type: "tool_use",
+            id: call.id,
+            name: call.name,
+            input: call.input,
+          })
+        }
+      }
+      entries.push({
+        type: "assistant",
+        timestamp,
+        cwd,
+        message: { role: "assistant", content },
+      })
+    } else if (payload.type === "tool-output") {
+      // Tool results are usually attributed to "user" in Swiz transcript model
+      // so they appear as feedback to the assistant.
+      entries.push({
+        type: "user",
+        timestamp,
+        cwd,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: payload.tool_call_id,
+              content: payload.content,
+              is_error: payload.is_error,
+            },
+          ],
+        },
+      })
+    }
+  }
+  return entries
+}
+
+/**
+ * Schema for Junie's events.jsonl records.
+ */
+const junieEventSchema = z.looseObject({
+  type: z.literal("event"),
+  timestamp: z.string().optional(),
+  cwd: z.string().optional(),
+  payload: z.union([
+    z.looseObject({ type: z.literal("user-prompt"), content: z.string() }),
+    z.looseObject({
+      type: z.literal("agent-response"),
+      content: z.string().optional(),
+      tool_calls: z
+        .array(
+          z.looseObject({
+            id: z.string(),
+            name: z.string(),
+            input: z.record(z.string(), z.unknown()),
+          })
+        )
+        .optional(),
+    }),
+    z.looseObject({
+      type: z.literal("tool-output"),
+      tool_call_id: z.string(),
+      content: z.string(),
+      is_error: z.boolean().optional(),
+    }),
+    z.looseObject({ type: z.string() }), // Fallback for other event types
+  ]),
+})
+
 function extractCodexMessageText(content: unknown, textType: "input_text" | "output_text"): string {
   if (!Array.isArray(content)) return ""
   const texts = content

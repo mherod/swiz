@@ -98,7 +98,7 @@ export interface Session {
   id: string
   path: string
   mtime: number
-  provider?: "claude" | "gemini" | "cursor" | "antigravity" | "codex"
+  provider?: "claude" | "gemini" | "cursor" | "antigravity" | "codex" | "junie"
   format?:
     | "jsonl"
     | "gemini-json"
@@ -106,6 +106,7 @@ export interface Session {
     | "antigravity-pb"
     | "codex-jsonl"
     | "cursor-agent-jsonl"
+    | "junie-events"
 }
 
 export interface TranscriptResolution {

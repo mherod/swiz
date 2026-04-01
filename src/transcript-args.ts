@@ -151,7 +151,7 @@ export function validateTranscriptArgs(parsed: TranscriptArgs): void {
     throw new Error("`--all` cannot be combined with an explicit agent flag.")
   }
   if (parsed.explicitAgents.length > 1) {
-    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
+    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, --codex, or --junie.")
   }
   if (parsed.userOnly && parsed.includeDebug) {
     throw new Error("`--user-only` cannot be combined with `--include-debug`.")
@@ -191,7 +191,7 @@ export function validateProviders(
   if (providers.size === 0) {
     const agentLabel = selectedAgents[0]?.name ?? "selected agent"
     throw new Error(
-      `${agentLabel} transcript discovery is not supported yet.\nUse --all or --claude/--gemini/--codex.`
+      `${agentLabel} transcript discovery is not supported yet.\nUse --all or --claude/--gemini/--codex/--junie.`
     )
   }
 }
