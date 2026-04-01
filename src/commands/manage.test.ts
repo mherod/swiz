@@ -40,7 +40,7 @@ describe("parseManageArgs", () => {
   it("parses list defaults to all agents including claude-desktop", () => {
     const parsed = parseManageArgs(["mcp", "list"])
     expect(parsed.action).toBe("list")
-    expect(parsed.targetAgents).toEqual(["cursor", "claude", "claude-desktop", "gemini"])
+    expect(parsed.targetAgents).toEqual(["cursor", "claude", "claude-desktop", "gemini", "junie"])
   })
 
   it("parses --claude-desktop flag", () => {

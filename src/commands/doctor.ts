@@ -760,7 +760,7 @@ async function extractPathsFromSettingsFile(
 async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   const paths: string[] = []
   for (const agent of CONFIGURABLE_AGENTS) {
-    const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
+    const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex" | "junie"
     for (const settingsPath of getAgentSettingsSearchPaths(agentId)) {
       paths.push(...(await extractPathsFromSettingsFile(settingsPath, agent)))
     }

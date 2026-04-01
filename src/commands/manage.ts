@@ -7,7 +7,7 @@ import type { Command } from "../types.ts"
 
 type ManageSubject = "mcp"
 type ManageAction = "list" | "add" | "remove" | "validate" | "show"
-type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop"
+type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop" | "junie"
 type AgentScope = "global" | "project"
 
 interface McpServerDef {
@@ -72,6 +72,13 @@ const GLOBAL_AGENTS: AgentConfig[] = [
     displayName: "Gemini CLI",
     resolvePath: (home) => getAgentSettingsPath("gemini", home),
   },
+  {
+    id: "junie",
+    scope: "global",
+    flag: "--junie",
+    displayName: "Junie",
+    resolvePath: (home) => join(home, ".junie", "mcp", "mcp.json"),
+  },
 ]
 
 /** Project-level MCP config files, resolved relative to the project root (cwd). */
@@ -97,6 +104,13 @@ const PROJECT_AGENTS: AgentConfig[] = [
     displayName: "VS Code / Gemini (project)",
     resolvePath: (cwd) => join(cwd, ".vscode", "mcp.json"),
   },
+  {
+    id: "junie",
+    scope: "project",
+    flag: "--junie",
+    displayName: "Junie (project)",
+    resolvePath: (cwd) => join(cwd, ".junie", "mcp", "mcp.json"),
+  },
 ]
 
 /** Returns the appropriate agent list for the given scope. */
@@ -116,7 +130,7 @@ function usage(): string {
     "  swiz manage mcp remove figma --claude --cursor",
     "  swiz manage mcp validate",
     "  swiz manage mcp validate --project",
-    "Agent flags (optional): --cursor --claude --claude-desktop --gemini (default: all)",
+    "Agent flags (optional): --cursor --claude --claude-desktop --gemini --junie (default: all)",
     "Scope flags (optional): --project (target project-level files; default: global home files)",
   ].join("\n")
 }
@@ -438,13 +452,13 @@ export const manageCommand: Command = {
     { flags: "mcp remove <name>", description: "Remove an MCP server entry" },
     { flags: "mcp validate", description: "Validate MCP server configuration files" },
     {
-      flags: "--cursor --claude --claude-desktop --gemini",
+      flags: "--cursor --claude --claude-desktop --gemini --junie",
       description: "Limit action to selected agents",
     },
     {
       flags: "--project",
       description:
-        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json)",
+        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json, .junie/mcp/mcp.json)",
     },
   ],
   async run(args) {
