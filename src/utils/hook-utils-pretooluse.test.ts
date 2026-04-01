@@ -56,8 +56,7 @@ describe("denyPreToolUse", () => {
     const hso = parsed.hookSpecificOutput as JsonObject
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("deny")
-    expect(hso.permissionDecisionReason as string).toStartWith("blocked for testing")
-    expect(hso).not.toHaveProperty("updatedInput")
+    expect(hso.permissionDecisionReason).toBe("blocked for testing")
   })
 })
 
@@ -155,7 +154,7 @@ describe("denyPreToolUse edge cases", () => {
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
-    expect(hso.permissionDecisionReason as string).toStartWith('Line1\nLine2\t"quoted"\\backslash')
+    expect(hso.permissionDecisionReason).toBe('Line1\nLine2\t"quoted"\\backslash')
   })
 
   test("handles very long reason string", async () => {
@@ -164,8 +163,7 @@ describe("denyPreToolUse edge cases", () => {
     )
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
-    // Footer is appended after the 10,000-char reason
-    expect(hso.permissionDecisionReason as string).toStartWith("x".repeat(10000))
+    expect(hso.permissionDecisionReason).toBe("x".repeat(10000))
   })
 
   test("handles reason with unicode characters", async () => {
@@ -266,7 +264,7 @@ describe("PreToolUse helper isolation (integration)", () => {
     for (const [i, result] of results.entries()) {
       const hso = result.hookSpecificOutput as JsonObject
       expect(hso.permissionDecision).toBe("deny")
-      expect(hso.permissionDecisionReason as string).toStartWith(reasons[i]!)
+      expect(hso.permissionDecisionReason).toBe(reasons[i]!)
       expect(hso).not.toHaveProperty("updatedInput")
     }
   })

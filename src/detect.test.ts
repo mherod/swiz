@@ -77,10 +77,11 @@ describe("detect.ts", () => {
         // Set an arbitrary env var that isn't in any agent's envVars list
         process.env.FAKE_AGENT_VAR = "1"
         const agent = detectCurrentAgent()
-        // In Cursor, parent-process fallback can still identify Cursor even when
-        // no configured env var matches. The assertion here is specifically that
-        // FAKE_AGENT_VAR does not trigger any env-var based agent match.
-        expect(agent === null || agent.id === "cursor").toBe(true)
+        // In the test runner environment (especially if running in an agent),
+        // parent-process fallback can identify the agent even when no env var
+        // matches. The assertion here is that FAKE_AGENT_VAR does not itself
+        // trigger an env-var based match; the agent (if any) is from fallback.
+        expect(agent === null || ["cursor", "junie"].includes(agent.id)).toBe(true)
       })
     })
 

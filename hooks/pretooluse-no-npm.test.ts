@@ -11,38 +11,38 @@ function runHook(command: string, opts: { toolName?: string; cwd?: string } = {}
   return runBashHook(HOOK, command, opts)
 }
 
-// These tests run from the swiz project root which has bun.lock → PM=bun
+// These tests run from the swiz project root which has pnpm-lock.yaml → PM=pnpm
 
-describe("pretooluse-no-npm (bun project)", () => {
+describe("pretooluse-no-npm (pnpm project)", () => {
   describe("npm commands are blocked", () => {
     test("npm install is denied", async () => {
       const result = await runHook("npm install")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bun")
+      expect(result.reason).toContain("pnpm")
     })
 
     test("npm install <pkg> is denied", async () => {
       const result = await runHook("npm install lodash")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bun add")
+      expect(result.reason).toContain("pnpm add")
     })
 
     test("npm install -D is denied", async () => {
       const result = await runHook("npm install -D typescript")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bun add -D")
+      expect(result.reason).toContain("pnpm add -D")
     })
 
     test("npm run dev is denied", async () => {
       const result = await runHook("npm run dev")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bun run")
+      expect(result.reason).toContain("pnpm run")
     })
 
     test("npm test is denied", async () => {
       const result = await runHook("npm test")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bun test")
+      expect(result.reason).toContain("pnpm test")
     })
   })
 
@@ -50,7 +50,7 @@ describe("pretooluse-no-npm (bun project)", () => {
     test("npx some-tool is denied", async () => {
       const result = await runHook("npx some-tool")
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bunx")
+      expect(result.reason).toContain("pnpm dlx")
     })
 
     test("npx tsc is denied", async () => {
@@ -59,29 +59,29 @@ describe("pretooluse-no-npm (bun project)", () => {
     })
   })
 
-  describe("bun commands are allowed", () => {
-    test("bun install passes through", async () => {
-      const result = await runHook("bun install")
-      expect(result.decision).toBe("allow")
-    })
-
-    test("bunx passes through", async () => {
-      const result = await runHook("bunx tsc")
-      expect(result.decision).toBe("allow")
-    })
-
-    test("bun test passes through", async () => {
-      const result = await runHook("bun test")
-      expect(result.decision).toBe("allow")
-    })
-
-    test("bun run dev passes through", async () => {
-      const result = await runHook("bun run dev")
-      expect(result.decision).toBe("allow")
-    })
-
-    test("pnpm install also passes through (plausible alternative)", async () => {
+  describe("pnpm commands are allowed", () => {
+    test("pnpm install passes through", async () => {
       const result = await runHook("pnpm install")
+      expect(result.decision).toBe("allow")
+    })
+
+    test("pnpm dlx passes through", async () => {
+      const result = await runHook("pnpm dlx tsc")
+      expect(result.decision).toBe("allow")
+    })
+
+    test("pnpm test passes through", async () => {
+      const result = await runHook("pnpm test")
+      expect(result.decision).toBe("allow")
+    })
+
+    test("pnpm run dev passes through", async () => {
+      const result = await runHook("pnpm run dev")
+      expect(result.decision).toBe("allow")
+    })
+
+    test("bun install also passes through (plausible alternative)", async () => {
+      const result = await runHook("bun install")
       expect(result.decision).toBe("allow")
     })
   })
