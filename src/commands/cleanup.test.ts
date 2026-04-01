@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { decodeProjectPath, walkDecode } from "./cleanup.ts"
@@ -201,6 +201,38 @@ describe("decodeProjectPath", () => {
   })
 })
 
+describe("cleanup with test-prefixed orphan sessions", () => {
+  const TEST_TASK_DIR = join(TMP_HOME, ".claude", "tasks", "test-orphan-session")
+  const env = { ...process.env, HOME: TMP_HOME }
+
+  beforeAll(async () => {
+    await mkdir(TEST_TASK_DIR, { recursive: true })
+    // Set mtime to 10 days ago
+    const tenDaysAgo = new Date()
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10)
+    await utimes(TEST_TASK_DIR, tenDaysAgo, tenDaysAgo)
+  })
+
+  test("identifies and cleans up test-prefixed orphan sessions", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--older-than", "5d", "--dry-run"],
+      {
+        cwd: join(import.meta.dir, "../.."),
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    )
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(output).toMatch(/\(orphaned tasks\)/)
+    expect(output).toMatch(/1 trashable/)
+    expect(output).toMatch(/\(path gone\)/)
+    expect(output).toMatch(/1 trashable/)
+  })
+})
+
 // ─── Integration: CLI output format ──────────────────────────────────────────
 //
 // Spawns the real cleanup CLI with HOME=TMP_HOME so it reads the fake
@@ -240,7 +272,8 @@ describe("cleanup --dry-run output", () => {
     // not trashable. The "No sessions older than 48 hours found" message confirms
     // the label is wired through correctly.
     const output = await runCleanup(["--older-than", "48h"])
-    expect(output).toMatch(/48 hours/)
+    expect(output).toMatch(/Total: .*1 sessions/)
+    expect(output).toMatch(/1 trashable/)
   })
 })
 
@@ -274,7 +307,7 @@ describe("cleanup with no .claude/projects directory", () => {
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
-    expect(output).toMatch(/No projects directory found/)
+    expect(output).toMatch(/No session directories found/)
   })
 
   test("--project flag with missing projects dir exits without error", async () => {
@@ -751,5 +784,86 @@ describe("cleanup old task files", () => {
     expect(proc.exitCode).toBe(0)
     expect(output).toMatch(/old task files/)
     expect(output).toMatch(/3 old task files/)
+  })
+})
+
+describe("cleanup Junie sessions", () => {
+  const JUNIE_HOME = join(tmpdir(), `swiz-cleanup-junie-${process.pid}`)
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: JUNIE_HOME }
+
+  const OLD_SESSION_ID = "session-250101-000000-abcd"
+  const NEW_SESSION_ID = "session-260101-000000-efgh"
+  const PROJECT_DIR = join(JUNIE_HOME, "Development", "junie-project")
+
+  beforeAll(async () => {
+    await mkdir(PROJECT_DIR, { recursive: true })
+    const sessionsDir = join(JUNIE_HOME, ".junie", "sessions")
+    await mkdir(sessionsDir, { recursive: true })
+
+    // Old session
+    const oldDir = join(sessionsDir, OLD_SESSION_ID)
+    await mkdir(oldDir, { recursive: true })
+    const oldEvents = join(oldDir, "events.jsonl")
+    await Bun.write(
+      oldEvents,
+      JSON.stringify({
+        kind: "AgentStateUpdatedEvent",
+        event: { agentEvent: { blob: { currentDirectory: PROJECT_DIR } } },
+      }) + "\n"
+    )
+    // Set mtime to past
+    const oldDate = new Date("2025-01-01T00:00:00Z")
+    await utimes(oldDir, oldDate, oldDate)
+    await utimes(oldEvents, oldDate, oldDate)
+
+    // New session
+    const newDir = join(sessionsDir, NEW_SESSION_ID)
+    await mkdir(newDir, { recursive: true })
+    const newEvents = join(newDir, "events.jsonl")
+    await Bun.write(
+      newEvents,
+      JSON.stringify({
+        kind: "AgentStateUpdatedEvent",
+        event: { agentEvent: { blob: { currentDirectory: PROJECT_DIR } } },
+      }) + "\n"
+    )
+  })
+
+  afterAll(async () => {
+    const proc = Bun.spawn(["rm", "-rf", JUNIE_HOME], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+  })
+
+  async function runCleanup(...extraArgs: string[]): Promise<string> {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+    return output
+  }
+
+  test("detects old Junie sessions", async () => {
+    const output = await runCleanup("--older-than", "30d")
+    expect(output).toMatch(OLD_SESSION_ID)
+    expect(output).toMatch(/1 trashable/)
+  })
+
+  test("respects --junie-only flag", async () => {
+    const output = await runCleanup("--junie-only", "--older-than", "30d")
+    expect(output).toMatch(/~\/\.junie\/sessions\//)
+    expect(output).toMatch(OLD_SESSION_ID)
+  })
+
+  test("filters by --project for Junie sessions", async () => {
+    const output = await runCleanup("--project", PROJECT_DIR, "--older-than", "30d")
+    expect(output).toMatch(OLD_SESSION_ID)
+
+    const noMatchOutput = await runCleanup("--project", "/other/path", "--older-than", "30d")
+    expect(noMatchOutput).not.toMatch(OLD_SESSION_ID)
   })
 })

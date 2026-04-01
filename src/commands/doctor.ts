@@ -1,3 +1,4 @@
+import type { Dirent, Stats } from "node:fs"
 import { chmod, cp, mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
@@ -1646,10 +1647,6 @@ async function runDoctorChecks(args: string[]): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const CLEANUP_HOME = getHomeDir()
-const CLAUDE_DIR = join(CLEANUP_HOME, ".claude")
-const GEMINI_DIR = join(CLEANUP_HOME, ".gemini")
-const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
-const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
 const DAEMON_LABEL = SWIZ_DAEMON_LABEL
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
@@ -1724,6 +1721,10 @@ export async function decodeProjectPath(
 
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// Also match test-prefixed session IDs from recovery tests
+const ORPHAN_SESSION_ID_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|test-.*|unknown-.*)$/i
+const JUNIE_SESSION_ID_RE = /^(session-\d{6}-\d{6}-[0-9a-z]{4}|test-.*)$/i
 
 // ─── Cleanup helpers ─────────────────────────────────────────────────────────
 
@@ -1795,20 +1796,20 @@ async function addBackupFile(
   }
 }
 
-async function findClaudeBackups(): Promise<ClaudeBackupInfo> {
+async function findClaudeBackups(claudeDir: string): Promise<ClaudeBackupInfo> {
   const backup: ClaudeBackupInfo = { files: [], sizeBytes: 0, fileCount: 0 }
 
   try {
-    const entries = await readdir(CLAUDE_DIR, { withFileTypes: true })
+    const entries = await readdir(claudeDir, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isFile()) continue
       const name = entry.name
       if (name === "settings.json.backup" || name.startsWith("settings.json.bak")) {
-        await addBackupFile(join(CLAUDE_DIR, name), backup)
+        await addBackupFile(join(claudeDir, name), backup)
       }
     }
   } catch {
-    // ~/.claude doesn't exist or is unreadable
+    // claudeDir doesn't exist or is unreadable
   }
 
   return backup
@@ -1845,14 +1846,17 @@ async function collectBakFiles(
   }
 }
 
-async function findGeminiBackups(): Promise<GeminiBackupInfo> {
+async function findGeminiBackups(homeDir: string): Promise<GeminiBackupInfo> {
+  const geminiDir = join(homeDir, ".gemini")
+  const geminiSettingsBak = join(geminiDir, "settings.json.bak")
+  const geminiTmpDir = join(geminiDir, "tmp")
   const backup: GeminiBackupInfo = { files: [], sizeBytes: 0, fileCount: 0 }
 
   // Check for settings.json.bak
-  await addBackupFile(GEMINI_SETTINGS_BAK, backup)
+  await addBackupFile(geminiSettingsBak, backup)
 
   // Check for *.bak files in ~/.gemini/tmp/**
-  await collectBakFiles(GEMINI_TMP_DIR, backup, true)
+  await collectBakFiles(geminiTmpDir, backup, true)
 
   return backup
 }
@@ -2034,7 +2038,17 @@ async function trashSession(
       else failed++
     }
   }
-  const taskRemoved = !!(session.taskDirPath && (await trashDir(session.taskDirPath)))
+  let taskRemoved = false
+  if (session.taskDirPath) {
+    if (await trashDir(session.taskDirPath)) {
+      taskRemoved = true
+    } else {
+      failed++
+      // If we failed to trash the only thing we have (orphaned task),
+      // the whole session trashing failed.
+      if (session.paths.length === 0) sessionPartSucceeded = false
+    }
+  }
   return { succeeded: sessionPartSucceeded ? 1 : 0, failed, taskRemoved }
 }
 
@@ -2088,6 +2102,75 @@ async function resolveTaskDirInfo(
   return { taskDirPath: null, taskDirSizeBytes: 0 }
 }
 
+async function findJunieProjectSessions(
+  junieSessionsDir: string,
+  cutoffMs: number,
+  projectFilter: string | undefined
+): Promise<ProjectResult[]> {
+  const results: ProjectResult[] = []
+  let entries: Dirent[]
+  try {
+    entries = await readdir(junieSessionsDir, { withFileTypes: true })
+  } catch {
+    return results
+  }
+
+  const sessionDirs = entries
+    .filter((e) => e.isDirectory() && JUNIE_SESSION_ID_RE.test(e.name))
+    .map((e) => e.name)
+
+  for (const sessionId of sessionDirs) {
+    const sessionPath = join(junieSessionsDir, sessionId)
+    const eventsPath = join(sessionPath, "events.jsonl")
+    let s: Stats
+    try {
+      s = await stat(sessionPath)
+    } catch {
+      continue
+    }
+
+    // Determine if this session belongs to the filtered project
+    if (projectFilter) {
+      const projectKey = projectKeyFromCwd(projectFilter)
+      const lines = await readLines(eventsPath, 20)
+      let matches = false
+      for (const line of lines) {
+        if (line.includes(`"currentDirectory":"${projectFilter}"`) || line.includes(projectKey)) {
+          matches = true
+          break
+        }
+      }
+      if (!matches) continue
+    }
+
+    const info: SessionInfo = {
+      sessionId,
+      paths: [sessionPath],
+      mtimeMs: s.mtimeMs,
+      sizeBytes: await dirSize(sessionPath),
+      taskDirPath: null,
+      taskDirSizeBytes: 0,
+    }
+
+    const { keep, old } = partitionByCutoff([info], cutoffMs)
+    if (keep.length > 0 || old.length > 0) {
+      results.push({ name: sessionId, keep, old, stale: false })
+    }
+  }
+
+  return results
+}
+
+async function readLines(path: string, count: number): Promise<string[]> {
+  try {
+    const file = Bun.file(path)
+    const text = await file.text()
+    return text.split("\n").slice(0, count)
+  } catch {
+    return []
+  }
+}
+
 async function findSessions(
   projectDir: string,
   cutoffMs: number,
@@ -2135,6 +2218,7 @@ export interface CleanupArgs {
   taskOlderThanLabel: string | null
   dryRun: boolean
   projectFilter: string | undefined
+  junieOnly?: boolean
 }
 
 /** Parse a time value like "7", "7d", or "48h" into milliseconds + display label. */
@@ -2159,6 +2243,7 @@ interface CleanupFlagState {
   taskOlderThan: { ms: number; label: string } | null
   dryRun: boolean
   projectFilter: string | undefined
+  junieOnly: boolean
 }
 
 function consumeCleanupFlag(
@@ -2168,6 +2253,10 @@ function consumeCleanupFlag(
 ): boolean {
   if (arg === "--dry-run") {
     state.dryRun = true
+    return false
+  }
+  if (arg === "--junie-only") {
+    state.junieOnly = true
     return false
   }
   if (arg === "--older-than" && next) {
@@ -2191,6 +2280,7 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     taskOlderThan: null as { ms: number; label: string } | null,
     dryRun: false,
     projectFilter: undefined as string | undefined,
+    junieOnly: false,
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -2206,6 +2296,7 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     taskOlderThanLabel: state.taskOlderThan?.label ?? null,
     dryRun: state.dryRun,
     projectFilter: state.projectFilter,
+    junieOnly: state.junieOnly,
   }
 }
 
@@ -2231,11 +2322,10 @@ async function discoverProjectNames(
       .filter((name) => !projectFilter || name === projectFilter)
       .sort()
   } catch {
-    console.log(`No projects directory found at ${projectsDir}`)
     return null
   }
   if (projectFilter && projectNames.length === 0) {
-    throw new Error(`Project "${projectFilter}" not found in ${projectsDir}`)
+    return null
   }
   return projectNames
 }
@@ -2280,6 +2370,35 @@ function collectSessionIds(results: ProjectResult[]): Set<string> {
   return ids
 }
 
+async function getRealSessionMtime(taskDirPath: string): Promise<number | null> {
+  let taskEntries: string[] = []
+  try {
+    taskEntries = await readdir(taskDirPath)
+  } catch {
+    return null
+  }
+
+  let maxMs = 0
+  for (const file of taskEntries) {
+    if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json")
+      continue
+    const p = join(taskDirPath, file)
+    try {
+      const s = await stat(p)
+      let taskMs = s.mtimeMs
+      try {
+        const taskJson = JSON.parse(await readFile(p, "utf-8"))
+        const parsedMs = parseTaskAgeMs(taskJson)
+        if (parsedMs !== null) taskMs = parsedMs
+      } catch {
+        /* invalid JSON — stick to file mtime */
+      }
+      if (taskMs > maxMs) maxMs = taskMs
+    } catch {}
+  }
+  return maxMs > 0 ? maxMs : null
+}
+
 async function appendOrphanTasks(
   results: ProjectResult[],
   tasksDir: string,
@@ -2293,15 +2412,18 @@ async function appendOrphanTasks(
 
   const orphans: SessionInfo[] = []
   for (const entry of taskEntries) {
-    if (!UUID_RE.test(entry) || allKnownSessionIds.has(entry)) continue
+    if (!ORPHAN_SESSION_ID_RE.test(entry) || allKnownSessionIds.has(entry)) continue
     const taskDirPath = join(tasksDir, entry)
     try {
       const s = await stat(taskDirPath)
       if (!s.isDirectory()) continue
+
+      const realMtimeMs = (await getRealSessionMtime(taskDirPath)) ?? s.mtimeMs
+
       orphans.push({
         sessionId: entry,
         paths: [],
-        mtimeMs: s.mtimeMs,
+        mtimeMs: realMtimeMs,
         sizeBytes: 0,
         taskDirPath,
         taskDirSizeBytes: await dirSize(taskDirPath),
@@ -2358,16 +2480,25 @@ interface ProjectTotals {
   totalOldTaskDirs: number
 }
 
-async function printProjectTable(results: ProjectResult[]): Promise<ProjectTotals> {
+async function printProjectTable(
+  results: ProjectResult[],
+  junieOnly = false
+): Promise<ProjectTotals> {
   const decodedNames = await Promise.all(
     results.map((r) =>
-      r.name.startsWith("(") ? Promise.resolve(r.name) : decodeProjectPath(r.name)
+      r.name.startsWith("(") || UUID_RE.test(r.name) || JUNIE_SESSION_ID_RE.test(r.name)
+        ? Promise.resolve(r.name)
+        : decodeProjectPath(r.name)
     )
   )
   const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
   console.log()
-  console.log(`  ${BOLD}~/.claude/projects/${RESET}`)
+  if (junieOnly) {
+    console.log(`  ${BOLD}~/.junie/sessions/${RESET}`)
+  } else {
+    console.log(`  ${BOLD}Agent Sessions${RESET}`)
+  }
 
   let totalOldCount = 0
   let totalOldBytes = 0
@@ -2451,7 +2582,7 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
     cleanupArgs,
   } = opts
 
-  const totals = await printProjectTable(results)
+  const totals = await printProjectTable(results, cleanupArgs.junieOnly)
 
   console.log()
   printBackupSection("claude", claudeBackups)
@@ -2617,15 +2748,41 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
 // ─── Cleanup runner ─────────────────────────────────────────────────────────
 
 async function gatherCleanupData(cleanupArgs: ReturnType<typeof parseCleanupArgs>) {
-  const { projectsDir, tasksDir } = createDefaultTaskStore()
+  const homeDir = getHomeDir()
+  const claudeDir = join(homeDir, ".claude")
+  const projectsDir = join(claudeDir, "projects")
+  const tasksDir = join(claudeDir, "tasks")
+  const junieSessionsDir = join(homeDir, ".junie", "sessions")
+
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
-  const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
-  if (!projectNames) return null
+  let results: ProjectResult[] = []
 
-  const results = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
-  await markStaleProjects(results)
+  if (!cleanupArgs.junieOnly) {
+    const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
+    if (projectNames) {
+      const claudeResults = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
+      await markStaleProjects(claudeResults)
+      results = results.concat(claudeResults)
+    } else if (cleanupArgs.projectFilter) {
+      // If project filter was specified but no Claude project found,
+      // it's still possible it's a Junie project, so we don't return early.
+    } else {
+      // No Claude projects directory found, still scan Junie.
+    }
+  }
+
+  const junieResults = await findJunieProjectSessions(
+    junieSessionsDir,
+    cutoffMs,
+    cleanupArgs.projectFilter
+  )
+  results = results.concat(junieResults)
+
+  if (results.length === 0 && !cleanupArgs.junieOnly) {
+    // If no explicit results yet, we might still have orphans or backups
+  }
 
   const scopedSessionIds = collectSessionIds(results)
   const oldTaskFiles =
@@ -2638,13 +2795,13 @@ async function gatherCleanupData(cleanupArgs: ReturnType<typeof parseCleanupArgs
         )
   const oldTaskBytes = oldTaskFiles.reduce((sum, task) => sum + task.sizeBytes, 0)
 
-  if (!cleanupArgs.projectFilter) {
+  if (!cleanupArgs.projectFilter && !cleanupArgs.junieOnly) {
     await appendOrphanTasks(results, tasksDir, cutoffMs)
   }
 
   const [claudeBackups, geminiBackups] = await Promise.all([
-    findClaudeBackups(),
-    findGeminiBackups(),
+    findClaudeBackups(claudeDir),
+    findGeminiBackups(homeDir),
   ])
   return { results, oldTaskFiles, oldTaskBytes, taskCutoffMs, claudeBackups, geminiBackups }
 }
@@ -2656,8 +2813,10 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
   const { results, claudeBackups, geminiBackups, oldTaskFiles, oldTaskBytes, taskCutoffMs } = data
 
   if (results.length === 0 && claudeBackups.fileCount === 0 && geminiBackups.fileCount === 0) {
-    console.log(`No session directories found (older than ${cleanupArgs.olderThanLabel}).`)
-    console.log(`No Claude or Gemini backup artifacts found.`)
+    if (!cleanupArgs.projectFilter) {
+      console.log(`No session directories found (older than ${cleanupArgs.olderThanLabel}).`)
+      console.log(`No Claude or Gemini backup artifacts found.`)
+    }
     return
   }
 
@@ -2700,7 +2859,7 @@ export const doctorCommand: Command = {
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
     {
       flags: "cleanup",
-      description: "Remove old Claude Code session data and Gemini backup artifacts",
+      description: "Remove old Claude Code/Junie session data and Gemini backup artifacts",
     },
   ],
   async run(args) {
