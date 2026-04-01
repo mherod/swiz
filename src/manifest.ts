@@ -392,11 +392,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preCompact",
-    hooks: [
-      { hook: precompactTaskSnapshot },
-      { hook: precompactSpeak },
-      { hook: posttooluseSpeakNarrator },
-    ],
+    hooks: [{ hook: precompactTaskSnapshot }, { hook: precompactSpeak }],
   },
   {
     event: "userPromptSubmit",
@@ -409,7 +405,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "notification",
-    hooks: [],
+    hooks: [{ hook: posttooluseSpeakNarrator }],
   },
   {
     event: "subagentStart",

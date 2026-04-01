@@ -807,10 +807,10 @@ describe("cleanup Junie sessions", () => {
     const oldEvents = join(oldDir, "events.jsonl")
     await Bun.write(
       oldEvents,
-      JSON.stringify({
+      `${JSON.stringify({
         kind: "AgentStateUpdatedEvent",
         event: { agentEvent: { blob: { currentDirectory: PROJECT_DIR } } },
-      }) + "\n"
+      })}\n`
     )
     // Set mtime to past
     const oldDate = new Date("2025-01-01T00:00:00Z")
@@ -823,10 +823,10 @@ describe("cleanup Junie sessions", () => {
     const newEvents = join(newDir, "events.jsonl")
     await Bun.write(
       newEvents,
-      JSON.stringify({
+      `${JSON.stringify({
         kind: "AgentStateUpdatedEvent",
         event: { agentEvent: { blob: { currentDirectory: PROJECT_DIR } } },
-      }) + "\n"
+      })}\n`
     )
   })
 

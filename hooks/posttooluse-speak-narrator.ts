@@ -10,61 +10,7 @@
 
 import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
-import { spawnSpeak } from "../src/speech.ts"
-import { speakLockPath, speakPositionPath } from "../src/temp-paths.ts"
-
-const LOCK_STALE_MS = 30_000
-const HEARTBEAT_MS = 5_000
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function clearStaleLock(lockFile: string): Promise<void> {
-  try {
-    const content = (await Bun.file(lockFile).text()).trim()
-    const ownerPid = parseInt(content, 10)
-    const stats = await Bun.file(lockFile).stat()
-    const age = Date.now() - stats.mtime.getTime()
-    if (!Number.isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
-    await Bun.file(lockFile).delete()
-  } catch {
-    // Lock doesn't exist or can't be read — nothing to clear
-  }
-}
-
-async function acquireLock(lockFile: string, timeoutMs = 10_000): Promise<boolean> {
-  await clearStaleLock(lockFile)
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    if (!(await Bun.file(lockFile).exists())) {
-      try {
-        await Bun.write(lockFile, String(process.pid))
-        const owner = (await Bun.file(lockFile).text()).trim()
-        if (owner === String(process.pid)) return true
-      } catch {
-        // Another process grabbed it — retry
-      }
-    }
-    await clearStaleLock(lockFile)
-    await Bun.sleep(200)
-  }
-  return false
-}
-
-async function heartbeat(lockFile: string): Promise<void> {
-  try {
-    await Bun.write(lockFile, String(process.pid))
-  } catch {
-    // Lock was removed — heartbeat no longer needed
-  }
-}
+import { narrateSession } from "../src/speech.ts"
 
 export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
@@ -72,77 +18,14 @@ export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<
   const record = input as Record<string, any>
   const transcriptPath: string = (record.transcript_path as string) ?? ""
   const sessionId: string = (record.session_id as string) ?? ""
+  const message: string | undefined = record.message as string | undefined
 
-  const rawSettings = await readSwizSettings()
-  const settings = getEffectiveSwizSettings(rawSettings, sessionId || null)
-  if (!settings.speak) return {}
-
-  if (!transcriptPath || !sessionId || !(await Bun.file(transcriptPath).exists())) return {}
-
-  const lockFile = speakLockPath(sessionId)
-  await clearStaleLock(lockFile)
-
-  const posFile = speakPositionPath(sessionId)
-  let lastPos = 0
-  try {
-    if (await Bun.file(posFile).exists()) {
-      lastPos = parseInt((await Bun.file(posFile).text()).trim(), 10) || 0
-    }
-  } catch {
-    // Corrupted pos file — start from 0
-  }
-
-  const lines = (await Bun.file(transcriptPath).text()).split("\n").filter(Boolean)
-  const totalLines = lines.length
-
-  if (totalLines <= lastPos) return {}
-
-  const newLines = lines.slice(lastPos)
-  const texts: string[] = []
-
-  for (const line of newLines) {
-    try {
-      const entry = JSON.parse(line) as {
-        type?: string
-        message?: { content?: Array<{ type?: string; text?: string }> }
-      }
-      if (entry.type !== "assistant") continue
-      for (const block of entry.message?.content ?? []) {
-        if (block.type === "text" && block.text) {
-          texts.push(block.text)
-        }
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  await Bun.write(posFile, String(totalLines))
-
-  const newText = texts.join(" ").replace(/\s+/g, " ").trim()
-
-  if (newText.length < 5) return {}
-
-  const truncated = newText.slice(0, 500)
-
-  if (!(await acquireLock(lockFile))) return {}
-
-  const heartbeatInterval = setInterval(() => {
-    heartbeat(lockFile).catch(() => {
-      // Ignore heartbeat failures; lock cleanup in finally block
-    })
-  }, HEARTBEAT_MS)
-
-  try {
-    await spawnSpeak(truncated, settings)
-  } finally {
-    clearInterval(heartbeatInterval)
-    try {
-      await Bun.file(lockFile).delete()
-    } catch {
-      // Lock already cleared
-    }
-  }
+  await narrateSession({
+    sessionId,
+    transcriptPath,
+    message,
+    cooldownSeconds: 0, // In-session narration is already discrete; always attempt
+  })
 
   return {}
 }

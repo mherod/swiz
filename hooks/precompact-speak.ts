@@ -6,20 +6,24 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { runSwizHookAsMain, type SwizSessionHook } from "../src/SwizHook.ts"
-import type { EffectiveSwizSettings } from "../src/settings"
-import { spawnSpeak } from "../src/speech.ts"
+import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import type { SwizSessionHook } from "../src/SwizHook.ts"
+import { narrateSession } from "../src/speech.ts"
 
 const precompactSpeak: SwizSessionHook = {
   name: "precompact-speak",
   event: "preCompact",
-  timeout: 10,
+  timeout: 30,
 
   async run(input) {
-    const settings = input._effectiveSettings as unknown as EffectiveSwizSettings | undefined
-    if (!settings?.speak) return {}
-
-    await spawnSpeak("Just a moment while I gather my thoughts", settings)
+    const transcriptPath: string = (input.transcript_path as string) ?? ""
+    const sessionId: string = (input.session_id as string) ?? ""
+    await narrateSession({
+      sessionId,
+      transcriptPath,
+      message: "Just a moment while I gather my thoughts",
+      cooldownSeconds: 0, // Compaction is a discrete event; always speak if requested
+    })
     return {}
   },
 }

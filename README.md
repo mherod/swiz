@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**109 hooks. 12 event types. Every agent. Zero compromises.**
+**110 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -86,7 +86,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 95 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
+The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
 ### Stop (25)
 
@@ -233,6 +233,14 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `userpromptsubmit-skill-steps.ts` | When the user's message starts with a `/skill-name` invocation, extracts steps from the skill's SKILL.md and creates pending tasks. Renders content before extraction and applies quality filtering. |
 | `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
+
+### Notification (1)
+
+Notification hooks are triggered by the daemon when it detects events such as new assistant messages in watched sessions.
+
+| Hook | What it does |
+|------|-------------|
+| `notification-speak.ts` | Speaks daemon-detected assistant messages via platform-native TTS when `speak` is enabled. Triggered by the daemon's monitoring loop; fire-and-forget so it never blocks the notification path. |
 
 ## Plugin Marketplace
 

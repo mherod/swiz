@@ -40,6 +40,10 @@ export function speakPositionPath(sessionId: string): string {
   return `${TMP_ROOT}/speak-pos-${sessionId}.txt`
 }
 
+export function speakCooldownPath(sessionId: string): string {
+  return `${TMP_ROOT}/speak-cooldown-${sessionId}.timestamp`
+}
+
 export function sessionTaskSentinelPath(safeSentinel: string, safeSession: string): string {
   return `${TMP_ROOT}/${safeSentinel}-${safeSession}.flag`
 }

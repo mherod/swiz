@@ -308,7 +308,7 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
                 ? JSON.parse(agentEvent.input)
                 : (agentEvent.input ?? {}),
           })
-        } else if (agentEvent.text && agentEvent.text.startsWith("Found ")) {
+        } else if (agentEvent.text?.startsWith("Found ")) {
           content.push({
             type: "tool_use",
             id: agentEvent.callId || agentEvent.stepId || "unknown",
