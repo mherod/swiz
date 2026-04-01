@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { LRUCache } from "lru-cache"
 import { CiWatchRegistry, verifyWebhookSignature } from "./daemon/ci-watch-registry.ts"
 import {
   CooldownRegistry,
@@ -18,6 +19,134 @@ import {
 } from "./daemon/runtime-cache.ts"
 import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
+
+describe("snapshot resolver .finally() cleanup", () => {
+  it("cleans up inFlight map after successful snapshot computation", async () => {
+    // Reconstruct the buildSnapshotResolver logic to test .finally() cleanup
+    const snapshots: LRUCache<string, object> = new LRUCache({ max: 10 })
+    const inFlight = new Map<string, Promise<object>>()
+
+    // Mock computeWarmStatusLineSnapshot
+    let computeCount = 0
+    const mockCompute = async (_cwd: string, _sessionId?: string) => {
+      computeCount += 1
+      return {
+        shortCwd: "/test",
+        gitInfo: "main",
+        gitBranch: "main",
+        activeSegments: [],
+        issueCount: null,
+        prCount: null,
+      }
+    }
+
+    // NOT async — returns the promise directly without wrapping
+    const resolver = (cwd: string, sessionId?: string): Promise<object> => {
+      const inflight = inFlight.get(cwd)
+      if (inflight) return inflight
+
+      const computation = mockCompute(cwd, sessionId)
+        .then((snapshot) => {
+          snapshots.set(`${cwd}\x00${sessionId ?? ""}`, snapshot)
+          return snapshot
+        })
+        .finally(() => {
+          inFlight.delete(cwd)
+        })
+      inFlight.set(cwd, computation)
+      return computation
+    }
+
+    // First call: adds to inFlight
+    const p1 = resolver("/cwd", "sess1")
+
+    // Concurrent call should coalesce
+    const p2 = resolver("/cwd", "sess1")
+    expect(p1).toBe(p2)
+    expect(inFlight.has("/cwd")).toBeTrue()
+
+    // Wait for computation
+    await p1
+    expect(computeCount).toBe(1)
+
+    // After completion, inFlight should be cleared by .finally()
+    expect(inFlight.has("/cwd")).toBeFalse()
+
+    // Second resolver call should trigger new computation (no coalescing)
+    const p3 = resolver("/cwd", "sess1")
+    expect(p3).not.toBe(p1)
+    expect(inFlight.has("/cwd")).toBeTrue()
+
+    await p3
+    expect(computeCount).toBe(2)
+    expect(inFlight.has("/cwd")).toBeFalse()
+  })
+
+  it("cleans up inFlight map after rejected snapshot computation", async () => {
+    const snapshots: LRUCache<string, object> = new LRUCache({ max: 10 })
+    const inFlight = new Map<string, Promise<object>>()
+
+    let computeCount = 0
+    const testError = new Error("test failure")
+    const mockCompute = async (_cwd: string, _sessionId?: string) => {
+      computeCount += 1
+      throw testError
+    }
+
+    // NOT async — returns the promise directly without wrapping
+    const resolver = (cwd: string, sessionId?: string): Promise<object> => {
+      const inflight = inFlight.get(cwd)
+      if (inflight) return inflight
+
+      const computation = mockCompute(cwd, sessionId)
+        .then((snapshot) => {
+          snapshots.set(`${cwd}\x00${sessionId ?? ""}`, snapshot)
+          return snapshot
+        })
+        .catch((err) => {
+          // Re-throw after .finally() runs to ensure inFlight cleanup happens
+          throw err
+        })
+        .finally(() => {
+          inFlight.delete(cwd)
+        })
+      inFlight.set(cwd, computation)
+      return computation
+    }
+
+    // First call: adds to inFlight
+    const p1 = resolver("/cwd", "sess1")
+
+    // Concurrent call should coalesce on same (rejected) promise
+    const p2 = resolver("/cwd", "sess1")
+    expect(p1).toBe(p2)
+    expect(inFlight.has("/cwd")).toBeTrue()
+
+    // Wait for rejection
+    try {
+      await p1
+    } catch (e) {
+      expect(e).toBe(testError)
+    }
+    expect(computeCount).toBe(1)
+
+    // After rejection, .finally() should still clean up inFlight
+    expect(inFlight.has("/cwd")).toBeFalse()
+
+    // Second resolver call should trigger new computation (no coalescing)
+    const p3 = resolver("/cwd", "sess1")
+    expect(p3).not.toBe(p1)
+    expect(inFlight.has("/cwd")).toBeTrue()
+
+    try {
+      await p3
+    } catch (e) {
+      expect(e).toBe(testError)
+    }
+    expect(computeCount).toBe(2)
+    expect(inFlight.has("/cwd")).toBeFalse()
+  })
+})
 
 describe("hasSnapshotInvalidated", () => {
   const base = {
