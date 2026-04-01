@@ -5,6 +5,7 @@
 // fire-and-forget (default) vs block-until-complete (sync pipeline). See SwizHookMeta.
 
 import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
+import notificationSpeak from "../hooks/notification-speak.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
@@ -426,6 +427,11 @@ export const manifest: HookGroup[] = [
     event: "prPoll",
     scheduled: true,
     hooks: [{ hook: prpollNotify }],
+  },
+  {
+    event: "notification",
+    scheduled: true,
+    hooks: [{ hook: notificationSpeak }],
   },
   {
     event: "preCommit",

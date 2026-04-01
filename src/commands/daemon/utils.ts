@@ -46,6 +46,10 @@ export function transcriptWatchPathsForProject(cwd: string): TranscriptWatchPath
       path: join(home, ".codex", "sessions", "/"),
       label: `transcripts:codex:${cwd}`,
     },
+    {
+      path: join(home, ".junie", "sessions", "/"),
+      label: `transcripts:junie:${cwd}`,
+    },
   ]
 }
 

@@ -53,7 +53,7 @@ async function denyIfLastTaskStanding(
   const allTasks = await readSessionTasks(sessionId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
-    return preToolUseDeny(buildLastTaskStandingDenial(taskId))
+    return await preToolUseDeny(buildLastTaskStandingDenial(taskId))
   }
   return null
 }
@@ -73,7 +73,7 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
   ) {
     return preToolUseAllow(SWIZ_TASKS_CLI_DENY_MESSAGE)
   }
-  return preToolUseDeny(SWIZ_TASKS_CLI_DENY_MESSAGE)
+  return await preToolUseDeny(SWIZ_TASKS_CLI_DENY_MESSAGE)
 }
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"

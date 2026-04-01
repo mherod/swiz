@@ -39,6 +39,10 @@ interface CachedSessionData {
   toolStats: Array<{ name: string; count: number }>
   fallbackTimestamps: Map<string, string>
   lastAssignedFallbackMs: number
+  /** Fingerprint of the last tool call detected in this session. */
+  lastToolCallFingerprint?: string
+  /** Fingerprint of the last assistant message text detected in this session. */
+  lastMessageFingerprint?: string
 }
 
 export interface SessionPreview {
@@ -70,7 +74,13 @@ class SessionDataCache {
     prev?: CachedSessionData
   ): CachedSessionData {
     const extraction = SessionDataCache.extractMessages(entries)
-    const { messages, toolCounts, pendingFallback } = extraction
+    const {
+      messages,
+      toolCounts,
+      pendingFallback,
+      lastToolCallFingerprint,
+      lastMessageFingerprint,
+    } = extraction
     let { startedAt, lastMessageAt } = extraction
 
     const fallbackTimestamps = new Map<string, string>()
@@ -101,6 +111,8 @@ class SessionDataCache {
       toolStats,
       fallbackTimestamps,
       lastAssignedFallbackMs,
+      lastToolCallFingerprint,
+      lastMessageFingerprint,
     }
   }
 
@@ -143,13 +155,21 @@ class SessionDataCache {
     const pendingFallback: Array<{ messageIndex: number; key: string }> = []
     let startedAt = 0
     let lastMessageAt = 0
+    let lastToolCallFingerprint: string | undefined
+    let lastMessageFingerprint: string | undefined
 
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]!
       const built = SessionDataCache.buildMessage(entry)
       if (!built) continue
       const { message, toolCalls } = built
-      for (const tc of toolCalls) {
+      for (let j = 0; j < toolCalls.length; j++) {
+        const tc = toolCalls[j]!
         toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
+        lastToolCallFingerprint = `${tc.name}:${tc.detail}:${entry.timestamp ?? ""}:${i}:${j}`
+      }
+      if (message.role === "assistant" && message.text) {
+        lastMessageFingerprint = `assistant:${message.text.slice(-100)}:${entry.timestamp ?? ""}:${i}`
       }
       messages.push(message)
 
@@ -167,7 +187,15 @@ class SessionDataCache {
         messages.length - 1
       )
     }
-    return { messages, toolCounts, pendingFallback, startedAt, lastMessageAt }
+    return {
+      messages,
+      toolCounts,
+      pendingFallback,
+      startedAt,
+      lastMessageAt,
+      lastToolCallFingerprint,
+      lastMessageFingerprint,
+    }
   }
 
   private static assignFallbackTimestamps(opts: {
@@ -218,7 +246,6 @@ class SessionDataCache {
       const text = await file.text()
       const parsed = parseTranscriptEntries(text, session.format)
       const next = this.buildFromEntries(parsed, mtimeMs, cached)
-      next.mtimeMs = mtimeMs
       next.size = size
       this.entries.set(session.path, next)
       return next

@@ -32,7 +32,7 @@ export async function evaluatePretooluseStateGate(input: ToolHookInput): Promise
 
   const metadata = STATE_METADATA[state]
   if (!metadata) {
-    return preToolUseDeny(
+    return await preToolUseDeny(
       `Project state is "${state}" but no metadata is registered for it — blocking ${toolName} until state metadata is repaired.`
     )
   }
@@ -41,7 +41,7 @@ export async function evaluatePretooluseStateGate(input: ToolHookInput): Promise
     `${metadata.description}\n\n` +
     `Use "swiz state set <state>" to transition to a different state.`
 
-  return preToolUseDeny(reason)
+  return await preToolUseDeny(reason)
 }
 
 const pretooluseStateGate: SwizToolHook = {

@@ -137,7 +137,7 @@ export async function evaluatePretoolusePrChangesBranchGuard(
 
   const fork = await detectForkTopology(cwd)
   const reason = buildBlockReason(pr, changesRequested, currentBranch, fork)
-  return preToolUseDeny(reason)
+  return await preToolUseDeny(reason)
 }
 
 const pretoolusePrChangesBranchGuard: SwizToolHook = {

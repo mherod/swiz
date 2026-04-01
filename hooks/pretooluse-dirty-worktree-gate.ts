@@ -100,7 +100,7 @@ export async function evaluatePretooluseDirtyWorktreeGate(
     await mergeActionPlanIntoTasks(commitSteps, input.session_id, cwd)
   }
 
-  return preToolUseDeny(
+  return await preToolUseDeny(
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +
       `Commit your current changes before updating the task plan.\n\n` +
       `To adjust: swiz settings set dirty-worktree-threshold <N>`

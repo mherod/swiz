@@ -77,7 +77,7 @@ export async function evaluatePretooluseBlockCommitToMain(input: unknown): Promi
 
   const fork = await detectForkTopology(cwd)
 
-  return preToolUseDeny(`
+  return await preToolUseDeny(`
 Committing directly to '${defaultBranch}' is blocked in ${repoRef} (collaborative repository).
 
 Collaboration signals:

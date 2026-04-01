@@ -80,7 +80,7 @@ async function handleLockResolution(lockPath: string, repoRoot: string): Promise
   }
 
   // A relevant git process IS active and lock is recent — block to prevent corruption.
-  return preToolUseDeny(
+  return await preToolUseDeny(
     [
       `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
       "",
@@ -270,7 +270,7 @@ const pretooluseGitIndexLock: SwizShellHook = {
       return await handleLockResolution(validated.lockPath, validated.repoRoot)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      return preToolUseDeny(
+      return await preToolUseDeny(
         `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
           `Error: ${message}\n\n` +
           formatActionPlan(

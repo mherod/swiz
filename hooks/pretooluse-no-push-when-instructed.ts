@@ -80,7 +80,7 @@ const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
     if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
     if (state.approvedAfter) return preToolUseAllow("Push approved by user after instruction")
 
-    return preToolUseDeny(
+    return await preToolUseDeny(
       `BLOCKED: git push is prohibited by an explicit instruction in this session.\n\n` +
         `Instruction found in transcript:\n` +
         `  "${state.blockingLine}"\n\n` +

@@ -190,7 +190,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  return preToolUseDeny(buildDenialMessage(taskId, sessionId))
+  return await preToolUseDeny(buildDenialMessage(taskId, sessionId))
 }
 
 const pretooluseNoPhantomTaskCompletion: SwizToolHook = {

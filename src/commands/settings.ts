@@ -260,6 +260,8 @@ interface ProjectPolicyInfo {
   trunkMode: boolean
   auditStrictness: string
   source: "project" | "default"
+  autoSteerTranscriptWatching: boolean
+  autoSteerTranscriptWatchingSource: "project" | "user" | "default"
   disabledHooks?: string[]
 }
 
@@ -469,6 +471,11 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
       value: projectPolicyInfo.auditStrictness,
       scope: projectPolicyInfo.source,
     },
+    {
+      label: "auto-steer-transcript-watching:",
+      value: boolToEnabledDisabled(projectPolicyInfo.autoSteerTranscriptWatching),
+      scope: projectPolicyInfo.autoSteerTranscriptWatchingSource,
+    },
   ]
   const projectDisabled = projectPolicyInfo.disabledHooks ?? []
   if (projectDisabled.length > 0) {
@@ -533,6 +540,11 @@ function buildProjectPolicyInfo(
     trunkMode: projectSettings?.trunkMode ?? false,
     auditStrictness: projectSettings?.auditStrictness ?? "strict",
     source: policy.source,
+    autoSteerTranscriptWatching:
+      projectSettings?.autoSteerTranscriptWatching ?? settings.autoSteerTranscriptWatching,
+    autoSteerTranscriptWatchingSource: projectSettings?.autoSteerTranscriptWatching
+      ? "project"
+      : "user",
     disabledHooks: projectSettings?.disabledHooks,
   }
 }

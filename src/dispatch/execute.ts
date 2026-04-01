@@ -73,6 +73,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "commitMsg",
   "prePush",
   "prPoll",
+  "notification",
 ])
 
 export function parsePayload(payloadStr: string): {

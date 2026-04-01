@@ -55,7 +55,7 @@ async function denyAutoSteerOrBlock(
       return preToolUseAllow("")
     }
   }
-  return preToolUseDeny(reason)
+  return await preToolUseDeny(reason)
 }
 
 const STALENESS_THRESHOLD = 20
@@ -180,7 +180,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      return preToolUseDeny(
+      return await preToolUseDeny(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -195,7 +195,7 @@ function checkNoTasks(
       )
     }
 
-    return preToolUseDeny(
+    return await preToolUseDeny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +

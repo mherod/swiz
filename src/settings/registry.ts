@@ -90,7 +90,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "speak",
     aliases: ["speak", "tts"],
     kind: "boolean",
-    scopes: ["global"],
+    scopes: ["global", "project"],
     default: false,
     docs: {
       description: "Read agent output aloud using text-to-speech",
@@ -113,6 +113,25 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         "When enabled, uses AppleScript to simulate typing 'Continue' into your terminal after every tool call, creating a fully autonomous loop. Only works on macOS with accessibility permissions.",
       enableDescription: "Type 'Continue' into the terminal after every tool call via AppleScript",
       disableDescription: "Disable auto-steer terminal input",
+    },
+  },
+  {
+    key: "autoSteerTranscriptWatching",
+    aliases: [
+      "auto-steer-transcript-watching",
+      "autosteertranscriptwatching",
+      "auto_steer_transcript_watching",
+    ],
+    kind: "boolean",
+    scopes: ["global", "project"],
+    default: false,
+    docs: {
+      description:
+        "Enable daemon-driven auto-steering by monitoring session transcripts for tool calls",
+      effectExplanation:
+        "When enabled, the Swiz daemon monitors agent transcript files. When it detects a new tool call, it triggers the auto-steer hook logic even for agents that don't natively support hooks (like Cursor).",
+      enableDescription: "Enable daemon-driven transcript monitoring for auto-steering",
+      disableDescription: "Disable daemon-driven transcript monitoring for auto-steering",
     },
   },
   {

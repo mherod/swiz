@@ -32,7 +32,7 @@ async function evaluate(input: FileEditHookInput) {
   }
 
   if (!valid) {
-    return preToolUseDeny(
+    return await preToolUseDeny(
       "Current settings.json contains invalid JSON. Fix the syntax errors first before making further edits.\n\nTip: Run `bun run -i validate-stop-hooks.ts` to see what's broken."
     )
   }

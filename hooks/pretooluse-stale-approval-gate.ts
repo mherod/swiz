@@ -145,7 +145,7 @@ export async function evaluatePretooluseStaleApprovalGate(input: unknown): Promi
   }
 
   const approverList = formatApproverList(result.approvals)
-  return preToolUseDeny(buildDenyMessage(result.pr, approverList))
+  return await preToolUseDeny(buildDenyMessage(result.pr, approverList))
 }
 
 const pretooluseStaleApprovalGate: SwizToolHook = {

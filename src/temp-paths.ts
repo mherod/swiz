@@ -64,6 +64,10 @@ export function swizEmergencyBypassPath(repoKey: string): string {
   return `${TMP_ROOT}/swiz-emergency-bypass-${repoKey}.json`
 }
 
+export function swizPseudoHookLogPath(): string {
+  return `${TMP_ROOT}/swiz-pseudohooks.log`
+}
+
 export function stopAutoContSuggestionsPath(safeSession: string): string {
   return `${TMP_ROOT}/swiz-stop-suggestions-${safeSession}.json`
 }

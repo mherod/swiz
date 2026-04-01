@@ -131,7 +131,7 @@ const pretooluseBunApiEnforce: SwizToolHook = {
         }
         lines.push("")
         lines.push("Directory operations (mkdir, readdir, stat) are allowed via node:fs/promises.")
-        return preToolUseDeny(lines.join("\n"))
+        return await preToolUseDeny(lines.join("\n"))
       }
     }
 

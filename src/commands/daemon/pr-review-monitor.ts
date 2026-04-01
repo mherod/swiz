@@ -135,6 +135,15 @@ export class PrReviewMonitor {
     return queue.payloads
   }
 
+  /** Remove queued payloads for sessions no longer active. */
+  pruneOldSessions(activeSessions: Set<string>): void {
+    for (const sessionId of this.sessionQueues.keys()) {
+      if (!activeSessions.has(sessionId)) {
+        this.sessionQueues.delete(sessionId)
+      }
+    }
+  }
+
   /** Clear cached state for a project (e.g., when unregistering). */
   clearProject(cwd: string): void {
     for (const key of this.projectStates.keys()) {

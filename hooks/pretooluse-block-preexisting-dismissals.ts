@@ -298,7 +298,7 @@ export async function evaluatePretooluseBlockPreexistingDismissals(
   const allowReason = resolveAllowReason(state)
   if (allowReason) return preToolUseAllow(allowReason)
 
-  return preToolUseDeny(buildBlockMessage(state))
+  return await preToolUseDeny(buildBlockMessage(state))
 }
 
 const pretooluseBlockPreexistingDismissals: SwizToolHook = {

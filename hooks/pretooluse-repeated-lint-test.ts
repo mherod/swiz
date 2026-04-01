@@ -731,7 +731,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   const { command, currentKind } = parsed
 
   const overfilterIssue = detectOverfiltering(command, currentKind)
-  if (overfilterIssue) return preToolUseDeny(overfilterIssue)
+  if (overfilterIssue) return await preToolUseDeny(overfilterIssue)
 
   if (!(await isGitRepo(cwd))) return {}
   if (!transcriptPath) return {}
@@ -745,7 +745,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   if (!match) return {}
 
   const blockMessage = await buildBlockMessage(command, match, transcriptPath, cachedSessionLines)
-  return preToolUseDeny(blockMessage)
+  return await preToolUseDeny(blockMessage)
 }
 
 const pretooluseRepeatedLintTest: SwizToolHook = {

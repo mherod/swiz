@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { executeDispatch } from "../dispatch/execute.ts"
@@ -7,6 +8,7 @@ import {
   invalidateSettingsCache,
   readSwizSettings,
 } from "../settings.ts"
+import { swizPseudoHookLogPath } from "../temp-paths.ts"
 import { findAllProviderSessions, isHookFeedback } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
@@ -166,11 +168,14 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
       return existing.snapshot
     }
 
-    const computation = computeWarmStatusLineSnapshot(cwd, sessionId).then((snapshot) => {
-      snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
-      inFlight.delete(cwd)
-      return snapshot
-    })
+    const computation = computeWarmStatusLineSnapshot(cwd, sessionId)
+      .then((snapshot) => {
+        snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
+        return snapshot
+      })
+      .finally(() => {
+        inFlight.delete(cwd)
+      })
     inFlight.set(cwd, computation)
     return computation
   }
@@ -276,6 +281,7 @@ function evictIdleProjects(
     caches.cooldownRegistry.invalidateProject(cwd)
     caches.upstreamSyncRegistry.unregister(cwd)
     caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
+    caches.prReviewMonitor.clearProject(cwd)
     for (const key of caches.snapshots.keys()) {
       if (key.startsWith(cwd)) caches.snapshots.delete(key)
     }
@@ -285,7 +291,8 @@ function evictIdleProjects(
 function createPruner(
   state: ReturnType<typeof createDaemonState>,
   caches: ReturnType<typeof createDaemonCaches>,
-  registeredProjects: Set<string>
+  registeredProjects: Set<string>,
+  transcriptMonitor: TranscriptMonitor
 ) {
   let lastPruneAt = 0
   return () => {
@@ -311,6 +318,8 @@ function createPruner(
     }
 
     evictIdleProjects(now, state, caches, registeredProjects)
+    transcriptMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
+    caches.prReviewMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
   }
 }
 
@@ -321,7 +330,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const { registeredProjects, registerProjectWatchers } = setupWatchers(caches, transcriptMonitor)
 
   state.touchProject(process.cwd())
-  const pruneTranscriptMemory = createPruner(state, caches, registeredProjects)
+  const pruneTranscriptMemory = createPruner(state, caches, registeredProjects, transcriptMonitor)
   const resolveSnapshot = buildSnapshotResolver(caches.snapshots)
 
   const server = startDaemonWebServer({
@@ -356,8 +365,38 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 
   // Register initial project for periodic upstream sync
   void caches.upstreamSyncRegistry.register(process.cwd())
+  registerProjectWatchers(process.cwd())
+
+  // Start periodic transcript monitoring for all registered projects
+  void logPseudoHook(`Transcript monitor starting for initial project: ${process.cwd()}`)
+  let isMonitoring = false
+  setInterval(() => {
+    if (isMonitoring) return
+    isMonitoring = true
+    void (async () => {
+      try {
+        for (const cwd of registeredProjects) {
+          await transcriptMonitor.checkProject(cwd)
+        }
+      } catch (err) {
+        console.error(`[daemon] Transcript monitor error: ${err}`)
+        void logPseudoHook(`Error in monitor loop: ${err}`)
+      } finally {
+        isMonitoring = false
+      }
+    })()
+  }, 10000)
 
   console.log(`Daemon listening on ${server.url}`)
+}
+
+async function logPseudoHook(message: string) {
+  try {
+    const timestamp = new Date().toISOString()
+    await appendFile(swizPseudoHookLogPath(), `[${timestamp}] ${message}\n`)
+  } catch (err) {
+    console.error(`Failed to log pseudo-hook: ${err}`)
+  }
 }
 
 /** CLI command: starts the daemon web server, or manages its LaunchAgent lifecycle. */
@@ -369,6 +408,15 @@ class TranscriptMonitor {
   private lastMessageFingerprints = new Map<string, string>()
 
   constructor(private caches: ReturnType<typeof createDaemonCaches>) {}
+
+  pruneOldSessions(activeSessions: Set<string>) {
+    for (const sessionId of this.lastToolCallFingerprints.keys()) {
+      if (!activeSessions.has(sessionId)) {
+        this.lastToolCallFingerprints.delete(sessionId)
+        this.lastMessageFingerprints.delete(sessionId)
+      }
+    }
+  }
 
   async checkProject(cwd: string): Promise<void> {
     const cached = await this.caches.projectSettingsCache.get(cwd)
@@ -387,28 +435,39 @@ class TranscriptMonitor {
     const data = await sessionDataCache.get(latestSession)
     if (!data) return
 
+    void logPseudoHook(
+      `checkProject: autoSteer=${autoSteerEnabled} speak=${speakEnabled} session=${latestSession.id} lastToolCallFingerprint=${data.lastToolCallFingerprint}`
+    )
+
     if (autoSteerEnabled && data.lastToolCallFingerprint) {
       const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
       if (prevFingerprint !== data.lastToolCallFingerprint) {
+        const msg = `tool call fingerprint change in ${latestSession.id}: ${prevFingerprint} -> ${data.lastToolCallFingerprint}`
+        console.error(`[daemon] ${msg}`)
+        void logPseudoHook(msg)
         this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
 
-        // Detect if the last message was a tool call to avoid loops
-        const lastMessage = data.messages[data.messages.length - 1]
-        if (
-          lastMessage &&
-          lastMessage.role === "assistant" &&
-          (lastMessage.toolCalls?.length ?? 0) > 0
-        ) {
+        // Detect the recent tool call to avoid loops
+        let toolCallMessage: (typeof data.messages)[0] | undefined
+        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
+          const msg = data.messages[i]
+          if (msg && msg.role === "assistant" && (msg.toolCalls?.length ?? 0) > 0) {
+            toolCallMessage = msg
+            break
+          }
+        }
+
+        if (toolCallMessage) {
           // Trigger postToolUse hook
-          console.error(
-            `[daemon] new tool call detected in ${latestSession.id}, triggering auto-steer`
-          )
+          const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
+          console.error(`[daemon] ${triggerMsg}`)
+          void logPseudoHook(triggerMsg)
           const payload = {
             session_id: latestSession.id,
             transcript_path: latestSession.path,
             cwd,
-            tool_name: lastMessage.toolCalls![0]!.name,
-            tool_input: lastMessage.toolCalls![0]!.detail,
+            tool_name: toolCallMessage.toolCalls![0]!.name,
+            tool_input: toolCallMessage.toolCalls![0]!.detail,
           }
 
           void executeDispatch({
@@ -425,26 +484,32 @@ class TranscriptMonitor {
     if (speakEnabled && data.lastMessageFingerprint) {
       const prevMessageFingerprint = this.lastMessageFingerprints.get(latestSession.id)
       if (prevMessageFingerprint !== data.lastMessageFingerprint) {
+        const msg = `message fingerprint change in ${latestSession.id}: ${prevMessageFingerprint} -> ${data.lastMessageFingerprint}`
+        console.error(`[daemon] ${msg}`)
+        void logPseudoHook(msg)
         this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
 
         // Find the actual message for text
-        const lastMessage = data.messages[data.messages.length - 1]
-        if (
-          lastMessage &&
-          lastMessage.role === "assistant" &&
-          lastMessage.text &&
-          !isHookFeedback(lastMessage.text)
-        ) {
+        let textMessage: (typeof data.messages)[0] | undefined
+        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
+          const msg = data.messages[i]
+          if (msg && msg.role === "assistant" && msg.text && !isHookFeedback(msg.text)) {
+            textMessage = msg
+            break
+          }
+        }
+
+        if (textMessage) {
           // Trigger notification hook for TTS
-          console.error(
-            `[daemon] new assistant message detected in ${latestSession.id}, triggering speak`
-          )
+          const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
+          console.error(`[daemon] ${triggerMsg}`)
+          void logPseudoHook(triggerMsg)
           const payload = {
             session_id: latestSession.id,
             transcript_path: latestSession.path,
             cwd,
             type: "assistant_message",
-            message: lastMessage.text,
+            message: textMessage.text,
           }
 
           void executeDispatch({

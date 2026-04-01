@@ -22,5 +22,6 @@
       "event": "prePush",
       "hooks": []
     }
-  ]
+  ],
+  "autoSteerTranscriptWatching": true
 }

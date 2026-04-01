@@ -48,7 +48,7 @@ ${compactionChecklist}
 
 Current: ${stats.words} words | Limit: ${wordLimit} words | Target: ${wordLimit - 10} words`
 
-    return preToolUseDeny(message)
+    return await preToolUseDeny(message)
   }
 
   return {}

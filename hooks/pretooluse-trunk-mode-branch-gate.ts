@@ -74,13 +74,13 @@ async function denyPrCheckoutWhenTrunk(
   if (projectState === "reviewing" && (await hasOpenPullRequests(cwd))) return null
 
   if (projectState === "developing") {
-    return preToolUseDeny(
+    return await preToolUseDeny(
       `Trunk mode is enabled and project state is \`developing\` — checking out a pull request branch is not allowed.\n\n` +
         `Stay on the default branch (\`${defaultBranch}\`) while developing.`
     )
   }
 
-  return preToolUseDeny(
+  return await preToolUseDeny(
     `Trunk mode is enabled for this project — checking out a pull request branch is not allowed.\n\n` +
       `Work on the default branch (\`${defaultBranch}\`) only.`
   )

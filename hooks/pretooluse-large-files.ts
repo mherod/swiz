@@ -136,7 +136,7 @@ const pretooluseLargeFiles: SwizFileEditHook = {
     const projectedKb = check.projectedKb!
     const sizeLimitKb = check.sizeLimitKb!
 
-    return preToolUseDeny(
+    return await preToolUseDeny(
       [
         `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
         "",

@@ -137,15 +137,18 @@ export async function findJunieSessions(targetDir: string, home?: string): Promi
     const eventsPath = join(junieSessionsDir, dir.name, "events.jsonl")
     try {
       const s = await stat(eventsPath)
-      // Read first 20 lines to check if it's for this project
-      const lines = await readLines(eventsPath, 20)
+      // Read first 50 lines to check if it's for this project
+      const lines = await readLines(eventsPath, 50)
       for (const line of lines) {
         if (!line) continue
         const parsed = tryParseJsonLine(line)
         if (
           parsed?.cwd === target ||
           parsed?.payload?.cwd === target ||
-          (parsed?.kind === "SessionA2uxEvent" && parsed.event?.agentEvent?.blob?.includes(target))
+          (parsed?.kind === "SessionA2uxEvent" &&
+            parsed.event?.agentEvent?.blob?.includes(target)) ||
+          (parsed?.event?.agentEvent?.kind === "AgentStateUpdatedEvent" &&
+            parsed.event.agentEvent.blob?.includes(target))
         ) {
           sessions.push({
             id: dir.name,

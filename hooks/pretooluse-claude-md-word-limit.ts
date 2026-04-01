@@ -82,7 +82,7 @@ const pretoolusClaudeMdWordLimit: SwizHook<FileEditHookInput> = {
       const projectedWordCount = countMarkdownWords(projectedContent)
 
       if (projectedWordCount > wordThreshold) {
-        return preToolUseDeny(
+        return await preToolUseDeny(
           await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold)
         )
       }

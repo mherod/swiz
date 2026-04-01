@@ -112,7 +112,7 @@ export async function evaluatePretooluseOffensiveLanguage(
     if (sessionId && (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd))) {
       return preToolUseAllow("")
     }
-    return preToolUseDeny(reason)
+    return await preToolUseDeny(reason)
   }
 
   return preToolUseAllow("")

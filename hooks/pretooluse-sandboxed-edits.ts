@@ -92,7 +92,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
         const defaultBranch = await getDefaultBranch(hookCwd)
         const currentBranch = (await git(["branch", "--show-current"], hookCwd)).trim()
         if (currentBranch && currentBranch !== defaultBranch) {
-          return preToolUseDeny(
+          return await preToolUseDeny(
             [
               "Trunk mode is enabled — file edits are blocked on non-default branches.",
               "",
@@ -111,7 +111,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     // setting validation, schema enforcement, and hook-level guards.
     const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
     if (SWIZ_CONFIG_RE.test(filePath)) {
-      return preToolUseDeny(
+      return await preToolUseDeny(
         [
           "Editing swiz config files directly is not permitted.",
           "",
@@ -205,7 +205,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
       }
     }
 
-    return preToolUseDeny(
+    return await preToolUseDeny(
       [
         "File edit blocked: path is outside the session sandbox.",
         "",

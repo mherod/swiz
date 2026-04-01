@@ -48,3 +48,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .swiz/context-stats.json
 .swiz/gh-cache.json
 /.output.txt
+output.txt
