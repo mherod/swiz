@@ -16,7 +16,7 @@ import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { commitFile, makeTempGitRepo, runGit, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
-const FOOTER_MARKER = "ACTION REQUIRED"
+const FOOTER_MARKER = "You must act on this now."
 
 const tmp = useTempDir("swiz-stop-footer-")
 

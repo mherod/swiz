@@ -959,7 +959,7 @@ describe("stop-git-status: positive paths", () => {
     const reason = r.json?.reason as string
     expect(reason).toContain("Uncommitted changes")
     expect(reason).toContain("2 untracked")
-    expect(reason).toContain("ACTION REQUIRED")
+    expect(reason).toContain("You must act on this now")
   }, 15000)
 
   test("dirty repo with staged files reports them", async () => {

@@ -292,7 +292,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
       issues: [makeIssue(67, "Detect project tech stack for per-stack hook config", ["ready"])],
     })
     expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("ACTION REQUIRED")
+    expect(result.reason).toContain("You must act on this now")
     expect(result.reason).not.toContain("Cause to capture:")
     expect(result.reason).not.toContain("Use the /update-memory skill")
   })

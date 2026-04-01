@@ -384,7 +384,7 @@ describe("blockStop", () => {
     expect(exitCode).toBe(0)
     expect(parsed.decision).toBe("block")
     const reason = parsed.reason as string
-    expect(reason).toContain("ACTION REQUIRED")
+    expect(reason).toContain("You must act on this now")
     expect(reason).not.toContain("Cause to capture:")
     expect(reason).not.toContain("Use the /update-memory skill")
   })

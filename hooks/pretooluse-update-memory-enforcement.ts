@@ -14,6 +14,7 @@ import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
+  actionRequired,
   extractToolBlocksFromEntry,
   formatActionPlan,
   hasFileInTree,
@@ -185,7 +186,8 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
         ],
         { header: "To resolve:" }
       ) +
-      `\nThis gate clears automatically once the transcript shows both steps after the original reminder.`
+      `\nThis gate clears automatically once the transcript shows both steps after the original reminder.` +
+      actionRequired()
     )
   }
   return (
@@ -194,7 +196,8 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
       ["Write the DO or DON'T rule into a project markdown file such as CLAUDE.md."],
       { header: "To resolve:" }
     ) +
-    `\nThis gate clears automatically once the transcript shows that markdown write after the original reminder.`
+    `\nThis gate clears automatically once the transcript shows that markdown write after the original reminder.` +
+    actionRequired()
   )
 }
 
@@ -258,7 +261,7 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
   const state = scanTranscript(lines, lastTriggerIndex)
   if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
 
-  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
+  return await preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
 }
 
 const pretooluseUpdateMemoryEnforcement: SwizToolHook = {

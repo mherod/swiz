@@ -127,11 +127,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: false,
     docs: {
-      description: "Append memory-update guidance to ACTION REQUIRED stop hook footers",
+      description: "Append memory-update guidance to stop hook footers",
       effectExplanation:
         "When enabled, stop hook block messages include a reminder to update CLAUDE.md/MEMORY.md with session learnings. This triggers the memory enforcement hook more frequently.",
-      enableDescription: "Include update-memory guidance in ACTION REQUIRED footers",
-      disableDescription: "Exclude update-memory guidance from ACTION REQUIRED footers",
+      enableDescription: "Include update-memory guidance in stop hook footers",
+      disableDescription: "Exclude update-memory guidance from stop hook footers",
     },
   },
   {

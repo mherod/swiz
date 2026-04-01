@@ -458,7 +458,7 @@ describe("TranscriptIndexCache", () => {
     expect(cache.size).toBe(0)
   })
 
-  it("detects blocked tool_use IDs from ACTION REQUIRED", async () => {
+  it("detects blocked tool_use IDs from 'You must act on this now'", async () => {
     const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
     const tp = join(dir, "transcript.jsonl")
     const lines = [
@@ -475,7 +475,7 @@ describe("TranscriptIndexCache", () => {
             {
               type: "tool_result",
               tool_use_id: "tu_1",
-              content: "Hook denied. ACTION REQUIRED: fix the issue.",
+              content: "Hook denied. You must act on this now: fix the issue.",
             },
           ],
         },

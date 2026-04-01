@@ -186,10 +186,11 @@ export {
 const PREVIEW_LEN_BLOCK = 4000
 
 function denyPreToolUseObj(reason: string) {
+  const fullReason = `${reason}${actionRequired()}`
   return hookOutputSchema.parse({
     suppressOutput: true,
     systemMessage: extractHookSystemMessagePreview(reason),
-    hookSpecificOutput: hsoPreToolUseDeny(reason),
+    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
   })
 }
 
@@ -333,9 +334,9 @@ export { SwizHookExit } from "../inline-hook-context.ts"
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
-/** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
+/** Standard footer appended to all stop hook block reasons. */
 export function actionRequired(): string {
-  return `\n\nACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.`
+  return `\n\nYou must act on this now. Do not try to stop again without completing the required action.`
 }
 
 export function blockStopObj(reason: string): HookOutput {
@@ -374,7 +375,7 @@ export function blockStopRaw(reason: string): never {
 
 /** Inline SwizHook equivalent of {@link blockStopHumanRequired}. */
 export function blockStopHumanRequiredObj(reason: string): HookOutput {
-  const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
+  const fullReason = `${reason}\n\nResolve this block before stopping.`
   const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   return hookOutputSchema.parse({
     decision: "block",

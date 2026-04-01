@@ -39,7 +39,7 @@ export function findHumanRequiredBlock(transcriptText: string, limit = 20): stri
     if (entry.type === "assistant") return null
     if (entry.type === "user") {
       const text = extractContentText(entry.message?.content)
-      const result = extractCommandMessage(text, "ACTION REQUIRED:")
+      const result = extractCommandMessage(text, "You must act on this now:")
       if (result) return result
     }
   }

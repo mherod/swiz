@@ -272,7 +272,7 @@ Failing lines:
 - dateFilter["$lte"] = end;    → use  dateFilter.$lte = end;
 - query["event_date"] = ...;   → use  query.event_date = ...;
 
-Action required: Verify CI passes and re-request review.`
+You must act on this now: Verify CI passes and re-request review.`
     expect(score(text)).toBeLessThan(-0.5)
     expect(rejectionLabels(text)).toContain("CI failure")
     expect(rejectionLabels(text)).toContain("re-request review")
@@ -415,7 +415,7 @@ describe("false positive prevention", () => {
 
   it("'CI passes' inside rejection context does not reduce rejection score below threshold", () => {
     // "Verify CI passes" is a rejection signal (pending) even though "CI passes" is approval
-    const text = "Action required: Verify CI passes and re-request review."
+    const text = "You must act on this now: Verify CI passes and re-request review."
     expect(score(text)).toBeLessThan(0)
   })
 

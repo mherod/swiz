@@ -602,9 +602,8 @@ function cleanInterruptionMarkers(text: string): string {
 }
 
 const GIT_ACTION_SIGNAL_RE =
-  /Uncommitted changes detected:|ACTION REQUIRED:|Commit your changes:|Push your committed changes/i
-const GIT_FIRST_LINE_RE =
-  /Uncommitted changes detected:|modified \(\d+ file\(s\)\)|ACTION REQUIRED:/i
+  /Uncommitted changes detected:|Commit your changes:|Push your committed changes/i
+const GIT_FIRST_LINE_RE = /Uncommitted changes detected:|modified \(\d+ file\(s\)\)/i
 const FILE_PATH_RE = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sh|css|html))\b/g
 
 function extractGitFilePaths(lines: string[], declaredCount: number | null): string[] {
@@ -630,15 +629,8 @@ function buildGitActionDetails(
   if (first) {
     details.push({
       label: "changes",
-      value: compactMetadataValue(
-        first.replace(/^Uncommitted changes detected:\s*/i, "").replace(/^ACTION REQUIRED:\s*/i, "")
-      ),
+      value: compactMetadataValue(first.replace(/^Uncommitted changes detected:\s*/i, "")),
     })
-  }
-
-  const actionLine = lines.find((l) => l.startsWith("ACTION REQUIRED:"))
-  if (actionLine) {
-    notes.push(compactMetadataValue(actionLine.replace(/^ACTION REQUIRED:\s*/i, "").trim(), 180))
   }
 
   const gitCommitRe = new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}commit\\b`)

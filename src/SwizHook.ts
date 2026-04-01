@@ -171,12 +171,14 @@ export function preToolUseAllow(reason = ""): SwizHookOutput {
 }
 
 /** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
-export function preToolUseDeny(reason: string): SwizHookOutput {
+export async function preToolUseDeny(reason: string): Promise<SwizHookOutput> {
+  const { actionRequired } = await import("./utils/hook-utils.ts")
+  const fullReason = `${reason}${actionRequired()}`
   const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
   return {
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseDeny(reason),
+    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
   }
 }
 

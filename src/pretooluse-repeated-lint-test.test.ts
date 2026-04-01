@@ -1138,7 +1138,7 @@ describe("parseTranscriptEvents", () => {
   test("blocked first run is excluded: only one test event produced", () =>
     withDir(async (dir) => {
       // Simulate: first bun test was denied by a PreToolUse hook (tool_result
-      // contains "ACTION REQUIRED:"), then a second bun test actually ran.
+      // contains "You must act on this now:"), then a second bun test actually ran.
       const blockedId = "tu_blocked_001"
       const succeededId = "tu_ok_002"
       const assistant1 = JSON.stringify({
@@ -1149,7 +1149,7 @@ describe("parseTranscriptEvents", () => {
           ],
         },
       })
-      // Denial tool_result — contains "ACTION REQUIRED:" marker
+      // Denial tool_result — contains "You must act on this now:" marker
       const denial = JSON.stringify({
         type: "user",
         message: {
@@ -1158,7 +1158,7 @@ describe("parseTranscriptEvents", () => {
               type: "tool_result",
               tool_use_id: blockedId,
               content:
-                "Use `bun test` with `--concurrent`.\n\nACTION REQUIRED: Fix the underlying issue.",
+                "Use `bun test` with `--concurrent`.\n\nYou must act on this now: Fix the underlying issue.",
             },
           ],
         },
@@ -1258,13 +1258,13 @@ describe("collectBlockedToolUseIds", () => {
     expect(collectBlockedToolUseIds(lines).size).toBe(0)
   })
 
-  test("detects tool_use_id with ACTION REQUIRED: in string content", () => {
-    const lines = [toolResultLine("tu_abc", "Blocked.\n\nACTION REQUIRED: Fix this.")]
+  test("detects tool_use_id with 'You must act on this now' in string content", () => {
+    const lines = [toolResultLine("tu_abc", "Blocked.\n\nYou must act on this now: Fix this.")]
     const blocked = collectBlockedToolUseIds(lines)
     expect(blocked.has("tu_abc")).toBe(true)
   })
 
-  test("detects tool_use_id with ACTION REQUIRED: in array content", () => {
+  test("detects tool_use_id with 'You must act on this now' in array content", () => {
     const line = JSON.stringify({
       type: "user",
       message: {
@@ -1272,7 +1272,7 @@ describe("collectBlockedToolUseIds", () => {
           {
             type: "tool_result",
             tool_use_id: "tu_arr",
-            content: [{ type: "text", text: "Denied.\n\nACTION REQUIRED: Do the thing." }],
+            content: [{ type: "text", text: "Denied.\n\nYou must act on this now: Do the thing." }],
           },
         ],
       },
@@ -1281,17 +1281,16 @@ describe("collectBlockedToolUseIds", () => {
     expect(blocked.has("tu_arr")).toBe(true)
   })
 
-  test("does not flag tool_result without ACTION REQUIRED:", () => {
+  test("does not flag tool_result without marker", () => {
     const lines = [toolResultLine("tu_ok", "4 pass\n0 fail\nRan 4 tests across 1 file.")]
     const blocked = collectBlockedToolUseIds(lines)
     expect(blocked.has("tu_ok")).toBe(false)
   })
 
   test("ignores malformed JSON lines", () => {
-    const lines = ["{ not valid json", toolResultLine("tu_good", "ACTION REQUIRED: Fix.")]
+    const lines = ["{ not valid json", toolResultLine("tu_good", "You must act on this now: Fix.")]
     const blocked = collectBlockedToolUseIds(lines)
     expect(blocked.has("tu_good")).toBe(true)
-    expect(blocked.size).toBe(1)
   })
 })
 

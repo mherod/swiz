@@ -63,10 +63,10 @@ alwaysApply: false
 - Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
 - Output helpers (call `process.exit(0)`; no stdout after):
-  - PreToolUse: `denyPreToolUse(reason)` — block with ACTION REQUIRED footer; `allowPreToolUse(reason)` — allow with hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
+  - PreToolUse: `denyPreToolUse(reason)` — block with footer; `allowPreToolUse(reason)` — allow with hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
   - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
-  - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
+  - Stop: `blockStop(reason, opts?)` — block with footer; `blockStopRaw(reason)` — block without footer.
 - **DO NOT** write raw `console.log(JSON.stringify(...))` — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).

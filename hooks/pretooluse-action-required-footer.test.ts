@@ -13,7 +13,7 @@ import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { createEnforcementProjectDir, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
-const FOOTER_MARKER = "ACTION REQUIRED"
+const FOOTER_MARKER = "You must act on this now."
 
 // Keywords split to avoid self-triggering the pretooluse-no-eslint-disable hook
 const ESLINT_DISABLE_KW = ["eslint", "disable"].join("-")
@@ -66,7 +66,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { command: "rm -rf /tmp/junk" },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
     expect(result.reason).not.toContain("/re-assess")
     expect(result.reason).not.toContain("re-assess skill")
   })
@@ -77,7 +77,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { command: "cd /tmp && ls" },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-banned-commands: git stash denial", async () => {
@@ -86,7 +86,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { command: "git stash" },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-banned-commands: git stash list is allowed (no footer)", async () => {
@@ -107,7 +107,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-eslint-disable: eslint-disable denial includes footer", async () => {
@@ -121,7 +121,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-ts-ignore: @ts-ignore denial includes footer", async () => {
@@ -135,7 +135,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-ts-ignore: @ts-nocheck denial includes footer", async () => {
@@ -148,7 +148,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-long-sleep: sleep 60 denial includes footer", async () => {
@@ -157,7 +157,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { command: "sleep 60" },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-task-delegation: TaskCreate delegation denial includes footer", async () => {
@@ -166,7 +166,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { prompt: "Use TaskCreate to create tasks for the upcoming work." },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-task-subject-validation: compound subject denial includes footer", async () => {
@@ -175,7 +175,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { subject: "Fix the authentication bug and update the user schema" },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-direct-deps: writing package.json deps denial includes footer", async () => {
@@ -187,7 +187,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-eslint-config-strength: weakening config denial includes footer", async () => {
@@ -201,7 +201,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-no-npm: npm in bun project denial includes footer", async () => {
@@ -215,7 +215,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       { cwd: process.cwd() }
     )
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-json-validation: invalid settings.json denial includes footer", async () => {
@@ -229,7 +229,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       tool_input: { file_path: settingsPath },
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-require-tasks: no incomplete tasks denial includes footer", async () => {
@@ -250,7 +250,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       { env: { HOME: fakeHome } }
     )
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 
   test("pretooluse-update-memory-enforcement: reminder denial includes footer", async () => {
@@ -275,6 +275,6 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
       transcript_path: transcriptPath,
     })
     expect(result.denied).toBe(true)
-    expect(result.reason).not.toContain(FOOTER_MARKER)
+    expect(result.reason).toContain(FOOTER_MARKER)
   })
 })

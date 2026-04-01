@@ -21,7 +21,11 @@ function extractToolResultText(block: { content?: string | unknown[] }): string 
 type ToolResultBlock = { type?: string; content?: string | unknown[]; tool_use_id?: string }
 
 function isBlockedToolResult(block: ToolResultBlock): boolean {
-  return block?.type === "tool_result" && extractToolResultText(block).includes("ACTION REQUIRED:")
+  const text = extractToolResultText(block)
+  return (
+    block?.type === "tool_result" &&
+    (text.includes("You must act on this now") || text.includes("Resolve this block"))
+  )
 }
 
 function collectBlockedIdsFromEntry(line: string, blockedIds: string[]): void {

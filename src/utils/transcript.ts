@@ -99,15 +99,15 @@ export async function extractReadFilePaths(path: string): Promise<Set<string>> {
  * Collect the tool_use IDs of calls denied by a PreToolUse hook.
  *
  * When a PreToolUse hook blocks a tool call, the corresponding tool_result
- * contains the denial reason. All hook denial messages end with the mandatory
- * `ACTION REQUIRED:` footer, which is the reliable detection signal.
+ * contains the denial reason. All hook denial messages end with a mandatory
+ * footer (e.g., "You must act on this now"), which is the reliable detection signal.
  */
 function collectBlockedIdsFromContent(content: unknown[]): string[] {
   const ids: string[] = []
   for (const block of content) {
     if ((block as Record<string, any>)?.type !== "tool_result") continue
     const text = extractTextFromUnknownContent((block as Record<string, any>).content)
-    if (text.includes("ACTION REQUIRED:"))
+    if (text.includes("You must act on this now") || text.includes("Resolve this block"))
       ids.push(String((block as Record<string, any>).tool_use_id ?? ""))
   }
   return ids
