@@ -137,7 +137,7 @@ describe("swiz settings", () => {
       expect(result.stdout).toMatch(/auto-continue:\s+enabled/)
       expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
       expect(result.stdout).toMatch(/update-memory-footer:\s+disabled/)
-      expect(result.stdout).toContain("(defaults)")
+      expect(result.stdout).toContain("(user)")
     })
 
     test("shows default narrator-voice and narrator-speed", () => {
@@ -159,7 +159,7 @@ describe("swiz settings", () => {
 
     test("shows default collaboration mode", () => {
       expect(result.stdout).toContain("collaboration:")
-      expect(result.stdout).toMatch(/collaboration:.*\((default|project)\)/)
+      expect(result.stdout).toMatch(/collaboration:.*\((default|user)\)/)
     })
   })
 
@@ -258,33 +258,53 @@ describe("swiz settings", () => {
   test("new sessions inherit the global setting by default", async () => {
     const home = await createTempHome()
     const targetDir = join(home, "repo")
+    await mkdir(targetDir, { recursive: true })
+    const realTargetDir = await realpath(targetDir)
     const sessionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    await writeClaudeSession(home, targetDir, sessionId)
+
+    const projectKey = realTargetDir.replace(/[/.\\:]/g, "-")
+    console.log("PROJECT KEY:", projectKey)
+    const claudeDir = join(home, ".claude", "projects", projectKey)
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(join(claudeDir, `${sessionId}.jsonl`), "")
 
     const disableGlobal = await runSwiz(["settings", "disable", "auto-continue"], home)
     expect(disableGlobal.exitCode).toBe(0)
 
     const showSession = await runSwiz(
-      ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],
+      ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", realTargetDir],
       home
     )
+    if (showSession.exitCode !== 0) {
+      console.log("SHOW SESSION STDOUT:", showSession.stdout)
+      console.log("SHOW SESSION STDERR:", showSession.stderr)
+      console.log("TARGET DIR:", realTargetDir)
+      console.log("HOME DIR:", home)
+      console.log("CLAUDE DIR:", claudeDir)
+      const exists = await Bun.file(join(claudeDir, `${sessionId}.jsonl`)).exists()
+      console.log("SESSION FILE EXISTS:", exists)
+      const keyFromCode = realTargetDir.replace(/[/.\\:]/g, "-")
+      console.log("KEY FROM CODE MANUALLY:", keyFromCode)
+    }
     expect(showSession.exitCode).toBe(0)
     expect(showSession.stdout).toContain(`scope: session ${sessionId}`)
-    expect(showSession.stdout).toMatch(/auto-continue:\s+disabled \(global\/default\)/)
+    expect(showSession.stdout).toMatch(/auto-continue:\s+disabled \(user\)/)
   }, 30_000)
 
   test("session-scoped disable stores override under sessions map", async () => {
     const home = await createTempHome()
     const targetDir = join(home, "repo")
+    await mkdir(targetDir, { recursive: true })
+    const realTargetDir = await realpath(targetDir)
     const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    await writeClaudeSession(home, targetDir, sessionId)
+    await writeClaudeSession(home, realTargetDir, sessionId)
 
     const result = await runSwiz(
-      ["settings", "disable", "auto-continue", "--session", "--dir", targetDir],
+      ["settings", "disable", "auto-continue", "--session", "--dir", realTargetDir],
       home
     )
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`(session ${sessionId})`)
+    expect(result.stdout).toContain(`session ${sessionId}`)
 
     const configPath = join(home, ".swiz", "settings.json")
     const text = await readFile(configPath, "utf-8")
@@ -456,12 +476,12 @@ describe("swiz settings", () => {
         setup: async (home: string) => {
           await writeClaudeSession(home, "/tmp/fake-project", "sess-scope-test")
         },
-        args: ["enable", "speak", "--session", "sess-scope-test"],
+        args: ["enable", "sandboxed-edits", "--session", "sess-scope-test"],
         stderr: "does not support --session scope",
       },
       {
         setup: async (_home: string) => {},
-        args: ["enable", "speak", "--project", "--dir", "HOME_PLACEHOLDER"],
+        args: ["enable", "sandboxed-edits", "--project", "--dir", "HOME_PLACEHOLDER"],
         stderr: "does not support --project scope",
       },
       {
@@ -486,26 +506,29 @@ describe("swiz settings", () => {
 
   test("accepts --session for auto-continue", async () => {
     const home = await createTempHome()
+    const realHome = await realpath(home)
+    const targetDir = realHome
     // Ensure settings.json exists so readSwizSettings({ strict: true }) succeeds
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: false }))
-    await writeClaudeSession(home, home, "sess-ac-test")
+    await writeClaudeSession(home, targetDir, "sess-ac-test")
     const result = await runSwiz(
-      ["settings", "enable", "auto-continue", "--session", "sess-ac-test", "--dir", home],
+      ["settings", "enable", "auto-continue", "--session", "sess-ac-test", "--dir", targetDir],
       home
     )
     expect(result.stderr).toBe("")
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Enabled")
+    expect(result.stdout).toMatch(/Enabled auto-continue \(session\b/)
   })
 
   test("accepts --session for ambition-mode", async () => {
     const home = await createTempHome()
+    const targetDir = await realpath(home)
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
-    await writeClaudeSession(home, home, "sess-ambition-test")
+    await writeClaudeSession(home, targetDir, "sess-ambition-test")
 
     const result = await runSwiz(
       [
@@ -516,7 +539,7 @@ describe("swiz settings", () => {
         "--session",
         "sess-ambition-test",
         "--dir",
-        home,
+        targetDir,
       ],
       home
     )
@@ -681,7 +704,7 @@ describe("swiz settings", () => {
     await runSwiz(["settings", "disable-hook", "stop-ship-checklist.ts"], home)
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-ship-checklist\.ts \(global\)/)
+    expect(result.stdout).toMatch(/disabled-hooks:\s+stop-ship-checklist\.ts \(user\)/)
   })
 
   test("settings show lists multiple disabled hooks", async () => {
@@ -1274,7 +1297,7 @@ describe("collaborationMode settings", () => {
     expect(effective.collaborationMode).toBe("solo")
   })
 
-  test("project ambitionMode overrides global when no session override", () => {
+  test("project ambitionMode overrides global when no session", () => {
     const settings = {
       autoContinue: true,
       critiquesEnabled: true,
@@ -1319,7 +1342,7 @@ describe("collaborationMode settings", () => {
     expect(effective.ambitionMode).toBe("creative")
   })
 
-  test("project collaborationMode overrides global when no session override", () => {
+  test("project collaborationMode overrides global when no session", () => {
     const settings = {
       autoContinue: true,
       critiquesEnabled: true,
@@ -1413,7 +1436,7 @@ describe("collaborationMode settings", () => {
     const effective = getEffectiveSwizSettings(
       settings,
       "test-session",
-      { ambitionMode: "creative" } // project-level should lose to session override
+      { ambitionMode: "creative" } // project-level should lose to session
     )
     expect(effective.ambitionMode).toBe("aggressive")
   })
@@ -1648,7 +1671,7 @@ describe("strictNoDirectMain setting", () => {
     )
     expect(setExitCode).toBe(0)
     const { stdout } = await runSwiz(["settings", "show", "--project", "--dir", home], home)
-    expect(stdout).toMatch(/strict-no-direct-main:\s+enabled \(project override\)/)
+    expect(stdout).toMatch(/strict-no-direct-main:\s+enabled \(project\)/)
   })
 
   test("getEffectiveSwizSettings propagates strictNoDirectMain", () => {

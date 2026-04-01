@@ -290,8 +290,9 @@ function printHeader(path: string | null, fileExists: boolean, sessionId: string
 type BoolSettingRow = [label: string, key: keyof EffectiveSwizSettings, scope: string]
 
 function resolveScopeLabel(source: string | undefined, fallback: string): string {
-  if (source === "session") return "session override"
-  if (source === "project") return "project override"
+  if (source === "session") return "(session)"
+  if (source === "project") return "(project)"
+  if (source === "global" || source === "user") return "(user)"
   return fallback
 }
 
@@ -301,7 +302,7 @@ function printAlignedRows(rows: SettingsRow[]): void {
   if (rows.length === 0) return
   const maxLabelLen = Math.max(...rows.map((r) => r.label.length))
   for (const row of rows) {
-    const suffix = row.scope ? ` (${row.scope})` : ""
+    const suffix = row.scope ? ` ${row.scope}` : ""
     console.log(`  ${row.label.padEnd(maxLabelLen)} ${row.value}${suffix}`)
     if (row.description) {
       console.log(`  ${" ".repeat(maxLabelLen)} ${row.description}`)
@@ -334,7 +335,7 @@ const SPECIAL_BOOL_KEYS = new Set(["autoContinue", "strictNoDirectMain", "trunkM
 /** Derive global boolean display rows from SETTINGS_REGISTRY. */
 const GLOBAL_BOOL_ROWS: BoolSettingRow[] = SETTINGS_REGISTRY.filter(
   (d) => d.kind === "boolean" && d.scopes.includes("global") && !SPECIAL_BOOL_KEYS.has(d.key)
-).map((d) => [`${d.aliases[0]}:`, d.key as keyof EffectiveSwizSettings, "global"])
+).map((d) => [`${d.aliases[0]}:`, d.key as keyof EffectiveSwizSettings, "(user)"])
 
 /** Derive global numeric/string display from SETTINGS_REGISTRY. */
 function formatNumericDisplay(numVal: number, placeholder: string | undefined): string {
@@ -355,7 +356,7 @@ function numericGlobalSettingsRows(effective: EffectiveSwizSettings): SettingsRo
   ).map((def) => ({
     label: `${def.aliases[0] ?? def.key}:`,
     value: formatSettingValue(def, effective[def.key as keyof EffectiveSwizSettings]),
-    scope: "global",
+    scope: "(user)",
     description: def.docs?.description,
   }))
 }
@@ -365,12 +366,12 @@ function resolveGlobalScopes(
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined
 ): { base: string; ambition: string; collaboration: string; strict: string } {
-  const base = effective.source === "session" ? "session override" : "global/default"
+  const base = effective.source === "session" ? "(session)" : "(user)"
   return {
     base,
-    ambition: resolveScopeLabel(ambitionSource, "global/default"),
-    collaboration: effective.collaborationMode === "auto" ? "default" : base,
-    strict: strictNoDirectMainSource === "project" ? "project override" : "global",
+    ambition: resolveScopeLabel(ambitionSource, "(default)"),
+    collaboration: effective.collaborationMode === "auto" ? "(default)" : base,
+    strict: strictNoDirectMainSource === "project" ? "(project)" : "(user)",
   }
 }
 
@@ -424,7 +425,7 @@ function printGlobalSettings(
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
-    rows.push({ label: "disabled-hooks:", value: globalDisabled.join(", "), scope: "global" })
+    rows.push({ label: "disabled-hooks:", value: globalDisabled.join(", "), scope: "(user)" })
   }
 
   printAlignedRows(rows)
@@ -433,53 +434,54 @@ function printGlobalSettings(
 function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks?: string[]): void {
   console.log("\n  project policy")
   const profileLabel = projectPolicyInfo.profile ?? "none"
+  const scope = `(${projectPolicyInfo.source})`
   const rows: SettingsRow[] = [
-    { label: "config:", value: projectPolicyInfo.configPath, scope: projectPolicyInfo.source },
-    { label: "profile:", value: profileLabel, scope: projectPolicyInfo.source },
+    { label: "config:", value: projectPolicyInfo.configPath, scope },
+    { label: "profile:", value: profileLabel, scope },
     {
       label: "trivial-max-files:",
       value: String(projectPolicyInfo.trivialMaxFiles),
-      scope: projectPolicyInfo.source,
+      scope,
     },
     {
       label: "trivial-max-lines:",
       value: String(projectPolicyInfo.trivialMaxLines),
-      scope: projectPolicyInfo.source,
+      scope,
     },
     {
       label: "default-branch:",
       value: projectPolicyInfo.defaultBranch,
-      scope: projectPolicyInfo.defaultBranchSource,
+      scope: `(${projectPolicyInfo.defaultBranchSource})`,
     },
     {
       label: "memory-line-threshold:",
       value: String(projectPolicyInfo.memoryLineThreshold),
-      scope: projectPolicyInfo.memoryLineSource,
+      scope: `(${projectPolicyInfo.memoryLineSource})`,
     },
     {
       label: "memory-word-threshold:",
       value: String(projectPolicyInfo.memoryWordThreshold),
-      scope: projectPolicyInfo.memoryWordSource,
+      scope: `(${projectPolicyInfo.memoryWordSource})`,
     },
     {
       label: "trunk-mode:",
       value: boolToEnabledDisabled(projectPolicyInfo.trunkMode),
-      scope: projectPolicyInfo.source,
+      scope,
     },
     {
       label: "audit-strictness:",
       value: projectPolicyInfo.auditStrictness,
-      scope: projectPolicyInfo.source,
+      scope,
     },
     {
       label: "auto-steer-transcript-watching:",
       value: boolToEnabledDisabled(projectPolicyInfo.autoSteerTranscriptWatching),
-      scope: projectPolicyInfo.autoSteerTranscriptWatchingSource,
+      scope: `(${projectPolicyInfo.autoSteerTranscriptWatchingSource})`,
     },
   ]
   const projectDisabled = projectPolicyInfo.disabledHooks ?? []
   if (projectDisabled.length > 0) {
-    rows.push({ label: "disabled-hooks:", value: projectDisabled.join(", "), scope: "project" })
+    rows.push({ label: "disabled-hooks:", value: projectDisabled.join(", "), scope: "(project)" })
   }
 
   printAlignedRows(rows)
