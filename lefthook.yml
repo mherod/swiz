@@ -55,3 +55,8 @@ pre-push:
       skip:
         - merge
         - rebase
+
+commit-msg:
+  commands:
+    commitlint:
+      run: echo '{"cwd":"'$(pwd)'","commit_msg_file":"{1}"}' | SWIZ_DIRECT=1 bun run index.ts dispatch commitMsg && bunx commitlint --edit {1}

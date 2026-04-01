@@ -4,6 +4,7 @@
 // Hooks may set `async: true` for concurrent scheduling; optional `asyncMode` chooses
 // fire-and-forget (default) vs block-until-complete (sync pipeline). See SwizHookMeta.
 
+import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
@@ -431,6 +432,11 @@ export const manifest: HookGroup[] = [
     scheduled: true,
     hooks: [{ hook: precommitStagedValidation }],
   },
+  {
+    event: "commitMsg",
+    scheduled: true,
+    hooks: [{ hook: commitMsgScrubCoauthors }],
+  },
 ]
 
 // ─── Runtime routing validator ──────────────────────────────────────────────
@@ -506,5 +512,6 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   preCompact: 15,
   userPromptSubmit: 15,
   preCommit: 30,
+  commitMsg: 10,
   prPoll: 20,
 }

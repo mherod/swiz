@@ -70,6 +70,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "userPromptSubmit",
   "stop",
   "preCommit",
+  "commitMsg",
   "prPoll",
 ])
 

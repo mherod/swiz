@@ -47,3 +47,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .swiz/state.json
 .swiz/context-stats.json
 .swiz/gh-cache.json
+.junie
+/.output.txt
+.junie/mcp/mcp.json
+.junie/memory/language.json
+/.junie/memory/language.json
+/.junie/mcp/mcp.json

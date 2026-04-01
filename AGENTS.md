@@ -191,7 +191,7 @@ alwaysApply: false
 - DO NOT push to `main`/`master` without the Step 0 collaboration guard.
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
-- DO NOT add `Co-Authored-By` trailers. Enforced by commitlint.
+- DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
 - DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
