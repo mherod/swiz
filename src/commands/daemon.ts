@@ -2,6 +2,7 @@ import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { executeDispatch } from "../dispatch/execute.ts"
+import { hookIdentifier, isInlineHookDef } from "../hook-types.ts"
 import {
   getProjectSettingsPath,
   getSwizSettingsPath,
@@ -409,6 +410,34 @@ class TranscriptMonitor {
 
   constructor(private caches: ReturnType<typeof createDaemonCaches>) {}
 
+  /**
+   * Returns true if any hook for the given event is within its cooldown window (dispatch should be skipped).
+   * Marks the cooldown for the first non-cooled hook when returning false.
+   */
+  private isEventOnCooldown(
+    manifestGroups: Awaited<
+      ReturnType<ReturnType<typeof createDaemonCaches>["manifestCache"]["get"]>
+    >,
+    event: string,
+    cwd: string
+  ): boolean {
+    const groups = manifestGroups.filter((g) => g.event === event)
+    for (const group of groups) {
+      for (const hook of group.hooks) {
+        const cooldown = isInlineHookDef(hook)
+          ? (hook.hook.cooldownSeconds ?? 30)
+          : (hook.cooldownSeconds ?? 30)
+        const id = hookIdentifier(hook)
+        if (this.caches.cooldownRegistry.checkAndMark(id, cooldown, cwd)) {
+          void logPseudoHook(`${event} cooldown active for ${id} in ${cwd}, skipping`)
+          console.error(`[daemon] ${event} cooldown active for ${id}, skipping dispatch`)
+          return true
+        }
+      }
+    }
+    return false
+  }
+
   pruneOldSessions(activeSessions: Set<string>) {
     for (const sessionId of this.lastToolCallFingerprints.keys()) {
       if (!activeSessions.has(sessionId)) {
@@ -439,6 +468,9 @@ class TranscriptMonitor {
       `checkProject: autoSteer=${autoSteerEnabled} speak=${speakEnabled} session=${latestSession.id} lastToolCallFingerprint=${data.lastToolCallFingerprint}`
     )
 
+    // Fetch manifest once for cooldown extraction
+    const manifestGroups = await this.caches.manifestCache.get(cwd)
+
     if (autoSteerEnabled && data.lastToolCallFingerprint) {
       const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
       if (prevFingerprint !== data.lastToolCallFingerprint) {
@@ -458,6 +490,8 @@ class TranscriptMonitor {
         }
 
         if (toolCallMessage) {
+          if (this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
+
           // Trigger postToolUse hook
           const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
           console.error(`[daemon] ${triggerMsg}`)
@@ -500,6 +534,8 @@ class TranscriptMonitor {
         }
 
         if (textMessage) {
+          if (this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
+
           // Trigger notification hook for TTS
           const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
           console.error(`[daemon] ${triggerMsg}`)
