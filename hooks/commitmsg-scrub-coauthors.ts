@@ -27,7 +27,7 @@ export async function evaluateCommitMsgScrubCoauthors(input: unknown): Promise<S
     const content = readFileSync(msgFile, "utf-8")
     if (CO_AUTHORED_BY_RE.test(content)) {
       const scrubbed = content.replace(CO_AUTHORED_BY_RE, "").trim()
-      writeFileSync(msgFile, scrubbed + "\n", "utf-8")
+      writeFileSync(msgFile, `${scrubbed}\n`, "utf-8")
       return {
         systemMessage: "Scrubbed 'Co-authored-by' trailers from commit message.",
       }
