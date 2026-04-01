@@ -1,6 +1,7 @@
 import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
+import { stderrLog } from "../debug.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
 import { hookIdentifier, isInlineHookDef } from "../hook-types.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
@@ -390,7 +391,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
           void pruneTempLogs()
         }
       } catch (err) {
-        console.error(`[daemon] Transcript monitor error: ${err}`)
+        stderrLog("monitoring loop exception", `[daemon] Transcript monitor error: ${err}`)
         void logPseudoHook(`Error in monitor loop: ${err}`)
       } finally {
         isMonitoring = false
@@ -411,7 +412,7 @@ async function logPseudoHook(message: string) {
     const timestamp = new Date().toISOString()
     await appendFile(swizPseudoHookLogPath(), `[${timestamp}] ${message}\n`)
   } catch (err) {
-    console.error(`Failed to log pseudo-hook: ${err}`)
+    stderrLog("pseudo-hook logging", `Failed to log pseudo-hook: ${err}`)
   }
 }
 
@@ -445,7 +446,10 @@ class TranscriptMonitor {
         const id = hookIdentifier(hook)
         if (this.caches.cooldownRegistry.checkAndMark(id, cooldown, cwd)) {
           void logPseudoHook(`${event} cooldown active for ${id} in ${cwd}, skipping`)
-          console.error(`[daemon] ${event} cooldown active for ${id}, skipping dispatch`)
+          stderrLog(
+            "hook cooldown active",
+            `[daemon] ${event} cooldown active for ${id}, skipping dispatch`
+          )
           return true
         }
       }
@@ -490,7 +494,7 @@ class TranscriptMonitor {
       const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
       if (prevFingerprint !== data.lastToolCallFingerprint) {
         const msg = `tool call fingerprint change in ${latestSession.id}: ${prevFingerprint} -> ${data.lastToolCallFingerprint}`
-        console.error(`[daemon] ${msg}`)
+        stderrLog("tool call detection", `[daemon] ${msg}`)
         void logPseudoHook(msg)
         this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
 
@@ -509,7 +513,7 @@ class TranscriptMonitor {
 
           // Trigger postToolUse hook
           const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
-          console.error(`[daemon] ${triggerMsg}`)
+          stderrLog("postToolUse dispatch", `[daemon] ${triggerMsg}`)
           void logPseudoHook(triggerMsg)
           const payload = {
             session_id: latestSession.id,
@@ -534,7 +538,7 @@ class TranscriptMonitor {
       const prevMessageFingerprint = this.lastMessageFingerprints.get(latestSession.id)
       if (prevMessageFingerprint !== data.lastMessageFingerprint) {
         const msg = `message fingerprint change in ${latestSession.id}: ${prevMessageFingerprint} -> ${data.lastMessageFingerprint}`
-        console.error(`[daemon] ${msg}`)
+        stderrLog("message detection", `[daemon] ${msg}`)
         void logPseudoHook(msg)
         this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
 
@@ -553,7 +557,7 @@ class TranscriptMonitor {
 
           // Trigger notification hook for TTS
           const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
-          console.error(`[daemon] ${triggerMsg}`)
+          stderrLog("notification dispatch", `[daemon] ${triggerMsg}`)
           void logPseudoHook(triggerMsg)
           const payload = {
             session_id: latestSession.id,
