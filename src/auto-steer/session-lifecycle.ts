@@ -27,18 +27,21 @@ export interface SessionAutoSteerContext {
 export function processAutoSteerDirectives(context: SessionAutoSteerContext): void {
   if (!context.autoSteerQueue || context.autoSteerQueue.length === 0) return
 
-  // Priority sort: high first, then timestamp
-  const sorted = [...context.autoSteerQueue].sort((a, b) => {
-    const pDiff = (b.priority === "high" ? 1 : 0) - (a.priority === "high" ? 1 : 0)
-    return pDiff !== 0 ? pDiff : new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  })
+  // Pre-compute numeric timestamps to avoid O(N log N) Date constructions in comparator
+  type Keyed = { payload: AutoSteerPayload; ts: number; hi: number }
+  const keyed: Keyed[] = context.autoSteerQueue.map((s) => ({
+    payload: s,
+    ts: new Date(s.timestamp).getTime(),
+    hi: s.priority === "high" ? 1 : 0,
+  }))
+  keyed.sort((a, b) => b.hi - a.hi || a.ts - b.ts)
 
   // Inject as system-level directives
-  context.pendingDirectives.push(
-    ...sorted.map(
-      (s) => `[AUTO-STEER | ${s.type.replace(/_/g, " ")} | PR #${s.prNumber}] ${s.message}`
+  for (const { payload: s } of keyed) {
+    context.pendingDirectives.push(
+      `[AUTO-STEER | ${s.type.replace(/_/g, " ")} | PR #${s.prNumber}] ${s.message}`
     )
-  )
+  }
 
   context.autoSteerQueue = []
 }

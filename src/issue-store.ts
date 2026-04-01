@@ -251,6 +251,8 @@ export class IssueStore {
   private _stmtListPullRequests!: Statement<{ data: string }>
   private _stmtGetPullRequest!: Statement<{ data: string }>
   private _stmtRemovePullRequest!: Statement
+  private _stmtListIssueComments!: Statement<{ data: string }>
+  private _stmtListAllCommentIds!: Statement<{ comment_id: number; issue_number: number }>
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getDefaultDbPath()
@@ -271,6 +273,12 @@ export class IssueStore {
     )
     this._stmtRemovePullRequest = this.db.prepare(
       "DELETE FROM pull_requests WHERE repo = ? AND number = ?"
+    )
+    this._stmtListIssueComments = this.db.prepare(
+      "SELECT data FROM issue_comments WHERE repo = ? AND issue_number = ? ORDER BY comment_id ASC"
+    )
+    this._stmtListAllCommentIds = this.db.prepare(
+      "SELECT comment_id, issue_number FROM issue_comments WHERE repo = ?"
     )
   }
 
@@ -704,13 +712,18 @@ export class IssueStore {
 
   /** List cached comments for an issue. Returns null if none have been synced yet. */
   listIssueComments<T = unknown>(repo: string, issueNumber: number): T[] | null {
-    const rows = this.db
-      .query(
-        "SELECT data FROM issue_comments WHERE repo = ? AND issue_number = ? ORDER BY comment_id ASC"
-      )
-      .all(repo, issueNumber) as { data: string }[]
+    const rows = this._stmtListIssueComments.all(repo, issueNumber) as { data: string }[]
     if (rows.length === 0) return null
     return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** List all cached comment IDs for a repo in a single query. */
+  listAllIssueCommentIds(repo: string): Array<{ id: string; prNumber: number }> {
+    const rows = this._stmtListAllCommentIds.all(repo) as {
+      comment_id: number
+      issue_number: number
+    }[]
+    return rows.map((r) => ({ id: String(r.comment_id), prNumber: r.issue_number }))
   }
 
   /** Timestamp (ms) of the most recent comment on an issue, or null when not yet synced. */

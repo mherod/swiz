@@ -7,14 +7,20 @@
  */
 
 import type { trackPrReviewTransitions } from "../../auto-steer/pr-review-tracker.ts"
-import { createSyncIntegrationContext } from "../../auto-steer/sync-integration.ts"
+import {
+  createSyncIntegrationContext,
+  processSyncForAutoSteer,
+} from "../../auto-steer/sync-integration.ts"
 import { debugLog } from "../../debug.ts"
+import { git } from "../../git-helpers.ts"
 import type { IssueStore, UpstreamSyncResult } from "../../issue-store.ts"
 import { getIssueStore } from "../../issue-store.ts"
 
-interface ProjectPrReviewState {
-  /** Current branch PR review state */
-  prDetail: Record<string, any> | null
+const BRANCH_CACHE_TTL_MS = 15_000
+
+interface BranchCacheEntry {
+  branch: string
+  cachedAt: number
 }
 
 interface SessionAutoSteerQueue {
@@ -22,7 +28,7 @@ interface SessionAutoSteerQueue {
 }
 
 export class PrReviewMonitor {
-  private projectStates = new Map<string, ProjectPrReviewState>()
+  private branchCache = new Map<string, BranchCacheEntry>()
   private sessionQueues = new Map<string, SessionAutoSteerQueue>()
   private store: IssueStore
 
@@ -59,61 +65,32 @@ export class PrReviewMonitor {
       // Only process if PR branch detail changed
       if (!syncResult.prBranchDetail?.changes?.length) return
 
-      const { git } = await import("../../git-helpers.ts")
-      const branch = await git(["branch", "--show-current"], cwd)
+      const branch = await this.getCurrentBranch(cwd)
       if (!branch) return
 
       // Find if this branch had PR detail changes
       const branchChange = syncResult.prBranchDetail.changes.find((c) => c.key === branch)
       if (!branchChange) return
 
-      // Extract PR data for current branch and comments from store
-      // Get open PRs to extract reviewDecision
+      // Get open PRs (only number + reviewDecision needed)
       const openPrs = this.store.listPullRequests(repo) as
-        | Array<{
-            number: number
-            reviewDecision: string | null
-          }>
+        | Array<{ number: number; reviewDecision: string | null }>
         | undefined
       if (!openPrs) return
 
-      // Comments are stored per-issue number in the store
-      const allComments: Array<{ id: string; prNumber: number }> = []
-      for (const pr of openPrs) {
-        const comments = this.store.listIssueComments<{ id: string }>(repo, pr.number)
-        if (comments) {
-          for (const c of comments) {
-            allComments.push({
-              id: c.id,
-              prNumber: pr.number,
-            })
-          }
-        }
-      }
+      // Fetch all comments for this repo in a single query
+      const allComments = this.store.listAllIssueCommentIds(repo)
 
-      // Build integration context
+      // Build integration context and process
       const ctx = createSyncIntegrationContext(sessionId, true, (payloads) => {
         if (sessionId && payloads.length > 0) {
-          // Store payloads in session queue for retrieval during lifecycle
           const existing = this.sessionQueues.get(sessionId) ?? { payloads: [] }
           existing.payloads.push(...payloads)
           this.sessionQueues.set(sessionId, existing)
         }
       })
 
-      // Process through tracker
-      const { processSyncForAutoSteer } = await import("../../auto-steer/sync-integration.ts")
       processSyncForAutoSteer(syncResult, openPrs, allComments, ctx)
-
-      // Update state tracker with new PR detail for this branch
-      const rawPrDetail = this.store.getPrBranchDetailRaw(repo, branch)
-      const key = `${cwd}:${branch}`
-      if (rawPrDetail) {
-        const prDetail = JSON.parse(rawPrDetail)
-        this.projectStates.set(key, { prDetail })
-      } else {
-        this.projectStates.delete(key)
-      }
 
       debugLog(
         `[swiz] PR_REVIEW_MONITOR branch=${branch} processed openPrs=${openPrs.length} comments=${allComments.length}`
@@ -122,6 +99,16 @@ export class PrReviewMonitor {
       debugLog(`[swiz] PR_REVIEW_MONITOR_ERROR ${err instanceof Error ? err.message : String(err)}`)
       // Fail silently — review monitoring shouldn't block sync
     }
+  }
+
+  /** Return current branch for cwd, cached for BRANCH_CACHE_TTL_MS. */
+  private async getCurrentBranch(cwd: string): Promise<string | null> {
+    const now = Date.now()
+    const cached = this.branchCache.get(cwd)
+    if (cached && now - cached.cachedAt < BRANCH_CACHE_TTL_MS) return cached.branch
+    const branch = await git(["branch", "--show-current"], cwd)
+    if (branch) this.branchCache.set(cwd, { branch, cachedAt: now })
+    return branch || null
   }
 
   /**
@@ -144,18 +131,14 @@ export class PrReviewMonitor {
     }
   }
 
-  /** Clear cached state for a project (e.g., when unregistering). */
+  /** Clear branch cache for a project (e.g., when unregistering). */
   clearProject(cwd: string): void {
-    for (const key of this.projectStates.keys()) {
-      if (key.startsWith(cwd)) {
-        this.projectStates.delete(key)
-      }
-    }
+    this.branchCache.delete(cwd)
   }
 
   /** Purge all cached state. */
   clear(): void {
-    this.projectStates.clear()
+    this.branchCache.clear()
     this.sessionQueues.clear()
   }
 }

@@ -132,8 +132,10 @@ describe("PR Review Auto-Steer Tracker", () => {
       ]
     )
 
-    // Should detect 2 new comments
-    expect(res.filter((p) => p.type === "PR_COMMENT")).toHaveLength(2)
+    // Should detect 2 new comments as a single batched payload
+    const commentPayloads = res.filter((p) => p.type === "PR_COMMENT")
+    expect(commentPayloads).toHaveLength(1)
+    expect(commentPayloads[0]!.message).toContain("2 new comments")
   })
 
   it("emits payloads with correct timestamps", () => {

@@ -26,6 +26,9 @@ export interface AutoSteerPayload {
 /** In-memory state tracker persisted across sync cycles. */
 const prStateHistory = new Map<number, PrReviewState>()
 
+/** Evict entries not seen in the last 7 days. */
+const PR_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
 /** Reset tracker state (for testing and explicit state management). */
 export function resetPrTrackerState(): void {
   prStateHistory.clear()
@@ -43,6 +46,15 @@ export function trackPrReviewTransitions(
   currentComments: Array<{ id: string; prNumber: number }>
 ): AutoSteerPayload[] {
   const autoSteers: AutoSteerPayload[] = []
+  const now = new Date().toISOString()
+  const nowMs = Date.now()
+
+  // Evict stale entries for closed/aged-out PRs
+  for (const [prNumber, state] of prStateHistory.entries()) {
+    if (nowMs - new Date(state.syncedAt).getTime() > PR_STATE_TTL_MS) {
+      prStateHistory.delete(prNumber)
+    }
+  }
 
   // Diff PR review decisions
   for (const pr of currentPrs) {
@@ -62,7 +74,7 @@ export function trackPrReviewTransitions(
           currDecision === "APPROVED"
             ? `Pull request #${pr.number} received an approval. You may proceed to merge or address pending items.`
             : `Pull request #${pr.number} has requested changes. Review feedback requires attention before proceeding.`,
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         priority: currDecision === "CHANGES_REQUESTED" ? "high" : "normal",
       })
     } else if (prevDecision === "CHANGES_REQUESTED" && currDecision === "APPROVED") {
@@ -71,7 +83,7 @@ export function trackPrReviewTransitions(
         type: "PR_APPROVAL",
         prNumber: pr.number,
         message: `Pull request #${pr.number} previously requested changes, but has now been approved.`,
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         priority: "high",
       })
     }
@@ -81,11 +93,11 @@ export function trackPrReviewTransitions(
       prNumber: pr.number,
       reviewDecision: currDecision,
       commentIds: prev?.commentIds ?? new Set(),
-      syncedAt: new Date().toISOString(),
+      syncedAt: now,
     })
   }
 
-  // Diff comments
+  // Build comment lookup: prNumber → Set<id>
   const commentsMap = new Map<number, Set<string>>()
   for (const c of currentComments) {
     if (!commentsMap.has(c.prNumber)) commentsMap.set(c.prNumber, new Set())
@@ -93,23 +105,28 @@ export function trackPrReviewTransitions(
   }
 
   for (const [prNumber, state] of prStateHistory.entries()) {
-    const prComments = commentsMap.get(prNumber) ?? new Set()
+    const prComments = commentsMap.get(prNumber) ?? new Set<string>()
 
-    // Detect new comments
+    // Count new comments and emit a single batched payload
+    let newCount = 0
     for (const id of prComments) {
-      if (!state.commentIds.has(id)) {
-        autoSteers.push({
-          type: "PR_COMMENT",
-          prNumber,
-          message: `New comment on pull request #${prNumber}. Review inline feedback.`,
-          timestamp: new Date().toISOString(),
-          priority: "normal",
-        })
-      }
+      if (!state.commentIds.has(id)) newCount++
+    }
+    if (newCount > 0) {
+      autoSteers.push({
+        type: "PR_COMMENT",
+        prNumber,
+        message:
+          newCount === 1
+            ? `New comment on pull request #${prNumber}. Review inline feedback.`
+            : `${newCount} new comments on pull request #${prNumber}. Review inline feedback.`,
+        timestamp: now,
+        priority: "normal",
+      })
     }
 
-    // Sync current comment IDs to state
-    state.commentIds = new Set(prComments)
+    // Assign directly — commentsMap values are not reused after this loop
+    state.commentIds = prComments
   }
 
   return autoSteers
