@@ -10,6 +10,7 @@ interface GlobalSettingsForm {
   sandboxedEdits: boolean
   speak: boolean
   autoSteer: boolean
+  autoSteerTranscriptWatching: boolean
   gitStatusGate: boolean
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective"
   auditStrictness: "strict" | "relaxed" | "local-dev"
@@ -41,6 +42,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   sandboxedEdits: true,
   speak: false,
   autoSteer: false,
+  autoSteerTranscriptWatching: false,
   gitStatusGate: true,
   ambitionMode: "standard",
   auditStrictness: "strict",
@@ -77,6 +79,8 @@ interface CachedProjectSettingsResponse {
     largeFileSizeKb?: number
     ambitionMode?: "standard" | "aggressive" | "creative" | "reflective"
     taskDurationWarningMinutes?: number
+    autoSteerTranscriptWatching?: boolean
+    speak?: boolean
   } | null
   globalSettings?: {
     prMergeMode?: boolean
@@ -96,6 +100,8 @@ interface ProjectSettingsForm {
   largeFileSizeKb: number | ""
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective" | "inherit"
   taskDurationWarningMinutes: number | ""
+  autoSteerTranscriptWatching: boolean | "inherit"
+  speak: boolean | "inherit"
 }
 
 const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
@@ -111,6 +117,8 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   largeFileSizeKb: "",
   ambitionMode: "inherit",
   taskDurationWarningMinutes: "",
+  autoSteerTranscriptWatching: "inherit",
+  speak: "inherit",
 }
 
 function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettingsForm {
@@ -122,6 +130,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     sandboxedEdits: settings.sandboxedEdits !== false,
     speak: !!settings.speak,
     autoSteer: !!settings.autoSteer,
+    autoSteerTranscriptWatching: !!settings.autoSteerTranscriptWatching,
     gitStatusGate: settings.gitStatusGate !== false,
     ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
     auditStrictness:
@@ -160,6 +169,8 @@ const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
   largeFileSizeKb: "",
   ambitionMode: "inherit",
   taskDurationWarningMinutes: "",
+  autoSteerTranscriptWatching: "inherit",
+  speak: "inherit",
 }
 
 function projectSettingsToForm(response: CachedProjectSettingsResponse): ProjectSettingsForm {
@@ -180,6 +191,10 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
       largeFileSizeKb: s.largeFileSizeKb,
       ambitionMode: s.ambitionMode,
       taskDurationWarningMinutes: s.taskDurationWarningMinutes,
+      autoSteerTranscriptWatching: (s.autoSteerTranscriptWatching ?? "inherit") as
+        | boolean
+        | "inherit",
+      speak: (s.speak ?? "inherit") as boolean | "inherit",
     }),
   }
 }
@@ -302,6 +317,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "autoSteer",
     label: "Auto-steer",
     desc: "Type 'Continue' into the terminal after every tool call via AppleScript.",
+  },
+  {
+    key: "autoSteerTranscriptWatching",
+    label: "Auto-steer transcript watching",
+    desc: "Enable daemon-driven auto-steering by monitoring session transcripts for tool calls.",
   },
   {
     key: "updateMemoryFooter",
@@ -799,6 +819,33 @@ function ProjectSettingsColumn({
             label="Trunk mode"
             desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks. Blocks checkout/switch to other branches, gh pr checkout, and gh pr create."
           />
+          <div className="mt-4">
+            <label
+              className="grid gap-1 text-[0.75rem] text-[#b8c8ea]"
+              htmlFor="project-autoSteerTranscriptWatching"
+            >
+              <span>Auto-steer transcript watching override</span>
+              <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+                Project-specific override for daemon-driven auto-steering. "inherit" uses the global
+                setting.
+              </p>
+              <Select
+                id="project-autoSteerTranscriptWatching"
+                value={String(form.autoSteerTranscriptWatching)}
+                onChange={(e) => {
+                  const val = e.target.value
+                  set({
+                    autoSteerTranscriptWatching: val === "inherit" ? "inherit" : val === "true",
+                  })
+                }}
+                options={[
+                  { label: "inherit (global)", value: "inherit" },
+                  { label: "enabled", value: "true" },
+                  { label: "disabled", value: "false" },
+                ]}
+              />
+            </label>
+          </div>
         </>
       )}
     </div>

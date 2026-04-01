@@ -122,8 +122,6 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
     }
   }
 
-  const processedStepIds = new Set<string>()
-
   if (latestBlob) {
     const lastState = latestBlob.lastAgentState
 
@@ -141,21 +139,54 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
     }
 
     // Extract conversation history from observations if available
-    const observations = lastState?.issue?.previousTasksInfo?.agentState?.observations
+    const observations =
+      lastState?.issue?.previousTasksInfo?.agentState?.observations ?? lastState?.observations
     if (Array.isArray(observations)) {
       for (const obs of observations) {
         // Assistant request part
-        if (obs.assistantRequest?.content) {
-          entries.push({
-            type: "assistant",
-            message: { role: "assistant", content: obs.assistantRequest.content },
-          })
+        if (obs.assistantRequest) {
+          const content: ContentBlock[] = []
+          if (obs.assistantRequest.content) {
+            content.push({ type: "text", text: obs.assistantRequest.content })
+          }
+          if (Array.isArray(obs.assistantRequest.toolUses)) {
+            for (const call of obs.assistantRequest.toolUses) {
+              const toolName = call.toolCallId?.name
+              const input = call.input?.rawJsonObject
+              if (toolName) {
+                content.push({
+                  type: "tool_use",
+                  id: call.toolCallId?.id,
+                  name: toolName,
+                  input: input ?? {},
+                })
+              }
+            }
+          }
+          if (content.length > 0) {
+            entries.push({
+              type: "assistant",
+              message: { role: "assistant", content },
+            })
+          }
         }
 
         // User response part
         if (obs.userResponse?.parts) {
-          const content = obs.userResponse.parts.map((p: any) => p.text).join("")
-          if (content) {
+          const content: ContentBlock[] = []
+          for (const part of obs.userResponse.parts) {
+            if (part.type === "text" && part.text) {
+              content.push({ type: "text", text: part.text })
+            } else if (part.type === "toolResult" && part.toolResult) {
+              content.push({
+                type: "tool_result",
+                tool_use_id: part.toolResult.toolCallId?.id,
+                content: part.toolResult.content,
+                is_error: part.toolResult.isError,
+              })
+            }
+          }
+          if (content.length > 0) {
             entries.push({
               type: "user",
               message: { role: "user", content },
@@ -172,8 +203,20 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
     if (Array.isArray(history)) {
       for (const msg of history) {
         if (msg.kind === "User") {
-          const content = msg.parts?.map((p: any) => p.text).join("")
-          if (content) {
+          const content: ContentBlock[] = []
+          for (const part of msg.parts ?? []) {
+            if (part.type === "text" && part.text) {
+              content.push({ type: "text", text: part.text })
+            } else if (part.type === "toolResult" && part.toolResult) {
+              content.push({
+                type: "tool_result",
+                tool_use_id: part.toolResult.toolCallId?.id,
+                content: part.toolResult.content,
+                is_error: part.toolResult.isError,
+              })
+            }
+          }
+          if (content.length > 0) {
             entries.push({
               type: "user",
               message: { role: "user", content },
@@ -240,15 +283,6 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
     if (parsed.event?.agentEvent) {
       const agentEvent = parsed.event.agentEvent
       const kind = agentEvent.kind
-      const stepId = agentEvent.stepId
-
-      // Avoid double-processing the same step ID in same session
-      if (stepId && processedStepIds.has(stepId)) {
-        // We only care about the latest state of a step
-        // But in JSONL, later events for same step override earlier ones.
-        // For simplicity, we'll collect them and only push when status is COMPLETED or CANCELED
-        // OR we just keep track of the latest text for each step and push at the end.
-      }
 
       if (
         (kind === "MarkdownBlockUpdatedEvent" || kind === "AgentThoughtBlockUpdatedEvent") &&
@@ -264,14 +298,86 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
         if (agentEvent.text) {
           content.push({ type: "text", text: agentEvent.text })
         }
-        // If it's a tool call, we might want to represent it as tool_use
-        // but Junie events don't always have full tool_use structure here.
-        // We can at least show the text.
+        if (agentEvent.toolName) {
+          content.push({
+            type: "tool_use",
+            id: agentEvent.callId || agentEvent.stepId,
+            name: agentEvent.toolName,
+            input:
+              typeof agentEvent.input === "string"
+                ? JSON.parse(agentEvent.input)
+                : (agentEvent.input ?? {}),
+          })
+        } else if (agentEvent.text && agentEvent.text.startsWith("Found ")) {
+          content.push({
+            type: "tool_use",
+            id: agentEvent.callId || agentEvent.stepId || "unknown",
+            name: "search",
+            input: { query: agentEvent.text },
+          })
+        }
         if (content.length > 0) {
           entries.push({
             type: "assistant",
             timestamp: parsed.timestamp,
             message: { role: "assistant", content },
+          })
+        }
+
+        if (agentEvent.output !== undefined || agentEvent.details !== undefined) {
+          const out = agentEvent.output ?? agentEvent.details ?? ""
+          if (out) {
+            entries.push({
+              type: "user",
+              timestamp: parsed.timestamp,
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: agentEvent.callId || agentEvent.stepId || "unknown",
+                    content: out,
+                    is_error: agentEvent.status === "FAILED",
+                  },
+                ],
+              },
+            })
+          }
+        }
+      } else if (kind === "TerminalBlockUpdatedEvent") {
+        const content: ContentBlock[] = []
+        if (agentEvent.command) {
+          content.push({
+            type: "tool_use",
+            id: agentEvent.stepId || "unknown",
+            name: "bash",
+            input: { command: agentEvent.command },
+          })
+        }
+        if (content.length > 0) {
+          entries.push({
+            type: "assistant",
+            timestamp: parsed.timestamp,
+            message: { role: "assistant", content },
+          })
+        }
+
+        if (agentEvent.output !== undefined || agentEvent.presentableOutput !== undefined) {
+          const out = agentEvent.output ?? agentEvent.presentableOutput ?? ""
+          entries.push({
+            type: "user",
+            timestamp: parsed.timestamp,
+            message: {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: agentEvent.stepId || "unknown",
+                  content: out,
+                  is_error: agentEvent.status === "FAILED",
+                },
+              ],
+            },
           })
         }
       } else if (kind === "ResultBlockUpdatedEvent" && agentEvent.output) {
@@ -283,7 +389,9 @@ export function parseJunieEvents(text: string): TranscriptEntry[] {
             content: [
               {
                 type: "tool_result",
+                tool_use_id: agentEvent.callId,
                 content: agentEvent.output,
+                is_error: agentEvent.isError,
               },
             ],
           },

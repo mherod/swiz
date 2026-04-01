@@ -40,6 +40,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     largeFileSizeKb: 500,
     largeFileSizeBlockKb: 5120,
     dirtyWorktreeThreshold: 15,
+    autoSteerTranscriptWatching: false,
     statusLineSegments: [],
     source: "global",
     ...overrides,

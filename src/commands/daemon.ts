@@ -1,10 +1,13 @@
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
+import { executeDispatch } from "../dispatch/execute.ts"
 import {
   getProjectSettingsPath,
   getSwizSettingsPath,
   invalidateSettingsCache,
+  readSwizSettings,
 } from "../settings.ts"
+import { findAllProviderSessions, isHookFeedback } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
@@ -173,7 +176,10 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
   }
 }
 
-function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
+function setupWatchers(
+  caches: ReturnType<typeof createDaemonCaches>,
+  transcriptMonitor: TranscriptMonitor
+) {
   const {
     watchers,
     ghCache,
@@ -225,8 +231,12 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
     watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
+    const transcriptWatchFlush = () => {
+      projectFlush()
+      void transcriptMonitor.checkProject(cwd)
+    }
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
-      watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
+      watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush)
     }
     // Auto-register project for periodic upstream sync and sync immediately
     void caches.upstreamSyncRegistry
@@ -307,7 +317,8 @@ function createPruner(
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
   const state = createDaemonState()
   const caches = createDaemonCaches()
-  const { registeredProjects, registerProjectWatchers } = setupWatchers(caches)
+  const transcriptMonitor = new TranscriptMonitor(caches)
+  const { registeredProjects, registerProjectWatchers } = setupWatchers(caches, transcriptMonitor)
 
   state.touchProject(process.cwd())
   const pruneTranscriptMemory = createPruner(state, caches, registeredProjects)
@@ -350,6 +361,105 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 }
 
 /** CLI command: starts the daemon web server, or manages its LaunchAgent lifecycle. */
+/**
+ * Monitors session transcripts for new tool calls and triggers auto-steer.
+ */
+class TranscriptMonitor {
+  private lastToolCallFingerprints = new Map<string, string>()
+  private lastMessageFingerprints = new Map<string, string>()
+
+  constructor(private caches: ReturnType<typeof createDaemonCaches>) {}
+
+  async checkProject(cwd: string): Promise<void> {
+    const cached = await this.caches.projectSettingsCache.get(cwd)
+    const settings = cached.settings
+    const globalSettings = await readSwizSettings()
+    const autoSteerEnabled =
+      settings?.autoSteerTranscriptWatching ?? globalSettings.autoSteerTranscriptWatching
+    const speakEnabled = settings?.speak ?? globalSettings.speak
+    if (!autoSteerEnabled && !speakEnabled) return
+
+    const sessions = await findAllProviderSessions(cwd)
+    // Only check the most recent session for performance
+    const latestSession = sessions[0]
+    if (!latestSession) return
+
+    const data = await sessionDataCache.get(latestSession)
+    if (!data) return
+
+    if (autoSteerEnabled && data.lastToolCallFingerprint) {
+      const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
+      if (prevFingerprint !== data.lastToolCallFingerprint) {
+        this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
+
+        // Detect if the last message was a tool call to avoid loops
+        const lastMessage = data.messages[data.messages.length - 1]
+        if (
+          lastMessage &&
+          lastMessage.role === "assistant" &&
+          (lastMessage.toolCalls?.length ?? 0) > 0
+        ) {
+          // Trigger postToolUse hook
+          console.error(
+            `[daemon] new tool call detected in ${latestSession.id}, triggering auto-steer`
+          )
+          const payload = {
+            session_id: latestSession.id,
+            transcript_path: latestSession.path,
+            cwd,
+            tool_name: lastMessage.toolCalls![0]!.name,
+            tool_input: lastMessage.toolCalls![0]!.detail,
+          }
+
+          void executeDispatch({
+            canonicalEvent: "postToolUse",
+            hookEventName: "postToolUse",
+            payloadStr: JSON.stringify(payload),
+            daemonContext: true,
+            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
+          })
+        }
+      }
+    }
+
+    if (speakEnabled && data.lastMessageFingerprint) {
+      const prevMessageFingerprint = this.lastMessageFingerprints.get(latestSession.id)
+      if (prevMessageFingerprint !== data.lastMessageFingerprint) {
+        this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
+
+        // Find the actual message for text
+        const lastMessage = data.messages[data.messages.length - 1]
+        if (
+          lastMessage &&
+          lastMessage.role === "assistant" &&
+          lastMessage.text &&
+          !isHookFeedback(lastMessage.text)
+        ) {
+          // Trigger notification hook for TTS
+          console.error(
+            `[daemon] new assistant message detected in ${latestSession.id}, triggering speak`
+          )
+          const payload = {
+            session_id: latestSession.id,
+            transcript_path: latestSession.path,
+            cwd,
+            type: "assistant_message",
+            message: lastMessage.text,
+          }
+
+          void executeDispatch({
+            canonicalEvent: "notification",
+            hookEventName: "notification",
+            payloadStr: JSON.stringify(payload),
+            daemonContext: true,
+            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
+          })
+        }
+      }
+    }
+  }
+}
+
 export const daemonCommand: Command = {
   name: "daemon",
   description: "Run a background web server",

@@ -131,6 +131,8 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "taskDurationWarningMinutes",
   "largeFileSizeKb",
   "dirtyWorktreeThreshold",
+  "speak",
+  "autoSteerTranscriptWatching",
 ] as const satisfies ReadonlyArray<keyof ProjectSwizSettings & keyof SwizSettings>
 
 /** Resolve fields that support project-level overrides. */
@@ -158,7 +160,6 @@ function buildBaseSettings(
     pushCooldownMinutes: settings.pushCooldownMinutes,
     skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
-    speak: settings.speak,
     autoSteer: settings.autoSteer,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,
@@ -192,6 +193,9 @@ export function getEffectiveSwizSettings(
       autoContinue: s.autoContinue ?? base.autoContinue,
       ambitionMode: s.ambitionMode ?? base.ambitionMode,
       collaborationMode: s.collaborationMode ?? base.collaborationMode,
+      autoSteerTranscriptWatching:
+        s.autoSteerTranscriptWatching ?? base.autoSteerTranscriptWatching,
+      speak: s.speak ?? base.speak,
       prMergeMode: typeof s.prMergeMode === "boolean" ? s.prMergeMode : base.prMergeMode,
       source: "session",
     }

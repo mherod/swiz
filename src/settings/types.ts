@@ -62,6 +62,8 @@ export interface SessionSwizSettings {
   prMergeMode?: boolean
   ambitionMode?: AmbitionMode
   collaborationMode?: CollaborationMode
+  autoSteerTranscriptWatching?: boolean
+  speak?: boolean
 }
 
 export type SettingsScope = "global" | "project" | "session"
@@ -111,6 +113,10 @@ export interface ProjectSwizSettings {
   qualityChecksGate?: boolean
   /** Block git push unless the user has explicitly approved it. */
   pushGate?: boolean
+  /** Read agent output aloud using text-to-speech. */
+  speak?: boolean
+  /** Enable daemon-driven auto-steering by monitoring session transcripts. */
+  autoSteerTranscriptWatching?: boolean
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
@@ -174,6 +180,8 @@ export interface SwizSettings {
   speak: boolean
   /** When true, types "Continue" into the terminal after every tool call via AppleScript. */
   autoSteer: boolean
+  /** When true, the daemon monitors session transcripts and triggers auto-steer via post-tool hooks. */
+  autoSteerTranscriptWatching: boolean
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
@@ -257,6 +265,7 @@ export const projectSettingsSchema = z.object({
   dirtyWorktreeThreshold: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
+  autoSteerTranscriptWatching: z.boolean().optional(),
   pushGate: z.boolean().optional(),
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
