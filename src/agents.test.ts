@@ -42,6 +42,12 @@ describe("agents.ts", () => {
       expect(codex?.name).toBe("Codex CLI")
     })
 
+    it("contains junie agent definition", () => {
+      const junie = AGENTS.find((a) => a.id === "junie")
+      expect(junie).toBeDefined()
+      expect(junie?.name).toBe("Junie")
+    })
+
     it("each agent has required properties", () => {
       AGENTS.forEach((agent) => {
         expect(agent).toHaveProperty("id")
@@ -104,6 +110,11 @@ describe("agents.ts", () => {
     it("finds codex agent", () => {
       const agent = getAgent("codex")
       expect(agent?.name).toBe("Codex CLI")
+    })
+
+    it("finds junie agent", () => {
+      const agent = getAgent("junie")
+      expect(agent?.name).toBe("Junie")
     })
 
     it("returns exact agent object reference", () => {

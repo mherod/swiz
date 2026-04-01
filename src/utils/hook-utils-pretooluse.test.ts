@@ -146,8 +146,7 @@ describe("denyPreToolUse edge cases", () => {
     expect(exitCode).toBe(0)
     const hso = parsed.hookSpecificOutput as JsonObject
     expect(hso.permissionDecision).toBe("deny")
-    // Footer is always appended; empty caller reason → only the footer
-    expect(hso.permissionDecisionReason).toContain("ACTION REQUIRED")
+    expect(hso.permissionDecisionReason).toBe("")
   })
 
   test("handles reason with special characters", async () => {

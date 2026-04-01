@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest"
-import { detectAgentCli } from "./agent.ts"
+import { detectAgentCli, detectBestAgentCli, detectJunieCli } from "./agent.ts"
 
 describe("agent.ts", () => {
   describe("detectAgentCli", () => {
     it("function is exported and callable", () => {
       expect(typeof detectAgentCli).toBe("function")
     })
+  })
 
-    it("returns AgentBackend type definition", () => {
-      // Verify the function signature
-      const func = detectAgentCli
-      expect(typeof func).toBe("function")
-      // Function returns "agent" | null (tested via integration/runtime)
+  describe("detectJunieCli", () => {
+    it("function is exported and callable", () => {
+      expect(typeof detectJunieCli).toBe("function")
     })
+  })
 
-    it("AgentBackend type is string literal 'agent'", () => {
-      const backend: "agent" = "agent"
-      expect(backend).toBe("agent")
+  describe("detectBestAgentCli", () => {
+    it("function is exported and callable", () => {
+      expect(typeof detectBestAgentCli).toBe("function")
     })
   })
 

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { basename, dirname, resolve } from "node:path"
-import { detectAgentCli, promptAgent } from "../agent.ts"
+import { detectBestAgentCli, promptBestAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { stderrLog } from "../debug.ts"
 import type { Command } from "../types.ts"
@@ -219,16 +219,16 @@ export function buildPrompt(
 export async function resolveWithAI(prompt: string, provider?: AiProviderId): Promise<string> {
   // Prefer explicit provider override or ai-providers layer (Gemini/Codex).
   // Fall back to Cursor Agent CLI when no AI SDK provider is configured.
-  if (!provider && !hasAiProvider() && !detectAgentCli()) {
+  if (!provider && !hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, install Junie, or install Cursor Agent."
     )
   }
 
   const result =
     provider || hasAiProvider()
       ? await promptText(prompt, { provider })
-      : await promptAgent(prompt, { timeout: 120_000 })
+      : await promptBestAgent(prompt, { timeout: 120_000 })
 
   if (!result) {
     throw new Error("AI returned empty response")

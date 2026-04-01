@@ -189,11 +189,11 @@ function denyPreToolUseObj(reason: string) {
   return hookOutputSchema.parse({
     suppressOutput: true,
     systemMessage: extractHookSystemMessagePreview(reason),
-    hookSpecificOutput: hsoPreToolUseDeny(reason + preToolActionRequired()),
+    hookSpecificOutput: hsoPreToolUseDeny(reason),
   })
 }
 
-/** Emit a PreToolUse denial and exit. Appends ACTION REQUIRED footer. Works across all agents. */
+/** Emit a PreToolUse denial and exit. Works across all agents. */
 export function denyPreToolUse(reason: string): never {
   exitWithHookObject(denyPreToolUseObj(reason))
 }
@@ -332,11 +332,6 @@ export { SwizHookExit } from "../inline-hook-context.ts"
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
-
-/** Standard ACTION REQUIRED footer for PreToolUse denials. */
-export function preToolActionRequired(): string {
-  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause.`
-}
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
 export function actionRequired(): string {

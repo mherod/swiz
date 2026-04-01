@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { AGENTS, type AgentDef, translateMatcher } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 
-export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex"
+export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex" | "junie"
 
 export interface AgentSettingsSearchOptions {
   cwd?: string
@@ -22,6 +22,8 @@ export function getAgentSettingsPath(
       return join(homeDir, ".gemini", "settings.json")
     case "codex":
       return join(homeDir, ".codex", "hooks.json")
+    case "junie":
+      return join(homeDir, ".junie", "settings.json")
   }
 }
 
@@ -49,6 +51,13 @@ export function getAgentSettingsSearchPaths(
       break
     case "codex":
       paths.push(join(cwd, ".codex", "hooks.json"))
+      break
+    case "junie":
+      paths.push(
+        join(homeDir, ".junie", "settings.local.json"),
+        join(cwd, ".junie", "settings.json"),
+        join(cwd, ".junie", "settings.local.json")
+      )
       break
   }
 

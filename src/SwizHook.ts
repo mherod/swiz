@@ -170,17 +170,13 @@ export function preToolUseAllow(reason = ""): SwizHookOutput {
   }
 }
 
-const PRE_TOOL_ACTION_REQUIRED =
-  "\n\nACTION REQUIRED: Fix the underlying issue before retrying. Do not attempt to bypass or work around it — address the root cause."
-
-/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). Appends ACTION REQUIRED footer. */
+/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
 export function preToolUseDeny(reason: string): SwizHookOutput {
   const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
-  const fullReason = reason + PRE_TOOL_ACTION_REQUIRED
   return {
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
+    hookSpecificOutput: hsoPreToolUseDeny(reason),
   }
 }
 

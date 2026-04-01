@@ -182,6 +182,34 @@ export const AGENTS: AgentDef[] = [
     },
     unsupportedEvents: ["subagentStart", "subagentStop", "notification"],
   },
+  {
+    id: "junie",
+    name: "Junie",
+    settingsPath: getAgentSettingsPath("junie", HOME),
+    hooksKey: "hooks",
+    configStyle: "nested",
+    binary: "junie",
+    // Junie uses allowlist.json for execution permissions, not user-configurable hooks.
+    // No hook events fired at all — it's an external agent with its own session lifecycle.
+    hooksConfigurable: false,
+    envVars: ["JUNIE_DATA"],
+    processPattern: /\/junie(\.app\/)?/,
+    toolAliases: {},
+    eventMap: {
+      stop: "stop",
+      preToolUse: "preToolUse",
+    },
+    unsupportedEvents: [
+      "postToolUse",
+      "sessionStart",
+      "sessionEnd",
+      "userPromptSubmit",
+      "preCompact",
+      "notification",
+      "subagentStart",
+      "subagentStop",
+    ],
+  },
 ]
 
 export function getAgent(id: string): AgentDef | undefined {

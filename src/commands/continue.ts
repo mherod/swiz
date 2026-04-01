@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
-import { detectAgentCli, promptAgent } from "../agent.ts"
+import { detectBestAgentCli, promptBestAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { stderrLog } from "../debug.ts"
@@ -35,7 +35,7 @@ async function generateNextStep(jsonlText: string, provider?: AiProviderId): Pro
   if (provider || hasAiProvider()) {
     return promptText(prompt, { provider })
   }
-  return promptAgent(prompt)
+  return promptBestAgent(prompt)
 }
 
 // ─── Arg Parsing ─────────────────────────────────────────────────────────────
@@ -118,9 +118,9 @@ async function resolveSession(targetDir: string, sessionQuery: string | null): P
 }
 
 function ensureAiBackend(): void {
-  if (!hasAiProvider() && !detectAgentCli()) {
+  if (!hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, install Junie, or install Cursor Agent."
     )
   }
 }

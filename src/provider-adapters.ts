@@ -116,6 +116,14 @@ const CODEX_CONFIG: ProviderConfig = {
   skillDir: "skills",
 }
 
+const JUNIE_CONFIG: ProviderConfig = {
+  agentId: "junie",
+  configDir: ".junie",
+  projectFiles: ["AGENTS.md"],
+  ruleExtensions: [],
+  skillDir: "skills",
+}
+
 const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
   claude: {
     id: "claude",
@@ -319,6 +327,44 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
         tasksDir: join(this.getHomeDir(), "tasks"),
         projectsDir: join(this.getHomeDir(), "projects"),
       }
+    },
+  },
+  junie: {
+    id: "junie",
+    config: JUNIE_CONFIG,
+    getHomeDir() {
+      return join(getHomeDir(), JUNIE_CONFIG.configDir)
+    },
+    getProjectStateDir() {
+      return join(this.getHomeDir(), "misc")
+    },
+    getProjectFiles(projectDir: string) {
+      return JUNIE_CONFIG.projectFiles.map((file) => projectPath(projectDir, file))
+    },
+    getRuleDirs() {
+      return { project: null, global: null }
+    },
+    getMemorySources(projectDir: string) {
+      const sources: ProviderMemorySource[] = [
+        { label: "Project rules", path: projectPath(projectDir, "AGENTS.md") },
+        { label: "Global rules", path: join(this.getHomeDir(), "AGENTS.md") },
+        { label: "Allowlist", path: join(this.getHomeDir(), "allowlist.json") },
+      ]
+      return sources
+    },
+    getTranscriptProviders() {
+      return new Set<TranscriptProviderId>(["junie"])
+    },
+    getSessionDir() {
+      return join(this.getHomeDir(), "sessions")
+    },
+    getSkillDirs() {
+      return [join(this.getHomeDir(), "skills")]
+    },
+    getTaskRoots() {
+      // Junie uses per-session task dirs with .matterhorn exit_status markers,
+      // not Claude-style JSON task files. Return null to indicate no task tracking.
+      return null
     },
   },
 }

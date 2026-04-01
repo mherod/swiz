@@ -3,7 +3,15 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/**", ".swiz/**", "coverage/**", "dist/**", "**/*.d.ts"],
+    ignores: [
+      "node_modules/**",
+      ".swiz/**",
+      ".junie/**",
+      "./.junie/**",
+      "coverage/**",
+      "dist/**",
+      "**/*.d.ts",
+    ],
   },
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx,jsx}"],

@@ -8,7 +8,15 @@
 import { tmpdir } from "node:os"
 import type { PromptOptions } from "./ai-providers.ts"
 
-export type AgentBackend = "agent"
+export type AgentBackend = "agent" | "junie"
+
+/**
+ * Return the best available agent backend, or null if none found.
+ * Prefers "junie" over "agent" (Cursor).
+ */
+export function detectBestAgentCli(): AgentBackend | null {
+  return detectJunieCli() || detectAgentCli()
+}
 
 /**
  * Return "agent" if the Cursor Agent CLI is installed, null otherwise.
@@ -17,12 +25,31 @@ export function detectAgentCli(): AgentBackend | null {
   return Bun.which("agent") ? "agent" : null
 }
 
+/**
+ * Return "junie" if the Junie CLI is installed, null otherwise.
+ */
+export function detectJunieCli(): AgentBackend | null {
+  return Bun.which("junie") ? "junie" : null
+}
+
 export interface PromptAgentOptions extends Pick<PromptOptions, "signal" | "timeout"> {
   /**
    * When true, runs agent with --workspace <tmpdir> so it has no access
    * to the current project's files — prompt-only Q&A mode.
    */
   promptOnly?: boolean
+}
+
+/**
+ * Send a prompt to the best available agent CLI and return the trimmed output.
+ */
+export async function promptBestAgent(
+  prompt: string,
+  options?: PromptAgentOptions
+): Promise<string> {
+  const backend = detectBestAgentCli()
+  if (backend === "junie") return promptJunie(prompt, options)
+  return promptAgent(prompt, options)
 }
 
 /**
@@ -83,6 +110,33 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
 
   if (proc.exitCode !== 0) {
     throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`)
+  }
+
+  return output.trim()
+}
+
+/**
+ * Send a prompt to the Junie CLI and return the trimmed output.
+ * Throws if junie is not installed or the process exits non-zero.
+ */
+export async function promptJunie(prompt: string, options?: PromptAgentOptions): Promise<string> {
+  if (!detectJunieCli()) {
+    throw new Error("Junie not found. Install it via the Junie installer.")
+  }
+
+  const args = ["junie", "--task", prompt]
+
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
+  attachAbortSignal(proc, options)
+
+  const [output, err] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+
+  if (proc.exitCode !== 0) {
+    throw new Error(`junie exited ${proc.exitCode}: ${err.trim()}`)
   }
 
   return output.trim()
