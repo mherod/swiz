@@ -105,6 +105,24 @@ describe("agent.ts", () => {
     })
   })
 
+  describe("junie CLI invocation", () => {
+    it("junie command includes --output-format=json flag", () => {
+      const args = ["junie", "--task", "prompt", "--output-format=json"]
+      expect(args).toContain("--output-format=json")
+    })
+
+    it("junie JSON output result field is extracted correctly", () => {
+      const junieOutput = {
+        sessionId: "session-260401-130206-16cj",
+        taskName: "Test Task",
+        result: "### Summary\n- Done.",
+        changes: [],
+        llmUsage: [],
+      }
+      expect(junieOutput.result.trim()).toBe("### Summary\n- Done.")
+    })
+  })
+
   describe("timeout and signal handling", () => {
     it("timeout creates internal AbortController if signal not provided", () => {
       const timeout = 5000

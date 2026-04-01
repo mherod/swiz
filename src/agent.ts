@@ -115,6 +115,14 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
   return output.trim()
 }
 
+interface JunieJsonOutput {
+  sessionId: string
+  taskName: string
+  result: string
+  changes: unknown[]
+  llmUsage: unknown[]
+}
+
 /**
  * Send a prompt to the Junie CLI and return the trimmed output.
  * Throws if junie is not installed or the process exits non-zero.
@@ -124,7 +132,7 @@ export async function promptJunie(prompt: string, options?: PromptAgentOptions):
     throw new Error("Junie not found. Install it via the Junie installer.")
   }
 
-  const args = ["junie", "--task", prompt]
+  const args = ["junie", "--task", prompt, "--output-format=json"]
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
   attachAbortSignal(proc, options)
@@ -139,5 +147,6 @@ export async function promptJunie(prompt: string, options?: PromptAgentOptions):
     throw new Error(`junie exited ${proc.exitCode}: ${err.trim()}`)
   }
 
-  return output.trim()
+  const parsed = JSON.parse(output.trim()) as JunieJsonOutput
+  return parsed.result.trim()
 }
