@@ -81,7 +81,7 @@ const pretooluseReadGrepStallGuard: SwizToolHook = {
 
       if (readStreak < STALL_THRESHOLD) return {}
 
-      return await preToolUseDeny(
+      return preToolUseDeny(
         `STOP. ${toolName} is BLOCKED — ${readStreak} consecutive Read/Search tool calls ` +
           `have occurred without any Edit or Write output.\n\n` +
           `Your information gathering has gone on for too long without producing changes. ` +

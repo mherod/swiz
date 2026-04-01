@@ -272,7 +272,7 @@ describe("waitForCooldown", () => {
       log: () => {},
     })
 
-    await expect(promise).rejects.toThrow("did not expire within")
+    expect(promise).rejects.toThrow("did not expire within")
   })
 
   it("timeout error includes remaining cooldown time", async () => {

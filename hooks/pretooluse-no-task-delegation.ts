@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Deny Task tool calls whose prompt delegates task creation.
 // Tasks created inside a subagent land in a different session and are invisible
 // to pretooluse-require-tasks.ts — the parent session stays blocked as if no
@@ -6,8 +7,8 @@
 //
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { preToolUseDeny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 

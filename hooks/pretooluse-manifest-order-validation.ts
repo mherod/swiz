@@ -94,7 +94,7 @@ const pretooluseManiOrderValidation: SwizFileEditHook = {
 
     try {
       const denyReason = await validateManifestOrder(input)
-      return denyReason ? await preToolUseDeny(denyReason) : preToolUseAllow("")
+      return denyReason ? preToolUseDeny(denyReason) : preToolUseAllow("")
     } catch {
       return preToolUseAllow("")
     }

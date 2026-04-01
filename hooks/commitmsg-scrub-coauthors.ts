@@ -5,9 +5,9 @@
 
 import { readFileSync, writeFileSync } from "node:fs"
 import { z } from "zod"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
+import { isGitRepo } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { isGitRepo } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 
 const commitMsgHookInputSchema = z.looseObject({
   cwd: z.string().optional(),

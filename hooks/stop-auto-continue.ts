@@ -11,8 +11,8 @@ import { resolveCwd } from "../src/cwd.ts"
 import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   type AmbitionMode,
   getEffectiveSwizSettings,

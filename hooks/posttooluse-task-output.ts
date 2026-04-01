@@ -8,8 +8,8 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
 import {

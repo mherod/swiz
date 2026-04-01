@@ -9,8 +9,8 @@
 
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -55,7 +55,7 @@ async function denyAutoSteerOrBlock(
       return preToolUseAllow("")
     }
   }
-  return await preToolUseDeny(reason)
+  return preToolUseDeny(reason)
 }
 
 const STALENESS_THRESHOLD = 20
@@ -180,7 +180,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      return await preToolUseDeny(
+      return preToolUseDeny(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -195,7 +195,7 @@ function checkNoTasks(
       )
     }
 
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
@@ -342,12 +342,9 @@ function shouldSkipStalenessCheck(opts: {
   if (opts.lastTaskIndex < 0 || opts.allTasksDone) return true
   if (opts.callsSinceTask < STALENESS_THRESHOLD) return true
   if (opts.hasInProgressTask) return true
-  if (
-    (isEditTool(opts.toolName) || isWriteTool(opts.toolName)) &&
-    isLargeContentPayload(opts.input)
+  return (
+    (isEditTool(opts.toolName) || isWriteTool(opts.toolName)) && isLargeContentPayload(opts.input)
   )
-    return true
-  return false
 }
 
 async function checkTaskStaleness(
@@ -461,8 +458,7 @@ function validateGuardConditions(
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
   if (isCurrentAgent("gemini")) return false
-  if (isExemptToolCall(input, toolName)) return false
-  return true
+  return !isExemptToolCall(input, toolName)
 }
 
 function applySyncGuards(input: Record<string, any>): ParsedInput | null {
@@ -542,7 +538,7 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
   const message = err instanceof Error ? err.message : String(err)
   return preToolUseDeny(
-    `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+    `STOP. \u26a0\ufe0f pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
       `Error: ${message}\n\n` +
       formatActionPlan(
         [

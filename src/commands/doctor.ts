@@ -27,6 +27,7 @@ import {
 } from "../skill-utils.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
+import { readLines } from "../utils/file-utils.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
@@ -2159,16 +2160,6 @@ async function findJunieProjectSessions(
   }
 
   return results
-}
-
-async function readLines(path: string, count: number): Promise<string[]> {
-  try {
-    const file = Bun.file(path)
-    const text = await file.text()
-    return text.split("\n").slice(0, count)
-  } catch {
-    return []
-  }
 }
 
 async function findSessions(

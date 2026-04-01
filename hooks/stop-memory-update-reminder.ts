@@ -7,8 +7,8 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { blockStopObj, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 

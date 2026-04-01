@@ -6,22 +6,11 @@ import { pluginsCommand } from "./plugins.ts"
 
 const { create: createTempDir } = useTempDir("swiz-plugins-")
 
-interface ConsoleCapture {
-  messages: string[]
-  restore: () => void
-}
-
-function captureConsoleLog(): ConsoleCapture {
+function captureOutput(): { messages: string[]; opts: { writeStdout: (s: string) => void } } {
   const messages: string[] = []
-  const original = console.log
-  console.log = (...args: unknown[]) => {
-    messages.push(args.map((arg) => String(arg)).join(" "))
-  }
   return {
     messages,
-    restore: () => {
-      console.log = original
-    },
+    opts: { writeStdout: (s: string) => messages.push(s) },
   }
 }
 
@@ -48,11 +37,10 @@ describe("swiz plugins", () => {
       },
     })
 
-    const captured = captureConsoleLog()
-    await pluginsCommand.run(["list", "--json", "--plugins-dir", pluginsDir])
-    captured.restore()
+    const { messages, opts } = captureOutput()
+    await pluginsCommand.run(["list", "--json", "--plugins-dir", pluginsDir], opts)
 
-    const payload = JSON.parse(captured.messages.join("\n")) as Array<{ key: string }>
+    const payload = JSON.parse(messages.join("\n")) as Array<{ key: string }>
     expect(payload.map((p) => p.key)).toEqual(["alpha@claude-plugins-official", "beta@custom"])
   })
 
@@ -67,9 +55,9 @@ describe("swiz plugins", () => {
       },
     })
 
-    await expect(
-      pluginsCommand.run(["info", "alpha", "--plugins-dir", pluginsDir])
-    ).rejects.toThrow("ambiguous")
+    expect(pluginsCommand.run(["info", "alpha", "--plugins-dir", pluginsDir])).rejects.toThrow(
+      "ambiguous"
+    )
   })
 
   test("uninstall removes install directory and registry entry", async () => {
@@ -89,15 +77,12 @@ describe("swiz plugins", () => {
       },
     })
 
-    const captured = captureConsoleLog()
-    await pluginsCommand.run([
-      "uninstall",
-      "alpha@claude-plugins-official",
-      "--plugins-dir",
-      pluginsDir,
-    ])
-    captured.restore()
-    expect(captured.messages.join("\n")).toContain("Uninstalled Claude plugin")
+    const { messages, opts } = captureOutput()
+    await pluginsCommand.run(
+      ["uninstall", "alpha@claude-plugins-official", "--plugins-dir", pluginsDir],
+      opts
+    )
+    expect(messages.join("\n")).toContain("Uninstalled Claude plugin")
 
     const installedPath = join(home, ".claude", "plugins", "installed_plugins.json")
     const payload = (await Bun.file(installedPath).json()) as {
@@ -106,11 +91,11 @@ describe("swiz plugins", () => {
     expect(payload.plugins["alpha@claude-plugins-official"]).toBeUndefined()
     expect(payload.plugins["beta@custom"]).toBeDefined()
 
-    await expect(
+    expect(
       stat(join(home, ".claude", "plugins", "installed_plugins.json.bak"))
     ).resolves.toBeDefined()
-    await expect(stat(installPath)).rejects.toBeDefined()
-    await expect(stat(dataPath)).rejects.toBeDefined()
+    expect(stat(installPath)).rejects.toBeDefined()
+    expect(stat(dataPath)).rejects.toBeDefined()
   })
 
   test("uninstall removes prefixed data directories when marketplace is unknown", async () => {
@@ -131,8 +116,8 @@ describe("swiz plugins", () => {
 
     await pluginsCommand.run(["uninstall", "gamma", "--plugins-dir", pluginsDir])
 
-    await expect(stat(installPath)).rejects.toBeDefined()
-    await expect(stat(matchedDataPath)).rejects.toBeDefined()
-    await expect(stat(unmatchedDataPath)).resolves.toBeDefined()
+    expect(stat(installPath)).rejects.toBeDefined()
+    expect(stat(matchedDataPath)).rejects.toBeDefined()
+    expect(stat(unmatchedDataPath)).resolves.toBeDefined()
   })
 })

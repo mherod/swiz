@@ -4,8 +4,8 @@
 
 import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   buildContextHookOutput,
   ghJson,

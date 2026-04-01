@@ -65,10 +65,6 @@ class SessionTranscript {
     this.lines.push(entry)
     await writeFile(this.path, `${this.lines.join("\n")}\n`)
   }
-
-  get commandCount(): number {
-    return this.lines.length
-  }
 }
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────

@@ -5,8 +5,8 @@
 //
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
@@ -42,8 +42,7 @@ function shouldInspectShellInput(input: { tool_name?: string }): boolean {
 function isBlockedSwizTasksCliCommand(command: string): boolean {
   const stripped = stripQuotedShellStrings(command)
   if (!SWIZ_TASKS_CLI_RE.test(stripped)) return false
-  if (SWIZ_TASKS_ADOPT_RE.test(stripped)) return false
-  return true
+  return !SWIZ_TASKS_ADOPT_RE.test(stripped)
 }
 
 async function denyIfLastTaskStanding(
@@ -53,7 +52,7 @@ async function denyIfLastTaskStanding(
   const allTasks = await readSessionTasks(sessionId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
-    return await preToolUseDeny(buildLastTaskStandingDenial(taskId))
+    return preToolUseDeny(buildLastTaskStandingDenial(taskId))
   }
   return null
 }
@@ -73,7 +72,7 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
   ) {
     return preToolUseAllow(SWIZ_TASKS_CLI_DENY_MESSAGE)
   }
-  return await preToolUseDeny(SWIZ_TASKS_CLI_DENY_MESSAGE)
+  return preToolUseDeny(SWIZ_TASKS_CLI_DENY_MESSAGE)
 }
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"

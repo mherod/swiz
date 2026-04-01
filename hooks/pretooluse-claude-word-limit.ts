@@ -7,8 +7,12 @@ import {
   compactionChecklistSteps,
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { preToolUseDeny, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { countFileWords, formatActionPlan, isShellTool } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -48,7 +52,7 @@ ${compactionChecklist}
 
 Current: ${stats.words} words | Limit: ${wordLimit} words | Target: ${wordLimit - 10} words`
 
-    return await preToolUseDeny(message)
+    return preToolUseDeny(message)
   }
 
   return {}

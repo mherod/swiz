@@ -105,7 +105,7 @@ const pretoolUseNoDirectDeps: SwizToolHook = {
         const parsed = parseContentSafely(content)
         if (!parsed) return preToolUseAllow("")
         if (hasDependencyBlocks(parsed)) {
-          return await preToolUseDeny(
+          return preToolUseDeny(
             `Do not directly write dependency blocks in package.json. ` +
               `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
           )
@@ -126,7 +126,7 @@ const pretoolUseNoDirectDeps: SwizToolHook = {
         if (!currentParsed || !projectedParsed) return preToolUseAllow("")
 
         if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
-          return await preToolUseDeny(
+          return preToolUseDeny(
             `Do not directly edit dependency blocks in package.json. ` +
               `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
           )

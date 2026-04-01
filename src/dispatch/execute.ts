@@ -124,7 +124,7 @@ export function summarizeToolInput(input: Record<string, any> | undefined): stri
   return ""
 }
 
-function getHookContext(
+export function getHookContext(
   canonicalEvent: string,
   payload: Record<string, any>
 ): { toolName: string | undefined; trigger: string | undefined } {

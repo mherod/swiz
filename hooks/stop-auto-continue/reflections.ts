@@ -5,7 +5,7 @@
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDir } from "../../src/home.ts"
-import { projectKeyFromCwd } from "../../src/transcript-utils.ts"
+import { projectKeyFromCwd } from "../../src/project-key.ts"
 
 const HOME = getHomeDir()
 const PROJECTS_DIR = join(HOME, ".claude", "projects")

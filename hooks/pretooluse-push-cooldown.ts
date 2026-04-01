@@ -66,7 +66,7 @@ async function evaluate(input: ShellHookInput) {
       const elapsed = now - lastPush
       if (elapsed < cooldownMs) {
         const remaining = Math.ceil((cooldownMs - elapsed) / 1000)
-        return await preToolUseDeny(
+        return preToolUseDeny(
           `BLOCKED: git push cooldown active — ${remaining}s remaining.\n\n` +
             `A push was made ${Math.floor(elapsed / 1000)}s ago. ` +
             `Wait ${remaining}s before pushing again.\n\n` +

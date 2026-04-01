@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
+
 // PostToolUse hook: After `gh pr create`, checks whether the PR description is
 // thin and suggests the /refine-pr skill via additionalContext (non-blocking).
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   buildContextHookOutput,
   GH_PR_CREATE_RE,

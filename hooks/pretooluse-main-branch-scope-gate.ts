@@ -8,10 +8,10 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
@@ -84,7 +84,7 @@ export async function evaluatePretooluseMainBranchScopeGate(
       ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
       : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
 
-    return await preToolUseDeny(`
+    return preToolUseDeny(`
 Merging ${prRef} via \`gh pr merge\` is blocked in ${repoContext}
 
 \`gh pr merge\` lands code directly on '${defaultBranch}', bypassing the intended review workflow.
@@ -138,7 +138,7 @@ Repository: ${owner}/${repo}
   const fork = await detectForkTopology(cwd)
 
   if (!diffRange) {
-    return await preToolUseDeny(`
+    return preToolUseDeny(`
 Push blocked: could not determine diff range for change analysis.
 
 No valid comparison ref found (tried origin/${currentBranch}, merge-base, HEAD~N, local history).
@@ -194,7 +194,7 @@ Remediation:
   }
 
   if (statParsingFailed) {
-    return await preToolUseDeny(`
+    return preToolUseDeny(`
 Push blocked: git diff --stat could not be parsed, but ${changedFiles.length} file(s) were detected via --name-only.
 
 Scope: ${scopeDescription}
@@ -233,7 +233,7 @@ For substantive work, use the feature branch workflow:
 This ensures code review, CI validation, and team coordination.
 `
 
-  return await preToolUseDeny(reason)
+  return preToolUseDeny(reason)
 }
 
 const pretooluseMainBranchScopeGate: SwizToolHook = {

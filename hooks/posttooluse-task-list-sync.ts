@@ -16,8 +16,8 @@
 
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   getSessionTaskPath,
   getSessionTasksDir,

@@ -19,8 +19,8 @@
 
 import type { AutoSteerTrigger } from "../src/auto-steer-store.ts"
 import { getAutoSteerStore } from "../src/auto-steer-store.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {

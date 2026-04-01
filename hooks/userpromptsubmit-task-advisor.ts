@@ -3,8 +3,12 @@
 
 import { toolNameForCurrentAgent } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommand,

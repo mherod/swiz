@@ -3,8 +3,12 @@
 // UserPromptSubmit hook: When the user's message starts with a skill
 // invocation, extract numbered steps from SKILL.md and create pending tasks.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { createTasksFromSkillSteps, formatSkillStepsSummary } from "../src/utils/skill-steps.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "./schemas.ts"
 

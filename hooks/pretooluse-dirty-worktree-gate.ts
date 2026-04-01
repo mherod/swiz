@@ -4,8 +4,8 @@
 // Forces a commit boundary before the task plan can be reshaped further.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   DEFAULT_DIRTY_WORKTREE_THRESHOLD,
   readProjectSettings,
@@ -100,7 +100,7 @@ export async function evaluatePretooluseDirtyWorktreeGate(
     await mergeActionPlanIntoTasks(commitSteps, input.session_id, cwd)
   }
 
-  return await preToolUseDeny(
+  return preToolUseDeny(
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +
       `Commit your current changes before updating the task plan.\n\n` +
       `To adjust: swiz settings set dirty-worktree-threshold <N>`

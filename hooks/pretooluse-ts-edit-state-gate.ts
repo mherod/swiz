@@ -13,7 +13,7 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
-import type { ProjectState } from "../src/settings/types.ts"
+import type { ProjectState } from "../src/settings"
 import { isCodeChangeTool } from "../src/tool-matchers.ts"
 import type { FileEditHookInput } from "./schemas.ts"
 

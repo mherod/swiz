@@ -4,8 +4,8 @@
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
 // Uses the blocking strategy — returns blockStopObj to fail the commit.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { blockStopObj, git, isGitRepo } from "../src/utils/hook-utils.ts"
 import { preCommitHookInputSchema } from "./schemas.ts"
 

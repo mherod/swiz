@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
-import { AGENTS } from "./agents.ts"
+import { AGENTS, agentSupportsTool } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
@@ -18,11 +18,22 @@ export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 
 const _skillCache = new Map<string, boolean>()
 
+/** Clear the internal skill existence cache. Primarily for testing. */
+export function clearSkillCache(): void {
+  _skillCache.clear()
+}
+
 /** Check if a skill exists in any of the skill directories. Cached per process. */
 export function skillExists(name: string): boolean {
   if (!name.trim()) return false
   const cached = _skillCache.get(name)
   if (cached !== undefined) return cached
+
+  const active = detectCurrentAgent()
+  if (!active || !agentSupportsTool(active, "Skill")) {
+    _skillCache.set(name, false)
+    return false
+  }
 
   const found = SKILL_DIRS.some((dir) => existsSync(join(dir, name, "SKILL.md")))
   _skillCache.set(name, found)
@@ -136,10 +147,14 @@ function detectActiveSkillTools(): string[] {
   // Agent-specific aliases are the primary invocation names.
   for (const alias of Object.values(active.toolAliases)) tools.add(alias)
 
-  // Include canonical names that map for this agent (identity for Claude, helpful for mixed skills).
-  for (const canonical of Object.keys(active.toolAliases)) tools.add(canonical)
+  // Include canonical names that map for this agent.
+  for (const canonical of Object.keys(active.toolAliases)) {
+    if (agentSupportsTool(active, canonical)) {
+      tools.add(canonical)
+    }
+  }
 
-  // Claude uses canonical names directly and has an empty alias table.
+  // Claude uses canonical names directly and supports all tools by default.
   if (active.id === "claude") {
     for (const agent of AGENTS) {
       for (const canonical of Object.keys(agent.toolAliases)) tools.add(canonical)

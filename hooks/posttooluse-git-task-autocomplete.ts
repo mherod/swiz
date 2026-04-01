@@ -14,8 +14,8 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { getSessionTasksDir, readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"

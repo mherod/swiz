@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+  clearSkillCache,
   extractMandatedSkillTools,
   extractStepsFromSkill,
   filterQualitySteps,
@@ -74,6 +75,42 @@ describe("skillExists", () => {
     const second = skillExists(name)
     expect(first).toBe(second)
     expect(first).toBe(false)
+  })
+
+  test("returns false if the current agent does not support the Skill tool", () => {
+    // commit skill exists in the test environment, but if we pretend to be Cursor
+    // (which doesn't support Skill), skillExists should return false.
+    const originalEnv = { ...process.env }
+    try {
+      // Clear ALL agent-identifying env vars
+      const envKeys = [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_PROJECT_ID",
+        "CLAUDECODE",
+        "GEMINI_API_KEY",
+        "GEMINI_CLI",
+        "GEMINI_PROJECT_DIR",
+        "CODEX_API_KEY",
+        "CODEX_MANAGED_BY_NPM",
+        "CODEX_THREAD_ID",
+        "JUNIE_DATA",
+      ]
+      for (const key of envKeys) {
+        delete process.env[key]
+      }
+
+      process.env.CURSOR = "true"
+      // Clear cache to ensure we detect the agent change
+      clearSkillCache()
+      expect(skillExists("commit")).toBe(false)
+    } finally {
+      // Restore ALL original env vars
+      for (const key of Object.keys(process.env)) {
+        delete process.env[key]
+      }
+      Object.assign(process.env, originalEnv)
+      clearSkillCache()
+    }
   })
 })
 

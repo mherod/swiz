@@ -4,8 +4,8 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { join } from "node:path"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { blockStopObj } from "../src/utils/hook-utils.ts"
 import type { PackageManager } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"

@@ -1,8 +1,12 @@
 #!/usr/bin/env bun
 
 import { git } from "../src/git-helpers.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { userPromptSubmitHookInputSchema } from "./schemas.ts"
 
 export async function evaluateUserpromptsubmitGitContext(input: unknown): Promise<SwizHookOutput> {

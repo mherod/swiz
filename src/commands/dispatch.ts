@@ -13,6 +13,7 @@ import {
   assertNormalizedDispatchPayload,
   DISPATCH_ROUTES,
   formatTrace,
+  getHookContext,
   groupMatches,
   log,
   normalizeAgentHookPayload,
@@ -106,10 +107,7 @@ async function tryDaemonDispatch(
 
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
 
-interface HookContext {
-  toolName: string | undefined
-  trigger: string | undefined
-}
+// HookContext replaced by getHookContext return type from hook-utils
 
 async function readStdinPayloadWithTimeout(
   timeoutMs: number = STDIN_PAYLOAD_TIMEOUT_MS
@@ -152,15 +150,6 @@ async function readStdinPayloadWithTimeout(
       reader.releaseLock()
     } catch {}
   }
-}
-
-function getHookContext(canonicalEvent: string, payload: Record<string, any>): HookContext {
-  const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
-  const trigger =
-    canonicalEvent === "sessionStart"
-      ? ((payload.trigger ?? payload.hook_event_name) as string | undefined)
-      : undefined
-  return { toolName, trigger }
 }
 
 // ─── CLI timing log ─────────────────────────────────────────────────────────

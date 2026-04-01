@@ -33,6 +33,7 @@ import {
   isGitRepo,
   isNotebookTool,
   isShellTool,
+  isSkillTool,
   isSwizCommand,
   isTaskCreateTool,
   isTaskTool,
@@ -597,6 +598,7 @@ describe("tool classification with edge-case inputs", () => {
     expect(isNotebookTool("")).toBe(false)
     expect(isTaskTool("")).toBe(false)
     expect(isTaskCreateTool("")).toBe(false)
+    expect(isSkillTool("")).toBe(false)
     expect(isFileEditTool("")).toBe(false)
     expect(isCodeChangeTool("")).toBe(false)
   })
@@ -627,6 +629,11 @@ describe("tool classification with edge-case inputs", () => {
     expect(isCodeChangeTool("NotebookEdit")).toBe(true)
     expect(isCodeChangeTool("Read")).toBe(false)
     expect(isCodeChangeTool("Bash")).toBe(false)
+  })
+
+  it("isSkillTool recognizes Claude Skill tool", () => {
+    expect(isSkillTool("Skill")).toBe(true)
+    expect(isSkillTool("Bash")).toBe(false)
   })
 })
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Notification hook: speak — uses the TTS narrator to speak incoming notifications.
  *
@@ -6,8 +7,8 @@
  * for projects with `speak` enabled.
  */
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 export function evaluateNotificationSpeak(input: unknown): SwizHookOutput {

@@ -10,11 +10,10 @@ import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
-  actionRequired,
   extractToolBlocksFromEntry,
   formatActionPlan,
   hasFileInTree,
@@ -187,7 +186,7 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
         { header: "To resolve:" }
       ) +
       `\nThis gate clears automatically once the transcript shows both steps after the original reminder.` +
-      actionRequired()
+      `\n\nYou must act on this now. Do not try to stop again without completing the required action.`
     )
   }
   return (
@@ -197,7 +196,7 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
       { header: "To resolve:" }
     ) +
     `\nThis gate clears automatically once the transcript shows that markdown write after the original reminder.` +
-    actionRequired()
+    `\n\nYou must act on this now. Do not try to stop again without completing the required action.`
   )
 }
 
@@ -208,8 +207,7 @@ async function shouldSkipEnforcement(
 ): Promise<boolean> {
   if (!transcriptPath || !toolName) return true
   if (!(await isGitRepo(cwd))) return true
-  if (!(await hasFileInTree(cwd, "CLAUDE.md"))) return true
-  return false
+  return !(await hasFileInTree(cwd, "CLAUDE.md"))
 }
 
 async function shouldSkipAfterTrigger(
@@ -220,8 +218,7 @@ async function shouldSkipAfterTrigger(
 ): Promise<boolean> {
   if (wasCompactedAfterTrigger(lines, triggerIndex)) return true
   if (await isMemoryRecentlyUpdated(cwd)) return true
-  if (await hasActiveTask(sessionId)) return true
-  return false
+  return await hasActiveTask(sessionId)
 }
 
 function isCurrentToolSatisfying(
@@ -231,8 +228,7 @@ function isCurrentToolSatisfying(
 ): boolean {
   if (state.skillReadComplete && state.markdownWriteComplete) return true
   if (!state.skillReadComplete && toolReadsUpdateMemorySkill(toolName, toolInput)) return true
-  if (!state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)) return true
-  return false
+  return !state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)
 }
 
 export async function evaluatePretooluseUpdateMemoryEnforcement(
@@ -261,7 +257,7 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
   const state = scanTranscript(lines, lastTriggerIndex)
   if (isCurrentToolSatisfying(state, toolName, toolInput)) return {}
 
-  return await preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
+  return preToolUseDeny(buildDenialReason(toolName, !state.skillReadComplete))
 }
 
 const pretooluseUpdateMemoryEnforcement: SwizToolHook = {

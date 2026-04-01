@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Incremental TTS narrator — speaks only new assistant text since last call.
  * Shared by PostToolUse, Stop, SessionStart, PreCompact, UserPromptSubmit, and PreToolUse.
@@ -8,8 +9,8 @@
  * Dual-mode: SwizHook (async fire-and-forget) + runSwizHookAsMain for subprocess.
  */
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { narrateSession } from "../src/speech.ts"
 
 export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<SwizHookOutput> {

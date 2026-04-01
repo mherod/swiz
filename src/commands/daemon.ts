@@ -52,6 +52,7 @@ import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./st
 const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000
 const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 5 * 60 * 1000
 const PROJECT_IDLE_EVICTION_MS = 60 * 60 * 1000 // 1 hour
+const MAX_WATCHED_PROJECTS = 10
 
 async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
   if (args.includes("status")) {
@@ -215,15 +216,52 @@ function setupWatchers(
   }
 
   watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)
-  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots)
+  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots, { depth: 1 })
   const globalSettingsPath = getSwizSettingsPath()
   if (globalSettingsPath) {
     watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
   }
 
   const registeredProjects = new Set<string>()
+
+  const evictProject = (cwd: string) => {
+    registeredProjects.delete(cwd)
+    ghCache.invalidateProject(cwd)
+    eligibilityCache.invalidateProject(cwd)
+    gitStateCache.invalidateProject(cwd)
+    projectSettingsCache.invalidateProject(cwd)
+    manifestCache.invalidateProject(cwd)
+    transcriptIndex.invalidateProject(cwd)
+    sessionDataCache.invalidateProject(cwd)
+    watchers.unregisterByLabelSuffix(`:${cwd}`)
+    caches.upstreamSyncRegistry.unregister(cwd)
+    caches.prReviewMonitor.clearProject(cwd)
+    caches.cooldownRegistry.invalidateProject(cwd)
+    for (const key of snapshots.keys()) {
+      if (key.startsWith(cwd)) snapshots.delete(key)
+    }
+  }
+
   const registerProjectWatchers = (cwd: string) => {
     if (registeredProjects.has(cwd)) return
+
+    // Limit the number of concurrently watched projects
+    if (registeredProjects.size >= MAX_WATCHED_PROJECTS) {
+      // Evict the least recently used project if possible, otherwise just the first one
+      // We don't have LRU Set, but we can find the oldest last-seen project
+      let oldestCwd: string | null = null
+      for (const projectCwd of registeredProjects) {
+        // Skip the current one we're trying to register (shouldn't happen due to check above)
+        if (projectCwd === cwd) continue
+        oldestCwd = projectCwd
+        break
+      }
+      if (oldestCwd) {
+        stderrLog("project eviction", `[daemon] Evicting project ${oldestCwd} to stay within limit`)
+        evictProject(oldestCwd)
+      }
+    }
+
     registeredProjects.add(cwd)
     const projectFlush = () => {
       for (const key of snapshots.keys()) {
@@ -239,22 +277,25 @@ function setupWatchers(
     }
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
-    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
+    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush, { depth: 2 })
     const transcriptWatchFlush = () => {
       projectFlush()
       void transcriptMonitor.checkProject(cwd)
     }
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
-      watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush)
+      watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush, {
+        depth: 1,
+      })
     }
     // Auto-register project for periodic upstream sync and sync immediately
     void caches.upstreamSyncRegistry
       .register(cwd)
       .then(() => caches.upstreamSyncRegistry.syncNow(cwd))
-    watchers.start()
+      .catch(() => {})
+    watchers.start().catch(() => {})
   }
 
-  watchers.start()
+  watchers.start().then(undefined, () => {})
   process.on("exit", () => {
     watchers.close()
     caches.ciWatchRegistry.close()
@@ -276,18 +317,24 @@ function evictIdleProjects(
     if (lastSeen >= projectCutoff) continue
     state.projectLastSeen.delete(cwd)
     state.projectMetrics.delete(cwd)
-    registeredProjects.delete(cwd)
-    caches.ghCache.invalidateProject(cwd)
-    caches.eligibilityCache.invalidateProject(cwd)
-    caches.gitStateCache.invalidateProject(cwd)
-    caches.projectSettingsCache.invalidateProject(cwd)
-    caches.manifestCache.invalidateProject(cwd)
-    caches.cooldownRegistry.invalidateProject(cwd)
-    caches.upstreamSyncRegistry.unregister(cwd)
-    caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
-    caches.prReviewMonitor.clearProject(cwd)
-    for (const key of caches.snapshots.keys()) {
-      if (key.startsWith(cwd)) caches.snapshots.delete(key)
+
+    // Manual eviction of idle projects
+    if (registeredProjects.has(cwd)) {
+      registeredProjects.delete(cwd)
+      caches.ghCache.invalidateProject(cwd)
+      caches.eligibilityCache.invalidateProject(cwd)
+      caches.gitStateCache.invalidateProject(cwd)
+      caches.projectSettingsCache.invalidateProject(cwd)
+      caches.manifestCache.invalidateProject(cwd)
+      caches.transcriptIndex.invalidateProject(cwd)
+      sessionDataCache.invalidateProject(cwd)
+      caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
+      caches.upstreamSyncRegistry.unregister(cwd)
+      caches.prReviewMonitor.clearProject(cwd)
+      caches.cooldownRegistry.invalidateProject(cwd)
+      for (const key of caches.snapshots.keys()) {
+        if (key.startsWith(cwd)) caches.snapshots.delete(key)
+      }
     }
   }
 }

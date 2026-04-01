@@ -15,8 +15,8 @@
 
 import { appendFile, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { toolHookInputSchema } from "./schemas.ts"

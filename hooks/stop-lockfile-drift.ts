@@ -5,8 +5,8 @@
 
 import { dirname, join } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { stopLockfileDriftBlockedFlagPath } from "../src/temp-paths.ts"
 import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"

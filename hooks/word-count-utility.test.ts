@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto"
 import { unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { countFileWords } from "../src/utils/hook-utils.ts"
+import { countFileWords } from "../src/file-metrics.ts"
 
 /** Create a unique temp file path for each test (concurrent-safe). */
 function uniqueTempFile(): string {

@@ -16,10 +16,10 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
@@ -66,7 +66,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
       "If rebase produces merge conflicts, resolve them with `git add <file>` and `git rebase --continue`, or abort with `git rebase --abort`."
     )
 
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `Remote is ahead by ${behindCount} commit${behindCount === 1 ? "" : "s"} — pull before pushing.\n\n` +
         `Run: \`git pull --rebase --autostash\`\n\n` +
         conflictAdvice
@@ -101,7 +101,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
     const offending = subjects.filter((s) => WIP_SUBJECT_RE.test(s))
 
     if (offending.length > 0) {
-      return await preToolUseDeny(
+      return preToolUseDeny(
         `Push blocked — outgoing commits contain temporary subjects that must be squashed first.\n\n` +
           `Offending commits:\n` +
           offending.map((s) => `  • ${s}`).join("\n") +
@@ -149,7 +149,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
     }
 
     if (secretMatches.length > 0) {
-      return await preToolUseDeny(
+      return preToolUseDeny(
         `Potential secret or credential detected in outgoing diff — push blocked.\n\n` +
           `Matching lines (truncated):\n` +
           secretMatches.map((l) => `  ${l}`).join("\n") +
@@ -218,7 +218,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
     )
 
     if (blockFiles.length > 0) {
-      return await preToolUseDeny(
+      return preToolUseDeny(
         `Large file(s) in outgoing batch exceed the ${blockThresholdKb} KB block threshold — push blocked.\n\n` +
           blockFiles.map((f) => `  ${f}`).join("\n") +
           `\n\nTo resolve:\n` +

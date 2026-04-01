@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
+
 // Block stop when incomplete tasks remain in the current session.
 // Runs before the completion auditor so incomplete tasks are caught early.
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { isCurrentAgent } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
-import { isCurrentAgent } from "../src/utils/hook-utils.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 

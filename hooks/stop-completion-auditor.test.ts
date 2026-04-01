@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { formatActionPlan } from "../src/action-plan.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { formatActionPlan } from "../src/utils/hook-utils.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── formatActionPlan unit tests ─────────────────────────────────────────────
@@ -278,7 +278,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   })
 
   it("falls through to block when audit log file does not exist", async () => {
-    const { home, tasksDir: _tasksDir, transcriptPath } = await createFixture()
+    const { home, transcriptPath } = await createFixture()
     // tasks dir exists but has no .json files and no audit log
     const result = await runAuditor(home, transcriptPath)
     // Bun.file().text() throws → catch swallows → toolCallCount≥10 → blocks
@@ -298,7 +298,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   })
 
   it("block reason contains formatActionPlan-formatted step list", async () => {
-    const { home, tasksDir: _tasksDir, transcriptPath } = await createFixture()
+    const { home, transcriptPath } = await createFixture()
     // No audit log → falls through to blockStop with formatActionPlan steps
     const result = await runAuditor(home, transcriptPath)
     expect(result.blocked).toBe(true)
@@ -309,7 +309,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   })
 
   it("uses the current agent's task tool alias in the action plan", async () => {
-    const { home, tasksDir: _tasksDir, transcriptPath } = await createFixture()
+    const { home, transcriptPath } = await createFixture()
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })
@@ -319,11 +319,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   })
 
   it("recognises update_plan as task activity and does not block when tasks were used", async () => {
-    const {
-      home,
-      tasksDir: _tasksDir,
-      transcriptPath,
-    } = await createFixtureWithTools(Array.from({ length: 12 }, () => "update_plan"))
+    const { home, transcriptPath } = await createFixtureWithTools(
+      Array.from({ length: 12 }, () => "update_plan")
+    )
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })

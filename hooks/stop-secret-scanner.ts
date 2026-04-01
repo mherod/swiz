@@ -20,8 +20,7 @@ const GENERIC_EXCLUDE_RE =
 function isSecretLine(line: string): boolean {
   if (PRIVATE_KEY_RE.test(line)) return true
   if (TOKEN_RE.test(line)) return true
-  if (GENERIC_SECRET_RE.test(line) && !GENERIC_EXCLUDE_RE.test(line)) return true
-  return false
+  return GENERIC_SECRET_RE.test(line) && !GENERIC_EXCLUDE_RE.test(line)
 }
 
 function scanDiffForSecrets(diff: string, limit = 10): string[] {

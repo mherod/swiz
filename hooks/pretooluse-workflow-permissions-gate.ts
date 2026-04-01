@@ -63,7 +63,7 @@ const pretoolusWorkflowPermissionsGate: SwizHook = {
       )
     }
 
-    return await preToolUseDeny(
+    return preToolUseDeny(
       [
         "Workflow permission change blocked on non-default branch.",
         "",

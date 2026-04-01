@@ -14,8 +14,8 @@
 // until the background task completes; the cooldown is handled by the
 // pretooluse hook reading the stale sentinel.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
   GIT_PUSH_RE,

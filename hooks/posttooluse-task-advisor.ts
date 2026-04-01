@@ -3,8 +3,8 @@
 // PostToolUse hook: Remind agents to create/update tasks regularly
 // Dual-mode: SwizHook + runSwizHookAsMain.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   buildContextHookOutput,
   getCurrentSessionTaskToolStats,

@@ -6,8 +6,8 @@
 
 import { join } from "node:path"
 import { getOpenPrForBranch } from "../src/git-helpers.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   blockStopObj,

@@ -56,7 +56,9 @@ export const AGENTS: AgentDef[] = [
     binary: "claude",
     hooksConfigurable: true,
     envVars: ["CLAUDECODE"],
-    toolAliases: {},
+    toolAliases: {
+      Skill: "Skill",
+    },
     eventMap: {
       stop: "Stop",
       preToolUse: "PreToolUse",
@@ -223,6 +225,26 @@ export function getAgentByFlag(args: string[]): AgentDef[] {
 
 export function hasAnyAgentFlag(args: string[]): boolean {
   return args.some((arg) => AGENTS.some((agent) => `--${agent.id}` === arg))
+}
+
+/** Check if an agent supports a specific tool by name. */
+export function agentSupportsTool(agent: AgentDef, toolName: string): boolean {
+  // Claude (empty aliases or only Skill) supports canonical tools directly.
+  if (agent.id === "claude") return true
+
+  // If the agent has no explicit tool aliases, it is assumed to support
+  // the canonical tool name directly — UNLESS it's the Skill tool,
+  // which is currently unique to Claude Code.
+  if (Object.keys(agent.toolAliases).length === 0) {
+    return toolName !== "Skill"
+  }
+
+  // If the tool is explicitly aliased to itself, it's considered supported
+  // (e.g. Gemini maps NotebookEdit to itself even if it's a no-op).
+  if (agent.toolAliases[toolName] !== undefined) return true
+
+  // Check if the toolName is one of the agent-specific names already
+  return Object.values(agent.toolAliases).includes(toolName)
 }
 
 /** Agents that support user-configurable hooks files */

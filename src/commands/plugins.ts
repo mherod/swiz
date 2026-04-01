@@ -9,6 +9,10 @@ type InstalledPlugins = {
   plugins?: Record<string, InstalledPluginEntry[]>
 }
 
+interface PluginsRunOptions {
+  writeStdout?: (line: string) => void
+}
+
 interface PluginRecord {
   key: string
   name: string
@@ -78,26 +82,26 @@ function resolveTarget(records: PluginRecord[], target: string): PluginRecord {
   throw new Error(`Plugin not found: ${target}`)
 }
 
-function printPluginList(records: PluginRecord[]): void {
+function printPluginList(records: PluginRecord[], write: (s: string) => void): void {
   if (records.length === 0) {
-    console.log("  No Claude plugins installed.")
+    write("  No Claude plugins installed.")
     return
   }
-  console.log("  Installed Claude plugins:\n")
+  write("  Installed Claude plugins:\n")
   for (const record of records) {
     const marketplace = record.marketplace ? ` @ ${record.marketplace}` : ""
-    console.log(`    ${record.name}${marketplace} (${record.entries.length} install)`)
+    write(`    ${record.name}${marketplace} (${record.entries.length} install)`)
   }
 }
 
-function printPluginInfo(record: PluginRecord): void {
-  console.log(`  key: ${record.key}`)
-  console.log(`  name: ${record.name}`)
-  console.log(`  marketplace: ${record.marketplace ?? "unknown"}`)
-  console.log(`  installs: ${record.entries.length}`)
-  console.log("  install paths:")
+function printPluginInfo(record: PluginRecord, write: (s: string) => void): void {
+  write(`  key: ${record.key}`)
+  write(`  name: ${record.name}`)
+  write(`  marketplace: ${record.marketplace ?? "unknown"}`)
+  write(`  installs: ${record.entries.length}`)
+  write("  install paths:")
   for (const entry of record.entries) {
-    console.log(`    - ${entry.installPath}`)
+    write(`    - ${entry.installPath}`)
   }
 }
 
@@ -145,11 +149,15 @@ async function writeInstalledPlugins(
   await Bun.write(path, `${JSON.stringify(installed, null, 2)}\n`)
 }
 
-async function handleList(args: string[], pluginsDirOverride?: string): Promise<void> {
+async function handleList(
+  args: string[],
+  pluginsDirOverride?: string,
+  write: (s: string) => void = console.log
+): Promise<void> {
   const asJson = args.includes("--json")
   const records = toPluginRecords(await readInstalledPlugins(pluginsDirOverride))
   if (asJson) {
-    console.log(
+    write(
       JSON.stringify(
         records.map((r) => ({
           key: r.key,
@@ -164,10 +172,14 @@ async function handleList(args: string[], pluginsDirOverride?: string): Promise<
     )
     return
   }
-  printPluginList(records)
+  printPluginList(records, write)
 }
 
-async function handleInfo(args: string[], pluginsDirOverride?: string): Promise<void> {
+async function handleInfo(
+  args: string[],
+  pluginsDirOverride?: string,
+  write: (s: string) => void = console.log
+): Promise<void> {
   const target = args[0]
   if (!target) throw new Error(`Missing plugin name.\n${usage()}`)
   const asJson = args.includes("--json")
@@ -176,7 +188,7 @@ async function handleInfo(args: string[], pluginsDirOverride?: string): Promise<
     target
   )
   if (asJson) {
-    console.log(
+    write(
       JSON.stringify(
         {
           key: record.key,
@@ -190,10 +202,14 @@ async function handleInfo(args: string[], pluginsDirOverride?: string): Promise<
     )
     return
   }
-  printPluginInfo(record)
+  printPluginInfo(record, write)
 }
 
-async function handleUninstall(args: string[], pluginsDirOverride?: string): Promise<void> {
+async function handleUninstall(
+  args: string[],
+  pluginsDirOverride?: string,
+  write: (s: string) => void = console.log
+): Promise<void> {
   const target = args[0]
   if (!target) throw new Error(`Missing plugin name.\n${usage()}`)
 
@@ -208,10 +224,10 @@ async function handleUninstall(args: string[], pluginsDirOverride?: string): Pro
   delete nextPlugins[record.key]
   await writeInstalledPlugins({ ...installed, plugins: nextPlugins }, pluginsDirOverride)
 
-  console.log(`  Uninstalled Claude plugin: ${record.key}`)
+  write(`  Uninstalled Claude plugin: ${record.key}`)
 }
 
-export const pluginsCommand: Command = {
+export const pluginsCommand: Command<PluginsRunOptions> = {
   name: "plugins",
   description: "Manage Claude plugins in ~/.claude/plugins",
   usage: "swiz plugins <list|info|uninstall> [name] [--json]",
@@ -231,7 +247,8 @@ export const pluginsCommand: Command = {
     },
     { flags: "--json", description: "Output JSON for list/info subcommands" },
   ],
-  async run(args: string[]) {
+  async run(args: string[], opts?: PluginsRunOptions) {
+    const writeStdout = opts?.writeStdout ?? console.log.bind(console)
     const pluginsDirFlag = args.indexOf("--plugins-dir")
     let pluginsDirOverride: string | undefined
     let effectiveArgs = args
@@ -244,9 +261,10 @@ export const pluginsCommand: Command = {
     }
     const sub = effectiveArgs[0]
     if (!sub) throw new Error(`Missing subcommand.\n${usage()}`)
-    if (sub === "list") return handleList(effectiveArgs.slice(1), pluginsDirOverride)
-    if (sub === "info") return handleInfo(effectiveArgs.slice(1), pluginsDirOverride)
-    if (sub === "uninstall") return handleUninstall(effectiveArgs.slice(1), pluginsDirOverride)
+    if (sub === "list") return handleList(effectiveArgs.slice(1), pluginsDirOverride, writeStdout)
+    if (sub === "info") return handleInfo(effectiveArgs.slice(1), pluginsDirOverride, writeStdout)
+    if (sub === "uninstall")
+      return handleUninstall(effectiveArgs.slice(1), pluginsDirOverride, writeStdout)
     throw new Error(`Unknown subcommand: ${sub}\n${usage()}`)
   },
 }

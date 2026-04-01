@@ -316,7 +316,7 @@ describe("resolveTaskById", () => {
   })
 
   it("throws for nonexistent task ID", async () => {
-    await expect(resolveTaskById("999", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+    expect(resolveTaskById("999", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
       "Task #999 not found in any session for this project."
     )
   })
@@ -341,7 +341,7 @@ describe("resolveTaskById", () => {
 
   it("throws disambiguation error when task ID collides across sessions", async () => {
     // Task #200 exists in SESSION_B and SESSION_C but not SESSION_A
-    await expect(resolveTaskById("200", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+    expect(resolveTaskById("200", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
       /Task #200 exists in 2 sessions/
     )
   })
@@ -366,7 +366,7 @@ describe("resolveTaskById", () => {
   })
 
   it("throws for prefixed ID with no matching session", async () => {
-    await expect(resolveTaskById("zzzz-99", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+    expect(resolveTaskById("zzzz-99", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
       /no session with prefix "zzzz" exists in this project/
     )
   })
@@ -439,7 +439,7 @@ describe("resolveTaskById", () => {
 
     const prefixC = sessionPrefix(SESSION_C)
     // SESSION_C is outside the scoped project — should throw
-    await expect(
+    expect(
       resolveTaskById(`${prefixC}-10`, SESSION_A, FILTER_CWD, TASKS, scopedProjects)
     ).rejects.toThrow()
   })
@@ -462,9 +462,7 @@ describe("resolveTaskById", () => {
     await writeFile(join(scopedProjects2, otherKey2, `${SESSION_C}.jsonl`), "\n")
 
     // Task #120 only exists in SESSION_B — which is excluded by filterCwd
-    await expect(
-      resolveTaskById("120", SESSION_A, FILTER_CWD, TASKS, scopedProjects2)
-    ).rejects.toThrow()
+    expect(resolveTaskById("120", SESSION_A, FILTER_CWD, TASKS, scopedProjects2)).rejects.toThrow()
   })
 
   it("both ID forms agree on scope — same project, same result", async () => {
@@ -559,14 +557,14 @@ describe("complete --dry-run: resolveTaskById validation", () => {
   })
 
   it("throws 'not found' for a task ID that does not exist", async () => {
-    await expect(resolveTaskById("9999", SESSION_A, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
+    expect(resolveTaskById("9999", SESSION_A, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
       /not found/
     )
   })
 
   it("throws for a missing task even when session is valid", async () => {
     // SESSION_B has task 120 but not task 999
-    await expect(resolveTaskById("999", SESSION_B, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
+    expect(resolveTaskById("999", SESSION_B, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
       /not found/
     )
   })
@@ -613,17 +611,15 @@ describe("tasks command regressions (#242)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await Promise.resolve(
-          tasksCommand.run([
-            "status",
-            taskId,
-            "completed",
-            "--session",
-            sessionId,
-            "--evidence",
-            "note:completed",
-          ])
-        )
+        await [
+          "status",
+          taskId,
+          "completed",
+          "--session",
+          sessionId,
+          "--evidence",
+          "note:completed",
+        ]
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) {
@@ -671,7 +667,7 @@ describe("task timing fields (#267)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        expect(
           tasksCommand.run(["status", taskId, "in_progress", "--session", sessionId])
         ).resolves.toBeUndefined()
       } finally {
@@ -723,17 +719,15 @@ describe("task timing fields (#267)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await Promise.resolve(
-          tasksCommand.run([
-            "status",
-            taskId,
-            "completed",
-            "--session",
-            sessionId,
-            "--evidence",
-            "note:completed with timing",
-          ])
-        )
+        await [
+          "status",
+          taskId,
+          "completed",
+          "--session",
+          sessionId,
+          "--evidence",
+          "note:completed with timing",
+        ]
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
@@ -772,7 +766,7 @@ describe("native task recovery paths (#271)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        expect(
           tasksCommand.run([
             "complete",
             taskId,
@@ -817,7 +811,7 @@ describe("native task recovery paths (#271)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        expect(
           tasksCommand.run([
             "status",
             taskId,
@@ -863,7 +857,7 @@ describe("native task recovery paths (#271)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        expect(
           tasksCommand.run([
             "update",
             taskId,

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+
 // PostToolUse hook: Validate JSON files after writing
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 

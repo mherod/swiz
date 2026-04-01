@@ -46,7 +46,7 @@ async function getGitStatus(
   return (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
 }
 
-const posttoolusGitContext: SwizHook<ToolHookInput> = {
+const posttoolusGitContext: SwizHook = {
   name: "posttooluse-git-context",
   event: "postToolUse",
   cooldownSeconds: 60,

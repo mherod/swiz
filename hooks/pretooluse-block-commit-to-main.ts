@@ -5,10 +5,10 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
@@ -77,7 +77,7 @@ export async function evaluatePretooluseBlockCommitToMain(input: unknown): Promi
 
   const fork = await detectForkTopology(cwd)
 
-  return await preToolUseDeny(`
+  return preToolUseDeny(`
 Committing directly to '${defaultBranch}' is blocked in ${repoRef} (collaborative repository).
 
 Collaboration signals:

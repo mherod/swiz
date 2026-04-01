@@ -8,8 +8,12 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { preToolUseDeny, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import {
   collectCheckoutNewBranchNames,
@@ -35,8 +39,7 @@ function isAllowedTrunkCheckoutTarget(target: string, defaultBranch: string): bo
   if (isDefaultBranch(target, defaultBranch)) return true
   if (target === `origin/${defaultBranch}`) return true
   if (target === `remotes/origin/${defaultBranch}`) return true
-  if (target === `refs/heads/${defaultBranch}`) return true
-  return false
+  return target === `refs/heads/${defaultBranch}`
 }
 
 function isTrunkModeRelevantShellCommand(command: string): boolean {
@@ -74,13 +77,13 @@ async function denyPrCheckoutWhenTrunk(
   if (projectState === "reviewing" && (await hasOpenPullRequests(cwd))) return null
 
   if (projectState === "developing") {
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `Trunk mode is enabled and project state is \`developing\` — checking out a pull request branch is not allowed.\n\n` +
         `Stay on the default branch (\`${defaultBranch}\`) while developing.`
     )
   }
 
-  return await preToolUseDeny(
+  return preToolUseDeny(
     `Trunk mode is enabled for this project — checking out a pull request branch is not allowed.\n\n` +
       `Work on the default branch (\`${defaultBranch}\`) only.`
   )

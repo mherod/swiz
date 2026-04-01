@@ -9,8 +9,8 @@
 // discovery or the agent's in-context memory.
 
 import { getHomeDirWithFallback } from "../src/home.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   getSessionCompactSnapshotPath,
   isIncompleteTaskStatus,

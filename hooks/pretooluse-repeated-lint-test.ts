@@ -19,8 +19,12 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { orderBy } from "lodash-es"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
-import { preToolUseDeny, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
@@ -731,7 +735,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   const { command, currentKind } = parsed
 
   const overfilterIssue = detectOverfiltering(command, currentKind)
-  if (overfilterIssue) return await preToolUseDeny(overfilterIssue)
+  if (overfilterIssue) return preToolUseDeny(overfilterIssue)
 
   if (!(await isGitRepo(cwd))) return {}
   if (!transcriptPath) return {}
@@ -745,7 +749,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   if (!match) return {}
 
   const blockMessage = await buildBlockMessage(command, match, transcriptPath, cachedSessionLines)
-  return await preToolUseDeny(blockMessage)
+  return preToolUseDeny(blockMessage)
 }
 
 const pretooluseRepeatedLintTest: SwizToolHook = {

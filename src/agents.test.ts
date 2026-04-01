@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   AGENTS,
   type AgentDef,
+  agentSupportsTool,
   CONFIGURABLE_AGENTS,
   detectInstalledAgents,
   getAgent,
@@ -232,6 +233,46 @@ describe("agents.ts", () => {
     })
   })
 
+  describe("agentSupportsTool", () => {
+    it("Claude supports canonical tools by default (and Skill tool)", () => {
+      const claude = getAgent("claude")!
+      expect(agentSupportsTool(claude, "Bash")).toBe(true)
+      expect(agentSupportsTool(claude, "Edit")).toBe(true)
+      expect(agentSupportsTool(claude, "Write")).toBe(true)
+      expect(agentSupportsTool(claude, "Skill")).toBe(true)
+      expect(agentSupportsTool(claude, "Unknown")).toBe(true)
+    })
+
+    it("Cursor supports aliased tools", () => {
+      const cursor = getAgent("cursor")!
+      expect(agentSupportsTool(cursor, "Bash")).toBe(true)
+      expect(agentSupportsTool(cursor, "Edit")).toBe(true)
+      expect(agentSupportsTool(cursor, "NotebookEdit")).toBe(true)
+      // Cursor has no Skill tool
+      expect(agentSupportsTool(cursor, "Skill")).toBe(false)
+    })
+
+    it("Cursor supports its own tool names", () => {
+      const cursor = getAgent("cursor")!
+      expect(agentSupportsTool(cursor, "Shell")).toBe(true)
+      expect(agentSupportsTool(cursor, "StrReplace")).toBe(true)
+      expect(agentSupportsTool(cursor, "EditNotebook")).toBe(true)
+    })
+
+    it("Gemini supports its aliased tools", () => {
+      const gemini = getAgent("gemini")!
+      expect(agentSupportsTool(gemini, "Bash")).toBe(true)
+      expect(agentSupportsTool(gemini, "Edit")).toBe(true)
+      // Gemini aliases NotebookEdit to NotebookEdit (self-aliased)
+      expect(agentSupportsTool(gemini, "NotebookEdit")).toBe(true)
+    })
+
+    it("returns false for unknown tools in agents with aliases", () => {
+      const cursor = getAgent("cursor")!
+      expect(agentSupportsTool(cursor, "NonExistentTool")).toBe(false)
+    })
+  })
+
   describe("translateEvent", () => {
     it("translates stop event for Claude", () => {
       const claude = getAgent("claude")!
@@ -388,9 +429,10 @@ describe("agents.ts", () => {
       expect(codex.toolAliases.Task).toBe("update_plan")
     })
 
-    it("claude has empty tool aliases", () => {
+    it("claude has Skill tool alias", () => {
       const claude = getAgent("claude")!
-      expect(Object.keys(claude.toolAliases).length).toBe(0)
+      expect(Object.keys(claude.toolAliases).length).toBe(1)
+      expect(claude.toolAliases.Skill).toBe("Skill")
     })
   })
 

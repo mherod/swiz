@@ -47,7 +47,7 @@ describe("dispatch execute integration", () => {
         hookEventName: "NonexistentEvent",
         payloadStr: "not-json{{{",
       }
-      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
+      expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
     })
 
     it("accepts daemonContext flag without error", async () => {
@@ -100,7 +100,7 @@ describe("dispatch execute integration", () => {
         hookEventName: "Stop",
         payloadStr: "not-json{{{",
       }
-      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
+      expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
     })
 
     it("rejects subagentStop dispatch with non-object JSON stdin", async () => {
@@ -109,7 +109,7 @@ describe("dispatch execute integration", () => {
         hookEventName: "SubagentStop",
         payloadStr: "[]",
       }
-      await expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
+      expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
     })
 
     it("throws when coercing stop envelope that violates stopHookOutputSchema", () => {

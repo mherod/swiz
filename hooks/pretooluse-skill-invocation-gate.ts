@@ -75,7 +75,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     const verb = requiredSkill === "commit" ? "commit" : "push"
 
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
         `${formatSessionSkillsForReason(invokedSkills)}\n\n` +
         formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {

@@ -14,8 +14,8 @@ import {
   type CollaborationModePolicy,
   getCollaborationModePolicy,
 } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,

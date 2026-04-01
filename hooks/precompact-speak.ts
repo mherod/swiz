@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * PreCompact hook: Speak a narration before context compaction begins.
  *
@@ -6,8 +7,8 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizSessionHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { narrateSession } from "../src/speech.ts"
 
 const precompactSpeak: SwizSessionHook = {

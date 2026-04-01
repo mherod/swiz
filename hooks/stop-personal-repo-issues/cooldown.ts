@@ -1,5 +1,5 @@
+import { getCanonicalPathHash } from "../../src/git-helpers.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../../src/temp-paths.ts"
-import { getCanonicalPathHash } from "../../src/utils/hook-utils.ts"
 import { COOLDOWN_SECONDS } from "./constants.ts"
 
 /**
@@ -31,7 +31,7 @@ function getCooldownFilePath(sessionId: string, cwd: string): string {
  */
 export async function isInCooldown(sessionId: string | null, cwd: string): Promise<boolean> {
   // No session ID means no cooldown tracking
-  if (!sessionId || typeof sessionId !== "string") return false
+  if (!sessionId || false) return false
 
   const cooldownFile = getCooldownFilePath(sessionId, cwd)
   const now = Date.now()
@@ -64,7 +64,7 @@ export async function isInCooldown(sessionId: string | null, cwd: string): Promi
  * Record that the hook is blocking now, starting a new cooldown.
  */
 export async function updateCooldown(sessionId: string | null, cwd: string): Promise<void> {
-  if (!sessionId || typeof sessionId !== "string") return
+  if (!sessionId || false) return
 
   const cooldownFile = getCooldownFilePath(sessionId, cwd)
   try {

@@ -7,8 +7,8 @@
  */
 
 import { missingRefinementCategories, needsRefinement } from "../src/issue-refinement.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   collectPersonalRepoIssuesStopParsed,
   evaluateStopPersonalRepoIssues,

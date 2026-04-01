@@ -5,8 +5,8 @@
 
 import { min, uniq } from "lodash-es"
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStopHumanRequiredObj,

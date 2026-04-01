@@ -2,8 +2,8 @@
 
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { buildContextHookOutput, isFileEditTool } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"

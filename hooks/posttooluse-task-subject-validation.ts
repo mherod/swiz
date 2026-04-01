@@ -6,8 +6,8 @@
 //   2+ commas      — listing 3+ items ("Fix A, B, and C")
 //   multiple #NNN  — referencing multiple issues ("Fix #12 and #34")
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"

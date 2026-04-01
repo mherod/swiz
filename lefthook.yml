@@ -26,17 +26,17 @@ pre-commit:
         - merge
         - rebase
     similar:
-      run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.96 --strict --skip-same-file --same-name-only --min-lines=12
+      run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.94 --strict --skip-same-file --same-name-only --min-lines=8
       skip:
         - merge
         - rebase
     memory:
-      run: swiz memory --strict
+      run: SWIZ_DIRECT=1 swiz memory --strict
       skip:
         - merge
         - rebase
     swiz-precommit:
-      run: echo '{"cwd":"'$(pwd)'"}' | SWIZ_DIRECT=1 bun run index.ts dispatch preCommit
+      run: echo '{"cwd":"'$(pwd)'"}' | SWIZ_DIRECT=1 swiz dispatch preCommit
       skip:
         - merge
         - rebase
@@ -67,9 +67,9 @@ pre-push:
 commit-msg:
   commands:
     commitlint:
-      run: echo '{"cwd":"'$(pwd)'","commit_msg_file":"{1}"}' | SWIZ_DIRECT=1 bun run index.ts dispatch commitMsg && bunx commitlint --edit {1}
+      run: echo '{"cwd":"'$(pwd)'","commit_msg_file":"{1}"}' | SWIZ_DIRECT=1 swiz dispatch commitMsg && bunx commitlint --edit {1}
 
 post-push:
   commands:
     push-ci:
-      run: SWIZ_DIRECT=1 bun run index.ts push-ci origin main --ci-timeout 600
+      run: SWIZ_DIRECT=1 swiz push-ci origin main --ci-timeout 600

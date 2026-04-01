@@ -2,8 +2,8 @@
 
 // SessionStart hook: inject current project state into session context
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { buildContextHookOutput, isGitRepo } from "../src/utils/hook-utils.ts"
 import { sessionStartHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"

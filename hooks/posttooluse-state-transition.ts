@@ -20,8 +20,8 @@
 // so this is safe to run regardless of workflow or whether PRs are used.
 
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "../src/git-helpers.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import {
   extractCheckoutBranch,
@@ -256,8 +256,7 @@ async function handleAsyncTransitions(
   if (await handleCommitTransitions(command, cwd, state)) return true
   if (await handleCheckoutToDeveloping(command, cwd, state)) return true
   if (await handleCheckoutToReviewing(command, cwd, state)) return true
-  if (await handleNewBranchCheckout(command, cwd)) return true
-  return false
+  return await handleNewBranchCheckout(command, cwd)
 }
 
 export async function evaluatePosttooluseStateTransition(input: unknown): Promise<SwizHookOutput> {

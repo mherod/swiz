@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import type { Session } from "./transcript-schemas.ts"
+import { readLines } from "./utils/file-utils.ts"
 
 const SESSION_PROVIDER_PRECEDENCE = [
   "claude",
@@ -164,16 +165,6 @@ export async function findJunieSessions(targetDir: string, home?: string): Promi
   }
 
   return sessions
-}
-
-async function readLines(path: string, count: number): Promise<string[]> {
-  try {
-    const file = Bun.file(path)
-    const text = await file.text()
-    return text.split("\n").slice(0, count)
-  } catch {
-    return []
-  }
 }
 
 export async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {

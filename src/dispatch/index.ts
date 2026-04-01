@@ -68,6 +68,7 @@ export {
   type DispatchRequest,
   type DispatchResult,
   executeDispatch,
+  getHookContext,
   parsePayload,
 } from "./execute.ts"
 export {

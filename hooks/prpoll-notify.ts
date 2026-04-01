@@ -5,8 +5,8 @@
 import { homedir } from "node:os"
 import { gh, git } from "../src/git-helpers.ts"
 import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { hsoContextEvent } from "../src/utils/hook-specific-output.ts"
 import { hookOutputSchema, prPollHookInputSchema } from "./schemas.ts"
 

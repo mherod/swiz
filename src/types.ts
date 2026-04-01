@@ -3,10 +3,10 @@ export interface CommandOption {
   description: string
 }
 
-export interface Command {
+export interface Command<Opts = never> {
   name: string
   description: string
   usage?: string
   options?: CommandOption[]
-  run(args: string[]): Promise<void> | void
+  run(args: string[], opts?: Opts): Promise<void> | void
 }

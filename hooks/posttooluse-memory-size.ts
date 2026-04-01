@@ -12,8 +12,8 @@ import {
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -33,8 +33,7 @@ export function isMemoryFile(filePath: string): boolean {
   if (/\/CLAUDE\.md$/.test(filePath)) return true
   if (/\/MEMORY\.md$/.test(filePath)) return true
   // Memory files under .claude/projects/*/memory/*.md or .claude/memory/*.md
-  if (/\/\.claude\/.*\/memory\/.*\.md$/.test(filePath)) return true
-  return false
+  return /\/\.claude\/.*\/memory\/.*\.md$/.test(filePath)
 }
 
 export function countStats(content: string): { lines: number; words: number } {

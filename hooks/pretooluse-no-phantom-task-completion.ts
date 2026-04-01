@@ -16,8 +16,8 @@
 //      transcript — task may have been set in_progress in a prior session.
 //      Fail-open; we can only verify what the transcript contains.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   extractToolBlocksFromEntry,
   formatActionPlan,
@@ -190,7 +190,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  return await preToolUseDeny(buildDenialMessage(taskId, sessionId))
+  return preToolUseDeny(buildDenialMessage(taskId, sessionId))
 }
 
 const pretooluseNoPhantomTaskCompletion: SwizToolHook = {

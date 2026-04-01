@@ -4,8 +4,8 @@
 //
 // Dual-mode: SwizToolHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { readProjectState } from "../src/settings.ts"
 import { STATE_METADATA } from "../src/state-machine.ts"
 import { isShellTool, isSwizCommand, preToolUseDeny } from "../src/utils/hook-utils.ts"
@@ -32,7 +32,7 @@ export async function evaluatePretooluseStateGate(input: ToolHookInput): Promise
 
   const metadata = STATE_METADATA[state]
   if (!metadata) {
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `Project state is "${state}" but no metadata is registered for it — blocking ${toolName} until state metadata is repaired.`
     )
   }
@@ -41,7 +41,7 @@ export async function evaluatePretooluseStateGate(input: ToolHookInput): Promise
     `${metadata.description}\n\n` +
     `Use "swiz state set <state>" to transition to a different state.`
 
-  return await preToolUseDeny(reason)
+  return preToolUseDeny(reason)
 }
 
 const pretooluseStateGate: SwizToolHook = {

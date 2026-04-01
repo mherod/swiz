@@ -13,8 +13,8 @@
  */
 
 import { z } from "zod"
-import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { preToolUseAllow, preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
@@ -112,7 +112,7 @@ export async function evaluatePretooluseOffensiveLanguage(
     if (sessionId && (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd))) {
       return preToolUseAllow("")
     }
-    return await preToolUseDeny(reason)
+    return preToolUseDeny(reason)
   }
 
   return preToolUseAllow("")

@@ -14,13 +14,13 @@ afterEach(() => {
 describe("ai-providers startup model validation", () => {
   test("throws immediately for invalid GEMINI_MODEL", async () => {
     process.env.GEMINI_MODEL = "gemini-3-pro-low"
-    await expect(importFreshAiProviders()).rejects.toThrow(
+    expect(importFreshAiProviders()).rejects.toThrow(
       'Invalid Gemini model "gemini-3-pro-low" from GEMINI_MODEL'
     )
   })
 
   test("accepts a known GEMINI_MODEL value", async () => {
     process.env.GEMINI_MODEL = "gemini-2.5-pro"
-    await expect(importFreshAiProviders()).resolves.toBeDefined()
+    expect(importFreshAiProviders()).resolves.toBeDefined()
   })
 })

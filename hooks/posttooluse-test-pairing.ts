@@ -6,8 +6,8 @@
 
 import { stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   buildContextHookOutput,
   isFileEditTool,

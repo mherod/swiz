@@ -37,11 +37,6 @@ import {
   preToolUseDeny,
 } from "../SwizHook.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
-
-// Re-export skillAdvice for backward compatibility with existing hooks.
-// New code should import directly from skill-utils.ts.
-export { skillAdvice }
-
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
   GH_CMD_RE,
@@ -60,6 +55,10 @@ import {
   hsoPreToolUseDeny,
 } from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
+
+// Re-export skillAdvice for backward compatibility with existing hooks.
+// New code should import directly from skill-utils.ts.
+export { skillAdvice }
 
 export type { SessionHookInput, ToolHookInput }
 
@@ -139,6 +138,7 @@ export {
   isFileEditTool,
   isNotebookTool,
   isShellTool,
+  isSkillTool,
   isTaskCreateTool,
   isTaskGetTool,
   isTaskListTool,
@@ -149,6 +149,7 @@ export {
   READ_TOOLS,
   SEARCH_TOOLS,
   SHELL_TOOLS,
+  SKILL_TOOLS,
   TASK_CREATE_TOOLS,
   TASK_GET_TOOLS,
   TASK_LIST_TOOLS,
@@ -186,7 +187,7 @@ export {
 const PREVIEW_LEN_BLOCK = 4000
 
 function denyPreToolUseObj(reason: string) {
-  const fullReason = `${reason}${actionRequired()}`
+  const fullReason = `${reason}\n\nYou must act on this now. Do not try to stop again without completing the required action.`
   return hookOutputSchema.parse({
     suppressOutput: true,
     systemMessage: extractHookSystemMessagePreview(reason),
@@ -334,11 +335,6 @@ export { SwizHookExit } from "../inline-hook-context.ts"
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
-/** Standard footer appended to all stop hook block reasons. */
-export function actionRequired(): string {
-  return `\n\nYou must act on this now. Do not try to stop again without completing the required action.`
-}
-
 export function blockStopObj(reason: string): HookOutput {
   const preview = extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK)
   // Omit hookSpecificOutput: Claude Code only allows hookSpecificOutput for PreToolUse,
@@ -346,7 +342,9 @@ export function blockStopObj(reason: string): HookOutput {
   return hookOutputSchema.parse({
     decision: "block",
     continue: true,
-    reason: reason + actionRequired(),
+    reason:
+      reason +
+      `\n\nYou must act on this now. Do not try to stop again without completing the required action.`,
     suppressOutput: true,
     systemMessage: preview,
   })

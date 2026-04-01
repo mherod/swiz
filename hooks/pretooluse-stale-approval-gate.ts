@@ -5,10 +5,10 @@
 // Fires once per 5 minutes (cooldownSeconds: 300 in manifest).
 // Fails open on all error paths — missing gh, no PR, no protection, API 404.
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
@@ -145,7 +145,7 @@ export async function evaluatePretooluseStaleApprovalGate(input: unknown): Promi
   }
 
   const approverList = formatApproverList(result.approvals)
-  return await preToolUseDeny(buildDenyMessage(result.pr, approverList))
+  return preToolUseDeny(buildDenyMessage(result.pr, approverList))
 }
 
 const pretooluseStaleApprovalGate: SwizToolHook = {

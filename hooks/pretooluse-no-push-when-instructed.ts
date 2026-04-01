@@ -31,7 +31,7 @@ import {
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
 import type { ToolHookInput } from "./schemas.ts"
 
-const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
+const pretoolusNoPushWhenInstructed: SwizHook = {
   name: "pretooluse-no-push-when-instructed",
   event: "preToolUse",
   matcher: "Bash",
@@ -55,7 +55,7 @@ const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
       if (!(await file.exists())) return preToolUseAllow("")
       try {
         const settings = await readSwizSettings({ strict: true })
-        pushGateEnabled = settings.pushGate === true
+        pushGateEnabled = settings.pushGate
       } catch {
         // Parse failure on a present file → fail-closed: keep the gate active.
         pushGateEnabled = true
@@ -80,7 +80,7 @@ const pretoolusNoPushWhenInstructed: SwizHook<ToolHookInput> = {
     if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
     if (state.approvedAfter) return preToolUseAllow("Push approved by user after instruction")
 
-    return await preToolUseDeny(
+    return preToolUseDeny(
       `BLOCKED: git push is prohibited by an explicit instruction in this session.\n\n` +
         `Instruction found in transcript:\n` +
         `  "${state.blockingLine}"\n\n` +

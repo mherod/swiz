@@ -49,6 +49,7 @@ export const SEARCH_TOOLS = new Set([
   "grep_files",
   "list_dir",
 ])
+export const SKILL_TOOLS = new Set(["Skill"])
 
 export function isShellTool(name: string): boolean {
   return SHELL_TOOLS.has(name)
@@ -76,6 +77,9 @@ export function isTaskListTool(name: string): boolean {
 }
 export function isTaskGetTool(name: string): boolean {
   return TASK_GET_TOOLS.has(name)
+}
+export function isSkillTool(name: string): boolean {
+  return SKILL_TOOLS.has(name)
 }
 export function isFileEditTool(name: string): boolean {
   return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name)

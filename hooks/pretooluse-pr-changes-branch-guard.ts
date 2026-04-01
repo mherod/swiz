@@ -7,10 +7,10 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
@@ -137,7 +137,7 @@ export async function evaluatePretoolusePrChangesBranchGuard(
 
   const fork = await detectForkTopology(cwd)
   const reason = buildBlockReason(pr, changesRequested, currentBranch, fork)
-  return await preToolUseDeny(reason)
+  return preToolUseDeny(reason)
 }
 
 const pretoolusePrChangesBranchGuard: SwizToolHook = {

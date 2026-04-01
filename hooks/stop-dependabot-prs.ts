@@ -5,8 +5,8 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import {
   blockStopObj,
   ghJson,

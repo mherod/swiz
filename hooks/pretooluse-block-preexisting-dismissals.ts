@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block follow-up work when the assistant dismisses warnings,
 // errors, or issues as "pre-existing" or "unrelated" without proving that claim
 // from the transcript.
@@ -22,8 +23,8 @@
 //   - A scoped verification run (e.g. lint on specific files)
 //   - Transcript-visible baseline evidence for the exact diagnostic
 
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
@@ -228,14 +229,12 @@ function isExemptShellCommand(command: string): boolean {
   if (DIAGNOSTIC_COMMAND_RE.test(unquoted)) return true
   // Scoped verification and baseline evidence need the full command to match flags/paths
   if (SCOPED_VERIFICATION_RE.test(command)) return true
-  if (BASELINE_EVIDENCE_RE.test(command)) return true
-  return false
+  return BASELINE_EVIDENCE_RE.test(command)
 }
 
 function shouldSkipTool(toolName: string, toolInput: Record<string, any>): boolean {
   if (!isShellTool(toolName) && !isCodeChangeTool(toolName)) return true
-  if (isShellTool(toolName) && isExemptShellCommand(String(toolInput?.command ?? ""))) return true
-  return false
+  return isShellTool(toolName) && isExemptShellCommand(String(toolInput?.command ?? ""))
 }
 
 async function getAllTranscriptLines(
@@ -298,7 +297,7 @@ export async function evaluatePretooluseBlockPreexistingDismissals(
   const allowReason = resolveAllowReason(state)
   if (allowReason) return preToolUseAllow(allowReason)
 
-  return await preToolUseDeny(buildBlockMessage(state))
+  return preToolUseDeny(buildBlockMessage(state))
 }
 
 const pretooluseBlockPreexistingDismissals: SwizToolHook = {

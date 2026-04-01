@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────

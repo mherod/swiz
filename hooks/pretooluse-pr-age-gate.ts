@@ -16,10 +16,10 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
-import { runSwizHookAsMain } from "../src/RunSwizHookAsMain.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
+  runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
