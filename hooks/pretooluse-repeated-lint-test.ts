@@ -370,9 +370,7 @@ export async function parseTranscriptEvents(
     const content = extractAssistantContent(entry)
     if (content) {
       for (const block of content) {
-        events.push(
-          ...extractEventsFromBlock(block as Record<string, any>, blockedIds, lineIdx)
-        )
+        events.push(...extractEventsFromBlock(block as Record<string, any>, blockedIds, lineIdx))
       }
     }
     lineIdx++
@@ -713,9 +711,7 @@ function resolveCommandAndKind(input: {
   const toolName = input.tool_name ?? ""
   if (!isShellTool(toolName)) return null
 
-  const command = String((input.tool_input as Record<string, any>)?.command ?? "").normalize(
-    "NFKC"
-  )
+  const command = String((input.tool_input as Record<string, any>)?.command ?? "").normalize("NFKC")
 
   const currentKind = classifyCommand(command)
   if (!currentKind) return null

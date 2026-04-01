@@ -23,8 +23,7 @@ const delegationPatterns = [
 
 export function evaluatePretooluseNoTaskDelegation(input: unknown): SwizHookOutput {
   const parsed = toolHookInputSchema.parse(input)
-  const prompt: string = (parsed.tool_input as Record<string, any> | undefined)
-    ?.prompt as string
+  const prompt: string = (parsed.tool_input as Record<string, any> | undefined)?.prompt as string
 
   if (!delegationPatterns.some((p) => p.test(String(prompt ?? "")))) {
     return {}

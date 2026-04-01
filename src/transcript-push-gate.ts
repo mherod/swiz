@@ -55,10 +55,7 @@ function extractBlockingSnippet(text: string): string {
   )
 }
 
-function applyEntryToPushGateState(
-  entry: Record<string, any>,
-  state: PushGateScanResult
-): void {
+function applyEntryToPushGateState(entry: Record<string, any>, state: PushGateScanResult): void {
   for (const { role, text } of extractTextBlocks(entry)) {
     if (role !== "user") continue
     if (NO_PUSH_RE.test(text)) {

@@ -215,8 +215,7 @@ function normalizeCursorItem(item: unknown): ContentBlock | null {
   const toolCallResult = cursorToolCallBlockSchema.safeParse(item)
   if (toolCallResult.success) {
     const p = toolCallResult.data.params
-    const input =
-      p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, any>) : {}
+    const input = p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, any>) : {}
     return { type: "tool_use", name: toolCallResult.data.toolName, input }
   }
 

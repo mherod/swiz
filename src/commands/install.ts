@@ -373,10 +373,7 @@ function logUnconfigurableAgent(agent: AgentDef): void {
   )
 }
 
-function extractOldHooks(
-  existing: Record<string, any>,
-  agent: AgentDef
-): Record<string, any> {
+function extractOldHooks(existing: Record<string, any>, agent: AgentDef): Record<string, any> {
   const raw = agent.wrapsHooks
     ? (((existing as Record<string, any>).hooks as Record<string, any>) ?? {})
     : ((existing[agent.hooksKey] as Record<string, any>) ?? {})

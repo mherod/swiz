@@ -76,9 +76,7 @@ export function normalizeEventNameToCanonical(eventName: string): string {
  * Strip high-risk fields from dispatch payloads before writing to disk. The CLI injects full
  * `process.env` as `_env` — that must not be persisted in `/tmp`.
  */
-export function sanitizeDispatchPayloadForCapture(
-  o: Record<string, any>
-): Record<string, any> {
+export function sanitizeDispatchPayloadForCapture(o: Record<string, any>): Record<string, any> {
   let out = structuredClone(o) as Record<string, any>
   if (out._env && typeof out._env === "object" && !Array.isArray(out._env)) {
     out = omit(

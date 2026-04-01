@@ -492,9 +492,7 @@ export interface ParsedTaskToolCall {
   activeForm?: string | null
 }
 
-function extractTaskCallFields(
-  payload: Record<string, any>
-): Omit<ParsedTaskToolCall, "action"> {
+function extractTaskCallFields(payload: Record<string, any>): Omit<ParsedTaskToolCall, "action"> {
   return {
     taskId:
       typeof payload.taskId === "string" || typeof payload.taskId === "number"

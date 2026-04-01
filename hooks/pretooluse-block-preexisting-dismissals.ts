@@ -111,9 +111,7 @@ function parseToolUseBlock(block: unknown): { toolName: string; command: string 
   }
 }
 
-function extractToolUse(
-  entry: Record<string, any>
-): { toolName: string; command: string } | null {
+function extractToolUse(entry: Record<string, any>): { toolName: string; command: string } | null {
   if (entry?.type !== "assistant") return null
   const content = (entry as { message?: { content?: unknown[] } })?.message?.content
   if (!Array.isArray(content)) return null

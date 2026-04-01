@@ -33,10 +33,7 @@ const fallbackInboundSchema = dispatchInboundObjectSchema
  * Per canonical dispatch route, validate normalized payload (after agent normalization + cwd/session backfills).
  * Unknown events use a plain object record schema.
  */
-export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<
-  string,
-  z.ZodType<Record<string, any>>
-> = {
+export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record<string, any>>> = {
   preToolUse: toolHookInputSchema as z.ZodType<Record<string, any>>,
   postToolUse: postToolUseHookInputSchema as z.ZodType<Record<string, any>>,
   stop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,

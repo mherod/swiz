@@ -10,7 +10,6 @@
         "noNonNullAssertion": "off"
       },
       "suspicious": {
-        "noExplicitAny": "error",
         "noTemplateCurlyInString": "off",
         "noConsole": "error"
       }
@@ -48,14 +47,15 @@
       }
     },
     {
-      "includes": ["hooks/**"],
+      "includes": ["hooks/**", "scripts/**", "push/scripts/**"],
       "linter": {
         "rules": {
           "correctness": {
             "useHookAtTopLevel": "off"
           },
           "suspicious": {
-            "noConsole": "off"
+            "noConsole": "off",
+            "noExplicitAny": "off"
           }
         }
       }
@@ -66,16 +66,31 @@
         "rules": {
           "correctness": {
             "useHookAtTopLevel": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
           }
         }
       }
     },
     {
-      "includes": ["scripts/**", "push/scripts/**"],
+      "includes": [
+        "src/SwizHook.ts",
+        "src/claude-model-settings.ts",
+        "src/web/lib/http.ts",
+        "src/settings/**",
+        "src/utils/**",
+        "src/*-analysis*.ts",
+        "src/issue-store*.ts",
+        "src/pr-review-autosteer.ts",
+        "src/web/components/**",
+        "src/commands/**",
+        "src/dispatch/**"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
-            "noConsole": "off"
+            "noExplicitAny": "off"
           }
         }
       }

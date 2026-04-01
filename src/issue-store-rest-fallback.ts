@@ -96,9 +96,7 @@ function normalizeRestIssues(raw: unknown): Array<{
   if (!Array.isArray(raw)) return []
   return raw
     .map((entry) => asRecord(entry))
-    .filter(
-      (issue): issue is Record<string, any> => issue !== null && !("pull_request" in issue)
-    )
+    .filter((issue): issue is Record<string, any> => issue !== null && !("pull_request" in issue))
     .map((issue) => {
       const number = typeof issue.number === "number" ? issue.number : null
       const title = typeof issue.title === "string" ? issue.title : null

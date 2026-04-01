@@ -109,9 +109,7 @@ function isBlockedTool(toolName: string): boolean {
 
 function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boolean {
   if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
-  const filePath = String(
-    (input.tool_input as Record<string, any> | undefined)?.file_path ?? ""
-  )
+  const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
   return MEMORY_MARKDOWN_RE.test(filePath)
 }
 

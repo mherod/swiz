@@ -93,8 +93,7 @@ function stalenessWarningMessage(
 }
 
 export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
-  const hookRaw =
-    typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  const hookRaw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
   const parsed = toolHookInputSchema.parse(hookRaw)
 
   advisorSessionId = parsed.session_id ?? ""

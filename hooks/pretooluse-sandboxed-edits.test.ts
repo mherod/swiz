@@ -430,8 +430,7 @@ describe("pretooluse-sandboxed-edits", () => {
       const cwd = await createTempDir()
       const result = await runHook(cwd, "Edit", join(cwd, ".swiz", "config.json"))
       expect(result.exitCode).toBe(0)
-      const decision = (result.json?.hookSpecificOutput as Record<string, any>)
-        ?.permissionDecision
+      const decision = (result.json?.hookSpecificOutput as Record<string, any>)?.permissionDecision
       expect(decision).toBe("deny")
     })
 
@@ -439,8 +438,7 @@ describe("pretooluse-sandboxed-edits", () => {
       const cwd = await createTempDir()
       const result = await runHook(cwd, "Write", join(cwd, ".swiz", "config.json"))
       expect(result.exitCode).toBe(0)
-      const decision = (result.json?.hookSpecificOutput as Record<string, any>)
-        ?.permissionDecision
+      const decision = (result.json?.hookSpecificOutput as Record<string, any>)?.permissionDecision
       expect(decision).toBe("deny")
     })
 

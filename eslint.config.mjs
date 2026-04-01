@@ -1,8 +1,6 @@
 import globals from "globals"
 import tseslint from "typescript-eslint"
 
-const COMPLEXITY_WARN = "warn"
-
 export default tseslint.config(
   {
     ignores: ["node_modules/**", ".swiz/**", "coverage/**", "dist/**", "**/*.d.ts"],
@@ -72,7 +70,7 @@ export default tseslint.config(
         },
       ],
       "max-len": [
-        COMPLEXITY_WARN,
+        "warn",
         {
           code: 110,
           ignoreUrls: true,
@@ -82,11 +80,11 @@ export default tseslint.config(
           ignoreComments: true,
         },
       ],
-      complexity: [COMPLEXITY_WARN, 10],
-      "max-depth": [COMPLEXITY_WARN, 4],
-      "max-params": [COMPLEXITY_WARN, 5],
+      complexity: ["warn", 10],
+      "max-depth": ["warn", 4],
+      "max-params": ["warn", 5],
       "max-lines-per-function": [
-        COMPLEXITY_WARN,
+        "warn",
         {
           max: 110,
           skipBlankLines: true,
@@ -136,9 +134,9 @@ export default tseslint.config(
   {
     files: ["**/*.tsx", "**/*.jsx"],
     rules: {
-      "max-depth": [COMPLEXITY_WARN, 3],
+      "max-depth": ["warn", 3],
       "max-lines-per-function": [
-        COMPLEXITY_WARN,
+        "warn",
         {
           max: 60,
           skipBlankLines: true,
@@ -181,6 +179,25 @@ export default tseslint.config(
       "@typescript-eslint/explicit-module-boundary-types": "off",
       /** `setTimeout(async () => …)` and similar patterns in tests. */
       "@typescript-eslint/no-misused-promises": "off",
+    },
+  },
+  {
+    files: [
+      "src/web/**",
+      "hooks/**",
+      "scripts/**",
+      "src/SwizHook.ts",
+      "src/claude-model-settings.ts",
+      "src/codex-event-map.contract.test.ts",
+      "src/gemini-event-map.contract.test.ts",
+      "src/commands/**",
+      "src/dispatch/**",
+      "src/settings/**",
+      "**/*.test.ts",
+    ],
+    rules: {
+      /** Modules that handle loosely-typed JSON from network/dispatch or test files. */
+      "@typescript-eslint/no-explicit-any": "off",
     },
   }
 )
