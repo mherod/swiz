@@ -2,13 +2,20 @@
  * Log rotation and pruning for temporary log files in /tmp.
  *
  * Prevents unbounded growth of:
- * - /tmp/swiz-dispatch.log
- * - /tmp/swiz-pseudohooks.log
- * - /tmp/swiz-prpoll.log
- * - /tmp/swiz-prpoll-error.log
+ * - swiz-dispatch.log
+ * - swiz-pseudohooks.log
+ * - swiz-prpoll.log
+ * - swiz-prpoll-error.log
  *
  * Each log is capped at MAX_LOG_LINES to prevent filesystem issues.
  */
+
+import {
+  swizDispatchLogPath,
+  swizPrPollErrorLogPath,
+  swizPrPollLogPath,
+  swizPseudoHookLogPath,
+} from "./temp-paths.ts"
 
 const MAX_LOG_LINES = 10_000
 
@@ -18,10 +25,10 @@ interface LogFile {
 }
 
 const LOG_FILES: LogFile[] = [
-  { path: "/tmp/swiz-dispatch.log", name: "dispatch" },
-  { path: "/tmp/swiz-pseudohooks.log", name: "pseudohooks" },
-  { path: "/tmp/swiz-prpoll.log", name: "prpoll" },
-  { path: "/tmp/swiz-prpoll-error.log", name: "prpoll-error" },
+  { path: swizDispatchLogPath(), name: "dispatch" },
+  { path: swizPseudoHookLogPath(), name: "pseudohooks" },
+  { path: swizPrPollLogPath(), name: "prpoll" },
+  { path: swizPrPollErrorLogPath(), name: "prpoll-error" },
 ]
 
 /**
