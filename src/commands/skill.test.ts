@@ -209,8 +209,10 @@ async function runListCmd(
   args: string[],
   fakeHome: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", "skill", ...args], {
-    cwd: process.cwd(),
+  const indexPath = join(process.cwd(), "index.ts")
+  const tempCwd = await createTempDir()
+  const proc = Bun.spawn(["bun", "run", indexPath, "skill", ...args], {
+    cwd: tempCwd,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, HOME: fakeHome },

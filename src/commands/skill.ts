@@ -324,11 +324,15 @@ async function handleSync(
   dryRun: boolean,
   overwrite: boolean
 ): Promise<void> {
-  const positional = args.filter((a) => !a.startsWith("--"))
-  if (positional.length > 0) throw new Error("--sync/--sync-gemini does not accept a skill name.")
+  const flagsWithValue = new Set(["--from", "--to"])
+  const positionals = args.filter(
+    (a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? "")
+  )
+  if (positionals.length > 0) throw new Error("--sync/--sync-gemini does not accept a skill name.")
   const from = syncGemini ? "gemini" : extractFlagValue(args, "--from")
   if (!from) throw new Error("--sync requires --from <agent>.")
-  await syncSkills({ from, to: "claude", dryRun, overwrite })
+  const to = extractFlagValue(args, "--to") ?? "claude"
+  await syncSkills({ from, to, dryRun, overwrite })
 }
 
 async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
@@ -350,7 +354,7 @@ export const skillCommand: Command = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -358,11 +362,12 @@ export const skillCommand: Command = {
     {
       flags: "--sync",
       description:
-        "Copy skills from --from <agent> into ~/.claude/skills (copy-only; use --convert for tool name remapping)",
+        "Copy skills from --from <agent> to --to <agent> (default: claude) (copy-only; use --convert for tool name remapping)",
     },
     {
       flags: "--sync-gemini",
-      description: "Alias for --sync --from gemini (copy ~/.gemini/skills into ~/.claude/skills)",
+      description:
+        "Alias for --sync --from gemini --to claude (copy ~/.gemini/skills into ~/.claude/skills)",
     },
     {
       flags: "--convert",
@@ -370,11 +375,11 @@ export const skillCommand: Command = {
     },
     {
       flags: "--from <agent>",
-      description: "Source agent ID for --sync or --convert (claude|cursor|gemini|codex)",
+      description: "Source agent ID for --sync or --convert (claude|cursor|gemini|codex|junie)",
     },
     {
       flags: "--to <agent>",
-      description: "Target agent ID for --convert (claude|cursor|gemini|codex)",
+      description: "Target agent ID for --sync or --convert (claude|cursor|gemini|codex|junie)",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills" },
