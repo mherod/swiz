@@ -280,6 +280,15 @@ export const preCommitHookInputSchema = z.looseObject({
 export type PreCommitHookInput = z.infer<typeof preCommitHookInputSchema>
 
 /**
+ * PrePush hook input envelope.
+ */
+export const prePushHookInputSchema = z.looseObject({
+  cwd: CwdSchema.optional(),
+})
+
+export type PrePushHookInput = z.infer<typeof prePushHookInputSchema>
+
+/**
  * PrPoll scheduled hook input. Dispatcher sends hook base fields (typically `cwd`).
  */
 export const prPollHookInputSchema = hookBaseSchema

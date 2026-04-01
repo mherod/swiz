@@ -8,5 +8,19 @@
   "trunkMode": true,
   "autoContinue": true,
   "defaultBranch": "main",
-  "pushGate": false
+  "pushGate": false,
+  "hooks": [
+    {
+      "event": "commitMsg",
+      "hooks": []
+    },
+    {
+      "event": "preCommit",
+      "hooks": []
+    },
+    {
+      "event": "prePush",
+      "hooks": []
+    }
+  ]
 }

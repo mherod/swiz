@@ -27,6 +27,7 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   prPoll: "blocking",
   preCommit: "blocking",
   commitMsg: "blocking",
+  prePush: "blocking",
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

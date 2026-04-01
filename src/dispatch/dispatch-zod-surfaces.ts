@@ -11,6 +11,7 @@ import {
   postCompactHookInputSchema,
   postToolUseHookInputSchema,
   preCommitHookInputSchema,
+  prePushHookInputSchema,
   prPollHookInputSchema,
   sessionEndHookInputSchema,
   sessionStartHookInputSchema,
@@ -46,6 +47,7 @@ export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record
   sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, any>>,
   prPoll: prPollHookInputSchema as z.ZodType<Record<string, any>>,
   preCommit: preCommitHookInputSchema as z.ZodType<Record<string, any>>,
+  prePush: prePushHookInputSchema as z.ZodType<Record<string, any>>,
 }
 
 export class DispatchPayloadValidationError extends Error {

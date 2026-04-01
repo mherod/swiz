@@ -437,6 +437,11 @@ export const manifest: HookGroup[] = [
     scheduled: true,
     hooks: [{ hook: commitMsgScrubCoauthors }],
   },
+  {
+    event: "prePush",
+    scheduled: true,
+    hooks: [],
+  },
 ]
 
 // ─── Runtime routing validator ──────────────────────────────────────────────
@@ -513,5 +518,6 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   userPromptSubmit: 15,
   preCommit: 30,
   commitMsg: 10,
+  prePush: 30,
   prPoll: 20,
 }

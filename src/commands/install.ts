@@ -23,7 +23,7 @@ import {
   pauseSessionstartSelfHeal,
   resumeSessionstartSelfHeal,
 } from "../sessionstart-self-heal-state.ts"
-import { readProjectSettings } from "../settings.ts"
+import { readProjectSettings, writeProjectSettings } from "../settings.ts"
 import {
   HOOKS_DIR,
   isManagedSwizCommand,
@@ -1043,6 +1043,37 @@ async function uninstallHooksForTargets(args: string[], opts: InstallRunOptions)
   await uninstallSwizFromAgents(opts.targets, opts.dryRun)
 }
 
+async function installProjectHooks(dryRun: boolean): Promise<void> {
+  const settings = await readProjectSettings(process.cwd())
+  if (!settings) return
+
+  const requiredEvents = ["commitMsg", "preCommit", "prePush"]
+  const existingEvents = new Set((settings.hooks ?? []).map((g) => g.event))
+  const missingEvents = requiredEvents.filter((e) => !existingEvents.has(e))
+
+  if (missingEvents.length === 0) {
+    console.log(`  ${DIM}Project hooks: already configured in .swiz/config.json${RESET}\n`)
+    return
+  }
+
+  if (dryRun) {
+    console.log(
+      `  ${GREEN}+ Project hooks: add ${missingEvents.join(", ")} to .swiz/config.json${RESET}\n`
+    )
+    return
+  }
+
+  const newHooks = [...(settings.hooks ?? [])]
+  for (const event of missingEvents) {
+    newHooks.push({ event, hooks: [] })
+  }
+
+  await writeProjectSettings(process.cwd(), { hooks: newHooks })
+  console.log(
+    `  ${GREEN}✓${RESET} Project hooks configured in .swiz/config.json (${missingEvents.join(", ")})\n`
+  )
+}
+
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
@@ -1090,6 +1121,7 @@ export const installCommand: Command = {
 
     console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
     await runOptionalInstallSteps(opts)
+    await installProjectHooks(opts.dryRun)
     if (await installHooksForTargets(args, opts)) return
     if (opts.dryRun) {
       console.log("  No changes written.\n")
