@@ -375,7 +375,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   let isMonitoring = false
   let lastLogPruneMs = 0
   const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000 // Prune every 5 minutes
-  setInterval(() => {
+  const monitoringInterval = setInterval(() => {
     if (isMonitoring) return
     isMonitoring = true
     void (async () => {
@@ -397,6 +397,11 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
       }
     })()
   }, 10000)
+
+  // Ensure monitoring loop stops on graceful shutdown
+  process.on("exit", () => {
+    clearInterval(monitoringInterval)
+  })
 
   console.log(`Daemon listening on ${server.url}`)
 }
