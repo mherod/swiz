@@ -69,7 +69,8 @@ const SHELL_TEE_WRITE_RE = /\btee\s+(?!\/dev\/)/
 const SHELL_HEREDOC_WRITE_RE = /<<-?\s*['"]?\w+['"]?[^|&;]*>(?!\s*[&>])(?!\s*\/dev\/)/
 
 const DESTRUCTIVE_FIRST_CMDS = new Set(["rm", "rmdir", "unlink", "shred"])
-const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/
+// Pipe to xargs then rm — allow flags between xargs and rm (`xargs -r rm`, `xargs -0 rm -rf`).
+const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs(?:\s+-\S+)*\s+rm\b|&&\s*rm\b|;\s*rm\b)/
 const FIND_DELETE_RE = /find\s.*-delete/
 const FIND_EXEC_RM_RE = /find\s.*-exec\s+rm\s/
 

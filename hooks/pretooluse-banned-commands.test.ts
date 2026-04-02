@@ -47,6 +47,36 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("trash")
     })
 
+    describe("dangerous pipelines (#436)", () => {
+      test("git diff piped to xargs git restore is denied (regression)", async () => {
+        const result = await runHook("git diff --name-only HEAD | xargs -r git restore --")
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("git restore")
+      })
+
+      test("pipeline with xargs -r rm is denied", async () => {
+        const result = await runHook("git diff --name-only HEAD | xargs -r rm -f")
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("trash")
+      })
+
+      test("pipeline with xargs -0 rm is denied", async () => {
+        const result = await runHook("git ls-files -z | xargs -0 rm -f")
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("trash")
+      })
+
+      test("plain git status is not denied", async () => {
+        const result = await runHook("git status --short")
+        expect(result.decision).not.toBe("deny")
+      })
+
+      test("plain git diff is not denied", async () => {
+        const result = await runHook("git diff --stat")
+        expect(result.decision).not.toBe("deny")
+      })
+    })
+
     test("cd is blocked", async () => {
       const result = await runHook("cd /tmp && ls")
       expect(result.decision).toBe("deny")
