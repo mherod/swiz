@@ -15,36 +15,47 @@ import {
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
 
-export async function evaluatePosttoolusePrCreateRefine(input: unknown): Promise<SwizHookOutput> {
-  if (!input || typeof input !== "object") return {}
+function parseCommandInput(input: unknown): { cwd: string; valid: boolean } {
+  if (!input || typeof input !== "object") return { cwd: "", valid: false }
   const rec = input as Record<string, any>
 
   const toolName: string = (rec.tool_name as string) ?? ""
   const cwd: string = (rec.cwd as string) ?? process.cwd()
   const command: string = (rec.tool_input as { command?: string } | undefined)?.command ?? ""
 
-  if (!isShellTool(toolName) || !command) return {}
-  if (!GH_PR_CREATE_RE.test(command)) return {}
-  if (!hasGhCli()) return {}
+  const valid = isShellTool(toolName) && Boolean(command) && GH_PR_CREATE_RE.test(command)
+  return { cwd, valid }
+}
 
+async function fetchThinPrNumber(cwd: string): Promise<number | undefined> {
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return {}
+  if (!branch) return undefined
 
   const pr = await ghJson<{ number: number; title: string; body: string }>(
     ["pr", "view", branch, "--json", "number,title,body"],
     cwd
   )
-  if (!pr?.number) return {}
+  if (!pr?.number) return undefined
 
   const body = (pr.body ?? "").replace(/\s/g, "")
   const isThin = !body || body.length < 30
 
-  if (!isThin) return {}
+  if (!isThin) return undefined
+  return pr.number
+}
+
+export async function evaluatePosttoolusePrCreateRefine(input: unknown): Promise<SwizHookOutput> {
+  const { cwd, valid } = parseCommandInput(input)
+  if (!valid) return {}
+  if (!hasGhCli()) return {}
+
+  const prNumber = await fetchThinPrNumber(cwd)
+  if (!prNumber) return {}
 
   const advice = skillAdvice(
     "refine-pr",
-    `PR #${pr.number} was just created with a thin description. Use the /refine-pr skill to populate it with a proper summary, change list, and test plan.`,
-    `PR #${pr.number} was just created with a thin description. Consider updating it:\n  gh pr edit ${pr.number} --body "## Summary\\n<description>\\n\\n## Changes\\n- <change 1>"`
+    `PR #${prNumber} was just created with a thin description. Use the /refine-pr skill to populate it with a proper summary, change list, and test plan.`,
+    `PR #${prNumber} was just created with a thin description. Consider updating it:\n  gh pr edit ${prNumber} --body "## Summary\\n<description>\\n\\n## Changes\\n- <change 1>"`
   )
 
   return buildContextHookOutput("PostToolUse", advice)
