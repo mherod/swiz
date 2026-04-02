@@ -34,9 +34,29 @@ const SESSION_A = "aaaa-aaaa-aaaa"
 const SESSION_B = "bbbb-bbbb-bbbb"
 const SESSION_C = "cccc-cccc-cccc"
 
-// Clear CLAUDECODE so the native-task-tool guard doesn't block CLI tests
+// Clear environment variables that trigger agent detection so native tests use mocked HOME
 const _savedClaudeCode = process.env.CLAUDECODE
+const _savedJunieData = process.env.JUNIE_DATA
+const _savedGeminiCli = process.env.GEMINI_CLI
+const _savedGeminiProjectDir = process.env.GEMINI_PROJECT_DIR
+const _savedCodexManaged = process.env.CODEX_MANAGED_BY_NPM
+const _savedCodexThread = process.env.CODEX_THREAD_ID
+
 delete process.env.CLAUDECODE
+delete process.env.JUNIE_DATA
+delete process.env.GEMINI_CLI
+delete process.env.GEMINI_PROJECT_DIR
+delete process.env.CODEX_MANAGED_BY_NPM
+delete process.env.CODEX_THREAD_ID
+
+afterAll(() => {
+  if (_savedClaudeCode) process.env.CLAUDECODE = _savedClaudeCode
+  if (_savedJunieData) process.env.JUNIE_DATA = _savedJunieData
+  if (_savedGeminiCli) process.env.GEMINI_CLI = _savedGeminiCli
+  if (_savedGeminiProjectDir) process.env.GEMINI_PROJECT_DIR = _savedGeminiProjectDir
+  if (_savedCodexManaged) process.env.CODEX_MANAGED_BY_NPM = _savedCodexManaged
+  if (_savedCodexThread) process.env.CODEX_THREAD_ID = _savedCodexThread
+})
 
 beforeAll(async () => {
   // ── Task directories (3 sessions) ──
@@ -611,7 +631,7 @@ describe("tasks command regressions (#242)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await [
+        await tasksCommand.run([
           "status",
           taskId,
           "completed",
@@ -619,7 +639,7 @@ describe("tasks command regressions (#242)", () => {
           sessionId,
           "--evidence",
           "note:completed",
-        ]
+        ])
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) {
@@ -719,7 +739,7 @@ describe("task timing fields (#267)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await [
+        await tasksCommand.run([
           "status",
           taskId,
           "completed",
@@ -727,7 +747,7 @@ describe("task timing fields (#267)", () => {
           sessionId,
           "--evidence",
           "note:completed with timing",
-        ]
+        ])
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
