@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { decodeProjectPath, walkDecode } from "./doctor.ts"
+import { decodeProjectPath, walkDecode } from "./doctor/cleanup-path.ts"
 
 // ─── Fixture setup ────────────────────────────────────────────────────────────
 //

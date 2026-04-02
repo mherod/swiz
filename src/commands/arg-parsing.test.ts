@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { parseContinueArgs } from "./continue.ts"
-import { parseCleanupArgs } from "./doctor.ts"
+import { parseCleanupArgs } from "./doctor/cleanup-path.ts"
 import { parseTranscriptArgs } from "./transcript.ts"
 
 describe("parseTranscriptArgs", () => {
