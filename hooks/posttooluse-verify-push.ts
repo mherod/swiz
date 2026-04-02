@@ -38,38 +38,31 @@ import type { PostToolHookInput } from "./schemas.ts"
 
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
 
-async function evaluate(input: PostToolHookInput): Promise<SwizHookOutput> {
-  if (!input.tool_name || !isShellTool(input.tool_name)) return {}
+function isBackgroundPush(input: PostToolHookInput, command: string): boolean {
+  if (input.tool_input?.run_in_background === true) return true
+  if (/\s+&\s*$|\s+&\s/.test(command)) return true
+  if (
+    typeof input.tool_response === "string" &&
+    /running in background|background task/i.test(input.tool_response)
+  ) {
+    return true
+  }
+  return false
+}
 
-  const command = String(input.tool_input?.command ?? "")
-  if (!GIT_PUSH_RE.test(command)) return {}
+function getPushCommand(input: PostToolHookInput): string | null {
+  if (!input.tool_name || !isShellTool(input.tool_name)) return null
+  const command = input.tool_input?.command
+  if (typeof command !== "string") return null
+  if (!GIT_PUSH_RE.test(command)) return null
+  if (isBackgroundPush(input, command)) return null
+  return command
+}
 
-  const isBackground =
-    input.tool_input?.run_in_background === true ||
-    /\s+&\s*$|\s+&\s/.test(command) ||
-    (typeof input.tool_response === "string" &&
-      /running in background|background task/i.test(input.tool_response))
-
-  if (isBackground) return {}
-
-  const cwd = input.cwd ?? process.cwd()
-
-  const localHead = await git(["rev-parse", "HEAD"], cwd)
-  if (!localHead) return {}
-
+async function verifyWithRetries(localHead: string, cwd: string): Promise<SwizHookOutput> {
   const getRemoteHead = async (): Promise<string> => {
     await git(["fetch", "--quiet"], cwd)
     return (await git(["rev-parse", "@{upstream}"], cwd)) ?? ""
-  }
-
-  const remoteHead = await git(["rev-parse", "@{upstream}"], cwd)
-  if (!remoteHead) return {}
-
-  if (localHead === remoteHead) {
-    return buildContextHookOutput(
-      "PostToolUse",
-      `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
-    )
   }
 
   for (const delayMs of RETRY_DELAYS_MS) {
@@ -91,6 +84,28 @@ async function evaluate(input: PostToolHookInput): Promise<SwizHookOutput> {
       `  • A different branch/ref was pushed than HEAD\n\n` +
       `Run \`git log origin/$(git branch --show-current)..HEAD --oneline\` to see unpushed commits, then push again.`
   )
+}
+
+async function evaluate(input: PostToolHookInput): Promise<SwizHookOutput> {
+  const command = getPushCommand(input)
+  if (!command) return {}
+
+  const cwd = input.cwd ?? process.cwd()
+
+  const localHead = await git(["rev-parse", "HEAD"], cwd)
+  if (!localHead) return {}
+
+  const remoteHead = await git(["rev-parse", "@{upstream}"], cwd)
+  if (!remoteHead) return {}
+
+  if (localHead === remoteHead) {
+    return buildContextHookOutput(
+      "PostToolUse",
+      `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+    )
+  }
+
+  return await verifyWithRetries(localHead, cwd)
 }
 
 const posttoolusVerifyPush: SwizHook<PostToolHookInput> = {
