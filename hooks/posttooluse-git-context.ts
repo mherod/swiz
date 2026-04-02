@@ -46,6 +46,40 @@ async function getGitStatus(
   return (await fetchGitStatusFromDaemon(cwd)) ?? (await getGitStatusV2(cwd))
 }
 
+function shouldLoadDirectives(
+  tool_name: string | undefined,
+  input: ToolHookInput,
+  gitStatus: GitStatusV2 | null,
+  isShellTool: (name: string) => boolean,
+  GIT_ANY_CMD_RE: RegExp
+): boolean {
+  if (!gitStatus || gitStatus.total === 0) return false
+  if (!tool_name || !isShellTool(tool_name)) return false
+  const command = (input.tool_input as Record<string, any>)?.command as string | undefined
+  if (!command) return false
+  return GIT_ANY_CMD_RE.test(command)
+}
+
+async function loadGitDirectives(
+  cwd: string,
+  effective: any,
+  gitStatus: GitStatusV2,
+  getRepoSlug: (cwd: string) => Promise<string | null>
+): Promise<string[]> {
+  const lines = buildGitRelevantSettingLines(effective)
+  const repoSlug = await getRepoSlug(cwd)
+  if (gitStatus.branch && repoSlug) {
+    const { getIssueStore } = await import("../src/issue-store.ts")
+    appendBranchProtectionFromStore(lines, getIssueStore(), repoSlug, gitStatus.branch)
+  }
+
+  if (lines.length > 0) {
+    const refined = await refineDirectives(lines)
+    return refined.directives
+  }
+  return []
+}
+
 const posttoolusGitContext: SwizHook = {
   name: "posttooluse-git-context",
   event: "postToolUse",
@@ -79,24 +113,12 @@ const posttoolusGitContext: SwizHook = {
     })
     const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
     const statusLine = gitStatus ? buildGitContextLine(gitStatus, effective.collaborationMode) : ""
-    let directives: string[] = []
-    const isGitBash =
-      tool_name &&
-      isShellTool(tool_name) &&
-      GIT_ANY_CMD_RE.test(((input.tool_input as Record<string, any>)?.command as string) ?? "")
-    if (isGitBash && gitStatus && gitStatus.total > 0) {
-      const lines = buildGitRelevantSettingLines(effective)
-      const repoSlug = await getRepoSlug(cwd)
-      if (gitStatus.branch && repoSlug) {
-        const { getIssueStore } = await import("../src/issue-store.ts")
-        appendBranchProtectionFromStore(lines, getIssueStore(), repoSlug, gitStatus.branch)
-      }
 
-      if (lines.length > 0) {
-        const refined = await refineDirectives(lines)
-        directives = refined.directives
-      }
+    let directives: string[] = []
+    if (shouldLoadDirectives(tool_name, input, gitStatus, isShellTool, GIT_ANY_CMD_RE)) {
+      directives = await loadGitDirectives(cwd, effective, gitStatus!, getRepoSlug)
     }
+
     const finalContext = [statusLine, ...directives].filter(Boolean).join("\n")
     return finalContext ? buildContextHookOutput("PostToolUse", finalContext) : {}
   },
