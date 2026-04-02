@@ -72,6 +72,29 @@ export interface HookResult {
 }
 
 /**
+ * Merge `process.env` with overrides. Keys set to `undefined` are removed.
+ * `HOME: undefined` becomes `HOME: ""` because Bun.spawn re-injects the real
+ * home from the OS when `HOME` is omitted from the env object.
+ */
+function mergeHookEnv(overrides: Record<string, string | undefined>): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete env[key]
+    } else {
+      env[key] = value
+    }
+  }
+  if (Object.hasOwn(overrides, "HOME") && overrides.HOME === undefined) {
+    env.HOME = ""
+  }
+  return env
+}
+
+/**
  * Run a hook script as a subprocess with controlled env.
  * Returns parsed hookSpecificOutput decision if present.
  */
@@ -81,7 +104,7 @@ export async function runHook(
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
+  const env = mergeHookEnv(envOverrides)
 
   const proc = Bun.spawn(["bun", script], {
     stdin: "pipe",

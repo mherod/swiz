@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { runBashHook, useTempDir } from "../src/utils/test-utils.ts"
@@ -7,11 +7,18 @@ const HOOK = "hooks/pretooluse-no-npm.ts"
 
 const { create: makeTempDir } = useTempDir("swiz-no-npm-")
 
-function runHook(command: string, opts: { toolName?: string; cwd?: string } = {}) {
-  return runBashHook(HOOK, command, opts)
-}
+/** Temp project: pnpm-lock only (swiz repo root has bun.lock → bun wins for PM detection). */
+let pnpmOnlyCwd: string
 
-// These tests run from the swiz project root which has pnpm-lock.yaml → PM=pnpm
+beforeAll(async () => {
+  const dir = await makeTempDir("swiz-no-npm-pnpm-only-")
+  await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+  pnpmOnlyCwd = dir
+})
+
+function runHook(command: string, opts: { toolName?: string; cwd?: string } = {}) {
+  return runBashHook(HOOK, command, { cwd: pnpmOnlyCwd, ...opts })
+}
 
 describe("pretooluse-no-npm (pnpm project)", () => {
   describe("npm commands are blocked", () => {

@@ -725,6 +725,14 @@ async function validateResponseAndChecks(
 async function runStopAutoContinueMain(hookRaw: Record<string, any>): Promise<void> {
   startSuggestionLogCleanup() // Fire-and-forget cleanup
 
+  if (!getHomeDirOrNull()) {
+    terminate(
+      "skip",
+      "NO_HOME",
+      "HOME unset — skipping auto-continue (cannot resolve session paths under ~/.claude)."
+    )
+  }
+
   const { input, cwd } = parseStopInput(hookRaw)
   const { effective } = await validateMainInputsAndSettings(hookRaw, cwd)
 
