@@ -1,6 +1,10 @@
 import { dirname, join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { stderrLog } from "../../../debug.ts"
+import type {
+  TranscriptMonitorParentMessage,
+  TranscriptMonitorWorkerMessage,
+} from "../worker-messages.ts"
 import type { TranscriptMonitor } from "./transcript-monitor.ts"
 
 /**
@@ -19,34 +23,29 @@ export class WorkerTranscriptMonitor
     )
     this.worker = new Worker(workerPath)
 
-    const handleWorkerMessage = async (msg: {
-      type: string
-      id?: string
-      cwd?: string
-      cooldown?: number
-    }): Promise<void> => {
+    const handleWorkerMessage = async (msg: TranscriptMonitorParentMessage): Promise<void> => {
       try {
         switch (msg.type) {
           case "getManifest": {
-            const manifest = await this.caches.manifestCache.get(msg.cwd ?? "")
-            this.worker.postMessage({ type: "manifestResponse", id: msg.id, manifest })
+            const manifest = await this.caches.manifestCache.get(msg.cwd)
+            this.worker.postMessage({
+              type: "manifestResponse",
+              id: msg.id,
+              manifest,
+            } satisfies TranscriptMonitorWorkerMessage)
             break
           }
           case "getSettings": {
-            const cached = await this.caches.projectSettingsCache.get(msg.cwd ?? "")
+            const cached = await this.caches.projectSettingsCache.get(msg.cwd)
             this.worker.postMessage({
               type: "settingsResponse",
               id: msg.id,
               settings: cached.settings,
-            })
+            } satisfies TranscriptMonitorWorkerMessage)
             break
           }
           case "checkAndMarkCooldown": {
-            this.caches.cooldownRegistry.checkAndMark(
-              msg.id ?? "",
-              msg.cooldown ?? 0,
-              msg.cwd ?? ""
-            )
+            this.caches.cooldownRegistry.checkAndMark(msg.id, msg.cooldown, msg.cwd)
             break
           }
         }
@@ -56,8 +55,7 @@ export class WorkerTranscriptMonitor
     }
     this.worker.on(
       "message",
-      (msg: { type: string; id?: string; cwd?: string; cooldown?: number }): void =>
-        void handleWorkerMessage(msg)
+      (msg: TranscriptMonitorParentMessage): void => void handleWorkerMessage(msg)
     )
 
     this.worker.on("error", (err) => {
@@ -73,20 +71,20 @@ export class WorkerTranscriptMonitor
     this.worker.unref()
 
     this.initialized = new Promise((resolve) => {
-      const handler = (msg: any) => {
+      const handler = (msg: TranscriptMonitorParentMessage) => {
         if (msg.type === "initialized") {
           this.worker.off("message", handler)
           resolve()
         }
       }
       this.worker.on("message", handler)
-      this.worker.postMessage({ type: "init" })
+      this.worker.postMessage({ type: "init" } satisfies TranscriptMonitorWorkerMessage)
     })
   }
 
   async checkProject(cwd: string): Promise<void> {
     await this.initialized
-    this.worker.postMessage({ type: "checkProject", cwd })
+    this.worker.postMessage({ type: "checkProject", cwd } satisfies TranscriptMonitorWorkerMessage)
   }
 
   pruneOldSessions(activeSessions: Set<string>): void {
@@ -94,7 +92,7 @@ export class WorkerTranscriptMonitor
     this.worker.postMessage({
       type: "pruneOldSessions",
       activeSessions: Array.from(activeSessions),
-    })
+    } satisfies TranscriptMonitorWorkerMessage)
   }
 
   terminate(): void {

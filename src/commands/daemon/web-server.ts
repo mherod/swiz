@@ -522,10 +522,10 @@ async function handleDispatchRoute(
         daemonContext: true,
         signal: requestAbort.signal,
         currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
-          getCurrentSessionToolUsageFromDaemon(ctx as any, sessionId, transcriptPath),
+          getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
         disableTranscriptSummaryFallback: true,
         manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
-        onDispatchLifecycle: createDispatchLifecycleHandler(ctx as any),
+        onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
       }),
       new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
         setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)

@@ -1,7 +1,10 @@
 import { stderrLog } from "../../../debug.ts"
 import { executeDispatch } from "../../../dispatch/index.ts"
+import type { HookGroup } from "../../../hook-types.ts"
 import { hookIdentifier, isInlineHookDef } from "../../../hook-types.ts"
+import type { ProjectSwizSettings } from "../../../settings/types.ts"
 import { readSwizSettings } from "../../../settings.ts"
+import type { Session } from "../../../transcript-utils.ts"
 import { findAllProviderSessions, isHookFeedback } from "../../../transcript-utils.ts"
 import { CappedMap } from "../../../utils/capped-map.ts"
 import { logPseudoHook } from "../daemon-logging.ts"
@@ -14,17 +17,19 @@ import { transcriptWatchPathsForProject } from "../utils.ts"
 export class TranscriptMonitor {
   private lastToolCallFingerprints = new CappedMap<string, string>(500)
   private lastMessageFingerprints = new CappedMap<string, string>(500)
-  private latestSessionCache = new Map<string, { session: any; mtimeMs: number }>()
+  private latestSessionCache = new Map<string, { session: Session; mtimeMs: number }>()
 
   constructor(
     private caches: {
-      manifestCache: { get: (cwd: string) => Promise<any> }
+      manifestCache: { get: (cwd: string) => Promise<HookGroup[]> }
       cooldownRegistry: { checkAndMark: (id: string, cooldown: number, cwd: string) => boolean }
-      projectSettingsCache: { get: (cwd: string) => Promise<{ settings: any }> }
+      projectSettingsCache: {
+        get: (cwd: string) => Promise<{ settings: ProjectSwizSettings | null }>
+      }
     }
   ) {}
 
-  private async getLatestSession(cwd: string): Promise<any | null> {
+  private async getLatestSession(cwd: string): Promise<Session | null> {
     const cached = this.latestSessionCache.get(cwd)
     // Check if the transcript directories have changed since we last scanned
     const watchPaths = transcriptWatchPathsForProject(cwd)
@@ -52,14 +57,14 @@ export class TranscriptMonitor {
     } else {
       this.latestSessionCache.delete(cwd)
     }
-    return latest
+    return latest ?? null
   }
 
   /**
    * Returns true if any hook for the given event is within its cooldown window (dispatch should be skipped).
    * Marks the cooldown for the first non-cooled hook when returning false.
    */
-  private isEventOnCooldown(manifestGroups: any[], event: string, cwd: string): boolean {
+  private isEventOnCooldown(manifestGroups: HookGroup[], event: string, cwd: string): boolean {
     const groups = manifestGroups.filter((g) => g.event === event)
     for (const group of groups) {
       for (const hook of group.hooks) {
@@ -170,7 +175,7 @@ export class TranscriptMonitor {
             hookEventName: "postToolUse",
             payloadStr: JSON.stringify(payload),
             daemonContext: true,
-            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
+            manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
           })
         }
       }
@@ -214,7 +219,7 @@ export class TranscriptMonitor {
             hookEventName: "notification",
             payloadStr: JSON.stringify(payload),
             daemonContext: true,
-            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
+            manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
           })
         }
       }

@@ -1,4 +1,5 @@
 import { parentPort } from "node:worker_threads"
+import type { FileWatcherParentMessage, FileWatcherWorkerMessage } from "../worker-messages.ts"
 import { BaseFileWatcherRegistry } from "./file-watcher-registry.ts"
 
 if (!parentPort) {
@@ -9,7 +10,7 @@ let registry: BaseFileWatcherRegistry | null = null
 
 if (parentPort) {
   const pp = parentPort
-  const handleMessage = async (msg: any): Promise<void> => {
+  const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
     try {
       switch (msg.type) {
         case "init": {
@@ -18,49 +19,58 @@ if (parentPort) {
         }
         case "register": {
           if (!registry) registry = new BaseFileWatcherRegistry()
+          const path = msg.path
+          const label = msg.label
           registry.register(
-            msg.path,
-            msg.label,
+            path,
+            label,
             () => {
-              pp.postMessage({ type: "invalidation", path: msg.path, label: msg.label })
+              pp.postMessage({
+                type: "invalidation",
+                path,
+                label,
+              } satisfies FileWatcherParentMessage)
             },
             msg.options
           )
-          pp.postMessage({ type: "status", status: registry.status() })
+          pp.postMessage({
+            type: "status",
+            status: registry.status(),
+          } satisfies FileWatcherParentMessage)
           break
         }
         case "start": {
           if (!registry) registry = new BaseFileWatcherRegistry()
           await registry.start()
-          pp.postMessage({ type: "status", status: registry.status() })
-          pp.postMessage({ type: "started" })
+          pp.postMessage({
+            type: "status",
+            status: registry.status(),
+          } satisfies FileWatcherParentMessage)
+          pp.postMessage({ type: "started" } satisfies FileWatcherParentMessage)
           break
         }
         case "unregisterByLabelSuffix": {
           if (!registry) {
-            pp.postMessage({ type: "unregistered", suffix: msg.suffix, count: 0 })
             break
           }
-          const count = registry.unregisterByLabelSuffix(msg.suffix)
-          pp.postMessage({ type: "unregistered", suffix: msg.suffix, count })
+          registry.unregisterByLabelSuffix(msg.suffix)
           break
         }
         case "close": {
           if (registry) {
             registry.close()
           }
-          pp.postMessage({ type: "closed" })
           break
         }
         case "status": {
           const status = registry ? registry.status() : []
-          pp.postMessage({ type: "status", status })
+          pp.postMessage({ type: "status", status } satisfies FileWatcherParentMessage)
           break
         }
       }
     } catch (err) {
-      pp.postMessage({ type: "error", error: String(err) })
+      pp.postMessage({ type: "error", error: String(err) } satisfies FileWatcherParentMessage)
     }
   }
-  pp.on("message", (msg: any): void => void handleMessage(msg))
+  pp.on("message", (msg: FileWatcherWorkerMessage): void => void handleMessage(msg))
 }
