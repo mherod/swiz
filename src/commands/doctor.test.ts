@@ -163,6 +163,19 @@ describe("swiz doctor", () => {
     })
   })
 
+  describe("orphaned hook manifest paths (#479)", () => {
+    test("fixOrphanedHookScripts resolves manifest and hooks from package root, not cwd", async () => {
+      const doctorSrc = await Bun.file(join(import.meta.dir, "doctor.ts")).text()
+      const start = doctorSrc.indexOf("async function fixOrphanedHookScripts")
+      expect(start).toBeGreaterThanOrEqual(0)
+      const block = doctorSrc.slice(start, start + 4000)
+      expect(block).toContain('join(SWIZ_ROOT, "src", "manifest.ts")')
+      expect(block).toContain("join(HOOKS_DIR, script)")
+      expect(block).not.toContain('join(process.cwd(), "src", "manifest.ts")')
+      expect(block).not.toContain('join(process.cwd(), "hooks", script)')
+    })
+  })
+
   // ── Tests requiring custom settings.json ──────────────────────────────
 
   test("doctor --fix sets execute permissions on scripts in installed config", async () => {

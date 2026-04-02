@@ -1413,7 +1413,7 @@ async function fixOrphanedHookScripts(scripts: string[], fix: boolean): Promise<
 
   console.log(`  ${BOLD}Orphaned hook scripts detected${RESET}. Adding to manifest...\n`)
 
-  const manifestPath = join(process.cwd(), "src", "manifest.ts")
+  const manifestPath = join(SWIZ_ROOT, "src", "manifest.ts")
   let manifestContent: string
   try {
     manifestContent = await Bun.file(manifestPath).text()
@@ -1444,7 +1444,7 @@ async function fixOrphanedHookScripts(scripts: string[], fix: boolean): Promise<
     }
 
     // Determine event from hook file content
-    const hookPath = join(process.cwd(), "hooks", script)
+    const hookPath = join(HOOKS_DIR, script)
     let hookContent: string
     try {
       hookContent = await Bun.file(hookPath).text()
