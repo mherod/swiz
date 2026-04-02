@@ -26,22 +26,31 @@ import {
 } from "../src/utils/hook-utils.ts"
 import type { PostToolHookInput } from "./schemas.ts"
 
-export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<SwizHookOutput> {
-  const hookInput = input as PostToolHookInput
-  if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return {}
+function getEligibleCommand(hookInput: PostToolHookInput): string | null {
+  if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return null
 
   const command = String(hookInput.tool_input?.command ?? "")
-  if (!GIT_PUSH_RE.test(command)) return {}
+  if (!GIT_PUSH_RE.test(command) || hasGitPushForceFlag(command)) return null
 
-  if (hasGitPushForceFlag(command)) return {}
+  return command
+}
 
-  const isBackground =
+function isBackgroundPush(hookInput: PostToolHookInput, command: string): boolean {
+  return (
     hookInput.tool_input?.run_in_background === true ||
     /\s+&\s*$|\s+&\s/.test(command) ||
     (typeof hookInput.tool_response === "string" &&
       /running in background|background task/i.test(hookInput.tool_response))
+  )
+}
 
-  if (isBackground) return {}
+export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<SwizHookOutput> {
+  const hookInput = input as PostToolHookInput
+
+  const command = getEligibleCommand(hookInput)
+  if (!command) return {}
+
+  if (isBackgroundPush(hookInput, command)) return {}
 
   const cwd = hookInput.cwd ?? process.cwd()
   const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
