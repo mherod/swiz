@@ -46,6 +46,22 @@ function buildWeakeningMessage(kind: string, oldCount: number, newCount: number)
   ].join("\n")
 }
 
+export function validateConfigStrength(oldString: string, newString: string): Record<string, any> {
+  const oldCounts = countEnforcements(oldString)
+  const newCounts = countEnforcements(newString)
+
+  if (newCounts.warnings < oldCounts.warnings) {
+    return preToolUseDeny(buildWeakeningMessage("Warning", oldCounts.warnings, newCounts.warnings))
+  }
+  if (newCounts.errors < oldCounts.errors) {
+    return preToolUseDeny(buildWeakeningMessage("Enforcement", oldCounts.errors, newCounts.errors))
+  }
+
+  return preToolUseAllow(
+    `ESLint config strength maintained (${newCounts.warnings}w/${newCounts.errors}e)`
+  )
+}
+
 const pretoolusEslintConfigStrength: SwizHook = {
   name: "pretooluse-eslint-config-strength",
   event: "preToolUse",
@@ -55,31 +71,17 @@ const pretoolusEslintConfigStrength: SwizHook = {
   run(rawInput) {
     const input = rawInput as Record<string, any>
     const toolInput = input.tool_input as Record<string, any> | undefined
-    const filePath = String(toolInput?.file_path ?? "").normalize("NFKC")
+    if (!toolInput) return {}
+
+    const filePath = String(toolInput.file_path ?? "").normalize("NFKC")
     if (!isEslintConfigFile(filePath)) return {}
 
-    const oldString = String(toolInput?.old_string ?? "").normalize("NFKC")
+    const oldString = String(toolInput.old_string ?? "").normalize("NFKC")
     if (!oldString) return {}
 
-    const newString = String(toolInput?.new_string ?? toolInput?.content ?? "").normalize("NFKC")
+    const newString = String(toolInput.new_string ?? toolInput.content ?? "").normalize("NFKC")
 
-    const oldCounts = countEnforcements(oldString)
-    const newCounts = countEnforcements(newString)
-
-    if (newCounts.warnings < oldCounts.warnings) {
-      return preToolUseDeny(
-        buildWeakeningMessage("Warning", oldCounts.warnings, newCounts.warnings)
-      )
-    }
-    if (newCounts.errors < oldCounts.errors) {
-      return preToolUseDeny(
-        buildWeakeningMessage("Enforcement", oldCounts.errors, newCounts.errors)
-      )
-    }
-
-    return preToolUseAllow(
-      `ESLint config strength maintained (${newCounts.warnings}w/${newCounts.errors}e)`
-    )
+    return validateConfigStrength(oldString, newString)
   },
 }
 
