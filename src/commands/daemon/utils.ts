@@ -22,10 +22,15 @@ export interface TranscriptWatchPath {
   label: string
 }
 
+const watchPathsCache = new Map<string, TranscriptWatchPath[]>()
+
 export function transcriptWatchPathsForProject(cwd: string): TranscriptWatchPath[] {
+  const cached = watchPathsCache.get(cwd)
+  if (cached) return cached
+
   const home = getHomeDir()
   const projectKey = projectKeyFromCwd(cwd)
-  return [
+  const paths: TranscriptWatchPath[] = [
     {
       path: join(home, ".claude", "projects", projectKey, "/"),
       label: `transcripts:claude:${cwd}`,
@@ -51,6 +56,8 @@ export function transcriptWatchPathsForProject(cwd: string): TranscriptWatchPath
       label: `transcripts:junie:${cwd}`,
     },
   ]
+  watchPathsCache.set(cwd, paths)
+  return paths
 }
 
 export async function listDaemonPids(port: number): Promise<number[]> {
@@ -152,9 +159,10 @@ export async function restartDaemon(
   }
 }
 
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+
 export function stripAnsi(text: string): string {
-  const ansiRe = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
-  return text.replace(ansiRe, "")
+  return text.replace(ANSI_RE, "")
 }
 
 export interface CapturedToolCall {
@@ -183,12 +191,7 @@ export interface ProjectTaskPreview extends SessionTaskPreview {
 const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
 
 function formatToolInputForDisplay(input: Record<string, any> | undefined): string {
-  if (!input) return ""
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return summarizeToolInput(input)
-  }
+  return summarizeToolInput(input)
 }
 
 function truncate(value: string, max: number): string {
@@ -315,15 +318,12 @@ export function supplementMessagesWithCapturedToolCalls(
 ): SessionMessage[] {
   if (captured.length === 0) return messages
 
-  const next = messages.map((message) => ({
-    ...message,
-    ...(message.toolCalls ? { toolCalls: [...message.toolCalls] } : {}),
-  }))
-  const assistantIndexes = next
+  const assistantIndexes = messages
     .map((message, index) => (message.role === "assistant" ? index : -1))
     .filter((index) => index >= 0)
 
   if (assistantIndexes.length === 0) {
+    const next = [...messages]
     for (const call of captured) {
       next.push({
         role: "assistant",
@@ -335,12 +335,20 @@ export function supplementMessagesWithCapturedToolCalls(
     return next.sort((a, b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""))
   }
 
+  const next = messages.map((m) =>
+    m.role === "assistant"
+      ? {
+          ...m,
+          toolCalls: m.toolCalls ? [...m.toolCalls] : [],
+        }
+      : m
+  )
+
   let targetIdx = 0
   for (const call of captured) {
     const messageIndex = assistantIndexes[Math.min(targetIdx, assistantIndexes.length - 1)]!
-    const target = next[messageIndex]!
-    const existing = target.toolCalls ?? []
-    target.toolCalls = [...existing, { name: call.name, detail: call.detail }]
+    const target = next[messageIndex] as SessionMessage
+    target.toolCalls!.push({ name: call.name, detail: call.detail })
     targetIdx++
   }
   return next

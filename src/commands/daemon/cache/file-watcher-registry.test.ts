@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
-import { FileWatcherRegistry } from "./file-watcher-registry.ts"
+import { BaseFileWatcherRegistry as FileWatcherRegistry } from "./file-watcher-registry.ts"
 
 function createDirTree(base: string, dirs: string[]): void {
   for (const dir of dirs) {
@@ -39,7 +39,10 @@ describe("file-watcher-registry exclusion", () => {
       await registry.start()
 
       const status = registry.status()
-      const totalWatchers = status.reduce((sum, s) => sum + s.watcherCount, 0)
+      const totalWatchers = status.reduce(
+        (sum: number, s: { watcherCount: number }) => sum + s.watcherCount,
+        0
+      )
 
       // With depth=2 and exclusions:
       // base/ (1) + src (1) + src/utils (1) + hooks (1) = 4

@@ -7,6 +7,43 @@
 
 import type { ZodType } from "zod"
 
+// ── Streaming / line-by-line reading ─────────────────────────────────────────
+
+/**
+ * Returns an async iterator that yields non-empty lines from a file.
+ * Uses a streaming reader to avoid loading the entire file into memory.
+ */
+export async function* readLinesStreaming(path: string): AsyncIterableIterator<string> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return
+
+  const stream = file.stream()
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let remaining = ""
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = (remaining + chunk).split("\n")
+      remaining = lines.pop() ?? ""
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed) yield trimmed
+      }
+    }
+
+    const final = (remaining + decoder.decode()).trim()
+    if (final) yield final
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 // ── Low-level line helpers ───────────────────────────────────────────────────
 
 /** Split a JSONL string into non-empty lines (whitespace-only lines excluded). */

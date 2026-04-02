@@ -23,8 +23,9 @@ export interface WatchEntry {
  * Now supports a depth limit for recursive watching to avoid massive resource leaks
  * and keep a sensible limit on watched files.
  */
-export class FileWatcherRegistry {
+export class BaseFileWatcherRegistry {
   private entries = new Map<string, WatchEntry>()
+  // noinspection TypeScriptFieldCanBeMadeReadonly
   private maxTotalWatchers = 1000 // Sensible safeguard
 
   constructor(options?: { maxTotalWatchers?: number }) {

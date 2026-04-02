@@ -1,22 +1,19 @@
-import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import * as v8 from "node:v8"
 import { LRUCache } from "lru-cache"
 import { stderrLog } from "../debug.ts"
-import { executeDispatch } from "../dispatch"
-import { hookIdentifier, isInlineHookDef } from "../hook-types.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
 import {
   getProjectSettingsPath,
   getSwizSettingsPath,
   invalidateSettingsCache,
-  readSwizSettings,
 } from "../settings.ts"
-import { swizPseudoHookLogPath } from "../temp-paths.ts"
-import { findAllProviderSessions, isHookFeedback } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { formatBytes } from "../utils/format.ts"
+import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
+import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
+import { logPseudoHook } from "./daemon/daemon-logging.ts"
 import { PrReviewMonitor } from "./daemon/pr-review-monitor.ts"
 import {
   CappedMap,
@@ -50,10 +47,10 @@ import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import { installDaemonLaunchAgent, uninstallDaemonLaunchAgent } from "./install.ts"
 import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./status-line.ts"
 
-const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000
-const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 5 * 60 * 1000
-const PROJECT_IDLE_EVICTION_MS = 60 * 60 * 1000 // 1 hour
-const MAX_WATCHED_PROJECTS = 10
+const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
+const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 60 * 1000 // 1 min
+const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000 // 3 mins
+const MAX_WATCHED_PROJECTS = 2
 
 async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
   if (args.includes("status")) {
@@ -87,12 +84,12 @@ async function handleDaemonSubcommand(args: string[], port: number): Promise<boo
 
 function createDaemonState() {
   const globalMetrics = createMetrics()
-  const projectMetrics = new CappedMap<string, DaemonMetrics>(200)
-  const projectLastSeen = new CappedMap<string, number>(200)
-  const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(500)
-  const sessionToolCalls = new CappedMap<string, CapturedToolCall[]>(500)
-  const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(500)
-  const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(500)
+  const projectMetrics = new CappedMap<string, DaemonMetrics>(100)
+  const projectLastSeen = new CappedMap<string, number>(50)
+  const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(20)
+  const sessionToolCalls = new CappedMap<string, CapturedToolCall[]>(10)
+  const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(100)
+  const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(10)
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {
     let m = projectMetrics.get(cwd)
@@ -189,7 +186,8 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
 
 function setupWatchers(
   caches: ReturnType<typeof createDaemonCaches>,
-  transcriptMonitor: TranscriptMonitor
+  transcriptMonitor: TranscriptMonitor,
+  projectLastSeen: ReturnType<typeof createDaemonState>["projectLastSeen"]
 ) {
   const {
     watchers,
@@ -218,6 +216,7 @@ function setupWatchers(
 
   watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)
   watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots, { depth: 1 })
+
   const globalSettingsPath = getSwizSettingsPath()
   if (globalSettingsPath) {
     watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
@@ -243,19 +242,33 @@ function setupWatchers(
     }
   }
 
+  const invalidateProject = (cwd: string) => {
+    ghCache.invalidateProject(cwd)
+    eligibilityCache.invalidateProject(cwd)
+    gitStateCache.invalidateProject(cwd)
+    projectSettingsCache.invalidateProject(cwd)
+    manifestCache.invalidateProject(cwd)
+    transcriptIndex.invalidateProject(cwd)
+    sessionDataCache.invalidateProject(cwd)
+    for (const key of snapshots.keys()) {
+      if (key.startsWith(cwd)) snapshots.delete(key)
+    }
+  }
+
   const registerProjectWatchers = (cwd: string) => {
     if (registeredProjects.has(cwd)) return
 
     // Limit the number of concurrently watched projects
     if (registeredProjects.size >= MAX_WATCHED_PROJECTS) {
-      // Evict the least recently used project if possible, otherwise just the first one
-      // We don't have LRU Set, but we can find the oldest last-seen project
       let oldestCwd: string | null = null
+      let oldestTime = Infinity
       for (const projectCwd of registeredProjects) {
-        // Skip the current one we're trying to register (shouldn't happen due to check above)
         if (projectCwd === cwd) continue
-        oldestCwd = projectCwd
-        break
+        const lastSeen = projectLastSeen.get(projectCwd) ?? 0
+        if (lastSeen < oldestTime) {
+          oldestTime = lastSeen
+          oldestCwd = projectCwd
+        }
       }
       if (oldestCwd) {
         stderrLog("project eviction", `[daemon] Evicting project ${oldestCwd} to stay within limit`)
@@ -264,18 +277,7 @@ function setupWatchers(
     }
 
     registeredProjects.add(cwd)
-    const projectFlush = () => {
-      for (const key of snapshots.keys()) {
-        if (key.startsWith(cwd)) snapshots.delete(key)
-      }
-      ghCache.invalidateProject(cwd)
-      eligibilityCache.invalidateProject(cwd)
-      gitStateCache.invalidateProject(cwd)
-      projectSettingsCache.invalidateProject(cwd)
-      manifestCache.invalidateProject(cwd)
-      transcriptIndex.invalidateProject(cwd)
-      sessionDataCache.invalidateProject(cwd)
-    }
+    const projectFlush = () => invalidateProject(cwd)
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
     watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush, { depth: 2 })
@@ -296,24 +298,32 @@ function setupWatchers(
     watchers.start().catch(() => {})
   }
 
-  watchers.start().then(undefined, () => {})
-  process.on("exit", () => {
-    const snap = v8.writeHeapSnapshot()
-    process.stderr.write(snap)
-    watchers.close()
-    caches.ciWatchRegistry.close()
-    caches.upstreamSyncRegistry.close()
-    caches.workerRuntime.close()
-  })
+  startMemoryMonitoring()
 
-  return { registeredProjects, registerProjectWatchers }
+  watchers.start().then(undefined, () => {})
+
+  return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
+}
+
+function startMemoryMonitoring() {
+  setInterval(() => {
+    const memoryUsage = process.memoryUsage()
+    const bytes = memoryUsage.rss
+    const parts = [
+      `rss=${formatBytes(bytes)}`,
+      `heapTotal=${formatBytes(memoryUsage.heapTotal)}`,
+      `heapUsed=${formatBytes(memoryUsage.heapUsed)}`,
+      `external=${formatBytes(memoryUsage.external)}`,
+    ]
+    process.stdout.write(`Mem: ${parts.join(", ")}\n`)
+  }, 1000)
 }
 
 function evictIdleProjects(
   now: number,
   state: ReturnType<typeof createDaemonState>,
-  caches: ReturnType<typeof createDaemonCaches>,
-  registeredProjects: Set<string>
+  registeredProjects: Set<string>,
+  evictProject: (cwd: string) => void
 ) {
   const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
   for (const [cwd, lastSeen] of state.projectLastSeen) {
@@ -323,21 +333,7 @@ function evictIdleProjects(
 
     // Manual eviction of idle projects
     if (registeredProjects.has(cwd)) {
-      registeredProjects.delete(cwd)
-      caches.ghCache.invalidateProject(cwd)
-      caches.eligibilityCache.invalidateProject(cwd)
-      caches.gitStateCache.invalidateProject(cwd)
-      caches.projectSettingsCache.invalidateProject(cwd)
-      caches.manifestCache.invalidateProject(cwd)
-      caches.transcriptIndex.invalidateProject(cwd)
-      sessionDataCache.invalidateProject(cwd)
-      caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
-      caches.upstreamSyncRegistry.unregister(cwd)
-      caches.prReviewMonitor.clearProject(cwd)
-      caches.cooldownRegistry.invalidateProject(cwd)
-      for (const key of caches.snapshots.keys()) {
-        if (key.startsWith(cwd)) caches.snapshots.delete(key)
-      }
+      evictProject(cwd)
     }
   }
 }
@@ -346,9 +342,13 @@ function createPruner(
   state: ReturnType<typeof createDaemonState>,
   caches: ReturnType<typeof createDaemonCaches>,
   registeredProjects: Set<string>,
-  transcriptMonitor: TranscriptMonitor
+  transcriptMonitor: TranscriptMonitor,
+  evictProject: (cwd: string) => void
 ) {
   let lastPruneAt = 0
+  let lastLogPruneAt = 0
+  const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000 // Prune logs every 5 minutes
+
   return () => {
     const now = Date.now()
     if (now - lastPruneAt < TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS) return
@@ -360,7 +360,7 @@ function createPruner(
       if (activity.lastSeen < cutoffMs) state.sessionActivity.delete(sessionId)
     }
     for (const [sessionId, toolCalls] of state.sessionToolCalls) {
-      const recent = toolCalls.filter((call) => new Date(call.timestamp).getTime() >= cutoffMs)
+      const recent = toolCalls.filter((call) => Date.parse(call.timestamp) >= cutoffMs)
       if (recent.length === 0) {
         state.sessionToolCalls.delete(sessionId)
         continue
@@ -371,20 +371,61 @@ function createPruner(
       if (usage.lastSeen < cutoffMs) state.sessionToolUsage.delete(sessionId)
     }
 
-    evictIdleProjects(now, state, caches, registeredProjects)
+    evictIdleProjects(now, state, registeredProjects, evictProject)
     transcriptMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
     caches.prReviewMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
+
+    // Integrated log pruning
+    if (now - lastLogPruneAt >= LOG_PRUNE_INTERVAL_MS) {
+      lastLogPruneAt = now
+      void pruneTempLogs()
+    }
   }
 }
 
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
   const state = createDaemonState()
   const caches = createDaemonCaches()
-  const transcriptMonitor = new TranscriptMonitor(caches)
-  const { registeredProjects, registerProjectWatchers } = setupWatchers(caches, transcriptMonitor)
+  const transcriptMonitor = new WorkerTranscriptMonitor(caches) as unknown as TranscriptMonitor
+  const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
+    caches,
+    transcriptMonitor,
+    state.projectLastSeen
+  )
 
-  state.touchProject(process.cwd())
-  const pruneTranscriptMemory = createPruner(state, caches, registeredProjects, transcriptMonitor)
+  let isClosing = false
+  const cleanup = (reason: string) => {
+    if (isClosing) return
+    isClosing = true
+    process.stderr.write(`\nClosing daemon components (${reason})... `)
+    caches.watchers.close()
+    process.stderr.write("Watchers... ")
+    transcriptMonitor.terminate()
+    process.stderr.write("Transcript monitor... ")
+    caches.ciWatchRegistry.close()
+    process.stderr.write("CI registry... ")
+    caches.upstreamSyncRegistry.close()
+    process.stderr.write("Upstream sync... ")
+    caches.workerRuntime.close()
+    process.stderr.write("Worker runtime... ")
+    process.stderr.write("Done.\n")
+    if (reason !== "exit") process.exit(0)
+  }
+
+  process.on("SIGINT", () => cleanup("SIGINT"))
+  process.on("SIGTERM", () => cleanup("SIGTERM"))
+  process.on("exit", () => cleanup("exit"))
+
+  const cwd = process.cwd()
+
+  state.touchProject(cwd)
+  const pruneTranscriptMemory = createPruner(
+    state,
+    caches,
+    registeredProjects,
+    transcriptMonitor,
+    evictProject
+  )
   const resolveSnapshot = buildSnapshotResolver(caches.snapshots)
 
   const server = startDaemonWebServer({
@@ -418,14 +459,21 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   })
 
   // Register initial project for periodic upstream sync
-  void caches.upstreamSyncRegistry.register(process.cwd())
-  registerProjectWatchers(process.cwd())
+  void caches.upstreamSyncRegistry.register(cwd)
+  registerProjectWatchers(cwd)
 
+  startTranscriptMonitoring(registeredProjects, transcriptMonitor)
+
+  console.log(`Daemon listening on ${server.url}`)
+}
+
+function startTranscriptMonitoring(
+  registeredProjects: Set<string>,
+  transcriptMonitor: TranscriptMonitor
+) {
   // Start periodic transcript monitoring for all registered projects
-  void logPseudoHook(`Transcript monitor starting for initial project: ${process.cwd()}`)
+  void logPseudoHook("Transcript monitor starting")
   let isMonitoring = false
-  let lastLogPruneMs = 0
-  const LOG_PRUNE_INTERVAL_MS = 5 * 60 * 1000 // Prune every 5 minutes
   const monitoringInterval = setInterval(() => {
     if (isMonitoring) return
     isMonitoring = true
@@ -434,12 +482,6 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
         await Promise.allSettled(
           [...registeredProjects].map((cwd) => transcriptMonitor.checkProject(cwd))
         )
-        // Rate-limit log pruning to every LOG_PRUNE_INTERVAL_MS
-        const now = Date.now()
-        if (now - lastLogPruneMs > LOG_PRUNE_INTERVAL_MS) {
-          lastLogPruneMs = now
-          void pruneTempLogs()
-        }
       } catch (err) {
         stderrLog("monitoring loop exception", `[daemon] Transcript monitor error: ${err}`)
         void logPseudoHook(`Error in monitor loop: ${err}`)
@@ -453,197 +495,6 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   process.on("exit", () => {
     clearInterval(monitoringInterval)
   })
-
-  console.log(`Daemon listening on ${server.url}`)
-}
-
-async function logPseudoHook(message: string) {
-  try {
-    const timestamp = new Date().toISOString()
-    await appendFile(swizPseudoHookLogPath(), `[${timestamp}] ${message}\n`)
-  } catch (err) {
-    stderrLog("pseudo-hook logging", `Failed to log pseudo-hook: ${err}`)
-  }
-}
-
-/** CLI command: starts the daemon web server, or manages its LaunchAgent lifecycle. */
-/**
- * Monitors session transcripts for new tool calls and triggers auto-steer.
- */
-class TranscriptMonitor {
-  private lastToolCallFingerprints = new CappedMap<string, string>(500)
-  private lastMessageFingerprints = new CappedMap<string, string>(500)
-
-  constructor(private caches: ReturnType<typeof createDaemonCaches>) {}
-
-  /**
-   * Returns true if any hook for the given event is within its cooldown window (dispatch should be skipped).
-   * Marks the cooldown for the first non-cooled hook when returning false.
-   */
-  private isEventOnCooldown(
-    manifestGroups: Awaited<
-      ReturnType<ReturnType<typeof createDaemonCaches>["manifestCache"]["get"]>
-    >,
-    event: string,
-    cwd: string
-  ): boolean {
-    const groups = manifestGroups.filter((g) => g.event === event)
-    for (const group of groups) {
-      for (const hook of group.hooks) {
-        const cooldown = isInlineHookDef(hook)
-          ? (hook.hook.cooldownSeconds ?? 30)
-          : (hook.cooldownSeconds ?? 30)
-        const id = hookIdentifier(hook)
-        if (this.caches.cooldownRegistry.checkAndMark(id, cooldown, cwd)) {
-          void logPseudoHook(`${event} cooldown active for ${id} in ${cwd}, skipping`)
-          stderrLog(
-            "hook cooldown active",
-            `[daemon] ${event} cooldown active for ${id}, skipping dispatch`
-          )
-          return true
-        }
-      }
-    }
-    return false
-  }
-
-  pruneOldSessions(activeSessions: Set<string>) {
-    for (const sessionId of this.lastToolCallFingerprints.keys()) {
-      if (!activeSessions.has(sessionId)) {
-        this.lastToolCallFingerprints.delete(sessionId)
-        this.lastMessageFingerprints.delete(sessionId)
-      }
-    }
-  }
-
-  async checkProject(cwd: string): Promise<void> {
-    const cached = await this.caches.projectSettingsCache.get(cwd)
-    const settings = cached.settings
-    const globalSettings = await readSwizSettings()
-    const autoSteerEnabled =
-      settings?.autoSteerTranscriptWatching ?? globalSettings.autoSteerTranscriptWatching
-    const speakEnabled = settings?.speak ?? globalSettings.speak
-    if (!autoSteerEnabled && !speakEnabled) return
-
-    const sessions = await findAllProviderSessions(cwd, undefined, 1)
-    // Only check the most recent session for performance
-    const latestSession = sessions[0]
-    if (!latestSession) return
-
-    const [data, manifestGroups] = await Promise.all([
-      sessionDataCache.get(latestSession),
-      this.caches.manifestCache.get(cwd),
-    ])
-    if (!data) return
-
-    void logPseudoHook(
-      `checkProject: autoSteer=${autoSteerEnabled} speak=${speakEnabled} session=${latestSession.id} lastToolCallFingerprint=${data.lastToolCallFingerprint}`
-    )
-
-    // manifestGroups fetched in parallel with data above
-
-    if (autoSteerEnabled && data.lastToolCallFingerprint) {
-      const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
-      if (prevFingerprint !== data.lastToolCallFingerprint) {
-        const msg = `tool call fingerprint change in ${latestSession.id}: ${prevFingerprint} -> ${data.lastToolCallFingerprint}`
-        stderrLog("tool call detection", `[daemon] ${msg}`)
-        void logPseudoHook(msg)
-        this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
-
-        // Detect the recent tool call to avoid loops
-        let toolCallMessage: (typeof data.messages)[0] | undefined
-        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
-          const msg = data.messages[i]
-          if (msg && msg.role === "assistant" && (msg.toolCalls?.length ?? 0) > 0) {
-            toolCallMessage = msg
-            break
-          }
-        }
-
-        if (toolCallMessage) {
-          if (this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
-
-          // Trigger postToolUse hook
-          const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
-          stderrLog("postToolUse dispatch", `[daemon] ${triggerMsg}`)
-          void logPseudoHook(triggerMsg)
-          const toolName = toolCallMessage.toolCalls![0]!.name
-          const detailStr = toolCallMessage.toolCalls![0]!.detail
-          let toolInput: Record<string, any> = {}
-          if (detailStr) {
-            try {
-              const parsed = JSON.parse(detailStr)
-              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-                toolInput = parsed as Record<string, any>
-              }
-            } catch {
-              // detail may be a truncated summary string — leave as empty object
-            }
-          }
-
-          const payload = {
-            session_id: latestSession.id,
-            transcript_path: latestSession.path,
-            cwd,
-            tool_name: toolName,
-            tool_input: toolInput,
-          }
-
-          void executeDispatch({
-            canonicalEvent: "postToolUse",
-            hookEventName: "postToolUse",
-            payloadStr: JSON.stringify(payload),
-            daemonContext: true,
-            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
-          })
-        }
-      }
-    }
-
-    if (speakEnabled && data.lastMessageFingerprint) {
-      const prevMessageFingerprint = this.lastMessageFingerprints.get(latestSession.id)
-      if (prevMessageFingerprint !== data.lastMessageFingerprint) {
-        const msg = `message fingerprint change in ${latestSession.id}: ${prevMessageFingerprint} -> ${data.lastMessageFingerprint}`
-        stderrLog("message detection", `[daemon] ${msg}`)
-        void logPseudoHook(msg)
-        this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
-
-        // Find the actual message for text
-        let textMessage: (typeof data.messages)[0] | undefined
-        for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
-          const msg = data.messages[i]
-          if (msg && msg.role === "assistant" && msg.text && !isHookFeedback(msg.text)) {
-            textMessage = msg
-            break
-          }
-        }
-
-        if (textMessage) {
-          if (this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
-
-          // Trigger notification hook for TTS
-          const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
-          stderrLog("notification dispatch", `[daemon] ${triggerMsg}`)
-          void logPseudoHook(triggerMsg)
-          const payload = {
-            session_id: latestSession.id,
-            transcript_path: latestSession.path,
-            cwd,
-            type: "assistant_message",
-            message: textMessage.text,
-          }
-
-          void executeDispatch({
-            canonicalEvent: "notification",
-            hookEventName: "notification",
-            payloadStr: JSON.stringify(payload),
-            daemonContext: true,
-            manifestProvider: async (cwd) => this.caches.manifestCache.get(cwd),
-          })
-        }
-      }
-    }
-  }
 }
 
 export const daemonCommand: Command = {

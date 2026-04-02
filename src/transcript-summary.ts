@@ -161,6 +161,13 @@ function computeSessionDuration(sessionLines: string[]): number {
  */
 export function extractSessionLines(jsonlText: string): string[] {
   const allLines = jsonlText.split("\n")
+  return filterSessionLines(allLines)
+}
+
+/**
+ * Filter an array of JSONL lines to return only those after the last compaction boundary.
+ */
+function filterSessionLines(allLines: string[]): string[] {
   let sessionStartIdx = 0
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
@@ -391,6 +398,13 @@ export async function getBashCommandsUsedForCurrentSession(
 
 export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
   const sessionLines = extractSessionLines(jsonlText)
+  return computeSummaryFromSessionLines(sessionLines)
+}
+
+/**
+ * Compute transcript summary from already-filtered session lines.
+ */
+export function computeSummaryFromSessionLines(sessionLines: string[]): TranscriptSummary {
   const acc = collectSessionToolUsage(sessionLines)
 
   const sessionDurationMs = computeSessionDuration(sessionLines)

@@ -28,6 +28,7 @@ import {
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 import { readLines } from "../utils/file-utils.ts"
+import { formatBytes } from "../utils/format.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
@@ -1728,13 +1729,6 @@ const ORPHAN_SESSION_ID_RE =
 const JUNIE_SESSION_ID_RE = /^(session-\d{6}-\d{6}-[0-9a-z]{4}|test-.*)$/i
 
 // ─── Cleanup helpers ─────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`
-}
 
 async function dirSize(dirPath: string): Promise<number> {
   let total = 0

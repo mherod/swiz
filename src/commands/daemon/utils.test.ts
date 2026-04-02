@@ -428,8 +428,7 @@ describe("extractToolCalls", () => {
 
     const result = extractToolCalls(content)
 
-    // JSON.stringify(input, null, 2) produces 2-space indented JSON
-    expect(result[0]!.detail).toBe('{\n  "path": "/test/file.txt"\n}')
+    expect(result[0]!.detail).toBe("/test/file.txt")
   })
 
   test("handles tool_use with undefined input", () => {

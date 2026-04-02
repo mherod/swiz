@@ -400,22 +400,23 @@ describe("FileWatcherRegistry", () => {
     expect(status).toHaveLength(1)
   })
 
-  it("close stops all watchers", () => {
+  it("close stops all watchers", async () => {
     const reg = new FileWatcherRegistry()
     registries.push(reg)
     reg.register("/tmp", "tmp", () => {})
-    void reg.start()
+    await reg.start()
     expect(reg.status()[0]?.watching).toBeTrue()
     reg.close()
     expect(reg.status()[0]?.watching).toBeFalse()
   })
 
-  it("start ignores non-existent paths gracefully", () => {
+  it("start ignores non-existent paths gracefully", async () => {
     const reg = new FileWatcherRegistry()
     registries.push(reg)
     reg.register("/nonexistent/path/that/does/not/exist", "missing", () => {})
-    void reg.start()
+    await reg.start()
     expect(reg.status()[0]?.watching).toBeFalse()
+    reg.close()
   })
 })
 

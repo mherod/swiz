@@ -4,7 +4,9 @@
 // The shell sets process.env._ to the command that was actually executed.
 // When run via `swiz`, it ends with "/swiz"; when run via `bun index.ts`, it points to bun.
 // Only enforce in interactive terminals — subprocess/test invocations (piped stdio) are allowed.
+
 const invokedAs = process.env._ ?? ""
+// noinspection PointlessBooleanExpressionJS
 const isInteractive = process.stderr.isTTY === true
 if (isInteractive && !invokedAs.endsWith("/swiz") && !process.env.SWIZ_DIRECT) {
   process.stderr.write(
@@ -88,9 +90,13 @@ registerCommand(usageCommand)
 registerCommand(daemonCommand)
 
 // Signal listeners for tidy exit and cleanup.
-const handleSignal = (signal: string) => {
+const handleSignal = async (signal: string) => {
   // Use stderr to avoid polluting stdout if the output is being piped.
   process.stderr.write(`\nReceived ${signal}. Cleaning up...\n`)
+
+  // Give process.on("exit") handlers a moment to run by exiting,
+  // but if we exit abruptly async cleanup won't happen.
+  // Actually, process.exit() runs process.on('exit') handlers synchronously.
 
   // Standard exit codes: 128 + signal number
   // SIGINT (2) -> 130, SIGTERM (15) -> 143, SIGHUP (1) -> 129, SIGQUIT (3) -> 131
@@ -100,13 +106,15 @@ const handleSignal = (signal: string) => {
     SIGHUP: 129,
     SIGQUIT: 131,
   }
-  process.exit(exitCodes[signal] ?? 1)
+
+  process.exitCode = exitCodes[signal] ?? 1
+  process.exit()
 }
 
-process.on("SIGINT", () => handleSignal("SIGINT"))
-process.on("SIGTERM", () => handleSignal("SIGTERM"))
-process.on("SIGHUP", () => handleSignal("SIGHUP"))
-process.on("SIGQUIT", () => handleSignal("SIGQUIT"))
+process.on("SIGINT", () => void handleSignal("SIGINT"))
+process.on("SIGTERM", () => void handleSignal("SIGTERM"))
+process.on("SIGHUP", () => void handleSignal("SIGHUP"))
+process.on("SIGQUIT", () => void handleSignal("SIGQUIT"))
 
 // Global timeout: ensure the CLI terminates if it exceeds a requested budget.
 // Useful for CI environments or automated runs where a hang is unacceptable.
