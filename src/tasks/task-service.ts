@@ -661,7 +661,7 @@ export async function writeTaskUpdate(
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
     taskId,
-    action: "status_change",
+    action: "field_update",
     oldStatus: task.status,
     newStatus: task.status,
     subject: task.subject,

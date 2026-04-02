@@ -60,6 +60,7 @@ export const DEFAULT_ALLOWED_SKILL_CATEGORIES: readonly string[] = [
 
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
@@ -1641,6 +1642,20 @@ async function runDoctorChecks(args: string[]): Promise<void> {
       `${failures.length} check(s) failed:\n` +
         failures.map((f) => `  - ${f.name}: ${f.detail}`).join("\n")
     )
+  }
+  await notifyDaemon(false)
+}
+
+/** Best-effort daemon notification after fixing issues (similar to settings write). */
+async function notifyDaemon(jsonOutput: boolean): Promise<void> {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
+      signal: AbortSignal.timeout(500),
+    })
+    if (!resp.ok) return
+    if (!jsonOutput) console.log("  Daemon notified of changes.")
+  } catch {
+    // Daemon not running — silently continue
   }
 }
 

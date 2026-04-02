@@ -525,6 +525,9 @@ Interact with GitHub issues with guards against accidentally operating on alread
 swiz issue close 42                         # close an issue (skips if already closed)
 swiz issue comment 42 --body "text"        # comment on an issue (skips if closed)
 swiz issue resolve 42 --body "text"        # comment + close in one idempotent call
+swiz issue sync                             # sync local issue store from upstream
+swiz issue cache-bust                       # clear local issue store cache for repo
+swiz issue list                             # list open issues and pull requests
 ```
 
 | Flag                | Description                                   |

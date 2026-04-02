@@ -31,6 +31,9 @@ const prStateHistory = new CappedMap<number, PrReviewState>(1000)
 /** Evict entries not seen in the last 7 days. */
 const PR_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+/** Max comments to track per PR to avoid memory bloat. */
+const MAX_COMMENTS_PER_PR = 100
+
 /** Reset tracker state (for testing and explicit state management). */
 export function resetPrTrackerState(): void {
   prStateHistory.clear()
@@ -51,20 +54,37 @@ export function trackPrReviewTransitions(
   const now = new Date().toISOString()
   const nowMs = Date.now()
 
-  // Evict stale entries for closed/aged-out PRs
-  for (const [prNumber, state] of prStateHistory.entries()) {
-    if (nowMs - new Date(state.syncedAt).getTime() > PR_STATE_TTL_MS) {
-      prStateHistory.delete(prNumber)
+  // Evict stale entries for closed/aged-out PRs (batch prune once)
+  if (Math.random() < 0.1) {
+    for (const [prNumber, state] of prStateHistory.entries()) {
+      if (nowMs - new Date(state.syncedAt).getTime() > PR_STATE_TTL_MS) {
+        prStateHistory.delete(prNumber)
+      }
     }
   }
 
-  // Diff PR review decisions
+  // Build comment lookup: prNumber → Set<id> for ONLY the PRs in this sync
+  const syncedPrNumbers = new Set(currentPrs.map((p) => p.number))
+  const commentsMap = new Map<number, Set<string>>()
+  for (const c of currentComments) {
+    if (!syncedPrNumbers.has(c.prNumber)) continue
+    let set = commentsMap.get(c.prNumber)
+    if (!set) {
+      set = new Set()
+      commentsMap.set(c.prNumber, set)
+    }
+    if (set.size < MAX_COMMENTS_PER_PR) {
+      set.add(c.id)
+    }
+  }
+
+  // Diff PR review decisions and comments
   for (const pr of currentPrs) {
     const prev = prStateHistory.get(pr.number)
     const prevDecision = (prev?.reviewDecision ?? null) as PrReviewDecision
     const currDecision = (pr.reviewDecision ?? null) as PrReviewDecision
 
-    // New approval or new changes requested (first time)
+    // 1. Detect review transitions
     if (
       prevDecision === null &&
       (currDecision === "APPROVED" || currDecision === "CHANGES_REQUESTED")
@@ -80,7 +100,6 @@ export function trackPrReviewTransitions(
         priority: currDecision === "CHANGES_REQUESTED" ? "high" : "normal",
       })
     } else if (prevDecision === "CHANGES_REQUESTED" && currDecision === "APPROVED") {
-      // Transition from CHANGES_REQUESTED to APPROVED
       autoSteers.push({
         type: "PR_APPROVAL",
         prNumber: pr.number,
@@ -90,45 +109,34 @@ export function trackPrReviewTransitions(
       })
     }
 
+    // 2. Detect new comments (only for PRs in the current sync)
+    const currentCommentIds = commentsMap.get(pr.number) ?? new Set<string>()
+    if (prev) {
+      let newCount = 0
+      for (const id of currentCommentIds) {
+        if (!prev.commentIds.has(id)) newCount++
+      }
+      if (newCount > 0) {
+        autoSteers.push({
+          type: "PR_COMMENT",
+          prNumber: pr.number,
+          message:
+            newCount === 1
+              ? `New comment on pull request #${pr.number}. Review inline feedback.`
+              : `${newCount} new comments on pull request #${pr.number}. Review inline feedback.`,
+          timestamp: now,
+          priority: "normal",
+        })
+      }
+    }
+
     // Update tracked state for this PR
     prStateHistory.set(pr.number, {
       prNumber: pr.number,
       reviewDecision: currDecision,
-      commentIds: prev?.commentIds ?? new Set(),
+      commentIds: currentCommentIds,
       syncedAt: now,
     })
-  }
-
-  // Build comment lookup: prNumber → Set<id>
-  const commentsMap = new Map<number, Set<string>>()
-  for (const c of currentComments) {
-    if (!commentsMap.has(c.prNumber)) commentsMap.set(c.prNumber, new Set())
-    commentsMap.get(c.prNumber)!.add(c.id)
-  }
-
-  for (const [prNumber, state] of prStateHistory.entries()) {
-    const prComments = commentsMap.get(prNumber) ?? new Set<string>()
-
-    // Count new comments and emit a single batched payload
-    let newCount = 0
-    for (const id of prComments) {
-      if (!state.commentIds.has(id)) newCount++
-    }
-    if (newCount > 0) {
-      autoSteers.push({
-        type: "PR_COMMENT",
-        prNumber,
-        message:
-          newCount === 1
-            ? `New comment on pull request #${prNumber}. Review inline feedback.`
-            : `${newCount} new comments on pull request #${prNumber}. Review inline feedback.`,
-        timestamp: now,
-        priority: "normal",
-      })
-    }
-
-    // Assign directly — commentsMap values are not reused after this loop
-    state.commentIds = prComments
   }
 
   return autoSteers

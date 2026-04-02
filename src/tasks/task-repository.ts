@@ -46,7 +46,7 @@ export function isIncompleteTaskStatus(status: string): boolean {
 
 export type TaskStatus = Task["status"]
 
-export type TaskMutationAction = "create" | "status_change" | "delete"
+export type TaskMutationAction = "create" | "status_change" | "delete" | "field_update"
 
 export interface AuditEntry {
   timestamp: string

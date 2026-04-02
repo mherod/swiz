@@ -79,7 +79,7 @@ Commands are registered in this order in `index.ts`:
 
 | Command | Source | Description |
 |---------|--------|-------------|
-| `issue` | `src/commands/issue.ts` | Interact with GitHub issues (guards against operating on closed issues) |
+| `issue` | `src/commands/issue.ts` | Interact with GitHub issues and PRs. Subcommands: `close`, `comment`, `resolve`, `sync`, `cache-bust`, `list`. `sync` updates the local store from upstream. |
 | `cross-repo-issue` | `src/commands/cross-repo-issue.ts` | File a GitHub issue with exact change details when a sandbox edit is blocked. Auto-infers `--repo` from known sandbox paths |
 
 ### AI-Powered Analysis

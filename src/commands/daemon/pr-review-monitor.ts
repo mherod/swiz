@@ -20,6 +20,8 @@ import { CappedMap } from "./cache/capped-map.ts"
 const BRANCH_CACHE_TTL_MS = 15_000
 /** Max age for unconsumed auto-steer payloads before eviction (2 hours) */
 const QUEUE_PAYLOAD_MAX_AGE_MS = 2 * 60 * 60 * 1000
+/** Max payloads to queue per session to avoid memory bloat. */
+const MAX_QUEUE_SIZE = 20
 
 interface BranchCacheEntry {
   branch: string
@@ -93,6 +95,10 @@ export class PrReviewMonitor {
             queue = { payloads: [], addedAt: Date.now() }
           }
           queue.payloads.push(...payloads)
+          // Cap queue size
+          if (queue.payloads.length > MAX_QUEUE_SIZE) {
+            queue.payloads = queue.payloads.slice(-MAX_QUEUE_SIZE)
+          }
           this.sessionQueues.set(sessionId, queue)
         }
       })

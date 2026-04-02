@@ -37,12 +37,13 @@ async function commentViaRest(
 function usage(): string {
   return (
     "Usage: swiz issue <subcommand> [options]\n" +
-    "Subcommands: close, comment, resolve, cache-bust, sync\n" +
+    "Subcommands: close, comment, resolve, cache-bust, sync, list\n" +
     "  swiz issue close <number>\n" +
     "  swiz issue comment <number> --body <text>\n" +
     "  swiz issue resolve <number> [--body <text>]\n" +
     "  swiz issue cache-bust [--repo <slug>]\n" +
-    "  swiz issue sync [<repo>]"
+    "  swiz issue sync [<repo>]\n" +
+    "  swiz issue list [<repo>]"
   )
 }
 
@@ -365,6 +366,51 @@ async function handleSync(args: string[]): Promise<void> {
   }
 }
 
+async function handleList(args: string[]): Promise<void> {
+  const cwd = process.cwd()
+  let repo: string | null = args[1] ?? null
+  if (!repo) {
+    repo = await getRepoSlug(cwd)
+  }
+  if (!repo) {
+    throw new Error(
+      `Repo required. Usage: swiz issue list [<repo>]\nOr run this in a git repo with an origin.`
+    )
+  }
+
+  const store = getIssueStore()
+  // Use Number.MAX_SAFE_INTEGER to get all cached items regardless of TTL
+  const issues = store.listIssues<{ number: number; title: string; state?: string }>(
+    repo,
+    Number.MAX_SAFE_INTEGER
+  )
+  const prs = store.listPullRequests<{ number: number; title: string; state?: string }>(
+    repo,
+    Number.MAX_SAFE_INTEGER
+  )
+
+  const openIssues = issues.filter((i) => i.state?.toLowerCase() === "open")
+  const openPrs = prs.filter((pr) => pr.state?.toLowerCase() === "open")
+
+  console.log(`\nOpen Issues for ${repo}:`)
+  if (openIssues.length === 0) {
+    console.log("  None")
+  } else {
+    for (const issue of openIssues) {
+      console.log(`  #${issue.number} ${issue.title}`)
+    }
+  }
+
+  console.log(`\nOpen Pull Requests for ${repo}:`)
+  if (openPrs.length === 0) {
+    console.log("  None")
+  } else {
+    for (const pr of openPrs) {
+      console.log(`  #${pr.number} ${pr.title}`)
+    }
+  }
+}
+
 export const issueCommand: Command = {
   name: "issue",
   description: "Interact with GitHub issues and store (guards against operating on closed issues)",
@@ -393,11 +439,16 @@ export const issueCommand: Command = {
         "Manually sync upstream GitHub state (issues, PRs, CI, labels) into the local store. " +
         "Defaults to current repo.",
     },
+    {
+      flags: "list [<repo>]",
+      description: "List all currently open issues and pull requests from the local store.",
+    },
   ],
   async run(args: string[]) {
     const sub = args[0]
     if (sub === "cache-bust") return handleCacheBust(args)
     if (sub === "sync") return handleSync(args)
+    if (sub === "list") return handleList(args)
 
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
