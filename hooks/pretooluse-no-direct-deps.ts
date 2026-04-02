@@ -79,6 +79,62 @@ const ADD_COMMANDS: Record<string, string> = {
   npm: "npm install",
 }
 
+function checkWriteMutation(content: string, addCmd: string) {
+  if (!content) return null
+  const parsed = parseContentSafely(content)
+  if (parsed && hasDependencyBlocks(parsed)) {
+    return preToolUseDeny(
+      `Do not directly write dependency blocks in package.json. ` +
+        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
+    )
+  }
+  return null
+}
+
+async function checkEditMutation(
+  toolName: string,
+  filePath: string,
+  toolInput: Record<string, string>,
+  addCmd: string
+) {
+  const projectedContent = await computeProjectedContent(toolName, filePath, toolInput)
+  if (projectedContent === null) return null
+
+  let currentContent: string
+  try {
+    currentContent = await Bun.file(filePath).text()
+  } catch {
+    return null
+  }
+
+  const currentParsed = parseContentSafely(currentContent)
+  const projectedParsed = parseContentSafely(projectedContent)
+  if (!currentParsed || !projectedParsed) return null
+
+  if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
+    return preToolUseDeny(
+      `Do not directly edit dependency blocks in package.json. ` +
+        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
+    )
+  }
+  return null
+}
+
+function extractToolInput(rawInput: Record<string, any>) {
+  const toolName = (rawInput.tool_name as string) || ""
+  const toolInput = (rawInput.tool_input as Record<string, string>) || {}
+  const content = toolInput.content || ""
+  const filePath = toolInput.file_path || toolInput.path || ""
+  return { toolName, toolInput, filePath, content }
+}
+
+function shouldSkipHook(toolName: string, filePath: string): boolean {
+  if (!isFileEditTool(toolName)) return true
+  if (!filePath.endsWith("package.json")) return true
+  if (isNodeModulesPath(filePath)) return true
+  return false
+}
+
 const pretoolUseNoDirectDeps: SwizToolHook = {
   name: "pretooluse-no-direct-deps",
   event: "preToolUse",
@@ -86,57 +142,30 @@ const pretoolUseNoDirectDeps: SwizToolHook = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as Record<string, any>
-    const toolName: string = (input.tool_name as string) ?? ""
-    if (!isFileEditTool(toolName)) return preToolUseAllow("")
+    const { toolName, toolInput, filePath, content } = extractToolInput(
+      rawInput as Record<string, any>
+    )
 
-    const toolInput = input.tool_input as Record<string, string> | undefined
-    const filePath: string = toolInput?.file_path ?? toolInput?.path ?? ""
-    if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath))
+    if (shouldSkipHook(toolName, filePath)) {
       return preToolUseAllow("")
+    }
 
     const PM = await detectPackageManager(dirname(filePath))
-    const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
+    const addCmd = ADD_COMMANDS[PM || "npm"] || "npm install"
 
     try {
-      if (isWriteTool(toolName)) {
-        const content: string = toolInput?.content ?? ""
-        if (!content) return preToolUseAllow("")
-        const parsed = parseContentSafely(content)
-        if (!parsed) return preToolUseAllow("")
-        if (hasDependencyBlocks(parsed)) {
-          return preToolUseDeny(
-            `Do not directly write dependency blocks in package.json. ` +
-              `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
-          )
-        }
-      } else if (isEditTool(toolName)) {
-        const projectedContent = await computeProjectedContent(toolName, filePath, toolInput ?? {})
-        if (projectedContent === null) return preToolUseAllow("")
+      const result = isWriteTool(toolName)
+        ? checkWriteMutation(content, addCmd)
+        : isEditTool(toolName)
+          ? await checkEditMutation(toolName, filePath, toolInput, addCmd)
+          : null
 
-        let currentContent: string
-        try {
-          currentContent = await Bun.file(filePath).text()
-        } catch {
-          return preToolUseAllow("")
-        }
-
-        const currentParsed = parseContentSafely(currentContent)
-        const projectedParsed = parseContentSafely(projectedContent)
-        if (!currentParsed || !projectedParsed) return preToolUseAllow("")
-
-        if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
-          return preToolUseDeny(
-            `Do not directly edit dependency blocks in package.json. ` +
-              `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
-          )
-        }
-      }
+      if (result) return result
     } catch {
       return preToolUseAllow("")
     }
 
-    return preToolUseAllow(`No direct dependency edits detected in ${filePath.split("/").pop()}`)
+    return preToolUseAllow(`No direct dependency edits detected in package.json`)
   },
 }
 
