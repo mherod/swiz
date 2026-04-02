@@ -3,10 +3,13 @@ import { cp, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, getAgent } from "../agents.ts"
+import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import {
+  buildSkillAgentToolEnvironmentFooter,
   extractMandatedSkillTools,
+  extractReferencedToolsFromSkillText,
   findSkills,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
@@ -64,7 +67,8 @@ async function readSkill(
     throw new Error(`Skill not found: ${name}\nRun "swiz skill" to list available skills.`)
   }
 
-  let content = await Bun.file(skill.path).text()
+  const fileText = await Bun.file(skill.path).text()
+  let content = fileText
   const availabilityWarning = getSkillToolAvailabilityWarning(name, content)
   if (availabilityWarning) {
     console.log(availabilityWarning.message)
@@ -73,10 +77,26 @@ async function readSkill(
   if (!raw) {
     content = await expandInlineCommands(content)
   }
+
+  const scanBody = stripFrontmatter(content)
+  const referencedFromBody = extractReferencedToolsFromSkillText(scanBody)
+  const mandatedTools = extractMandatedSkillTools(fileText)
+  const allReferencedTools = orderBy(
+    [...new Set([...mandatedTools, ...referencedFromBody])],
+    [(t) => t],
+    ["asc"]
+  )
+  const agent = detectCurrentAgent()
+  const agentToolFooter =
+    agent !== null ? buildSkillAgentToolEnvironmentFooter(agent, allReferencedTools) : null
+
   if (noFrontMatter) {
     content = stripFrontmatter(content)
   }
   console.log(content)
+  if (agentToolFooter) {
+    console.log(agentToolFooter)
+  }
 }
 
 function displayPath(path: string): string {

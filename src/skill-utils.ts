@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
-import { AGENTS, agentSupportsTool } from "./agents.ts"
+import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
@@ -136,6 +136,99 @@ export function extractMandatedSkillTools(content: string): string[] {
   }
 
   return uniq(tools)
+}
+
+/** Extra tool tokens that appear in Claude-style skills but may not appear in every agent's alias table. */
+const EXTRA_SKILL_TOOL_SCAN_TOKENS: readonly string[] = [
+  "TaskList",
+  "WebSearch",
+  "WebFetch",
+  "MultiEdit",
+  "ListMcpResources",
+]
+
+let _canonicalToolScanSet: Set<string> | null = null
+
+function buildCanonicalToolScanSet(): Set<string> {
+  const s = new Set<string>()
+  for (const a of AGENTS) {
+    for (const k of Object.keys(a.toolAliases)) s.add(k)
+    for (const v of Object.values(a.toolAliases)) {
+      if (/^[A-Za-z][A-Za-z0-9_]*$/.test(v)) s.add(v)
+    }
+  }
+  s.add("Skill")
+  for (const t of EXTRA_SKILL_TOOL_SCAN_TOKENS) s.add(t)
+  return s
+}
+
+function getCanonicalToolScanSet(): Set<string> {
+  if (_canonicalToolScanSet === null) _canonicalToolScanSet = buildCanonicalToolScanSet()
+  return _canonicalToolScanSet
+}
+
+/**
+ * Find tool-like tokens referenced in skill body text (backticks and `Name(` invocations).
+ * Only names present in the shared scan set (agent alias keys/values plus common extras) are returned.
+ */
+export function extractReferencedToolsFromSkillText(body: string): string[] {
+  const scan = getCanonicalToolScanSet()
+  const found = new Set<string>()
+
+  for (const m of body.matchAll(/`([A-Za-z][A-Za-z0-9_]*)`/g)) {
+    const name = m[1]
+    if (name && scan.has(name)) found.add(name)
+  }
+
+  for (const m of body.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*\(/g)) {
+    const name = m[1]
+    if (name && scan.has(name)) found.add(name)
+  }
+
+  return orderBy([...found], [(t) => t], ["asc"])
+}
+
+/**
+ * When printing a skill inside a detected agent runtime, append a footer if the skill references
+ * tools that {@link agentSupportsTool} reports as unavailable for that agent.
+ *
+ * Uses {@link AgentDef.toolAliases} for replacement hints when the unsupported token is a known
+ * canonical name with a mapped runtime tool. Otherwise explains that the reader should adapt via
+ * planning and step-by-step reasoning.
+ */
+export function buildSkillAgentToolEnvironmentFooter(
+  agent: AgentDef,
+  referencedTools: string[]
+): string | null {
+  if (agent.id === "claude") return null
+
+  const unsupported = orderBy(
+    uniq(referencedTools.filter((t) => !agentSupportsTool(agent, t))),
+    [(t) => t],
+    ["asc"]
+  )
+  if (unsupported.length === 0) return null
+
+  const lines: string[] = []
+  for (const t of unsupported) {
+    lines.push(
+      `- \`${t}\` → not exposed under that name for ${agent.name} in Swiz's agent tool table; treat it as a capability goal and carry out equivalent steps with your available tools.`
+    )
+  }
+
+  const aliasEntries = Object.entries(agent.toolAliases).filter(([c, m]) => c !== m)
+  const mappingLine =
+    aliasEntries.length > 0
+      ? `\n\n_Swiz Claude-style → ${agent.name} tool names: ${aliasEntries.map(([c, m]) => `\`${c}\`→\`${m}\``).join(", ")}._`
+      : ""
+
+  return (
+    `\n\n---\n\n**${agent.name}:** This skill references tool name(s) that are not exposed under those exact names in your environment ` +
+    `(names that already map for ${agent.name} in Swiz's agent tool table are omitted):\n` +
+    `${lines.join("\n")}` +
+    mappingLine +
+    `\n\n_Any references to tools your session does not provide should be satisfied with best-effort planning and explicit step-by-step reasoning._\n`
+  )
 }
 
 function detectActiveSkillTools(): string[] {

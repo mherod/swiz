@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { getAgent } from "./agents.ts"
 import {
+  buildSkillAgentToolEnvironmentFooter,
   clearSkillCache,
   extractMandatedSkillTools,
+  extractReferencedToolsFromSkillText,
   extractStepsFromSkill,
   filterQualitySteps,
   getSkillToolAvailabilityWarning,
@@ -246,6 +249,54 @@ describe("getSkillToolAvailabilityWarning", () => {
     const content = "---\nallowed-tools: Bash, Read\n---\nBody\n"
     const warning = getSkillToolAvailabilityWarning("example", content, ["Bash", "Read", "Edit"])
     expect(warning).toBeNull()
+  })
+})
+
+describe("extractReferencedToolsFromSkillText", () => {
+  test("collects backtick-wrapped tool names in the scan set", () => {
+    const body = "Use `Read` then `Edit` for the file.\n"
+    expect(extractReferencedToolsFromSkillText(body)).toEqual(["Edit", "Read"])
+  })
+
+  test("collects invocation-style Tool(", () => {
+    const body = "Run Read(path) then Bash(git status)\n"
+    expect(extractReferencedToolsFromSkillText(body)).toContain("Read")
+    expect(extractReferencedToolsFromSkillText(body)).toContain("Bash")
+  })
+
+  test("ignores prose words not in the scan set", () => {
+    expect(extractReferencedToolsFromSkillText("Read the docs carefully.")).toEqual([])
+  })
+})
+
+describe("buildSkillAgentToolEnvironmentFooter", () => {
+  test("returns null for Claude (canonical tools assumed available)", () => {
+    const claude = getAgent("claude")!
+    expect(buildSkillAgentToolEnvironmentFooter(claude, ["Read", "Skill", "Imaginary"])).toBeNull()
+  })
+
+  test("returns null when all referenced tools are supported for the agent", () => {
+    const cursor = getAgent("cursor")!
+    expect(buildSkillAgentToolEnvironmentFooter(cursor, ["Bash", "Edit"])).toBeNull()
+  })
+
+  test("lists unsupported tools for Cursor with guidance footer", () => {
+    const cursor = getAgent("cursor")!
+    const footer = buildSkillAgentToolEnvironmentFooter(cursor, ["Bash", "Read"])
+    expect(footer).not.toBeNull()
+    expect(footer).toContain("Cursor")
+    expect(footer).toContain("- `Read` → not exposed")
+    expect(footer).not.toContain("- `Bash` → not exposed")
+    expect(footer).toContain("best-effort planning")
+    expect(footer).toContain("`Bash`→`Shell`")
+  })
+
+  test("flags Skill for Gemini", () => {
+    const gemini = getAgent("gemini")!
+    const footer = buildSkillAgentToolEnvironmentFooter(gemini, ["Skill", "Read"])
+    expect(footer).not.toBeNull()
+    expect(footer).toContain("- `Skill` → not exposed")
+    expect(footer).not.toContain("- `Read` → not exposed")
   })
 })
 
