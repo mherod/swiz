@@ -535,6 +535,9 @@ swiz issue list                             # list open issues and pull requests
 | `close <number>`    | Close an issue (skips if already closed)      |
 | `comment <number>`  | Comment on an issue (skips if already closed) |
 | `resolve <number>`  | Comment and close in one idempotent operation |
+| `sync [<repo>]`      | Manually sync local store from upstream GitHub |
+| `cache-bust`         | Clear cached issue/PR/CI data for repo        |
+| `list [<repo>]`      | List open issues and pull requests from store |
 | `--body, -b <text>` | Comment body (for `comment` and `resolve`)    |
 
 ### `swiz sentiment`

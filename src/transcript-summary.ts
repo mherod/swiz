@@ -103,15 +103,6 @@ function countSuccessfulTests(bashCommands: string[]): number {
   return count
 }
 
-/** Extract the last successful verification timestamp from session lines. */
-function extractLastVerificationTime(sessionLines: string[]): string | null {
-  for (let i = sessionLines.length - 1; i >= 0; i--) {
-    const timestamp = extractTimestamp(sessionLines[i]!)
-    if (timestamp) return timestamp
-  }
-  return null
-}
-
 /** Classify session scope based on changes and bash commands. */
 function classifySessionScope(bashCommands: string[]): SessionScope {
   // Check for docs-only changes
@@ -135,22 +126,6 @@ function classifySessionScope(bashCommands: string[]): SessionScope {
   if (editCommands <= 2) return "trivial"
   if (editCommands <= 5) return "small-fix"
   return "large"
-}
-
-/** Compute session duration from timestamps in session lines. */
-function computeSessionDuration(sessionLines: string[]): number {
-  const firstTime = extractTimestamp(sessionLines[0] ?? "")
-  const lastTime = extractTimestamp(sessionLines[sessionLines.length - 1] ?? "")
-
-  if (!firstTime || !lastTime) return 0
-
-  try {
-    const firstMs = new Date(firstTime).getTime()
-    const lastMs = new Date(lastTime).getTime()
-    return Math.max(0, lastMs - firstMs)
-  } catch {
-    return 0
-  }
 }
 
 /**
@@ -208,6 +183,8 @@ interface SummaryAccumulator {
   bashCommands: string[]
   skillInvocations: string[]
   hasGitPush: boolean
+  firstTimestamp: string | null
+  lastTimestamp: string | null
 }
 
 function createEmptySummaryAccumulator(): SummaryAccumulator {
@@ -216,6 +193,8 @@ function createEmptySummaryAccumulator(): SummaryAccumulator {
     bashCommands: [],
     skillInvocations: [],
     hasGitPush: false,
+    firstTimestamp: null,
+    lastTimestamp: null,
   }
 }
 
@@ -272,8 +251,10 @@ function extractUserSkillExpansions(line: string): string[] {
   return skills
 }
 
-function collectSessionToolUsage(sessionLines: string[]): SummaryAccumulator {
-  const acc = createEmptySummaryAccumulator()
+export function collectSessionToolUsage(
+  sessionLines: string[],
+  acc: SummaryAccumulator = createEmptySummaryAccumulator()
+): SummaryAccumulator {
   for (const line of sessionLines) {
     if (!line.trim()) continue
     for (const block of parseAssistantToolBlocks(line)) {
@@ -283,6 +264,11 @@ function collectSessionToolUsage(sessionLines: string[]): SummaryAccumulator {
       if (!acc.skillInvocations.includes(skill)) {
         acc.skillInvocations.push(skill)
       }
+    }
+    const ts = extractTimestamp(line)
+    if (ts) {
+      if (!acc.firstTimestamp) acc.firstTimestamp = ts
+      acc.lastTimestamp = ts
     }
   }
   return acc
@@ -404,13 +390,21 @@ export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
 /**
  * Compute transcript summary from already-filtered session lines.
  */
-export function computeSummaryFromSessionLines(sessionLines: string[]): TranscriptSummary {
-  const acc = collectSessionToolUsage(sessionLines)
-
-  const sessionDurationMs = computeSessionDuration(sessionLines)
+export function computeSummaryFromSessionLines(
+  sessionLines: string[],
+  acc: SummaryAccumulator = collectSessionToolUsage(sessionLines)
+): TranscriptSummary {
   const successfulTestRuns = countSuccessfulTests(acc.bashCommands)
-  const lastVerificationTime = extractLastVerificationTime(sessionLines)
   const sessionScope = classifySessionScope(acc.bashCommands)
+
+  let sessionDurationMs = 0
+  if (acc.firstTimestamp && acc.lastTimestamp) {
+    try {
+      const firstMs = new Date(acc.firstTimestamp).getTime()
+      const lastMs = new Date(acc.lastTimestamp).getTime()
+      sessionDurationMs = Math.max(0, lastMs - firstMs)
+    } catch {}
+  }
 
   return {
     ...acc,
@@ -418,7 +412,7 @@ export function computeSummaryFromSessionLines(sessionLines: string[]): Transcri
     sessionLines,
     sessionDurationMs,
     successfulTestRuns,
-    lastVerificationTime,
+    lastVerificationTime: acc.lastTimestamp,
     sessionScope,
   }
 }

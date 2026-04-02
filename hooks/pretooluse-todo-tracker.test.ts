@@ -198,9 +198,9 @@ describe("pretooluse-todo-tracker: NFKC normalization bypass prevention", () => 
   // U+FF0F FULLWIDTH SOLIDUS → NFKC normalizes to /
   const FW_SLASH = String.fromCodePoint(0xff0f)
 
-  test("blocks " + "TODO with fullwidth // comment prefix (NFKC → //)", async () => {
+  test(`blocks ${"TODO"} with fullwidth // comment prefix (NFKC → //)`, async () => {
     const result = await runHook({
-      newString: `${FW_SLASH}${FW_SLASH} ` + "TODO: sneaky",
+      newString: `${FW_SLASH}${FW_SLASH} ${"TODO"}: sneaky`,
     })
     expect(result.decision).toBe("deny")
   })
