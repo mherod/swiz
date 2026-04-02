@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-04-02
+
+### Fixes
+
+- **Daemon transcript monitor cooldown** — The worker-thread `TranscriptMonitor` stub for
+  `CooldownRegistry.checkAndMark` always returned `false`, so hook cooldown never blocked
+  daemon-triggered `postToolUse` / `notification` dispatches. Worker IPC now correlates
+  `requestId` + `hookId` and awaits `cooldownCheckResponse` from the parent; the monitor
+  awaits `checkAndMark` (sync or async). Added `transcript-monitor.test.ts` coverage
+  (closes [#467](https://github.com/mherod/swiz/issues/467), commit `3d1b925`).
+
 ## 2026-03-29
 
 ### Improvements
