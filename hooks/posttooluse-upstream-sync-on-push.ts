@@ -27,20 +27,16 @@ const GH_API_ISSUE_PATCH_RE = /\bgh\s+api\s+\S*\/(?:issues|pulls)\/\d+\b.*-X\s+P
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 
-async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {
-  const toolName = input.tool_name ?? ""
-  const command = String(input.tool_input?.command ?? "")
-  if (!isShellTool(toolName) || !command) return {}
-
-  const shouldSync =
+function isUpstreamMutatingCommand(command: string): boolean {
+  return (
     GIT_PUSH_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     UPSTREAM_MUTATING_RE.test(command) ||
     GH_API_ISSUE_PATCH_RE.test(command)
-  if (!shouldSync) return {}
+  )
+}
 
-  const cwd = input.cwd ?? process.cwd()
-
+async function triggerDaemonSync(cwd: string) {
   try {
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 2_000)
@@ -53,6 +49,17 @@ async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {
   } catch {
     // Daemon not running or timed out — non-fatal, sync will happen on next interval.
   }
+}
+
+async function evaluate(input: ShellHookInput): Promise<SwizHookOutput> {
+  const toolName = input.tool_name ?? ""
+  const command = String(input.tool_input?.command ?? "")
+  if (!isShellTool(toolName) || !command) return {}
+
+  if (!isUpstreamMutatingCommand(command)) return {}
+
+  const cwd = input.cwd ?? process.cwd()
+  await triggerDaemonSync(cwd)
 
   return {}
 }
