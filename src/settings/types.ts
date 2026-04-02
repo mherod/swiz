@@ -117,6 +117,11 @@ export interface ProjectSwizSettings {
   speak?: boolean
   /** Enable daemon-driven auto-steering by monitoring session transcripts. */
   autoSteerTranscriptWatching?: boolean
+  /**
+   * Max concurrent executeDispatch runs from transcript monitoring for this project; unset inherits global.
+   * Only positive values are stored in project config (see persistence normalization).
+   */
+  transcriptMonitorMaxConcurrentDispatches?: number
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
   /** When true, work directly on the default branch — no feature branches or PRs. */
@@ -182,6 +187,10 @@ export interface SwizSettings {
   autoSteer: boolean
   /** When true, the daemon monitors session transcripts and triggers auto-steer via post-tool hooks. */
   autoSteerTranscriptWatching: boolean
+  /**
+   * Max concurrent transcript-monitor executeDispatch calls (0 = unlimited, same as legacy behavior).
+   */
+  transcriptMonitorMaxConcurrentDispatches: number
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
@@ -266,6 +275,7 @@ export const projectSettingsSchema = z.object({
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
   autoSteerTranscriptWatching: z.boolean().optional(),
+  transcriptMonitorMaxConcurrentDispatches: z.number().int().min(1).max(64).optional(),
   pushGate: z.boolean().optional(),
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),

@@ -133,6 +133,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "dirtyWorktreeThreshold",
   "speak",
   "autoSteerTranscriptWatching",
+  "transcriptMonitorMaxConcurrentDispatches",
 ] as const satisfies ReadonlyArray<keyof ProjectSwizSettings & keyof SwizSettings>
 
 /** Resolve fields that support project-level overrides. */

@@ -135,6 +135,28 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "transcriptMonitorMaxConcurrentDispatches",
+    aliases: [
+      "transcript-monitor-max-concurrent-dispatches",
+      "transcriptmonitormaxconcurrentdispatches",
+      "transcript_monitor_max_concurrent_dispatches",
+      "transcript-dispatch-cap",
+    ],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 0,
+    zodSchema: z.number().int().min(0).max(64),
+    docs: {
+      description:
+        "Cap concurrent daemon transcript dispatches (postToolUse / notification); 0 = unlimited",
+      effectExplanation:
+        "When the daemon detects transcript changes it fires executeDispatch without awaiting. " +
+        "A positive value limits how many of those dispatches run at once for this monitor instance " +
+        "(queued work starts when a slot frees). 0 preserves the previous unlimited (fire-and-forget) behavior.",
+      valuePlaceholder: "0-64 (0 = unlimited)",
+    },
+  },
+  {
     key: "updateMemoryFooter",
     aliases: [
       "update-memory-footer",

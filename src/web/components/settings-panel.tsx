@@ -32,6 +32,7 @@ interface GlobalSettingsForm {
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
   largeFileSizeBlockKb: number
+  transcriptMonitorMaxConcurrentDispatches: number
 }
 
 const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
@@ -64,6 +65,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
   largeFileSizeBlockKb: 5120,
+  transcriptMonitorMaxConcurrentDispatches: 0,
 }
 
 interface CachedProjectSettingsResponse {
@@ -79,6 +81,7 @@ interface CachedProjectSettingsResponse {
     largeFileSizeKb?: number
     ambitionMode?: "standard" | "aggressive" | "creative" | "reflective"
     taskDurationWarningMinutes?: number
+    transcriptMonitorMaxConcurrentDispatches?: number
     autoSteerTranscriptWatching?: boolean
     speak?: boolean
   } | null
@@ -100,6 +103,7 @@ interface ProjectSettingsForm {
   largeFileSizeKb: number | ""
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective" | "inherit"
   taskDurationWarningMinutes: number | ""
+  transcriptMonitorMaxConcurrentDispatches: number | ""
   autoSteerTranscriptWatching: boolean | "inherit"
   speak: boolean | "inherit"
 }
@@ -117,6 +121,7 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   largeFileSizeKb: "",
   ambitionMode: "inherit",
   taskDurationWarningMinutes: "",
+  transcriptMonitorMaxConcurrentDispatches: "",
   autoSteerTranscriptWatching: "inherit",
   speak: "inherit",
 }
@@ -153,6 +158,8 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
     largeFileSizeBlockKb: Number(settings.largeFileSizeBlockKb) || 5120,
+    transcriptMonitorMaxConcurrentDispatches:
+      Number(settings.transcriptMonitorMaxConcurrentDispatches) || 0,
   }
 }
 
@@ -169,6 +176,7 @@ const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
   largeFileSizeKb: "",
   ambitionMode: "inherit",
   taskDurationWarningMinutes: "",
+  transcriptMonitorMaxConcurrentDispatches: "",
   autoSteerTranscriptWatching: "inherit",
   speak: "inherit",
 }
@@ -191,6 +199,7 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
       largeFileSizeKb: s.largeFileSizeKb,
       ambitionMode: s.ambitionMode,
       taskDurationWarningMinutes: s.taskDurationWarningMinutes,
+      transcriptMonitorMaxConcurrentDispatches: s.transcriptMonitorMaxConcurrentDispatches,
       autoSteerTranscriptWatching: (s.autoSteerTranscriptWatching ?? "inherit") as
         | boolean
         | "inherit",
@@ -245,6 +254,10 @@ const GLOBAL_NUMBER_FIELDS: Array<{
   { key: "largeFileSizeBlockKb", label: "Large file size block (KB)" },
   { key: "pushCooldownMinutes", label: "Push cooldown (min)" },
   { key: "prAgeGateMinutes", label: "PR age gate (min)" },
+  {
+    key: "transcriptMonitorMaxConcurrentDispatches",
+    label: "Transcript monitor max concurrent dispatches (0=unlimited)",
+  },
 ]
 
 const PROJECT_SELECT_FIELDS: Array<{
@@ -669,6 +682,12 @@ function ProjectFieldsGrid({
         label="Large file size (KB)"
         value={form.largeFileSizeKb}
         onChange={optNum("largeFileSizeKb")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Transcript monitor dispatch cap"
+        value={form.transcriptMonitorMaxConcurrentDispatches}
+        onChange={optNum("transcriptMonitorMaxConcurrentDispatches")}
         placeholder="Inherit global"
       />
     </div>

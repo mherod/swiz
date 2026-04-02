@@ -1079,6 +1079,7 @@ async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
     "ambitionMode",
     "memoryWordThreshold",
     "memoryLineThreshold",
+    "transcriptMonitorMaxConcurrentDispatches",
   ]
   let updatedAny = false
   for (const key of validKeys) {
@@ -1145,6 +1146,7 @@ async function handleProjectSettingsUpdate(
       largeFileSizeKb?: number | null
       ambitionMode?: "standard" | "aggressive" | "creative" | "reflective" | "inherit" | null
       taskDurationWarningMinutes?: number | null
+      transcriptMonitorMaxConcurrentDispatches?: number | null
     }
   } | null
   const cwd = body?.cwd
@@ -1193,6 +1195,7 @@ function normalizeProjectSettingsUpdates(
     "memoryWordThreshold",
     "largeFileSizeKb",
     "taskDurationWarningMinutes",
+    "transcriptMonitorMaxConcurrentDispatches",
     "ambitionMode",
   ] as const
 

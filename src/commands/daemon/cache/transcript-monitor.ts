@@ -10,6 +10,20 @@ import { CappedMap } from "../../../utils/capped-map.ts"
 import { logPseudoHook } from "../daemon-logging.ts"
 import { sessionDataCache } from "../session-data.ts"
 import { transcriptWatchPathsForProject } from "../utils.ts"
+import { TranscriptDispatchConcurrencyGate } from "./transcript-dispatch-concurrency.ts"
+
+function parseToolCallInput(detailStr: string | undefined): Record<string, any> {
+  if (!detailStr) return {}
+  try {
+    const parsed = JSON.parse(detailStr)
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, any>
+    }
+  } catch {
+    // detail may be a truncated summary string
+  }
+  return {}
+}
 
 /**
  * Monitors session transcripts for new tool calls and triggers auto-steer.
@@ -18,6 +32,7 @@ export class TranscriptMonitor {
   private lastToolCallFingerprints = new CappedMap<string, string>(100)
   private lastMessageFingerprints = new CappedMap<string, string>(100)
   private latestSessionCache = new Map<string, { session: Session; mtimeMs: number }>()
+  private readonly dispatchConcurrency = new TranscriptDispatchConcurrencyGate()
 
   constructor(
     private caches: {
@@ -118,6 +133,12 @@ export class TranscriptMonitor {
     const speakEnabled = settings?.speak ?? globalSettings.speak
     if (!autoSteerEnabled && !speakEnabled) return
 
+    this.dispatchConcurrency.setMaxConcurrent(
+      settings?.transcriptMonitorMaxConcurrentDispatches ??
+        globalSettings.transcriptMonitorMaxConcurrentDispatches ??
+        0
+    )
+
     const latestSession = await this.getLatestSession(cwd)
     if (!latestSession) return
 
@@ -134,8 +155,6 @@ export class TranscriptMonitor {
         stderrLog("tool call detection", `[daemon] ${msg}`)
         void logPseudoHook(msg)
         this.lastToolCallFingerprints.set(latestSession.id, data.lastToolCallFingerprint)
-
-        // Detect the recent tool call to avoid loops
         let toolCallMessage: (typeof data.messages)[0] | undefined
         for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
           const msg = data.messages[i]
@@ -147,40 +166,27 @@ export class TranscriptMonitor {
 
         if (toolCallMessage) {
           if (await this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
-
-          // Trigger postToolUse hook
           const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
           stderrLog("postToolUse dispatch", `[daemon] ${triggerMsg}`)
           void logPseudoHook(triggerMsg)
           const toolName = toolCallMessage.toolCalls![0]!.name
-          const detailStr = toolCallMessage.toolCalls![0]!.detail
-          let toolInput: Record<string, any> = {}
-          if (detailStr) {
-            try {
-              const parsed = JSON.parse(detailStr)
-              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-                toolInput = parsed as Record<string, any>
-              }
-            } catch {
-              // detail may be a truncated summary string — leave as empty object
-            }
-          }
-
           const payload = {
             session_id: latestSession.id,
             transcript_path: latestSession.path,
             cwd,
             tool_name: toolName,
-            tool_input: toolInput,
+            tool_input: parseToolCallInput(toolCallMessage.toolCalls![0]!.detail),
           }
 
-          void executeDispatch({
-            canonicalEvent: "postToolUse",
-            hookEventName: "postToolUse",
-            payloadStr: JSON.stringify(payload),
-            daemonContext: true,
-            manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
-          })
+          this.dispatchConcurrency.schedule(() =>
+            executeDispatch({
+              canonicalEvent: "postToolUse",
+              hookEventName: "postToolUse",
+              payloadStr: JSON.stringify(payload),
+              daemonContext: true,
+              manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
+            })
+          )
         }
       }
     }
@@ -192,8 +198,6 @@ export class TranscriptMonitor {
         stderrLog("message detection", `[daemon] ${msg}`)
         void logPseudoHook(msg)
         this.lastMessageFingerprints.set(latestSession.id, data.lastMessageFingerprint)
-
-        // Find the actual message for text
         let textMessage: (typeof data.messages)[0] | undefined
         for (let i = data.messages.length - 1; i >= Math.max(0, data.messages.length - 10); i--) {
           const msg = data.messages[i]
@@ -205,8 +209,6 @@ export class TranscriptMonitor {
 
         if (textMessage) {
           if (await this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
-
-          // Trigger notification hook for TTS
           const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`
           stderrLog("notification dispatch", `[daemon] ${triggerMsg}`)
           void logPseudoHook(triggerMsg)
@@ -218,13 +220,15 @@ export class TranscriptMonitor {
             message: textMessage.text,
           }
 
-          void executeDispatch({
-            canonicalEvent: "notification",
-            hookEventName: "notification",
-            payloadStr: JSON.stringify(payload),
-            daemonContext: true,
-            manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
-          })
+          this.dispatchConcurrency.schedule(() =>
+            executeDispatch({
+              canonicalEvent: "notification",
+              hookEventName: "notification",
+              payloadStr: JSON.stringify(payload),
+              daemonContext: true,
+              manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
+            })
+          )
         }
       }
     }

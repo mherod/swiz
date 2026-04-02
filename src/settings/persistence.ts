@@ -232,6 +232,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "largeFileSizeKb",
     "dirtyWorktreeThreshold",
     "taskDurationWarningMinutes",
+    "transcriptMonitorMaxConcurrentDispatches",
   ])
 
   const defaultBranch = parseDefaultBranch(obj.defaultBranch)

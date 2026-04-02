@@ -41,6 +41,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     largeFileSizeBlockKb: 5120,
     dirtyWorktreeThreshold: 15,
     autoSteerTranscriptWatching: false,
+    transcriptMonitorMaxConcurrentDispatches: 0,
     statusLineSegments: [],
     source: "global",
     ...overrides,
