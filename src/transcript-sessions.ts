@@ -14,6 +14,7 @@ import {
   findSessions,
   sortSessionsDeterministic,
 } from "./transcript-sessions-discovery.ts"
+import { getCachedFileText } from "./utils/file-cache.ts"
 
 export { projectKeyFromCwd } from "./project-key.ts"
 
@@ -108,7 +109,7 @@ async function tryInputTranscript(
 > {
   const hintedFormat = inferTranscriptFormatFromPath(transcriptPath)
   try {
-    const raw = await Bun.file(transcriptPath).text()
+    const raw = await getCachedFileText(transcriptPath)
     const hintedTurns = extractTranscriptData(raw, hintedFormat).turns.length
     const fallbackTurns = hintedFormat ? extractTranscriptData(raw).turns.length : 0
     if (hintedTurns > 0 || fallbackTurns > 0) {
@@ -134,7 +135,7 @@ async function findFallbackTranscript(
   for (const session of sessions) {
     if (isUnsupportedTranscriptFormat(session.format)) continue
     try {
-      const raw = await Bun.file(session.path).text()
+      const raw = await getCachedFileText(session.path)
       const resolution: TranscriptResolution = {
         raw,
         formatHint: session.format,

@@ -247,6 +247,85 @@ function daemonDispatchRequestTimeoutMs(canonicalEvent: string): number {
 const STALE_DISPATCH_MAX_AGE_MS = 300_000 // 5 minutes
 
 /**
+ * Narrow context for dispatch route handlers — only the capabilities those handlers need.
+ */
+export interface DispatchRoutesContext {
+  projectMetrics: Map<string, DaemonMetrics>
+  getProjectMetrics: (cwd: string) => DaemonMetrics
+  globalMetrics: DaemonMetrics
+  sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
+  sessionToolCalls: Map<string, CapturedToolCall[]>
+  sessionToolUsage: Map<string, SessionToolUsageState>
+  activeHookDispatches: Map<string, ActiveHookDispatch>
+  workerRuntime: DaemonWorkerRuntime
+  touchProject: (cwd: string) => void
+  registerProjectWatchers: (cwd: string) => void
+  manifestCache: ManifestCache
+  resolveSnapshot: (
+    cwd: string,
+    sessionId: string | null | undefined
+  ) => Promise<WarmStatusLineSnapshot>
+  prReviewMonitor: PrReviewMonitor
+  upstreamSyncRegistry: UpstreamSyncRegistry
+  transcriptIndex: TranscriptIndexCache
+}
+
+export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): DispatchRoutesContext {
+  return {
+    projectMetrics: ctx.projectMetrics,
+    getProjectMetrics: ctx.getProjectMetrics,
+    globalMetrics: ctx.globalMetrics,
+    sessionActivity: ctx.sessionActivity,
+    sessionToolCalls: ctx.sessionToolCalls,
+    sessionToolUsage: ctx.sessionToolUsage,
+    activeHookDispatches: ctx.activeHookDispatches,
+    workerRuntime: ctx.workerRuntime,
+    touchProject: ctx.touchProject,
+    registerProjectWatchers: ctx.registerProjectWatchers,
+    manifestCache: ctx.manifestCache,
+    resolveSnapshot: ctx.resolveSnapshot,
+    prReviewMonitor: ctx.prReviewMonitor,
+    upstreamSyncRegistry: ctx.upstreamSyncRegistry,
+    transcriptIndex: ctx.transcriptIndex,
+  }
+}
+
+/**
+ * Narrow context for cache route handlers — only the capabilities those handlers need.
+ */
+export interface CacheRoutesContext {
+  ghCache: GhQueryCache
+  eligibilityCache: HookEligibilityCache
+  transcriptIndex: TranscriptIndexCache
+  cooldownRegistry: CooldownRegistry
+  gitStateCache: GitStateCache
+  ciWatchRegistry: CiWatchRegistry
+  projectSettingsCache: ProjectSettingsCache
+  manifestCache: ManifestCache
+  touchProject: (cwd: string) => void
+  registerProjectWatchers: (cwd: string) => void
+  snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
+  watchers: FileWatcherRegistry
+}
+
+export function buildCacheRoutesContext(ctx: DaemonWebServerContext): CacheRoutesContext {
+  return {
+    ghCache: ctx.ghCache,
+    eligibilityCache: ctx.eligibilityCache,
+    transcriptIndex: ctx.transcriptIndex,
+    cooldownRegistry: ctx.cooldownRegistry,
+    gitStateCache: ctx.gitStateCache,
+    ciWatchRegistry: ctx.ciWatchRegistry,
+    projectSettingsCache: ctx.projectSettingsCache,
+    manifestCache: ctx.manifestCache,
+    touchProject: ctx.touchProject,
+    registerProjectWatchers: ctx.registerProjectWatchers,
+    snapshots: ctx.snapshots,
+    watchers: ctx.watchers,
+  }
+}
+
+/**
  * Remove leaked entries from activeHookDispatches that are older than
  * STALE_DISPATCH_MAX_AGE_MS. Called on every incoming request as a
  * lightweight garbage collection pass.
@@ -262,14 +341,17 @@ function reapStaleDispatches(activeHookDispatches: Map<string, ActiveHookDispatc
 }
 
 /** Watcher registration then touch — standard order for POST routes scoped to a project cwd. */
-function registerProjectAndTouch(ctx: DaemonWebServerContext, cwd: string): void {
+function registerProjectAndTouch(
+  ctx: { touchProject: (cwd: string) => void; registerProjectWatchers: (cwd: string) => void },
+  cwd: string
+): void {
   ctx.registerProjectWatchers(cwd)
   ctx.touchProject(cwd)
 }
 
 /** Fire-and-forget upstream sync when the store returned no rows; returns whether a sync was scheduled. */
 function kickUpstreamSyncWhenEmpty(
-  ctx: DaemonWebServerContext,
+  ctx: DispatchRoutesContext,
   cwd: string,
   isEmpty: boolean
 ): boolean {
@@ -287,7 +369,7 @@ function kickUpstreamSyncWhenEmpty(
 }
 
 async function processPrReviewChanges(
-  ctx: DaemonWebServerContext,
+  ctx: DispatchRoutesContext,
   cwd: string,
   syncResult: import("../../issue-store.ts").UpstreamSyncResult
 ): Promise<void> {
@@ -307,7 +389,7 @@ function clampDashboardListLimit(raw: number | undefined): number {
 }
 
 function createDispatchLifecycleHandler(
-  ctx: DaemonWebServerContext
+  ctx: DispatchRoutesContext
 ): (update: DispatchLifecycleUpdate) => void {
   return (update) => {
     if (update.phase === "start") {
@@ -329,7 +411,7 @@ function createDispatchLifecycleHandler(
 }
 
 async function updateParsedPayloadMetrics(
-  ctx: DaemonWebServerContext,
+  ctx: DispatchRoutesContext,
   payloadStr: string,
   canonicalEvent: string,
   durationMs: number
@@ -369,7 +451,7 @@ async function updateParsedPayloadMetrics(
 }
 
 async function getCurrentSessionToolUsageFromDaemon(
-  ctx: DaemonWebServerContext,
+  ctx: DispatchRoutesContext,
   sessionId: string,
   transcriptPath?: string
 ): Promise<CurrentSessionToolUsage | null> {
@@ -410,7 +492,7 @@ function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
 async function handleDispatchRoute(
   req: Request,
   url: URL,
-  ctx: DaemonWebServerContext
+  ctx: DispatchRoutesContext
 ): Promise<Response> {
   const canonicalEvent = url.searchParams.get("event")
   const hookEventName = url.searchParams.get("hookEventName") ?? canonicalEvent
@@ -440,10 +522,10 @@ async function handleDispatchRoute(
         daemonContext: true,
         signal: requestAbort.signal,
         currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
-          getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
+          getCurrentSessionToolUsageFromDaemon(ctx as any, sessionId, transcriptPath),
         disableTranscriptSummaryFallback: true,
         manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
-        onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
+        onDispatchLifecycle: createDispatchLifecycleHandler(ctx as any),
       }),
       new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
         setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)
@@ -598,7 +680,7 @@ async function handleSessionDelete(req: Request): Promise<Response> {
   })
 }
 
-async function handleGhQuery(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleGhQuery(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     args?: string[]
     cwd?: string
@@ -616,7 +698,7 @@ async function handleGhQuery(req: Request, ctx: DaemonWebServerContext): Promise
   return Response.json({ hit, value })
 }
 
-async function handleHooksEligible(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleHooksEligible(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as { cwd?: string } | null
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
@@ -626,7 +708,7 @@ async function handleHooksEligible(req: Request, ctx: DaemonWebServerContext): P
   return Response.json(snapshot)
 }
 
-async function handleTranscriptIndex(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleTranscriptIndex(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     transcriptPath?: string
   } | null
@@ -640,7 +722,7 @@ async function handleTranscriptIndex(req: Request, ctx: DaemonWebServerContext):
   return Response.json(index)
 }
 
-async function handleCooldownCheck(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleCooldownCheck(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     hookFile?: string
     cooldownSeconds?: number
@@ -667,7 +749,7 @@ async function handleCooldownCheck(req: Request, ctx: DaemonWebServerContext): P
   return Response.json({ withinCooldown })
 }
 
-async function handleCooldownMark(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleCooldownMark(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     hookFile?: string
     cwd?: string
@@ -682,7 +764,7 @@ async function handleCooldownMark(req: Request, ctx: DaemonWebServerContext): Pr
   return Response.json({ marked: true })
 }
 
-async function handleGitState(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+async function handleGitState(req: Request, ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     cwd?: string
   } | null
@@ -697,7 +779,7 @@ async function handleGitState(req: Request, ctx: DaemonWebServerContext): Promis
   return Response.json(state)
 }
 
-type CacheRouteHandler = (req: Request, ctx: DaemonWebServerContext) => Promise<Response>
+type CacheRouteHandler = (req: Request, ctx: CacheRoutesContext) => Promise<Response>
 
 const CACHE_ROUTE_TABLE: Record<string, CacheRouteHandler> = {
   "/gh-query": handleGhQuery,
@@ -711,7 +793,7 @@ const CACHE_ROUTE_TABLE: Record<string, CacheRouteHandler> = {
 async function handleCacheRoutes(
   req: Request,
   url: URL,
-  ctx: DaemonWebServerContext
+  ctx: CacheRoutesContext
 ): Promise<Response | null> {
   if (req.method !== "POST") return null
   const handler = CACHE_ROUTE_TABLE[url.pathname]
@@ -1245,7 +1327,7 @@ const DELEGATE_HANDLERS: Array<
   (req: Request, url: URL, ctx: DaemonWebServerContext) => Promise<Response | null>
 > = [
   handleTopLevelRoutes,
-  handleCacheRoutes,
+  (req, url, ctx) => handleCacheRoutes(req, url, buildCacheRoutesContext(ctx)),
   handleCiRoutes,
   handleSettingsRoutes,
   (req, url, ctx) => handleSessionRoutes(req, url, buildSessionRoutesContext(ctx)),

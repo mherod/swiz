@@ -39,8 +39,9 @@ function countTodoMarkers(content: string): number {
   let count = 0
   for (const line of content.split("\n")) {
     if (!DEBT_MARKER_RE.test(line)) continue
-    if (REGEX_LITERAL_RE.test(line)) continue
-    if (!COMMENT_RE.test(line)) continue
+    const normalized = line.normalize("NFKC")
+    if (REGEX_LITERAL_RE.test(normalized)) continue
+    if (!COMMENT_RE.test(normalized)) continue
     count++
   }
   return count

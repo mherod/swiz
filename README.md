@@ -84,7 +84,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-95 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+110 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
@@ -266,7 +266,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 81 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 110 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

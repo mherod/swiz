@@ -34,8 +34,9 @@ function scanDiffForTodos(diff: string): string[] {
     if (!line.startsWith("+") || line.startsWith("+++")) continue
     const content = line.slice(1)
     if (!TODO_RE.test(content)) continue
-    if (REGEX_LITERAL_RE.test(content)) continue
-    if (!COMMENT_RE.test(content)) continue
+    const normalized = content.normalize("NFKC")
+    if (REGEX_LITERAL_RE.test(normalized)) continue
+    if (!COMMENT_RE.test(normalized)) continue
     todos.push(line.slice(0, 150))
     if (todos.length >= 15) break
   }

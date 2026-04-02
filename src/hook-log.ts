@@ -7,7 +7,7 @@
  * The log is append-only and capped at ~10k lines to prevent unbounded growth.
  */
 
-import { mkdirSync } from "node:fs"
+import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
 import { splitJsonlLines } from "./utils/jsonl.ts"
@@ -52,9 +52,7 @@ export async function appendHookLogs(entries: HookLogEntry[]): Promise<void> {
   try {
     mkdirSync(dirname(logPath), { recursive: true })
     const lines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
-    const file = Bun.file(logPath)
-    const existing = (await file.exists()) ? await file.text() : ""
-    await Bun.write(logPath, existing + lines)
+    appendFileSync(logPath, lines)
   } catch {
     // Never block on log write failure
   }

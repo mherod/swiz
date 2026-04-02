@@ -1,9 +1,14 @@
-import { open, readdir, readFile, stat } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import type { Session } from "./transcript-schemas.ts"
-import { readLines } from "./utils/file-utils.ts"
+import {
+  getCachedFileJson,
+  getCachedFileText,
+  getCachedLines,
+  getCachedPrefix,
+} from "./utils/file-cache.ts"
 
 const SESSION_PROVIDER_PRECEDENCE = [
   "claude",
@@ -61,7 +66,7 @@ function tryParseJsonLine(line: string): any | undefined {
 
 async function readProjectRoot(path: string): Promise<string | null> {
   try {
-    const raw = await readFile(path, "utf-8")
+    const raw = await getCachedFileText(path)
     const trimmed = raw.trim()
     return trimmed ? resolve(trimmed) : null
   } catch {
@@ -71,7 +76,7 @@ async function readProjectRoot(path: string): Promise<string | null> {
 
 async function readGeminiSessionId(sessionPath: string): Promise<string | null> {
   try {
-    const parsed = (await Bun.file(sessionPath).json()) as Record<string, any>
+    const parsed = (await getCachedFileJson(sessionPath)) as Record<string, any>
     const sessionId = parsed.sessionId
     if (typeof sessionId === "string" && sessionId.trim()) {
       return sessionId
@@ -139,7 +144,7 @@ export async function findJunieSessions(targetDir: string, home?: string): Promi
     try {
       const s = await stat(eventsPath)
       // Read first 50 lines to check if it's for this project
-      const lines = await readLines(eventsPath, 50)
+      const lines = await getCachedLines(eventsPath, 50)
       for (const line of lines) {
         if (!line) continue
         const parsed = tryParseJsonLine(line)
@@ -204,21 +209,7 @@ async function readFilePrefix(
   path: string,
   maxBytes = CODEX_SESSION_HEADER_BYTES
 ): Promise<string> {
-  let handle: import("node:fs/promises").FileHandle | null = null
-  try {
-    handle = await open(path, "r")
-    const buffer = Buffer.alloc(maxBytes)
-    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0)
-    return buffer.subarray(0, bytesRead).toString("utf-8")
-  } catch {
-    return ""
-  } finally {
-    if (handle) {
-      try {
-        await handle.close()
-      } catch {}
-    }
-  }
+  return getCachedPrefix(path, maxBytes)
 }
 
 function parseCodexIdFromFilename(name: string): string {
@@ -329,7 +320,7 @@ async function cursorSessionMatchesTarget(
   const targetPath = resolve(targetDir)
   const fileUrlNeedle = `file://${targetPath}`
   try {
-    const text = await Bun.file(sessionPath).text()
+    const text = await getCachedFileText(sessionPath)
     return text.includes(targetPath) || text.includes(fileUrlNeedle)
   } catch {
     return false
@@ -504,7 +495,7 @@ async function antigravitySessionMatchesTarget(
 
   for (const name of candidates) {
     try {
-      const content = await readFile(join(brainSessionDir, name), "utf-8")
+      const content = await getCachedFileText(join(brainSessionDir, name))
       const sample = content.slice(0, 200_000)
       if (sample.includes(fileUrlNeedle) || sample.includes(targetPath)) {
         return true
