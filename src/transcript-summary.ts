@@ -81,12 +81,8 @@ const DOCS_ONLY_PATTERNS = [/\.md$/i, /README/i, /CHANGELOG/i, /docs\//i, /\.mdx
 
 /** Extract ISO timestamp from transcript JSONL entry. */
 function extractTimestamp(line: string): string | null {
-  try {
-    const entry = JSON.parse(line) as { timestamp?: string }
-    return entry?.timestamp ?? null
-  } catch {
-    return null
-  }
+  const entry = tryParseJsonLine(line) as { timestamp?: string } | undefined
+  return entry?.timestamp ?? null
 }
 
 /** Count successful test/build runs in bash output. */

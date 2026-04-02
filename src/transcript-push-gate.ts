@@ -4,6 +4,8 @@
  * user-only push-approval phrases. Used by `pretooluse-no-push-when-instructed`.
  */
 
+import { tryParseJsonLine } from "./utils/jsonl.ts"
+
 export const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
 
 export const PUSH_APPROVAL_PATTERNS: RegExp[] = [
@@ -80,12 +82,8 @@ export function scanPushGateFromJsonlLines(lines: string[]): PushGateScanResult 
   try {
     for (const line of lines) {
       if (!line.trim()) continue
-      let entry: Record<string, any>
-      try {
-        entry = JSON.parse(line) as Record<string, any>
-      } catch {
-        continue
-      }
+      const entry = tryParseJsonLine(line) as Record<string, any> | undefined
+      if (!entry) continue
       applyEntryToPushGateState(entry, state)
     }
   } catch {

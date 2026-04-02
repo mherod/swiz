@@ -7,6 +7,7 @@
 import { dirname, join } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "./settings.ts"
 import { speakCooldownPath, speakLockPath, speakPositionPath } from "./temp-paths.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 const LOCK_STALE_MS = 30_000
 const HEARTBEAT_MS = 5_000
@@ -114,7 +115,7 @@ export async function narrateSession(payload: {
       // Corrupted pos file — start from 0
     }
 
-    const lines = (await Bun.file(transcriptPath).text()).split("\n").filter(Boolean)
+    const lines = splitJsonlLines(await Bun.file(transcriptPath).text())
     const totalLines = lines.length
 
     if (totalLines <= lastPos) return
@@ -123,19 +124,17 @@ export async function narrateSession(payload: {
     const texts: string[] = []
 
     for (const line of newLines) {
-      try {
-        const entry = JSON.parse(line) as {
-          type?: string
-          message?: { content?: Array<{ type?: string; text?: string }> }
-        }
-        if (entry.type !== "assistant") continue
-        for (const block of entry.message?.content ?? []) {
-          if (block.type === "text" && block.text) {
-            texts.push(block.text)
+      const entry = tryParseJsonLine(line) as
+        | {
+            type?: string
+            message?: { content?: Array<{ type?: string; text?: string }> }
           }
+        | undefined
+      if (!entry || entry.type !== "assistant") continue
+      for (const block of entry.message?.content ?? []) {
+        if (block.type === "text" && block.text) {
+          texts.push(block.text)
         }
-      } catch {
-        // Skip malformed lines
       }
     }
 

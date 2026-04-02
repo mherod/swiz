@@ -7,10 +7,10 @@
  * The log is append-only and capped at ~10k lines to prevent unbounded growth.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
-import { splitJsonlLines } from "./utils/jsonl.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 export interface HookLogEntry {
   ts: string
@@ -50,9 +50,11 @@ export async function appendHookLogs(entries: HookLogEntry[]): Promise<void> {
   const logPath = getLogPath()
   if (!logPath) return
   try {
-    mkdirSync(dirname(logPath), { recursive: true })
-    const lines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
-    appendFileSync(logPath, lines)
+    await mkdir(dirname(logPath), { recursive: true })
+    const newLines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
+    const file = Bun.file(logPath)
+    const existing = (await file.exists()) ? await file.text() : ""
+    await Bun.write(logPath, existing + newLines)
   } catch {
     // Never block on log write failure
   }
@@ -70,8 +72,8 @@ export async function readHookLogs(limit = 200): Promise<HookLogEntry[]> {
     const recent = lines.slice(-limit).join("\n")
     const entries: HookLogEntry[] = []
     for (const line of splitJsonlLines(recent)) {
-      const parsed = JSON.parse(line) as HookLogEntry
-      entries.push(parsed)
+      const parsed = tryParseJsonLine(line) as HookLogEntry | undefined
+      if (parsed) entries.push(parsed)
     }
     return entries
   } catch {

@@ -3,44 +3,45 @@
  *
  * Centralises the split → filter → JSON.parse → validate pattern used across
  * transcript readers, hook-log readers, and task audit-log scanners.
+ *
+ * Backed by `stream-json/jsonl/parser` for both streaming file reads and
+ * single-line parsing via its `checkedParse` helper.
  */
 
+import { createReadStream } from "node:fs"
+import jsonlParser from "stream-json/jsonl/parser.js"
 import type { ZodType } from "zod"
 
-// ── Streaming / line-by-line reading ─────────────────────────────────────────
+const { checkedParse } = jsonlParser
+
+// ── Streaming / parsed-object reading ────────────────────────────────────────
 
 /**
- * Returns an async iterator that yields non-empty lines from a file.
- * Uses a streaming reader to avoid loading the entire file into memory.
+ * Returns an async iterator that yields parsed JSONL objects from a file.
+ * Uses `stream-json/jsonl/parser` for efficient streaming — the file is never
+ * fully loaded into memory.  Malformed lines are silently skipped.
  */
-export async function* readLinesStreaming(path: string): AsyncIterableIterator<string> {
+export async function* streamJsonlEntries(path: string): AsyncIterableIterator<unknown> {
   const file = Bun.file(path)
   if (!(await file.exists())) return
 
-  const stream = file.stream()
-  const reader = stream.getReader()
-  const decoder = new TextDecoder()
-  let remaining = ""
+  const pipeline = createReadStream(path).pipe(jsonlParser.asStream({ errorIndicator: undefined }))
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+  for await (const { value } of pipeline as AsyncIterable<jsonlParser.JsonlItem>) {
+    yield value
+  }
+}
 
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = (remaining + chunk).split("\n")
-      remaining = lines.pop() ?? ""
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (trimmed) yield trimmed
-      }
-    }
-
-    const final = (remaining + decoder.decode()).trim()
-    if (final) yield final
-  } finally {
-    reader.releaseLock()
+/**
+ * Streaming variant with Zod validation — yields only entries that pass the schema.
+ */
+export async function* streamJsonlFile<T>(
+  path: string,
+  schema: ZodType<T>
+): AsyncIterableIterator<T> {
+  for await (const entry of streamJsonlEntries(path)) {
+    const result = schema.safeParse(entry)
+    if (result.success) yield result.data
   }
 }
 
@@ -53,14 +54,10 @@ export function splitJsonlLines(text: string): string[] {
 
 /**
  * Parse a single JSON line, returning `undefined` on failure.
- * Never throws.
+ * Delegates to `stream-json`'s `checkedParse` — never throws.
  */
 export function tryParseJsonLine(line: string): unknown | undefined {
-  try {
-    return JSON.parse(line)
-  } catch {
-    return undefined
-  }
+  return checkedParse(line, undefined, undefined)
 }
 
 // ── Streaming / callback parsing ─────────────────────────────────────────────

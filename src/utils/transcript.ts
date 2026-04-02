@@ -114,14 +114,10 @@ function collectBlockedIdsFromContent(content: unknown[]): string[] {
 }
 
 function extractBlockedIdsFromEntry(line: string): string[] {
-  try {
-    const entry = JSON.parse(line)
-    if (entry?.type !== "user") return []
-    const content = entry?.message?.content
-    return Array.isArray(content) ? collectBlockedIdsFromContent(content) : []
-  } catch {
-    return []
-  }
+  const entry = tryParseJsonLine(line) as Record<string, any> | undefined
+  if (!entry || entry.type !== "user") return []
+  const content = entry.message?.content
+  return Array.isArray(content) ? collectBlockedIdsFromContent(content) : []
 }
 
 export function collectBlockedToolUseIds(lines: string[]): Set<string> {

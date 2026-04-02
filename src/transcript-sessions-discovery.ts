@@ -9,6 +9,7 @@ import {
   getCachedLines,
   getCachedPrefix,
 } from "./utils/file-cache.ts"
+import { tryParseJsonLine } from "./utils/jsonl.ts"
 
 const SESSION_PROVIDER_PRECEDENCE = [
   "claude",
@@ -54,14 +55,6 @@ export async function findSessions(projectDir: string): Promise<Session[]> {
   }
 
   return sortSessionsDeterministic(sessions)
-}
-
-function tryParseJsonLine(line: string): any | undefined {
-  try {
-    return JSON.parse(line)
-  } catch {
-    return undefined
-  }
 }
 
 async function readProjectRoot(path: string): Promise<string | null> {
@@ -147,7 +140,7 @@ export async function findJunieSessions(targetDir: string, home?: string): Promi
       const lines = await getCachedLines(eventsPath, 50)
       for (const line of lines) {
         if (!line) continue
-        const parsed = tryParseJsonLine(line)
+        const parsed = tryParseJsonLine(line) as Record<string, any> | undefined
         if (
           parsed?.cwd === target ||
           parsed?.payload?.cwd === target ||

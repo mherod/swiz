@@ -33,11 +33,13 @@ function isBlockedToolResult(block: ToolResultBlock): boolean {
 }
 
 function collectBlockedIdsFromEntry(line: string, blockedIds: string[]): void {
-  const entry = JSON.parse(line) as {
-    type?: string
-    message?: { content?: string | unknown[] }
-  }
-  if (entry?.type !== "user") return
+  const entry = tryParseJsonLine(line) as
+    | {
+        type?: string
+        message?: { content?: string | unknown[] }
+      }
+    | undefined
+  if (!entry || entry.type !== "user") return
   const content = entry?.message?.content
   if (!Array.isArray(content)) return
   for (const block of content as ToolResultBlock[]) {
