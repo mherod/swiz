@@ -4,8 +4,35 @@ import {
   coerceDispatchAgentEnvelopeInPlace,
   DispatchPayloadValidationError,
 } from "./dispatch-zod-surfaces.ts"
-import { type DispatchRequest, executeDispatch } from "./execute.ts"
+import { type DispatchRequest, executeDispatch, resolveLifecycleRequestId } from "./execute.ts"
 import { DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT } from "./stop-response.ts"
+
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+describe("resolveLifecycleRequestId", () => {
+  it("returns caller request_id when non-empty string", () => {
+    expect(resolveLifecycleRequestId({ request_id: "req-abc" })).toBe("req-abc")
+  })
+
+  it("uses UUID v4 fallback when request_id is missing", () => {
+    const id = resolveLifecycleRequestId({})
+    expect(id.length).toBeGreaterThan(0)
+    expect(UUID_V4_RE.test(id)).toBe(true)
+  })
+
+  it("uses fallback for empty string (invalid id)", () => {
+    const id = resolveLifecycleRequestId({ request_id: "" })
+    expect(UUID_V4_RE.test(id)).toBe(true)
+  })
+
+  it("produces unique ids across rapid fallbacks", () => {
+    const seen = new Set<string>()
+    for (let i = 0; i < 200; i++) {
+      seen.add(resolveLifecycleRequestId({}))
+    }
+    expect(seen.size).toBe(200)
+  })
+})
 
 describe("dispatch execute integration", () => {
   let prevCaptureIncoming: string | undefined

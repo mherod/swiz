@@ -6,6 +6,7 @@
  * endpoint so that both paths execute identical logic.
  */
 
+import { randomUUID } from "node:crypto"
 import { merge, orderBy, unset } from "lodash-es"
 import { isGitRepo } from "../git-helpers.ts"
 import type { HookLogEntry } from "../hook-log.ts"
@@ -560,11 +561,13 @@ async function prepareDispatchGroups(
   return result
 }
 
-function resolveLifecycleRequestId(payload: Record<string, any>): string {
-  return (
-    (payload.request_id as string | undefined) ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  )
+/** Fallback uses RFC 4122 UUID v4 when the agent omits `request_id`. */
+export function resolveLifecycleRequestId(payload: Record<string, any>): string {
+  const fromPayload = payload.request_id as string | undefined
+  if (typeof fromPayload === "string" && fromPayload.length > 0) {
+    return fromPayload
+  }
+  return randomUUID()
 }
 
 function assertDispatchResponseMatchesWire(
