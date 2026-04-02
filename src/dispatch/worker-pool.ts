@@ -53,10 +53,16 @@ export class WorkerPool {
   private workerBusy: boolean[] = []
   private pendingMessages = new Map<string, QueuedHook>()
   private initialized = false
+  /** True while `processQueue` is draining — nested calls defer via `deferredProcess` + microtask. */
   private processing = false
+  /** Set when `processQueue` is re-entered while `processing` — tail drain scheduled in `finally`. */
+  private deferredProcess = false
+  /** Set during `terminate()` so a tail `queueMicrotask` does not touch torn-down state. */
+  private shutdown = false
 
   async initialize(): Promise<void> {
     if (this.initialized) return
+    this.shutdown = false
 
     const workerPath = join(import.meta.dir, "hook-worker.ts")
 
@@ -124,10 +130,20 @@ export class WorkerPool {
     this.processQueue()
   }
 
+  /**
+   * Assign queued hooks to idle workers. Serialized: only one active drain at a time; synchronous
+   * re-entry (e.g. worker `onmessage` in the same turn) sets `deferredProcess` and a microtask
+   * continues draining so work is not stuck behind an early return.
+   */
   private processQueue(): void {
-    if (this.processing || this.queue.length === 0) return
-    this.processing = true
+    if (this.shutdown) return
+    if (this.queue.length === 0) return
+    if (this.processing) {
+      this.deferredProcess = true
+      return
+    }
 
+    this.processing = true
     try {
       while (this.queue.length > 0) {
         // Find idle worker
@@ -172,6 +188,13 @@ export class WorkerPool {
       }
     } finally {
       this.processing = false
+      const scheduleTail = this.deferredProcess && this.queue.length > 0
+      this.deferredProcess = false
+      if (scheduleTail) {
+        queueMicrotask(() => {
+          if (!this.shutdown) this.processQueue()
+        })
+      }
     }
   }
 
@@ -311,6 +334,8 @@ export class WorkerPool {
    * Rejects all pending and queued hook executions with a shutdown error.
    */
   terminate(): void {
+    this.shutdown = true
+    this.deferredProcess = false
     const shutdownError = new Error("Worker pool terminated: process shutting down")
     for (const [, pending] of this.pendingMessages) {
       if (pending.supervisorTimer) clearTimeout(pending.supervisorTimer)
@@ -328,6 +353,8 @@ export class WorkerPool {
     this.queue = []
     this.pendingMessages.clear()
     this.initialized = false
+    this.processing = false
+    this.deferredProcess = false
   }
 }
 
