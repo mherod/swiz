@@ -6,6 +6,7 @@ export interface EventMetrics {
 export interface DaemonMetrics {
   startedAt: number
   dispatches: Map<string, EventMetrics>
+  memoryUsage?: NodeJS.MemoryUsage
 }
 
 export function createMetrics(): DaemonMetrics {
@@ -27,6 +28,7 @@ export function serializeMetrics(metrics: DaemonMetrics): {
   uptimeHuman: string
   totalDispatches: number
   byEvent: Record<string, { count: number; avgMs: number }>
+  memoryUsage?: NodeJS.MemoryUsage
 } {
   const uptimeMs = Date.now() - metrics.startedAt
   const byEvent: Record<string, { count: number; avgMs: number }> = {}
@@ -40,6 +42,7 @@ export function serializeMetrics(metrics: DaemonMetrics): {
     uptimeHuman: formatUptime(uptimeMs),
     totalDispatches,
     byEvent,
+    ...(metrics.memoryUsage && { memoryUsage: metrics.memoryUsage }),
   }
 }
 

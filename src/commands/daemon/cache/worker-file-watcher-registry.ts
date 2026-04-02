@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads"
+import { stderrLog } from "../../../debug.ts"
 import type {
   FileWatcherParentMessage,
   FileWatcherStatus,
@@ -26,26 +27,26 @@ export class FileWatcherRegistry {
             try {
               cb()
             } catch (err) {
-              console.error("[daemon] FileWatcher registry callback error:", err)
+              stderrLog("FileWatcher", `[daemon] FileWatcher registry callback error: ${err}`)
             }
           }
         }
       } else if (msg.type === "status") {
         this.lastStatus = msg.status
       } else if (msg.type === "error") {
-        console.error("[daemon] FileWatcher worker logic error:", msg.error)
+        stderrLog("FileWatcher", `[daemon] FileWatcher worker logic error: ${msg.error}`)
       } else if (msg.type === "started") {
         // Handled by the Promise in start()
       }
     })
 
     this.worker.on("error", (err) => {
-      console.error("[daemon] FileWatcher worker error:", err)
+      stderrLog("FileWatcher", `[daemon] FileWatcher worker error: ${err}`)
     })
 
     this.worker.on("exit", (code) => {
       if (code !== 0) {
-        console.error(`[daemon] FileWatcher worker stopped with exit code ${code}`)
+        stderrLog("FileWatcher", `[daemon] FileWatcher worker stopped with exit code ${code}`)
       }
     })
 

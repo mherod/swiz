@@ -22,7 +22,6 @@ if (isInteractive && !invokedAs.endsWith("/swiz") && !process.env.SWIZ_DIRECT) {
 
 import { registerCommand, run } from "./src/cli.ts"
 import { ciWaitCommand } from "./src/commands/ci-wait.ts"
-import { cleanupCommand } from "./src/commands/cleanup.ts"
 import { compactCommand } from "./src/commands/compact.ts"
 import { continueCommand } from "./src/commands/continue.ts"
 import { crossRepoIssueCommand } from "./src/commands/cross-repo-issue.ts"
@@ -68,7 +67,6 @@ registerCommand(shimCommand)
 registerCommand(dispatchCommand)
 registerCommand(transcriptCommand)
 registerCommand(continueCommand)
-registerCommand(cleanupCommand)
 registerCommand(issueCommand)
 registerCommand(crossRepoIssueCommand)
 registerCommand(ideaCommand)

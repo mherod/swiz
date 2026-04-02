@@ -8,7 +8,6 @@ import {
   invalidateSettingsCache,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
-import { formatBytes } from "../utils/format.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
@@ -298,24 +297,15 @@ function setupWatchers(
     watchers.start().catch(() => {})
   }
 
-  startMemoryMonitoring()
-
   watchers.start().then(undefined, () => {})
 
   return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
 }
 
-function startMemoryMonitoring() {
+function startMemoryMonitoring(metrics: DaemonMetrics) {
   setInterval(() => {
-    const memoryUsage = process.memoryUsage()
-    const parts = [
-      `rss=${formatBytes(memoryUsage.rss)}`,
-      `heapTotal=${formatBytes(memoryUsage.heapTotal)}`,
-      `heapUsed=${formatBytes(memoryUsage.heapUsed)}`,
-      `external=${formatBytes(memoryUsage.external)}`,
-    ]
-    process.stdout.write(`Mem: ${parts.join(", ")}\n`)
-  }, 1000)
+    metrics.memoryUsage = process.memoryUsage()
+  }, 30000)
 }
 
 function evictIdleProjects(
@@ -392,6 +382,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     transcriptMonitor,
     state.projectLastSeen
   )
+
+  startMemoryMonitoring(state.globalMetrics)
 
   let isClosing = false
   const cleanup = (reason: string) => {

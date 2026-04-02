@@ -3,6 +3,7 @@ import { chmod, cp, mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, getAgent, translateEvent } from "../agents.ts"
+import { stderrLog } from "../debug.ts"
 import { suggest } from "../fuzzy.ts"
 import { getHomeDir, getHomeDirWithFallback } from "../home.ts"
 import {
@@ -1525,6 +1526,11 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
     await fixSkillConflicts(skillConflicts, fix)
     await fixInvalidSkills(invalidSkillEntries)
     await fixStalePluginCache(pluginCacheInfos)
+    try {
+      await autoCleanup()
+    } catch (err) {
+      stderrLog("auto-cleanup", `  ${YELLOW}Warning: auto-cleanup failed: ${err}${RESET}`)
+    }
     return
   }
   if (
@@ -2745,6 +2751,56 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
   }
 }
 
+async function autoCleanup(): Promise<void> {
+  const cleanupArgs = {
+    olderThanMs: parseOlderThan("1").ms, // 24 hours
+    olderThanLabel: "1 day",
+    taskOlderThanMs: null,
+    taskOlderThanLabel: null,
+    dryRun: false,
+    projectFilter: undefined,
+    junieOnly: false,
+  }
+
+  const data = await gatherCleanupData(cleanupArgs)
+  if (!data) return
+  const { results, claudeBackups, geminiBackups, oldTaskFiles, oldTaskBytes } = data
+
+  const totals = {
+    totalOldCount: 0,
+    totalOldBytes: 0,
+    totalOldTaskDirs: 0,
+    totalBytes: 0,
+  }
+
+  for (const { old } of results) {
+    totals.totalOldCount += old.length
+    totals.totalOldBytes += old.reduce((sum, s) => sum + s.sizeBytes, 0)
+    totals.totalOldTaskDirs += old.filter((s) => s.taskDirPath !== null).length
+  }
+
+  const totalBytes =
+    totals.totalOldBytes + oldTaskBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
+  const nothingToTrash =
+    totals.totalOldCount === 0 &&
+    oldTaskFiles.length === 0 &&
+    claudeBackups.fileCount === 0 &&
+    geminiBackups.fileCount === 0
+
+  if (nothingToTrash) return
+
+  console.log(`\n  ${BOLD}Cleaning up old session data (> 24h)...${RESET}`)
+  await executeCleanup({
+    results,
+    claudeBackups,
+    geminiBackups,
+    oldTaskFiles,
+    totalOldCount: totals.totalOldCount,
+    totalOldTaskDirs: totals.totalOldTaskDirs,
+    totalBytes: totalBytes,
+  })
+}
+
 // ─── Cleanup runner ─────────────────────────────────────────────────────────
 
 async function gatherCleanupData(cleanupArgs: ReturnType<typeof parseCleanupArgs>) {
@@ -2854,16 +2910,21 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
 export const doctorCommand: Command = {
   name: "doctor",
   description: "Check environment health, fix issues, and clean up old session data",
-  usage: "swiz doctor [--fix] | swiz doctor cleanup [--older-than <time>] [--dry-run]",
+  usage: "swiz doctor [--fix] | swiz doctor clean [--older-than <time>] [--dry-run]",
   options: [
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
     {
-      flags: "cleanup",
+      flags: "clean",
       description: "Remove old Claude Code/Junie session data and Gemini backup artifacts",
     },
+    { flags: "--older-than <time>", description: "Cleanup window (e.g. 30, 7d, 48h)" },
+    { flags: "--task-older-than <time>", description: "Separate window for task files" },
+    { flags: "--project <name>", description: "Filter by project name or path" },
+    { flags: "--dry-run", description: "Show what would be removed without trashing" },
+    { flags: "--junie-only", description: "Only scan Junie sessions" },
   ],
   async run(args) {
-    if (args[0] === "cleanup") {
+    if (args[0] === "clean") {
       await runCleanupCommand(args.slice(1))
       return
     }

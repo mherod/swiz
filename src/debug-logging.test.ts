@@ -21,6 +21,11 @@ const SRC_ROOT = join(import.meta.dirname ?? ".", "..")
 const STDERR_ALLOWLIST = new Map<string, string>([
   ["src/cli.ts", "CLI error handler — unknown command, uncaught exception"],
   ["src/commands/ci-wait.ts", "CI failure/error status reporting with exit codes"],
+  ["src/commands/doctor.ts", "doctor clean auto-cleanup failure warnings"],
+  [
+    "src/commands/daemon/cache/worker-file-watcher-registry.ts",
+    "daemon worker process lifecycle error reporting",
+  ],
   [
     "src/commands/daemon.ts",
     "daemon status subcommand — reports unreachable daemon or error responses",
@@ -87,6 +92,9 @@ const STDOUT_ALLOWLIST = new Set([
   // idea — generates and prints creative issue proposal from Gemini
   "src/commands/idea.ts",
   "src/commands/install.ts",
+  "src/commands/install/agent-helpers.ts",
+  "src/commands/install/optional-helpers.ts",
+  "src/commands/install/daemon-helpers.ts",
   "src/commands/issue.ts",
   "src/commands/memory.ts",
   // model — Claude Code settings.json model show/set output
