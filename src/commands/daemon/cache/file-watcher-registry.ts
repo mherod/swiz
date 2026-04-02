@@ -40,6 +40,8 @@ export class BaseFileWatcherRegistry {
     callback: () => void,
     options?: { recursive?: boolean; depth?: number }
   ): void {
+    if (this.shouldIgnore(path)) return
+
     let entry = this.entries.get(path)
     if (!entry) {
       entry = {
@@ -73,13 +75,17 @@ export class BaseFileWatcherRegistry {
         }
       }
 
-      if (entry.recursive && entry.depth !== undefined) {
-        // Limited depth recursion
-        await this.watchRecursiveWithDepth(entry.path, entry.depth, entry.watchers, onEvent)
+      // Force depth-limited recursion for ALL recursive entries to ensure exclusions are respected.
+      // Native recursive watching (watch(path, { recursive: true })) is intentionally disabled
+      // because it bypasses the manual directory filtering logic and can cause massive resource leaks.
+      if (entry.recursive) {
+        // Default to a shallow depth of 1 if not specified, to prevent runaway scanning.
+        const safeDepth = entry.depth ?? 1
+        await this.watchRecursiveWithDepth(entry.path, safeDepth, entry.watchers, onEvent)
       } else {
-        // Standard single watcher (either non-recursive or native recursive)
+        // Standard single watcher for non-recursive files/directories.
         try {
-          const watcher = watch(entry.path, { recursive: !!entry.recursive }, onEvent)
+          const watcher = watch(entry.path, { recursive: false }, onEvent)
           entry.watchers.push(watcher)
         } catch {
           // path may not exist yet — that's fine
@@ -94,7 +100,7 @@ export class BaseFileWatcherRegistry {
     watchers: FSWatcher[],
     callback: () => void
   ): Promise<void> {
-    if (depth < 0) return
+    if (depth < 0 || this.shouldIgnore(path)) return
 
     // Check global limit before adding more
     const currentTotal = [...this.entries.values()].reduce((acc, e) => acc + e.watchers.length, 0)
@@ -111,13 +117,7 @@ export class BaseFileWatcherRegistry {
       try {
         const files = await readdir(path, { withFileTypes: true })
         for (const file of files) {
-          if (
-            file.isDirectory() &&
-            file.name !== ".git" &&
-            file.name !== ".svn" &&
-            file.name !== ".hg" &&
-            file.name !== "node_modules"
-          ) {
+          if (file.isDirectory() && !this.shouldIgnore(file.name)) {
             await this.watchRecursiveWithDepth(join(path, file.name), depth - 1, watchers, callback)
           }
         }
@@ -125,6 +125,26 @@ export class BaseFileWatcherRegistry {
         // Ignore readdir errors
       }
     }
+  }
+
+  private shouldIgnore(name: string): boolean {
+    const n = name.toLowerCase()
+    return (
+      n === ".git" ||
+      n === ".svn" ||
+      n === ".hg" ||
+      n === "node_modules" ||
+      n === ".swiz" ||
+      n === ".github" ||
+      n === ".vscode" ||
+      n === ".idea" ||
+      n === "dist" ||
+      n === "build" ||
+      n === "target" ||
+      n === "vendor" ||
+      name.includes("/.git/") ||
+      name.endsWith("/.git")
+    )
   }
 
   /** Close and remove all watchers whose label ends with the given suffix. */
