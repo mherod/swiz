@@ -718,77 +718,92 @@ async function buildCiContext(output: string, cwd: string): Promise<string | nul
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-export async function evaluatePosttooluseTaskOutput(input: unknown): Promise<SwizHookOutput> {
-  const hookInput = (
-    typeof input === "object" && input !== null ? input : null
-  ) as PostToolHookInput | null
-  if (!hookInput) return {}
+async function handlePushCiContext(output: string, cwd: string): Promise<SwizHookOutput | null> {
+  if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) return null
 
-  if (hookInput.tool_name !== "TaskOutput") return {}
+  const pushCwd = cwd || process.cwd()
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(pushCwd),
+  ])
+  const effectivePush = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  if (effectivePush.ignoreCi) return null
 
-  const response = hookInput.tool_response ?? null
+  const ciContext = await buildCiContext(output, pushCwd)
+  if (!ciContext) return null
 
-  if (typeof response === "string") {
-    if (BLOCK_TYPE_ERR_RE.test(response)) {
-      return buildDenyPostToolUseOutput(
-        "`TaskOutput` call failed: the `block` parameter must be a boolean (`true`/`false`), not a string.\n\n" +
-          'Fix: pass `block: true` (boolean) — never `block: "true"` (string).'
-      )
-    }
+  return buildContextHookOutput("PostToolUse", ciContext)
+}
 
-    const notFoundMatch = response.match(TASK_NOT_FOUND_RE)
-    if (notFoundMatch) {
-      const taskId = String(hookInput.tool_input?.task_id ?? notFoundMatch[1] ?? "")
-      const recovered = taskId
-        ? await tryReadOutputFile(taskId, hookInput.cwd ?? process.cwd())
-        : null
-      if (recovered) {
-        const failureReason = detectFailure(recovered, null)
-        if (failureReason) {
-          return buildDenyPostToolUseOutput(
-            `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
-          )
-        }
-        return buildContextHookOutput(
-          "PostToolUse",
-          `Task \`${taskId}\` output recovered from file (record had expired).\n` +
-            `Output preview:\n${recovered.slice(0, 500)}`
+async function handleStringResponse(
+  response: string,
+  cwd: string,
+  taskIdFromInput: string | number | undefined | null
+): Promise<SwizHookOutput | null> {
+  if (BLOCK_TYPE_ERR_RE.test(response)) {
+    return buildDenyPostToolUseOutput(
+      "`TaskOutput` call failed: the `block` parameter must be a boolean (`true`/`false`), not a string.\n\n" +
+        'Fix: pass `block: true` (boolean) — never `block: "true"` (string).'
+    )
+  }
+
+  const notFoundMatch = response.match(TASK_NOT_FOUND_RE)
+  if (notFoundMatch) {
+    const taskId = String(taskIdFromInput ?? notFoundMatch[1] ?? "")
+    const recovered = taskId ? await tryReadOutputFile(taskId, cwd) : null
+    if (recovered) {
+      const failureReason = detectFailure(recovered, null)
+      if (failureReason) {
+        return buildDenyPostToolUseOutput(
+          `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
         )
       }
-      return buildDenyPostToolUseOutput(
-        `Task \`${notFoundMatch[1]}\` output unavailable: the task record has been garbage-collected and no output file was found.\n\n` +
-          `The task completed (or was cleaned up) before its output could be read. ` +
-          `Check recent git log or CI status to determine whether the task succeeded.`
+      return buildContextHookOutput(
+        "PostToolUse",
+        `Task \`${taskId}\` output recovered from file (record had expired).\n` +
+          `Output preview:\n${recovered.slice(0, 500)}`
       )
     }
+    return buildDenyPostToolUseOutput(
+      `Task \`${notFoundMatch[1]}\` output unavailable: the task record has been garbage-collected and no output file was found.\n\n` +
+        `The task completed (or was cleaned up) before its output could be read. ` +
+        `Check recent git log or CI status to determine whether the task succeeded.`
+    )
+  }
+  return null
+}
+
+async function evaluateResponse(
+  response: any,
+  cwd: string,
+  taskIdFromInput: any
+): Promise<SwizHookOutput | null> {
+  if (typeof response === "string") {
+    const stringHandlingResult = await handleStringResponse(response, cwd, taskIdFromInput)
+    if (stringHandlingResult) return stringHandlingResult
   }
 
   const taskStatus = extractStatus(response)
-
   if (taskStatus === "in_progress" || taskStatus === "running") return {}
 
   const output = extractOutputText(response)
   const exitCode = extractExitCode(response)
 
   const failureReason = detectFailure(output, exitCode)
-  if (failureReason) {
-    return buildDenyPostToolUseOutput(failureReason)
-  }
+  if (failureReason) return buildDenyPostToolUseOutput(failureReason)
 
-  if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) return {}
+  return await handlePushCiContext(output, cwd)
+}
 
-  const pushCwd = hookInput.cwd ?? process.cwd()
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(pushCwd),
-  ])
-  const effectivePush = getEffectiveSwizSettings(globalSettings, null, projectSettings)
-  if (effectivePush.ignoreCi) return {}
+export async function evaluatePosttooluseTaskOutput(input: unknown): Promise<SwizHookOutput> {
+  if (!input || typeof input !== "object") return {}
+  const hookInput = input as PostToolHookInput
 
-  const ciContext = await buildCiContext(output, pushCwd)
-  if (!ciContext) return {}
+  if (hookInput.tool_name !== "TaskOutput") return {}
 
-  return buildContextHookOutput("PostToolUse", ciContext)
+  const cwd = hookInput.cwd || process.cwd()
+  const result = await evaluateResponse(hookInput.tool_response, cwd, hookInput.tool_input?.task_id)
+  return result || {}
 }
 
 const posttooluseTaskOutput: SwizHook<PostToolHookInput> = {
