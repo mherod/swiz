@@ -25,7 +25,7 @@ export function summarizeNotification(message: string, limit = 500): string {
 
   // 4. Hard character limit
   if (summarized.length > limit) {
-    summarized = summarized.substring(0, limit) + "..."
+    summarized = `${summarized.substring(0, limit)}...`
   }
 
   return summarized

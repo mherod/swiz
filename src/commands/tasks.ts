@@ -164,13 +164,17 @@ async function runListTasks(args: string[]): Promise<void> {
 
 async function runCreateTask(rest: string[]): Promise<void> {
   const [subject, description, ...sessionArgs] = rest
+  const stateFlag = extractFlag(rest, "--state")
+  const statusFlag = extractFlag(rest, "--status")
+
   if (!subject || !description) {
     throw new Error('Usage: swiz tasks create "<subject>" "<description>" --state <state>')
   }
-  const stateFlag = extractFlag(rest, "--state")
+
   if (!stateFlag) {
+    const hint = statusFlag ? ' (did you mean "--state"?)' : ""
     throw new Error(
-      `--state <state> is required.\n` +
+      `--state <state> is required${hint}.\n` +
         `It sets the session's active working phase (not the task's todo status).\n` +
         `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
         `Example: swiz tasks create "<subject>" "<description>" --state developing`
@@ -216,6 +220,10 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     throw new Error(
       "Usage: swiz tasks complete <task-id> [--evidence TEXT] [--state STATE] [--verify TEXT] [--subject TEXT] [--dry-run]"
     )
+  }
+  const statusFlag = extractFlag(rest, "--status")
+  if (statusFlag) {
+    throw new Error(`Unknown option: --status (did you mean "--state" or "swiz tasks status"?)`)
   }
   const dryRun = rest.includes("--dry-run")
   const evidence = extractFlag(rest, "--evidence")
@@ -473,6 +481,11 @@ export const tasksCommand: Command = {
       flags: "complete <id>",
       description: "Mark a task completed",
     },
+    {
+      flags: "--status <status>",
+      description: "Hidden option to guide users (did you mean --state?)",
+      hidden: true,
+    } as any,
     {
       flags: "status <id> <status>",
       description: "Set status: pending | in_progress | completed | cancelled",

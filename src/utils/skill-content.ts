@@ -47,3 +47,32 @@ export function substituteArgs(content: string, positionalArgs: string[]): strin
   }
   return result
 }
+
+/**
+ * Eliminate positional args and argument-like placeholders from content.
+ * Replaces $0, $1, ..., $ARGUMENTS, $ISSUE_NUMBER, etc. and any preceding KEY= with empty strings.
+ */
+export function eliminatePositionalArgs(content: string): string {
+  // 1. First remove KEY=$VALUE patterns where $VALUE starts with $
+  // This handles ARGUMENTS=$ARGUMENTS, ISSUE_NUMBER=$0, etc.
+  // We also handle spaces after them to avoid double-spacing.
+  // We use [0-9]+ to handle $10, $11, etc.
+  let result = content.replace(/\b[A-Z0-9_-]+=\$[A-Z0-9_]+\b\s*/g, "")
+
+  // 2. Then remove any remaining $ placeholders
+  result = result.replace(/\$[A-Z0-9_]+\b\s*/g, "")
+
+  // 3. Handle shell-style variables like ${0} or ${ISSUE_NUMBER}
+  result = result.replace(/\b[A-Z0-9_-]+=\$\{[A-Z0-9_]+\}\s*/g, "")
+  result = result.replace(/\$\{[A-Z0-9_]+\}\s*/g, "")
+
+  return result.trim()
+}
+
+/**
+ * Unwrap inline commands in skill content: !`cmd` → cmd.
+ * This removes the ! and backticks without executing the command.
+ */
+export function unwrapInlineCommands(content: string): string {
+  return content.replace(/!`([^`]+)`/g, "$1")
+}

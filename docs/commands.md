@@ -38,7 +38,7 @@ Commands are registered in this order in `index.ts`:
 
 | Command | Source | Description |
 |---------|--------|-------------|
-| `skill` | `src/commands/skill.ts` | Read, list, sync, and convert skills |
+| `skill` | `src/commands/skill.ts` | Read, list, sync, and convert skills. Subcommands: `read`, `list`, `sync`, `convert`, `to-command`. `to-command` transforms skills into agent commands. |
 | `hooks` | `src/commands/hooks.ts` | Inspect agent hooks (Claude Code, Cursor, Gemini CLI) |
 | `install` | `src/commands/install.ts` | Install swiz hooks into agent settings |
 | `uninstall` | `src/commands/uninstall.ts` | Remove swiz hooks from agent settings |

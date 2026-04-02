@@ -305,17 +305,38 @@ function setupWatchers(
   return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
 }
 
+function restartLaunchdDaemon() {
+  // Bun.spawn(["kill", "-9", process.pid.toString()], {
+  //   stdout: "pipe",
+  //   stderr: "pipe",
+  // })
+  Bun.spawn(["launchctl", "kickstart", "-k", "gui/501/com.swiz.daemon"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+}
+
 function startMemoryMonitoring() {
   setInterval(() => {
     const memoryUsage = process.memoryUsage()
     const bytes = memoryUsage.rss
+    const external = memoryUsage.external
+    const heapUsed = memoryUsage.heapUsed
+    const heapTotal = memoryUsage.heapTotal
     const parts = [
       `rss=${formatBytes(bytes)}`,
-      `heapTotal=${formatBytes(memoryUsage.heapTotal)}`,
-      `heapUsed=${formatBytes(memoryUsage.heapUsed)}`,
-      `external=${formatBytes(memoryUsage.external)}`,
+      `heapTotal=${formatBytes(heapTotal)}`,
+      `heapUsed=${formatBytes(heapUsed)}`,
+      `external=${formatBytes(external)}`,
     ]
     process.stdout.write(`Mem: ${parts.join(", ")}\n`)
+    if (Object.values(memoryUsage).some((b) => b > 6 * 1024 * 1024 * 1024)) {
+      stderrLog(
+        "memory warning",
+        `[daemon] Restarting due to excessive memory usage (${parts.join()}})`
+      )
+      restartLaunchdDaemon()
+    }
   }, 1000)
 }
 

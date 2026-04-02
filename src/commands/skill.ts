@@ -382,7 +382,7 @@ async function exportCommand(options: {
       const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
       if (
         logSkillAction(
-          skillName + ".md" + warnSuffix,
+          `${skillName}.md${warnSuffix}`,
           targetExists,
           dryRun,
           "exported",
