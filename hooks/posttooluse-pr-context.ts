@@ -41,6 +41,73 @@ interface GhPr {
   latestReviews: GhReview[]
 }
 
+function getValidatedCheckout(input: ShellHookInput): { cwd: string; command: string } | null {
+  const parsed = shellHookInputSchema.safeParse(input)
+  if (!parsed.success) return null
+
+  const { tool_name, cwd, tool_input } = parsed.data
+  if (!tool_name || !cwd || !tool_input) return null
+  if (!isShellTool(tool_name)) return null
+
+  const command = tool_input.command as string
+  if (!command) return null
+
+  if (!GIT_CHECKOUT_RE.test(command) && !GH_PR_CHECKOUT_RE.test(command)) return null
+
+  return { cwd, command }
+}
+
+function getPrStatusLines(pr: GhPr): string[] {
+  const lines = [`PR #${pr.number}: ${pr.title} [${pr.state}]`]
+  if (pr.reviewDecision && pr.reviewDecision !== "null") {
+    lines.push(`Review: ${pr.reviewDecision}`)
+  }
+  if (pr.mergeStateStatus && pr.mergeStateStatus !== "null") {
+    lines.push(`Merge status: ${pr.mergeStateStatus}`)
+  }
+  if (pr.mergeable && pr.mergeable !== "null" && pr.mergeable !== "UNKNOWN") {
+    lines.push(`Mergeable: ${pr.mergeable}`)
+  }
+  return lines
+}
+
+function formatReviewBody(body: string | undefined): string {
+  if (!body) return ""
+  return `: ${body.length > 300 ? `${body.slice(0, 300)}...` : body}`
+}
+
+function getPrReviewsLines(pr: GhPr): string[] {
+  const reviews = pr.latestReviews || []
+  const approvals = reviews.filter((r) => r.state === "APPROVED" || r.state === "CHANGES_REQUESTED")
+  if (!approvals.length) return []
+
+  const lines = ["", "--- Reviews ---"]
+  for (const r of approvals) {
+    const who = r.author?.login || "unknown"
+    const when = r.submittedAt || ""
+    lines.push(`[${r.state}] @${who} (${when})${formatReviewBody(r.body)}`)
+  }
+  return lines
+}
+
+function getPrDescriptionLines(pr: GhPr): string[] {
+  if (!pr.body) return []
+  const body = pr.body.length > 800 ? `${pr.body.slice(0, 800)}...` : pr.body
+  return ["", "--- PR Description ---", body]
+}
+
+function getPrLastCommentLines(pr: GhPr): string[] {
+  if (!pr.comments?.length) return []
+  const last = pr.comments[pr.comments.length - 1]
+  if (!last) return []
+
+  const who = last.author?.login || "unknown"
+  const when = last.createdAt || ""
+  const text = last.body || ""
+  const truncated = text.length > 600 ? `${text.slice(0, 600)}...` : text
+  return ["", `--- Last Comment ---`, `[${who} at ${when}]`, truncated]
+}
+
 const posttoolusPrContext: SwizShellHook = {
   name: "posttooluse-pr-context",
   event: "postToolUse",
@@ -48,26 +115,10 @@ const posttoolusPrContext: SwizShellHook = {
   timeout: 10,
 
   async run(input: ShellHookInput): Promise<SwizHookOutput> {
-    let parsed: ShellHookInput
-    try {
-      parsed = shellHookInputSchema.parse(input)
-    } catch {
-      return {}
-    }
+    const validated = getValidatedCheckout(input)
+    if (!validated) return {}
 
-    const toolName: string = parsed.tool_name ?? ""
-    const cwd: string = parsed.cwd ?? ""
-    const command: string = (parsed.tool_input?.command as string) ?? ""
-
-    if (!isShellTool(toolName) || !cwd || !command) return {}
-
-    // Detect checkout patterns:
-    //   git checkout <branch>  /  git checkout -b <branch>
-    //   gh pr checkout <number-or-branch>
-    const isCheckout = GIT_CHECKOUT_RE.test(command) || GH_PR_CHECKOUT_RE.test(command)
-
-    if (!isCheckout) return {}
-
+    const { cwd } = validated
     const branch = await git(["branch", "--show-current"], cwd)
     if (!branch) return {}
 
@@ -85,56 +136,14 @@ const posttoolusPrContext: SwizShellHook = {
 
     if (!pr?.number) return {}
 
-    // Build context
-    const lines: string[] = []
+    const lines = [
+      ...getPrStatusLines(pr),
+      ...getPrReviewsLines(pr),
+      ...getPrDescriptionLines(pr),
+      ...getPrLastCommentLines(pr),
+    ]
 
-    lines.push(`PR #${pr.number}: ${pr.title} [${pr.state}]`)
-
-    if (pr.reviewDecision && pr.reviewDecision !== "null") {
-      lines.push(`Review: ${pr.reviewDecision}`)
-    }
-    if (pr.mergeStateStatus && pr.mergeStateStatus !== "null") {
-      lines.push(`Merge status: ${pr.mergeStateStatus}`)
-    }
-    if (pr.mergeable && pr.mergeable !== "null" && pr.mergeable !== "UNKNOWN") {
-      lines.push(`Mergeable: ${pr.mergeable}`)
-    }
-
-    // Render individual review details (approvals, changes requested, etc.)
-    const approvals = (pr.latestReviews ?? []).filter(
-      (r) => r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"
-    )
-    if (approvals.length > 0) {
-      lines.push("", "--- Reviews ---")
-      for (const r of approvals) {
-        const who = r.author?.login ?? "unknown"
-        const when = r.submittedAt ?? ""
-        const reviewBody = r.body
-          ? `: ${r.body.length > 300 ? `${r.body.slice(0, 300)}...` : r.body}`
-          : ""
-        lines.push(`[${r.state}] @${who} (${when})${reviewBody}`)
-      }
-    }
-
-    if (pr.body) {
-      const body = pr.body.length > 800 ? `${pr.body.slice(0, 800)}...` : pr.body
-      lines.push("", "--- PR Description ---", body)
-    }
-
-    if (pr.comments?.length) {
-      const last = pr.comments[pr.comments.length - 1]
-      if (last) {
-        const who = last.author?.login ?? "unknown"
-        const when = last.createdAt ?? ""
-        const text = last.body ?? ""
-        const truncated = text.length > 600 ? `${text.slice(0, 600)}...` : text
-        lines.push("", `--- Last Comment ---`, `[${who} at ${when}]`, truncated)
-      }
-    }
-
-    const context = lines.join("\n")
-
-    return postToolUseAdditionalContext(context)
+    return postToolUseAdditionalContext(lines.join("\n"))
   },
 }
 
