@@ -63,16 +63,29 @@ function isNoiseLine(line: string): boolean {
   return NOISE_PHRASES.some((re) => re.test(trimmed))
 }
 
+function isCommentCommand(command: string): boolean {
+  return (
+    GH_PR_COMMENT_RE.test(command) ||
+    GH_PR_REVIEW_COMMENT_RE.test(command) ||
+    GH_API_ISSUE_COMMENT_RE.test(command)
+  )
+}
+
+function isPureNoise(bodyNormalized: string): boolean {
+  const lines = bodyNormalized
+    .split(/[\n.!?]/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+
+  return lines.length === 0 || lines.every(isNoiseLine)
+}
+
 function evaluate(input: ShellHookInput) {
   // In standalone mode the matcher isn't applied, so guard on tool name.
   if (!isShellTool(input.tool_name ?? "")) return {}
 
   const command: string = input.tool_input?.command ?? ""
-
-  const isPrComment = GH_PR_COMMENT_RE.test(command)
-  const isPrReviewComment = GH_PR_REVIEW_COMMENT_RE.test(command)
-  const isApiComment = GH_API_ISSUE_COMMENT_RE.test(command)
-  if (!isPrComment && !isPrReviewComment && !isApiComment) return {}
+  if (!isCommentCommand(command)) return {}
 
   const body = extractBody(command)
   if (body === null) return {}
@@ -83,13 +96,7 @@ function evaluate(input: ShellHookInput) {
   const hasMergeConflictSignal = NOISE_PHRASES.some((re) => re.test(bodyNormalized))
   if (!hasMergeConflictSignal) return preToolUseAllow("Comment has no merge-conflict signals")
 
-  const lines = bodyNormalized
-    .split(/[\n.!?]/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-
-  const allNoise = lines.length === 0 || lines.every(isNoiseLine)
-  if (!allNoise)
+  if (!isPureNoise(bodyNormalized))
     return preToolUseAllow("Comment contains substantive content beyond conflict notice")
 
   const rebaseAdvice = skillAdvice(
