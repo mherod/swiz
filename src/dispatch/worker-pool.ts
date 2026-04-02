@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { cpus } from "node:os"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import type { HookExecution } from "./engine.ts"
@@ -14,7 +15,6 @@ import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
 const SUPERVISOR_GRACE_SEC = 10
 
 function getWorkerCount(): number {
-  const { cpus } = require("node:os") as typeof import("node:os")
   return Math.max(1, cpus().length - 1)
 }
 
