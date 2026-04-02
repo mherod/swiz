@@ -15,8 +15,8 @@ import { transcriptWatchPathsForProject } from "../utils.ts"
  * Monitors session transcripts for new tool calls and triggers auto-steer.
  */
 export class TranscriptMonitor {
-  private lastToolCallFingerprints = new CappedMap<string, string>(500)
-  private lastMessageFingerprints = new CappedMap<string, string>(500)
+  private lastToolCallFingerprints = new CappedMap<string, string>(100)
+  private lastMessageFingerprints = new CappedMap<string, string>(100)
   private latestSessionCache = new Map<string, { session: Session; mtimeMs: number }>()
 
   constructor(

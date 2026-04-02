@@ -86,9 +86,9 @@ function createDaemonState() {
   const globalMetrics = createMetrics()
   const projectMetrics = new CappedMap<string, DaemonMetrics>(100)
   const projectLastSeen = new CappedMap<string, number>(50)
-  const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(20)
+  const sessionActivity = new CappedMap<string, { lastSeen: number; dispatches: number }>(10)
   const sessionToolCalls = new CappedMap<string, CapturedToolCall[]>(10)
-  const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(100)
+  const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(30)
   const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(10)
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {
@@ -310,10 +310,12 @@ function restartLaunchdDaemon() {
   //   stdout: "pipe",
   //   stderr: "pipe",
   // })
-  Bun.spawn(["launchctl", "kickstart", "-k", "gui/501/com.swiz.daemon"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  // Bun.spawn(["launchctl", "kickstart", "-k", "gui/501/com.swiz.daemon"], {
+  //   stdout: "pipe",
+  //   stderr: "pipe",
+  // })
+  process.exitCode = 1
+  process.exit(1)
 }
 
 function startMemoryMonitoring() {
@@ -380,6 +382,7 @@ function createPruner(
     for (const [sessionId, activity] of state.sessionActivity) {
       if (activity.lastSeen < cutoffMs) state.sessionActivity.delete(sessionId)
     }
+    sessionDataCache.pruneSessionsPerProject(3)
     for (const [sessionId, toolCalls] of state.sessionToolCalls) {
       const recent = toolCalls.filter((call) => Date.parse(call.timestamp) >= cutoffMs)
       if (recent.length === 0) {

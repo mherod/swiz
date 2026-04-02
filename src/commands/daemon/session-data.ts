@@ -33,7 +33,7 @@ interface SessionScanResult {
 /** Max transcripts to parse per session. */
 const MAX_TRANSCRIPT_ENTRIES = 2000
 /** Max messages cached per session. */
-const MAX_SESSION_MESSAGES = 200
+const MAX_SESSION_MESSAGES = 100
 
 interface CachedSessionData {
   mtimeMs: number
@@ -286,6 +286,34 @@ class SessionDataCache {
     const projectKey = projectKeyFromCwd(cwd)
     for (const key of this.entries.keys()) {
       if (key.includes(projectKey)) this.entries.delete(key)
+    }
+  }
+
+  /** Keep only the last `limit` sessions per project. */
+  pruneSessionsPerProject(limit: number): void {
+    const projectSessions = new Map<string, string[]>()
+    for (const sessionPath of this.entries.keys()) {
+      // Extract project directory from session path (heuristic)
+      // Claude sessions are in ~/.claude/projects/<key>/...
+      // Cursor sessions are in ~/.cursor/projects/<key>/...
+      const match = sessionPath.match(/.+projects\/([^/]+)\//)
+      const projectKey = match ? match[1]! : "unknown"
+      const list = projectSessions.get(projectKey) ?? []
+      list.push(sessionPath)
+      projectSessions.set(projectKey, list)
+    }
+
+    for (const [_, paths] of projectSessions) {
+      if (paths.length <= limit) continue
+      // Sort by last message time descending
+      paths.sort((a, b) => {
+        const dataA = this.entries.get(a)
+        const dataB = this.entries.get(b)
+        return (dataB?.lastMessageAt ?? 0) - (dataA?.lastMessageAt ?? 0)
+      })
+      for (let i = limit; i < paths.length; i++) {
+        this.entries.delete(paths[i]!)
+      }
     }
   }
 
