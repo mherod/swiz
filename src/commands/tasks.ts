@@ -436,7 +436,32 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
+  TaskCreate: (rest) => {
+    console.log(
+      `  ${DIM}Note: "TaskCreate" is a native tool. Use "swiz tasks create" for CLI usage.${RESET}\n`
+    )
+    return runCreateTask(rest)
+  },
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
+  TaskUpdate: (rest, filterCwd) => {
+    // Determine if it's a completion (TaskUpdate status: completed) or general update
+    const statusFlag = extractFlag(rest, "--status")
+    const filteredRest = rest.filter((arg, i) => {
+      if (arg === "--status") return false
+      if (i > 0 && rest[i - 1] === "--status") return false
+      return true
+    })
+    if (statusFlag === "completed") {
+      console.log(
+        `  ${DIM}Note: "TaskUpdate --status completed" is a native tool call. Use "swiz tasks complete" for CLI usage.${RESET}\n`
+      )
+      return runCompleteTask(filteredRest, filterCwd)
+    }
+    console.log(
+      `  ${DIM}Note: "TaskUpdate" is a native tool. Use "swiz tasks update" for CLI usage.${RESET}\n`
+    )
+    return runUpdateTask(filteredRest, filterCwd)
+  },
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
   adopt: async (rest) => {
@@ -448,7 +473,7 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
 // ─── Claude Code native-tool guard ───────────────────────────────────────────
 
 /** Subcommands with no native equivalent — only these may run via CLI inside Claude Code. */
-const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt"])
+const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt", "TaskCreate", "TaskUpdate"])
 
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()

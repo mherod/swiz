@@ -161,16 +161,26 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
 
   const stat = await file.stat()
   const mtimeMs = stat.mtimeMs ?? 0
+  const lastModified = stat.mtime ? new Date(stat.mtime).toUTCString() : undefined
+
   const cached = webAssetCache.get(filePath)
   if (cached && cached.mtimeMs === mtimeMs) {
     return new Response(cached.body, {
-      headers: { "cache-control": "no-cache", "content-type": cached.contentType },
+      headers: {
+        "cache-control": "max-age=5",
+        "content-type": cached.contentType,
+        ...(lastModified && { "last-modified": lastModified }),
+      },
     })
   }
 
   const built = await buildWebAsset(filePath, file, mtimeMs)
   return new Response(built.body, {
-    headers: { "cache-control": "no-cache", "content-type": built.contentType },
+    headers: {
+      "cache-control": "max-age=5",
+      "content-type": built.contentType,
+      ...(lastModified && { "last-modified": lastModified }),
+    },
   })
 }
 
