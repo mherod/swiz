@@ -17,6 +17,7 @@ describe("Task Audit Log Verification", () => {
   })
 
   it("should log action: 'field_update' when status does not change", async () => {
+    const sessionId = `${testSessionId}-field-update`
     const task: Task = {
       id: "1",
       subject: "Initial Subject",
@@ -26,14 +27,14 @@ describe("Task Audit Log Verification", () => {
       blockedBy: [],
     }
 
-    // Ensure session dir exists
-    await mkdir(sessionDir, { recursive: true })
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
 
     // Update only description
     task.description = "Updated Description"
-    await writeTaskUpdate(testSessionId, "1", task)
+    await writeTaskUpdate(sessionId, "1", task)
 
-    const auditLogPath = join(sessionDir, ".audit-log.jsonl")
+    const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
     const logContent = await readFile(auditLogPath, "utf-8")
     const entry = JSON.parse(logContent.trim().split("\n").pop()!)
 
@@ -41,9 +42,12 @@ describe("Task Audit Log Verification", () => {
     expect(entry.taskId).toBe("1")
     expect(entry.oldStatus).toBe("pending")
     expect(entry.newStatus).toBe("pending")
+
+    await rm(testSessionDir, { recursive: true, force: true })
   })
 
   it("should log action: 'status_change' when status changes", async () => {
+    const sessionId = `${testSessionId}-status-change`
     const task: Task = {
       id: "2",
       subject: "Status Task",
@@ -53,12 +57,12 @@ describe("Task Audit Log Verification", () => {
       blockedBy: [],
     }
 
-    // Ensure session dir exists
-    await mkdir(sessionDir, { recursive: true })
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
 
-    await writeTaskUpdate(testSessionId, "2", task, "in_progress")
+    await writeTaskUpdate(sessionId, "2", task, "in_progress")
 
-    const auditLogPath = join(sessionDir, ".audit-log.jsonl")
+    const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
     const logContent = await readFile(auditLogPath, "utf-8")
     const entry = JSON.parse(logContent.trim().split("\n").pop()!)
 
@@ -66,5 +70,7 @@ describe("Task Audit Log Verification", () => {
     expect(entry.taskId).toBe("2")
     expect(entry.oldStatus).toBe("pending")
     expect(entry.newStatus).toBe("in_progress")
+
+    await rm(testSessionDir, { recursive: true, force: true })
   })
 })
