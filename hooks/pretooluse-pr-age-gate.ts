@@ -74,12 +74,119 @@ function checkPrAge(
   return null
 }
 
-export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizHookOutput> {
+async function fetchGhPrMergeCreatedAt(
+  prNumber: string | null,
+  cwd: string
+): Promise<string | null> {
+  const repo = await getRepoSlug(cwd)
+  if (!repo) return null
+
+  if (prNumber) {
+    const cached = await getIssueStoreReader().getPullRequest<{ createdAt: string }>(
+      repo,
+      parseInt(prNumber, 10)
+    )
+    if (cached?.createdAt) return cached.createdAt
+  }
+
+  const viewArgs = prNumber
+    ? [
+        "pr",
+        "view",
+        prNumber,
+        "--json",
+        "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
+      ]
+    : [
+        "pr",
+        "view",
+        "--json",
+        "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
+      ]
+  const pr = await ghJson<{ number: number; createdAt: string }>(viewArgs, cwd)
+  if (pr) {
+    getIssueStore().upsertPullRequests(repo, [pr])
+  }
+  return pr?.createdAt ?? null
+}
+
+async function evaluateGhPrMerge(
+  command: string,
+  cwd: string,
+  gracePeriodMs: number,
+  graceMinutes: number
+): Promise<SwizHookOutput | null> {
+  const prNumber = extractPrNumber(command)
+  const createdAtStr = await fetchGhPrMergeCreatedAt(prNumber, cwd)
+  if (!createdAtStr) return {}
+  return checkPrAge(createdAtStr, gracePeriodMs, graceMinutes)
+}
+
+async function checkGitMergeBranch(command: string, cwd: string): Promise<string | null> {
+  const branch = extractMergeBranch(command)
+  if (!branch) return null
+
+  const branchName = branch.replace(/^origin\//, "")
+
+  const currentBranch = await git(["branch", "--show-current"], cwd)
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (branchName === defaultBranch || branchName === currentBranch) return null
+  return branchName
+}
+
+async function fetchGitMergePrCreatedAt(branchName: string, cwd: string): Promise<string | null> {
+  const branchRepo = await getRepoSlug(cwd)
+  if (!branchRepo) return null
+
+  const stored = await getIssueStoreReader().listPullRequests<{
+    number: number
+    headRefName: string
+    createdAt: string
+  }>(branchRepo)
+  const cached = stored.find((p) => p.headRefName === branchName)
+  if (cached?.createdAt) return cached.createdAt
+
+  const pr = await getOpenPrForBranch<{ number: number; createdAt: string }>(
+    branchName,
+    cwd,
+    "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt"
+  )
+  if (pr) {
+    getIssueStore().upsertPullRequests(branchRepo, [pr])
+  }
+  return pr?.createdAt ?? null
+}
+
+async function evaluateGitMerge(
+  command: string,
+  cwd: string,
+  gracePeriodMs: number,
+  graceMinutes: number
+): Promise<SwizHookOutput | null> {
+  const branchName = await checkGitMergeBranch(command, cwd)
+  if (!branchName) return {}
+
+  const prCreatedAt = await fetchGitMergePrCreatedAt(branchName, cwd)
+  if (!prCreatedAt) return {}
+
+  return checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
+}
+
+function parseCommandAndCwd(input: unknown): { command: string; cwd: string } | null {
   const parsed = toolHookInputSchema.parse(input)
-  if (!isShellTool(parsed.tool_name ?? "")) return {}
+  if (!isShellTool(parsed.tool_name ?? "")) return null
 
   const toolInput = (parsed.tool_input ?? {}) as Record<string, any>
   const command: string = String(toolInput.command ?? "")
+  const cwd: string = (toolInput.cwd as string) ?? parsed.cwd ?? process.cwd()
+
+  return { command, cwd }
+}
+
+export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizHookOutput> {
+  const parsed = parseCommandAndCwd(input)
+  if (!parsed) return {}
+  const { command, cwd } = parsed
 
   const isGhPrMerge = GH_PR_MERGE_RE.test(command)
   const isGitMerge = GIT_MERGE_RE.test(command)
@@ -91,83 +198,12 @@ export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizH
   if (graceMinutes <= 0) return {}
   const gracePeriodMs = graceMinutes * 60 * 1000
 
-  const cwd: string = (toolInput.cwd as string) ?? parsed.cwd ?? process.cwd()
-
   if (isGhPrMerge) {
-    const prNumber = extractPrNumber(command)
-    const repo = await getRepoSlug(cwd)
-    let createdAtStr: string | null = null
-
-    if (prNumber && repo) {
-      const cached = await getIssueStoreReader().getPullRequest<{ createdAt: string }>(
-        repo,
-        parseInt(prNumber, 10)
-      )
-      createdAtStr = cached?.createdAt ?? null
-    }
-
-    if (!createdAtStr) {
-      const viewArgs = prNumber
-        ? [
-            "pr",
-            "view",
-            prNumber,
-            "--json",
-            "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
-          ]
-        : [
-            "pr",
-            "view",
-            "--json",
-            "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
-          ]
-      const pr = await ghJson<{ number: number; createdAt: string }>(viewArgs, cwd)
-      if (pr && repo) {
-        getIssueStore().upsertPullRequests(repo, [pr])
-      }
-      createdAtStr = pr?.createdAt ?? null
-    }
-
-    if (!createdAtStr) return {}
-    const blocked = checkPrAge(createdAtStr, gracePeriodMs, graceMinutes)
-    if (blocked) return blocked
+    const result = await evaluateGhPrMerge(command, cwd, gracePeriodMs, graceMinutes)
+    if (result) return result
   } else if (isGitMerge) {
-    const branch = extractMergeBranch(command)
-    if (!branch) return {}
-
-    const branchName = branch.replace(/^origin\//, "")
-
-    const currentBranch = await git(["branch", "--show-current"], cwd)
-    const defaultBranch = await getDefaultBranch(cwd)
-    if (branchName === defaultBranch) return {}
-    if (branchName === currentBranch) return {}
-
-    let prCreatedAt: string | null = null
-    const branchRepo = await getRepoSlug(cwd)
-    if (branchRepo) {
-      const stored = await getIssueStoreReader().listPullRequests<{
-        number: number
-        headRefName: string
-        createdAt: string
-      }>(branchRepo)
-      prCreatedAt = stored.find((p) => p.headRefName === branchName)?.createdAt ?? null
-    }
-
-    if (!prCreatedAt) {
-      const pr = await getOpenPrForBranch<{ number: number; createdAt: string }>(
-        branchName,
-        cwd,
-        "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt"
-      )
-      if (pr && branchRepo) {
-        getIssueStore().upsertPullRequests(branchRepo, [pr])
-      }
-      prCreatedAt = pr?.createdAt ?? null
-    }
-
-    if (!prCreatedAt) return {}
-    const blocked = checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
-    if (blocked) return blocked
+    const result = await evaluateGitMerge(command, cwd, gracePeriodMs, graceMinutes)
+    if (result) return result
   }
 
   return preToolUseAllow("PR age grace period has elapsed — merge allowed")
