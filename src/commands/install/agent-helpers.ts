@@ -3,8 +3,10 @@ import type { AgentDef } from "../../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../../ansi.ts"
 import { isManagedSwizCommand, isSwizCommand, LEGACY_HOOK_DIRS } from "../../swiz-hook-commands.ts"
 import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
-import { backup, readFileText, readJsonFile } from "../../utils/file-utils.ts"
+import { readFileText, readJsonFile } from "../../utils/file-utils.ts"
 import { collectCommands, mergeConfig } from "./config-helpers.ts"
+import { writeWithBackup } from "./file-helpers.ts"
+import { buildProposedAgentSettings, extractOldHooks } from "./settings-helpers.ts"
 
 export function logUnconfigurableAgent(agent: AgentDef): void {
   console.log(`  ${BOLD}${agent.name}${RESET} → ${YELLOW}hooks not yet user-configurable${RESET}`)
@@ -14,27 +16,6 @@ export function logUnconfigurableAgent(agent: AgentDef): void {
   console.log(
     `  settings file format for user hooks. Tool mappings are tracked for when this ships.${RESET}\n`
   )
-}
-
-export function extractOldHooks(
-  existing: Record<string, any>,
-  agent: AgentDef
-): Record<string, any> {
-  const raw = agent.wrapsHooks
-    ? (((existing as Record<string, any>).hooks as Record<string, any>) ?? {})
-    : ((existing[agent.hooksKey] as Record<string, any>) ?? {})
-  return typeof raw === "object" && !Array.isArray(raw) ? raw : {}
-}
-
-export function buildProposedAgentSettings(
-  existing: Record<string, any>,
-  agent: AgentDef,
-  config: Record<string, unknown[]>
-): string {
-  const proposed = agent.wrapsHooks
-    ? { ...agent.wrapsHooks, hooks: config }
-    : { ...existing, [agent.hooksKey]: config }
-  return JSON.stringify(proposed, null, 2)
 }
 
 export function reportDryRunAgentInstall(
@@ -96,8 +77,7 @@ export function reportDryRunAgentInstall(
 }
 
 export async function writeAgentSettings(agent: AgentDef, newText: string): Promise<void> {
-  await backup(agent.settingsPath)
-  await Bun.write(agent.settingsPath, `${newText}\n`)
+  await writeWithBackup(agent.settingsPath, `${newText}\n`)
 
   // Verify the write persisted (some agents watch and revert their settings)
   await new Promise((r) => setTimeout(r, 1500))

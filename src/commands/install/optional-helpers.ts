@@ -8,7 +8,8 @@ import {
 } from "../../launch-agents.ts"
 import { swizPrPollErrorLogPath, swizPrPollLogPath } from "../../temp-paths.ts"
 import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
-import { backup, readFileText, readJsonFile } from "../../utils/file-utils.ts"
+import { readFileText, readJsonFile } from "../../utils/file-utils.ts"
+import { exists, removeFile, writeWithBackup } from "./file-helpers.ts"
 
 // ─── Status line configuration ───────────────────────────────────────────────
 
@@ -42,9 +43,8 @@ export async function installStatusLine(dryRun: boolean): Promise<void> {
     return
   }
 
-  await backup(settingsPath)
   const proposed = { ...existing, statusLine: { type: "command", command: STATUS_LINE_CMD } }
-  await Bun.write(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
+  await writeWithBackup(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
   console.log(`  ${GREEN}✓${RESET} statusLine configured in ${settingsPath}\n`)
 }
 
@@ -77,10 +77,9 @@ export async function uninstallStatusLine(dryRun: boolean): Promise<void> {
     return
   }
 
-  await backup(settingsPath)
   const proposed = { ...existing }
   delete proposed.statusLine
-  await Bun.write(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
+  await writeWithBackup(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
   console.log(`  ${GREEN}✓${RESET} statusLine removed from ${settingsPath}\n`)
 }
 
@@ -167,11 +166,10 @@ export async function installPrPoll(dryRun: boolean): Promise<void> {
 }
 
 export async function uninstallPrPoll(dryRun: boolean): Promise<void> {
-  const file = Bun.file(PR_POLL_PLIST)
-  const exists = await file.exists()
+  const isInstalled = await exists(PR_POLL_PLIST)
 
   if (dryRun) {
-    if (!exists) {
+    if (!isInstalled) {
       console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
     } else {
       console.log(`  ${RED}- prPoll LaunchAgent: unload + trash ${PR_POLL_PLIST}${RESET}\n`)
@@ -179,18 +177,13 @@ export async function uninstallPrPoll(dryRun: boolean): Promise<void> {
     return
   }
 
-  if (!exists) {
+  if (!isInstalled) {
     console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
     return
   }
 
   unloadLaunchAgentSync(PR_POLL_PLIST)
-  const proc = Bun.spawnSync(["trash", PR_POLL_PLIST])
-  if (proc.exitCode !== 0) {
-    throw new Error(
-      `Failed to trash ${PR_POLL_PLIST} — is the trash CLI installed? (${proc.exitCode ?? "unknown"})`
-    )
-  }
+  await removeFile(PR_POLL_PLIST)
   console.log(`  ${GREEN}✓${RESET} prPoll LaunchAgent unloaded and removed:\n`)
   console.log(`    ${DIM}${PR_POLL_PLIST}${RESET}\n`)
 }

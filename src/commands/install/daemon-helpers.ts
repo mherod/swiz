@@ -11,6 +11,7 @@ import {
 } from "../../launch-agents.ts"
 import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
 import { readFileText } from "../../utils/file-utils.ts"
+import { removeFile } from "./file-helpers.ts"
 
 /** Minimum PATH directories the daemon needs. /usr/sbin is required for
  *  lsof and pgrep; /opt/homebrew/bin for bun on Apple Silicon. */
@@ -130,26 +131,7 @@ export async function uninstallDaemonLaunchAgent(): Promise<void> {
     await killLaunchAgentProcesses(SWIZ_DAEMON_LABEL)
   }
 
-  const file = Bun.file(plistPath)
-  if (await file.exists()) {
-    try {
-      const rm = Bun.spawn(["trash", plistPath], {
-        stdout: "ignore",
-        stderr: "pipe",
-      })
-      await rm.exited
-      if (rm.exitCode !== 0) {
-        // Fallback to rm -f if trash fails
-        const rmForce = Bun.spawn(["rm", "-f", plistPath])
-        await rmForce.exited
-      }
-      console.log(`Removed ${plistPath}`)
-    } catch (_e) {
-      // Fallback to rm -f if spawn fails
-      const rmForce = Bun.spawn(["rm", "-f", plistPath])
-      await rmForce.exited
-    }
-  }
+  await removeFile(plistPath)
 
   if (isLoaded) {
     console.log(`Unloaded ${SWIZ_DAEMON_LABEL}`)

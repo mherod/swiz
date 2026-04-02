@@ -6,13 +6,19 @@ import { AGENTS, getAgent } from "../agents.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import {
+  extractMandatedSkillTools,
   findSkills,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   stripFrontmatter,
 } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
-import { expandInlineCommands, substituteArgs } from "../utils/skill-content.ts"
+import {
+  eliminatePositionalArgs,
+  expandInlineCommands,
+  substituteArgs,
+  unwrapInlineCommands,
+} from "../utils/skill-content.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
@@ -299,15 +305,122 @@ async function syncSkills(options: {
 
 // ─── Flag parsing and routing ───────────────────────────────────────────────
 
+async function exportCommand(options: {
+  from: string
+  to: string
+  dryRun: boolean
+  overwrite: boolean
+  name?: string
+}): Promise<void> {
+  const { from, to, dryRun, overwrite, name } = options
+  const { fromAgent, toAgent } = resolveAgentPair(from, to)
+
+  if (toAgent.id !== "junie") {
+    throw new Error(`Command export is currently only supported for the 'junie' agent.`)
+  }
+
+  const fromSkillsDir = primarySkillDir(from)
+  const commandsDir = join(HOME, `.${toAgent.id}`, "commands")
+  const orderedSkillNames = name ? [name] : await discoverSkillNames(fromSkillsDir)
+
+  if (orderedSkillNames.length === 0) {
+    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
+    return
+  }
+
+  console.log(
+    dryRun
+      ? `Dry run: exporting ${fromAgent.name} skills to ${toAgent.name} commands (no files will be written).`
+      : `Exporting ${fromAgent.name} skills to ${toAgent.name} commands.`
+  )
+  if (!dryRun) await mkdir(commandsDir, { recursive: true })
+
+  let exported = 0,
+    overwritten = 0,
+    skipped = 0
+
+  for (const skillName of orderedSkillNames) {
+    const targetFile = join(commandsDir, `${skillName}.md`)
+    const targetExists = existsSync(targetFile)
+
+    if (targetExists && !overwrite) {
+      skipped++
+      console.log(`  - skipped ${skillName} (already exists)`)
+      continue
+    }
+
+    try {
+      const original = await Bun.file(join(fromSkillsDir, skillName, "SKILL.md")).text()
+      const { content: convertedContent, unmapped } = convertSkillContent(
+        original,
+        fromAgent,
+        toAgent,
+        AGENTS
+      )
+      const description = parseFrontmatterField(original, "description") || ""
+      let convertedBody = stripFrontmatter(convertedContent).trim()
+
+      // Transform skill variables to default command values
+      convertedBody = eliminatePositionalArgs(convertedBody)
+      convertedBody = unwrapInlineCommands(convertedBody)
+
+      const frontmatter = ["---", `name: ${skillName}`, `description: ${description}`]
+
+      const allowedTools = extractMandatedSkillTools(convertedContent)
+      if (allowedTools.length > 0) {
+        frontmatter.push(`allowed-tools: ${allowedTools.join(", ")}`)
+      }
+
+      frontmatter.push("---")
+
+      const commandContent = [...frontmatter, "", convertedBody, ""].join("\n")
+
+      if (!dryRun) {
+        await Bun.write(targetFile, commandContent)
+      }
+
+      const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
+      if (
+        logSkillAction(
+          skillName + ".md" + warnSuffix,
+          targetExists,
+          dryRun,
+          "exported",
+          "export"
+        ) === "overwrite"
+      ) {
+        overwritten++
+      } else {
+        exported++
+      }
+    } catch (e) {
+      console.log(
+        `  - failed to export ${skillName}: ${e instanceof Error ? e.message : String(e)}`
+      )
+    }
+  }
+
+  console.log(
+    `\nSummary: ${exported} exported, ${overwritten} overwritten, ${skipped} skipped` +
+      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
+  )
+}
+
 function extractFlagValue(args: string[], flag: string): string | null {
   const idx = args.indexOf(flag)
   return idx >= 0 ? (args[idx + 1] ?? null) : null
 }
 
-function validateTransferExclusivity(sync: boolean, syncGemini: boolean, convert: boolean): void {
-  if ((sync || syncGemini) && convert)
-    throw new Error("--sync/--sync-gemini and --convert are mutually exclusive.")
-  if (sync && syncGemini) throw new Error("--sync and --sync-gemini are mutually exclusive.")
+function validateTransferExclusivity(
+  sync: boolean,
+  syncGemini: boolean,
+  convert: boolean,
+  toCommand: boolean
+): void {
+  const flags = [sync, syncGemini, convert, toCommand].filter(Boolean).length
+  if (flags > 1) {
+    throw new Error("--sync, --sync-gemini, --convert, and --to-command are mutually exclusive.")
+  }
 }
 
 async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
@@ -316,6 +429,22 @@ async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean
   if (!from) throw new Error("--convert requires --from <agent>.")
   if (!to) throw new Error("--convert requires --to <agent>.")
   await convertSkills({ from, to, dryRun, overwrite })
+}
+
+async function handleToCommand(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
+  const from = extractFlagValue(args, "--from")
+  if (!from) throw new Error("--to-command requires --from <agent>.")
+  // Target agent is always junie for commands
+  const to = "junie"
+
+  const flagsWithValue = new Set(["--from", "--to"])
+  const positionals = args.filter(
+    (a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? "")
+  )
+  // The first positional after removing flags is considered the specific skill name
+  const name = positionals[0]
+
+  await exportCommand({ from, to, dryRun, overwrite, name })
 }
 
 async function handleSync(
@@ -339,11 +468,13 @@ async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
   const sync = args.includes("--sync")
   const syncGemini = args.includes("--sync-gemini")
   const convert = args.includes("--convert")
-  if (!sync && !syncGemini && !convert) return false
-  validateTransferExclusivity(sync, syncGemini, convert)
+  const toCommand = args.includes("--to-command")
+  if (!sync && !syncGemini && !convert && !toCommand) return false
+  validateTransferExclusivity(sync, syncGemini, convert, toCommand)
   const dryRun = args.includes("--dry-run")
   const overwrite = args.includes("--overwrite")
   if (convert) await handleConvert(args, dryRun, overwrite)
+  else if (toCommand) await handleToCommand(args, dryRun, overwrite)
   else await handleSync(args, syncGemini, dryRun, overwrite)
   return true
 }
@@ -354,7 +485,7 @@ export const skillCommand: Command = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -374,15 +505,20 @@ export const skillCommand: Command = {
       description: "Convert skills between agents, remapping tool names to target equivalents",
     },
     {
+      flags: "--to-command",
+      description: "Transform skills from --from <agent> to Junie commands",
+    },
+    {
       flags: "--from <agent>",
-      description: "Source agent ID for --sync or --convert (claude|cursor|gemini|codex|junie)",
+      description:
+        "Source agent ID for --sync, --convert, or --to-command (claude|cursor|gemini|codex|junie)",
     },
     {
       flags: "--to <agent>",
       description: "Target agent ID for --sync or --convert (claude|cursor|gemini|codex|junie)",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
-    { flags: "--overwrite", description: "Allow overwriting existing target skills" },
+    { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
   ],
   async run(args) {
     const handled = await handleSkillTransferArgs(args)
@@ -390,7 +526,7 @@ export const skillCommand: Command = {
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(
-        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, or --convert."
+        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, --convert, or --to-command."
       )
     }
 
