@@ -127,10 +127,6 @@ export class TranscriptMonitor {
     ])
     if (!data) return
 
-    void logPseudoHook(
-      `checkProject: autoSteer=${autoSteerEnabled} speak=${speakEnabled} session=${latestSession.id} lastToolCallFingerprint=${data.lastToolCallFingerprint}`
-    )
-
     if (autoSteerEnabled && data.lastToolCallFingerprint) {
       const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)
       if (prevFingerprint !== data.lastToolCallFingerprint) {
