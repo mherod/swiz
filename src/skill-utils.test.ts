@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import { getAgent } from "./agents.ts"
 import {
@@ -485,13 +484,176 @@ describe("findSkills (via swiz skill CLI)", () => {
 
 // ─── extractStepsFromSkill ───────────────────────────────────────────────────
 
+/** Inline fixtures — CI has no ~/.claude/skills; avoid coupling tests to live skill copies. */
+function fixtureNumberedStepsLikeApplyTypography(): string {
+  return [
+    "---",
+    "name: apply-typography-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "1. Read the target file or directory before editing.",
+    "2. Second step for typography review.",
+    "3. Third step adjust font sizes.",
+    "4. Fourth step tune line height.",
+    "5. Fifth step verify contrast.",
+    "6. Sixth step check headings.",
+    "7. Seventh step polish lists.",
+    "8. Eighth step spacing pass.",
+    "9. Ninth step final read.",
+    "10. Run `pnpm lint` on touched files.",
+    "",
+    "## Detailed Reference",
+    "",
+    "This section must not leak into extracted step subjects.",
+  ].join("\n")
+}
+
+function fixtureSubheadedStepsLikeCiStatus(): string {
+  return [
+    "---",
+    "name: ci-status-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "### 1. Plan analysis approach",
+    "Outline checks before running shell commands.",
+    "",
+    "### 2. Gather workflow identifiers",
+    "Collect run IDs from GitHub.",
+    "",
+    "### 3. Review failure logs carefully",
+    "Inspect job output for root cause.",
+  ].join("\n")
+}
+
+function fixtureReflectOnSessionMistakesLike(): string {
+  return [
+    "---",
+    "name: reflect-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "### 1. Full session review (honest audit)",
+    "Start from user intent and trace decisions.",
+    "",
+    "### 2. Identify recurring failure modes",
+    "Note patterns that showed up twice or more.",
+    "",
+    "### 3. Separate environment from judgment errors",
+    "Classify what was knowable vs noise.",
+    "",
+    "### 4. Capture concrete countermeasures",
+    "Each lesson maps to one behavior change.",
+    "",
+    "### 5. Prioritize top three improvements",
+    "Rank by impact for the next session.",
+    "",
+    "### 6. Write actionable follow-ups",
+    "Prefer verbs and owners over vague intent.",
+  ].join("\n")
+}
+
+function fixtureStashToBranchLike(): string {
+  return [
+    "---",
+    "name: stash-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "### 1. Plan Work (MANDATORY) before touching stash",
+    "List risks and recovery path.",
+    "",
+    "### 2. Create a dedicated recovery branch",
+    "Branch from a known-good base.",
+    "",
+    "### 3. Apply stash onto the branch",
+    "Resolve conflicts immediately.",
+    "",
+    "### 4. Run targeted quality checks",
+    "Lint or tests for touched areas.",
+    "",
+    "### 5. Commit in small logical chunks",
+    "Preserve bisect-friendly history.",
+    "",
+    "### 6. Push or open PR when green",
+    "Share the recovered work safely.",
+  ].join("\n")
+}
+
+function fixtureCommitSkillStepHeadings(): string {
+  return [
+    "---",
+    "name: commit-fixture",
+    "---",
+    "",
+    "## Context",
+    "Conventional commit workflow.",
+    "",
+    "## Step 0: Task Preflight (MANDATORY — before any shell)",
+    "Ensure an in-progress task exists per project rules.",
+    "",
+    "## Step 1: Stage and commit",
+    "Stage files and write a Conventional Commits message.",
+  ].join("\n")
+}
+
+function fixturePushSkillStepHeadings(): string {
+  return [
+    "---",
+    "name: push-fixture",
+    "---",
+    "",
+    "## Your Task",
+    "",
+    "### Step 0: Task Preflight",
+    "Call TaskList before running git or gh commands.",
+    "",
+    "### Step 1: Collaboration Guard",
+    "Verify branch policy and solo vs shared repo signals.",
+  ].join("\n")
+}
+
+function fixtureCiStatusQualityMix(): string {
+  return [
+    "---",
+    "name: ci-quality-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "### 1. Plan",
+    "Single-word subject should be filtered by quality rules.",
+    "",
+    "### 2. Retrieve failing job logs",
+    "Multi-word subject should be kept.",
+    "",
+    "### 3. `gh run view` for the failing run",
+    "Backtick-dominant subject should be filtered.",
+  ].join("\n")
+}
+
+function fixturePruneBranchesLike(): string {
+  return [
+    "---",
+    "name: prune-branches-fixture",
+    "---",
+    "",
+    "## Steps",
+    "",
+    "### 1. List merged local branches",
+    "Use read-only git commands first.",
+    "",
+    "### 2. Delete stale branches intentionally",
+    "Confirm each name before removing.",
+  ].join("\n")
+}
+
 describe("extractStepsFromSkill", () => {
-  const skillsDir = join(homedir(), ".claude", "skills")
-
-  async function readSkill(name: string): Promise<string> {
-    return Bun.file(join(skillsDir, name, "SKILL.md")).text()
-  }
-
   test("returns empty array for content with no ## Steps section", () => {
     const content = "---\nname: foo\n---\n\n## Context\n\nSome content.\n"
     expect(extractStepsFromSkill(content)).toEqual([])
@@ -501,8 +663,8 @@ describe("extractStepsFromSkill", () => {
     expect(extractStepsFromSkill("")).toEqual([])
   })
 
-  test("extracts simple numbered steps from apply-typography", async () => {
-    const content = await readSkill("apply-typography")
+  test("extracts simple numbered steps from apply-typography-shaped content", () => {
+    const content = fixtureNumberedStepsLikeApplyTypography()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBe(10)
@@ -514,8 +676,8 @@ describe("extractStepsFromSkill", () => {
     }
   })
 
-  test("extracts sub-headed steps from ci-status", async () => {
-    const content = await readSkill("ci-status")
+  test("extracts sub-headed steps from ci-status-shaped content", () => {
+    const content = fixtureSubheadedStepsLikeCiStatus()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBeGreaterThanOrEqual(3)
@@ -524,16 +686,16 @@ describe("extractStepsFromSkill", () => {
     expect(steps[0]?.description).toBeDefined()
   })
 
-  test("extracts steps from reflect-on-session-mistakes", async () => {
-    const content = await readSkill("reflect-on-session-mistakes")
+  test("extracts steps from reflect-on-session-mistakes-shaped content", () => {
+    const content = fixtureReflectOnSessionMistakesLike()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBe(6)
     expect(steps[0]?.subject).toContain("Full session review")
   })
 
-  test("extracts sub-headed steps from stash-to-branch", async () => {
-    const content = await readSkill("stash-to-branch")
+  test("extracts sub-headed steps from stash-to-branch-shaped content", () => {
+    const content = fixtureStashToBranchLike()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBeGreaterThanOrEqual(6)
@@ -541,8 +703,8 @@ describe("extractStepsFromSkill", () => {
     expect(steps[0]?.description).toBeDefined()
   })
 
-  test("steps do not include content from sections after ## Steps", async () => {
-    const content = await readSkill("apply-typography")
+  test("steps do not include content from sections after ## Steps", () => {
+    const content = fixtureNumberedStepsLikeApplyTypography()
     const steps = extractStepsFromSkill(content)
 
     for (const step of steps) {
@@ -550,18 +712,18 @@ describe("extractStepsFromSkill", () => {
     }
   })
 
-  test("extracts ## Step N: headings from commit skill", async () => {
-    const content = await readSkill("commit")
+  test("extracts ## Step N: headings from commit-skill-shaped content", () => {
+    const content = fixtureCommitSkillStepHeadings()
     const steps = extractStepsFromSkill(content)
 
-    // commit skill has ## Step 0: Task Preflight as a top-level step heading
+    // Top-level ## Step 0: … headings (no dedicated ## Steps section)
     expect(steps.length).toBeGreaterThanOrEqual(1)
     expect(steps[0]?.subject).toContain("Task Preflight")
     expect(steps[0]?.description).toBeDefined()
   })
 
-  test("extracts ### Step N: headings from push skill", async () => {
-    const content = await readSkill("push")
+  test("extracts ### Step N: headings from push-skill-shaped content", () => {
+    const content = fixturePushSkillStepHeadings()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBeGreaterThanOrEqual(2)
@@ -660,8 +822,8 @@ describe("extractStepsFromSkill", () => {
     expect(steps[1]?.description).toBe("Line 2.")
   })
 
-  test("subject and description are properly separated for sub-headed steps", async () => {
-    const content = await readSkill("prune-branches")
+  test("subject and description are properly separated for sub-headed steps", () => {
+    const content = fixturePruneBranchesLike()
     const steps = extractStepsFromSkill(content)
 
     expect(steps.length).toBeGreaterThanOrEqual(2)
@@ -723,9 +885,8 @@ describe("filterQualitySteps", () => {
     expect(filterQualitySteps(steps)).toEqual(steps)
   })
 
-  test("filters ci-status skill steps to only quality subjects", async () => {
-    const skillsDir = join(homedir(), ".claude", "skills")
-    const content = await Bun.file(join(skillsDir, "ci-status", "SKILL.md")).text()
+  test("filters mixed-quality sub-headed steps like ci-status would produce", () => {
+    const content = fixtureCiStatusQualityMix()
     const allSteps = extractStepsFromSkill(content)
     const filtered = filterQualitySteps(allSteps)
 
