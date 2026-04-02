@@ -31,6 +31,35 @@ import {
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
 import type { ToolHookInput } from "./schemas.ts"
 
+async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
+  const injected = (input as Record<string, any>)._effectiveSettings as
+    | Record<string, any>
+    | undefined
+  if (injected && typeof injected.pushGate !== "undefined") {
+    return injected.pushGate === true
+  }
+
+  const { getSwizSettingsPath, readSwizSettings } = await import("../src/settings.ts")
+  const path = getSwizSettingsPath()
+  if (!path) return false
+  const file = Bun.file(path)
+  if (!(await file.exists())) return false
+  try {
+    const settings = await readSwizSettings({ strict: true })
+    return settings.pushGate
+  } catch {
+    // Parse failure on a present file → fail-closed: keep the gate active.
+    return true
+  }
+}
+
+async function isPushCommand(input: ToolHookInput): Promise<boolean> {
+  const { isShellTool, GIT_PUSH_RE } = await import("../src/utils/hook-utils.ts")
+  if (!isShellTool(input?.tool_name ?? "")) return false
+  const command: string = (input?.tool_input?.command as string) ?? ""
+  return GIT_PUSH_RE.test(command)
+}
+
 const pretoolusNoPushWhenInstructed: SwizHook = {
   name: "pretooluse-no-push-when-instructed",
   event: "preToolUse",
@@ -38,43 +67,13 @@ const pretoolusNoPushWhenInstructed: SwizHook = {
   timeout: 5,
 
   async run(input: ToolHookInput): Promise<SwizHookOutput> {
-    // ── Feature flag check ────────────────────────────────────────────────────
-    // Prefer dispatcher-injected settings (fast path). Fall back to disk read
-    // with fail-closed behaviour: malformed settings.json keeps the gate active.
-    const injected = (input as Record<string, any>)._effectiveSettings as
-      | Record<string, any>
-      | undefined
-    let pushGateEnabled: boolean
-    if (injected && typeof injected.pushGate !== "undefined") {
-      pushGateEnabled = injected.pushGate === true
-    } else {
-      const { getSwizSettingsPath, readSwizSettings } = await import("../src/settings.ts")
-      const path = getSwizSettingsPath()
-      if (!path) return preToolUseAllow("")
-      const file = Bun.file(path)
-      if (!(await file.exists())) return preToolUseAllow("")
-      try {
-        const settings = await readSwizSettings({ strict: true })
-        pushGateEnabled = settings.pushGate
-      } catch {
-        // Parse failure on a present file → fail-closed: keep the gate active.
-        pushGateEnabled = true
-      }
-    }
-    if (!pushGateEnabled) return preToolUseAllow("")
+    if (!(await isPushGateActive(input))) return preToolUseAllow("")
+    if (!(await isPushCommand(input))) return preToolUseAllow("")
 
-    // ── Push command check ────────────────────────────────────────────────────
-    const { isShellTool, GIT_PUSH_RE, readSessionLines } = await import(
-      "../src/utils/hook-utils.ts"
-    )
-    if (!isShellTool(input?.tool_name ?? "")) return preToolUseAllow("")
-    const command: string = (input?.tool_input?.command as string) ?? ""
-    if (!GIT_PUSH_RE.test(command)) return preToolUseAllow("")
-
-    // ── Transcript scan ───────────────────────────────────────────────────────
     const transcriptPath: string = input?.transcript_path ?? ""
     if (!transcriptPath) return preToolUseAllow("")
 
+    const { readSessionLines } = await import("../src/utils/hook-utils.ts")
     const state = scanPushGateFromJsonlLines(await readSessionLines(transcriptPath))
 
     if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
