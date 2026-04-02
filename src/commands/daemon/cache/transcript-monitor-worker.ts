@@ -39,14 +39,24 @@ if (parentPort) {
               },
             },
             cooldownRegistry: {
-              checkAndMark: (id: string, cooldown: number, cwd: string) => {
-                pp.postMessage({
-                  type: "checkAndMarkCooldown",
-                  id,
-                  cooldown,
-                  cwd,
-                } satisfies TranscriptMonitorParentMessage)
-                return false
+              checkAndMark: (hookId: string, cooldown: number, cwd: string) => {
+                const requestId = Math.random().toString(36).slice(2, 11)
+                return new Promise<boolean>((resolve) => {
+                  const handler = (m: TranscriptMonitorWorkerMessage) => {
+                    if (m.type === "cooldownCheckResponse" && m.requestId === requestId) {
+                      pp.off("message", handler)
+                      resolve(m.withinCooldown)
+                    }
+                  }
+                  pp.on("message", handler)
+                  pp.postMessage({
+                    type: "checkAndMarkCooldown",
+                    requestId,
+                    hookId,
+                    cooldown,
+                    cwd,
+                  } satisfies TranscriptMonitorParentMessage)
+                })
               },
             },
             projectSettingsCache: {

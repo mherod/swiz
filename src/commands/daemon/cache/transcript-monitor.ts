@@ -22,7 +22,9 @@ export class TranscriptMonitor {
   constructor(
     private caches: {
       manifestCache: { get: (cwd: string) => Promise<HookGroup[]> }
-      cooldownRegistry: { checkAndMark: (id: string, cooldown: number, cwd: string) => boolean }
+      cooldownRegistry: {
+        checkAndMark: (id: string, cooldown: number, cwd: string) => boolean | Promise<boolean>
+      }
       projectSettingsCache: {
         get: (cwd: string) => Promise<{ settings: ProjectSwizSettings | null }>
       }
@@ -64,7 +66,11 @@ export class TranscriptMonitor {
    * Returns true if any hook for the given event is within its cooldown window (dispatch should be skipped).
    * Marks the cooldown for the first non-cooled hook when returning false.
    */
-  private isEventOnCooldown(manifestGroups: HookGroup[], event: string, cwd: string): boolean {
+  private async isEventOnCooldown(
+    manifestGroups: HookGroup[],
+    event: string,
+    cwd: string
+  ): Promise<boolean> {
     const groups = manifestGroups.filter((g) => g.event === event)
     for (const group of groups) {
       for (const hook of group.hooks) {
@@ -72,7 +78,9 @@ export class TranscriptMonitor {
           ? (hook.hook.cooldownSeconds ?? 30)
           : (hook.cooldownSeconds ?? 30)
         const id = hookIdentifier(hook)
-        if (this.caches.cooldownRegistry.checkAndMark(id, cooldown, cwd)) {
+        const raw = this.caches.cooldownRegistry.checkAndMark(id, cooldown, cwd)
+        const withinCooldown = await Promise.resolve(raw)
+        if (withinCooldown) {
           void logPseudoHook(`${event} cooldown active for ${id} in ${cwd}, skipping`)
           stderrLog(
             "hook cooldown active",
@@ -142,7 +150,7 @@ export class TranscriptMonitor {
         }
 
         if (toolCallMessage) {
-          if (this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
+          if (await this.isEventOnCooldown(manifestGroups, "postToolUse", cwd)) return
 
           // Trigger postToolUse hook
           const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
@@ -200,7 +208,7 @@ export class TranscriptMonitor {
         }
 
         if (textMessage) {
-          if (this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
+          if (await this.isEventOnCooldown(manifestGroups, "notification", cwd)) return
 
           // Trigger notification hook for TTS
           const triggerMsg = `new assistant message detected in ${latestSession.id}, triggering speak`

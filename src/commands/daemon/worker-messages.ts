@@ -35,9 +35,16 @@ export type TranscriptMonitorWorkerMessage =
   | { type: "pruneOldSessions"; activeSessions: string[] }
   | { type: "manifestResponse"; id: string; manifest: HookGroup[] }
   | { type: "settingsResponse"; id: string; settings: ProjectSwizSettings | null }
+  | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean }
 
 export type TranscriptMonitorParentMessage =
   | { type: "initialized" }
   | { type: "getManifest"; id: string; cwd: string }
   | { type: "getSettings"; id: string; cwd: string }
-  | { type: "checkAndMarkCooldown"; id: string; cooldown: number; cwd: string }
+  | {
+      type: "checkAndMarkCooldown"
+      requestId: string
+      hookId: string
+      cooldown: number
+      cwd: string
+    }

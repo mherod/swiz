@@ -45,7 +45,13 @@ export class WorkerTranscriptMonitor
             break
           }
           case "checkAndMarkCooldown": {
-            this.caches.cooldownRegistry.checkAndMark(msg.id, msg.cooldown, msg.cwd)
+            const raw = this.caches.cooldownRegistry.checkAndMark(msg.hookId, msg.cooldown, msg.cwd)
+            const withinCooldown = await Promise.resolve(raw)
+            this.worker.postMessage({
+              type: "cooldownCheckResponse",
+              requestId: msg.requestId,
+              withinCooldown,
+            } satisfies TranscriptMonitorWorkerMessage)
             break
           }
         }
