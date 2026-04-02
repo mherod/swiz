@@ -11,6 +11,7 @@ import { sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
 import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
+import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { sessionPrefix }
@@ -156,9 +157,7 @@ export async function readTasks(
 
   try {
     const files = await readdir(dir)
-    const taskFiles = files.filter(
-      (f) => f.endsWith(".json") && !f.startsWith(".") && f !== "compact-snapshot.json"
-    )
+    const taskFiles = files.filter(isSessionTaskJsonFile)
     const tasks = await Promise.all(
       taskFiles.map(async (f) => {
         const filePath = join(dir, f)
@@ -199,7 +198,7 @@ export const SESSION_META_FILE = ".session-meta.json"
 async function countOpenTasks(dir: string, files: string[]): Promise<number> {
   let count = 0
   for (const f of files) {
-    if (!f.endsWith(".json") || f.startsWith(".") || f === "compact-snapshot.json") continue
+    if (!isSessionTaskJsonFile(f)) continue
     try {
       const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
       if (t.status && isIncompleteTaskStatus(t.status)) count++

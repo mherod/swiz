@@ -27,6 +27,7 @@ import {
   type SkillConflictEntry,
 } from "../skill-utils.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { isSessionTaskJsonFile } from "../tasks/task-file-utils.ts"
 import type { Command } from "../types.ts"
 import { readLines } from "../utils/file-utils.ts"
 import { formatBytes } from "../utils/format.ts"
@@ -1926,10 +1927,6 @@ async function findOldTaskFiles(
     }
   }
 
-  function isTaskJsonFile(file: string): boolean {
-    return file.endsWith(".json") && !file.startsWith(".") && file !== "compact-snapshot.json"
-  }
-
   async function statFileSafe(filePath: string) {
     try {
       const s = await stat(filePath)
@@ -1945,7 +1942,7 @@ async function findOldTaskFiles(
     file: string,
     cutoffMs: number
   ): Promise<OldTaskFileInfo | null> {
-    if (!isTaskJsonFile(file)) return null
+    if (!isSessionTaskJsonFile(file)) return null
     const filePath = join(sessionDir, file)
     const fileStat = await statFileSafe(filePath)
     if (!fileStat) return null
@@ -2261,8 +2258,7 @@ async function getRealSessionMtime(taskDirPath: string): Promise<number | null> 
 
   let maxMs = 0
   for (const file of taskEntries) {
-    if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json")
-      continue
+    if (!isSessionTaskJsonFile(file)) continue
     const p = join(taskDirPath, file)
     try {
       const s = await stat(p)
