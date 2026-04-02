@@ -56,6 +56,29 @@ async function buildWordLimitDenyReason(
   )
 }
 
+async function checkWordLimit(
+  input: FileEditHookInput & { _effectiveSettings?: { memoryWordThreshold?: number } }
+) {
+  const toolName = input.tool_name ?? ""
+  const filePath = input.tool_input?.file_path ?? ""
+  const wordThreshold = input._effectiveSettings?.memoryWordThreshold ?? 5000
+  const projectedContent = await computeProjectedContent(
+    toolName,
+    filePath,
+    (input.tool_input as Record<string, any>) ?? {}
+  )
+  if (projectedContent === null) return preToolUseAllow("")
+  const projectedWordCount = countMarkdownWords(projectedContent)
+
+  if (projectedWordCount > wordThreshold) {
+    return preToolUseDeny(
+      await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold)
+    )
+  }
+
+  return preToolUseAllow("")
+}
+
 const pretoolusClaudeMdWordLimit: SwizHook<FileEditHookInput> = {
   name: "pretooluse-claude-md-word-limit",
   event: "preToolUse",
@@ -68,26 +91,8 @@ const pretoolusClaudeMdWordLimit: SwizHook<FileEditHookInput> = {
     }
     if (!isFileEditForPath(input, "CLAUDE.md")) return {}
 
-    const toolName = input.tool_name ?? ""
-    const filePath = input.tool_input?.file_path ?? ""
-
     try {
-      const wordThreshold = input._effectiveSettings?.memoryWordThreshold ?? 5000
-      const projectedContent = await computeProjectedContent(
-        toolName,
-        filePath,
-        (input.tool_input as Record<string, any>) ?? {}
-      )
-      if (projectedContent === null) return preToolUseAllow("")
-      const projectedWordCount = countMarkdownWords(projectedContent)
-
-      if (projectedWordCount > wordThreshold) {
-        return preToolUseDeny(
-          await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold)
-        )
-      }
-
-      return preToolUseAllow("")
+      return await checkWordLimit(input)
     } catch {
       return preToolUseAllow("")
     }
