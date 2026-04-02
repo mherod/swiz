@@ -1,14 +1,21 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { rmSync, writeFileSync } from "node:fs"
+import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import { TranscriptIndexCache } from "./transcript-index-cache.ts"
 
-const TEST_TRANSCRIPT = join("/tmp", `test-transcript-${Date.now()}.jsonl`)
+const TEST_TRANSCRIPT = testTranscript("1")
 
 function cleanup() {
   try {
-    rmSync(TEST_TRANSCRIPT, { force: true })
+    void rm(TEST_TRANSCRIPT, { force: true })
   } catch {}
+}
+
+function testTranscript(name: string): string {
+  return join(
+    "/tmp",
+    `test-transcript-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
+  )
 }
 
 describe("TranscriptIndexCache", () => {
@@ -30,7 +37,7 @@ describe("TranscriptIndexCache", () => {
         },
       }),
     ]
-    writeFileSync(TEST_TRANSCRIPT, lines.join("\n"))
+    await Bun.write(TEST_TRANSCRIPT, lines.join("\n"))
 
     const cache = new TranscriptIndexCache()
     const index = await cache.get(TEST_TRANSCRIPT)
@@ -60,15 +67,18 @@ describe("TranscriptIndexCache", () => {
         },
       }),
     ]
-    writeFileSync(TEST_TRANSCRIPT, lines.join("\n"))
+    const blockedTestPath = testTranscript("blocked")
+    await Bun.write(blockedTestPath, lines.join("\n"))
 
     const cache = new TranscriptIndexCache()
-    const index = await cache.get(TEST_TRANSCRIPT)
+    const index = await cache.get(blockedTestPath)
 
     expect(index).not.toBeNull()
     if (index) {
       expect(index.blockedToolUseIds).toEqual(["tool-1"])
     }
+
+    void rm(blockedTestPath, { force: true }).catch(() => {})
   })
 
   test("handles missing file gracefully", async () => {
