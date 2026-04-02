@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, utimes, writeFile } from "node:fs/promises"
+import { mkdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { decodeProjectPath, walkDecode } from "./doctor/cleanup-path.ts"
@@ -93,8 +93,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  const proc = Bun.spawn(["rm", "-rf", TMP_HOME], { stdout: "pipe", stderr: "pipe" })
-  await proc.exited
+  await rm(TMP_HOME, { recursive: true, force: true })
 })
 
 // ─── walkDecode ───────────────────────────────────────────────────────────────
@@ -302,8 +301,7 @@ describe("cleanup with no .claude/projects directory", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", EMPTY_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(EMPTY_HOME, { recursive: true, force: true })
   })
 
   test("exits without error and prints informative message", async () => {
@@ -484,8 +482,7 @@ describe("cleanup stale-project detection", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", STALE_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(STALE_HOME, { recursive: true, force: true })
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
@@ -588,8 +585,7 @@ describe("cleanup task directory handling", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", TASK_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(TASK_HOME, { recursive: true, force: true })
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
@@ -669,8 +665,7 @@ describe("cleanup Gemini backup artifact detection", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", GEMINI_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(GEMINI_HOME, { recursive: true, force: true })
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
@@ -804,8 +799,7 @@ describe("cleanup old task files", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", TASK_FILE_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(TASK_FILE_HOME, { recursive: true, force: true })
   })
 
   test("dry-run reports old task files across task statuses", async () => {
@@ -871,8 +865,7 @@ describe("cleanup Junie sessions", () => {
   })
 
   afterAll(async () => {
-    const proc = Bun.spawn(["rm", "-rf", JUNIE_HOME], { stdout: "pipe", stderr: "pipe" })
-    await proc.exited
+    await rm(JUNIE_HOME, { recursive: true, force: true })
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
