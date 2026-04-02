@@ -6,8 +6,8 @@ import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 
 type ManageSubject = "mcp"
-type ManageAction = "list" | "add" | "remove" | "validate" | "show"
-type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop" | "junie"
+type ManageAction = "list" | "add" | "remove" | "validate" | "show" | "merge"
+type AgentId = Exclude<AgentSettingsId, "codex"> | "claude-desktop" | "junie" | "ai"
 type AgentScope = "global" | "project"
 
 interface McpServerDef {
@@ -38,6 +38,7 @@ interface ParsedManageArgs {
   args: string[]
   env: Record<string, string>
   targetAgents: AgentId[]
+  sourceAgents: AgentId[]
   /** When true, target project-scoped config files resolved from cwd. */
   project: boolean
 }
@@ -79,6 +80,13 @@ const GLOBAL_AGENTS: AgentConfig[] = [
     displayName: "Junie",
     resolvePath: (home) => join(home, ".junie", "mcp", "mcp.json"),
   },
+  {
+    id: "ai",
+    scope: "global",
+    flag: "--ai",
+    displayName: "AI",
+    resolvePath: (home) => join(home, ".ai", "mcp", "mcp.json"),
+  },
 ]
 
 /** Project-level MCP config files, resolved relative to the project root (cwd). */
@@ -111,6 +119,13 @@ const PROJECT_AGENTS: AgentConfig[] = [
     displayName: "Junie (project)",
     resolvePath: (cwd) => join(cwd, ".junie", "mcp", "mcp.json"),
   },
+  {
+    id: "ai",
+    scope: "project",
+    flag: "--ai",
+    displayName: "AI (project)",
+    resolvePath: (cwd) => join(cwd, ".ai", "mcp", "mcp.json"),
+  },
 ]
 
 /** Returns the appropriate agent list for the given scope. */
@@ -120,7 +135,7 @@ function agentList(project: boolean): AgentConfig[] {
 
 function usage(): string {
   return [
-    "Usage: swiz manage mcp <list|show|add|remove|validate> [options]",
+    "Usage: swiz manage mcp <list|show|add|remove|validate|merge> [options]",
     "Examples:",
     "  swiz manage mcp list",
     "  swiz manage mcp list --project",
@@ -130,7 +145,10 @@ function usage(): string {
     "  swiz manage mcp remove figma --claude --cursor",
     "  swiz manage mcp validate",
     "  swiz manage mcp validate --project",
-    "Agent flags (optional): --cursor --claude --claude-desktop --gemini --junie (default: all)",
+    "  swiz manage mcp merge --from ai --junie",
+    "  swiz manage mcp merge --from all --cursor --project",
+    "Agent flags (optional): --cursor --claude --claude-desktop --gemini --junie --ai (default: all)",
+    "Source flags (merge only): --from <agent|all>",
     "Scope flags (optional): --project (target project-level files; default: global home files)",
   ].join("\n")
 }
@@ -150,6 +168,7 @@ interface ManageParseState {
   actionArgs: string[]
   env: Record<string, string>
   selectedAgentFlags: Set<AgentId>
+  sourceAgentFlags: Set<AgentId | "all">
 }
 
 function consumeManageValueFlag(
@@ -171,6 +190,17 @@ function consumeManageValueFlag(
     if (!next) throw new Error(`Missing value for --env\n${usage()}`)
     const { key, val } = parseEnvAssignment(next)
     state.env[key] = val
+    return 1
+  }
+  if (token === "--from") {
+    if (!next) throw new Error(`Missing value for --from\n${usage()}`)
+    if (next === "all") {
+      state.sourceAgentFlags.add("all")
+    } else {
+      const agent = GLOBAL_AGENTS.find((a) => a.id === next || a.flag === `--${next}`)
+      if (!agent) throw new Error(`Unknown source agent: ${next}\n${usage()}`)
+      state.sourceAgentFlags.add(agent.id)
+    }
     return 1
   }
   return null
@@ -203,7 +233,14 @@ function consumeManageFlag(
   throw new Error(`Unexpected argument: ${token}\n${usage()}`)
 }
 
-const VALID_MCP_ACTIONS = new Set<ManageAction>(["list", "show", "add", "remove", "validate"])
+const VALID_MCP_ACTIONS = new Set<ManageAction>([
+  "list",
+  "show",
+  "add",
+  "remove",
+  "validate",
+  "merge",
+])
 const ACTIONS_REQUIRING_NAME = new Set<ManageAction>(["add", "remove", "show"])
 
 function validateManageAction(token: string): ManageAction {
@@ -220,6 +257,14 @@ function resolveTargetAgents(state: ManageParseState): AgentId[] {
     : agents.map((a) => a.id)
 }
 
+function resolveSourceAgents(state: ManageParseState): AgentId[] {
+  const agents = agentList(state.project)
+  if (state.sourceAgentFlags.has("all")) {
+    return agents.map((a) => a.id)
+  }
+  return agents.filter((a) => state.sourceAgentFlags.has(a.id)).map((a) => a.id)
+}
+
 export function parseManageArgs(args: string[]): ParsedManageArgs {
   if (args[0] !== "mcp")
     throw new Error(`Unknown manage subject: ${args[0] ?? "(none)"}\n${usage()}`)
@@ -230,6 +275,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     actionArgs: [],
     env: {},
     selectedAgentFlags: new Set(),
+    sourceAgentFlags: new Set(),
   }
 
   for (let i = 2; i < args.length; i++) {
@@ -242,6 +288,9 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     throw new Error(`"${action}" requires a server name\n${usage()}`)
   if (action === "add" && !state.command)
     throw new Error(`"add" requires --command <cmd>\n${usage()}`)
+  if (action === "merge" && state.sourceAgentFlags.size === 0) {
+    throw new Error(`"merge" requires --from <agent|all>\n${usage()}`)
+  }
 
   return {
     subject: "mcp",
@@ -251,6 +300,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     args: state.actionArgs,
     env: state.env,
     targetAgents: resolveTargetAgents(state),
+    sourceAgents: resolveSourceAgents(state),
     project: state.project,
   }
 }
@@ -438,10 +488,78 @@ async function validateMcpServers(parsed: ParsedManageArgs, base: string): Promi
   throw new Error(`MCP validation failed with ${issues.length} issue(s)`)
 }
 
+async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
+  const sourceServers: Record<string, McpServerDef> = {}
+
+  // 1. Gather all unique servers from source agents
+  for (const agentId of parsed.sourceAgents) {
+    const agent = getAgentConfig(agentId, parsed.project)
+    const path = agent.resolvePath(base)
+    try {
+      const json = await readMcpFile(path)
+      const servers = json.mcpServers ?? {}
+      for (const [name, server] of Object.entries(servers)) {
+        // Simple merge: later sources overwrite earlier ones if there's a collision
+        // in source list, but we usually expect unique names or identical configs.
+        sourceServers[name] = server
+      }
+    } catch (error) {
+      stderrLog(
+        "manage",
+        `Warning: Could not read source config for ${agent.displayName}: ${error}`
+      )
+    }
+  }
+
+  if (Object.keys(sourceServers).length === 0) {
+    console.log("No MCP servers found in source agents to merge.")
+    return
+  }
+
+  // 2. Merge into target agents
+  for (const agentId of parsed.targetAgents) {
+    // Skip if target is one of the sources (unless it's the only target and we want to consolidate)
+    // Actually, usually we merge into a specific target.
+    // If user didn't specify target agents, it defaults to all.
+    // We should probably only merge into targets that weren't the ONLY source.
+
+    const agent = getAgentConfig(agentId, parsed.project)
+    const path = agent.resolvePath(base)
+    const json = await readMcpFile(path)
+    const mcpServers = { ...(json.mcpServers ?? {}) }
+
+    let addedCount = 0
+    let updatedCount = 0
+
+    for (const [name, server] of Object.entries(sourceServers)) {
+      if (mcpServers[name]) {
+        // Check if it's actually different
+        if (JSON.stringify(mcpServers[name]) !== JSON.stringify(server)) {
+          updatedCount++
+        } else {
+          continue
+        }
+      } else {
+        addedCount++
+      }
+      mcpServers[name] = server
+    }
+
+    if (addedCount > 0 || updatedCount > 0) {
+      await writeMcpFile(path, { ...json, mcpServers })
+      console.log(
+        `Merged ${addedCount} new and ${updatedCount} updated servers into ${agent.displayName} (${path})`
+      )
+    } else {
+      console.log(`${agent.displayName} (${path}) is already up to date.`)
+    }
+  }
+}
+
 export const manageCommand: Command = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
-  usage: "swiz manage mcp <list|show|add|remove|validate> [options]",
+  usage: "swiz manage mcp <list|show|add|remove|validate|merge> [options]",
   options: [
     { flags: "mcp list", description: "List configured MCP servers across target agents" },
     { flags: "mcp show <name>", description: "Show a single MCP server definition" },
@@ -452,13 +570,21 @@ export const manageCommand: Command = {
     { flags: "mcp remove <name>", description: "Remove an MCP server entry" },
     { flags: "mcp validate", description: "Validate MCP server configuration files" },
     {
-      flags: "--cursor --claude --claude-desktop --gemini --junie",
+      flags: "mcp merge --from <agent|all>",
+      description: "Merge MCP servers from source agent(s) into target agents",
+    },
+    {
+      flags: "--cursor --claude --claude-desktop --gemini --junie --ai",
       description: "Limit action to selected agents",
+    },
+    {
+      flags: "--from <agent|all>",
+      description: "Specify source agent(s) for merge",
     },
     {
       flags: "--project",
       description:
-        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json, .junie/mcp/mcp.json)",
+        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json, .junie/mcp/mcp.json, .ai/mcp/mcp.json)",
     },
   ],
   async run(args) {
@@ -484,6 +610,8 @@ export const manageCommand: Command = {
         return removeMcpServer(parsed, base)
       case "validate":
         return validateMcpServers(parsed, base)
+      case "merge":
+        return mergeMcpServers(parsed, base)
     }
   },
 }

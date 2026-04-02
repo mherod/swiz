@@ -428,9 +428,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     isMonitoring = true
     void (async () => {
       try {
-        for (const cwd of registeredProjects) {
-          await transcriptMonitor.checkProject(cwd)
-        }
+        await Promise.allSettled(
+          [...registeredProjects].map((cwd) => transcriptMonitor.checkProject(cwd))
+        )
         // Rate-limit log pruning to every LOG_PRUNE_INTERVAL_MS
         const now = Date.now()
         if (now - lastLogPruneMs > LOG_PRUNE_INTERVAL_MS) {
@@ -527,15 +527,17 @@ class TranscriptMonitor {
     const latestSession = sessions[0]
     if (!latestSession) return
 
-    const data = await sessionDataCache.get(latestSession)
+    const [data, manifestGroups] = await Promise.all([
+      sessionDataCache.get(latestSession),
+      this.caches.manifestCache.get(cwd),
+    ])
     if (!data) return
 
     void logPseudoHook(
       `checkProject: autoSteer=${autoSteerEnabled} speak=${speakEnabled} session=${latestSession.id} lastToolCallFingerprint=${data.lastToolCallFingerprint}`
     )
 
-    // Fetch manifest once for cooldown extraction
-    const manifestGroups = await this.caches.manifestCache.get(cwd)
+    // manifestGroups fetched in parallel with data above
 
     if (autoSteerEnabled && data.lastToolCallFingerprint) {
       const prevFingerprint = this.lastToolCallFingerprints.get(latestSession.id)

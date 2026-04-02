@@ -40,12 +40,26 @@ describe("parseManageArgs", () => {
   it("parses list defaults to all agents including claude-desktop", () => {
     const parsed = parseManageArgs(["mcp", "list"])
     expect(parsed.action).toBe("list")
-    expect(parsed.targetAgents).toEqual(["cursor", "claude", "claude-desktop", "gemini", "junie"])
+    expect(parsed.targetAgents).toEqual([
+      "cursor",
+      "claude",
+      "claude-desktop",
+      "gemini",
+      "junie",
+      "ai",
+    ])
   })
 
   it("parses --claude-desktop flag", () => {
     const parsed = parseManageArgs(["mcp", "list", "--claude-desktop"])
     expect(parsed.targetAgents).toEqual(["claude-desktop"])
+  })
+
+  it("parses merge action with --from flag", () => {
+    const parsed = parseManageArgs(["mcp", "merge", "--from", "ai", "--junie"])
+    expect(parsed.action).toBe("merge")
+    expect(parsed.sourceAgents).toEqual(["ai"])
+    expect(parsed.targetAgents).toEqual(["junie"])
   })
 
   it("parses add with command/arg/env", () => {
@@ -166,6 +180,69 @@ describe("manage mcp command", () => {
     const result = await runManage(["mcp", "validate", "--claude"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("MCP validation passed")
+  })
+
+  it("merges MCP servers from one agent to another", async () => {
+    const home = await makeTempHome()
+    const aiDir = join(home, ".ai", "mcp")
+    const junieDir = join(home, ".junie", "mcp")
+    await mkdir(aiDir, { recursive: true })
+    await mkdir(junieDir, { recursive: true })
+
+    await writeFile(
+      join(aiDir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          serverA: { command: "cmdA" },
+          serverB: { command: "cmdB" },
+        },
+      })
+    )
+    await writeFile(
+      join(junieDir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          serverC: { command: "cmdC" },
+        },
+      })
+    )
+
+    const merge = await runManage(["mcp", "merge", "--from", "ai", "--junie"], home)
+    expect(merge.exitCode).toBe(0)
+    expect(merge.stdout).toContain("Merged 2 new and 0 updated servers into Junie")
+
+    const junieJson = JSON.parse(await readFile(join(junieDir, "mcp.json"), "utf-8"))
+    expect(junieJson.mcpServers.serverA.command).toBe("cmdA")
+    expect(junieJson.mcpServers.serverB.command).toBe("cmdB")
+    expect(junieJson.mcpServers.serverC.command).toBe("cmdC")
+  })
+
+  it("merges all agents into a specific target", async () => {
+    const home = await makeTempHome()
+    const aiDir = join(home, ".ai", "mcp")
+    const junieDir = join(home, ".junie", "mcp")
+    const cursorDir = join(home, ".cursor")
+    await mkdir(aiDir, { recursive: true })
+    await mkdir(junieDir, { recursive: true })
+    await mkdir(cursorDir, { recursive: true })
+
+    await writeFile(
+      join(aiDir, "mcp.json"),
+      JSON.stringify({ mcpServers: { aiS: { command: "aiC" } } })
+    )
+    await writeFile(
+      join(junieDir, "mcp.json"),
+      JSON.stringify({ mcpServers: { juS: { command: "juC" } } })
+    )
+    await writeFile(join(cursorDir, "mcp.json"), JSON.stringify({ mcpServers: {} }))
+
+    const merge = await runManage(["mcp", "merge", "--from", "all", "--cursor"], home)
+    expect(merge.exitCode).toBe(0)
+    expect(merge.stdout).toContain("Merged 2 new and 0 updated servers into Cursor")
+
+    const cursorJson = JSON.parse(await readFile(join(cursorDir, "mcp.json"), "utf-8"))
+    expect(cursorJson.mcpServers.aiS.command).toBe("aiC")
+    expect(cursorJson.mcpServers.juS.command).toBe("juC")
   })
 })
 

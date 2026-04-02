@@ -97,12 +97,7 @@ export class FileWatcherRegistry {
 
     // Check global limit before adding more
     const currentTotal = [...this.entries.values()].reduce((acc, e) => acc + e.watchers.length, 0)
-    if (currentTotal >= this.maxTotalWatchers) {
-      console.error(
-        `[FileWatcherRegistry] Max total watchers reached (${this.maxTotalWatchers}). Skipping ${path}`
-      )
-      return
-    }
+    if (currentTotal >= this.maxTotalWatchers) return
 
     try {
       const watcher = watch(path, { recursive: false }, callback)
