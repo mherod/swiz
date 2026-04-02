@@ -7,60 +7,10 @@
 import { dirname, join } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "./settings.ts"
 import { speakCooldownPath, speakLockPath, speakPositionPath } from "./temp-paths.ts"
+import { withFileLock } from "./utils/file-lock.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
-const LOCK_STALE_MS = 30_000
-const HEARTBEAT_MS = 5_000
 const DEFAULT_COOLDOWN_SECONDS = 10
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function clearStaleLock(lockFile: string): Promise<void> {
-  try {
-    const content = (await Bun.file(lockFile).text()).trim()
-    const ownerPid = parseInt(content, 10)
-    const stats = await Bun.file(lockFile).stat()
-    const age = Date.now() - stats.mtime.getTime()
-    if (!Number.isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
-    await Bun.file(lockFile).delete()
-  } catch {
-    // Lock doesn't exist or can't be read — nothing to clear
-  }
-}
-
-async function acquireLock(lockFile: string, timeoutMs = 10_000): Promise<boolean> {
-  await clearStaleLock(lockFile)
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    if (!(await Bun.file(lockFile).exists())) {
-      try {
-        await Bun.write(lockFile, String(process.pid))
-        const owner = (await Bun.file(lockFile).text()).trim()
-        if (owner === String(process.pid)) return true
-      } catch {
-        // Another process grabbed it — retry
-      }
-    }
-    await clearStaleLock(lockFile)
-    await Bun.sleep(200)
-  }
-  return false
-}
-
-async function heartbeat(lockFile: string): Promise<void> {
-  try {
-    await Bun.write(lockFile, String(process.pid))
-  } catch {
-    // Lock was removed — heartbeat no longer needed
-  }
-}
 
 /**
  * Orchestrate incremental narration for a session.
@@ -98,7 +48,6 @@ export async function narrateSession(payload: {
   if (!hasMessage && !(await Bun.file(transcriptPath).exists())) return
 
   const lockFile = speakLockPath(sessionId)
-  await clearStaleLock(lockFile)
 
   let newText = ""
 
@@ -146,21 +95,12 @@ export async function narrateSession(payload: {
 
   const truncated = newText.slice(0, 500)
 
-  if (!(await acquireLock(lockFile))) return
-
-  const heartbeatInterval = setInterval(() => {
-    heartbeat(lockFile).catch(() => {})
-  }, HEARTBEAT_MS)
-
   try {
-    await spawnSpeak(truncated, settings)
-  } finally {
-    clearInterval(heartbeatInterval)
-    try {
-      await Bun.file(lockFile).delete()
-    } catch {
-      // Lock already cleared
-    }
+    await withFileLock(lockFile, async () => {
+      await spawnSpeak(truncated, settings)
+    })
+  } catch {
+    // Lock acquisition failed — silent skip
   }
 }
 

@@ -4,13 +4,13 @@
  *       ID utilities (parseTaskId, compareTaskIds), and STATUS_STYLE.
  */
 
-import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
-import { parseJsonl } from "../utils/jsonl.ts"
+import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { sessionPrefix }
@@ -290,6 +290,6 @@ export async function writeAudit(
   try {
     const dir = join(tasksDir, sessionId)
     await mkdir(dir, { recursive: true })
-    await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
+    await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch {}
 }

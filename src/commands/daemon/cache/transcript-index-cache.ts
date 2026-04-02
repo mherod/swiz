@@ -78,14 +78,13 @@ export class TranscriptIndexCache {
       }
       this._misses++
 
-      // Stream the file once to find the last compaction boundary and all lines.
-      // For truly massive files, we still have to store session lines in memory
-      // to compute the summary, but at least we don't load the PRE-session lines
-      // and we don't load the whole file as a single string.
-      const allLines: string[] = []
-      let lastSystemIdx = -1
-
+      // Use a two-pass approach to avoid loading the entire file into memory.
+      // 1. Stream the file to find the byte offset of the last "system" entry.
+      // 2. Read only from that offset to EOF.
       if (!(await transcriptFile.exists())) return null
+
+      let lastSystemByteOffset = 0
+      let currentByteOffset = 0
 
       const stream = transcriptFile.stream()
       const reader = stream.getReader()
@@ -99,31 +98,32 @@ export class TranscriptIndexCache {
 
           const chunk = decoder.decode(value, { stream: true })
           const lines = (remaining + chunk).split("\n")
-          remaining = lines.pop() ?? ""
+          const lastLineInChunk = lines.pop() ?? ""
 
           for (const line of lines) {
+            const lineByteLength = Buffer.byteLength(`${line}\n`)
             const parsed = tryParseJsonLine(line) as { type?: string } | undefined
             if (parsed?.type === "system") {
-              lastSystemIdx = allLines.length
+              lastSystemByteOffset = currentByteOffset + lineByteLength
             }
-            allLines.push(line)
+            currentByteOffset += lineByteLength
           }
+          remaining = lastLineInChunk
         }
 
         const final = remaining + decoder.decode()
         const parsed = tryParseJsonLine(final) as { type?: string } | undefined
         if (parsed?.type === "system") {
-          lastSystemIdx = allLines.length
+          lastSystemByteOffset = currentByteOffset + Buffer.byteLength(final)
         }
-        allLines.push(final)
       } finally {
         reader.releaseLock()
       }
 
-      const sessionLines =
-        lastSystemIdx !== -1
-          ? allLines.slice(lastSystemIdx + 1).filter((l) => l.trim())
-          : allLines.filter((l) => l.trim())
+      // 2. Read from lastSystemByteOffset to EOF.
+      const sessionFile = transcriptFile.slice(lastSystemByteOffset)
+      const sessionText = await sessionFile.text()
+      const sessionLines = sessionText.split("\n").filter((l) => l.trim())
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)
 

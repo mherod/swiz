@@ -9,8 +9,10 @@
  */
 
 import { createReadStream } from "node:fs"
+import { appendFile } from "node:fs/promises"
 import jsonlParser from "stream-json/jsonl/parser.js"
 import type { ZodType } from "zod"
+import { getLockPathForFile, withFileLock } from "./file-lock.ts"
 
 const { checkedParse } = jsonlParser
 
@@ -201,6 +203,28 @@ export async function readJsonlFile<T>(path: string, schema: ZodType<T>): Promis
   } catch {
     return []
   }
+}
+
+/**
+ * Write an array of entries to a JSONL file with a file-based lock.
+ * Overwrites the existing file if it exists.
+ */
+export async function writeJsonlFile<T>(path: string, entries: T[]): Promise<void> {
+  const lockFile = getLockPathForFile(path)
+  await withFileLock(lockFile, async () => {
+    const text = entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : "")
+    await Bun.write(path, text)
+  })
+}
+
+/**
+ * Append a single entry to a JSONL file with a file-based lock.
+ */
+export async function appendJsonlEntry<T>(path: string, entry: T): Promise<void> {
+  const lockFile = getLockPathForFile(path)
+  await withFileLock(lockFile, async () => {
+    await appendFile(path, `${JSON.stringify(entry)}\n`)
+  })
 }
 
 /**
