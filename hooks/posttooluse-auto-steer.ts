@@ -32,6 +32,72 @@ import {
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
 import { detectTerminal } from "../src/utils/terminal-detection.ts"
 
+function hasCommitTrigger(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  rec: Record<string, any>
+): boolean {
+  if (!store.hasPending(safeSession, "after_commit")) return false
+  const toolName = (rec.tool_name as string) ?? ""
+  const toolInput = (rec.tool_input as { command?: string } | undefined) ?? {}
+  const command = toolInput.command ?? ""
+  return isShellTool(toolName) && GIT_COMMIT_RE.test(command)
+}
+
+async function hasAllTasksCompleteTrigger(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  sessionId: string
+): Promise<boolean> {
+  if (!store.hasPending(safeSession, "after_all_tasks_complete")) return false
+  const tasks = await readSessionTasks(sessionId)
+  return (
+    tasks.length > 0 && tasks.every((t) => t.status === "completed" || t.status === "cancelled")
+  )
+}
+
+async function getTriggersToDeliver(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  sessionId: string,
+  rec: Record<string, any>
+): Promise<AutoSteerTrigger[]> {
+  const triggers: AutoSteerTrigger[] = []
+
+  if (store.hasPending(safeSession, "next_turn")) {
+    triggers.push("next_turn")
+  }
+
+  if (hasCommitTrigger(store, safeSession, rec)) {
+    triggers.push("after_commit")
+  }
+
+  if (await hasAllTasksCompleteTrigger(store, safeSession, sessionId)) {
+    triggers.push("after_all_tasks_complete")
+  }
+
+  return triggers
+}
+
+async function deliverTriggers(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  sessionId: string,
+  triggersToDeliver: AutoSteerTrigger[],
+  terminal: { app: TerminalApp; name: string } | undefined
+) {
+  const app = terminal?.app ?? detectTerminal().app
+  const sent = new Set<string>()
+  for (const trigger of triggersToDeliver) {
+    const requests = store.consumeOne(safeSession, trigger)
+    const req = requests[0]
+    if (req && !sent.has(req.message)) {
+      await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
+      sent.add(req.message)
+    }
+  }
+}
+
 export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
   const rec = input as Record<string, any>
@@ -43,47 +109,13 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
   if (!safeSession) return {}
 
   const store = getAutoSteerStore()
-  const triggersToDeliver: AutoSteerTrigger[] = []
-
-  if (store.hasPending(safeSession, "next_turn")) {
-    triggersToDeliver.push("next_turn")
-  }
-
-  const toolName = (rec.tool_name as string) ?? ""
-  const toolInput = (rec.tool_input as { command?: string } | undefined) ?? {}
-  const command = toolInput.command ?? ""
-  if (
-    isShellTool(toolName) &&
-    GIT_COMMIT_RE.test(command) &&
-    store.hasPending(safeSession, "after_commit")
-  ) {
-    triggersToDeliver.push("after_commit")
-  }
-
-  if (store.hasPending(safeSession, "after_all_tasks_complete")) {
-    const tasks = await readSessionTasks(sessionId)
-    const allComplete =
-      tasks.length > 0 && tasks.every((t) => t.status === "completed" || t.status === "cancelled")
-    if (allComplete) {
-      triggersToDeliver.push("after_all_tasks_complete")
-    }
-  }
+  const triggersToDeliver = await getTriggersToDeliver(store, safeSession, sessionId, rec)
 
   if (triggersToDeliver.length === 0) return {}
   if (await shouldDeferAutoSteerForForegroundChatApp()) return {}
 
   const terminal = rec._terminal as { app: TerminalApp; name: string } | undefined
-  const app = terminal?.app ?? detectTerminal().app
-
-  const sent = new Set<string>()
-  for (const trigger of triggersToDeliver) {
-    const requests = store.consumeOne(safeSession, trigger)
-    const req = requests[0]
-    if (req && !sent.has(req.message)) {
-      await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
-      sent.add(req.message)
-    }
-  }
+  await deliverTriggers(store, safeSession, sessionId, triggersToDeliver, terminal)
 
   store.prune()
   return {}
