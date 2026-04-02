@@ -1,8 +1,9 @@
 import { appendFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import * as v8 from "node:v8"
 import { LRUCache } from "lru-cache"
 import { stderrLog } from "../debug.ts"
-import { executeDispatch } from "../dispatch/execute.ts"
+import { executeDispatch } from "../dispatch"
 import { hookIdentifier, isInlineHookDef } from "../hook-types.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
 import {
@@ -297,6 +298,8 @@ function setupWatchers(
 
   watchers.start().then(undefined, () => {})
   process.on("exit", () => {
+    const snap = v8.writeHeapSnapshot()
+    process.stderr.write(snap)
     watchers.close()
     caches.ciWatchRegistry.close()
     caches.upstreamSyncRegistry.close()
@@ -564,12 +567,26 @@ class TranscriptMonitor {
           const triggerMsg = `new tool call detected in ${latestSession.id}, triggering auto-steer: ${toolCallMessage.toolCalls![0]!.name}`
           stderrLog("postToolUse dispatch", `[daemon] ${triggerMsg}`)
           void logPseudoHook(triggerMsg)
+          const toolName = toolCallMessage.toolCalls![0]!.name
+          const detailStr = toolCallMessage.toolCalls![0]!.detail
+          let toolInput: Record<string, any> = {}
+          if (detailStr) {
+            try {
+              const parsed = JSON.parse(detailStr)
+              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                toolInput = parsed as Record<string, any>
+              }
+            } catch {
+              // detail may be a truncated summary string — leave as empty object
+            }
+          }
+
           const payload = {
             session_id: latestSession.id,
             transcript_path: latestSession.path,
             cwd,
-            tool_name: toolCallMessage.toolCalls![0]!.name,
-            tool_input: toolCallMessage.toolCalls![0]!.detail,
+            tool_name: toolName,
+            tool_input: toolInput,
           }
 
           void executeDispatch({

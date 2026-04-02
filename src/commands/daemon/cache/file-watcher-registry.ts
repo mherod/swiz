@@ -110,7 +110,13 @@ export class FileWatcherRegistry {
       try {
         const files = await readdir(path, { withFileTypes: true })
         for (const file of files) {
-          if (file.isDirectory()) {
+          if (
+            file.isDirectory() &&
+            file.name !== ".git" &&
+            file.name !== ".svn" &&
+            file.name !== ".hg" &&
+            file.name !== "node_modules"
+          ) {
             await this.watchRecursiveWithDepth(join(path, file.name), depth - 1, watchers, callback)
           }
         }
