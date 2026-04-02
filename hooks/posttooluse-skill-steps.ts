@@ -10,6 +10,20 @@
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { SkillToolInput } from "./schemas.ts"
 
+function extractSkillParams(input: SkillToolInput) {
+  if (input.tool_name !== "Skill") return null
+  const skillName = input.tool_input?.skill
+  const sessionId = input.session_id
+  if (!skillName || !sessionId) return null
+
+  return {
+    skillName,
+    skillArgs: input.tool_input?.args || "",
+    sessionId,
+    cwd: input.cwd || process.cwd(),
+  }
+}
+
 const posttoolusSkillSteps: SwizHook<SkillToolInput> = {
   name: "posttooluse-skill-steps",
   event: "postToolUse",
@@ -18,16 +32,10 @@ const posttoolusSkillSteps: SwizHook<SkillToolInput> = {
   async: true,
 
   async run(input: SkillToolInput): Promise<SwizHookOutput> {
-    const toolName: string = input.tool_name ?? ""
-    if (toolName !== "Skill") return {}
+    const params = extractSkillParams(input)
+    if (!params) return {}
 
-    const toolInput = input.tool_input
-    const skillName: string = toolInput?.skill ?? ""
-    const skillArgs: string = toolInput?.args ?? ""
-    const sessionId: string = input.session_id ?? ""
-    const cwd: string = input.cwd ?? process.cwd()
-
-    if (!skillName || !sessionId) return {}
+    const { skillName, skillArgs, sessionId, cwd } = params
 
     // Import skill-steps logic dynamically to avoid circular deps at load time.
     const { createTasksFromSkillSteps, formatSkillStepsSummary } = await import(
