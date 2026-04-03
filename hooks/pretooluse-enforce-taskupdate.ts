@@ -78,24 +78,46 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
-/** Minimum interval (ms) between task completions to prevent rapid-fire batch completions. */
-const COMPLETION_RATE_LIMIT_MS = 5_000
+// ─── Sliding-window completion rate limiter ─────────────────────────────────
+// Thresholds: 2 completions in 3s is fine. 3 in 5s is the top threshold.
+// 4+ in 5s triggers a hard cooldown block.
 
-/** Track the last completion timestamp per session for rate limiting. */
-const lastCompletionBySession = new Map<string, number>()
+const WINDOW_MS = 5_000
+const MAX_COMPLETIONS_IN_WINDOW = 2
+
+/** Per-session ring buffer of recent completion timestamps. */
+const completionTimestamps = new Map<string, number[]>()
+
+function pruneWindow(timestamps: number[], now: number): number[] {
+  const cutoff = now - WINDOW_MS
+  return timestamps.filter((t) => t > cutoff)
+}
 
 function checkCompletionRateLimit(sessionId: string): SwizHookOutput | null {
   const now = Date.now()
-  const lastCompletion = lastCompletionBySession.get(sessionId)
-  if (lastCompletion && now - lastCompletion < COMPLETION_RATE_LIMIT_MS) {
-    const waitSec = Math.ceil((COMPLETION_RATE_LIMIT_MS - (now - lastCompletion)) / 1000)
+  const existing = completionTimestamps.get(sessionId) ?? []
+  const recent = pruneWindow(existing, now)
+
+  if (recent.length >= MAX_COMPLETIONS_IN_WINDOW) {
+    // Don't record this attempt — the agent must wait
+    completionTimestamps.set(sessionId, recent)
+    const oldestInWindow = recent[0] ?? now
+    const waitSec = Math.ceil((oldestInWindow + WINDOW_MS - now) / 1000)
     return preToolUseDeny(
-      `Task completion rate limit: wait ${waitSec}s before completing another task. ` +
-        "Rapid-fire completions bypass governance checks. " +
-        "Review the current task state with TaskList before completing the next task."
+      `Task completion rate limit: ${recent.length} completions in the last 5 seconds exceeds the threshold (max ${MAX_COMPLETIONS_IN_WINDOW}).\n\n` +
+        `Wait ${waitSec}s before completing another task.\n\n` +
+        "Before retrying, you MUST:\n" +
+        "1. Run TaskList to review the current task state\n" +
+        "2. Verify each task you intend to complete has concrete evidence (commit SHA, test output, file path)\n" +
+        "3. Confirm the work described in the task subject has actually been done — not assumed, not deferred\n" +
+        "4. Complete ONE task at a time, waiting for this hook to clear between each\n\n" +
+        "Rapid-fire completions bypass governance checks and risk leaving work unfinished."
     )
   }
-  lastCompletionBySession.set(sessionId, now)
+
+  // Record this completion
+  recent.push(now)
+  completionTimestamps.set(sessionId, recent)
   return null
 }
 
