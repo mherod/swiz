@@ -96,6 +96,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/install/optional-helpers.ts",
   "src/commands/install/daemon-helpers.ts",
   "src/commands/issue.ts",
+  "src/commands/issue/operations.ts",
+  "src/commands/issue/sync-display.ts",
   "src/commands/memory.ts",
   // model — Claude Code settings.json model show/set output
   "src/commands/model.ts",
