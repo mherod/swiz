@@ -214,14 +214,7 @@ function parseCodexIdFromFilename(name: string): string {
 const CODEX_META_TYPES = new Set(["session_meta", "turn_context"])
 
 function extractCodexMetaPayload(line: string): Record<string, any> | null {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed) as unknown
-  } catch {
-    return null
-  }
+  const parsed = tryParseJsonLine(line)
   if (!parsed || typeof parsed !== "object") return null
   const record = parsed as Record<string, any>
   if (!CODEX_META_TYPES.has(record.type as string)) return null

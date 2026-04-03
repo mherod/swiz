@@ -10,6 +10,7 @@ interface GlobalSettingsForm {
   sandboxedEdits: boolean
   speak: boolean
   autoSteer: boolean
+  swizNotifyHooks: boolean
   autoSteerTranscriptWatching: boolean
   gitStatusGate: boolean
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective"
@@ -43,6 +44,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   sandboxedEdits: true,
   speak: false,
   autoSteer: false,
+  swizNotifyHooks: false,
   autoSteerTranscriptWatching: false,
   gitStatusGate: true,
   ambitionMode: "standard",
@@ -135,6 +137,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     sandboxedEdits: settings.sandboxedEdits !== false,
     speak: !!settings.speak,
     autoSteer: !!settings.autoSteer,
+    swizNotifyHooks: !!settings.swizNotifyHooks,
     autoSteerTranscriptWatching: !!settings.autoSteerTranscriptWatching,
     gitStatusGate: settings.gitStatusGate !== false,
     ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
@@ -330,6 +333,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "autoSteer",
     label: "Auto-steer",
     desc: "Type 'Continue' into the terminal after every tool call via AppleScript.",
+  },
+  {
+    key: "swizNotifyHooks",
+    label: "Pseudo hooks",
+    desc: "Allow transcript/session monitoring to synthesize pseudo-hook dispatches in the daemon.",
   },
   {
     key: "autoSteerTranscriptWatching",
@@ -856,6 +864,28 @@ function ProjectSettingsColumn({
                   set({
                     autoSteerTranscriptWatching: val === "inherit" ? "inherit" : val === "true",
                   })
+                }}
+                options={[
+                  { label: "inherit (global)", value: "inherit" },
+                  { label: "enabled", value: "true" },
+                  { label: "disabled", value: "false" },
+                ]}
+              />
+            </label>
+          </div>
+          <div className="mt-4">
+            <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="project-speak">
+              <span>Speak override</span>
+              <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+                Project-specific override for text-to-speech narration. "inherit" uses the global
+                setting.
+              </p>
+              <Select
+                id="project-speak"
+                value={String(form.speak)}
+                onChange={(e) => {
+                  const val = e.target.value
+                  set({ speak: val === "inherit" ? "inherit" : val === "true" })
                 }}
                 options={[
                   { label: "inherit (global)", value: "inherit" },

@@ -1075,6 +1075,7 @@ async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
     "pushGate",
     "sandboxedEdits",
     "speak",
+    "swizNotifyHooks",
     "gitStatusGate",
     "ambitionMode",
     "memoryWordThreshold",
@@ -1147,6 +1148,8 @@ async function handleProjectSettingsUpdate(
       ambitionMode?: "standard" | "aggressive" | "creative" | "reflective" | "inherit" | null
       taskDurationWarningMinutes?: number | null
       transcriptMonitorMaxConcurrentDispatches?: number | null
+      autoSteerTranscriptWatching?: boolean
+      speak?: boolean
     }
   } | null
   const cwd = body?.cwd
@@ -1207,7 +1210,12 @@ function normalizeProjectSettingsUpdates(
     result.collaborationMode = mode
   }
 
-  for (const boolKey of ["prMergeMode", "strictNoDirectMain"] as const) {
+  for (const boolKey of [
+    "prMergeMode",
+    "strictNoDirectMain",
+    "autoSteerTranscriptWatching",
+    "speak",
+  ] as const) {
     const err = validateBooleanField(updates, boolKey)
     if (err) return { error: err }
     if (boolKey in updates) result[boolKey] = updates[boolKey]

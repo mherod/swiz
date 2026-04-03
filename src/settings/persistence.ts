@@ -113,6 +113,10 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   const session: SessionSwizSettings = {}
   if (typeof obj.autoContinue === "boolean") session.autoContinue = obj.autoContinue
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
+  if (typeof obj.autoSteerTranscriptWatching === "boolean") {
+    session.autoSteerTranscriptWatching = obj.autoSteerTranscriptWatching
+  }
+  if (typeof obj.speak === "boolean") session.speak = obj.speak
   if (VALID_AMBITION_MODES.has(obj.ambitionMode as string)) {
     session.ambitionMode = obj.ambitionMode as SessionSwizSettings["ambitionMode"]
   }
@@ -243,6 +247,8 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "autoContinue",
     "pushGate",
     "qualityChecksGate",
+    "speak",
+    "autoSteerTranscriptWatching",
     "strictNoDirectMain",
     "trunkMode",
   ])

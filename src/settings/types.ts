@@ -185,6 +185,8 @@ export interface SwizSettings {
   speak: boolean
   /** When true, types "Continue" into the terminal after every tool call via AppleScript. */
   autoSteer: boolean
+  /** When true, allow transcript/session monitoring to synthesize pseudo-hook dispatches. */
+  swizNotifyHooks: boolean
   /** When true, the daemon monitors session transcripts and triggers auto-steer via post-tool hooks. */
   autoSteerTranscriptWatching: boolean
   /**
@@ -260,6 +262,8 @@ export const sessionSwizSettingsSchema = z.object({
   prMergeMode: z.boolean().optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
+  autoSteerTranscriptWatching: z.boolean().optional(),
+  speak: z.boolean().optional(),
 })
 
 export const projectSettingsSchema = z.object({
@@ -274,6 +278,7 @@ export const projectSettingsSchema = z.object({
   dirtyWorktreeThreshold: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
+  speak: z.boolean().optional(),
   autoSteerTranscriptWatching: z.boolean().optional(),
   transcriptMonitorMaxConcurrentDispatches: z.number().int().min(1).max(64).optional(),
   pushGate: z.boolean().optional(),

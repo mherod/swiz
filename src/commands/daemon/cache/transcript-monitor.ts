@@ -128,6 +128,7 @@ export class TranscriptMonitor {
     const cached = await this.caches.projectSettingsCache.get(cwd)
     const settings = cached.settings
     const globalSettings = await readSwizSettings()
+    if (!globalSettings.swizNotifyHooks) return
     const autoSteerEnabled =
       settings?.autoSteerTranscriptWatching ?? globalSettings.autoSteerTranscriptWatching
     const speakEnabled = settings?.speak ?? globalSettings.speak

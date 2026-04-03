@@ -216,7 +216,10 @@ Detection uses `detectProjectStack(cwd)` from `src/detect-frameworks.ts`.
 `filterDisabledHooks()` removes any hook in the combined disabled set from:
 - `~/.swiz/settings.json` → `disabledHooks[]`
 - `.swiz/config.json` → `disabledHooks[]`
-- `swizNotifyHooks: false` → adds all three notification hooks to the disabled set
+
+Separately, `swizNotifyHooks: false` blocks the daemon's transcript/session-monitoring layer from
+emitting pseudo-hook dispatches (`postToolUse`, `notification`) for agents without native hook
+support.
 
 ---
 

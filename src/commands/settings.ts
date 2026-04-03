@@ -544,9 +544,8 @@ function buildProjectPolicyInfo(
     source: policy.source,
     autoSteerTranscriptWatching:
       projectSettings?.autoSteerTranscriptWatching ?? settings.autoSteerTranscriptWatching,
-    autoSteerTranscriptWatchingSource: projectSettings?.autoSteerTranscriptWatching
-      ? "project"
-      : "user",
+    autoSteerTranscriptWatchingSource:
+      projectSettings?.autoSteerTranscriptWatching !== undefined ? "project" : "user",
     disabledHooks: projectSettings?.disabledHooks,
   }
 }

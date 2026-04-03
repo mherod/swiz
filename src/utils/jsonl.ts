@@ -1,36 +1,97 @@
 /**
  * Type-safe JSONL parsing utilities.
  *
- * Centralises the split → filter → JSON.parse → validate pattern used across
+ * Centralises the split → filter → Bun.JSONL.parse → validate pattern used across
  * transcript readers, hook-log readers, and task audit-log scanners.
- *
- * Backed by `stream-json/jsonl/parser` for both streaming file reads and
- * single-line parsing via its `checkedParse` helper.
  */
 
-import { createReadStream } from "node:fs"
 import { appendFile } from "node:fs/promises"
-import jsonlParser from "stream-json/jsonl/parser.js"
 import type { ZodType } from "zod"
 import { getLockPathForFile, withFileLock } from "./file-lock.ts"
 
-const { checkedParse } = jsonlParser
+const NEWLINE_BYTE = 0x0a
+
+type JsonlBuffer = Uint8Array<ArrayBufferLike>
 
 // ── Streaming / parsed-object reading ────────────────────────────────────────
 
+function concatUint8Arrays(left: JsonlBuffer, right: JsonlBuffer): JsonlBuffer {
+  if (left.length === 0) return right
+  if (right.length === 0) return left
+  const combined = new Uint8Array(left.length + right.length)
+  combined.set(left)
+  combined.set(right, left.length)
+  return combined
+}
+
+function findNextLineStart(buffer: JsonlBuffer, start: number): number | null {
+  const newlineIndex = buffer.subarray(start).indexOf(NEWLINE_BYTE)
+  return newlineIndex === -1 ? null : start + newlineIndex + 1
+}
+
+function consumeJsonlChunk(
+  buffer: JsonlBuffer,
+  onValue: (value: unknown) => void
+): { remaining: JsonlBuffer; waitingForMore: boolean } {
+  let current = buffer
+
+  while (current.length > 0) {
+    const result = Bun.JSONL.parseChunk(current)
+    for (const value of result.values) onValue(value)
+
+    if (result.error) {
+      const nextLineStart = findNextLineStart(current, result.read)
+      if (nextLineStart === null) {
+        return { remaining: current, waitingForMore: true }
+      }
+      current = current.subarray(nextLineStart)
+      continue
+    }
+
+    if (result.done) return { remaining: new Uint8Array(0), waitingForMore: false }
+    if (result.read === 0) return { remaining: current, waitingForMore: true }
+    current = current.subarray(result.read)
+  }
+
+  return { remaining: current, waitingForMore: false }
+}
+
 /**
  * Returns an async iterator that yields parsed JSONL objects from a file.
- * Uses `stream-json/jsonl/parser` for efficient streaming — the file is never
- * fully loaded into memory.  Malformed lines are silently skipped.
+ * Uses Bun's native JSONL streaming parser. The file is never fully loaded
+ * into memory, and malformed lines are silently skipped.
  */
 export async function* streamJsonlEntries(path: string): AsyncIterableIterator<unknown> {
   const file = Bun.file(path)
   if (!(await file.exists())) return
 
-  const pipeline = createReadStream(path).pipe(jsonlParser.asStream({ errorIndicator: undefined }))
+  let buffer: JsonlBuffer = new Uint8Array(0)
+  const reader = file.stream().getReader()
 
-  for await (const { value } of pipeline as AsyncIterable<jsonlParser.JsonlItem>) {
-    yield value
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer = concatUint8Arrays(buffer, value)
+    const values: unknown[] = []
+    const result = consumeJsonlChunk(buffer, (value) => values.push(value))
+    buffer = result.remaining
+    for (const value of values) {
+      yield value
+    }
+  }
+
+  if (buffer.length > 0) {
+    const values: unknown[] = []
+    const result = consumeJsonlChunk(buffer, (value) => values.push(value))
+    if (result.waitingForMore && result.remaining.length > 0) {
+      const final = Bun.JSONL.parseChunk(result.remaining)
+      for (const value of final.values) {
+        values.push(value)
+      }
+    }
+    for (const value of values) {
+      yield value
+    }
   }
 }
 
@@ -56,10 +117,16 @@ export function splitJsonlLines(text: string): string[] {
 
 /**
  * Parse a single JSON line, returning `undefined` on failure.
- * Delegates to `stream-json`'s `checkedParse` — never throws.
+ * Uses Bun's native JSONL parser — never throws.
  */
 export function tryParseJsonLine(line: string): unknown | undefined {
-  return checkedParse(line, undefined, undefined)
+  const trimmed = line.trim()
+  if (!trimmed) return undefined
+  try {
+    return Bun.JSONL.parse(`${trimmed}\n`)[0]
+  } catch {
+    return undefined
+  }
 }
 
 // ── Streaming / callback parsing ─────────────────────────────────────────────

@@ -162,6 +162,7 @@ function buildBaseSettings(
     skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
     autoSteer: settings.autoSteer,
+    swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,

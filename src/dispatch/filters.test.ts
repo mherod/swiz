@@ -19,6 +19,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     sandboxedEdits: true,
     speak: false,
     autoSteer: false,
+    swizNotifyHooks: false,
     updateMemoryFooter: false,
     gitStatusGate: true,
     nonDefaultBranchGate: true,

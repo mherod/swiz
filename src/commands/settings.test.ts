@@ -174,6 +174,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("pushGate")
     expect(parsed).toHaveProperty("sandboxedEdits")
     expect(parsed).toHaveProperty("speak")
+    expect(parsed).toHaveProperty("swizNotifyHooks")
     expect(parsed).toHaveProperty("gitStatusGate")
     expect(parsed).toHaveProperty("ignoreCi")
     expect(parsed).toHaveProperty("memoryLineThreshold")
@@ -875,6 +876,21 @@ describe("readProjectSettings", () => {
     expect(settings?.disabledHooks).toEqual(["stop-ship-checklist.ts", "stop-lint-staged.ts"])
   })
 
+  test("reads transcript-monitoring boolean overrides from config.json", async () => {
+    const dir = await _tmp.create("swiz-proj-")
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({
+        autoSteerTranscriptWatching: true,
+        speak: true,
+      })
+    )
+    const settings = await readProjectSettings(dir)
+    expect(settings?.autoSteerTranscriptWatching).toBe(true)
+    expect(settings?.speak).toBe(true)
+  })
+
   test("ignores disabledHooks when entries contain non-string values", async () => {
     const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
@@ -937,6 +953,7 @@ describe("SETTINGS_REGISTRY", () => {
       "sandboxedEdits",
       "speak",
       "autoSteer",
+      "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "transcriptMonitorMaxConcurrentDispatches",
       "updateMemoryFooter",

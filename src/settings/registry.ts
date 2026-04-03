@@ -116,6 +116,29 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "swizNotifyHooks",
+    aliases: [
+      "pseudo-hooks",
+      "pseudohooks",
+      "pseudo_hooks",
+      "swiz-notify-hooks",
+      "swiznotifyhooks",
+      "swiz_notify_hooks",
+      "transcript-pseudo-hooks",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description:
+        "Allow transcript/session monitoring to synthesize pseudo-hook dispatches in the daemon",
+      effectExplanation:
+        "When enabled, the daemon may watch agent transcripts and emit pseudo hook events like postToolUse and notification for agents without native hook support. When disabled, transcript/session monitoring does not synthesize those hook dispatches.",
+      enableDescription: "Enable transcript/session-monitoring powered pseudo hooks",
+      disableDescription: "Disable transcript/session-monitoring powered pseudo hooks",
+    },
+  },
+  {
     key: "autoSteerTranscriptWatching",
     aliases: [
       "auto-steer-transcript-watching",

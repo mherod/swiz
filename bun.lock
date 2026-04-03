@@ -19,7 +19,6 @@
         "motion": "^12.36.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
-        "stream-json": "^2.1.0",
         "tailwindcss": "^4.2.1",
         "ufo": "^1.6.3",
         "yaml": "^2.8.3",
@@ -1375,11 +1374,7 @@
 
     "std-env": ["std-env@3.10.0", "", {}, "sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg=="],
 
-    "stream-chain": ["stream-chain@3.6.1", "", {}, "sha512-M4BQpNPI71uumkVXjl4y+mIormQXdo4R0pSR23mcLbn6D+kpvu7Kx2g1hf0jRB76Zb1IT1M06OIGghMTAtZdyQ=="],
-
     "stream-events": ["stream-events@1.0.5", "", { "dependencies": { "stubs": "3.0.0" } }, "sha512-E1GUzBSgvct8Jsb3v2X15pjzN1tYebtbLaMg+eBOUOAxgbLoSbT2NS91ckc5lJD1KfLjId+jXJRgo0qnV5Nerg=="],
-
-    "stream-json": ["stream-json@2.1.0", "", { "dependencies": { "stream-chain": "^3.6.1" } }, "sha512-9gV/ywtebMn3DdKnNKYCb9iESvgR1dHbucNV+bRGvdvy+jV4c9FFgYKmENhpKv58jSwvs90Wk80RhfKk1KxHPg=="],
 
     "stream-shift": ["stream-shift@1.0.3", "", {}, "sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ=="],
 
