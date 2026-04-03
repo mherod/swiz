@@ -453,6 +453,7 @@ export async function updateStatus(
     evidence?: string
     verifyText?: string
     filterCwd?: string
+    skipLastTaskGuard?: boolean
   } = {}
 ): Promise<void> {
   const { evidence, verifyText, filterCwd } = options
@@ -465,6 +466,15 @@ export async function updateStatus(
   if (verifyText) {
     const verifyError = verifyTaskSubject(task.subject, verifyText)
     if (verifyError) throw new Error(verifyError)
+  }
+
+  // Enforce last-task-standing invariant: completing a task must never leave
+  // zero incomplete tasks. This is the canonical enforcement point — all code
+  // paths that complete tasks flow through updateStatus.
+  if (newStatus === "completed" && !options.skipLastTaskGuard) {
+    const allTasks = await readTasks(effectiveSessionId)
+    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
+    if (lastTaskError) throw new Error(lastTaskError)
   }
 
   const oldStatus = task.status
@@ -510,11 +520,6 @@ export async function completeTaskWithAutoTransition(
   } = {}
 ): Promise<void> {
   const { filterCwd } = options
-  if (!options.skipLastTaskGuard) {
-    const allTasks = await readTasks(sessionId)
-    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
-    if (lastTaskError) throw new Error(lastTaskError)
-  }
 
   const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (task.status === "pending") {

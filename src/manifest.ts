@@ -20,6 +20,7 @@ import posttooluseSpeakNarrator from "../hooks/posttooluse-speak-narrator.ts"
 import posttooluseStateTransition from "../hooks/posttooluse-state-transition.ts"
 import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
 import posttooluseTaskAuditSync from "../hooks/posttooluse-task-audit-sync.ts"
+import posttooluseTaskCountContext from "../hooks/posttooluse-task-count-context.ts"
 import posttooluseTaskListSync from "../hooks/posttooluse-task-list-sync.ts"
 import posttooluseTaskOutput from "../hooks/posttooluse-task-output.ts"
 import posttooluseTaskSubjectValidation from "../hooks/posttooluse-task-subject-validation.ts"
@@ -340,7 +341,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     matcher: "TaskUpdate|TaskCreate|TodoWrite",
-    hooks: [{ hook: posttooluseTaskAuditSync }],
+    hooks: [{ hook: posttooluseTaskAuditSync }, { hook: posttooluseTaskCountContext }],
   },
   {
     event: "postToolUse",

@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**111 hooks. 12 event types. Every agent. Zero compromises.**
+**112 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -181,7 +181,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts`             | Blocks all `swiz tasks` CLI usage in Claude Code except `swiz tasks adopt` (orphan recovery). Requires native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) for every other task operation.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-### PostToolUse (20)
+### PostToolUse (21)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -204,6 +204,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-verify-push.ts` | After any `git push`, verifies the local HEAD SHA matches the remote tracking branch SHA. Blocks with a hard error if they diverge — prevents the agent from declaring push success when the commit didn't land on the remote. |
 | `posttooluse-state-transition.ts` | Auto-transitions project state based on PR lifecycle: `gh pr create` moves `in-development` → `awaiting-feedback`; `gh pr merge` moves `awaiting-feedback` → `in-development`. |
 | `posttooluse-task-audit-sync.ts` | After TaskCreate or TaskUpdate, writes the task subject and status to the swiz audit log. Ensures `recoverSubjectFromAuditLogs` can recover original task subjects after context compaction orphans the native task files. |
+| `posttooluse-task-count-context.ts` | After TaskCreate or TaskUpdate, reads session task state and injects a context message with incomplete/pending/in_progress counts. Warns urgently when pending tasks drop to ≤1. |
 | `posttooluse-upstream-sync-on-push.ts` | After `git push` or any `gh pr`/`gh issue` mutation command, fires a non-blocking sync request to the daemon so the IssueStore reflects the new GitHub state immediately — without waiting for the next 2-minute sync interval. |
 | `posttooluse-skill-steps.ts` | After a Skill tool call, extracts numbered steps from the skill's `## Steps` section and creates pending tasks for each step that doesn't already exist as a pending/in_progress task. Uses subject fingerprinting and overlap detection to avoid duplicates. |
 | `posttooluse-auto-steer.ts` | Types "Continue" into the active terminal session after every tool call using AppleScript automation. Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
@@ -267,7 +268,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 111 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 112 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
