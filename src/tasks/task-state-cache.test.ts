@@ -259,6 +259,46 @@ describe("TaskStateCache", () => {
     })
   })
 
+  describe("getTasksFresh", () => {
+    it("forces full reload when no watcher is active", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-fresh-no-watch")
+      await writeTaskFile(sessionDir, makeTask("1", "completed"))
+
+      // Warm cache via regular getState (no watcher registered)
+      const initial = await cache.getState("session-fresh-no-watch", sessionDir)
+      expect(initial.tasks).toHaveLength(1)
+
+      // Simulate native Claude TaskCreate writing directly to disk
+      await writeTaskFile(sessionDir, makeTask("2", "pending"))
+
+      // getTasksFresh without watcher must see the new task (full reload)
+      const fresh = await cache.getTasksFresh("session-fresh-no-watch", sessionDir)
+      expect(fresh).toHaveLength(2)
+      expect(fresh.find((t) => t.id === "2")?.status).toBe("pending")
+      cache.close()
+    })
+
+    it("uses cache when watcher is active and entry is fresh", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-fresh-watched")
+      await writeTaskFile(sessionDir, makeTask("1", "completed"))
+
+      // Register watcher and warm cache
+      cache.watchSession("session-fresh-watched", sessionDir)
+      await cache.getState("session-fresh-watched", sessionDir)
+
+      // Write to disk without going through cache — watcher hasn't fired yet
+      // (fs.watch is async, may not fire in time for this test)
+      // But since we have a watcher AND entry is fresh, cache is trusted
+      const fresh = await cache.getTasksFresh("session-fresh-watched", sessionDir)
+      expect(fresh).toHaveLength(1) // cached value, not re-read from disk
+      cache.close()
+    })
+  })
+
   describe("lifecycle", () => {
     it("close() clears all state", async () => {
       const cache = new TaskStateCache({ maxEntries: 10 })

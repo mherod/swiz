@@ -238,8 +238,10 @@ export class TaskStateCache {
   async getState(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const existing = this.entries.get(sessionId)
 
-    // Cache hit — fresh
-    if (existing && !existing.stale) {
+    // Cache hit — fresh, but zero incomplete tasks is a logical gap: the task
+    // governance system enforces ≥2 incomplete at all times, so an empty count
+    // means native writes were missed. Force a full reload to re-sync.
+    if (existing && !existing.stale && existing.openCount > 0) {
       this.touchAccessOrder(sessionId)
       return existing
     }
@@ -270,9 +272,14 @@ export class TaskStateCache {
   }
 
   /**
-   * Get tasks with a freshness guarantee. If the cached entry was last
-   * synced from disk more than `maxStaleMs` ago, forces a full reload
-   * regardless of stale flag. Use in stop hooks where accuracy is critical.
+   * Get tasks with a freshness guarantee. Forces a full disk reload when:
+   * - No cached entry exists
+   * - The entry is marked stale (fs.watch fired)
+   * - The entry is older than `maxStaleMs`
+   * - No fs.watch watcher is active for this session (native Claude writes
+   *   bypass the write-through path, so the cache may be incomplete)
+   *
+   * Use in stop hooks where accuracy is critical.
    */
   async getTasksFresh(
     sessionId: string,
@@ -280,11 +287,21 @@ export class TaskStateCache {
     maxStaleMs = DEFAULT_MAX_STALE_MS
   ): Promise<SessionTask[]> {
     const existing = this.entries.get(sessionId)
-    if (existing && !existing.stale && Date.now() - existing.syncedAtMs <= maxStaleMs) {
+    const hasWatcher = this.watchers.has(sessionId)
+    // Zero cached tasks is always suspect — native TaskCreate may have written
+    // directly to disk. Force a full reload to ensure nothing is missed.
+    const isEmpty = existing ? existing.tasks.length === 0 : true
+    if (
+      existing &&
+      !existing.stale &&
+      !isEmpty &&
+      hasWatcher &&
+      Date.now() - existing.syncedAtMs <= maxStaleMs
+    ) {
       this.touchAccessOrder(sessionId)
       return existing.tasks
     }
-    // Either no entry, stale, or too old — do a full disk reload
+    // No entry, stale, no watcher, or too old ��� full disk reload
     const state = await this.fullLoad(sessionId, tasksDir)
     return state.tasks
   }
