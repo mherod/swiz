@@ -69,8 +69,9 @@ export const issueCommand: Command = {
         "Defaults to current repo.",
     },
     {
-      flags: "list [<repo>]",
-      description: "List all currently open issues and pull requests from the local store.",
+      flags: "list [<repo>] [--mine]",
+      description:
+        "List open issues and pull requests. Use --mine to filter to issues assigned to you.",
     },
   ],
   async run(args: string[]) {

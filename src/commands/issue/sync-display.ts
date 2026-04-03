@@ -58,18 +58,26 @@ function printSyncSummary(result: UpstreamSyncResult): void {
   }
 }
 
-export function printOpenItems(repo: string): void {
+interface StoredItem {
+  number: number
+  title: string
+  state?: string
+  assignees?: Array<{ login: string }>
+}
+
+export function printOpenItems(repo: string, assigneeFilter?: string): void {
   const store = getIssueStore()
-  const issues = store.listIssues<{ number: number; title: string; state?: string }>(
-    repo,
-    Number.MAX_SAFE_INTEGER
-  )
-  const prs = store.listPullRequests<{ number: number; title: string; state?: string }>(
-    repo,
-    Number.MAX_SAFE_INTEGER
-  )
-  const openIssues = issues.filter((i) => i.state?.toLowerCase() === "open")
-  const openPrs = prs.filter((pr) => pr.state?.toLowerCase() === "open")
+  const issues = store.listIssues<StoredItem>(repo, Number.MAX_SAFE_INTEGER)
+  const prs = store.listPullRequests<StoredItem>(repo, Number.MAX_SAFE_INTEGER)
+
+  let openIssues = issues.filter((i) => i.state?.toLowerCase() === "open")
+  let openPrs = prs.filter((pr) => pr.state?.toLowerCase() === "open")
+
+  if (assigneeFilter) {
+    const login = assigneeFilter.toLowerCase()
+    openIssues = openIssues.filter((i) => i.assignees?.some((a) => a.login.toLowerCase() === login))
+    openPrs = openPrs.filter((pr) => pr.assignees?.some((a) => a.login.toLowerCase() === login))
+  }
 
   if (openIssues.length > 0) {
     console.log(`\nOpen Issues (${openIssues.length}):`)
@@ -126,20 +134,37 @@ export async function handleSync(args: string[]): Promise<void> {
   printOpenItems(repo)
 }
 
+async function resolveCurrentUser(): Promise<string> {
+  const proc = Bun.spawn(["gh", "api", "user", "-q", ".login"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const login = (await new Response(proc.stdout).text()).trim()
+  await proc.exited
+  if (proc.exitCode !== 0 || !login) {
+    throw new Error("Failed to resolve current GitHub user via `gh api user`")
+  }
+  return login
+}
+
 export async function handleList(args: string[]): Promise<void> {
   const cwd = process.cwd()
-  let repo: string | null = args[1] ?? null
+  const mine = args.includes("--mine")
+  const positionals = args.filter((a) => !a.startsWith("--"))
+  let repo: string | null = positionals[1] ?? null
   if (!repo) {
     repo = await getRepoSlug(cwd)
   }
   if (!repo) {
     throw new Error(
-      `Repo required. Usage: swiz issue list [<repo>]\nOr run this in a git repo with an origin.`
+      `Repo required. Usage: swiz issue list [<repo>] [--mine]\nOr run this in a git repo with an origin.`
     )
   }
 
   await ensureFreshData(repo, cwd)
 
-  console.log(`\nOpen Issues for ${repo}:`)
-  printOpenItems(repo)
+  const assigneeFilter = mine ? await resolveCurrentUser() : undefined
+  const label = mine ? `Issues assigned to ${assigneeFilter}` : `Open Issues for ${repo}`
+  console.log(`\n${label}:`)
+  printOpenItems(repo, assigneeFilter)
 }
