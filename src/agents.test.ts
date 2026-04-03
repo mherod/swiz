@@ -10,6 +10,7 @@ import {
   isAgentInstalled,
   translateEvent,
   translateMatcher,
+  validatePublicAgentHookMappings,
 } from "./agents.ts"
 
 describe("agents.ts", () => {
@@ -481,6 +482,45 @@ describe("agents.ts", () => {
       expect(gemini.unsupportedEvents).toContain("subagentStop")
       expect(gemini.eventMap.subagentStart).toBeUndefined()
       expect(gemini.eventMap.subagentStop).toBeUndefined()
+    })
+  })
+
+  describe("public hook event validation", () => {
+    it("accepts the registered agent table", () => {
+      expect(() => validatePublicAgentHookMappings(AGENTS)).not.toThrow()
+    })
+
+    it("rejects eventMap values that are not public hook events", () => {
+      const brokenAgents: AgentDef[] = AGENTS.map((agent) =>
+        agent.id === "codex"
+          ? {
+              ...agent,
+              eventMap: { ...agent.eventMap, preToolUse: "BeforeToolUse" },
+            }
+          : agent
+      )
+
+      expect(() => validatePublicAgentHookMappings(brokenAgents)).toThrow(
+        /codex.*preToolUse.*BeforeToolUse/
+      )
+    })
+
+    it("rejects additional dispatch entries that target non-public hook events", () => {
+      const brokenAgents: AgentDef[] = AGENTS.map((agent) =>
+        agent.id === "cursor"
+          ? {
+              ...agent,
+              additionalDispatchEntries: {
+                ...agent.additionalDispatchEntries,
+                beforeToolUseInternal: "preToolUse",
+              },
+            }
+          : agent
+      )
+
+      expect(() => validatePublicAgentHookMappings(brokenAgents)).toThrow(
+        /cursor.*additionalDispatchEntries.*beforeToolUseInternal/
+      )
     })
   })
 

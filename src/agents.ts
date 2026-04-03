@@ -38,13 +38,84 @@ export interface AgentDef {
   additionalDispatchEntries?: Record<string, string>
 }
 
+const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
+  claude: new Set([
+    "Stop",
+    "PreToolUse",
+    "PostToolUse",
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreCompact",
+    "Notification",
+    "SubagentStart",
+    "SubagentStop",
+  ]),
+  cursor: new Set([
+    "stop",
+    "preToolUse",
+    "postToolUse",
+    "sessionStart",
+    "sessionEnd",
+    "beforeSubmitPrompt",
+    "preCompact",
+    "afterAgentResponse",
+    "subagentStart",
+    "subagentStop",
+    "beforeShellExecution",
+    "afterShellExecution",
+  ]),
+  gemini: new Set([
+    "AfterAgent",
+    "BeforeTool",
+    "AfterTool",
+    "SessionStart",
+    "SessionEnd",
+    "BeforeAgent",
+    "PreCompress",
+    "Notification",
+  ]),
+  codex: new Set(["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"]),
+  junie: new Set(["stop", "preToolUse"]),
+}
+
+export function validatePublicAgentHookMappings(agents: AgentDef[]): void {
+  for (const agent of agents) {
+    const publicEvents = PUBLIC_HOOK_EVENTS_BY_AGENT[agent.id]
+    if (!publicEvents) {
+      throw new Error(`Agent "${agent.id}" is missing a public hook event allowlist.`)
+    }
+
+    for (const [canonicalEvent, agentEvent] of Object.entries(agent.eventMap)) {
+      if (!publicEvents.has(agentEvent)) {
+        throw new Error(
+          `Agent "${agent.id}" eventMap["${canonicalEvent}"] references non-public hook event "${agentEvent}".`
+        )
+      }
+    }
+
+    for (const agentEvent of Object.keys(agent.additionalDispatchEntries ?? {})) {
+      if (!publicEvents.has(agentEvent)) {
+        throw new Error(
+          `Agent "${agent.id}" additionalDispatchEntries references non-public hook event "${agentEvent}".`
+        )
+      }
+    }
+  }
+}
+
+function registerAgents(agents: AgentDef[]): AgentDef[] {
+  validatePublicAgentHookMappings(agents)
+  return agents
+}
+
 // ─── Codex hooks status ─────────────────────────────────────────────────────
 // Codex's public hooks.json schema currently exposes exactly:
 //   SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, Stop.
 // Swiz should only install against that public surface, even if Codex has
 // additional internal engine identifiers behind the scenes.
 
-export const AGENTS: AgentDef[] = [
+export const AGENTS: AgentDef[] = registerAgents([
   {
     id: "claude",
     name: "Claude Code",
@@ -213,7 +284,7 @@ export const AGENTS: AgentDef[] = [
       "subagentStop",
     ],
   },
-]
+])
 
 export function getAgent(id: string): AgentDef | undefined {
   return AGENTS.find((a) => a.id === id)
