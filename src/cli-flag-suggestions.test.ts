@@ -138,6 +138,15 @@ describe("CLI flag suggestions", () => {
     expect(warnings[0]).not.toContain("[id]")
   })
 
+  test("no warning for bracketed subcommand flag like [--mine]", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "issue",
+      ["list", "--mine"],
+      [{ flags: "list [<repo>] [--mine]", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
+
   test("positional-only option entries do not produce flag warnings", () => {
     const warnings = collectUnknownOptionWarnings(
       "dispatch",

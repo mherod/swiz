@@ -22,7 +22,7 @@ export function collectUnknownOptionWarnings(
     options.flatMap((o) =>
       o.flags
         .split(/[\s,]+/)
-        .map((t) => t.replace(/^[^-]+/, ""))
+        .map((t) => t.replace(/^[^-]+/, "").replace(/[[\]<>]/g, ""))
         .filter((t) => t.startsWith("-"))
     )
   )
