@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import type { HookExecution } from "./engine.ts"
 import { processBlockingResults } from "./strategies.ts"
 
@@ -304,5 +306,33 @@ describe("processBlockingResults", () => {
       "[git] On branch main tracking origin/main. Working tree is clean."
     )
     expect(finalResponse.systemMessage).toContain("On branch main")
+  })
+})
+
+describe("BlockingStrategy stop abort regression", () => {
+  it("must abort remaining hooks after first block for stop events (regression guard)", () => {
+    // This test guards against a regression where stop events were excluded from
+    // the abort-on-first-block behavior. The condition `ctx.canonicalEvent !== "stop"`
+    // was previously added, causing all 24 stop hooks to run to completion even after
+    // the first one blocked — making Stop events unnecessarily slow.
+    //
+    // The onResult callback must call abort() for ALL events including stop.
+    const source = readFileSync(join(import.meta.dir, "strategies.ts"), "utf-8")
+
+    // Find the BlockingStrategy onResult callback
+    const onResultMatch = source.match(
+      /class\s+BlockingStrategy[\s\S]*?onResult:\s*\(result,\s*abort\)\s*=>\s*\{([\s\S]*?)\}/
+    )
+    expect(onResultMatch).not.toBeNull()
+
+    const onResultBody = onResultMatch![1]!
+
+    // The abort condition must NOT exclude stop events
+    expect(onResultBody).not.toContain('canonicalEvent !== "stop"')
+    expect(onResultBody).not.toContain("canonicalEvent !== 'stop'")
+
+    // The abort must fire unconditionally on block
+    expect(onResultBody).toContain("isBlock(result.parsed)")
+    expect(onResultBody).toContain("abort()")
   })
 })

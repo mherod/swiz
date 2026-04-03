@@ -381,8 +381,7 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     const response = await runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
-        // Stop events should run all hooks to collect all results; only abort for other events
-        if (ctx.canonicalEvent !== "stop" && result.parsed && isBlock(result.parsed)) {
+        if (result.parsed && isBlock(result.parsed)) {
           abort()
         }
       },
