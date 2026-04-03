@@ -47,12 +47,13 @@ function isBlockedSwizTasksCliCommand(command: string): boolean {
 
 async function denyIfLastTaskStanding(
   taskId: string,
-  sessionId: string
+  sessionId: string,
+  cwd?: string
 ): Promise<SwizHookOutput | null> {
   const allTasks = await readSessionTasks(sessionId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
-    return preToolUseDeny(buildLastTaskStandingDenial(taskId))
+    return preToolUseDeny(await buildLastTaskStandingDenial(taskId, cwd))
   }
   return null
 }
@@ -89,7 +90,8 @@ async function checkNativeTaskUpdateCompletion(
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) return "early_exit"
 
-  const denied = await denyIfLastTaskStanding(taskId, sessionId)
+  const cwd = (input.cwd as string) ?? undefined
+  const denied = await denyIfLastTaskStanding(taskId, sessionId, cwd)
   if (denied) return denied
   return "continue"
 }

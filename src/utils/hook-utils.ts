@@ -555,17 +555,35 @@ export function autoTransitionForComplete(task: { status: string }, enabled = tr
  * Build the standard denial message for the last-task-standing guard.
  * Both pretooluse-enforce-taskupdate and pretooluse-require-task-evidence use this.
  */
-/** Filler suggestions for the next logical step when all tasks are about to complete. */
-const NEXT_STEP_SUGGESTIONS = [
-  "Review and address open GitHub issues",
+/** Fallback suggestions when no open issues are available. */
+const FALLBACK_SUGGESTIONS = [
   "Run quality checks and fix any warnings",
   "Verify recent changes work end-to-end",
   "Check for TODOs or FIXMEs in recently edited files",
   "Update documentation to reflect recent changes",
 ]
 
-export function buildLastTaskStandingDenial(taskId: string): string {
-  const suggestion = NEXT_STEP_SUGGESTIONS[Math.floor(Math.random() * NEXT_STEP_SUGGESTIONS.length)]
+async function suggestNextStep(cwd?: string): Promise<string> {
+  if (cwd) {
+    try {
+      const { getIssueStore } = await import("../issue-store.ts")
+      const repoSlug = await getRepoSlug(cwd)
+      if (repoSlug) {
+        const issues = getIssueStore().listIssues<{
+          number: number
+          title?: string
+          state?: string
+        }>(repoSlug)
+        const open = issues.find((i) => i.state === "open" && i.title)
+        if (open) return `Work on issue #${open.number}: "${open.title}"`
+      }
+    } catch {}
+  }
+  return FALLBACK_SUGGESTIONS[Math.floor(Math.random() * FALLBACK_SUGGESTIONS.length)]!
+}
+
+export async function buildLastTaskStandingDenial(taskId: string, cwd?: string): Promise<string> {
+  const suggestion = await suggestNextStep(cwd)
   return (
     `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
     `You have executive authority to determine the next logical step. ` +
