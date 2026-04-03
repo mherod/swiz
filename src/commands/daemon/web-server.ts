@@ -276,6 +276,7 @@ export interface DispatchRoutesContext {
   prReviewMonitor: PrReviewMonitor
   upstreamSyncRegistry: UpstreamSyncRegistry
   transcriptIndex: TranscriptIndexCache
+  taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
 }
 
 export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): DispatchRoutesContext {
@@ -295,6 +296,7 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     prReviewMonitor: ctx.prReviewMonitor,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
+    taskStateCache: ctx.taskStateCache,
   }
 }
 
@@ -502,12 +504,12 @@ async function getCurrentSessionToolUsageFromDaemon(
 /** Maps dispatch validation failures to HTTP — always includes Zod `issues` when available. */
 function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
   if (e instanceof DispatchPayloadValidationError) {
-    return Response.json({ error: e.message, issues: e.zodError.flatten() }, { status: 400 })
+    return Response.json({ error: e.message, issues: e.zodError.issues }, { status: 400 })
   }
   if (e instanceof ZodError) {
-    debugLog("[daemon] dispatch Zod validation failed:", e.flatten())
+    debugLog("[daemon] dispatch Zod validation failed:", e.issues)
     return Response.json(
-      { error: "Dispatch schema validation failed", issues: e.flatten() },
+      { error: "Dispatch schema validation failed", issues: e.issues },
       { status: 422 }
     )
   }
@@ -526,6 +528,20 @@ async function handleDispatchRoute(
   }
   const payloadStr = await req.text()
   const start = performance.now()
+
+  // Register fs.watch for this session's task directory so the TaskStateCache
+  // catches native Claude TaskCreate/TaskUpdate writes via filesystem events.
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+    const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : null
+    if (sessionId && ctx.taskStateCache) {
+      const { createDefaultTaskStore } = await import("../../task-roots.ts")
+      const { tasksDir } = createDefaultTaskStore()
+      ctx.taskStateCache.watchSession(sessionId, join(tasksDir, sessionId))
+    }
+  } catch {
+    // Best-effort — don't block dispatch if payload parsing fails here
+  }
 
   const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
 
