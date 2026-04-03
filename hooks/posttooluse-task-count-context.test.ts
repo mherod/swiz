@@ -103,6 +103,19 @@ describe("buildCountSummary", () => {
       inProgress: 1,
     })
     expect(s).toContain("URGENT")
+    expect(s).toContain("verification task")
+    expect(s).toContain("broader next-step task")
     expect(s).not.toContain("Good task hygiene")
+  })
+
+  it("encourages specific task types when only 1 pending", () => {
+    const s = buildCountSummary({
+      total: 2,
+      incomplete: 2,
+      pending: 1,
+      inProgress: 1,
+    })
+    expect(s).toContain("immediate verification step")
+    expect(s).toContain("broader logical next task")
   })
 })

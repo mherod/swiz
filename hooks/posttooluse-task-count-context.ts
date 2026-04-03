@@ -38,11 +38,11 @@ export function buildCountSummary(counts: {
 
   if (counts.pending === 0) {
     parts.push(
-      "URGENT: Zero pending tasks. Task governance requires ≥1 pending task at all times. Use TaskCreate immediately to plan your next step before continuing any implementation work."
+      "URGENT: Zero pending tasks. Task governance requires ≥2 pending tasks at all times. Use TaskCreate to add two pending tasks now: (1) a verification task for the current step (e.g. run tests, check output), and (2) a broader next-step task for the natural follow-on work (e.g. hardening, integration, cleanup)."
     )
   } else if (counts.pending === 1 && counts.incomplete <= 2) {
     parts.push(
-      "Proactive task planning needed: only 1 pending task remains. Create at least 1 more pending task to maintain the planning buffer before completing current work."
+      "Proactive task planning needed: only 1 pending task remains. Create 1 more pending task to maintain the planning buffer. Aim for two pending tasks: one immediate verification step and one broader logical next task."
     )
   }
 
