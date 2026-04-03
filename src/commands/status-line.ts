@@ -22,6 +22,7 @@ import {
   readSwizSettings,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
+import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 interface StatusLineInput {
@@ -57,6 +58,11 @@ export interface WarmStatusLineSnapshot {
 }
 
 export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
+
+interface StatusLineDaemonMetrics {
+  uptimeHuman: string
+  totalDispatches: number
+}
 
 interface GitHubCiRun {
   databaseId?: number
@@ -672,26 +678,59 @@ async function readWarmSnapshotFromDaemon(
   cwd: string,
   sessionId: string | null | undefined
 ): Promise<WarmStatusLineSnapshot | null> {
+  const payload = await readDaemonJson<{ snapshot?: WarmStatusLineSnapshot }>(
+    "/status-line/snapshot",
+    {
+      method: "POST",
+      body: { cwd, sessionId },
+    }
+  )
+  return payload?.snapshot ?? null
+}
+
+async function readDaemonJson<T>(
+  path: string,
+  init?: {
+    method?: "GET" | "POST"
+    body?: unknown
+  }
+): Promise<T | null> {
   const timeout = Number(process.env.SWIZ_STATUS_DAEMON_TIMEOUT_MS ?? "400")
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
   try {
-    const res = await fetch(`${DAEMON_ORIGIN}/status-line/snapshot`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd, sessionId }),
+    const res = await fetch(`${DAEMON_ORIGIN}${path}`, {
+      method: init?.method ?? "GET",
+      headers: init?.body ? { "content-type": "application/json" } : undefined,
+      body: init?.body ? JSON.stringify(init.body) : undefined,
       signal: controller.signal,
     })
     if (!res.ok) return null
-    const payload = (await res.json().catch(() => null)) as {
-      snapshot?: WarmStatusLineSnapshot
-    } | null
-    return payload?.snapshot ?? null
+    return (await res.json().catch(() => null)) as T | null
   } catch {
     return null
   } finally {
     clearTimeout(timer)
   }
+}
+
+function parseDaemonMetrics(
+  payload: SerializedDaemonMetrics | null | undefined
+): StatusLineDaemonMetrics | null {
+  if (!payload) return null
+  if (typeof payload.uptimeHuman !== "string") return null
+  if (typeof payload.totalDispatches !== "number") return null
+  return {
+    uptimeHuman: payload.uptimeHuman,
+    totalDispatches: payload.totalDispatches,
+  }
+}
+
+async function readProjectMetricsFromDaemon(cwd: string): Promise<StatusLineDaemonMetrics | null> {
+  const payload = await readDaemonJson<SerializedDaemonMetrics>(
+    `/metrics?project=${encodeURIComponent(cwd)}`
+  )
+  return parseDaemonMetrics(payload)
 }
 
 function buildContextSegment(
@@ -741,6 +780,12 @@ function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {
   return ""
 }
 
+function buildDaemonMetricsSegment(metrics: StatusLineDaemonMetrics | null | undefined): string {
+  if (!metrics || metrics.totalDispatches <= 0) return ""
+  const dispatchLabel = metrics.totalDispatches === 1 ? "dispatch" : "dispatches"
+  return `${DIM}${metrics.uptimeHuman}${R} ${fg256(51)}${metrics.totalDispatches}${R} ${DIM}${dispatchLabel}${R}`
+}
+
 type SegChecker = (name: string) => boolean
 
 function buildLine1(seg: SegChecker, snapshot: WarmStatusLineSnapshot, a2: string): string {
@@ -768,6 +813,7 @@ function buildModeSeg(
 function buildLine3(
   seg: SegChecker,
   snapshot: WarmStatusLineSnapshot,
+  daemonMetrics: StatusLineDaemonMetrics | null | undefined,
   a4: string,
   agentName: string | undefined,
   vimMode: string | undefined
@@ -775,11 +821,13 @@ function buildLine3(
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
+  const daemonMetricsSeg = buildDaemonMetricsSegment(daemonMetrics)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
     seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
+    seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
     seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
     seg("flags") && flagsStr ? `${lbl("flags")} ${flagsStr}` : "",
     seg("time") ? `${lbl("time")} ${DIM}${formatTime()}${R}` : "",
@@ -806,12 +854,13 @@ function buildLine2(opts: {
 export function renderStatusLineFromSnapshot(opts: {
   input: StatusLineInput
   snapshot: WarmStatusLineSnapshot
+  daemonMetrics?: StatusLineDaemonMetrics | null
   ctxPct: number
   ctxTokens: number
   ctxStats: ContextStats | null
   timeOffset: number
 }): string {
-  const { input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
+  const { input, snapshot, daemonMetrics = null, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
   const activeSegmentSet =
     snapshot.activeSegments.length > 0 ? new Set(snapshot.activeSegments) : null
   const seg: SegChecker = (name) => activeSegmentSet?.has(name) ?? true
@@ -823,7 +872,7 @@ export function renderStatusLineFromSnapshot(opts: {
 
   const line1 = buildLine1(seg, snapshot, a2)
   const line2 = buildLine2({ seg, ctxPct, ctxTokens, ctxStats, model, rb })
-  const line3 = buildLine3(seg, snapshot, a4, input.agent?.name, input.vim?.mode)
+  const line3 = buildLine3(seg, snapshot, daemonMetrics, a4, input.agent?.name, input.vim?.mode)
 
   const fill = `${DIM}─${R}`
   return [
@@ -847,13 +896,24 @@ export const statusLineCommand: Command = {
     // Time-based offset: cycles through full rainbow every ~1 minute (~1.7s per step)
     const timeOffset = Math.floor(Date.now() / 1667) % RL
 
-    const ctxStats = await updateContextStats(cwd, ctxPct)
+    const [ctxStats, warmSnapshot, daemonMetrics] = await Promise.all([
+      updateContextStats(cwd, ctxPct),
+      readWarmSnapshotFromDaemon(cwd, input.session_id ?? null),
+      readProjectMetricsFromDaemon(cwd),
+    ])
     const snapshot =
-      (await readWarmSnapshotFromDaemon(cwd, input.session_id ?? null)) ??
-      (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null))
+      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null))
 
     console.log(
-      renderStatusLineFromSnapshot({ input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset })
+      renderStatusLineFromSnapshot({
+        input,
+        snapshot,
+        daemonMetrics,
+        ctxPct,
+        ctxTokens,
+        ctxStats,
+        timeOffset,
+      })
     )
   },
 }

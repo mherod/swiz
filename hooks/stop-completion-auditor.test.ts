@@ -85,9 +85,9 @@ describe("formatActionPlan", () => {
 
   it("output from formatActionPlan is appendable alongside a prose prefix", () => {
     // Mirrors how stop-completion-auditor.ts uses it: prose + formatActionPlan(steps)
-    const full = `Create tasks to record the work done.\n\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`
+    const full = `No tasks were created this session (12 tool calls made).\n\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`
     expect(full).toBe(
-      "Create tasks to record the work done.\n\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
+      "No tasks were created this session (12 tool calls made).\n\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
     )
   })
 
@@ -247,16 +247,15 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("falls through to block when latest status is still in_progress", async () => {
+  it("allows stop when latest status is still in_progress but no task tool observed", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
       { action: "status_change", taskId: "1", newStatus: "in_progress" },
     ])
     const result = await runAuditor(home, transcriptPath)
-    // incomplete=1 → condition false → toolCallCount≥10 → blocks
-    expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("No completed tasks on record")
+    // No task tool in observed names → agent can't create tasks → allow
+    expect(result.blocked).toBe(false)
   })
 
   it("only the latest status_change per taskId counts — in_progress overwritten by completed", async () => {
@@ -274,7 +273,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("correctly counts incomplete across multiple tasks — one completed, one still pending", async () => {
+  it("allows stop with incomplete audit tasks when no task tool observed", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
@@ -283,8 +282,8 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
       { action: "status_change", taskId: "2", newStatus: "pending" },
     ])
     const result = await runAuditor(home, transcriptPath)
-    // incomplete=1 (task 2 is pending) → blocks
-    expect(result.blocked).toBe(true)
+    // No task tool in observed names → allow
+    expect(result.blocked).toBe(false)
   })
 
   it("gracefully ignores invalid JSON lines in audit log", async () => {
@@ -300,55 +299,31 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("falls through to block when audit log file does not exist", async () => {
+  it("allows stop when audit log file does not exist and no task tool observed", async () => {
     const { home, transcriptPath } = await createFixture()
     // tasks dir exists but has no .json files and no audit log
     const result = await runAuditor(home, transcriptPath)
-    // Bun.file().text() throws → catch swallows → toolCallCount≥10 → blocks
-    expect(result.blocked).toBe(true)
+    // No task tool in observed names → allow
+    expect(result.blocked).toBe(false)
   })
 
-  it("falls through when audit log contains no create entries", async () => {
+  it("allows stop when audit log has no create entries and no task tool observed", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
-    // Status changes with no corresponding create entries
     await writeAuditLog(tasksDir, [
       { action: "status_change", taskId: "1", newStatus: "completed" },
     ])
     const result = await runAuditor(home, transcriptPath)
-    // created=0 → condition (created>0 && incomplete===0) is false
-    // → toolCallCount≥10 → blocks
-    expect(result.blocked).toBe(true)
+    // No task tool in observed names → allow
+    expect(result.blocked).toBe(false)
   })
 
-  it("block reason contains formatActionPlan-formatted step list", async () => {
-    const { home, transcriptPath } = await createFixture()
-    // No audit log → falls through to blockStop with formatActionPlan steps
-    const result = await runAuditor(home, transcriptPath)
-    expect(result.blocked).toBe(true)
-    // Verify the numbered action plan appears in the reason
-    expect(result.reason).toContain("Action plan:")
-    expect(result.reason).toContain("  1. Use TaskCreate")
-    expect(result.reason).toContain("  2. Use TaskUpdate")
-  })
-
-  it("uses the current agent's task tool alias in the action plan", async () => {
-    const { home, transcriptPath } = await createFixture()
-    const result = await runAuditor(home, transcriptPath, {
-      CODEX_THREAD_ID: "test-codex-thread",
-    })
-    expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("  1. Use update_plan")
-    expect(result.reason).toContain("  2. Use update_plan")
-  })
-
-  it("uses transcript-observed Codex tools to translate the action plan without Codex env", async () => {
+  it("allows stop when agent has no task tools in observed tool names", async () => {
     const { home, transcriptPath } = await createFixtureWithTools(
       Array.from({ length: 12 }, () => "shell_command")
     )
     const result = await runAuditor(home, transcriptPath)
-    expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("  1. Use update_plan")
-    expect(result.reason).toContain("  2. Use update_plan")
+    // Agent without task tools should not be blocked for missing tasks
+    expect(result.blocked).toBe(false)
   })
 
   it("recognises update_plan as task activity and does not block when tasks were used", async () => {
