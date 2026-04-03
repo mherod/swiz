@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { Task } from "../../tasks/task-repository.ts"
@@ -23,11 +23,14 @@ import {
   transcriptWatchPathsForProject,
 } from "./utils.ts"
 
-const TEST_HOME_ROOT = join(TMP_ROOT, "swiz-daemon-utils-test")
-
-afterEach(async () => {
-  await rm(TEST_HOME_ROOT, { recursive: true, force: true })
-})
+function makeTestHome(label: string): string {
+  return join(
+    TMP_ROOT,
+    `swiz-daemon-utils-${label}-${process.pid}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`
+  )
+}
 
 // Task helper that respects explicit null/undefined values
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -161,7 +164,7 @@ describe("captured session tool call persistence", () => {
     const path = capturedSessionToolCallLogPath(
       "/tmp/my/project",
       "session:1",
-      join(TEST_HOME_ROOT, "home-a")
+      makeTestHome("path")
     )
 
     expect(path).toContain(join(".swiz", "daemon", "session-tool-calls"))
@@ -170,18 +173,22 @@ describe("captured session tool call persistence", () => {
   })
 
   test("persists and reads captured tool calls", async () => {
-    const homeDir = join(TEST_HOME_ROOT, "home-b")
-    const cwd = "/tmp/my/project"
-    const now = Date.now()
+    const homeDir = makeTestHome("persist")
+    try {
+      const cwd = "/tmp/my/project"
+      const now = Date.now()
 
-    await persistSessionToolCall(cwd, "sess:1", "Read", { path: "/tmp/file.txt" }, now, homeDir)
-    await persistSessionToolCall(cwd, "sess:1", "Bash", { command: "ls -la" }, now + 1, homeDir)
+      await persistSessionToolCall(cwd, "sess:1", "Read", { path: "/tmp/file.txt" }, now, homeDir)
+      await persistSessionToolCall(cwd, "sess:1", "Bash", { command: "ls -la" }, now + 1, homeDir)
 
-    const entries = await readPersistedSessionToolCalls(cwd, "sess:1", 10, homeDir)
-    expect(entries).toEqual([
-      { name: "Read", detail: "/tmp/file.txt", timestamp: new Date(now).toISOString() },
-      { name: "Bash", detail: "ls -la", timestamp: new Date(now + 1).toISOString() },
-    ])
+      const entries = await readPersistedSessionToolCalls(cwd, "sess:1", 10, homeDir)
+      expect(entries).toEqual([
+        { name: "Read", detail: "/tmp/file.txt", timestamp: new Date(now).toISOString() },
+        { name: "Bash", detail: "ls -la", timestamp: new Date(now + 1).toISOString() },
+      ])
+    } finally {
+      await rm(homeDir, { recursive: true, force: true })
+    }
   })
 })
 

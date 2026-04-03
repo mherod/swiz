@@ -41,7 +41,12 @@ async function clearStaleLock(lockFile: string): Promise<void> {
     const stats = await file.stat()
     const age = Date.now() - stats.mtime.getTime()
 
-    if (!Number.isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
+    if (age < LOCK_STALE_MS) {
+      // A freshly-created empty lock file can be observed before the owner PID
+      // write completes; treat it as live during the stale window.
+      if (content.length === 0) return
+      if (!Number.isNaN(ownerPid) && pidAlive(ownerPid)) return
+    }
     await file.delete()
   } catch {
     // Lock doesn't exist or can't be read — nothing to clear
