@@ -106,7 +106,8 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs for native writes, (2) `applyTaskUpdate()` write-through from PostToolUse hooks. Incremental refresh re-reads only 3 most recent files. Daemon instance in `createDaemonCaches()`.
+- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs, (2) `applyTaskUpdate()` write-through from `writeTask()`. Incremental refresh re-reads 3 most recent files. `getTasksFresh()` forces full disk reload when no watcher active or openCount zero — native `TaskCreate` bypasses `writeTask()`. **DO**: Call `watchSession()` when sessions activate in daemon. **DON'T**: Trust cached state for stop hooks without freshness guarantee — use `readSessionTasksFresh()`.
+- **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` is the canonical enforcement point — calls `validateLastTaskStanding` when `newStatus === "completed"`. All completion paths flow through it. `skipLastTaskGuard` option for explicit overrides only.
 
 - First action: `TaskCreate`/`TaskUpdate` after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
@@ -136,10 +137,9 @@ alwaysApply: false
 - **DON'T** commit untracked files (`.lock`, local state) without checking `.gitignore` first — stop hooks flag all uncommitted files regardless.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
 - Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
-- Before issue labeling, run `gh label list`; use requested literal labels when present.
-- After `gh issue create`, run `/refine-issue <number>` and apply readiness label.
-- **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
-- Before stop, audit open issue labels; if stop hook lists actionable issues, pick one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
+- Before issue labeling, run `gh label list`. After `gh issue create`, run `/refine-issue <number>`.
+- DON'T use `$(cat <<'EOF')` in `gh issue create --body` — write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
+- Before stop, audit open issue labels; pick actionable issues via `/work-on-issue <number>` (`ready` over `backlog`).
 ## Standard Work Sequence
 - Required order for each unit of work:
   1. `TaskCreate`/`TaskUpdate` -> `in_progress`.
@@ -152,17 +152,11 @@ alwaysApply: false
   8. `swiz ci-wait $SHA --timeout 300`.
   9. Confirm CI success; if failed, fix and re-push.
   10. Announce result.
-- Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
-- Capture SHA before push; CI checks must reference it.
-- Use `swiz push-wait`; no fixed sleeps, no `--force-with-lease`.
-- Use `swiz ci-wait`; no manual watch/view loops.
-- Don't call `TaskUpdate`/`TaskList` during steps 7-10.
-- Don't stop after step 3; stop hook requires origin current.
-- Push is inseparable from commit.
-- Await background pushes (`TaskOutput block:true`) before CI. **DON'T** pass `TaskOutput` timeout > 120000ms; 300000 always fails.
-- Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
-- **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
-- **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
+- Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success. Capture SHA before push.
+- Use `swiz push-wait`/`swiz ci-wait`; no fixed sleeps, no `--force-with-lease`, no manual watch/view loops.
+- Don't call `TaskUpdate`/`TaskList` during steps 7-10. Don't stop after step 3. Push is inseparable from commit.
+- Await background pushes (`TaskOutput block:true`) before CI. **DON'T** pass `TaskOutput` timeout > 120000ms.
+- Use `swiz issue resolve <number> --body "<text>"`; close-only: `swiz issue close <number>`. DON'T close as `duplicate`/`wontfix` without file+line evidence. `Fixes #N` auto-closes on push.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push to `main`.
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.

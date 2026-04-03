@@ -78,6 +78,27 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
+/** Minimum interval (ms) between task completions to prevent rapid-fire batch completions. */
+const COMPLETION_RATE_LIMIT_MS = 5_000
+
+/** Track the last completion timestamp per session for rate limiting. */
+const lastCompletionBySession = new Map<string, number>()
+
+function checkCompletionRateLimit(sessionId: string): SwizHookOutput | null {
+  const now = Date.now()
+  const lastCompletion = lastCompletionBySession.get(sessionId)
+  if (lastCompletion && now - lastCompletion < COMPLETION_RATE_LIMIT_MS) {
+    const waitSec = Math.ceil((COMPLETION_RATE_LIMIT_MS - (now - lastCompletion)) / 1000)
+    return preToolUseDeny(
+      `Task completion rate limit: wait ${waitSec}s before completing another task. ` +
+        "Rapid-fire completions bypass governance checks. " +
+        "Review the current task state with TaskList before completing the next task."
+    )
+  }
+  lastCompletionBySession.set(sessionId, now)
+  return null
+}
+
 async function checkNativeTaskUpdateCompletion(
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
@@ -89,6 +110,10 @@ async function checkNativeTaskUpdateCompletion(
 
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) return "early_exit"
+
+  // Rate limit: block completions that happen too quickly in succession
+  const rateLimited = checkCompletionRateLimit(sessionId)
+  if (rateLimited) return rateLimited
 
   const cwd = (input.cwd as string) ?? undefined
   const denied = await denyIfLastTaskStanding(taskId, sessionId, cwd)
