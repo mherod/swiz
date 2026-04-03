@@ -22,7 +22,7 @@ import {
 import { spawnSpeak } from "../speech.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-import { getDaemonPort } from "./daemon/daemon-admin.ts"
+import { isDaemonReady } from "./daemon/daemon-admin.ts"
 
 type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
 
@@ -788,18 +788,10 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   printSetConfirmation(resolved, key, label, path, def)
 }
 
-const DAEMON_PORT = getDaemonPort()
-
 /** Best-effort daemon notification after a settings write (issue #330). */
 async function notifyDaemon(jsonOutput: boolean): Promise<void> {
-  try {
-    const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
-      signal: AbortSignal.timeout(500),
-    })
-    if (!resp.ok) return
+  if (await isDaemonReady()) {
     if (!jsonOutput) console.log("  Daemon notified of settings change.")
-  } catch {
-    // Daemon not running — silently continue
   }
 }
 

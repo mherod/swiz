@@ -8,8 +8,6 @@ import { suggest } from "../fuzzy.ts"
 import { getHomeDir, getHomeDirWithFallback } from "../home.ts"
 import {
   getLaunchAgentPlistPath,
-  isLaunchAgentLoaded,
-  launchAgentExists,
   loadLaunchAgent,
   SWIZ_DAEMON_LABEL,
   unloadLaunchAgent,
@@ -33,7 +31,7 @@ import { readLines } from "../utils/file-utils.ts"
 import { formatBytes } from "../utils/format.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
-import { getDaemonPort } from "./daemon/daemon-admin.ts"
+import { getDaemonStatus, isDaemonReady } from "./daemon/daemon-admin.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import {
   type CleanupArgs,
@@ -77,7 +75,6 @@ export const DEFAULT_ALLOWED_SKILL_CATEGORIES: readonly string[] = [
 
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
-const DAEMON_PORT = getDaemonPort()
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
@@ -1695,14 +1692,8 @@ async function runDoctorChecks(args: string[]): Promise<void> {
 
 /** Best-effort daemon notification after fixing issues (similar to settings write). */
 async function notifyDaemon(jsonOutput: boolean): Promise<void> {
-  try {
-    const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
-      signal: AbortSignal.timeout(500),
-    })
-    if (!resp.ok) return
+  if (await isDaemonReady()) {
     if (!jsonOutput) console.log("  Daemon notified of changes.")
-  } catch {
-    // Daemon not running — silently continue
   }
 }
 
@@ -1749,14 +1740,16 @@ const trashDir = defaultTrashPath
 type DaemonStopState = "not-installed" | "not-running" | "stopped" | "failed"
 
 async function stopDaemonForCleanup(): Promise<DaemonStopState> {
+  const status = await getDaemonStatus()
+  if (!status.installed) return "not-installed"
+  if (!status.loaded) return "not-running"
   const plistPath = getLaunchAgentPlistPath(DAEMON_LABEL)
-  if (!(await launchAgentExists(DAEMON_LABEL))) return "not-installed"
-  if (!(await isLaunchAgentLoaded(DAEMON_LABEL))) return "not-running"
   return (await unloadLaunchAgent(plistPath)) === 0 ? "stopped" : "failed"
 }
 
 async function restartDaemonAfterCleanup(): Promise<boolean> {
-  if (!(await launchAgentExists(DAEMON_LABEL))) return false
+  const status = await getDaemonStatus()
+  if (!status.installed) return false
   return (await loadLaunchAgent(getLaunchAgentPlistPath(DAEMON_LABEL))) === 0
 }
 

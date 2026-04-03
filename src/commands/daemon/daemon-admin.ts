@@ -1,4 +1,5 @@
 import { stderrLog } from "../../debug.ts"
+import { isLaunchAgentLoaded, launchAgentExists, SWIZ_DAEMON_LABEL } from "../../launch-agents.ts"
 
 export const DAEMON_PORT = 7_943
 
@@ -55,4 +56,57 @@ export async function fetchDaemonStatus(port: number): Promise<void> {
     stderrLog("daemon-status", `Daemon not reachable on port ${port}`)
     process.exitCode = 1
   }
+}
+
+export type DaemonStatus =
+  | { installed: false; loaded: false; healthy: false }
+  | { installed: true; loaded: false; healthy: false }
+  | { installed: true; loaded: true; healthy: false }
+  | { installed: true; loaded: true; healthy: true }
+
+/**
+ * Detect daemon readiness by checking three layers in order:
+ * 1. Plist file exists on disk
+ * 2. LaunchAgent is loaded in launchctl
+ * 3. HTTP health endpoint responds
+ *
+ * Each check short-circuits — if the plist doesn't exist, we skip
+ * the subprocess call to launchctl and the network fetch entirely.
+ */
+export async function getDaemonStatus(
+  port: number = getDaemonPort(),
+  healthTimeoutMs: number = 500
+): Promise<DaemonStatus> {
+  if (!(await launchAgentExists(SWIZ_DAEMON_LABEL))) {
+    return { installed: false, loaded: false, healthy: false }
+  }
+
+  if (!(await isLaunchAgentLoaded(SWIZ_DAEMON_LABEL))) {
+    return { installed: true, loaded: false, healthy: false }
+  }
+
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/health`, {
+      signal: AbortSignal.timeout(healthTimeoutMs),
+    })
+    if (resp.ok) {
+      return { installed: true, loaded: true, healthy: true }
+    }
+  } catch {
+    // Health check failed — daemon loaded but not responding
+  }
+
+  return { installed: true, loaded: true, healthy: false }
+}
+
+/**
+ * Fast-path check: is the daemon installed, loaded, and responding?
+ * Use this to decide whether to attempt daemon dispatch or skip to local fallback.
+ */
+export async function isDaemonReady(
+  port: number = getDaemonPort(),
+  healthTimeoutMs: number = 500
+): Promise<boolean> {
+  const status = await getDaemonStatus(port, healthTimeoutMs)
+  return status.healthy
 }
