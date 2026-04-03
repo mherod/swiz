@@ -1,9 +1,10 @@
 import { stderrLog } from "../debug.ts"
 import { readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
+import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 // ─── Utilities ────────────────────────────────────────────────────────────
-const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_PORT = getDaemonPort()
 const DAEMON_ORIGIN = process.env.SWIZ_DAEMON_ORIGIN ?? `http://127.0.0.1:${DAEMON_PORT}`
 
 export interface CiWatchStartResponse {

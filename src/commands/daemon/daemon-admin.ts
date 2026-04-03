@@ -2,6 +2,14 @@ import { stderrLog } from "../../debug.ts"
 
 export const DAEMON_PORT = 7_943
 
+/** Resolve the daemon port from `SWIZ_DAEMON_PORT` env var, falling back to {@link DAEMON_PORT}. */
+export function getDaemonPort(): number {
+  const raw = process.env.SWIZ_DAEMON_PORT
+  if (!raw) return DAEMON_PORT
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DAEMON_PORT
+}
+
 export async function fetchDaemonStatus(port: number): Promise<void> {
   try {
     const resp = await fetch(`http://127.0.0.1:${port}/metrics`, {

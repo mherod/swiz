@@ -5,9 +5,10 @@
  * Extracted from issue-store.ts (issue #423).
  */
 
+import { getDaemonPort } from "./commands/daemon/daemon-admin.ts"
 import type { IssueStoreReader } from "./issue-store.ts"
 
-const DAEMON_FALLBACK_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_FALLBACK_PORT = getDaemonPort()
 const DAEMON_FALLBACK_TIMEOUT_MS = 2_000
 
 /** `gh ... --json` for `issue view` / `pr view` returns a one-element array; normalize to a single object. */

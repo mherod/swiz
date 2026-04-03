@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdirSync, mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_SETTINGS } from "../settings.ts"
@@ -100,6 +100,22 @@ describe("updateContextStats", () => {
     await updateContextStats(dir, 80)
     const stats = await updateContextStats(dir, 50)
     expect(stats).toEqual({ minPct: 20, maxPct: 80 })
+  })
+
+  it("does not rewrite the stats file when the value stays within the current range", async () => {
+    const dir = makeTempProject()
+    await updateContextStats(dir, 20)
+    await updateContextStats(dir, 80)
+
+    const statsPath = getContextStatsPath(dir)
+    const before = statSync(statsPath).mtimeMs
+
+    await Bun.sleep(5)
+    const stats = await updateContextStats(dir, 50)
+    const after = statSync(statsPath).mtimeMs
+
+    expect(stats).toEqual({ minPct: 20, maxPct: 80 })
+    expect(after).toBe(before)
   })
 
   it("creates .swiz directory if missing", async () => {

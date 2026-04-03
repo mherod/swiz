@@ -33,6 +33,7 @@ import { readLines } from "../utils/file-utils.ts"
 import { formatBytes } from "../utils/format.ts"
 import { stripQuotes } from "../utils/quoted-string.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
+import { getDaemonPort } from "./daemon/daemon-admin.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import {
   type CleanupArgs,
@@ -76,7 +77,7 @@ export const DEFAULT_ALLOWED_SKILL_CATEGORIES: readonly string[] = [
 
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
-const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+const DAEMON_PORT = getDaemonPort()
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 

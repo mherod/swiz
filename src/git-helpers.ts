@@ -120,7 +120,9 @@ export async function ghJson<T>(args: string[], cwd: string): Promise<T | null> 
   }
 }
 
-const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+import { getDaemonPort } from "./commands/daemon/daemon-admin.ts"
+
+const DAEMON_PORT = getDaemonPort()
 const DAEMON_GH_TIMEOUT_MS = 3_000
 
 interface GhFallbackCacheEntry {

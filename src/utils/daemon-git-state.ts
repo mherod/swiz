@@ -3,6 +3,7 @@
  * Falls back to {@link getGitStatusV2} when the daemon is unavailable.
  */
 
+import { getDaemonPort } from "../commands/daemon/daemon-admin.ts"
 import type { GitStatusV2 } from "./git-utils.ts"
 
 function numField(s: Record<string, any>, key: string): number {
@@ -54,7 +55,7 @@ export async function fetchGitStatusFromDaemon(
   cwd: string,
   options?: FetchGitStatusFromDaemonOptions
 ): Promise<GitStatusV2 | null> {
-  const port = options?.port ?? (Number(process.env.SWIZ_DAEMON_PORT) || 7943)
+  const port = options?.port ?? getDaemonPort()
   const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
   try {
     const res = await fetch(`http://127.0.0.1:${port}/git/state`, {

@@ -29,9 +29,13 @@ import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
+import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
-const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
-const DEFAULT_DAEMON_TIMEOUT_MS = 15_000
+const DAEMON_PORT = getDaemonPort()
+// Fallback for events not listed in DISPATCH_TIMEOUTS.
+// Must be long enough for the daemon to complete unknown-event processing
+// (daemon server-side fallback is 60s) but short enough for CLI responsiveness.
+const DEFAULT_DAEMON_TIMEOUT_MS = 30_000
 
 /**
  * Build a filtered environment for hook subprocesses.

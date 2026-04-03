@@ -2,7 +2,7 @@
 // Receives a JSON object via stdin with model, workspace, context window, and cost info.
 // Uses time-based rainbow cycling so colors shift on each render.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { detectCiProviders } from "../detect.ts"
 import {
@@ -22,6 +22,7 @@ import {
   readSwizSettings,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
+import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 interface StatusLineInput {
   model?: { display_name?: string }
@@ -66,7 +67,7 @@ interface GitHubCiRun {
   event: string
 }
 
-const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_PORT = getDaemonPort()
 const DAEMON_ORIGIN = process.env.SWIZ_DAEMON_ORIGIN ?? `http://127.0.0.1:${DAEMON_PORT}`
 
 // 256-color foreground: \x1b[38;5;Nm
@@ -266,17 +267,6 @@ export function formatProjectState(state: ProjectState | null | undefined): stri
   }
 }
 
-function latestCiRunsByWorkflow(runs: GitHubCiRun[]): GitHubCiRun[] {
-  const latest = new Map<string, GitHubCiRun>()
-  for (const run of runs) {
-    const existing = latest.get(run.workflowName)
-    if (!existing || run.createdAt > existing.createdAt) {
-      latest.set(run.workflowName, run)
-    }
-  }
-  return [...latest.values()]
-}
-
 function normalizeCiLabel(raw: string | null | undefined): string {
   return (raw ?? "").replaceAll("_", " ")
 }
@@ -297,18 +287,27 @@ function isFailingCiRun(run: GitHubCiRun): boolean {
 function classifyLatestRuns(
   latestRuns: GitHubCiRun[]
 ): { state: GitHubCiState; label: string } | null {
-  const active = latestRuns.filter(isActiveCiRun)
-  if (active.length > 0) {
-    return { state: "pending", label: active.length === 1 ? "running" : `${active.length} running` }
+  let activeCount = 0
+  let failingCount = 0
+  let allSucceeded = latestRuns.length > 0
+  let latestRun: GitHubCiRun | null = null
+
+  for (const run of latestRuns) {
+    if (isActiveCiRun(run)) activeCount++
+    if (isFailingCiRun(run)) failingCount++
+    if (run.status !== "completed" || run.conclusion !== "success") allSucceeded = false
+    if (!latestRun || run.createdAt > latestRun.createdAt) latestRun = run
   }
-  const failing = latestRuns.filter(isFailingCiRun)
-  if (failing.length > 0) {
-    return { state: "failure", label: failing.length === 1 ? "failed" : `${failing.length} failed` }
+
+  if (activeCount > 0) {
+    return { state: "pending", label: activeCount === 1 ? "running" : `${activeCount} running` }
   }
-  if (latestRuns.every((run) => run.status === "completed" && run.conclusion === "success")) {
+  if (failingCount > 0) {
+    return { state: "failure", label: failingCount === 1 ? "failed" : `${failingCount} failed` }
+  }
+  if (allSucceeded) {
     return { state: "success", label: "passing" }
   }
-  const latestRun = latestRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   if (!latestRun) return null
   const label =
     latestRun.status === "completed"
@@ -321,9 +320,16 @@ export function summarizeGitHubCiRuns(
   runs: GitHubCiRun[] | null | undefined
 ): { state: GitHubCiState; label: string } | null {
   if (!Array.isArray(runs) || runs.length === 0) return null
-  const relevant = runs.filter((run) => run.event !== "dynamic" && run.event !== "workflow_run")
-  if (relevant.length === 0) return null
-  return classifyLatestRuns(latestCiRunsByWorkflow(relevant))
+  const latest = new Map<string, GitHubCiRun>()
+  for (const run of runs) {
+    if (run.event === "dynamic" || run.event === "workflow_run") continue
+    const existing = latest.get(run.workflowName)
+    if (!existing || run.createdAt > existing.createdAt) {
+      latest.set(run.workflowName, run)
+    }
+  }
+  if (latest.size === 0) return null
+  return classifyLatestRuns([...latest.values()])
 }
 
 const CI_STATE_FORMAT: Record<string, { color: string; icon: string; fallback: string }> = {
@@ -482,9 +488,8 @@ export function getContextStatsPath(cwd: string): string {
   return join(cwd, ".swiz", "context-stats.json")
 }
 
-export async function readContextStats(cwd: string): Promise<ContextStats | null> {
+function parseContextStats(raw: string): ContextStats | null {
   try {
-    const raw = await readFile(getContextStatsPath(cwd), "utf8")
     const obj = JSON.parse(raw) as { minPct?: number; maxPct?: number } | null
     if (
       typeof obj?.minPct === "number" &&
@@ -500,15 +505,28 @@ export async function readContextStats(cwd: string): Promise<ContextStats | null
   }
 }
 
+async function readContextStatsFromPath(path: string): Promise<ContextStats | null> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+  return parseContextStats(await file.text())
+}
+
+export async function readContextStats(cwd: string): Promise<ContextStats | null> {
+  return readContextStatsFromPath(getContextStatsPath(cwd))
+}
+
 export async function updateContextStats(cwd: string, pct: number): Promise<ContextStats | null> {
-  if (pct <= 0) return readContextStats(cwd)
-  const existing = await readContextStats(cwd)
+  const statsPath = getContextStatsPath(cwd)
+  const existing = await readContextStatsFromPath(statsPath)
+  if (pct <= 0) return existing
+  if (existing && pct >= existing.minPct && pct <= existing.maxPct) return existing
+
   const stats: ContextStats = existing
     ? { minPct: Math.min(existing.minPct, pct), maxPct: Math.max(existing.maxPct, pct) }
     : { minPct: pct, maxPct: pct }
   try {
     await mkdir(join(cwd, ".swiz"), { recursive: true })
-    await writeFile(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`)
+    await Bun.write(statsPath, `${JSON.stringify(stats, null, 2)}\n`)
     await ensureGitExclude(cwd, ".swiz/")
   } catch {
     // Non-fatal — status line continues without persisted stats
@@ -794,8 +812,9 @@ export function renderStatusLineFromSnapshot(opts: {
   timeOffset: number
 }): string {
   const { input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
-  const seg: SegChecker = (name) =>
-    snapshot.activeSegments.length === 0 || snapshot.activeSegments.includes(name)
+  const activeSegmentSet =
+    snapshot.activeSegments.length > 0 ? new Set(snapshot.activeSegments) : null
+  const seg: SegChecker = (name) => activeSegmentSet?.has(name) ?? true
 
   const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
   const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
