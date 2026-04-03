@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { AGENTS, type AgentDef, translateMatcher } from "./agents.ts"
+import { AGENTS, type AgentDef, inferAgentFromToolNames, translateMatcher } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 
 export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex" | "junie"
@@ -127,6 +127,25 @@ export function isRunningInAgent(): boolean {
   if (process.env.CLAUDECODE) return true
 
   return false
+}
+
+/**
+ * Resolve which agent to use for canonical → agent-specific tool name translation
+ * (action plans, merged tasks). Same precedence as action-plan translation when
+ * `translateToolNames` is enabled.
+ */
+export function resolveTranslationAgent(options?: {
+  agent?: AgentDef | null
+  observedToolNames?: Iterable<string>
+}): AgentDef | null {
+  const envAgent = detectCurrentAgentFromEnv()
+  const inferredAgent =
+    options?.observedToolNames !== undefined
+      ? inferAgentFromToolNames(options.observedToolNames)
+      : null
+  const translationEnvAgent =
+    envAgent && Object.keys(envAgent.toolAliases).length > 0 ? envAgent : null
+  return options?.agent ?? translationEnvAgent ?? inferredAgent ?? detectCurrentAgent()
 }
 
 /**

@@ -5,15 +5,15 @@
  */
 
 import { join } from "node:path"
-import { type AgentDef, inferAgentFromToolNames, translateMatcher } from "./agents.ts"
-import { detectCurrentAgent, detectCurrentAgentFromEnv } from "./detect.ts"
+import { resolveTranslationAgent } from "./agent-paths.ts"
+import { type AgentDef, translateMatcher } from "./agents.ts"
 import {
   extractStepsFromSkill,
   filterQualitySteps,
   SKILL_DIRS,
   type SkillStep,
 } from "./skill-utils.ts"
-import { type MergeStep, mergeIntoTasks } from "./tasks/task-service.ts"
+import { type MergeIntoTasksOptions, type MergeStep, mergeIntoTasks } from "./tasks/task-service.ts"
 
 /** A step can be a plain string or an array of sub-steps (recursively nested). */
 export type ActionPlanItem = string | ActionPlanItem[]
@@ -33,15 +33,11 @@ export function formatActionPlan(
   }
 ): string {
   if (steps.length === 0) return ""
-  const envAgent = detectCurrentAgentFromEnv()
-  const inferredAgent =
-    options?.observedToolNames !== undefined
-      ? inferAgentFromToolNames(options.observedToolNames)
-      : null
-  const translationEnvAgent =
-    envAgent && Object.keys(envAgent.toolAliases).length > 0 ? envAgent : null
   const agent = options?.translateToolNames
-    ? (options?.agent ?? translationEnvAgent ?? inferredAgent ?? detectCurrentAgent())
+    ? resolveTranslationAgent({
+        agent: options?.agent,
+        observedToolNames: options?.observedToolNames,
+      })
     : null
   const lines = renderItems(steps, agent, 1, "  ")
   const header = options?.header ?? "Action plan:"
@@ -50,7 +46,7 @@ export function formatActionPlan(
 
 function renderItems(
   items: ActionPlanItem[],
-  agent: ReturnType<typeof detectCurrentAgent>,
+  agent: AgentDef | null,
   startIndex: number,
   indent: string
 ): string {
@@ -70,11 +66,7 @@ function renderItems(
   return lines.join("\n")
 }
 
-function renderSubItems(
-  items: ActionPlanItem[],
-  agent: ReturnType<typeof detectCurrentAgent>,
-  indent: string
-): string[] {
+function renderSubItems(items: ActionPlanItem[], agent: AgentDef | null, indent: string): string[] {
   const lines: string[] = []
   for (const [i, item] of items.entries()) {
     if (typeof item === "string") {
@@ -189,10 +181,11 @@ function flattenStrings(items: ActionPlanItem[]): string[] {
 export async function mergeActionPlanIntoTasks(
   steps: ActionPlanItem[],
   sessionId: string,
-  cwd?: string
+  cwd?: string,
+  mergeOptions?: MergeIntoTasksOptions
 ): Promise<number> {
   const mergeSteps: MergeStep[] = filterQualitySteps(flattenToSteps(steps))
   if (mergeSteps.length === 0) return 0
-  const created = await mergeIntoTasks(sessionId, mergeSteps, cwd)
+  const created = await mergeIntoTasks(sessionId, mergeSteps, cwd, mergeOptions)
   return created.length
 }

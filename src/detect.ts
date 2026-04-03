@@ -5,6 +5,7 @@ import {
   detectCurrentAgentFromEnv,
   isCurrentAgent,
   isRunningInAgent,
+  resolveTranslationAgent,
 } from "./agent-paths.ts"
 import { resolveCwd } from "./cwd.ts"
 
@@ -26,7 +27,13 @@ export {
 } from "./utils/terminal-detection.ts"
 
 // Re-export agent detection from agent-paths.ts
-export { detectCurrentAgent, detectCurrentAgentFromEnv, isCurrentAgent, isRunningInAgent }
+export {
+  detectCurrentAgent,
+  detectCurrentAgentFromEnv,
+  isCurrentAgent,
+  isRunningInAgent,
+  resolveTranslationAgent,
+}
 
 export type CiProvider =
   | "github-actions"

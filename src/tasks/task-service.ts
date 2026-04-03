@@ -1,5 +1,7 @@
 import { readdir, readFile, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { resolveTranslationAgent } from "../agent-paths.ts"
+import { type AgentDef, translateMatcher } from "../agents.ts"
 import { DIM, GREEN, RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
 import {
@@ -128,6 +130,22 @@ export interface MergeStep {
   description?: string
 }
 
+/** Options for {@link mergeIntoTasks} (tool-name translation matches action plans). */
+export interface MergeIntoTasksOptions {
+  /**
+   * When true (default), rewrite canonical tool tokens in subject/description
+   * using the detected agent's tool alias table (`AgentDef.toolAliases`).
+   */
+  translateToolNames?: boolean
+  agent?: AgentDef | null
+  observedToolNames?: Iterable<string>
+}
+
+function translateMergedTaskText(text: string, agent: AgentDef | null): string {
+  if (agent === null) return text
+  return translateMatcher(text, agent) ?? text
+}
+
 /**
  * Merge a list of steps into the session's task list, skipping any step whose
  * subject overlaps with an existing pending or in_progress task.
@@ -136,20 +154,36 @@ export interface MergeStep {
 export async function mergeIntoTasks(
   sessionId: string,
   steps: MergeStep[],
-  cwd = process.cwd()
+  cwd = process.cwd(),
+  options?: MergeIntoTasksOptions
 ): Promise<Task[]> {
+  const translate = options?.translateToolNames !== false
+  const agent = translate
+    ? resolveTranslationAgent({
+        agent: options?.agent,
+        observedToolNames: options?.observedToolNames,
+      })
+    : null
+
   const existing = await readTasks(sessionId)
   const incomplete = existing.filter((t) => isIncompleteTaskStatus(t.status))
 
   const created: Task[] = []
   for (const step of steps) {
-    if (findCollidingTask(step.subject, incomplete)) continue
+    const subject = translate ? translateMergedTaskText(step.subject, agent) : step.subject
+    if (findCollidingTask(subject, incomplete)) continue
 
     try {
+      const description =
+        step.description === undefined
+          ? undefined
+          : translate
+            ? translateMergedTaskText(step.description, agent)
+            : step.description
       const task = await createTaskInProcess({
         sessionId,
-        subject: step.subject,
-        description: step.description ?? step.subject,
+        subject: subject,
+        description: description ?? subject,
         cwd,
         skipSubjectValidation: true,
       })
