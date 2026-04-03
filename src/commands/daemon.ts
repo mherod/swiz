@@ -289,8 +289,12 @@ function setupWatchers(
       void transcriptMonitor.checkProject(cwd)
     }
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
+      // depth: 0 — only watch the parent directory for new/removed session entries.
+      // depth: 1 was creating an FSWatcher per session subdirectory (~350+ for Junie
+      // sessions alone), causing massive FD and memory overhead. The TranscriptMonitor
+      // handles targeted reads of specific transcript files on change detection.
       watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush, {
-        depth: 1,
+        depth: 0,
       })
     }
     // Auto-register project for periodic upstream sync and sync immediately
