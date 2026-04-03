@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
+import type { Session } from "../transcript-utils.ts"
 import { CiWatchRegistry, verifyWebhookSignature } from "./daemon/ci-watch-registry.ts"
 import {
   CooldownRegistry,
@@ -18,7 +19,9 @@ import {
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
 import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
+import type { CapturedToolCall } from "./daemon/utils.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
+import { hydratePersistedSessionToolState } from "./daemon.ts"
 
 describe("snapshot resolver .finally() cleanup", () => {
   it("cleans up inFlight map after successful snapshot computation", async () => {
@@ -326,6 +329,99 @@ describe("DaemonWorkerRuntime", () => {
       toolInput: { path: "/tmp/file.ts" },
     })
     runtime.close()
+  })
+})
+
+describe("hydratePersistedSessionToolState", () => {
+  it("seeds recovered tool calls, usage, and activity from persisted JSONL state", async () => {
+    const state = {
+      sessionActivity: new Map<string, { lastSeen: number; dispatches: number }>(),
+      sessionToolCalls: new Map<string, CapturedToolCall[]>(),
+      sessionToolUsage: new Map<
+        string,
+        { toolNames: string[]; skillInvocations: string[]; lastSeen: number }
+      >(),
+    }
+
+    const sessions: Session[] = [
+      {
+        id: "session-1",
+        path: "/tmp/transcript.jsonl",
+        mtime: 1_700_000_000_000,
+        provider: "cursor",
+        format: "cursor-agent-jsonl",
+      },
+    ]
+    const recoveredCalls: CapturedToolCall[] = [
+      { name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" },
+      { name: "Skill", detail: "commit --amend", timestamp: "2026-04-03T10:01:00.000Z" },
+    ]
+
+    const count = await hydratePersistedSessionToolState("/repo", state, {
+      listSessions: async () => sessions,
+      readToolCalls: async (_cwd, sessionId) => (sessionId === "session-1" ? recoveredCalls : []),
+    })
+
+    expect(count).toBe(1)
+    expect(state.sessionToolCalls.get("session-1")).toEqual(recoveredCalls)
+    expect(state.sessionToolUsage.get("session-1")).toEqual({
+      toolNames: ["Read", "Skill"],
+      skillInvocations: ["commit"],
+      lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
+    })
+    expect(state.sessionActivity.get("session-1")).toEqual({
+      lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
+      dispatches: 0,
+    })
+  })
+
+  it("merges recovered state into existing in-memory session data", async () => {
+    const state = {
+      sessionActivity: new Map<string, { lastSeen: number; dispatches: number }>([
+        ["session-1", { lastSeen: 10, dispatches: 2 }],
+      ]),
+      sessionToolCalls: new Map<string, CapturedToolCall[]>([
+        [
+          "session-1",
+          [{ name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" }],
+        ],
+      ]),
+      sessionToolUsage: new Map<
+        string,
+        { toolNames: string[]; skillInvocations: string[]; lastSeen: number }
+      >([["session-1", { toolNames: ["Read"], skillInvocations: [], lastSeen: 10 }]]),
+    }
+
+    const count = await hydratePersistedSessionToolState("/repo", state, {
+      listSessions: async () => [
+        {
+          id: "session-1",
+          path: "/tmp/transcript.jsonl",
+          mtime: 20,
+          provider: "cursor",
+          format: "cursor-agent-jsonl",
+        },
+      ],
+      readToolCalls: async () => [
+        { name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" },
+        { name: "Bash", detail: "ls", timestamp: "2026-04-03T10:02:00.000Z" },
+      ],
+    })
+
+    expect(count).toBe(1)
+    expect(state.sessionToolCalls.get("session-1")).toEqual([
+      { name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" },
+      { name: "Bash", detail: "ls", timestamp: "2026-04-03T10:02:00.000Z" },
+    ])
+    expect(state.sessionToolUsage.get("session-1")).toEqual({
+      toolNames: ["Read", "Read", "Bash"],
+      skillInvocations: [],
+      lastSeen: Date.parse("2026-04-03T10:02:00.000Z"),
+    })
+    expect(state.sessionActivity.get("session-1")).toEqual({
+      lastSeen: Date.parse("2026-04-03T10:02:00.000Z"),
+      dispatches: 2,
+    })
   })
 })
 

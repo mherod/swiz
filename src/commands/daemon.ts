@@ -7,6 +7,7 @@ import {
   getSwizSettingsPath,
   invalidateSettingsCache,
 } from "../settings.ts"
+import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
@@ -36,7 +37,10 @@ import {
 import type { ActiveHookDispatch } from "./daemon/types.ts"
 import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
+  buildSessionToolUsageStateFromCapturedCalls,
   type CapturedToolCall,
+  mergeCapturedToolCalls,
+  readPersistedSessionToolCalls,
   restartDaemon,
   type SessionToolUsageState,
   transcriptWatchPathsForProject,
@@ -373,6 +377,80 @@ function createPruner(
   }
 }
 
+interface HydratableSessionState {
+  sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
+  sessionToolCalls: Map<string, CapturedToolCall[]>
+  sessionToolUsage: Map<string, SessionToolUsageState>
+}
+
+function recoverLastSeenMs(calls: CapturedToolCall[], fallbackMs: number): number {
+  let lastSeen = fallbackMs
+  for (const call of calls) {
+    const parsed = Date.parse(call.timestamp)
+    if (Number.isFinite(parsed)) lastSeen = Math.max(lastSeen, parsed)
+  }
+  return lastSeen
+}
+
+function mergeSessionToolUsageStates(
+  existing: SessionToolUsageState | undefined,
+  recovered: SessionToolUsageState
+): SessionToolUsageState {
+  if (!existing) return recovered
+  return {
+    toolNames: [...existing.toolNames, ...recovered.toolNames],
+    skillInvocations: [...existing.skillInvocations, ...recovered.skillInvocations],
+    lastSeen: Math.max(existing.lastSeen, recovered.lastSeen),
+  }
+}
+
+export async function hydratePersistedSessionToolState(
+  cwd: string,
+  state: HydratableSessionState,
+  opts?: {
+    listSessions?: (cwd: string) => Promise<Session[]>
+    readToolCalls?: (cwd: string, sessionId: string) => Promise<CapturedToolCall[]>
+  }
+): Promise<number> {
+  const listSessions = opts?.listSessions ?? findAllProviderSessions
+  const readToolCalls =
+    opts?.readToolCalls ??
+    ((projectCwd: string, sessionId: string) =>
+      readPersistedSessionToolCalls(projectCwd, sessionId))
+
+  const sessions = await listSessions(cwd)
+  let hydratedCount = 0
+
+  for (const session of sessions) {
+    const persisted = await readToolCalls(cwd, session.id)
+    if (persisted.length === 0) continue
+
+    const mergedCalls = mergeCapturedToolCalls(
+      persisted,
+      state.sessionToolCalls.get(session.id) ?? []
+    )
+    if (mergedCalls.length === 0) continue
+
+    const lastSeen = recoverLastSeenMs(mergedCalls, session.mtime)
+    state.sessionToolCalls.set(session.id, mergedCalls)
+    state.sessionToolUsage.set(
+      session.id,
+      mergeSessionToolUsageStates(
+        state.sessionToolUsage.get(session.id),
+        buildSessionToolUsageStateFromCapturedCalls(mergedCalls, lastSeen)
+      )
+    )
+    const previousActivity = state.sessionActivity.get(session.id)
+    state.sessionActivity.set(session.id, {
+      lastSeen: Math.max(previousActivity?.lastSeen ?? 0, lastSeen),
+      dispatches: previousActivity?.dispatches ?? 0,
+    })
+    hydratedCount++
+  }
+
+  return hydratedCount
+}
+
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
   const state = createDaemonState()
   const caches = createDaemonCaches()
@@ -409,6 +487,13 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   process.on("exit", () => cleanup("exit"))
 
   const cwd = process.cwd()
+  const hydratedSessions = await hydratePersistedSessionToolState(cwd, state)
+  if (hydratedSessions > 0) {
+    stderrLog(
+      "daemon startup hydration",
+      `[daemon] hydrated ${hydratedSessions} persisted session tool-call log${hydratedSessions === 1 ? "" : "s"} for recovery`
+    )
+  }
 
   state.touchProject(cwd)
   const pruneTranscriptMemory = createPruner(

@@ -323,6 +323,31 @@ export function mergeCapturedToolCalls(...sources: CapturedToolCall[][]): Captur
     : merged
 }
 
+function recoverSkillInvocation(detail: string): string | null {
+  const trimmed = detail.trim()
+  if (!trimmed) return null
+  const [skill] = trimmed.split(/\s+/, 1)
+  return skill || null
+}
+
+export function buildSessionToolUsageStateFromCapturedCalls(
+  calls: CapturedToolCall[],
+  lastSeen: number
+): SessionToolUsageState {
+  const skillInvocations: string[] = []
+  for (const call of calls) {
+    if (call.name !== "Skill") continue
+    const skill = recoverSkillInvocation(call.detail)
+    if (skill) skillInvocations.push(skill)
+  }
+
+  return {
+    toolNames: calls.map((call) => call.name),
+    skillInvocations,
+    lastSeen,
+  }
+}
+
 export function seedSessionToolUsage(
   sessionToolUsage: Map<string, SessionToolUsageState>,
   sessionId: string,
