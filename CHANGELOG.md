@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-04-03
+
+### Performance Analysis: `stop-personal-repo-issues`
+
+Audited `hooks/stop-personal-repo-issues` and surrounding utilities for performance
+inefficiencies. Filed 7 issues:
+
+- **perf(git): cache `getRepoSlug` per-cwd** — `git remote get-url origin` spawned 4 times
+  per hook invocation for the same cwd; module-level cache eliminates 3 redundant subprocesses
+  ([#499](https://github.com/mherod/swiz/issues/499), priority-high).
+- **perf(stop): parallelize independent awaits in evaluate** — `readProjectState` and settings
+  import have no dependency on PR/issue fetches but are awaited sequentially
+  ([#500](https://github.com/mherod/swiz/issues/500)).
+- **perf(stop-auditor): parallelize sibling session CI evidence scan** — `findCiEvidenceInSiblings`
+  and `findCiEvidenceInAllSessions` loop sequentially over sessions with `readSessionTasks`
+  ([#501](https://github.com/mherod/swiz/issues/501)).
+- **perf(git): cache `getDefaultBranch`** — up to 5 sequential git subprocesses per call with
+  no caching ([#502](https://github.com/mherod/swiz/issues/502)).
+- **fix(stop): add `--limit` to `gh issue list` fallback** — CLI fallback path has no explicit
+  bound ([#503](https://github.com/mherod/swiz/issues/503)).
+- **refactor(stop): extract shared `feedbackPrCount`** — identical function defined in both
+  `context.ts` and `action-plan.ts`
+  ([#504](https://github.com/mherod/swiz/issues/504)).
+- **fix(cooldown): remove dead `|| false` conditions** — redundant `|| false` in `isInCooldown`
+  and `updateCooldown` ([#505](https://github.com/mherod/swiz/issues/505)).
+
 ## 2026-04-02
 
 ### Fixes
