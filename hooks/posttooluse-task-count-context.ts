@@ -55,7 +55,7 @@ function buildCountSummary(counts: {
  * the PostToolUse hook may fire before the write lands. Overlaying the
  * mutation from tool_input ensures accurate counts.
  */
-function applyMutationOverlay(
+export function applyMutationOverlay(
   tasks: Array<{ id: string; status: string }>,
   toolName: string,
   toolInput: Record<string, unknown>
