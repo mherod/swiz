@@ -23,7 +23,7 @@ import {
   formatTaskList,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
-  readSessionTasks,
+  readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
@@ -494,7 +494,7 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
     // Settings read failure → use strict thresholds as default
   }
 
-  const allTasks = await readSessionTasks(sessionId)
+  const allTasks = await readSessionTasksFresh(sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
