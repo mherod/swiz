@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { formatActionPlan } from "../src/action-plan.ts"
+import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
@@ -206,12 +207,9 @@ async function runAuditor(
     transcript_path: transcriptPath,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDECODE
-  delete env.CURSOR_TRACE_ID
-  delete env.GEMINI_CLI
-  delete env.GEMINI_PROJECT_DIR
-  delete env.CODEX_MANAGED_BY_NPM
-  delete env.CODEX_THREAD_ID
+  for (const agent of AGENTS) {
+    for (const v of agent.envVars ?? []) env[v] = ""
+  }
 
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
@@ -247,14 +245,16 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when latest status is still in_progress but no task tool observed", async () => {
+  it("allows stop when agent lacks task tools (Junie-like)", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
       { action: "status_change", taskId: "1", newStatus: "in_progress" },
     ])
-    const result = await runAuditor(home, transcriptPath)
-    // No task tool in observed names → agent can't create tasks → allow
+    const result = await runAuditor(home, transcriptPath, {
+      JUNIE_DATA: "/tmp/junie-test",
+    })
+    // Junie has no task tools → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -273,7 +273,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop with incomplete audit tasks when no task tool observed", async () => {
+  it("allows stop with incomplete audit tasks when agent lacks task tools", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
@@ -281,8 +281,10 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
       { action: "create", taskId: "2" },
       { action: "status_change", taskId: "2", newStatus: "pending" },
     ])
-    const result = await runAuditor(home, transcriptPath)
-    // No task tool in observed names → allow
+    const result = await runAuditor(home, transcriptPath, {
+      JUNIE_DATA: "/tmp/junie-test",
+    })
+    // Junie has no task tools → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -299,30 +301,35 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when audit log file does not exist and no task tool observed", async () => {
+  it("allows stop when audit log missing and agent lacks task tools", async () => {
     const { home, transcriptPath } = await createFixture()
-    // tasks dir exists but has no .json files and no audit log
-    const result = await runAuditor(home, transcriptPath)
-    // No task tool in observed names → allow
+    const result = await runAuditor(home, transcriptPath, {
+      JUNIE_DATA: "/tmp/junie-test",
+    })
+    // Junie has no task tools → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when audit log has no create entries and no task tool observed", async () => {
+  it("allows stop when audit log has no create entries and agent lacks task tools", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "status_change", taskId: "1", newStatus: "completed" },
     ])
-    const result = await runAuditor(home, transcriptPath)
-    // No task tool in observed names → allow
+    const result = await runAuditor(home, transcriptPath, {
+      JUNIE_DATA: "/tmp/junie-test",
+    })
+    // Junie has no task tools → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when agent has no task tools in observed tool names", async () => {
+  it("allows stop when agent lacks task tools despite many tool calls", async () => {
     const { home, transcriptPath } = await createFixtureWithTools(
       Array.from({ length: 12 }, () => "shell_command")
     )
-    const result = await runAuditor(home, transcriptPath)
-    // Agent without task tools should not be blocked for missing tasks
+    const result = await runAuditor(home, transcriptPath, {
+      JUNIE_DATA: "/tmp/junie-test",
+    })
+    // Junie has no task tools → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -584,12 +591,9 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
       transcript_path: currentTranscript,
     })
     const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-    delete env.CLAUDECODE
-    delete env.CURSOR_TRACE_ID
-    delete env.GEMINI_CLI
-    delete env.GEMINI_PROJECT_DIR
-    delete env.CODEX_MANAGED_BY_NPM
-    delete env.CODEX_THREAD_ID
+    for (const agent of AGENTS) {
+      for (const v of agent.envVars ?? []) delete env[v]
+    }
 
     const proc = Bun.spawn(["bun", HOOK_PATH], {
       stdin: "pipe",

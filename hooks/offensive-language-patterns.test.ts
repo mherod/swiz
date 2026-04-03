@@ -82,6 +82,11 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("That failure is pre-existing, not from my changes.")
       expect(m?.category).toBe("dismissal")
     })
+    test("matches 'test was already failing before my changes'", () => {
+      const m = findLazyPattern("test was already failing BEFORE my changes")
+      expect(m?.category).toBe("dismissal")
+      expect(m?.response).toContain("already failing before your changes")
+    })
   })
 
   // ── Compliance gaming ──────────────────────────────────────────────────────

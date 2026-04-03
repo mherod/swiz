@@ -6,6 +6,7 @@
 
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { agentHasTaskTools } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -18,7 +19,6 @@ import {
   readSessionTasks,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
-import { isTaskTool } from "../src/tool-matchers.ts"
 import {
   blockStopObj,
   computeTranscriptSummary,
@@ -32,11 +32,6 @@ import {
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const TOOL_CALL_THRESHOLD = 10
-
-/** Only enforce task creation when the agent has task tools available. */
-function agentSupportsTaskTools(observedToolNames: string[]): boolean {
-  return observedToolNames.some(isTaskTool)
-}
 
 /**
  * Extract sibling session IDs from the same project directory.
@@ -120,7 +115,7 @@ async function checkAuditLogAllowsStop(
   } catch {}
 
   if (taskToolUsed) return null
-  if (!agentSupportsTaskTools(observedToolNames)) return null
+  if (!agentHasTaskTools()) return null
 
   if (toolCallCount >= TOOL_CALL_THRESHOLD) {
     const planSteps = [
@@ -223,7 +218,7 @@ async function handleNoTasksDir(
   cwd?: string
 ): Promise<SwizHookOutput | null> {
   if (taskToolUsed) return null
-  if (!agentSupportsTaskTools(observedToolNames)) return null
+  if (!agentHasTaskTools()) return null
   if (toolCallCount >= TOOL_CALL_THRESHOLD) {
     return await blockNoTasks(toolCallCount, observedToolNames, sessionId, cwd)
   }

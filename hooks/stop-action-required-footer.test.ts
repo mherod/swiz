@@ -12,6 +12,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { commitFile, makeTempGitRepo, runGit, useTempDir } from "../src/utils/test-utils.ts"
 
@@ -31,12 +32,9 @@ async function runStopHook(
   opts: { env?: Record<string, string>; cwd?: string } = {}
 ): Promise<HookResult> {
   const env: Record<string, string | undefined> = { ...process.env, ...opts.env }
-  delete env.CLAUDECODE
-  delete env.CURSOR_TRACE_ID
-  delete env.GEMINI_CLI
-  delete env.GEMINI_PROJECT_DIR
-  delete env.CODEX_MANAGED_BY_NPM
-  delete env.CODEX_THREAD_ID
+  for (const agent of AGENTS) {
+    for (const v of agent.envVars ?? []) env[v] = ""
+  }
   const proc = Bun.spawn(["bun", join(HOOKS_DIR, hookFile)], {
     stdin: "pipe",
     stdout: "pipe",

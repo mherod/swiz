@@ -64,6 +64,12 @@ interface StatusLineDaemonMetrics {
   totalDispatches: number
 }
 
+interface StatusLineRenderSettings {
+  activeSegments: string[]
+  ignoreCi: boolean
+  settingsParts: string[]
+}
+
 interface GitHubCiRun {
   databaseId?: number
   status: string
@@ -544,6 +550,38 @@ function activeSegmentsFromEffective(effective: EffectiveSwizSettings | null): s
   return effective?.statusLineSegments ?? []
 }
 
+async function resolveStatusLineRenderSettings(
+  cwd: string,
+  sessionId: string | null | undefined
+): Promise<StatusLineRenderSettings | null> {
+  const [swizSettings, projectSettings] = await Promise.all([
+    readSwizSettings().catch(() => null),
+    readProjectSettings(cwd).catch(() => null),
+  ])
+
+  if (!swizSettings) return null
+
+  const effective = getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
+  return {
+    activeSegments: activeSegmentsFromEffective(effective),
+    ignoreCi: Boolean(effective.ignoreCi),
+    settingsParts: buildSettingsFlags(effective),
+  }
+}
+
+function applyRenderSettingsToSnapshot(
+  snapshot: WarmStatusLineSnapshot,
+  renderSettings: StatusLineRenderSettings | null
+): WarmStatusLineSnapshot {
+  if (!renderSettings) return snapshot
+  return {
+    ...snapshot,
+    activeSegments: renderSettings.activeSegments,
+    ignoreCi: renderSettings.ignoreCi,
+    settingsParts: renderSettings.settingsParts,
+  }
+}
+
 interface GhFetchNeeds {
   pr: boolean
   backlog: boolean
@@ -896,13 +934,16 @@ export const statusLineCommand: Command = {
     // Time-based offset: cycles through full rainbow every ~1 minute (~1.7s per step)
     const timeOffset = Math.floor(Date.now() / 1667) % RL
 
-    const [ctxStats, warmSnapshot, daemonMetrics] = await Promise.all([
+    const [ctxStats, warmSnapshot, daemonMetrics, renderSettings] = await Promise.all([
       updateContextStats(cwd, ctxPct),
       readWarmSnapshotFromDaemon(cwd, input.session_id ?? null),
       readProjectMetricsFromDaemon(cwd),
+      resolveStatusLineRenderSettings(cwd, input.session_id ?? null),
     ])
-    const snapshot =
-      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null))
+    const snapshot = applyRenderSettingsToSnapshot(
+      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null)),
+      renderSettings
+    )
 
     console.log(
       renderStatusLineFromSnapshot({

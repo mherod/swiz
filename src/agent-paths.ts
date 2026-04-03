@@ -1,6 +1,13 @@
 import { join } from "node:path"
-import { AGENTS, type AgentDef, inferAgentFromToolNames, translateMatcher } from "./agents.ts"
+import {
+  AGENTS,
+  type AgentDef,
+  getEmittedToolNames,
+  inferAgentFromToolNames,
+  translateMatcher,
+} from "./agents.ts"
 import { getHomeDir } from "./home.ts"
+import { isTaskTool } from "./tool-matchers.ts"
 
 export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex" | "junie"
 
@@ -86,6 +93,21 @@ function getParentProcessCommand(): string {
  */
 export function detectCurrentAgentFromEnv(): AgentDef | null {
   return AGENTS.find((a) => a.envVars?.some((v) => process.env[v])) ?? null
+}
+
+/**
+ * Check whether the current agent supports task tools (TaskCreate, TaskUpdate, etc.).
+ * When no agent is detected from env, assumes task tools are available (Claude default).
+ * Uses the authoritative emitted-tool-names registry to check for task tool support.
+ */
+export function agentHasTaskTools(): boolean {
+  const agent = detectCurrentAgentFromEnv()
+  if (!agent) return true
+  const emitted = getEmittedToolNames(agent)
+  for (const name of emitted) {
+    if (isTaskTool(name)) return true
+  }
+  return false
 }
 
 /**

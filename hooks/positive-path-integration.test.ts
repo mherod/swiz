@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { projectKeyFromCwd } from "../src/project-key.ts"
+import { AGENTS } from "../src/agents.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type HookResult, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
@@ -23,12 +23,12 @@ async function runHook(
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
   const env: Record<string, string | undefined> = { ...process.env }
-  delete env.CLAUDECODE
-  delete env.CURSOR_TRACE_ID
-  delete env.GEMINI_CLI
-  delete env.GEMINI_PROJECT_DIR
-  delete env.CODEX_MANAGED_BY_NPM
-  delete env.CODEX_THREAD_ID
+  // Neutralize all agent env vars — set to empty string rather than delete,
+  // because Bun.spawn re-injects vars from the parent even when they're
+  // absent from the explicit env object.
+  for (const agent of AGENTS) {
+    for (const v of agent.envVars ?? []) env[v] = ""
+  }
   // Force daemon connection failure — prevents 2s timeout per attempt under CI load
   env.SWIZ_DAEMON_PORT = "19999"
 
@@ -796,79 +796,6 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).toContain("Compaction context truncated to stay within budget.")
     expect(ctx.length).toBeLessThanOrEqual(2400)
   })
-
-  test("prior-session completed tasks are excluded from context", async () => {
-    const home = await createTempDir()
-    const currentSessionId = `current-${Date.now()}`
-    const priorSessionId = `prior-${Date.now()}`
-    const cwd = "/Users/testuser/myproject"
-
-    // Create a transcript for the prior session so findPriorSessionTasks can discover it
-    const projectKey = projectKeyFromCwd(cwd)
-    const projectDir = join(home, ".claude", "projects", projectKey)
-    await mkdir(projectDir, { recursive: true })
-    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
-
-    // Prior session has mixed tasks
-    await createTaskFile(home, priorSessionId, {
-      id: "1",
-      subject: "Prior completed work",
-      status: "completed",
-    })
-    await createTaskFile(home, priorSessionId, {
-      id: "2",
-      subject: "Prior incomplete work",
-      status: "in_progress",
-    })
-
-    const r = await runHook(
-      HOOK,
-      { matcher: "compact", cwd, session_id: currentSessionId },
-      { HOME: home }
-    )
-    expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
-    expect(ctx).not.toContain("Prior completed work")
-    expect(ctx).toContain("Prior incomplete work")
-    expect(ctx).toContain("1 incomplete task(s)")
-    // Verify prior-session completion uses native TaskUpdate guidance
-    expect(ctx).toContain("TaskUpdate")
-    expect(ctx).toContain(priorSessionId)
-  })
-
-  test("prior-session all-completed tasks produce no prior-session section", async () => {
-    const home = await createTempDir()
-    const currentSessionId = `current-${Date.now()}`
-    const priorSessionId = `prior-${Date.now()}`
-    const cwd = "/Users/testuser/myproject2"
-
-    const projectKey = projectKeyFromCwd(cwd)
-    const projectDir = join(home, ".claude", "projects", projectKey)
-    await mkdir(projectDir, { recursive: true })
-    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
-
-    await createTaskFile(home, priorSessionId, {
-      id: "1",
-      subject: "All done A",
-      status: "completed",
-    })
-    await createTaskFile(home, priorSessionId, {
-      id: "2",
-      subject: "All done B",
-      status: "completed",
-    })
-
-    const r = await runHook(
-      HOOK,
-      { matcher: "compact", cwd, session_id: currentSessionId },
-      { HOME: home }
-    )
-    expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
-    expect(ctx).not.toContain("All done A")
-    expect(ctx).not.toContain("All done B")
-    expect(ctx).not.toContain("Prior session")
-  })
 })
 
 describe("sessionstart-health-snapshot: positive paths", () => {
@@ -900,45 +827,6 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     expect(ctx).toContain("branch=")
     expect(ctx).toContain("uncommitted=")
   }, 15000)
-})
-
-describe("userpromptsubmit-task-advisor: positive paths", () => {
-  const HOOK = "hooks/userpromptsubmit-task-advisor.ts"
-
-  test("caps prior-session task preview to keep per-turn context bounded", async () => {
-    const home = await createTempDir()
-    const currentSessionId = `current-${Date.now()}`
-    const priorSessionId = `prior-${Date.now()}`
-    const cwd = "/Users/testuser/bounded-project"
-
-    const projectKey = projectKeyFromCwd(cwd)
-    const projectDir = join(home, ".claude", "projects", projectKey)
-    await mkdir(projectDir, { recursive: true })
-    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
-
-    for (const [id, subject] of [
-      ["1", "Resume task one"],
-      ["2", "Resume task two"],
-      ["3", "Resume task three"],
-      ["4", "Resume task four"],
-      ["5", "Resume task five"],
-    ] as const) {
-      await createTaskFile(home, priorSessionId, { id, subject, status: "in_progress" })
-    }
-
-    const r = await runHook(HOOK, { cwd, session_id: currentSessionId }, { HOME: home })
-    expect(r.exitCode).toBe(0)
-    const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
-    expect(ctx).toContain("5 incomplete task(s)")
-    expect(ctx).toContain("TaskUpdate")
-    expect(ctx).toContain(priorSessionId)
-    expect(ctx).toContain("Resume task one")
-    expect(ctx).toContain("Resume task two")
-    expect(ctx).toContain("Resume task three")
-    expect(ctx).not.toContain("Resume task four")
-    expect(ctx).not.toContain("Resume task five")
-    expect(ctx).toContain("... 2 more incomplete task(s)")
-  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { AGENTS } from "../src/agents.ts"
 import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 interface HookResult {
@@ -23,12 +24,10 @@ async function runHook({
     hook_event_name: "stop",
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
-  delete env.CLAUDECODE
-  delete env.CURSOR_TRACE_ID
-  delete env.GEMINI_CLI
-  delete env.GEMINI_PROJECT_DIR
-  delete env.CODEX_MANAGED_BY_NPM
-  delete env.CODEX_THREAD_ID
+  for (const agent of AGENTS) {
+    for (const v of agent.envVars ?? []) env[v] = ""
+  }
+  env.SWIZ_DAEMON_PORT = "19999"
   const proc = Bun.spawn(["bun", "hooks/stop-incomplete-tasks.ts"], {
     stdin: "pipe",
     stdout: "pipe",

@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { DEFAULT_SETTINGS } from "../settings.ts"
 import {
   buildSettingsFlags,
+  computeWarmStatusLineSnapshot,
   formatCountSegment,
   formatGitHubCiSegment,
   formatProjectState,
@@ -349,6 +350,23 @@ describe("renderStatusLineFromSnapshot", () => {
 
     expect(out).not.toContain("metrics")
     expect(out).not.toContain("dispatches")
+  })
+
+  it("renders metrics when local settings include the segment", async () => {
+    const snapshot = await computeWarmStatusLineSnapshot(process.cwd(), "debug-session")
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot,
+      daemonMetrics: { uptimeHuman: "1h 00m 00s", totalDispatches: 12 },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+
+    expect(out).toContain("metrics")
+    expect(out).toContain("12")
+    expect(out).toContain("dispatches")
   })
 })
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { AGENTS } from "../src/agents.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -43,12 +44,9 @@ async function runHook(
     session_id: sessionId,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: testHome }
-  delete env.CLAUDECODE
-  delete env.CURSOR_TRACE_ID
-  delete env.GEMINI_CLI
-  delete env.GEMINI_PROJECT_DIR
-  delete env.CODEX_MANAGED_BY_NPM
-  delete env.CODEX_THREAD_ID
+  for (const agent of AGENTS) {
+    for (const v of agent.envVars ?? []) env[v] = ""
+  }
 
   const proc = Bun.spawn(["bun", "hooks/posttooluse-git-task-autocomplete.ts"], {
     stdin: "pipe",

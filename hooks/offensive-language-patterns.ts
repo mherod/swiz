@@ -315,6 +315,14 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "dismissal",
     pattern:
+      /\b(?:this |that |the )?tests?\s+(?:was|were|has been|have been)\s+already\s+(?:failing|broken|red)\b[^.!?\n]{0,80}\b(?:before|prior to)\s+(?:my|our)\s+(?:change|changes|work|edits|updates|commit|commits)\b/i,
+    response:
+      "Saying the test was already failing before your changes is a dismissal, not an investigation. " +
+      "If it is red in your run, fix it or prove a clean baseline with transcript-visible evidence — when it started failing does not transfer ownership away from you.",
+  },
+  {
+    category: "dismissal",
+    pattern:
       /(?:was|were|has been|have been) (?:already )?(?:broken|failing|there|present|in (?:the )?(?:codebase|code)) (?:before|prior to|when (?:i|we) (?:started|began|arrived|got here))/i,
     response:
       "Whether it was broken before you started is irrelevant. It is broken now and it is in your workflow. " +

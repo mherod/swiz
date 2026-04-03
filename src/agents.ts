@@ -345,6 +345,11 @@ const EMITTED_TOOL_NAMES_BY_AGENT = new Map(
   ])
 )
 
+/** Get the set of tool names an agent emits (agent-specific names for aliased agents, canonical for Claude). */
+export function getEmittedToolNames(agent: AgentDef): ReadonlySet<string> {
+  return EMITTED_TOOL_NAMES_BY_AGENT.get(agent.id) ?? new Set()
+}
+
 // ─── Translation helpers ────────────────────────────────────────────────────
 
 export function translateMatcher(matcher: string | undefined, agent: AgentDef): string | undefined {
