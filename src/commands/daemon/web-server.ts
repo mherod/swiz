@@ -588,6 +588,12 @@ async function handleDispatchRoute(
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
   await updateParsedPayloadMetrics(ctx, payloadStr, canonicalEvent, durationMs)
 
+  // Force a full synchronous GC pass after each dispatch to reclaim external
+  // string backing stores (JSON.parse/stringify results, subprocess stdout reads).
+  // Without this, Bun's incremental GC may defer collection of large external
+  // allocations, causing RSS to grow unboundedly in long-lived daemon processes.
+  Bun.gc(true)
+
   try {
     return Response.json(
       parseValidatedAgentDispatchWireJson(raceResult.response, canonicalEvent, hookEventName)
@@ -959,6 +965,7 @@ async function handlePrPollRoute(req: Request, ctx: DaemonWebServerContext): Pro
     ctx.touchProject(cwd)
     recordDispatch(ctx.getProjectMetrics(cwd), "prPoll", durationMs)
     ctx.registerProjectWatchers(cwd)
+    Bun.gc(true)
     return Response.json({ success: true, response: result.response, durationMs, exitCode: 0 })
   } catch (error) {
     const durationMs = performance.now() - start

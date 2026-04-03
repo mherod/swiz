@@ -52,7 +52,7 @@ export function buildDaemonLaunchAgentPlist(port: number): string {
       <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>exec ${bunPath} --inspect ${indexPath} daemon --port ${port} 2&gt;&amp;1</string>
+        <string>exec ${bunPath} ${indexPath} daemon --port ${port} 2&gt;&amp;1</string>
       </array>
 
       <key>WorkingDirectory</key>
