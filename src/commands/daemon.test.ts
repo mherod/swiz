@@ -497,9 +497,10 @@ describe("FileWatcherRegistry", () => {
   })
 
   it("close stops all watchers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fwr-close-"))
     const reg = new FileWatcherRegistry()
     registries.push(reg)
-    reg.register("/tmp", "tmp", () => {})
+    reg.register(dir, "tmp", () => {})
     await reg.start()
     expect(reg.status()[0]?.watching).toBeTrue()
     reg.close()
