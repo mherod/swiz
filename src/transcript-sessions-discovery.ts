@@ -196,7 +196,7 @@ export async function findGeminiSessions(targetDir: string, home?: string): Prom
   return sessions
 }
 
-const CODEX_SESSION_HEADER_BYTES = 262_144
+const CODEX_SESSION_HEADER_BYTES = 32_768
 
 async function readFilePrefix(
   path: string,

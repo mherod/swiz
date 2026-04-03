@@ -9,6 +9,7 @@ import {
 } from "../settings.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { clearFileCache } from "../utils/file-cache.ts"
 import type { TranscriptMonitor } from "./daemon/cache/transcript-monitor.ts"
 import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monitor.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
@@ -492,6 +493,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
 
   const cwd = process.cwd()
   const hydratedSessions = await hydratePersistedSessionToolState(cwd, state)
+  // Release file-cache entries accumulated during session discovery.
+  // findAllProviderSessions reads prefixes of every session file across all
+  // providers (Codex ~2700 files, Junie ~400 files) to match by cwd. Without
+  // clearing, these prefix strings remain pinned in the module-level cache.
+  clearFileCache()
+  Bun.gc(true)
   if (hydratedSessions > 0) {
     stderrLog(
       "daemon startup hydration",

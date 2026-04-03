@@ -56,22 +56,46 @@ export async function getCachedFileJson(path: string): Promise<any> {
 }
 
 /**
- * Specialized version for reading the first N lines.
- * Still caches the whole file to simplify the 'stable' file logic.
+ * Reads the first N lines of a file using a bounded disk read.
+ * Only reads up to {@link LINES_PREFIX_BYTES} bytes — enough for typical
+ * JSONL headers — instead of loading the entire file into memory.
  */
 export async function getCachedLines(path: string, count: number): Promise<string[]> {
-  const text = await getCachedFileText(path)
-  if (!text) return []
-  return text.split("\n").slice(0, count)
+  // 50 JSONL lines of ~2KB each ≈ 100KB is generous for header scanning.
+  const prefix = await getCachedPrefix(path, LINES_PREFIX_BYTES)
+  if (!prefix) return []
+  return prefix.split("\n").slice(0, count)
 }
 
+const LINES_PREFIX_BYTES = 128 * 1024
+
 /**
- * Specialized version for reading a prefix.
+ * Reads at most {@link maxBytes} bytes from the start of a file.
+ * Uses Bun.file().slice() so only the requested prefix is loaded from disk,
+ * avoiding multi-megabyte allocations for large transcript files.
  */
 export async function getCachedPrefix(path: string, maxBytes: number): Promise<string> {
-  const text = await getCachedFileText(path)
-  if (!text) return ""
-  // Note: this assumes UTF-8 string indexing, which might differ slightly from
-  // bytes but should be close enough for prefix matching in these files.
-  return text.slice(0, maxBytes)
+  try {
+    const s = await stat(path)
+    const mtime = s.mtimeMs
+    const now = Date.now()
+    const cacheKey = `${path}\0prefix:${maxBytes}`
+
+    const cached = FILE_CACHE.get(cacheKey)
+    if (cached && now - mtime > TWO_HOURS_MS && cached.mtime === mtime) {
+      return cached.content
+    }
+
+    const file = Bun.file(path)
+    const content = await file.slice(0, maxBytes).text()
+
+    FILE_CACHE.set(cacheKey, { content, mtime, cachedAt: now })
+    return content
+  } catch {
+    return ""
+  }
+}
+
+export function clearFileCache(): void {
+  FILE_CACHE.clear()
 }
