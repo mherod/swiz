@@ -322,6 +322,29 @@ export function agentSupportsTool(agent: AgentDef, toolName: string): boolean {
 /** Agents that support user-configurable hooks files */
 export const CONFIGURABLE_AGENTS = AGENTS.filter((a) => a.hooksConfigurable)
 
+const CLAUDE_EMITTED_TOOL_NAMES = new Set([
+  "Bash",
+  "Edit",
+  "Write",
+  "Read",
+  "Grep",
+  "Glob",
+  "Task",
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskList",
+  "TaskGet",
+  "NotebookEdit",
+  "Skill",
+])
+
+const EMITTED_TOOL_NAMES_BY_AGENT = new Map(
+  AGENTS.map((agent) => [
+    agent.id,
+    agent.id === "claude" ? CLAUDE_EMITTED_TOOL_NAMES : new Set(Object.values(agent.toolAliases)),
+  ])
+)
+
 // ─── Translation helpers ────────────────────────────────────────────────────
 
 export function translateMatcher(matcher: string | undefined, agent: AgentDef): string | undefined {
@@ -331,6 +354,44 @@ export function translateMatcher(matcher: string | undefined, agent: AgentDef): 
 
 export function translateEvent(canonical: string, agent: AgentDef): string {
   return agent.eventMap[canonical] ?? canonical
+}
+
+/**
+ * Infer the most likely agent from emitted tool names.
+ *
+ * Only tool names that uniquely identify a single agent count as evidence. This
+ * keeps inline/daemon hook rendering conservative when the process environment
+ * does not belong to the originating agent session.
+ */
+export function inferAgentFromToolNames(toolNames: Iterable<string>): AgentDef | null {
+  const strongMatches = new Map<string, number>()
+
+  for (const rawName of toolNames) {
+    const name = rawName.trim()
+    if (!name) continue
+
+    const matchingAgents = AGENTS.filter((agent) =>
+      EMITTED_TOOL_NAMES_BY_AGENT.get(agent.id)?.has(name)
+    )
+    if (matchingAgents.length !== 1) continue
+
+    const agentId = matchingAgents[0]!.id
+    strongMatches.set(agentId, (strongMatches.get(agentId) ?? 0) + 1)
+  }
+
+  if (strongMatches.size === 0) return null
+
+  const rankedMatches = Array.from(strongMatches.entries()).sort((left, right) => {
+    if (right[1] !== left[1]) return right[1] - left[1]
+    return left[0].localeCompare(right[0])
+  })
+
+  const bestMatch = rankedMatches[0]
+  const secondBestMatch = rankedMatches[1]
+  if (!bestMatch) return null
+  if (secondBestMatch && secondBestMatch[1] === bestMatch[1]) return null
+
+  return getAgent(bestMatch[0]) ?? null
 }
 
 // ─── Agent detection ────────────────────────────────────────────────────────

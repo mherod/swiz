@@ -84,6 +84,7 @@ import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
 import prpollNotify from "../hooks/prpoll-notify.ts"
 import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
+import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-detects.ts"
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
 import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
 import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
@@ -380,6 +381,7 @@ export const manifest: HookGroup[] = [
     matcher: "startup",
     hooks: [
       { hook: sessionstartSelfHeal },
+      { hook: sessionstartEnvironmentDetects },
       { hook: sessionstartHealthSnapshot },
       { hook: sessionstartStateContext },
       { hook: posttooluseSpeakNarrator },

@@ -1,3 +1,7 @@
+/**
+ * Worker thread host for `BaseFileWatcherRegistry`; recursive dirs use
+ * `fs.watch(path, { recursive: true })` via file-watcher-registry.ts.
+ */
 import { parentPort } from "node:worker_threads"
 import type { FileWatcherParentMessage, FileWatcherWorkerMessage } from "../worker-messages.ts"
 import { BaseFileWatcherRegistry } from "./file-watcher-registry.ts"
@@ -14,7 +18,7 @@ if (parentPort) {
     try {
       switch (msg.type) {
         case "init": {
-          registry = new BaseFileWatcherRegistry(msg.options)
+          registry = new BaseFileWatcherRegistry()
           break
         }
         case "register": {

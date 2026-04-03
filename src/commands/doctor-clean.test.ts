@@ -784,6 +784,14 @@ describe("cleanup old task files", () => {
       })
     )
 
+    const corruptTaskPath = join(taskDir, "4.json")
+    await writeFile(corruptTaskPath, "{ not valid json")
+    await utimes(
+      corruptTaskPath,
+      new Date("2025-01-01T00:00:00.000Z"),
+      new Date("2025-01-01T00:00:00.000Z")
+    )
+
     // Non-UUID session directories still exist in the wild and should be pruned too.
     const nonUuidTaskDir = join(TASK_FILE_HOME, ".claude", "tasks", NON_UUID_SESSION_ID)
     await mkdir(nonUuidTaskDir, { recursive: true })
@@ -817,7 +825,7 @@ describe("cleanup old task files", () => {
 
     expect(proc.exitCode).toBe(0)
     expect(output).toMatch(/old task files/)
-    expect(output).toMatch(/3 old task files/)
+    expect(output).toMatch(/4 old task files/)
   })
 })
 

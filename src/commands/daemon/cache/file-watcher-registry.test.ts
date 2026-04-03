@@ -18,7 +18,7 @@ function safeRemove(path: string): void {
 }
 
 describe("file-watcher-registry exclusion", () => {
-  test("excluded dirs are not mentioned when recursing", async () => {
+  test("recursive root uses a single fs.watch with recursive: true", async () => {
     const base = join("/tmp/swiz-watcher-test-all", `run-${Date.now()}`)
     const dirs = [
       "src",
@@ -44,22 +44,10 @@ describe("file-watcher-registry exclusion", () => {
         0
       )
 
-      // With depth=2 and exclusions:
-      // base/ (1) + src (1) + src/utils (1) + hooks (1) = 4
-      // Without exclusions: base + src + src/utils + .git + .git/objects + .git/refs + .svn + .hg
-      //                      + node_modules + node_modules/lodash + hooks = 11
-      // 4 is far fewer than 11, confirming exclusions work
-
-      // Also verify excluded names are not in any watched path
-      const excluded = [".git", ".svn", ".hg", "node_modules"]
-      for (const s of status) {
-        for (const excl of excluded) {
-          expect(s.path).not.toContain(excl)
-        }
-      }
-
-      // 4 watchers is the expected count with exclusions
-      expect(totalWatchers).toBe(4)
+      // One recursive `fs.watch(..., { recursive: true })` on the project root;
+      // ignored subtrees are filtered in the change callback, not by skipping watch roots.
+      expect(totalWatchers).toBe(1)
+      expect(status[0]?.path).toBe(join(base, "/"))
 
       registry.close()
     } finally {

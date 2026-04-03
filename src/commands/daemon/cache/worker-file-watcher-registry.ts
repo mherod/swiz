@@ -6,18 +6,19 @@ import type {
   FileWatcherWorkerMessage,
 } from "../worker-messages.ts"
 
+/** Main-thread facade over `BaseFileWatcherRegistry` in a worker (Bun `fs.watch`, `recursive: true` for trees). */
 export class FileWatcherRegistry {
   private worker: Worker
   private callbacks = new Map<string, Set<() => void>>()
   private lastStatus: FileWatcherStatus[] = []
   private closed = false
 
-  constructor(options?: { maxTotalWatchers?: number }) {
+  constructor() {
     const workerPath = new URL("./file-watcher-worker.ts", import.meta.url).pathname
 
     this.worker = new Worker(workerPath)
 
-    this.worker.postMessage({ type: "init", options } satisfies FileWatcherWorkerMessage)
+    this.worker.postMessage({ type: "init" } satisfies FileWatcherWorkerMessage)
 
     this.worker.on("message", (msg: FileWatcherParentMessage) => {
       if (msg.type === "invalidation") {

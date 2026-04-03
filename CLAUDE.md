@@ -132,6 +132,7 @@ alwaysApply: false
 - Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
+- **DON'T** commit untracked files (`.lock`, local state) without checking `.gitignore` first — stop hooks flag all uncommitted files regardless.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
 - Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present.
@@ -263,6 +264,6 @@ alwaysApply: false
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
-- **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as steps finish.
-- **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
-- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
+- **DO**: Create workflow tasks for multi-commit sessions. Mark complete as steps finish.
+- **DO**: Route LaunchAgent `prPoll` via daemon first, fallback to `bun index.ts dispatch`.
+- **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` (they call `process.exit(0)`).

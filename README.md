@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**110 hooks. 12 event types. Every agent. Zero compromises.**
+**111 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,7 +84,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-110 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+111 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
@@ -208,11 +208,12 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-skill-steps.ts` | After a Skill tool call, extracts numbered steps from the skill's `## Steps` section and creates pending tasks for each step that doesn't already exist as a pending/in_progress task. Uses subject fingerprinting and overlap detection to avoid duplicates. |
 | `posttooluse-auto-steer.ts` | Types "Continue" into the active terminal session after every tool call using AppleScript automation. Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 
-### SessionStart (5)
+### SessionStart (6)
 
 | Hook | What it does |
 |------|-------------|
 | `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. After a **full** `swiz install --uninstall` or `swiz uninstall` (all agents), self-heal pauses until you run `swiz install` again so manifest drift cannot undo an intentional removal. |
+| `sessionstart-environment-detects.ts` | Injects a structured snapshot of swiz detections at session start: process-level agent guess, SessionStart payload fields (`agent_type`, `model`, `source`, …), project stacks, frameworks/ecosystems, CI config signals, terminal/shell, and `isRunningInAgent()`. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
 | `sessionstart-state-context.ts` | Injects the current project state (e.g., `in-development`, `awaiting-feedback`) and allowed transitions into the session context so the agent always knows its lifecycle position. |
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
@@ -266,7 +267,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 110 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 111 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

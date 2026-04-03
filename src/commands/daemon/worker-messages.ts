@@ -11,7 +11,7 @@ export interface FileWatcherStatus {
 }
 
 export type FileWatcherWorkerMessage =
-  | { type: "init"; options?: { maxTotalWatchers?: number } }
+  | { type: "init" }
   | {
       type: "register"
       path: string

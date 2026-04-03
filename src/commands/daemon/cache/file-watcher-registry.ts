@@ -1,6 +1,4 @@
 import { type FSWatcher, watch } from "node:fs"
-import { readdir } from "node:fs/promises"
-import { join } from "node:path"
 
 export interface WatchEntry {
   path: string
@@ -20,19 +18,14 @@ export interface WatchEntry {
  * manifest, settings, or git state change on disk — without requiring a
  * daemon restart.
  *
- * Now supports a depth limit for recursive watching to avoid massive resource leaks
- * and keep a sensible limit on watched files.
+ * Recursive directory trees use Bun/Node `fs.watch(path, { recursive: true })` so
+ * one watcher covers the whole subtree. Pass `depth: 0` to watch only the
+ * directory itself (no subtree), e.g. session folders where deep recursion would
+ * open too many handles. Changes under ignored path segments (e.g. `node_modules`)
+ * are filtered out in the callback.
  */
 export class BaseFileWatcherRegistry {
   private entries = new Map<string, WatchEntry>()
-  // noinspection TypeScriptFieldCanBeMadeReadonly
-  private maxTotalWatchers = 1000 // Sensible safeguard
-
-  constructor(options?: { maxTotalWatchers?: number }) {
-    if (options?.maxTotalWatchers) {
-      this.maxTotalWatchers = options.maxTotalWatchers
-    }
-  }
 
   register(
     path: string,
@@ -63,7 +56,7 @@ export class BaseFileWatcherRegistry {
     for (const entry of this.entries.values()) {
       if (entry.watchers.length > 0) continue
 
-      const onEvent = () => {
+      const fire = () => {
         entry.lastInvalidation = Date.now()
         entry.invalidationCount += 1
         for (const cb of entry.callbacks) {
@@ -75,17 +68,20 @@ export class BaseFileWatcherRegistry {
         }
       }
 
-      // Force depth-limited recursion for ALL recursive entries to ensure exclusions are respected.
-      // Native recursive watching (watch(path, { recursive: true })) is intentionally disabled
-      // because it bypasses the manual directory filtering logic and can cause massive resource leaks.
-      if (entry.recursive) {
-        // Default to a shallow depth of 1 if not specified, to prevent runaway scanning.
-        const safeDepth = entry.depth ?? 1
-        await this.watchRecursiveWithDepth(entry.path, safeDepth, entry.watchers, onEvent)
-      } else {
-        // Standard single watcher for non-recursive files/directories.
+      if (entry.recursive && entry.depth !== 0) {
         try {
-          const watcher = watch(entry.path, { recursive: false }, onEvent)
+          const watcher = watch(entry.path, { recursive: true }, (_event, filename) => {
+            const rel = filename == null ? "" : `${filename}`
+            if (this.shouldIgnoreRelativePath(rel)) return
+            fire()
+          })
+          entry.watchers.push(watcher)
+        } catch {
+          // path may not exist yet — that's fine
+        }
+      } else {
+        try {
+          const watcher = watch(entry.path, { recursive: false }, fire)
           entry.watchers.push(watcher)
         } catch {
           // path may not exist yet — that's fine
@@ -94,37 +90,14 @@ export class BaseFileWatcherRegistry {
     }
   }
 
-  private async watchRecursiveWithDepth(
-    path: string,
-    depth: number,
-    watchers: FSWatcher[],
-    callback: () => void
-  ): Promise<void> {
-    if (depth < 0 || this.shouldIgnore(path)) return
-
-    // Check global limit before adding more
-    const currentTotal = [...this.entries.values()].reduce((acc, e) => acc + e.watchers.length, 0)
-    if (currentTotal >= this.maxTotalWatchers) return
-
-    try {
-      const watcher = watch(path, { recursive: false }, callback)
-      watchers.push(watcher)
-    } catch {
-      return // Skip if path doesn't exist or no permission
+  /** True when any path segment is excluded (e.g. node_modules, .git). */
+  private shouldIgnoreRelativePath(relativePath: string): boolean {
+    if (!relativePath) return false
+    for (const part of relativePath.split(/[/\\]+/)) {
+      if (!part) continue
+      if (this.shouldIgnore(part)) return true
     }
-
-    if (depth > 0) {
-      try {
-        const files = await readdir(path, { withFileTypes: true })
-        for (const file of files) {
-          if (file.isDirectory() && !this.shouldIgnore(file.name)) {
-            await this.watchRecursiveWithDepth(join(path, file.name), depth - 1, watchers, callback)
-          }
-        }
-      } catch {
-        // Ignore readdir errors
-      }
-    }
+    return false
   }
 
   private shouldIgnore(name: string): boolean {

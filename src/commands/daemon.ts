@@ -219,7 +219,7 @@ function setupWatchers(
   }
 
   watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)
-  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots, { depth: 1 })
+  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots)
 
   const globalSettingsPath = getSwizSettingsPath()
   if (globalSettingsPath) {
@@ -284,7 +284,7 @@ function setupWatchers(
     const projectFlush = () => invalidateProject(cwd)
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
-    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush, { depth: 2 })
+    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
     const transcriptWatchFlush = () => {
       projectFlush()
       void transcriptMonitor.checkProject(cwd)

@@ -113,6 +113,29 @@ describe("formatActionPlan", () => {
       process.env = originalEnv
     }
   })
+
+  it("can infer Codex from observed tool names when env detection is unavailable", () => {
+    const originalEnv = { ...process.env }
+    delete process.env.CLAUDECODE
+    delete process.env.CURSOR_TRACE_ID
+    delete process.env.GEMINI_CLI
+    delete process.env.GEMINI_PROJECT_DIR
+    delete process.env.CODEX_MANAGED_BY_NPM
+    delete process.env.CODEX_THREAD_ID
+
+    try {
+      expect(
+        formatActionPlan(["Use TaskCreate to create tasks", "Use TaskUpdate to complete them"], {
+          translateToolNames: true,
+          observedToolNames: ["shell_command", "apply_patch", "read_file"],
+        })
+      ).toBe(
+        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+      )
+    } finally {
+      process.env = originalEnv
+    }
+  })
 })
 
 // ─── stop-completion-auditor — audit log path ────────────────────────────────
@@ -313,6 +336,16 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("  1. Use update_plan")
+    expect(result.reason).toContain("  2. Use update_plan")
+  })
+
+  it("uses transcript-observed Codex tools to translate the action plan without Codex env", async () => {
+    const { home, transcriptPath } = await createFixtureWithTools(
+      Array.from({ length: 12 }, () => "shell_command")
+    )
+    const result = await runAuditor(home, transcriptPath)
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain("  1. Use update_plan")
     expect(result.reason).toContain("  2. Use update_plan")

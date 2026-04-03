@@ -5,8 +5,8 @@
  */
 
 import { join } from "node:path"
-import { translateMatcher } from "./agents.ts"
-import { detectCurrentAgent } from "./detect.ts"
+import { type AgentDef, inferAgentFromToolNames, translateMatcher } from "./agents.ts"
+import { detectCurrentAgent, detectCurrentAgentFromEnv } from "./detect.ts"
 import {
   extractStepsFromSkill,
   filterQualitySteps,
@@ -25,10 +25,24 @@ export type ActionPlanItem = string | ActionPlanItem[]
  */
 export function formatActionPlan(
   steps: ActionPlanItem[],
-  options?: { translateToolNames?: boolean; header?: string }
+  options?: {
+    translateToolNames?: boolean
+    header?: string
+    agent?: AgentDef | null
+    observedToolNames?: Iterable<string>
+  }
 ): string {
   if (steps.length === 0) return ""
-  const agent = options?.translateToolNames ? detectCurrentAgent() : null
+  const envAgent = detectCurrentAgentFromEnv()
+  const inferredAgent =
+    options?.observedToolNames !== undefined
+      ? inferAgentFromToolNames(options.observedToolNames)
+      : null
+  const translationEnvAgent =
+    envAgent && Object.keys(envAgent.toolAliases).length > 0 ? envAgent : null
+  const agent = options?.translateToolNames
+    ? (options?.agent ?? translationEnvAgent ?? inferredAgent ?? detectCurrentAgent())
+    : null
   const lines = renderItems(steps, agent, 1, "  ")
   const header = options?.header ?? "Action plan:"
   return `${header}\n${lines}\n`

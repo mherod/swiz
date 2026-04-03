@@ -1917,25 +1917,55 @@ async function findOldTaskFiles(
     return oldTaskFiles
   }
 
-  async function readTaskFileJson(filePath: string) {
-    try {
-      return JSON.parse(await readFile(filePath, "utf-8")) as {
-        id?: string
-        status?: string
-        statusChangedAt?: string
-        completionTimestamp?: string
-      }
-    } catch {
-      return null
-    }
+  type TaskFileBody = {
+    id?: string
+    status?: string
+    statusChangedAt?: string
+    completionTimestamp?: string
   }
 
-  async function statFileSafe(filePath: string) {
+  /** Stat only — failures mean we cannot trust size/mtime for this path. */
+  async function statTaskFileForScan(filePath: string): Promise<Stats | null> {
     try {
       const s = await stat(filePath)
       return s.isFile() ? s : null
     } catch {
       return null
+    }
+  }
+
+  /** Read UTF-8 only — distinguish from JSON parse failures. */
+  async function readTaskFileUtf8(filePath: string): Promise<string | null> {
+    try {
+      return await readFile(filePath, "utf-8")
+    } catch {
+      return null
+    }
+  }
+
+  function parseTaskFileJson(raw: string): TaskFileBody | null {
+    try {
+      return JSON.parse(raw) as TaskFileBody
+    } catch {
+      return null
+    }
+  }
+
+  function oldTaskFromStatOnly(
+    sessionId: string,
+    file: string,
+    filePath: string,
+    fileStat: Stats,
+    cutoffMs: number,
+    status: string
+  ): OldTaskFileInfo | null {
+    if (fileStat.mtimeMs >= cutoffMs) return null
+    return {
+      sessionId,
+      taskId: file.slice(0, -5),
+      status,
+      path: filePath,
+      sizeBytes: fileStat.size,
     }
   }
 
@@ -1947,11 +1977,20 @@ async function findOldTaskFiles(
   ): Promise<OldTaskFileInfo | null> {
     if (!isSessionTaskJsonFile(file)) return null
     const filePath = join(sessionDir, file)
-    const fileStat = await statFileSafe(filePath)
+    const fileStat = await statTaskFileForScan(filePath)
     if (!fileStat) return null
 
-    const task = await readTaskFileJson(filePath)
-    if (!task?.status) return null
+    const raw = await readTaskFileUtf8(filePath)
+    if (raw === null) {
+      return oldTaskFromStatOnly(sessionId, file, filePath, fileStat, cutoffMs, "(read error)")
+    }
+
+    const task = parseTaskFileJson(raw)
+    if (task === null) {
+      return oldTaskFromStatOnly(sessionId, file, filePath, fileStat, cutoffMs, "(invalid json)")
+    }
+
+    if (!task.status) return null
     const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
     if (taskMs >= cutoffMs) return null
 
@@ -2263,18 +2302,31 @@ async function getRealSessionMtime(taskDirPath: string): Promise<number | null> 
   for (const file of taskEntries) {
     if (!isSessionTaskJsonFile(file)) continue
     const p = join(taskDirPath, file)
+    let s: Stats
     try {
-      const s = await stat(p)
-      let taskMs = s.mtimeMs
-      try {
-        const taskJson = JSON.parse(await readFile(p, "utf-8"))
-        const parsedMs = parseTaskAgeMs(taskJson)
-        if (parsedMs !== null) taskMs = parsedMs
-      } catch {
-        /* invalid JSON — stick to file mtime */
-      }
+      s = await stat(p)
+    } catch {
+      continue
+    }
+    let taskMs = s.mtimeMs
+    let raw: string
+    try {
+      raw = await readFile(p, "utf-8")
+    } catch {
       if (taskMs > maxMs) maxMs = taskMs
-    } catch {}
+      continue
+    }
+    try {
+      const taskJson = JSON.parse(raw) as {
+        statusChangedAt?: string
+        completionTimestamp?: string
+      }
+      const parsedMs = parseTaskAgeMs(taskJson)
+      if (parsedMs !== null) taskMs = parsedMs
+    } catch {
+      /* invalid JSON — stick to file mtime */
+    }
+    if (taskMs > maxMs) maxMs = taskMs
   }
   return maxMs > 0 ? maxMs : null
 }

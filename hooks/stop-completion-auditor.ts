@@ -80,6 +80,7 @@ async function checkAuditLogAllowsStop(
   tasksDir: string,
   taskToolUsed: boolean,
   toolCallCount: number,
+  observedToolNames: string[],
   sessionId?: string,
   cwd?: string
 ): Promise<SwizHookOutput | null> {
@@ -123,7 +124,10 @@ async function checkAuditLogAllowsStop(
     return blockStopObj(
       `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
         "Create tasks to record the work done.\n\n" +
-        formatActionPlan(planSteps, { translateToolNames: true })
+        formatActionPlan(planSteps, {
+          translateToolNames: true,
+          observedToolNames,
+        })
     )
   }
   return null
@@ -163,26 +167,30 @@ async function findCiEvidenceInAllSessions(sessionId: string, home: string): Pro
 function deriveToolCallStats(summary: TranscriptSummary): {
   total: number
   taskToolUsed: boolean
+  toolNames: string[]
 } {
   const stats = deriveCurrentSessionTaskToolStats(summary.toolNames)
   return {
     total: stats.totalToolCalls,
     taskToolUsed: stats.taskToolUsed,
+    toolNames: stats.toolNames,
   }
 }
 
 async function countToolCalls(
   source: string | Record<string, any>
-): Promise<{ total: number; taskToolUsed: boolean }> {
+): Promise<{ total: number; taskToolUsed: boolean; toolNames: string[] }> {
   const stats = await getCurrentSessionTaskToolStats(source)
   return {
     total: stats.totalToolCalls,
     taskToolUsed: stats.taskToolUsed,
+    toolNames: stats.toolNames,
   }
 }
 
 async function blockNoTasks(
   toolCallCount: number,
+  observedToolNames: string[],
   sessionId?: string,
   cwd?: string
 ): Promise<SwizHookOutput> {
@@ -194,7 +202,10 @@ async function blockNoTasks(
   return blockStopObj(
     `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
       "Create tasks to record the work done.\n\n" +
-      formatActionPlan(planSteps, { translateToolNames: true })
+      formatActionPlan(planSteps, {
+        translateToolNames: true,
+        observedToolNames,
+      })
   )
 }
 
@@ -202,11 +213,14 @@ async function blockNoTasks(
 async function handleNoTasksDir(
   taskToolUsed: boolean,
   toolCallCount: number,
+  observedToolNames: string[],
   sessionId?: string,
   cwd?: string
 ): Promise<SwizHookOutput | null> {
   if (taskToolUsed) return null
-  if (toolCallCount >= TOOL_CALL_THRESHOLD) return await blockNoTasks(toolCallCount, sessionId, cwd)
+  if (toolCallCount >= TOOL_CALL_THRESHOLD) {
+    return await blockNoTasks(toolCallCount, observedToolNames, sessionId, cwd)
+  }
   return null
 }
 
@@ -235,7 +249,10 @@ async function enforceCiEvidence(
       "All tasks are completed but none have CI verification evidence.\n\n" +
         "The push+CI lifecycle rule requires a completed task with evidence " +
         "confirming CI passed (e.g. 'CI green', 'conclusion: success').\n\n" +
-        formatActionPlan(planSteps, { translateToolNames: true })
+        formatActionPlan(planSteps, {
+          translateToolNames: true,
+          observedToolNames: effectiveSummary?.toolNames ?? [],
+        })
     )
   }
   return null
@@ -245,10 +262,10 @@ async function resolveToolCallStats(
   raw: Record<string, any>,
   summary: TranscriptSummary | null,
   transcript: string
-): Promise<{ total: number; taskToolUsed: boolean }> {
+): Promise<{ total: number; taskToolUsed: boolean; toolNames: string[] }> {
   if (summary) return deriveToolCallStats(summary)
   if (transcript) return await countToolCalls(raw)
-  return { total: 0, taskToolUsed: false }
+  return { total: 0, taskToolUsed: false, toolNames: [] }
 }
 
 interface CiEvidenceAfterPushCtx {
@@ -282,11 +299,11 @@ async function runStopCompletionWhenTasksDirReady(opts: {
 }): Promise<SwizHookOutput> {
   const { raw, input, sessionId, transcript, home, tasksDir } = opts
   const summary = getTranscriptSummary(raw)
-  const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(
-    raw,
-    summary,
-    transcript
-  )
+  const {
+    total: toolCallCount,
+    taskToolUsed,
+    toolNames,
+  } = await resolveToolCallStats(raw, summary, transcript)
 
   const allTasks = await readSessionTasks(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
@@ -295,6 +312,7 @@ async function runStopCompletionWhenTasksDirReady(opts: {
     const block = await handleNoTasksDir(
       taskToolUsed,
       toolCallCount,
+      toolNames,
       sessionId,
       input.cwd ?? process.cwd()
     )
@@ -306,6 +324,7 @@ async function runStopCompletionWhenTasksDirReady(opts: {
       tasksDir,
       taskToolUsed,
       toolCallCount,
+      toolNames,
       sessionId,
       input.cwd ?? process.cwd()
     )
