@@ -8,6 +8,7 @@
         "@ai-sdk/anthropic": "^3.0.64",
         "@anthropic-ai/claude-agent-sdk": "^0.2.87",
         "@openrouter/ai-sdk-provider": "^2.3.1",
+        "agent-hook-schemas": "^0.1.0",
         "ai": "^6.0.141",
         "ai-sdk-provider-claude-code": "^3.4.4",
         "ai-sdk-provider-gemini-cli": "^2.0.1",
@@ -575,6 +576,8 @@
     "acorn-jsx": ["acorn-jsx@5.3.2", "", { "peerDependencies": { "acorn": "8.16.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
 
     "agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
+
+    "agent-hook-schemas": ["agent-hook-schemas@0.1.0", "", { "dependencies": { "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-mw1XbbovfnvUdc80K3IOinO6+4aZEupY6gtnvU6qOwvQHTph+z3a9usOLPvTYAlKc0vTQoSw+DES4lSNYWTBqg=="],
 
     "ai": ["ai@6.0.141", "", { "dependencies": { "@ai-sdk/gateway": "3.0.83", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "4.3.6" } }, "sha512-+GomGQWaId3xN0wcugUW/H7xMMaFkID2PiS7K/Wugj45G3efv0BXhQ3psRZoQVoRbOpdNoUqcK/KTB+FR4h6qg=="],
 

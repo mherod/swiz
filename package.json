@@ -22,6 +22,7 @@
     "@ai-sdk/anthropic": "^3.0.64",
     "@anthropic-ai/claude-agent-sdk": "^0.2.87",
     "@openrouter/ai-sdk-provider": "^2.3.1",
+    "agent-hook-schemas": "^0.1.0",
     "ai": "^6.0.141",
     "ai-sdk-provider-claude-code": "^3.4.4",
     "ai-sdk-provider-gemini-cli": "^2.0.1",

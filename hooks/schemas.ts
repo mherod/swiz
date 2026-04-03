@@ -63,9 +63,76 @@
  *   keys such as `hookExecutions` are stripped in `src/dispatch/dispatch-wire.ts`.
  */
 
+// ─── agent-hook-schemas package imports ─────────────────────────────────────
+// Canonical upstream Zod schemas for hook stdin/stdout across Claude, Codex,
+// Gemini, and Cursor. Local schemas that need NFKC transforms or custom
+// refinements extend or wrap these; pure-validation schemas re-export directly.
+import {
+  ParseBashToolInput,
+  ParseEditToolInput,
+  ParseWriteToolInput,
+  ConfigChangeInputSchema as PkgConfigChangeInputSchema,
+  CwdChangedInputSchema as PkgCwdChangedInputSchema,
+  ElicitationInputSchema as PkgElicitationInputSchema,
+  ElicitationResultInputSchema as PkgElicitationResultInputSchema,
+  FileChangedInputSchema as PkgFileChangedInputSchema,
+  InstructionsLoadedInputSchema as PkgInstructionsLoadedInputSchema,
+  NotificationInputSchema as PkgNotificationInputSchema,
+  PermissionRequestInputSchema as PkgPermissionRequestInputSchema,
+  PostCompactInputSchema as PkgPostCompactInputSchema,
+  PostToolUseFailureInputSchema as PkgPostToolUseFailureInputSchema,
+  PreCompactInputSchema as PkgPreCompactInputSchema,
+  SessionEndInputSchema as PkgSessionEndInputSchema,
+  SessionStartInputSchema as PkgSessionStartInputSchema,
+  StopFailureInputSchema as PkgStopFailureInputSchema,
+  StopInputSchema as PkgStopInputSchema,
+  SubagentStartInputSchema as PkgSubagentStartInputSchema,
+  SubagentStopInputSchema as PkgSubagentStopInputSchema,
+  TaskCreatedInputSchema as PkgTaskCreatedInputSchema,
+  TeammateIdleInputSchema as PkgTeammateIdleInputSchema,
+  UserPromptSubmitInputSchema as PkgUserPromptSubmitInputSchema,
+  WorktreeCreateInputSchema as PkgWorktreeCreateInputSchema,
+  WorktreeRemoveInputSchema as PkgWorktreeRemoveInputSchema,
+  ToolInputCommand,
+  ToolInputFilePath,
+} from "agent-hook-schemas/claude"
+import {
+  CodexSessionStartInputSchema as PkgCodexSessionStartInputSchema,
+  CodexStopInputSchema as PkgCodexStopInputSchema,
+  CodexUserPromptSubmitInputSchema as PkgCodexUserPromptSubmitInputSchema,
+} from "agent-hook-schemas/codex"
+import {
+  GeminiAfterAgentInputSchema as PkgGeminiAfterAgentInputSchema,
+  GeminiAfterModelInputSchema as PkgGeminiAfterModelInputSchema,
+  GeminiBeforeAgentInputSchema as PkgGeminiBeforeAgentInputSchema,
+  GeminiBeforeModelInputSchema as PkgGeminiBeforeModelInputSchema,
+  GeminiBeforeToolSelectionInputSchema as PkgGeminiBeforeToolSelectionInputSchema,
+  GeminiPreCompressInputSchema as PkgGeminiPreCompressInputSchema,
+  GeminiSessionEndInputSchema as PkgGeminiSessionEndInputSchema,
+  GeminiSessionStartInputSchema as PkgGeminiSessionStartInputSchema,
+} from "agent-hook-schemas/gemini"
 import { z } from "zod"
 import { isJsonLikeRecord } from "../src/utils/hook-json-helpers.ts"
 import { getHookSpecificOutput } from "../src/utils/hook-specific-output.ts"
+
+// Re-export typed tool input parsers for direct consumer use
+export {
+  ParseBashToolInput,
+  ParseEditToolInput,
+  ParseWriteToolInput,
+  ToolInputCommand,
+  ToolInputFilePath,
+}
+
+/**
+ * Make all fields of a `z.looseObject` schema optional.
+ * The upstream package marks some fields as required (`session_id`, `cwd`),
+ * but swiz uses `.optional()` everywhere for resilient parsing — hooks must
+ * tolerate missing fields rather than rejecting payloads.
+ */
+function allOptional<T extends z.ZodObject>(schema: T) {
+  return schema.partial().catchall(z.unknown())
+}
 
 // ─── Primitive field schemas ──────────────────────────────────────────────────
 // Single-field building blocks reused across every hook envelope.
@@ -123,12 +190,18 @@ function nfkcDeep(val: unknown): unknown {
 /**
  * Minimal common fields present on every hook envelope.
  * All hook input schemas extend this base.
+ * Fields aligned with `HookInputBaseSchema` from `agent-hook-schemas/claude`,
+ * kept as local `z.looseObject` because downstream `.extend().transform()` chains
+ * (fileEditHookInputSchema, shellHookInputSchema, etc.) require looseObject inference.
  */
 export const hookBaseSchema = z.looseObject({
-  cwd: CwdSchema.optional(),
   session_id: SessionIdSchema.optional(),
-  hook_event_name: HookEventNameSchema.optional(),
   transcript_path: TranscriptPathSchema.optional(),
+  cwd: CwdSchema.optional(),
+  permission_mode: PermissionModeSchema.optional(),
+  agent_id: z.string().optional(),
+  agent_type: z.string().optional(),
+  hook_event_name: HookEventNameSchema.optional(),
 })
 export type HookBase = z.infer<typeof hookBaseSchema>
 
@@ -246,11 +319,9 @@ export type PostToolUseHookInput = z.infer<typeof postToolUseHookInputSchema>
 /**
  * Stop / SubagentStop hook input envelope.
  * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.
+ * Backed by `StopInputSchema` from `agent-hook-schemas/claude`.
  */
-export const stopHookInputSchema = hookBaseSchema.extend({
-  stop_hook_active: z.boolean().optional(),
-  permission_mode: PermissionModeSchema.optional(),
-})
+export const stopHookInputSchema = allOptional(PkgStopInputSchema)
 
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
 
@@ -258,12 +329,9 @@ export type StopHookInput = z.infer<typeof stopHookInputSchema>
  * PreCompact hook input envelope (and legacy session-shaped events).
  * For SessionStart, prefer {@link sessionStartHookInputSchema}.
  * For UserPromptSubmit, prefer {@link userPromptSubmitHookInputSchema}.
+ * Backed by `PreCompactInputSchema` from `agent-hook-schemas/claude`.
  */
-export const sessionHookInputSchema = hookBaseSchema.extend({
-  trigger: z.string().optional(),
-  matcher: z.string().optional(),
-  permission_mode: PermissionModeSchema.optional(),
-})
+export const sessionHookInputSchema = allOptional(PkgPreCompactInputSchema)
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 
@@ -299,41 +367,26 @@ export type PrPollHookInput = z.infer<typeof prPollHookInputSchema>
 
 /**
  * Stop / SubagentStop hook input envelope (extended).
- * Adds `last_assistant_message` per the hooks reference.
+ * Backed by `SubagentStopInputSchema` from `agent-hook-schemas/claude` which
+ * includes `last_assistant_message`, `agent_transcript_path`, `agent_id`, `agent_type`.
  */
-export const stopHookExtendedInputSchema = hookBaseSchema.extend({
-  stop_hook_active: z.boolean().optional(),
-  last_assistant_message: z.string().optional(),
-  // SubagentStop-specific fields
-  agent_id: z.string().optional(),
-  agent_type: z.string().optional(),
-  agent_transcript_path: z.string().optional(),
-})
+export const stopHookExtendedInputSchema = allOptional(PkgSubagentStopInputSchema)
 
 export type StopHookExtendedInput = z.infer<typeof stopHookExtendedInputSchema>
 
 /**
  * SessionStart hook input envelope.
- * Extends the base session schema with `source`, `model`, and `agent_type`.
+ * Backed by `SessionStartInputSchema` from `agent-hook-schemas/claude`.
  */
-export const sessionStartHookInputSchema = hookBaseSchema.extend({
-  trigger: z.string().optional(),
-  matcher: z.string().optional(),
-  source: z.enum(["startup", "resume", "clear", "compact"]).optional(),
-  model: z.string().optional(),
-  agent_type: z.string().optional(),
-})
+export const sessionStartHookInputSchema = allOptional(PkgSessionStartInputSchema)
 
 export type SessionStartHookInput = z.infer<typeof sessionStartHookInputSchema>
 
 /**
  * UserPromptSubmit hook input envelope.
- * Adds the `prompt` field containing the user's submitted text.
+ * Backed by `UserPromptSubmitInputSchema` from `agent-hook-schemas/claude`.
  */
-export const userPromptSubmitHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  prompt: z.string().optional(),
-})
+export const userPromptSubmitHookInputSchema = allOptional(PkgUserPromptSubmitInputSchema)
 
 export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInputSchema>
 
@@ -341,219 +394,137 @@ export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInput
 
 /**
  * Notification hook input envelope.
- * Fires when Claude Code sends a notification (permission_prompt, idle_prompt, etc.).
+ * Backed by `NotificationInputSchema` from `agent-hook-schemas/claude`.
  */
-export const notificationHookInputSchema = hookBaseSchema.extend({
-  message: z.string().optional(),
-  title: z.string().optional(),
-  notification_type: z.string().optional(),
-})
+export const notificationHookInputSchema = allOptional(PkgNotificationInputSchema)
 
 export type NotificationHookInput = z.infer<typeof notificationHookInputSchema>
 
 /**
  * PermissionRequest hook input envelope.
- * Fires when a permission dialog is shown to the user.
+ * Backed by `PermissionRequestInputSchema` from `agent-hook-schemas/claude`.
  */
-export const permissionRequestHookInputSchema = toolHookBaseObjectSchema.extend({
-  permission_suggestions: z.array(z.unknown()).optional(),
-})
+export const permissionRequestHookInputSchema = allOptional(PkgPermissionRequestInputSchema)
 
 export type PermissionRequestHookInput = z.infer<typeof permissionRequestHookInputSchema>
 
 /**
  * PostToolUseFailure hook input envelope.
- * Fires when a tool execution fails.
+ * Backed by `PostToolUseFailureInputSchema` from `agent-hook-schemas/claude`.
  */
-export const postToolUseFailureHookInputSchema = toolHookBaseObjectSchema.extend({
-  tool_use_id: z.string().optional(),
-  error: z.string().optional(),
-  is_interrupt: z.boolean().optional(),
-})
+export const postToolUseFailureHookInputSchema = allOptional(PkgPostToolUseFailureInputSchema)
 
 export type PostToolUseFailureHookInput = z.infer<typeof postToolUseFailureHookInputSchema>
 
 /**
  * SubagentStart hook input envelope.
- * Fires when a subagent is spawned.
+ * Backed by `SubagentStartInputSchema` from `agent-hook-schemas/claude`.
  */
-export const subagentStartHookInputSchema = hookBaseSchema.extend({
-  agent_id: z.string().optional(),
-  agent_type: z.string().optional(),
-})
+export const subagentStartHookInputSchema = allOptional(PkgSubagentStartInputSchema)
 
 export type SubagentStartHookInput = z.infer<typeof subagentStartHookInputSchema>
 
 /**
  * TaskCreated / TaskCompleted hook input envelope.
- * Fires when a task is being created or completed.
+ * Backed by `TaskCreatedInputSchema` from `agent-hook-schemas/claude`.
  */
-export const taskEventHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  task_id: z.string().optional(),
-  task_subject: z.string().optional(),
-  task_description: z.string().optional(),
-  teammate_name: z.string().optional(),
-  team_name: z.string().optional(),
-})
+export const taskEventHookInputSchema = allOptional(PkgTaskCreatedInputSchema)
 
 export type TaskEventHookInput = z.infer<typeof taskEventHookInputSchema>
 
 /**
  * TeammateIdle hook input envelope.
- * Fires when an agent team teammate is about to go idle.
+ * Backed by `TeammateIdleInputSchema` from `agent-hook-schemas/claude`.
  */
-export const teammateIdleHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  teammate_name: z.string().optional(),
-  team_name: z.string().optional(),
-})
+export const teammateIdleHookInputSchema = allOptional(PkgTeammateIdleInputSchema)
 
 export type TeammateIdleHookInput = z.infer<typeof teammateIdleHookInputSchema>
 
 /**
  * StopFailure hook input envelope.
- * Fires when the turn ends due to an API error.
+ * Backed by `StopFailureInputSchema` from `agent-hook-schemas/claude`.
  */
-export const stopFailureHookInputSchema = hookBaseSchema.extend({
-  error: z.string().optional(),
-  error_details: z.string().optional(),
-  last_assistant_message: z.string().optional(),
-})
+export const stopFailureHookInputSchema = allOptional(PkgStopFailureInputSchema)
 
 export type StopFailureHookInput = z.infer<typeof stopFailureHookInputSchema>
 
 /**
  * InstructionsLoaded hook input envelope.
- * Fires when a CLAUDE.md or .claude/rules/*.md file is loaded.
+ * Backed by `InstructionsLoadedInputSchema` from `agent-hook-schemas/claude`.
  */
-export const instructionsLoadedHookInputSchema = hookBaseSchema.extend({
-  file_path: z.string().optional(),
-  memory_type: z.enum(["User", "Project", "Local", "Managed"]).optional(),
-  load_reason: z
-    .enum(["session_start", "nested_traversal", "path_glob_match", "include", "compact"])
-    .optional(),
-  globs: z.array(z.string()).optional(),
-  trigger_file_path: z.string().optional(),
-  parent_file_path: z.string().optional(),
-})
+export const instructionsLoadedHookInputSchema = allOptional(PkgInstructionsLoadedInputSchema)
 
 export type InstructionsLoadedHookInput = z.infer<typeof instructionsLoadedHookInputSchema>
 
 /**
  * ConfigChange hook input envelope.
- * Fires when a configuration file changes during a session.
+ * Backed by `ConfigChangeInputSchema` from `agent-hook-schemas/claude`.
  */
-export const configChangeHookInputSchema = hookBaseSchema.extend({
-  source: z
-    .enum(["user_settings", "project_settings", "local_settings", "policy_settings", "skills"])
-    .optional(),
-  file_path: z.string().optional(),
-})
+export const configChangeHookInputSchema = allOptional(PkgConfigChangeInputSchema)
 
 export type ConfigChangeHookInput = z.infer<typeof configChangeHookInputSchema>
 
 /**
  * CwdChanged hook input envelope.
- * Fires when the working directory changes during a session.
+ * Backed by `CwdChangedInputSchema` from `agent-hook-schemas/claude`.
  */
-export const cwdChangedHookInputSchema = hookBaseSchema.extend({
-  old_cwd: z.string().optional(),
-  new_cwd: z.string().optional(),
-})
+export const cwdChangedHookInputSchema = allOptional(PkgCwdChangedInputSchema)
 
 export type CwdChangedHookInput = z.infer<typeof cwdChangedHookInputSchema>
 
 /**
  * FileChanged hook input envelope.
- * Fires when a watched file changes on disk.
+ * Backed by `FileChangedInputSchema` from `agent-hook-schemas/claude`.
  */
-export const fileChangedHookInputSchema = hookBaseSchema.extend({
-  file_path: z.string().optional(),
-  event: z.enum(["change", "add", "unlink"]).optional(),
-})
+export const fileChangedHookInputSchema = allOptional(PkgFileChangedInputSchema)
 
 export type FileChangedHookInput = z.infer<typeof fileChangedHookInputSchema>
 
 /**
  * WorktreeCreate hook input envelope.
- * Fires when a worktree is being created.
+ * Backed by `WorktreeCreateInputSchema` from `agent-hook-schemas/claude`.
  */
-export const worktreeCreateHookInputSchema = hookBaseSchema.extend({
-  name: z.string().optional(),
-})
+export const worktreeCreateHookInputSchema = allOptional(PkgWorktreeCreateInputSchema)
 
 export type WorktreeCreateHookInput = z.infer<typeof worktreeCreateHookInputSchema>
 
 /**
  * WorktreeRemove hook input envelope.
- * Fires when a worktree is being removed.
+ * Backed by `WorktreeRemoveInputSchema` from `agent-hook-schemas/claude`.
  */
-export const worktreeRemoveHookInputSchema = hookBaseSchema.extend({
-  worktree_path: z.string().optional(),
-})
+export const worktreeRemoveHookInputSchema = allOptional(PkgWorktreeRemoveInputSchema)
 
 export type WorktreeRemoveHookInput = z.infer<typeof worktreeRemoveHookInputSchema>
 
 /**
  * PostCompact hook input envelope.
- * Fires after a compact operation completes.
+ * Backed by `PostCompactInputSchema` from `agent-hook-schemas/claude`.
  */
-export const postCompactHookInputSchema = hookBaseSchema.extend({
-  trigger: z.enum(["manual", "auto"]).optional(),
-  compact_summary: z.string().optional(),
-})
+export const postCompactHookInputSchema = allOptional(PkgPostCompactInputSchema)
 
 export type PostCompactHookInput = z.infer<typeof postCompactHookInputSchema>
 
 /**
  * Elicitation hook input envelope.
- * Fires when an MCP server requests user input during a tool call.
+ * Backed by `ElicitationInputSchema` from `agent-hook-schemas/claude`.
  */
-export const elicitationHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  mcp_server_name: z.string().optional(),
-  message: z.string().optional(),
-  mode: z.enum(["form", "url"]).optional(),
-  url: z.string().optional(),
-  elicitation_id: z.string().optional(),
-  requested_schema: z.record(z.string(), z.unknown()).optional(),
-})
+export const elicitationHookInputSchema = allOptional(PkgElicitationInputSchema)
 
 export type ElicitationHookInput = z.infer<typeof elicitationHookInputSchema>
 
 /**
  * ElicitationResult hook input envelope.
- * Fires after a user responds to an MCP elicitation.
+ * Backed by `ElicitationResultInputSchema` from `agent-hook-schemas/claude`.
  */
-export const elicitationResultHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  mcp_server_name: z.string().optional(),
-  action: z.enum(["accept", "decline", "cancel"]).optional(),
-  content: z.record(z.string(), z.unknown()).optional(),
-  mode: z.enum(["form", "url"]).optional(),
-  elicitation_id: z.string().optional(),
-})
+export const elicitationResultHookInputSchema = allOptional(PkgElicitationResultInputSchema)
 
 export type ElicitationResultHookInput = z.infer<typeof elicitationResultHookInputSchema>
 
 /**
  * SessionEnd hook input envelope.
- * Fires when a session terminates.
+ * Backed by `SessionEndInputSchema` from `agent-hook-schemas/claude`.
  */
-export const sessionEndHookInputSchema = hookBaseSchema.extend({
-  permission_mode: PermissionModeSchema.optional(),
-  reason: z
-    .enum([
-      "clear",
-      "resume",
-      "logout",
-      "prompt_input_exit",
-      "bypass_permissions_disabled",
-      "other",
-    ])
-    .optional(),
-})
+export const sessionEndHookInputSchema = allOptional(PkgSessionEndInputSchema)
 
 export type SessionEndHookInput = z.infer<typeof sessionEndHookInputSchema>
 
@@ -570,74 +541,59 @@ export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
 
 /**
  * Gemini SessionStart hook input envelope.
- * `source` matches: `startup`, `resume`, `clear`.
+ * Backed by `GeminiSessionStartInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiSessionStartInputSchema = hookBaseSchema.extend({
-  source: z.enum(["startup", "resume", "clear"]).optional(),
-})
+export const geminiSessionStartInputSchema = allOptional(PkgGeminiSessionStartInputSchema)
 
 export type GeminiSessionStartInput = z.infer<typeof geminiSessionStartInputSchema>
 
 /**
  * Gemini SessionEnd hook input envelope.
- * Fires when a session ends (exit, clear).
+ * Backed by `GeminiSessionEndInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiSessionEndInputSchema = hookBaseSchema.extend({
-  reason: z.string().optional(),
-})
+export const geminiSessionEndInputSchema = allOptional(PkgGeminiSessionEndInputSchema)
 
 export type GeminiSessionEndInput = z.infer<typeof geminiSessionEndInputSchema>
 
 /**
  * Gemini BeforeAgent hook input envelope.
- * Fires after user submits prompt, before planning. Can block the turn.
+ * Backed by `GeminiBeforeAgentInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiBeforeAgentInputSchema = hookBaseSchema.extend({
-  prompt: z.string().optional(),
-})
+export const geminiBeforeAgentInputSchema = allOptional(PkgGeminiBeforeAgentInputSchema)
 
 export type GeminiBeforeAgentInput = z.infer<typeof geminiBeforeAgentInputSchema>
 
 /**
  * Gemini AfterAgent hook input envelope.
- * Fires when the agent loop ends. Can force retry or halt.
+ * Backed by `GeminiAfterAgentInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiAfterAgentInputSchema = hookBaseSchema.extend({
-  stop_hook_active: z.boolean().optional(),
-  last_assistant_message: z.string().optional(),
-})
+export const geminiAfterAgentInputSchema = allOptional(PkgGeminiAfterAgentInputSchema)
 
 export type GeminiAfterAgentInput = z.infer<typeof geminiAfterAgentInputSchema>
 
 /**
  * Gemini BeforeModel hook input envelope.
- * Fires before sending request to LLM. Can block turn or mock response.
+ * Backed by `GeminiBeforeModelInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiBeforeModelInputSchema = hookBaseSchema.extend({
-  model: z.string().optional(),
-  prompt: z.string().optional(),
-})
+export const geminiBeforeModelInputSchema = allOptional(PkgGeminiBeforeModelInputSchema)
 
 export type GeminiBeforeModelInput = z.infer<typeof geminiBeforeModelInputSchema>
 
 /**
  * Gemini AfterModel hook input envelope.
- * Fires after receiving LLM response. Can block turn or redact.
+ * Backed by `GeminiAfterModelInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiAfterModelInputSchema = hookBaseSchema.extend({
-  model: z.string().optional(),
-  response: z.unknown().optional(),
-})
+export const geminiAfterModelInputSchema = allOptional(PkgGeminiAfterModelInputSchema)
 
 export type GeminiAfterModelInput = z.infer<typeof geminiAfterModelInputSchema>
 
 /**
  * Gemini BeforeToolSelection hook input envelope.
- * Fires before LLM selects tools. Can filter available tools.
+ * Backed by `GeminiBeforeToolSelectionInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiBeforeToolSelectionInputSchema = hookBaseSchema.extend({
-  available_tools: z.array(z.string()).optional(),
-})
+export const geminiBeforeToolSelectionInputSchema = allOptional(
+  PkgGeminiBeforeToolSelectionInputSchema
+)
 
 export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSelectionInputSchema>
 
@@ -675,17 +631,22 @@ export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
 
 /**
  * Gemini PreCompress hook input envelope.
- * Advisory event — fires before context compression.
+ * Backed by `GeminiPreCompressInputSchema` from `agent-hook-schemas/gemini`.
  */
-export const geminiPreCompressInputSchema = hookBaseSchema
+export const geminiPreCompressInputSchema = allOptional(PkgGeminiPreCompressInputSchema)
 
 export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema>
 
 /**
  * Gemini Notification hook input envelope.
- * Advisory event — fires when a system notification occurs.
+ * Kept local — package restricts `notification_type` to enum `"ToolPermission"`,
+ * while swiz accepts any string for forward compatibility.
  */
-export const geminiNotificationInputSchema = hookBaseSchema.extend({
+export const geminiNotificationInputSchema = z.looseObject({
+  session_id: SessionIdSchema.optional(),
+  transcript_path: TranscriptPathSchema.optional(),
+  cwd: CwdSchema.optional(),
+  hook_event_name: HookEventNameSchema.optional(),
   message: z.string().optional(),
   title: z.string().optional(),
   notification_type: z.string().optional(),
@@ -765,12 +726,9 @@ export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
 
 /**
  * Codex SessionStart hook input envelope.
- * `source` is limited to `startup` | `resume` in current Codex runtime.
- * `matcher` filters on `source`.
+ * Backed by `CodexSessionStartInputSchema` from `agent-hook-schemas/codex`.
  */
-export const codexSessionStartInputSchema = codexHookBaseSchema.extend({
-  source: z.enum(["startup", "resume"]).optional(),
-})
+export const codexSessionStartInputSchema = allOptional(PkgCodexSessionStartInputSchema)
 
 export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema>
 
@@ -828,26 +786,17 @@ export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
 
 /**
  * Codex UserPromptSubmit hook input envelope.
- * `matcher` is not used for this event in Codex.
+ * Backed by `CodexUserPromptSubmitInputSchema` from `agent-hook-schemas/codex`.
  */
-export const codexUserPromptSubmitInputSchema = codexHookBaseSchema.extend({
-  turn_id: z.string().optional(),
-  prompt: z.string().optional(),
-})
+export const codexUserPromptSubmitInputSchema = allOptional(PkgCodexUserPromptSubmitInputSchema)
 
 export type CodexUserPromptSubmitInput = z.infer<typeof codexUserPromptSubmitInputSchema>
 
 /**
  * Codex Stop hook input envelope.
- * `matcher` is not used for this event in Codex.
- * `stop_hook_active` indicates whether this turn was already continued by Stop.
- * Expects JSON on stdout (plain text is invalid for this event).
+ * Backed by `CodexStopInputSchema` from `agent-hook-schemas/codex`.
  */
-export const codexStopInputSchema = codexHookBaseSchema.extend({
-  turn_id: z.string().optional(),
-  stop_hook_active: z.boolean().optional(),
-  last_assistant_message: z.string().nullable().optional(),
-})
+export const codexStopInputSchema = allOptional(PkgCodexStopInputSchema)
 
 export type CodexStopInput = z.infer<typeof codexStopInputSchema>
 

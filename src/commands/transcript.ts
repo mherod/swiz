@@ -251,7 +251,7 @@ async function streamAutoReply(
 
   const provider = createOpenRouter()
   const { response, fullStream } = streamText({
-    model: provider.languageModel("qwen/qwen3.6-plus-preview:free"),
+    model: provider.languageModel("openrouter/free"),
     messages: messages.slice(-20),
     system: AUTO_REPLY_SYSTEM,
     // Allow multi-step: model can call Read/Grep, get results,
