@@ -2,6 +2,11 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
+import {
+  applyTaskCreateEvent,
+  clearAllEventState,
+  getSessionEventState,
+} from "./task-event-state.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { TaskStateCache } from "./task-state-cache.ts"
 
@@ -343,6 +348,66 @@ describe("TaskStateCache", () => {
       const state = await cache.getState("session-skip", sessionDir)
       expect(state.tasks).toHaveLength(1)
       cache.close()
+    })
+  })
+
+  describe("event state pruning", () => {
+    it("unwatchSession prunes event state for that session", async () => {
+      clearAllEventState()
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "s-evict")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      cache.watchSession("s-evict", sessionDir)
+      await cache.getState("s-evict", sessionDir)
+
+      applyTaskCreateEvent("s-evict", "99", "Event task")
+      expect(getSessionEventState("s-evict")).toHaveLength(1)
+
+      cache.unwatchSession("s-evict")
+      expect(getSessionEventState("s-evict")).toBeNull()
+      cache.close()
+    })
+
+    it("LRU eviction prunes event state for evicted session", async () => {
+      clearAllEventState()
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const base = await tmp.create()
+
+      const dir1 = await createSessionDir(base, "lru1")
+      const dir2 = await createSessionDir(base, "lru2")
+      const dir3 = await createSessionDir(base, "lru3")
+      await writeTaskFile(dir1, makeTask("1", "pending"))
+      await writeTaskFile(dir2, makeTask("1", "pending"))
+      await writeTaskFile(dir3, makeTask("1", "pending"))
+
+      await cache.getState("lru1", dir1)
+      await cache.getState("lru2", dir2)
+
+      applyTaskCreateEvent("lru1", "10", "Will be evicted")
+      applyTaskCreateEvent("lru2", "10", "Will survive")
+
+      await cache.getState("lru3", dir3)
+
+      expect(getSessionEventState("lru1")).toBeNull()
+      expect(getSessionEventState("lru2")).toHaveLength(1)
+      cache.close()
+    })
+
+    it("close() clears all event state", async () => {
+      clearAllEventState()
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "s-close-evt")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      await cache.getState("s-close-evt", sessionDir)
+      applyTaskCreateEvent("s-close-evt", "5", "Event task")
+      expect(getSessionEventState("s-close-evt")).toHaveLength(1)
+
+      cache.close()
+      expect(getSessionEventState("s-close-evt")).toBeNull()
     })
   })
 })
