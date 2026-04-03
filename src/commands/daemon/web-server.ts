@@ -54,17 +54,13 @@ import {
   serializeMetrics,
   type TranscriptIndexCache,
 } from "./runtime-cache.ts"
-import {
-  getProjectTasks,
-  getSessionData,
-  getSessionTasks,
-  listProjectSessions,
-} from "./session-data.ts"
+import { getProjectTasks, getSessionData, listProjectSessions } from "./session-data.ts"
 import { handleSessionRoutes } from "./session-routes.ts"
 import type { CachedSnapshot } from "./snapshot.ts"
 import type { ActiveHookDispatch } from "./types.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import {
+  buildSessionTasksView,
   type CapturedToolCall,
   captureSessionToolCall,
   captureSessionToolUsage,
@@ -239,6 +235,7 @@ export interface DaemonWebServerContext {
   snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
   workerRuntime: DaemonWorkerRuntime
   prReviewMonitor: PrReviewMonitor
+  taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
 }
 
 /** Hard request-level timeout for daemon dispatch (ms).
@@ -1260,7 +1257,12 @@ function buildSessionRoutesContext(ctx: DaemonWebServerContext) {
       listProjectSessions(cwd, limit, ctx.sessionActivity, pinnedSessionId),
     getSessionData: (cwd: string, sessionId: string, limit: number) =>
       getSessionData(cwd, sessionId, limit, ctx.sessionToolCalls),
-    getSessionTasks,
+    getSessionTasks: async (sessionId: string, limit: number) => {
+      const { createDefaultTaskStore } = await import("../../task-roots.ts")
+      const { tasksDir } = createDefaultTaskStore()
+      const tasks = await ctx.taskStateCache.getTasks(sessionId, join(tasksDir, sessionId))
+      return buildSessionTasksView(tasks, limit)
+    },
     getProjectTasks,
     getAgentProcessSnapshot: () => getCachedAgentProcesses(),
   }

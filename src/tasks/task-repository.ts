@@ -279,6 +279,14 @@ export async function writeTask(
   await updateSessionMeta(dir, cwd)
   // Invalidate in-process cache so subsequent reads reflect the write.
   sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
+  // Write-through to the global TaskStateCache (daemon path) so hooks and
+  // web UI see the update without waiting for fs.watch.
+  try {
+    const { getGlobalTaskStateCache } = await import("./task-recovery.ts")
+    getGlobalTaskStateCache()?.applyTaskUpdate(sessionId, task)
+  } catch {
+    // Cache not available — safe to ignore (subprocess or non-daemon path)
+  }
 }
 
 export async function writeAudit(

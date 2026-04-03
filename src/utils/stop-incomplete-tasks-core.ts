@@ -18,7 +18,7 @@ import {
   getSessionTasksDir,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  readSessionTasks,
+  readSessionTasksFresh,
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { validateTransition } from "../tasks/task-service.ts"
@@ -119,7 +119,7 @@ export async function checkIncompleteTasks(
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return null
 
-  const allTasks = await readSessionTasks(sessionId, home)
+  const allTasks = await readSessionTasksFresh(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
   if (!tasksDirExists || allTasks.length === 0) return null
 

@@ -17,6 +17,7 @@ import {
   hasSessionTasksDir,
   isIncompleteTaskStatus,
   readSessionTasks,
+  readSessionTasksFresh,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
 import {
@@ -306,7 +307,7 @@ async function runStopCompletionWhenTasksDirReady(opts: {
     toolNames,
   } = await resolveToolCallStats(raw, summary, transcript)
 
-  const allTasks = await readSessionTasks(sessionId, home)
+  const allTasks = await readSessionTasksFresh(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   if (!tasksDirExists) {

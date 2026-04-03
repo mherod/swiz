@@ -46,7 +46,7 @@ alwaysApply: false
 - DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
-- `classifyHookOutput` (in `src/dispatch/worker-types.ts`) validates hook subprocess stdout against `hookOutputSchema`, returning `"invalid-schema"` on failure. Silent allows rejected; require `systemMessage`, `reason`, `stopReason`, or `additionalContext`. Empty `{}` valid. **Stop/SubagentStop** responses normalized with `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` module doc for stdout fields by event.
+- `classifyHookOutput` (`src/dispatch/worker-types.ts`) validates stdout against `hookOutputSchema`; returns `"invalid-schema"` on failure. Requires `systemMessage`, `reason`, `stopReason`, or `additionalContext`; `{}` valid. Stop/SubagentStop normalized via `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` for stdout fields by event.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
@@ -106,6 +106,7 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
+- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs for native writes, (2) `applyTaskUpdate()` write-through from PostToolUse hooks. Incremental refresh re-reads only 3 most recent files. Daemon instance in `createDaemonCaches()`.
 
 - First action: `TaskCreate`/`TaskUpdate` after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
@@ -180,20 +181,16 @@ alwaysApply: false
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
-- Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
+- Pre-push `bun test` may fail with `proc.stdin.write` TypeError (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
 - **DO**: Before **stop** after push: **MEMORY.md** triad (CI **completed** + jobs, **TaskUpdate** if shipped). **DON'T** skip for **`task #unkn-1`** / **missing or unstructured workflow**.
 - DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
 - Push-command parsing: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
-- DO NOT call `TaskUpdate` or `TaskList` after push starts.
-- DO NOT stop with unpushed commits.
-- DO NOT push to `main`/`master` without the Step 0 collaboration guard.
-- DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
-- DO NOT run branch/collaboration/open-PR checks after push.
-- DO NOT add `Co-Authored-By` trailers. Enforced by commitlint.
-- DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
+- DON'T call `TaskUpdate`/`TaskList` after push starts. DON'T stop with unpushed commits.
+- DON'T push to `main`/`master` without Step 0 collaboration guard. DON'T skip `git log origin/main..HEAD --oneline` pre-push review. DON'T run branch/collaboration/open-PR checks after push.
+- DON'T add `Co-Authored-By` trailers (commitlint enforced). DON'T use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
@@ -201,7 +198,7 @@ alwaysApply: false
 - `swiz daemon status` fetches `/metrics`. Metrics: in-memory only, tracked globally and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
-- **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL.
+- **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`).
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. Daemon `syncUpstreamState` keeps it fresh. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
 - **DO**: Add consumer-needed fields (e.g., `mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
 - **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits. Close: `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.

@@ -1,0 +1,308 @@
+import { describe, expect, it } from "bun:test"
+import { mkdir, unlink, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { useTempDir } from "../utils/test-utils.ts"
+import type { SessionTask } from "./task-recovery.ts"
+import { TaskStateCache } from "./task-state-cache.ts"
+
+const tmp = useTempDir("swiz-task-cache-")
+
+function makeTask(id: string, status: string, subject?: string): SessionTask {
+  return {
+    id,
+    subject: subject ?? `Task ${id}`,
+    status,
+    description: `Task ${id} description`,
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
+    startedAt: status === "in_progress" ? Date.now() : null,
+    completedAt: status === "completed" ? Date.now() : null,
+  }
+}
+
+async function writeTaskFile(dir: string, task: SessionTask): Promise<void> {
+  await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
+}
+
+async function createSessionDir(baseDir: string, sessionId: string): Promise<string> {
+  const dir = join(baseDir, sessionId)
+  await mkdir(dir, { recursive: true })
+  return dir
+}
+
+describe("TaskStateCache", () => {
+  it("returns empty list for nonexistent session directory", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const tasks = await cache.getTasks("nonexistent", join(base, "nonexistent"))
+    expect(tasks).toEqual([])
+    cache.close()
+  })
+
+  it("loads all tasks on first access (cold miss)", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const sessionDir = await createSessionDir(base, "session-1")
+
+    await writeTaskFile(sessionDir, makeTask("1", "completed"))
+    await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+    await writeTaskFile(sessionDir, makeTask("3", "pending"))
+
+    const state = await cache.getState("session-1", sessionDir)
+    expect(state.tasks).toHaveLength(3)
+    expect(state.openCount).toBe(2)
+    expect(state.pendingCount).toBe(1)
+    expect(state.inProgressCount).toBe(1)
+    expect(state.completedCount).toBe(1)
+    expect(state.stale).toBe(false)
+    cache.close()
+  })
+
+  it("returns cached data on subsequent reads", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const sessionDir = await createSessionDir(base, "session-2")
+    await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+    const first = await cache.getTasks("session-2", sessionDir)
+    // Write a new task to disk — cache should NOT see it
+    await writeTaskFile(sessionDir, makeTask("2", "pending"))
+    const second = await cache.getTasks("session-2", sessionDir)
+
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(1) // still cached
+    cache.close()
+  })
+
+  it("refreshes on invalidate", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const sessionDir = await createSessionDir(base, "session-3")
+
+    for (let i = 1; i <= 5; i++) {
+      await writeTaskFile(sessionDir, makeTask(String(i), i <= 3 ? "completed" : "pending"))
+    }
+
+    const initial = await cache.getState("session-3", sessionDir)
+    expect(initial.tasks).toHaveLength(5)
+    expect(initial.pendingCount).toBe(2)
+
+    // Update task 5 to in_progress on disk
+    await writeTaskFile(sessionDir, makeTask("5", "in_progress"))
+
+    // Mark stale (simulates fs.watch callback)
+    cache.invalidate("session-3")
+
+    const refreshed = await cache.getState("session-3", sessionDir)
+    expect(refreshed.tasks).toHaveLength(5)
+    expect(refreshed.pendingCount).toBe(1)
+    expect(refreshed.inProgressCount).toBe(1)
+    const task5 = refreshed.tasks.find((t) => t.id === "5")
+    expect(task5?.status).toBe("in_progress")
+    cache.close()
+  })
+
+  it("detects new task files on full reload after invalidate", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const sessionDir = await createSessionDir(base, "session-new")
+    await writeTaskFile(sessionDir, makeTask("1", "completed"))
+
+    await cache.getState("session-new", sessionDir)
+
+    // Add a new task file and invalidate
+    await writeTaskFile(sessionDir, makeTask("2", "pending"))
+    cache.invalidate("session-new")
+
+    const refreshed = await cache.getState("session-new", sessionDir)
+    expect(refreshed.tasks).toHaveLength(2)
+    expect(refreshed.pendingCount).toBe(1)
+    cache.close()
+  })
+
+  it("detects deleted task files on full reload after invalidate", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const sessionDir = await createSessionDir(base, "session-del")
+    await writeTaskFile(sessionDir, makeTask("1", "completed"))
+    await writeTaskFile(sessionDir, makeTask("2", "pending"))
+
+    await cache.getState("session-del", sessionDir)
+
+    // Delete task 2 and invalidate
+    await unlink(join(sessionDir, "2.json"))
+    cache.invalidate("session-del")
+
+    const refreshed = await cache.getState("session-del", sessionDir)
+    expect(refreshed.tasks).toHaveLength(1)
+    expect(refreshed.pendingCount).toBe(0)
+    cache.close()
+  })
+
+  describe("write-through", () => {
+    it("updates existing task in cache without disk read", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-wt")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+
+      await cache.getState("session-wt", sessionDir)
+
+      // Write-through: mark task 1 as in_progress
+      cache.applyTaskUpdate("session-wt", makeTask("1", "in_progress"))
+
+      const state = await cache.getState("session-wt", sessionDir)
+      expect(state.inProgressCount).toBe(2)
+      expect(state.pendingCount).toBe(0)
+      expect(state.stale).toBe(false)
+      cache.close()
+    })
+
+    it("adds new task to cache without disk read", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-wt2")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      await cache.getState("session-wt2", sessionDir)
+
+      cache.applyTaskUpdate("session-wt2", makeTask("2", "in_progress"))
+
+      const state = await cache.getState("session-wt2", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      expect(state.inProgressCount).toBe(1)
+      expect(state.pendingCount).toBe(1)
+      cache.close()
+    })
+
+    it("is a no-op when session has no cached state", () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      // Should not throw
+      cache.applyTaskUpdate("uncached-session", makeTask("1", "pending"))
+      cache.close()
+    })
+  })
+
+  describe("removeTask", () => {
+    it("removes task and recomputes counts", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-rm")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+
+      await cache.getState("session-rm", sessionDir)
+      cache.removeTask("session-rm", "1")
+
+      const state = await cache.getState("session-rm", sessionDir)
+      expect(state.tasks).toHaveLength(1)
+      expect(state.pendingCount).toBe(0)
+      expect(state.inProgressCount).toBe(1)
+      cache.close()
+    })
+  })
+
+  describe("count accessors", () => {
+    it("getOpenCount returns pending + in_progress", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-oc")
+      await writeTaskFile(sessionDir, makeTask("1", "completed"))
+      await writeTaskFile(sessionDir, makeTask("2", "pending"))
+      await writeTaskFile(sessionDir, makeTask("3", "in_progress"))
+
+      const count = await cache.getOpenCount("session-oc", sessionDir)
+      expect(count).toBe(2)
+      cache.close()
+    })
+
+    it("hasInProgressTask returns true when in_progress exists", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-ip")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      expect(await cache.hasInProgressTask("session-ip", sessionDir)).toBe(false)
+
+      cache.applyTaskUpdate("session-ip", makeTask("1", "in_progress"))
+      expect(await cache.hasInProgressTask("session-ip", sessionDir)).toBe(true)
+      cache.close()
+    })
+  })
+
+  describe("LRU eviction", () => {
+    it("evicts oldest session when max entries exceeded", async () => {
+      const cache = new TaskStateCache({ maxEntries: 2 })
+      const base = await tmp.create()
+
+      const dir1 = await createSessionDir(base, "s1")
+      const dir2 = await createSessionDir(base, "s2")
+      const dir3 = await createSessionDir(base, "s3")
+
+      await writeTaskFile(dir1, makeTask("1", "pending"))
+      await writeTaskFile(dir2, makeTask("1", "pending"))
+      await writeTaskFile(dir3, makeTask("1", "pending"))
+
+      await cache.getState("s1", dir1)
+      await cache.getState("s2", dir2)
+
+      expect(cache.size).toBe(2)
+
+      // Adding s3 should evict s1 (oldest)
+      await cache.getState("s3", dir3)
+      expect(cache.size).toBe(2)
+      expect(cache.has("s1")).toBe(false)
+      expect(cache.has("s2")).toBe(true)
+      expect(cache.has("s3")).toBe(true)
+      cache.close()
+    })
+  })
+
+  describe("lifecycle", () => {
+    it("close() clears all state", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-close")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      await cache.getState("session-close", sessionDir)
+      expect(cache.size).toBeGreaterThan(0)
+
+      cache.close()
+      expect(cache.size).toBe(0)
+    })
+
+    it("invalidateAll() forces full reload on next access", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-inv")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      await cache.getState("session-inv", sessionDir)
+
+      // Add task on disk, invalidate all
+      await writeTaskFile(sessionDir, makeTask("2", "pending"))
+      cache.invalidateAll()
+
+      // Full reload should see both tasks
+      const state = await cache.getState("session-inv", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      cache.close()
+    })
+
+    it("skips dotfiles and compact-snapshot.json", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-skip")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await writeFile(join(sessionDir, ".session-meta.json"), "{}")
+      await writeFile(join(sessionDir, ".audit-log.jsonl"), "")
+      await writeFile(join(sessionDir, "compact-snapshot.json"), "{}")
+
+      const state = await cache.getState("session-skip", sessionDir)
+      expect(state.tasks).toHaveLength(1)
+      cache.close()
+    })
+  })
+})

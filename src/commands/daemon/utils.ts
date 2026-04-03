@@ -16,7 +16,7 @@ import {
   unloadLaunchAgent,
 } from "../../launch-agents.ts"
 import { projectKeyFromCwd } from "../../project-key.ts"
-import { isIncompleteTaskStatus, type Task as StoredTask } from "../../tasks/task-repository.ts"
+import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
 import { extractText } from "../../transcript-utils.ts"
 
 export interface TranscriptWatchPath {
@@ -180,7 +180,7 @@ export interface SessionToolUsageState extends CurrentSessionToolUsage {
 export interface SessionTaskPreview {
   id: string
   subject: string
-  status: StoredTask["status"]
+  status: string
   statusChangedAt: string | null
   completionTimestamp: string | null
   completionEvidence: string | null
@@ -469,7 +469,7 @@ export function extractMessageText(content: unknown): string {
   return extractText(content as string | { type: string; text?: string }[] | undefined).trim()
 }
 
-function taskStatusRank(status: StoredTask["status"]): number {
+function taskStatusRank(status: string): number {
   switch (status) {
     case "in_progress":
       return 0
@@ -484,8 +484,18 @@ function taskStatusRank(status: StoredTask["status"]): number {
   }
 }
 
+/** Minimal fields needed by buildSessionTasksView — accepts both Task and SessionTask. */
+interface TaskViewInput {
+  id: string
+  subject: string
+  status: string
+  statusChangedAt?: string | null
+  completionTimestamp?: string | null
+  completionEvidence?: string | null
+}
+
 export function buildSessionTasksView(
-  tasks: StoredTask[],
+  tasks: TaskViewInput[],
   limit: number
 ): { tasks: SessionTaskPreview[]; summary: SessionTaskSummary } {
   const summary: SessionTaskSummary = {

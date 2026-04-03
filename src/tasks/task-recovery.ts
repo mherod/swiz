@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { getHomeDirWithFallback } from "../home.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import type { TaskStateCache } from "./task-state-cache.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 /**
@@ -129,6 +130,43 @@ export async function readSessionTasks(
   }
   // Sort tasks by ID to ensure deterministic output
   return orderBy(tasks, [(t) => t.id], ["asc"])
+}
+
+// ─── Cache-backed reads ─────────────────────────────────────────────────────
+
+let globalTaskStateCache: TaskStateCache | null = null
+
+/** Set the global TaskStateCache instance (called by the daemon on startup). */
+export function setGlobalTaskStateCache(cache: TaskStateCache | null): void {
+  globalTaskStateCache = cache
+}
+
+/** Get the global TaskStateCache instance, if set. */
+export function getGlobalTaskStateCache(): TaskStateCache | null {
+  return globalTaskStateCache
+}
+
+/**
+ * Read session tasks with freshness guarantee. Uses the global TaskStateCache
+ * when available (daemon path) with a 60-second max staleness window. Falls
+ * back to a direct disk read when no cache is configured (subprocess path).
+ *
+ * Use this in stop hooks where accuracy is critical — it ensures the data
+ * reflects disk state within the last minute even if fs.watch missed an event.
+ */
+export async function readSessionTasksFresh(
+  sessionId: string,
+  home: string = getHomeDirWithFallback(""),
+  maxStaleMs = 60_000
+): Promise<SessionTask[]> {
+  if (globalTaskStateCache) {
+    const tasksDir = getSessionTasksDir(sessionId, home)
+    if (tasksDir) {
+      return globalTaskStateCache.getTasksFresh(sessionId, tasksDir, maxStaleMs)
+    }
+  }
+  // No cache or no tasks dir — fall back to direct disk read
+  return readSessionTasks(sessionId, home)
 }
 
 /**

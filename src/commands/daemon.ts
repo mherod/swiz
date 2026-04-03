@@ -7,6 +7,8 @@ import {
   getSwizSettingsPath,
   invalidateSettingsCache,
 } from "../settings.ts"
+import { setGlobalTaskStateCache } from "../tasks/task-recovery.ts"
+import { TaskStateCache } from "../tasks/task-state-cache.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache } from "../utils/file-cache.ts"
@@ -134,6 +136,7 @@ function createDaemonCaches() {
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
   const prReviewMonitor = new PrReviewMonitor()
+  const taskStateCache = new TaskStateCache()
 
   return {
     watchers,
@@ -149,6 +152,7 @@ function createDaemonCaches() {
     manifestCache,
     snapshots,
     prReviewMonitor,
+    taskStateCache,
   }
 }
 
@@ -461,6 +465,7 @@ export async function hydratePersistedSessionToolState(
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
   const state = createDaemonState()
   const caches = createDaemonCaches()
+  setGlobalTaskStateCache(caches.taskStateCache)
   const transcriptMonitor = new WorkerTranscriptMonitor(caches) as unknown as TranscriptMonitor
   const { registeredProjects, registerProjectWatchers, evictProject } = setupWatchers(
     caches,
@@ -485,6 +490,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     process.stderr.write("Upstream sync... ")
     caches.workerRuntime.close()
     process.stderr.write("Worker runtime... ")
+    caches.taskStateCache.close()
+    setGlobalTaskStateCache(null)
+    process.stderr.write("Task cache... ")
     process.stderr.write("Done.\n")
     if (reason !== "exit") process.exit(0)
   }
@@ -546,6 +554,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     snapshots: caches.snapshots,
     workerRuntime: caches.workerRuntime,
     prReviewMonitor: caches.prReviewMonitor,
+    taskStateCache: caches.taskStateCache,
   })
 
   // Register initial project for periodic upstream sync
