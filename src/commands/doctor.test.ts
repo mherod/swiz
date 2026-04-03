@@ -43,7 +43,7 @@ async function createSkill(home: string, relativeRoot: string, skillName: string
 
 function buildExpectedHooks() {
   const claudeAgent = AGENTS.find((a) => a.id === "claude")!
-  const events = [...new Set(manifest.map((g) => g.event))]
+  const events = [...new Set(manifest.filter((g) => !g.scheduled).map((g) => g.event))]
   const hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>> = {}
   for (const event of events) {
     const agentEvent = claudeAgent.eventMap[event] ?? event
