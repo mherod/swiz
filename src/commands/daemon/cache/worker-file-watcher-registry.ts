@@ -10,6 +10,7 @@ export class FileWatcherRegistry {
   private worker: Worker
   private callbacks = new Map<string, Set<() => void>>()
   private lastStatus: FileWatcherStatus[] = []
+  private closed = false
 
   constructor(options?: { maxTotalWatchers?: number }) {
     const workerPath = new URL("./file-watcher-worker.ts", import.meta.url).pathname
@@ -121,10 +122,15 @@ export class FileWatcherRegistry {
   }
 
   close(): void {
-    this.worker.postMessage({ type: "close" } satisfies FileWatcherWorkerMessage)
+    if (this.closed) return
+    this.closed = true
+    try {
+      this.worker.postMessage({ type: "close" } satisfies FileWatcherWorkerMessage)
+    } catch {
+      // Worker may already be terminated
+    }
     void this.worker.terminate()
     this.callbacks.clear()
-    // Reset status so it reflects that we're no longer watching
     for (const s of this.lastStatus) {
       s.watching = false
       s.watcherCount = 0
@@ -132,9 +138,12 @@ export class FileWatcherRegistry {
   }
 
   status(): FileWatcherStatus[] {
-    // Send a request to the worker to update the status, but return the last known one
-    // Since this is usually for logging/debug, being slightly out of sync is okay.
-    this.worker.postMessage({ type: "status" } satisfies FileWatcherWorkerMessage)
+    if (this.closed) return this.lastStatus
+    try {
+      this.worker.postMessage({ type: "status" } satisfies FileWatcherWorkerMessage)
+    } catch {
+      // Worker may already be terminated
+    }
     return this.lastStatus
   }
 }
