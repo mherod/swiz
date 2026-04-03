@@ -76,11 +76,13 @@ import {
   ElicitationInputSchema as PkgElicitationInputSchema,
   ElicitationResultInputSchema as PkgElicitationResultInputSchema,
   FileChangedInputSchema as PkgFileChangedInputSchema,
+  HookInputBaseSchema as PkgHookInputBaseSchema,
   InstructionsLoadedInputSchema as PkgInstructionsLoadedInputSchema,
   NotificationInputSchema as PkgNotificationInputSchema,
   PermissionRequestInputSchema as PkgPermissionRequestInputSchema,
   PostCompactInputSchema as PkgPostCompactInputSchema,
   PostToolUseFailureInputSchema as PkgPostToolUseFailureInputSchema,
+  PostToolUseInputSchema as PkgPostToolUseInputSchema,
   PreCompactInputSchema as PkgPreCompactInputSchema,
   SessionEndInputSchema as PkgSessionEndInputSchema,
   SessionStartInputSchema as PkgSessionStartInputSchema,
@@ -97,16 +99,24 @@ import {
   ToolInputFilePath,
 } from "agent-hook-schemas/claude"
 import {
+  CodexHookInputBaseSchema as PkgCodexHookInputBaseSchema,
+  CodexPostToolUseInputSchema as PkgCodexPostToolUseInputSchema,
+  CodexPreToolUseInputSchema as PkgCodexPreToolUseInputSchema,
   CodexSessionStartInputSchema as PkgCodexSessionStartInputSchema,
   CodexStopInputSchema as PkgCodexStopInputSchema,
   CodexUserPromptSubmitInputSchema as PkgCodexUserPromptSubmitInputSchema,
 } from "agent-hook-schemas/codex"
+import { ToolCallCoreSchema } from "agent-hook-schemas/common"
 import {
   GeminiAfterAgentInputSchema as PkgGeminiAfterAgentInputSchema,
   GeminiAfterModelInputSchema as PkgGeminiAfterModelInputSchema,
+  GeminiAfterToolInputSchema as PkgGeminiAfterToolInputSchema,
   GeminiBeforeAgentInputSchema as PkgGeminiBeforeAgentInputSchema,
   GeminiBeforeModelInputSchema as PkgGeminiBeforeModelInputSchema,
+  GeminiBeforeToolInputSchema as PkgGeminiBeforeToolInputSchema,
   GeminiBeforeToolSelectionInputSchema as PkgGeminiBeforeToolSelectionInputSchema,
+  GeminiHookCommandOutputSchema as PkgGeminiHookCommandOutputSchema,
+  GeminiNotificationInputSchema as PkgGeminiNotificationInputSchema,
   GeminiPreCompressInputSchema as PkgGeminiPreCompressInputSchema,
   GeminiSessionEndInputSchema as PkgGeminiSessionEndInputSchema,
   GeminiSessionStartInputSchema as PkgGeminiSessionStartInputSchema,
@@ -137,6 +147,8 @@ function allOptional<T extends z.ZodObject>(schema: T) {
 // ─── Primitive field schemas ──────────────────────────────────────────────────
 // Single-field building blocks reused across every hook envelope.
 // Use as `CwdSchema.optional()` inside `z.looseObject({})`.
+// These remain `z.string()` (not enums) for forward compatibility — swiz hooks
+// must accept unknown event names and permission modes from future agent versions.
 
 /** Absolute path of the working directory when the hook fires. */
 export const CwdSchema = z.string()
@@ -190,18 +202,17 @@ function nfkcDeep(val: unknown): unknown {
 /**
  * Minimal common fields present on every hook envelope.
  * All hook input schemas extend this base.
- * Fields aligned with `HookInputBaseSchema` from `agent-hook-schemas/claude`,
- * kept as local `z.looseObject` because downstream `.extend().transform()` chains
- * (fileEditHookInputSchema, shellHookInputSchema, etc.) require looseObject inference.
+ * Field set derived from `HookInputBaseSchema` (`agent-hook-schemas/claude`) via
+ * `.partial().shape` destructuring — confirms field names match the upstream spec.
+ * Wrapped in `z.looseObject` (not `allOptional()`) to preserve clean TypeScript
+ * types for downstream `.extend().transform()` chains. `hook_event_name` and
+ * `permission_mode` are overridden to `z.string()` for forward compatibility.
  */
 export const hookBaseSchema = z.looseObject({
-  session_id: SessionIdSchema.optional(),
-  transcript_path: TranscriptPathSchema.optional(),
-  cwd: CwdSchema.optional(),
-  permission_mode: PermissionModeSchema.optional(),
-  agent_id: z.string().optional(),
-  agent_type: z.string().optional(),
+  ...PkgHookInputBaseSchema.partial().shape,
   hook_event_name: HookEventNameSchema.optional(),
+  // Override package enum — swiz must accept unknown permission modes
+  permission_mode: PermissionModeSchema.optional(),
 })
 export type HookBase = z.infer<typeof hookBaseSchema>
 
@@ -209,11 +220,10 @@ export type HookBase = z.infer<typeof hookBaseSchema>
  * Shared envelope fields present on every tool-use hook event.
  * Extended by `fileEditHookInputSchema`, `shellHookInputSchema`,
  * `toolHookInputSchema`, and `skillToolInputSchema`.
+ * Tool fields derived from `ToolCallCoreSchema` (`agent-hook-schemas/common`).
  */
 const toolHookBaseObjectSchema = hookBaseSchema.extend({
-  tool_name: ToolNameSchema.optional(),
-  tool_input: z.record(z.string(), z.unknown()).optional(),
-  permission_mode: PermissionModeSchema.optional(),
+  ...ToolCallCoreSchema.partial().shape,
 })
 
 export const fileEditHookInputSchema = toolHookBaseObjectSchema
@@ -302,10 +312,14 @@ export interface PostToolHookInput extends ToolHookInput {
 
 /**
  * PostToolUse stdin envelope — tool hook fields plus optional `tool_response` from the runtime.
+ * Field set derived from `PostToolUseInputSchema` (`agent-hook-schemas/claude`) via
+ * `.partial().shape` — uses `z.looseObject` for clean types in `.transform()` chain.
  */
-export const postToolUseHookInputSchema = toolHookBaseObjectSchema
-  .extend({
-    tool_response: z.unknown().optional(),
+export const postToolUseHookInputSchema = z
+  .looseObject({
+    ...PkgPostToolUseInputSchema.partial().shape,
+    // Override package enum — swiz must accept unknown permission modes
+    permission_mode: PermissionModeSchema.optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
@@ -601,13 +615,16 @@ export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSele
  * Gemini BeforeTool hook input envelope.
  * Fires before a tool executes. `matcher` is regex against tool name.
  * Can block tool or rewrite arguments.
+ * Derived from `GeminiBeforeToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
  */
-export const geminiBeforeToolInputSchema = toolHookBaseObjectSchema.transform((val) => {
-  if (val.tool_input) {
-    val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+export const geminiBeforeToolInputSchema = allOptional(PkgGeminiBeforeToolInputSchema).transform(
+  (val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+    }
+    return val
   }
-  return val
-})
+)
 
 export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
 
@@ -615,17 +632,16 @@ export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
  * Gemini AfterTool hook input envelope.
  * Fires after a tool executes. Can block result or add context.
  * `matcher` is regex against tool name.
+ * Derived from `GeminiAfterToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
  */
-export const geminiAfterToolInputSchema = toolHookBaseObjectSchema
-  .extend({
-    tool_response: z.unknown().optional(),
-  })
-  .transform((val) => {
+export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema).transform(
+  (val) => {
     if (val.tool_input) {
       val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
-  })
+  }
+)
 
 export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
 
@@ -639,16 +655,11 @@ export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema
 
 /**
  * Gemini Notification hook input envelope.
- * Kept local — package restricts `notification_type` to enum `"ToolPermission"`,
- * while swiz accepts any string for forward compatibility.
+ * Derived from `GeminiNotificationInputSchema` (`agent-hook-schemas/gemini`) via
+ * `allOptional()`, with `notification_type` overridden to `z.string()` — the package
+ * restricts it to enum `"ToolPermission"`, but swiz accepts any string for forward compat.
  */
-export const geminiNotificationInputSchema = z.looseObject({
-  session_id: SessionIdSchema.optional(),
-  transcript_path: TranscriptPathSchema.optional(),
-  cwd: CwdSchema.optional(),
-  hook_event_name: HookEventNameSchema.optional(),
-  message: z.string().optional(),
-  title: z.string().optional(),
+export const geminiNotificationInputSchema = allOptional(PkgGeminiNotificationInputSchema).extend({
   notification_type: z.string().optional(),
 })
 
@@ -665,60 +676,34 @@ export type HookSpecificOutput = z.infer<typeof hookSpecificOutputSchema>
 
 /**
  * Gemini hook output envelope.
- * Decision uses `"allow"/"deny"` (not `"approve"/"block"` like Claude).
- * Exit code 2 = system block (stderr as reason). Other non-zero = warning.
- * Silence on stdout (exit 0) = allow.
+ * Derived from `GeminiHookCommandOutputSchema` (`agent-hook-schemas/gemini`) which
+ * covers decision, flow-control, and hookSpecificOutput fields. Local refinement
+ * ensures at least one known control field is present (empty `{}` rejected).
  */
-export const geminiHookOutputSchema = z
-  .looseObject({
-    decision: z.enum(["allow", "deny"]).optional(),
-    reason: z.string().optional(),
-    systemMessage: z.string().optional(),
-    additionalContext: z.string().optional(),
-    /** AfterAgent: force retry of the agent loop. */
-    retry: z.boolean().optional(),
-    /** AfterAgent: halt execution entirely. */
-    halt: z.boolean().optional(),
-    /** BeforeToolSelection: filtered list of allowed tool names. */
-    filteredTools: z.array(z.string()).optional(),
-    /** BeforeTool: rewritten tool arguments. */
-    updatedInput: z.record(z.string(), z.unknown()).optional(),
-    /** BeforeModel: mock response to use instead of calling LLM. */
-    mockResponse: z.string().optional(),
-    hookSpecificOutput: hookSpecificOutputSchema.optional(),
-  })
-  .refine(
-    (o) =>
-      "decision" in o ||
-      "hookSpecificOutput" in o ||
-      "systemMessage" in o ||
-      "additionalContext" in o ||
-      "retry" in o ||
-      "halt" in o ||
-      "filteredTools" in o ||
-      "updatedInput" in o ||
-      "mockResponse" in o,
-    { message: "Gemini hook output must contain at least one known control field" }
-  )
+export const geminiHookOutputSchema = PkgGeminiHookCommandOutputSchema.refine(
+  (o) =>
+    "decision" in o ||
+    "hookSpecificOutput" in o ||
+    "systemMessage" in o ||
+    "additionalContext" in o ||
+    "retry" in o ||
+    "halt" in o ||
+    "filteredTools" in o ||
+    "updatedInput" in o ||
+    "mockResponse" in o,
+  { message: "Gemini hook output must contain at least one known control field" }
+)
 
 export type GeminiHookOutput = z.infer<typeof geminiHookOutputSchema>
 
 // ─── Codex hook input schemas ───────────────────────────────────────────────
 
 /**
- * Codex common input fields — present on every Codex hook event.
- * Extends the base envelope with `model` and `hook_event_name`.
- * `transcript_path` is nullable in Codex (null when no transcript exists).
- */
-/**
  * Base input fields for Codex hook envelopes.
- * Extends `hookBaseSchema` with nullable `transcript_path` (null when no
- * transcript exists) and `model`.
+ * Derived from `CodexHookInputBaseSchema` (`agent-hook-schemas/codex`).
+ * Codex uses nullable `transcript_path` (null when no transcript exists).
  */
-const codexHookBaseSchema = hookBaseSchema.extend({
-  transcript_path: TranscriptPathSchema.nullable().optional(),
-  model: z.string().optional(),
-})
+const codexHookBaseSchema = allOptional(PkgCodexHookInputBaseSchema)
 
 export const codexCommonInputSchema = codexHookBaseSchema
 
@@ -734,53 +719,33 @@ export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema
 
 /**
  * Codex PreToolUse hook input envelope.
+ * Derived from `CodexPreToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
  * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
- * `matcher` filters on `tool_name`.
  */
-export const codexPreToolUseInputSchema = codexHookBaseSchema
-  .extend({
-    turn_id: z.string().optional(),
-    tool_name: ToolNameSchema.optional(),
-    tool_use_id: z.string().optional(),
-    tool_input: z
-      .looseObject({
-        command: z.string().optional(),
-      })
-      .optional(),
-  })
-  .transform((val) => {
+export const codexPreToolUseInputSchema = allOptional(PkgCodexPreToolUseInputSchema).transform(
+  (val) => {
     if (val.tool_input) {
-      val.tool_input.command = nfkc(val.tool_input.command)
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
-  })
+  }
+)
 
 export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
 
 /**
  * Codex PostToolUse hook input envelope.
- * Currently only fires for `Bash` tool. Includes `tool_response` with the
- * command output payload (usually a JSON string).
- * `matcher` filters on `tool_name`.
+ * Derived from `CodexPostToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
+ * Currently only fires for `Bash` tool. Includes `tool_response`.
  */
-export const codexPostToolUseInputSchema = codexHookBaseSchema
-  .extend({
-    turn_id: z.string().optional(),
-    tool_name: ToolNameSchema.optional(),
-    tool_use_id: z.string().optional(),
-    tool_input: z
-      .looseObject({
-        command: z.string().optional(),
-      })
-      .optional(),
-    tool_response: z.unknown().optional(),
-  })
-  .transform((val) => {
+export const codexPostToolUseInputSchema = allOptional(PkgCodexPostToolUseInputSchema).transform(
+  (val) => {
     if (val.tool_input) {
-      val.tool_input.command = nfkc(val.tool_input.command)
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
-  })
+  }
+)
 
 export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
 
@@ -805,6 +770,8 @@ export type CodexStopInput = z.infer<typeof codexStopInputSchema>
  * Supports common output fields (`continue`, `stopReason`, `systemMessage`,
  * `suppressOutput`) plus `decision`/`reason` and `hookSpecificOutput`.
  * Alternative blocking: exit code 2 + reason on stderr.
+ * Kept local — package per-event wire schemas are strict (`additionalProperties: false`),
+ * swiz needs loose validation with the control-field refinement.
  */
 export const codexHookOutputSchema = z
   .looseObject({

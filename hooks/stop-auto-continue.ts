@@ -523,13 +523,17 @@ function buildFinalMessage(
 
   // Lead with the actionable next step — most important info first
   const nextStep = response.next || refinementStatus
-  parts.push(`▶ Next step: ${nextStep}`)
+  parts.push(`New task: ${nextStep}`)
 
   // Critiques as supporting context
   if (critiquesEnabled) {
     const critiques: string[] = []
-    if (response.processCritique) critiques.push(`  Process: ${response.processCritique}`)
-    if (response.productCritique) critiques.push(`  Product: ${response.productCritique}`)
+    if (response.processCritique) {
+      critiques.push(response.processCritique)
+    }
+    if (response.productCritique) {
+      critiques.push(response.productCritique)
+    }
     if (critiques.length > 0) {
       parts.push("")
       parts.push("── Session review ──")
