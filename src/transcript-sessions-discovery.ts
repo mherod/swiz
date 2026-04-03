@@ -9,7 +9,7 @@ import {
   getCachedLines,
   getCachedPrefix,
 } from "./utils/file-cache.ts"
-import { tryParseJsonLine } from "./utils/jsonl.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 const SESSION_PROVIDER_PRECEDENCE = [
   "claude",
@@ -237,7 +237,7 @@ async function readCodexSessionMeta(
   let id: string | null = null
   let cwd: string | null = null
 
-  for (const line of prefix.split("\n")) {
+  for (const line of splitJsonlLines(prefix)) {
     const payload = extractCodexMetaPayload(line)
     if (!payload) continue
 

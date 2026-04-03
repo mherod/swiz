@@ -4,7 +4,7 @@ import {
   computeSummaryFromSessionLines,
   type TranscriptSummary,
 } from "../../../transcript-summary.ts"
-import { tryParseJsonLine } from "../../../utils/jsonl.ts"
+import { splitJsonlChunk, splitJsonlLines, tryParseJsonLine } from "../../../utils/jsonl.ts"
 
 export interface TranscriptIndex {
   summary: TranscriptSummary
@@ -97,8 +97,7 @@ export class TranscriptIndexCache {
           if (done) break
 
           const chunk = decoder.decode(value, { stream: true })
-          const lines = (remaining + chunk).split("\n")
-          const lastLineInChunk = lines.pop() ?? ""
+          const { lines, remainder } = splitJsonlChunk(remaining + chunk)
 
           for (const line of lines) {
             const lineByteLength = Buffer.byteLength(`${line}\n`)
@@ -108,7 +107,7 @@ export class TranscriptIndexCache {
             }
             currentByteOffset += lineByteLength
           }
-          remaining = lastLineInChunk
+          remaining = remainder
         }
 
         const final = remaining + decoder.decode()
@@ -123,7 +122,7 @@ export class TranscriptIndexCache {
       // 2. Read from lastSystemByteOffset to EOF.
       const sessionFile = transcriptFile.slice(lastSystemByteOffset)
       const sessionText = await sessionFile.text()
-      const sessionLines = sessionText.split("\n").filter((l) => l.trim())
+      const sessionLines = splitJsonlLines(sessionText)
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)
 

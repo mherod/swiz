@@ -6,7 +6,7 @@
 
 import { normalizeCommand } from "./command-utils.ts"
 import { isShellTool, isTaskTool } from "./tool-matchers.ts"
-import { tryParseJsonLine } from "./utils/jsonl.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
 
 /**
@@ -131,7 +131,7 @@ function classifySessionScope(bashCommands: string[]): SessionScope {
  * is excluded from hook checks.
  */
 export function extractSessionLines(jsonlText: string): string[] {
-  const allLines = jsonlText.split("\n")
+  const allLines = splitJsonlLines(jsonlText)
   return filterSessionLines(allLines)
 }
 

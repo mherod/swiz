@@ -116,6 +116,18 @@ export function splitJsonlLines(text: string): string[] {
 }
 
 /**
+ * Split streamed JSONL text into complete lines and an unfinished remainder.
+ * Preserves blank complete lines so callers can maintain accurate byte offsets.
+ */
+export function splitJsonlChunk(text: string): { lines: string[]; remainder: string } {
+  const parts = text.split("\n")
+  return {
+    lines: parts.slice(0, -1),
+    remainder: parts.at(-1) ?? "",
+  }
+}
+
+/**
  * Parse a single JSON line, returning `undefined` on failure.
  * Uses Bun's native JSONL parser — never throws.
  */

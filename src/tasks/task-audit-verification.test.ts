@@ -2,6 +2,7 @@ import { mkdir, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { createDefaultTaskStore } from "../task-roots.ts"
+import { parseJsonlTailUntyped } from "../utils/jsonl.ts"
 import type { Task } from "./task-repository.ts"
 import { writeTaskUpdate } from "./task-service.ts"
 
@@ -36,7 +37,7 @@ describe("Task Audit Log Verification", () => {
 
     const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
     const logContent = await readFile(auditLogPath, "utf-8")
-    const entry = JSON.parse(logContent.trim().split("\n").pop()!)
+    const entry = parseJsonlTailUntyped(logContent, 1)[0] as Record<string, any>
 
     expect(entry.action).toBe("field_update")
     expect(entry.taskId).toBe("1")
@@ -64,7 +65,7 @@ describe("Task Audit Log Verification", () => {
 
     const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
     const logContent = await readFile(auditLogPath, "utf-8")
-    const entry = JSON.parse(logContent.trim().split("\n").pop()!)
+    const entry = parseJsonlTailUntyped(logContent, 1)[0] as Record<string, any>
 
     expect(entry.action).toBe("status_change")
     expect(entry.taskId).toBe("2")
