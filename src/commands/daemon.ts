@@ -156,19 +156,19 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
   const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
     `${cwd}\x00${sessionId ?? ""}`
 
-  // In-flight coalescing: concurrent requests for the same cwd share one computation.
-  // Keyed by cwd only — the expensive work (gh API calls) is cwd-scoped.
+  // In-flight coalescing: concurrent requests for the same cwd+session share one computation.
   const inFlight = new Map<string, Promise<WarmStatusLineSnapshot>>()
 
   return async (
     cwd: string,
     sessionId: string | null | undefined
   ): Promise<WarmStatusLineSnapshot> => {
+    const key = cacheKey(cwd, sessionId)
+
     // Coalesce concurrent callers before doing any expensive work.
-    const inflight = inFlight.get(cwd)
+    const inflight = inFlight.get(key)
     if (inflight) return inflight
 
-    const key = cacheKey(cwd, sessionId)
     const nextFingerprint = await buildSnapshotFingerprint(cwd)
     const existing = snapshots.get(key)
     if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
@@ -181,9 +181,9 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
         return snapshot
       })
       .finally(() => {
-        inFlight.delete(cwd)
+        inFlight.delete(key)
       })
-    inFlight.set(cwd, computation)
+    inFlight.set(key, computation)
     return computation
   }
 }
@@ -254,6 +254,8 @@ function setupWatchers(
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
     sessionDataCache.invalidateProject(cwd)
+    caches.cooldownRegistry.invalidateProject(cwd)
+    caches.prReviewMonitor.clearProject(cwd)
     for (const key of snapshots.keys()) {
       if (key.startsWith(cwd)) snapshots.delete(key)
     }

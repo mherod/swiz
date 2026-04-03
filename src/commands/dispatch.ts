@@ -50,7 +50,7 @@ function buildAllowlistedEnv(): Record<string, string> {
   const allowlistPatterns = [
     /^PATH$/,
     /^HOME$/,
-    /^TERM(COLOR)?$/,
+    /^(TERM|COLORTERM)$/,
     /^SWIZ_/,
     /^ANTHROPIC_/,
     /^CURSOR_/,
