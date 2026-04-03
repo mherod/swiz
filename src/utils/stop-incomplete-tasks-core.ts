@@ -109,19 +109,44 @@ function getIncompleteDetails(allTasks: SessionTask[]): string[] {
  * Reads task files, deduplicates stale entries, and returns a block result
  * when incomplete tasks remain — or null when stop is allowed.
  */
+async function logStopDiagnostic(message: string): Promise<void> {
+  try {
+    const { appendFile } = await import("node:fs/promises")
+    const line = `[${new Date().toISOString()}] stop-incomplete-tasks: ${message}\n`
+    await appendFile("/tmp/swiz-logging.log", line)
+  } catch {
+    // best-effort logging
+  }
+}
+
 export async function checkIncompleteTasks(
   sessionId: string,
   home: string,
   autoTransitionEnabled = true
 ): Promise<HookOutput | null> {
-  if (isCurrentAgent("gemini")) return null
+  if (isCurrentAgent("gemini")) {
+    await logStopDiagnostic(`skip: gemini agent (session=${sessionId.slice(0, 8)})`)
+    return null
+  }
 
   const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return null
+  if (!tasksDir) {
+    await logStopDiagnostic(`skip: no tasksDir (session=${sessionId.slice(0, 8)}, home=${home})`)
+    return null
+  }
 
   const allTasks = await readSessionTasksFresh(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
-  if (!tasksDirExists || allTasks.length === 0) return null
+
+  await logStopDiagnostic(
+    `read: session=${sessionId.slice(0, 8)} tasks=${allTasks.length} dirExists=${tasksDirExists} ` +
+      `statuses=${allTasks.map((t) => `${t.id}:${t.status}`).join(",")}`
+  )
+
+  if (!tasksDirExists || allTasks.length === 0) {
+    await logStopDiagnostic(`allow: no tasks found (session=${sessionId.slice(0, 8)})`)
+    return null
+  }
 
   // Deduplicate before checking
   const completedTasks = allTasks.filter((t) => t.status === "completed")
@@ -131,7 +156,16 @@ export async function checkIncompleteTasks(
   await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir, autoTransitionEnabled)
 
   const incompleteDetails = getIncompleteDetails(allTasks)
-  if (incompleteDetails.length === 0) return null
+  if (incompleteDetails.length === 0) {
+    await logStopDiagnostic(
+      `allow: all tasks complete after dedup (session=${sessionId.slice(0, 8)}, total=${allTasks.length})`
+    )
+    return null
+  }
+
+  await logStopDiagnostic(
+    `BLOCK: ${incompleteDetails.length} incomplete (session=${sessionId.slice(0, 8)}): ${incompleteDetails.join("; ")}`
+  )
 
   return blockStopObj(
     formatActionPlan(

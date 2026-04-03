@@ -52,6 +52,46 @@ async function runInstall(swizRoot: string): Promise<boolean> {
   return !result.timedOut && result.exitCode === 0
 }
 
+/**
+ * Check whether settings.json has all expected swiz dispatch entries.
+ * Returns the list of missing canonical event names, or empty if all present.
+ */
+async function findMissingDispatchEntries(): Promise<string[]> {
+  const settingsPath = join(getHomeDir(), ".claude", "settings.json")
+  try {
+    const settings = (await Bun.file(settingsPath).json()) as Record<string, unknown>
+    const hooks = ((settings.hooks as Record<string, unknown>) ?? {}) as Record<string, unknown>
+    const dispatchRe = /swiz dispatch (\S+)/
+    const installed = new Set<string>()
+
+    for (const [, groups] of Object.entries(hooks)) {
+      if (!Array.isArray(groups)) continue
+      for (const group of groups) {
+        const hookList = (group as Record<string, unknown>).hooks
+        if (!Array.isArray(hookList)) continue
+        for (const hook of hookList) {
+          const cmd = (hook as Record<string, unknown>).command
+          if (typeof cmd !== "string") continue
+          const m = dispatchRe.exec(cmd)
+          if (m?.[1]) installed.add(m[1])
+        }
+      }
+    }
+
+    // Scheduled events (preCommit, commitMsg, prePush, prPoll) use lefthook, not settings.json
+    const { manifest } = await import("../src/manifest.ts")
+    const missing: string[] = []
+    for (const group of manifest) {
+      if (group.scheduled) continue
+      if (!installed.has(group.event)) missing.push(group.event)
+    }
+    return missing
+  } catch {
+    // Can't read settings — assume missing
+    return ["unknown"]
+  }
+}
+
 export async function evaluateSessionstartSelfHeal(input: unknown): Promise<SwizHookOutput> {
   sessionStartHookInputSchema.parse(input)
 
@@ -62,18 +102,27 @@ export async function evaluateSessionstartSelfHeal(input: unknown): Promise<Swiz
   if (!currentHash) return {}
 
   const storedHash = await readStoredHash()
+  const manifestChanged = storedHash !== currentHash
 
-  if (storedHash === currentHash) return {}
+  // Check if dispatch entries are missing from settings.json even when manifest hasn't changed.
+  // Claude Code can overwrite settings.json, removing swiz entries without changing the manifest.
+  const missingEntries = manifestChanged ? [] : await findMissingDispatchEntries()
+  const needsInstall = manifestChanged || missingEntries.length > 0
+
+  if (!needsInstall) return {}
 
   const installed = await runInstall(swizRoot)
   if (!installed) return {}
 
   await writeHash(currentHash)
 
-  const isFirstInstall = storedHash === null
-  const message = isFirstInstall
-    ? "swiz install: initial agent config written."
-    : "swiz self-healed: manifest changed, agent configs updated."
+  const reason = manifestChanged
+    ? "manifest changed"
+    : `${missingEntries.length} missing dispatch entries (${missingEntries.join(", ")})`
+  const message =
+    storedHash === null
+      ? "swiz install: initial agent config written."
+      : `swiz self-healed: ${reason}, agent configs updated.`
 
   return buildContextHookOutput("SessionStart", message)
 }

@@ -123,10 +123,10 @@ describe("Gemini hook schema contracts", () => {
       cwd: "/repo",
       tool_name: "run_shell_command",
       tool_input: { command: "ls" },
-      tool_response: "file1.ts\nfile2.ts",
+      tool_response: { output: "file1.ts\nfile2.ts" },
     })
     expect(result.success).toBe(true)
-    expect(result.data!.tool_response).toBe("file1.ts\nfile2.ts")
+    expect((result.data!.tool_response as Record<string, string>).output).toBe("file1.ts\nfile2.ts")
   })
 
   it("geminiNotificationInputSchema parses notification fields", () => {
