@@ -106,16 +106,14 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs, (2) `applyTaskUpdate()` write-through from `writeTask()`. Incremental refresh re-reads 3 most recent files. `getTasksFresh()` forces full disk reload when no watcher active or openCount zero — native `TaskCreate` bypasses `writeTask()`. **DO**: Call `watchSession()` when sessions activate in daemon. **DON'T**: Trust cached state for stop hooks without freshness guarantee — use `readSessionTasksFresh()`.
-- **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` is the canonical enforcement point — calls `validateLastTaskStanding` when `newStatus === "completed"`. All completion paths flow through it. `skipLastTaskGuard` option for explicit overrides only.
+- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs, (2) `applyTaskUpdate()` write-through from `writeTask()`. `getTasksFresh()` forces full disk reload when no watcher active or openCount zero. **DO**: Call `watchSession()` when sessions activate in daemon. **DON'T**: Trust cached state for stop hooks — use `readSessionTasksFresh()`.
+- **In-memory event state**: `src/tasks/task-event-state.ts` — module-level `Map<sessionId, EventTaskState[]>` updated synchronously by inline PostToolUse hooks. `posttooluse-task-audit-sync` writes TaskCreate/TaskUpdate events; `posttooluse-task-list-sync` writes TaskList bulk state. `posttooluse-task-count-context` reads from `getSessionEventState()` first (zero disk I/O), falls back to disk + `applyMutationOverlay` when no event state exists. Eliminates stale reads from async native task writes.
+- **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` — calls `validateLastTaskStanding` when `newStatus === "completed"`. `skipLastTaskGuard` for explicit overrides only.
 
-- First action: `TaskCreate`/`TaskUpdate` after compaction.
-- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`.
-- Prior-session task blocks: complete prior-session `in_progress` tasks (`TaskUpdate status: completed`) before new Bash. If work remains, recreate with `TaskCreate`.
-- After compaction: `TaskList`; close stale tasks via `git log --oneline -3`.
-- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
-- Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
-- **DON'T**: Complete the final incomplete task without first creating a pending next-step task — `pretooluse-require-tasks.ts` blocks when zero incomplete tasks remain.
+- After compaction: `TaskList`, close stale tasks via `git log --oneline -3`.
+- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Create pending next-step before completing the final incomplete task.
+- Prior-session task blocks: complete `in_progress` tasks (`TaskUpdate status: completed`) before new Bash.
+- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools every 10 calls; staleness gate at 20.
