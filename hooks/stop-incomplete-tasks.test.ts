@@ -21,7 +21,7 @@ async function runHook({
   const payload = JSON.stringify({
     session_id: sessionId,
     cwd: cwd ?? process.cwd(),
-    hook_event_name: "stop",
+    hook_event_name: "Stop",
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   for (const agent of AGENTS) {
