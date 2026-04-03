@@ -16,6 +16,7 @@ import {
   sessionEndHookInputSchema,
   sessionStartHookInputSchema,
   stopHookExtendedInputSchema,
+  stopHookInputSchema,
   stopHookOutputSchema,
   subagentStartHookInputSchema,
   toolHookInputSchema,
@@ -37,7 +38,7 @@ const fallbackInboundSchema = dispatchInboundObjectSchema
 export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record<string, any>>> = {
   preToolUse: toolHookInputSchema as z.ZodType<Record<string, any>>,
   postToolUse: postToolUseHookInputSchema as z.ZodType<Record<string, any>>,
-  stop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
+  stop: stopHookInputSchema as z.ZodType<Record<string, any>>,
   subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
   sessionStart: sessionStartHookInputSchema as z.ZodType<Record<string, any>>,
   userPromptSubmit: userPromptSubmitHookInputSchema as z.ZodType<Record<string, any>>,

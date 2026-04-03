@@ -328,39 +328,44 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   return parseGitStatusV2Output(out)
 }
 
+function describeUpstream(upstream: string | null, upstreamGone: boolean): string {
+  if (upstreamGone) return `, upstream ${upstream} is gone.`
+  if (upstream) return ` tracking ${upstream}.`
+  return ` with no upstream.`
+}
+
+function describeWorkingTree(uncommitted: number): string {
+  if (uncommitted === 0) return ` Working tree is clean.`
+  return ` ${uncommitted} uncommitted file${uncommitted !== 1 ? "s" : ""}.`
+}
+
+function describeSyncState(ahead: number, behind: number): string {
+  if (ahead > 0 && behind > 0)
+    return ` Branch has diverged: ${ahead} ahead, ${behind} behind remote.`
+  if (ahead > 0) return ` ${ahead} commit${ahead !== 1 ? "s" : ""} not yet pushed.`
+  if (behind > 0) return ` ${behind} commit${behind !== 1 ? "s" : ""} behind remote.`
+  return ""
+}
+
 /**
  * Single-line git summary for agent context (PostToolUse / status line style).
+ * Produces coherent prose so the consuming model can parse it naturally.
  * @param gitStatus
  * @param collabMode - When `"auto"`, the collaboration suffix is omitted.
  */
 export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {
   const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
 
-  let status = `[git] branch: ${branch}`
-
-  if (upstreamGone) {
-    status += ` | upstream: ${upstream} (gone)`
-  } else if (upstream) {
-    status += ` | upstream: ${upstream}`
-  } else {
-    status += ` | no upstream`
-  }
-
-  status += ` | uncommitted files: ${uncommitted}`
-
-  if (ahead > 0 && behind > 0) {
-    status += ` | diverged: ${ahead} ahead, ${behind} behind`
-  } else if (ahead > 0) {
-    status += ` | ${ahead} unpushed commit(s)`
-  } else if (behind > 0) {
-    status += ` | ${behind} behind remote`
-  }
+  let line = `[git] On branch ${branch}`
+  line += describeUpstream(upstream, upstreamGone)
+  line += describeWorkingTree(uncommitted)
+  line += describeSyncState(ahead, behind)
 
   if (collabMode !== "auto") {
-    status += ` | collab: ${collabMode}`
+    line += ` Collaboration mode: ${collabMode}.`
   }
 
-  return status
+  return line
 }
 
 /** Canonical empty-tree hash used when repos have fewer than N commits. */

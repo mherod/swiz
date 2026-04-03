@@ -13,13 +13,16 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
   const hookInput = userPromptSubmitHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
 
-  const branch = (await git(["branch", "--show-current"], cwd)) || "(unknown)"
-  const dirty = (await git(["status", "--porcelain"], cwd))?.split("\n").filter(Boolean).length ?? 0
+  // Dynamic import to avoid circular dep (manifest → git-utils → settings → manifest)
+  const { getGitStatusV2, buildGitContextLine } = await import("../src/utils/git-utils.ts")
+  const gitStatus = await getGitStatusV2(cwd)
 
-  return buildContextHookOutput(
-    "UserPromptSubmit",
-    `[git] branch: ${branch} | uncommitted files: ${dirty}`
-  )
+  if (!gitStatus) {
+    const branch = (await git(["branch", "--show-current"], cwd)) || "(unknown)"
+    return buildContextHookOutput("UserPromptSubmit", `[git] On branch ${branch}.`)
+  }
+
+  return buildContextHookOutput("UserPromptSubmit", buildGitContextLine(gitStatus))
 }
 
 const userpromptsubmitGitContext: SwizHook<Record<string, any>> = {

@@ -19,7 +19,6 @@ import { buildGitContextLine, type GitStatusV2 } from "../src/utils/git-utils.ts
 import type { ToolHookInput } from "./schemas.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
-export { buildGitContextLine }
 
 async function refineDirectives(lines: string[]): Promise<{
   directives: string[]

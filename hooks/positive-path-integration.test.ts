@@ -351,8 +351,8 @@ describe("posttooluse-git-context: status injection", () => {
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PostToolUse")
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("[git] branch:")
-    expect(ctx).toContain("uncommitted files:")
+    expect(ctx).toContain("[git] On branch")
+    expect(ctx).toContain("uncommitted file")
   })
 
   test("reports uncommitted files count accurately", async () => {
@@ -363,7 +363,7 @@ describe("posttooluse-git-context: status injection", () => {
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("uncommitted files: 2")
+    expect(ctx).toContain("2 uncommitted files")
   })
 
   test("reports zero uncommitted for clean repo", async () => {
@@ -371,7 +371,7 @@ describe("posttooluse-git-context: status injection", () => {
     const r = await runHook(HOOK, { cwd: repo })
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("uncommitted files: 0")
+    expect(ctx).toContain("Working tree is clean")
   })
 })
 
@@ -1225,7 +1225,7 @@ describe("userpromptsubmit-git-context: positive paths", () => {
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("UserPromptSubmit")
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("[git] branch:")
-    expect(ctx).toContain("uncommitted files:")
+    expect(ctx).toContain("[git] On branch")
+    expect(ctx).toContain("uncommitted file")
   })
 })

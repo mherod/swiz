@@ -706,71 +706,79 @@ import { buildGitContextLine, type GitStatusV2 } from "./git-utils.ts"
 describe("buildGitContextLine", () => {
   test("includes branch name", () => {
     const result = buildGitContextLine(makeStatus({ branch: "feat/foo" }))
-    expect(result).toContain("[git] branch: feat/foo")
+    expect(result).toContain("[git] On branch feat/foo")
   })
 
   test("includes upstream ref when available", () => {
     const result = buildGitContextLine(makeStatus({ upstream: "origin/main" }))
-    expect(result).toContain("upstream: origin/main")
+    expect(result).toContain("tracking origin/main")
     expect(result).not.toContain("no upstream")
-    expect(result).not.toContain("(gone)")
+    expect(result).not.toContain("is gone")
   })
 
   test("shows no upstream when upstream is null", () => {
     const result = buildGitContextLine(makeStatus({ upstream: null }))
-    expect(result).toContain("no upstream")
+    expect(result).toContain("with no upstream")
   })
 
   test("shows gone upstream", () => {
     const result = buildGitContextLine(
       makeStatus({ upstream: "origin/deleted-branch", upstreamGone: true })
     )
-    expect(result).toContain("upstream: origin/deleted-branch (gone)")
+    expect(result).toContain("upstream origin/deleted-branch is gone")
   })
 
   test("includes uncommitted file count", () => {
     const result = buildGitContextLine(makeStatus({ total: 3 }))
-    expect(result).toContain("uncommitted files: 3")
+    expect(result).toContain("3 uncommitted files")
   })
 
   test("shows clean state with zero uncommitted", () => {
     const result = buildGitContextLine(makeStatus({ total: 0 }))
-    expect(result).toContain("uncommitted files: 0")
+    expect(result).toContain("Working tree is clean")
   })
 
   test("shows ahead count as unpushed commits", () => {
     const result = buildGitContextLine(makeStatus({ ahead: 2 }))
-    expect(result).toContain("2 unpushed commit(s)")
+    expect(result).toContain("2 commits not yet pushed")
   })
 
   test("shows behind count", () => {
     const result = buildGitContextLine(makeStatus({ behind: 5 }))
-    expect(result).toContain("5 behind remote")
+    expect(result).toContain("5 commits behind remote")
   })
 
   test("shows diverged when both ahead and behind", () => {
     const result = buildGitContextLine(makeStatus({ ahead: 3, behind: 2 }))
-    expect(result).toContain("diverged: 3 ahead, 2 behind")
+    expect(result).toContain("diverged: 3 ahead, 2 behind remote")
   })
 
   test("omits ahead/behind when both zero", () => {
     const result = buildGitContextLine(makeStatus({ ahead: 0, behind: 0 }))
-    expect(result).not.toContain("unpushed")
+    expect(result).not.toContain("pushed")
     expect(result).not.toContain("behind")
     expect(result).not.toContain("diverged")
   })
 
   test("omits collab mode when auto", () => {
     const result = buildGitContextLine(makeStatus(), "auto")
-    expect(result).not.toContain("collab:")
+    expect(result).not.toContain("Collaboration mode")
   })
 
   test("includes collab mode when not auto", () => {
     const result = buildGitContextLine(makeStatus(), "solo")
-    expect(result).toContain("collab: solo")
+    expect(result).toContain("Collaboration mode: solo")
   })
 
-  test("combines all fields for a full status line", () => {
+  test("singular forms for single file and single commit", () => {
+    const result = buildGitContextLine(makeStatus({ total: 1, ahead: 1 }))
+    expect(result).toContain("1 uncommitted file.")
+    expect(result).not.toContain("files")
+    expect(result).toContain("1 commit not yet pushed.")
+    expect(result).not.toContain("commits")
+  })
+
+  test("combines all fields into a coherent sentence", () => {
     const result = buildGitContextLine(
       makeStatus({
         branch: "feat/issue-42",
@@ -781,7 +789,7 @@ describe("buildGitContextLine", () => {
       "team"
     )
     expect(result).toBe(
-      "[git] branch: feat/issue-42 | upstream: origin/feat/issue-42 | uncommitted files: 2 | 1 unpushed commit(s) | collab: team"
+      "[git] On branch feat/issue-42 tracking origin/feat/issue-42. 2 uncommitted files. 1 commit not yet pushed. Collaboration mode: team."
     )
   })
 })
