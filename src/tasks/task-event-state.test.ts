@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   applyTaskCreateEvent,
   applyTaskListEvent,
@@ -8,6 +11,7 @@ import {
   getSessionEventState,
   hasSessionEventState,
   pruneSession,
+  seedSessionFromDisk,
 } from "./task-event-state.ts"
 
 afterEach(() => {
@@ -164,6 +168,48 @@ describe("task-event-state", () => {
       expect(eventStateSessionCount()).toBe(1)
       applyTaskCreateEvent("s2", "1", "B")
       expect(eventStateSessionCount()).toBe(2)
+    })
+  })
+
+  describe("seedSessionFromDisk", () => {
+    it("populates event state from task files", async () => {
+      const dir = join(tmpdir(), `seed-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      await mkdir(dir, { recursive: true })
+      await writeFile(
+        join(dir, "1.json"),
+        JSON.stringify({ id: "1", status: "pending", subject: "Task A" })
+      )
+      await writeFile(
+        join(dir, "2.json"),
+        JSON.stringify({ id: "2", status: "in_progress", subject: "Task B" })
+      )
+
+      await seedSessionFromDisk("seed1", dir)
+      const state = getSessionEventState("seed1")
+      expect(state).toHaveLength(2)
+      expect(state!.find((t) => t.id === "1")!.status).toBe("pending")
+      expect(state!.find((t) => t.id === "2")!.subject).toBe("Task B")
+    })
+
+    it("skips when event state already exists", async () => {
+      const dir = join(tmpdir(), `seed-skip-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      await mkdir(dir, { recursive: true })
+      await writeFile(
+        join(dir, "1.json"),
+        JSON.stringify({ id: "1", status: "pending", subject: "Disk task" })
+      )
+
+      applyTaskCreateEvent("seed2", "99", "Hook task")
+      await seedSessionFromDisk("seed2", dir)
+
+      const state = getSessionEventState("seed2")
+      expect(state).toHaveLength(1)
+      expect(state![0]!.id).toBe("99")
+    })
+
+    it("skips dotfiles and handles missing directory", async () => {
+      await seedSessionFromDisk("seed3", "/nonexistent/path")
+      expect(getSessionEventState("seed3")).toBeNull()
     })
   })
 })

@@ -529,18 +529,22 @@ async function handleDispatchRoute(
   const payloadStr = await req.text()
   const start = performance.now()
 
-  // Register fs.watch for this session's task directory so the TaskStateCache
-  // catches native Claude TaskCreate/TaskUpdate writes via filesystem events.
+  // Register fs.watch and seed in-memory event state for this session's task
+  // directory so both TaskStateCache and task-count-context have accurate data
+  // from the very first tool call in the session.
   try {
     const parsed = JSON.parse(payloadStr) as Record<string, unknown>
     const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : null
     if (sessionId && ctx.taskStateCache) {
       const { createDefaultTaskStore } = await import("../../task-roots.ts")
       const { tasksDir } = createDefaultTaskStore()
-      ctx.taskStateCache.watchSession(sessionId, join(tasksDir, sessionId))
+      const sessionTasksDir = join(tasksDir, sessionId)
+      ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
+      const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
+      await seedSessionFromDisk(sessionId, sessionTasksDir)
     }
   } catch {
-    // Best-effort — don't block dispatch if payload parsing fails here
+    // Best-effort — don't block dispatch if payload parsing or seeding fails
   }
 
   const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
