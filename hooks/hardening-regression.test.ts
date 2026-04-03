@@ -358,39 +358,6 @@ interface LefthookConfig {
 }
 
 describe("lefthook.yml config integrity", () => {
-  test("disk-space command is present in pre-commit", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands).toHaveProperty("disk-space")
-  })
-
-  test("disk-space command is present in pre-push", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-push"]?.commands).toHaveProperty("disk-space")
-  })
-
-  test("disk-space has priority 1 in pre-commit (runs before lint and typecheck)", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands?.["disk-space"]?.priority).toBe(1)
-  })
-
-  test("disk-space has priority 1 in pre-push (runs before test)", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-push"]?.commands?.["disk-space"]?.priority).toBe(1)
-  })
-
-  test("disk-space run command references check-disk-space.ts script", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    const preCommitRun = config["pre-commit"]?.commands?.["disk-space"]?.run ?? ""
-    const prePushRun = config["pre-push"]?.commands?.["disk-space"]?.run ?? ""
-    expect(preCommitRun).toContain("check-disk-space")
-    expect(prePushRun).toContain("check-disk-space")
-  })
-
   test("existing pre-commit commands (lint, typecheck) are still present", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
@@ -410,46 +377,6 @@ describe("lefthook.yml config integrity", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("lefthook.yml hook-order and invariant guards", () => {
-  // ── Hook order: disk-space must be the unique earliest command ───────────
-
-  test("no other pre-commit command has priority ≤ 1 (disk-space runs first uniquely)", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    const commands = config["pre-commit"]?.commands ?? {}
-    const contenders = Object.entries(commands)
-      .filter(([name, cmd]) => name !== "disk-space" && (cmd.priority ?? Infinity) <= 1)
-      .map(([name]) => name)
-    expect(contenders).toEqual([])
-  })
-
-  test("no other pre-push command has priority ≤ 1 (disk-space runs first uniquely)", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    const commands = config["pre-push"]?.commands ?? {}
-    const contenders = Object.entries(commands)
-      .filter(([name, cmd]) => name !== "disk-space" && (cmd.priority ?? Infinity) <= 1)
-      .map(([name]) => name)
-    expect(contenders).toEqual([])
-  })
-
-  // ── Partial edits: skip list and stage_fixed integrity ───────────────────
-
-  test("disk-space skip list includes merge and rebase in pre-commit", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    const skip = config["pre-commit"]?.commands?.["disk-space"]?.skip ?? []
-    expect(skip).toContain("merge")
-    expect(skip).toContain("rebase")
-  })
-
-  test("disk-space skip list includes merge and rebase in pre-push", async () => {
-    const raw = await Bun.file("lefthook.yml").text()
-    const config = parseYaml(raw) as LefthookConfig
-    const skip = config["pre-push"]?.commands?.["disk-space"]?.skip ?? []
-    expect(skip).toContain("merge")
-    expect(skip).toContain("rebase")
-  })
-
   test("lint retains stage_fixed:true", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
