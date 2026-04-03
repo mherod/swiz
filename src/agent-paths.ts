@@ -80,6 +80,15 @@ function getParentProcessCommand(): string {
 }
 
 /**
+ * Detect the current agent from environment variables only.
+ * This is the safest signal inside hook subprocesses because it avoids
+ * parent-process heuristics.
+ */
+export function detectCurrentAgentFromEnv(): AgentDef | null {
+  return AGENTS.find((a) => a.envVars?.some((v) => process.env[v])) ?? null
+}
+
+/**
  * Detects the currently running agent by checking environment variables and parent process.
  *
  * Detection order:
@@ -88,8 +97,7 @@ function getParentProcessCommand(): string {
  * 3. null if no agent detected
  */
 export function detectCurrentAgent(): AgentDef | null {
-  // First, check environment variables (fastest, most reliable in hooks)
-  const byEnv = AGENTS.find((a) => a.envVars?.some((v) => process.env[v]))
+  const byEnv = detectCurrentAgentFromEnv()
   if (byEnv) return byEnv
 
   // Fallback: check parent process command pattern

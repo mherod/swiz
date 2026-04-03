@@ -1,6 +1,11 @@
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "./agent-paths.ts"
+import {
+  detectCurrentAgent,
+  detectCurrentAgentFromEnv,
+  isCurrentAgent,
+  isRunningInAgent,
+} from "./agent-paths.ts"
 import { resolveCwd } from "./cwd.ts"
 
 // ─── Terminal & shell detection ──────────────────────────────────────────────
@@ -21,7 +26,7 @@ export {
 } from "./utils/terminal-detection.ts"
 
 // Re-export agent detection from agent-paths.ts
-export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
+export { detectCurrentAgent, detectCurrentAgentFromEnv, isCurrentAgent, isRunningInAgent }
 
 export type CiProvider =
   | "github-actions"

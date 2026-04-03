@@ -10,71 +10,85 @@ if (!parentPort) {
   process.exit(1)
 }
 
+const port = parentPort
+
 let registry: BaseFileWatcherRegistry | null = null
 
-if (parentPort) {
-  const pp = parentPort
-  const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
-    try {
-      switch (msg.type) {
-        case "init": {
-          registry = new BaseFileWatcherRegistry()
-          break
-        }
-        case "register": {
-          if (!registry) registry = new BaseFileWatcherRegistry()
-          const path = msg.path
-          const label = msg.label
-          registry.register(
-            path,
-            label,
-            () => {
-              pp.postMessage({
-                type: "invalidation",
-                path,
-                label,
-              } satisfies FileWatcherParentMessage)
-            },
-            msg.options
-          )
-          pp.postMessage({
-            type: "status",
-            status: registry.status(),
-          } satisfies FileWatcherParentMessage)
-          break
-        }
-        case "start": {
-          if (!registry) registry = new BaseFileWatcherRegistry()
-          await registry.start()
-          pp.postMessage({
-            type: "status",
-            status: registry.status(),
-          } satisfies FileWatcherParentMessage)
-          pp.postMessage({ type: "started" } satisfies FileWatcherParentMessage)
-          break
-        }
-        case "unregisterByLabelSuffix": {
-          if (!registry) {
-            break
-          }
-          registry.unregisterByLabelSuffix(msg.suffix)
-          break
-        }
-        case "close": {
-          if (registry) {
-            registry.close()
-          }
-          break
-        }
-        case "status": {
-          const status = registry ? registry.status() : []
-          pp.postMessage({ type: "status", status } satisfies FileWatcherParentMessage)
-          break
-        }
-      }
-    } catch (err) {
-      pp.postMessage({ type: "error", error: String(err) } satisfies FileWatcherParentMessage)
-    }
-  }
-  pp.on("message", (msg: FileWatcherWorkerMessage): void => void handleMessage(msg))
+const postMessage = (message: FileWatcherParentMessage): void => {
+  port.postMessage(message)
 }
+
+const postStatus = (): void => {
+  postMessage({
+    type: "status",
+    status: registry ? registry.status() : [],
+  })
+}
+
+const postError = (error: unknown): void => {
+  postMessage({ type: "error", error: String(error) })
+}
+
+const createRegistry = (): BaseFileWatcherRegistry => {
+  registry = new BaseFileWatcherRegistry()
+  return registry
+}
+
+const getOrCreateRegistry = (): BaseFileWatcherRegistry => {
+  return registry ?? createRegistry()
+}
+
+const postInvalidation = (path: string, label: string): void => {
+  postMessage({ type: "invalidation", path, label })
+}
+
+const handleRegister = (msg: Extract<FileWatcherWorkerMessage, { type: "register" }>): void => {
+  const activeRegistry = getOrCreateRegistry()
+  const { path, label, options } = msg
+
+  activeRegistry.register(path, label, () => postInvalidation(path, label), options)
+  postStatus()
+}
+
+const handleStart = async (): Promise<void> => {
+  const activeRegistry = getOrCreateRegistry()
+
+  await activeRegistry.start()
+  postStatus()
+  postMessage({ type: "started" })
+}
+
+const handleMessage = async (msg: FileWatcherWorkerMessage): Promise<void> => {
+  try {
+    switch (msg.type) {
+      case "init": {
+        createRegistry()
+        break
+      }
+      case "register": {
+        handleRegister(msg)
+        break
+      }
+      case "start": {
+        await handleStart()
+        break
+      }
+      case "unregisterByLabelSuffix": {
+        registry?.unregisterByLabelSuffix(msg.suffix)
+        break
+      }
+      case "close": {
+        registry?.close()
+        break
+      }
+      case "status": {
+        postStatus()
+        break
+      }
+    }
+  } catch (err) {
+    postError(err)
+  }
+}
+
+port.on("message", (msg: FileWatcherWorkerMessage): void => void handleMessage(msg))
