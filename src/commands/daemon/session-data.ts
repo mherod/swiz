@@ -16,8 +16,10 @@ import {
   type CapturedToolCall,
   extractMessageText,
   extractToolCalls,
+  mergeCapturedToolCalls,
   mergeToolStats,
   type ProjectTaskPreview,
+  readPersistedSessionToolCalls,
   type SessionMessage,
   type SessionTaskPreview,
   type SessionTaskSummary,
@@ -428,7 +430,12 @@ export async function getSessionData(
 
   const messages = cached.messages.slice(-limit)
   const hasToolCalls = messages.some((message) => (message.toolCalls?.length ?? 0) > 0)
-  const captured = (sessionToolCalls?.get(session.id) ?? []).map((entry) => ({
+  const persistedToolCalls = await readPersistedSessionToolCalls(cwd, session.id)
+  const effectiveToolCalls = mergeCapturedToolCalls(
+    persistedToolCalls,
+    sessionToolCalls?.get(session.id) ?? []
+  )
+  const captured = effectiveToolCalls.map((entry) => ({
     name: entry.name,
     detail: entry.detail,
   }))
@@ -436,10 +443,7 @@ export async function getSessionData(
     return { messages, toolStats: cached.toolStats }
   }
 
-  const supplemented = supplementMessagesWithCapturedToolCalls(
-    messages,
-    sessionToolCalls?.get(session.id) ?? []
-  )
+  const supplemented = supplementMessagesWithCapturedToolCalls(messages, effectiveToolCalls)
   return {
     messages: supplemented.slice(-limit),
     toolStats: mergeToolStats(cached.toolStats, captured),

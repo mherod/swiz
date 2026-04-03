@@ -70,4 +70,16 @@ describe("JSONL locking", () => {
     // Cleanup
     await rm(testDir, { recursive: true, force: true })
   })
+
+  it("creates parent directories for atomic append targets", async () => {
+    const testDir = join(TMP_ROOT, "swiz-jsonl-parent-dir-test")
+    const filePath = join(testDir, "nested", "dir", "entries.jsonl")
+
+    await appendJsonlEntry(filePath, { id: 1 })
+
+    const entries = await readJsonlFileUntyped(filePath)
+    expect(entries).toEqual([{ id: 1 }])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
 })

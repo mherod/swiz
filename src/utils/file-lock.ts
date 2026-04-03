@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto"
+import { open } from "node:fs/promises"
 import { join } from "node:path"
 import { TMP_ROOT } from "../temp-paths.ts"
 
@@ -54,14 +55,16 @@ export async function acquireLock(lockFile: string, timeoutMs = 10_000): Promise
   await clearStaleLock(lockFile)
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
-    if (!(await Bun.file(lockFile).exists())) {
+    try {
+      const handle = await open(lockFile, "wx")
       try {
-        await Bun.write(lockFile, String(process.pid))
-        const owner = (await Bun.file(lockFile).text()).trim()
-        if (owner === String(process.pid)) return true
-      } catch {
-        // Another process grabbed it — retry
+        await handle.writeFile(String(process.pid))
+      } finally {
+        await handle.close()
       }
+      return true
+    } catch {
+      // Another process grabbed it — retry
     }
     await clearStaleLock(lockFile)
     await Bun.sleep(200)

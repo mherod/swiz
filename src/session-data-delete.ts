@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { uniq } from "lodash-es"
+import { getHomeDir } from "./home.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
 import { createDefaultTaskStore } from "./task-roots.ts"
 import { findAllProviderSessions, type Session } from "./transcript-utils.ts"
 
@@ -9,6 +11,7 @@ export interface SessionDeletionTargets {
   sessionIds: string[]
   transcriptPaths: string[]
   taskDirPaths: string[]
+  daemonCapturePaths: string[]
 }
 
 export interface SessionDeletionResult {
@@ -35,8 +38,11 @@ export async function resolveSessionDeletionTargets(
   const transcriptPaths = uniq(matchedSessions.map((session) => session.path))
   const sessionIds = uniq(matchedSessions.map((session) => session.id))
   const { tasksDir } = createDefaultTaskStore()
+  const projectKey = projectKeyFromCwd(cwd)
+  const homeDir = getHomeDir()
 
   const taskDirPaths: string[] = []
+  const daemonCapturePaths: string[] = []
   for (const id of sessionIds) {
     const taskDirPath = join(tasksDir, id)
     try {
@@ -45,6 +51,21 @@ export async function resolveSessionDeletionTargets(
     } catch {
       // no task directory for this session
     }
+
+    const capturePath = join(
+      homeDir,
+      ".swiz",
+      "daemon",
+      "session-tool-calls",
+      projectKey,
+      `${encodeURIComponent(id)}.jsonl`
+    )
+    try {
+      const info = await stat(capturePath)
+      if (info.isFile()) daemonCapturePaths.push(capturePath)
+    } catch {
+      // no persisted capture log for this session
+    }
   }
 
   return {
@@ -52,6 +73,7 @@ export async function resolveSessionDeletionTargets(
     sessionIds,
     transcriptPaths,
     taskDirPaths,
+    daemonCapturePaths,
   }
 }
 
@@ -68,6 +90,11 @@ export async function deleteSessionData(
   }
 
   for (const path of targets.taskDirPaths) {
+    if (await trashPath(path)) deletedCount++
+    else failedPaths.push(path)
+  }
+
+  for (const path of targets.daemonCapturePaths) {
     if (await trashPath(path)) deletedCount++
     else failedPaths.push(path)
   }

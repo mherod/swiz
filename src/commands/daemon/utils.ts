@@ -1,6 +1,8 @@
 import { join } from "node:path"
+import { z } from "zod"
 import { getHomeDir } from "../../home.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import { appendJsonlEntry, readJsonlFileTail } from "../../utils/jsonl.ts"
 import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
 export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
@@ -188,7 +190,12 @@ export interface ProjectTaskPreview extends SessionTaskPreview {
   sessionId: string
 }
 
-const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
+export const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
+const capturedToolCallSchema = z.object({
+  name: z.string(),
+  detail: z.string(),
+  timestamp: z.string(),
+})
 
 function formatToolInputForDisplay(input: Record<string, any> | undefined): string {
   return summarizeToolInput(input)
@@ -242,15 +249,78 @@ export function captureSessionToolCall(
   nowMs: number
 ): void {
   const list = sessionToolCalls.get(sessionId) ?? []
-  list.push({
-    name: toolName,
-    detail: summarizeToolInput(toolInput),
-    timestamp: new Date(nowMs).toISOString(),
-  })
+  list.push(buildCapturedToolCall(toolName, toolInput, nowMs))
   if (list.length > MAX_CAPTURED_TOOL_CALLS_PER_SESSION) {
     list.splice(0, list.length - MAX_CAPTURED_TOOL_CALLS_PER_SESSION)
   }
   sessionToolCalls.set(sessionId, list)
+}
+
+function buildCapturedToolCall(
+  toolName: string,
+  toolInput: Record<string, any> | undefined,
+  nowMs: number
+): CapturedToolCall {
+  return {
+    name: toolName,
+    detail: summarizeToolInput(toolInput),
+    timestamp: new Date(nowMs).toISOString(),
+  }
+}
+
+export function capturedSessionToolCallLogPath(
+  cwd: string,
+  sessionId: string,
+  homeDir = getHomeDir()
+): string {
+  return join(
+    homeDir,
+    ".swiz",
+    "daemon",
+    "session-tool-calls",
+    projectKeyFromCwd(cwd),
+    `${encodeURIComponent(sessionId)}.jsonl`
+  )
+}
+
+export async function persistSessionToolCall(
+  cwd: string,
+  sessionId: string,
+  toolName: string,
+  toolInput: Record<string, any> | undefined,
+  nowMs: number,
+  homeDir = getHomeDir()
+): Promise<void> {
+  const path = capturedSessionToolCallLogPath(cwd, sessionId, homeDir)
+  await appendJsonlEntry(path, buildCapturedToolCall(toolName, toolInput, nowMs))
+}
+
+export async function readPersistedSessionToolCalls(
+  cwd: string,
+  sessionId: string,
+  limit = MAX_CAPTURED_TOOL_CALLS_PER_SESSION,
+  homeDir = getHomeDir()
+): Promise<CapturedToolCall[]> {
+  const path = capturedSessionToolCallLogPath(cwd, sessionId, homeDir)
+  return readJsonlFileTail(path, capturedToolCallSchema, limit)
+}
+
+export function mergeCapturedToolCalls(...sources: CapturedToolCall[][]): CapturedToolCall[] {
+  const merged: CapturedToolCall[] = []
+  const seen = new Set<string>()
+
+  for (const source of sources) {
+    for (const entry of source) {
+      const key = `${entry.timestamp}\x00${entry.name}\x00${entry.detail}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(entry)
+    }
+  }
+
+  return merged.length > MAX_CAPTURED_TOOL_CALLS_PER_SESSION
+    ? merged.slice(-MAX_CAPTURED_TOOL_CALLS_PER_SESSION)
+    : merged
 }
 
 export function seedSessionToolUsage(

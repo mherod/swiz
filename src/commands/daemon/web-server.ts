@@ -68,6 +68,7 @@ import {
   type CapturedToolCall,
   captureSessionToolCall,
   captureSessionToolUsage,
+  persistSessionToolCall,
   type SessionToolUsageState,
   seedSessionToolUsage,
   stripAnsi,
@@ -449,6 +450,23 @@ async function updateParsedPayloadMetrics(
         parsed.toolInput,
         nowMs
       )
+      if (parsed.cwd) {
+        try {
+          await persistSessionToolCall(
+            parsed.cwd,
+            parsed.sessionId,
+            parsed.toolName,
+            parsed.toolInput,
+            nowMs
+          )
+        } catch (error) {
+          debugLog(
+            `[daemon] failed to persist session tool call for ${parsed.sessionId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        }
+      }
       captureSessionToolUsage(
         ctx.sessionToolUsage,
         parsed.sessionId,

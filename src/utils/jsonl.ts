@@ -5,13 +5,15 @@
  * transcript readers, hook-log readers, and task audit-log scanners.
  */
 
-import { appendFile } from "node:fs/promises"
+import { mkdir, rename, rm } from "node:fs/promises"
+import { dirname } from "node:path"
 import type { ZodType } from "zod"
 import { getLockPathForFile, withFileLock } from "./file-lock.ts"
 
 const NEWLINE_BYTE = 0x0a
 
 type JsonlBuffer = Uint8Array<ArrayBufferLike>
+const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
 
 // ── Streaming / parsed-object reading ────────────────────────────────────────
 
@@ -292,7 +294,7 @@ export async function writeJsonlFile<T>(path: string, entries: T[]): Promise<voi
   const lockFile = getLockPathForFile(path)
   await withFileLock(lockFile, async () => {
     const text = entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : "")
-    await Bun.write(path, text)
+    await writeJsonlTextAtomically(path, text)
   })
 }
 
@@ -302,7 +304,11 @@ export async function writeJsonlFile<T>(path: string, entries: T[]): Promise<voi
 export async function appendJsonlEntry<T>(path: string, entry: T): Promise<void> {
   const lockFile = getLockPathForFile(path)
   await withFileLock(lockFile, async () => {
-    await appendFile(path, `${JSON.stringify(entry)}\n`)
+    const file = Bun.file(path)
+    const existingText = (await file.exists()) ? await file.text() : ""
+    const prefix =
+      existingText.length > 0 && !existingText.endsWith("\n") ? `${existingText}\n` : existingText
+    await writeJsonlTextAtomically(path, `${prefix}${JSON.stringify(entry)}\n`)
   })
 }
 
@@ -335,5 +341,25 @@ export async function readJsonlFileTail<T>(
     return parseJsonlTail(await file.text(), schema, n)
   } catch {
     return []
+  }
+}
+
+function buildJsonlTempPath(path: string): string {
+  return `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}${JSONL_TMP_SUFFIX}`
+}
+
+async function writeJsonlTextAtomically(path: string, text: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  const tempPath = buildJsonlTempPath(path)
+  await Bun.write(tempPath, text)
+  try {
+    await rename(tempPath, path)
+  } catch (error) {
+    try {
+      await rm(tempPath, { force: true })
+    } catch {
+      // Best-effort cleanup only.
+    }
+    throw error
   }
 }

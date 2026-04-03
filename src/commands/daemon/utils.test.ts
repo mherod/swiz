@@ -1,20 +1,33 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import type { Task } from "../../tasks/task-repository.ts"
+import { TMP_ROOT } from "../../temp-paths.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import {
   buildSessionTasksView,
   type CapturedToolCall,
+  capturedSessionToolCallLogPath,
   captureSessionToolCall,
   captureSessionToolUsage,
   extractMessageText,
   extractToolCalls,
+  mergeCapturedToolCalls,
   mergeToolStats,
+  persistSessionToolCall,
+  readPersistedSessionToolCalls,
   type SessionToolUsageState,
   seedSessionToolUsage,
   stripAnsi,
   supplementMessagesWithCapturedToolCalls,
   transcriptWatchPathsForProject,
 } from "./utils.ts"
+
+const TEST_HOME_ROOT = join(TMP_ROOT, "swiz-daemon-utils-test")
+
+afterEach(async () => {
+  await rm(TEST_HOME_ROOT, { recursive: true, force: true })
+})
 
 // Task helper that respects explicit null/undefined values
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -140,6 +153,50 @@ describe("captureSessionToolCall", () => {
     const calls = map.get("sess1")!
     // First entry should be from evicted prefix (i=10)
     expect(calls).toHaveLength(400)
+  })
+})
+
+describe("captured session tool call persistence", () => {
+  test("builds a project-scoped log path", () => {
+    const path = capturedSessionToolCallLogPath(
+      "/tmp/my/project",
+      "session:1",
+      join(TEST_HOME_ROOT, "home-a")
+    )
+
+    expect(path).toContain(join(".swiz", "daemon", "session-tool-calls"))
+    expect(path).toContain("session-tool-calls/-tmp-my-project/")
+    expect(path.endsWith("session%3A1.jsonl")).toBe(true)
+  })
+
+  test("persists and reads captured tool calls", async () => {
+    const homeDir = join(TEST_HOME_ROOT, "home-b")
+    const cwd = "/tmp/my/project"
+    const now = Date.now()
+
+    await persistSessionToolCall(cwd, "sess:1", "Read", { path: "/tmp/file.txt" }, now, homeDir)
+    await persistSessionToolCall(cwd, "sess:1", "Bash", { command: "ls -la" }, now + 1, homeDir)
+
+    const entries = await readPersistedSessionToolCalls(cwd, "sess:1", 10, homeDir)
+    expect(entries).toEqual([
+      { name: "Read", detail: "/tmp/file.txt", timestamp: new Date(now).toISOString() },
+      { name: "Bash", detail: "ls -la", timestamp: new Date(now + 1).toISOString() },
+    ])
+  })
+})
+
+describe("mergeCapturedToolCalls", () => {
+  test("deduplicates persisted and in-memory entries while preserving order", () => {
+    const shared = { name: "Read", detail: "/tmp/file", timestamp: "2026-04-03T10:00:00.000Z" }
+    const result = mergeCapturedToolCalls(
+      [shared],
+      [shared, { name: "Bash", detail: "ls", timestamp: "2026-04-03T10:00:01.000Z" }]
+    )
+
+    expect(result).toEqual([
+      shared,
+      { name: "Bash", detail: "ls", timestamp: "2026-04-03T10:00:01.000Z" },
+    ])
   })
 })
 
