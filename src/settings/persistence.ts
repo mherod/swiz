@@ -33,6 +33,19 @@ const LEGACY_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
   "time",
 ]
 
+const PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
+  "repo",
+  "git",
+  "pr",
+  "model",
+  "ctx",
+  "state",
+  "backlog",
+  "mode",
+  "flags",
+  "time",
+]
+
 /**
  * DEFAULT_SETTINGS is derived from SETTINGS_REGISTRY defaults.
  * Non-registry fields (statusLineSegments, sessions) are added here.
@@ -96,13 +109,16 @@ function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
   if (!valid) return DEFAULT_SETTINGS.statusLineSegments
 
   const segments = value as StatusLineSegment[]
-  if (segments.includes("state")) return segments
-
   const isLegacyDefault =
     segments.length === LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.length &&
     LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
 
-  return isLegacyDefault ? [...ALL_STATUS_LINE_SEGMENTS] : segments
+  const isPreMetricsDefault =
+    segments.length === PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
+    PRE_METRICS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
+
+  if (isLegacyDefault || isPreMetricsDefault) return [...ALL_STATUS_LINE_SEGMENTS]
+  return segments
 }
 
 const VALID_AMBITION_MODES = new Set(["standard", "aggressive", "creative", "reflective"])

@@ -1084,7 +1084,7 @@ describe("collaborationMode settings", () => {
     expect(settings.collaborationMode).toBe("auto")
   })
 
-  test("upgrades legacy default statusLineSegments to include state", async () => {
+  test("upgrades legacy default statusLineSegments to include current defaults", async () => {
     const home = await createTempHome()
     const configDir = join(home, ".swiz")
     await mkdir(configDir, { recursive: true })
@@ -1097,6 +1097,32 @@ describe("collaborationMode settings", () => {
           "pr",
           "model",
           "ctx",
+          "backlog",
+          "mode",
+          "flags",
+          "time",
+        ],
+      })
+    )
+
+    const settings = await readSwizSettings({ home })
+    expect(settings.statusLineSegments).toEqual([...ALL_STATUS_LINE_SEGMENTS])
+  })
+
+  test("upgrades pre-metrics default statusLineSegments to include metrics", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({
+        statusLineSegments: [
+          "repo",
+          "git",
+          "pr",
+          "model",
+          "ctx",
+          "state",
           "backlog",
           "mode",
           "flags",

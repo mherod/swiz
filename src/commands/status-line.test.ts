@@ -318,6 +318,38 @@ describe("renderStatusLineFromSnapshot", () => {
     const line1 = out.split("\n")[0] ?? ""
     expect(line1).not.toMatch(/\bci\b/i)
   })
+
+  it("renders daemon metrics when the segment is enabled and project metrics exist", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnapshot, activeSegments: ["metrics"] },
+      daemonMetrics: { uptimeHuman: "4m 12s", totalDispatches: 18 },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+
+    expect(out).toContain("metrics")
+    expect(out).toContain("4m 12s")
+    expect(out).toContain("18")
+    expect(out).toContain("dispatches")
+  })
+
+  it("suppresses daemon metrics when no project dispatches have been recorded", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnapshot, activeSegments: ["metrics"] },
+      daemonMetrics: { uptimeHuman: "0s", totalDispatches: 0 },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+
+    expect(out).not.toContain("metrics")
+    expect(out).not.toContain("dispatches")
+  })
 })
 
 describe("summarizeGitHubCiRuns", () => {

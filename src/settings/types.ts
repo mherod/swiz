@@ -163,6 +163,7 @@ export const ALL_STATUS_LINE_SEGMENTS = [
   "ctx",
   "state",
   "backlog",
+  "metrics",
   "mode",
   "flags",
   "time",

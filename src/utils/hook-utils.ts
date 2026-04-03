@@ -290,7 +290,8 @@ export function filePathGuardHook(
   }
 }
 
-function denyPostToolUseObj(reason: string): HookOutput {
+/** PostToolUse block payload without stdout/exit — use from `SwizHook.run()`. */
+export function buildDenyPostToolUseOutput(reason: string): HookOutput {
   return hookOutputSchema.parse({
     decision: "block",
     reason,
@@ -298,11 +299,6 @@ function denyPostToolUseObj(reason: string): HookOutput {
     systemMessage: extractHookSystemMessagePreview(reason, PREVIEW_LEN_BLOCK),
     hookSpecificOutput: hsoPostToolUseDenyBlock(reason),
   })
-}
-
-/** PostToolUse block payload without stdout/exit — use from `SwizHook.run()`. */
-export function buildDenyPostToolUseOutput(reason: string): HookOutput {
-  return denyPostToolUseObj(reason)
 }
 
 export function exitWithHookObject(obj: HookOutput): never {
