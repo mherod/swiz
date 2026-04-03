@@ -7,7 +7,7 @@
  * The log is append-only and capped at ~10k lines to prevent unbounded growth.
  */
 
-import { mkdir } from "node:fs/promises"
+import { appendFile, mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
@@ -52,9 +52,10 @@ export async function appendHookLogs(entries: HookLogEntry[]): Promise<void> {
   try {
     await mkdir(dirname(logPath), { recursive: true })
     const newLines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
-    const file = Bun.file(logPath)
-    const existing = (await file.exists()) ? await file.text() : ""
-    await Bun.write(logPath, existing + newLines)
+    // Append-only: avoid reading the entire file into memory per dispatch.
+    // The old pattern (read all + concat + rewrite) created ~4MB transient
+    // allocations for a 10K-line log file on every dispatch.
+    await appendFile(logPath, newLines)
   } catch {
     // Never block on log write failure
   }

@@ -9,6 +9,7 @@ import {
 } from "../utils/hook-specific-output.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import {
+  buildSpawnContext,
   extractAllowReason,
   extractContext,
   flatSyncHooks,
@@ -128,18 +129,22 @@ async function runStrategyPipeline(
   const controller = new AbortController()
   const { signal } = controller
 
+  // Parse spawn context ONCE for all hooks in this dispatch — avoids
+  // O(hooks) JSON.parse + env-merge allocations in runHook/runEntry.
+  const spawnCtx = buildSpawnContext(enrichedPayloadStr)
+
   const onDispatchAbort = () => controller.abort()
   ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
 
   const [results] = await Promise.all([
     Promise.all(
       entries.map(async (e) => {
-        const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
+        const result = await runEntry(e, enrichedPayloadStr, cwd, signal, spawnCtx)
         opts.onResult?.(result, () => controller.abort())
         return result
       })
     ),
-    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
+    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal, spawnCtx),
   ])
 
   ctx.signal?.removeEventListener("abort", onDispatchAbort)

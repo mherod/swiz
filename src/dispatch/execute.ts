@@ -204,14 +204,16 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     disableTranscriptSummaryFallback,
   } = opts
 
-  let enriched = payload
+  // payload is a per-dispatch working copy — mutate directly instead of
+  // deep-cloning via merge({}, enriched, ...) which copies the entire object
+  // graph including the large _env field on every call.
   const transcriptPath = payload.transcript_path as string | undefined
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
 
   if (currentSessionToolUsageProvider && sessionId) {
     const usage = await currentSessionToolUsageProvider(sessionId, transcriptPath)
     if (usage) {
-      enriched = merge({}, enriched, { _currentSessionToolUsage: usage }) as Record<string, any>
+      payload._currentSessionToolUsage = usage
       log(
         `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
       )
@@ -224,11 +226,11 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     disableTranscriptSummaryFallback
   )
   if (summary) {
-    enriched = merge({}, enriched, { _transcriptSummary: summary }) as Record<string, any>
+    payload._transcriptSummary = summary
     log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   }
 
-  return JSON.stringify(assertEnrichedDispatchPayloadRecord(enriched))
+  return JSON.stringify(assertEnrichedDispatchPayloadRecord(payload))
 }
 
 async function resolveTranscriptSummary(

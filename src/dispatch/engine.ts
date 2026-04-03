@@ -318,18 +318,43 @@ function buildAbortedResult(
   }
 }
 
-/** Build the env object for a hook subprocess by merging caller env from
- *  the enriched payload with the current process env. */
-function buildHookEnv(payloadStr: string): Record<string, string | undefined> | undefined {
-  const callerEnv = extractCallerEnv(payloadStr)
-  return callerEnv ? merge({}, process.env, callerEnv) : undefined
+/**
+ * Pre-parsed spawn context extracted once per dispatch from the enriched payload.
+ * Threading this through avoids O(hooks) JSON.parse + env-merge allocations.
+ */
+export interface PreParsedSpawnContext {
+  /** Working directory for hook subprocesses (from payload `cwd`). */
+  spawnCwd: string | undefined
+  /** Merged caller + process env for hook subprocesses (null when `_env` absent). */
+  spawnEnv: Record<string, string | undefined> | undefined
+}
+
+/** Parse spawn context from the enriched payload string ONCE per dispatch. */
+export function buildSpawnContext(payloadStr: string): PreParsedSpawnContext {
+  let spawnCwd: string | undefined
+  let spawnEnv: Record<string, string | undefined> | undefined
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, any>
+    const rawCwd = parsed.cwd
+    if (typeof rawCwd === "string" && rawCwd.trim()) {
+      spawnCwd = rawCwd.trim()
+    }
+    const env = parsed._env
+    if (env && typeof env === "object" && !Array.isArray(env)) {
+      spawnEnv = merge({}, process.env, env as Record<string, string>)
+    }
+  } catch {
+    // Malformed payload — use defaults
+  }
+  return { spawnCwd, spawnEnv }
 }
 
 export async function runHook(
   file: string,
   payloadStr: string,
   timeoutSec?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  spawnCtx?: PreParsedSpawnContext
 ): Promise<HookRunResult> {
   // If already aborted before we even spawn, return immediately.
   if (signal?.aborted) {
@@ -341,14 +366,22 @@ export async function runHook(
   const startTime = Date.now()
   const configuredTimeoutSec = getConfiguredTimeoutSec(timeoutSec)
 
-  const spawnCwd = extractPayloadCwd(payloadStr)
+  // Use pre-parsed spawn context when available; fall back to per-hook parsing for
+  // backward-compatible callers (replay, tests) that don't pass spawnCtx.
+  const spawnCwd = spawnCtx ? spawnCtx.spawnCwd : extractPayloadCwd(payloadStr)
+  const spawnEnv = spawnCtx
+    ? spawnCtx.spawnEnv
+    : (() => {
+        const callerEnv = extractCallerEnv(payloadStr)
+        return callerEnv ? merge({}, process.env, callerEnv) : undefined
+      })()
 
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     cwd: spawnCwd,
-    env: buildHookEnv(payloadStr),
+    env: spawnEnv,
   })
 
   await proc.stdin.write(payloadStr)
@@ -695,7 +728,8 @@ export async function runEntry(
   entry: HookEntry,
   payloadStr: string,
   cwd: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  spawnCtx?: PreParsedSpawnContext
 ): Promise<{
   execution: HookExecution
   parsed: Record<string, any> | null
@@ -721,7 +755,7 @@ export async function runEntry(
     return { execution, parsed }
   }
 
-  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal)
+  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal, spawnCtx)
   finalizeExecution(execution, matcher, hook, cwd, parsed)
   return { execution, parsed }
 }
@@ -739,9 +773,10 @@ function scheduleAsyncHookEntry(
     daemonContext: boolean | undefined
     signal: AbortSignal | undefined
     promises: Promise<void>[]
+    spawnCtx?: PreParsedSpawnContext
   }
 ): void {
-  const { pool, daemonContext, signal, promises } = ctx
+  const { pool, daemonContext, signal, promises, spawnCtx } = ctx
   const id = hookIdentifier(hook)
 
   if (isInlineHookDef(hook)) {
@@ -768,7 +803,7 @@ function scheduleAsyncHookEntry(
     promises.push(p)
   } else {
     log(`   → ${id} [async, fire-and-forget]`)
-    runHook(hook.file, payloadStr, hook.timeout, signal)
+    runHook(hook.file, payloadStr, hook.timeout, signal, spawnCtx)
       .then(() => {})
       .catch(() => {})
   }
@@ -778,7 +813,8 @@ export async function launchAsyncHooks(
   groups: HookGroup[],
   payloadStr: string,
   daemonContext?: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  spawnCtx?: PreParsedSpawnContext
 ): Promise<void> {
   // Flatten all async hooks across groups for concurrent condition evaluation.
   type AsyncEntry = { hook: HookDef; id: string }
@@ -817,6 +853,7 @@ export async function launchAsyncHooks(
       daemonContext,
       signal,
       promises,
+      spawnCtx,
     })
   }
   if (daemonContext && promises.length > 0) {

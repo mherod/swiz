@@ -45,6 +45,7 @@ export {
   parseValidatedAgentDispatchWireJson,
 } from "./dispatch-zod-surfaces.ts"
 export {
+  buildSpawnContext,
   classifyHookOutput,
   DEFAULT_TIMEOUT,
   extractAllowReason,
@@ -59,6 +60,7 @@ export {
   launchAsyncHooks,
   log,
   logHeader,
+  type PreParsedSpawnContext,
   runHook,
   type SkipReason,
   toolMatchesToken,
