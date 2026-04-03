@@ -327,6 +327,16 @@ describe("agents.ts", () => {
       expect(translateEvent("stop", codex)).toBe("Stop")
     })
 
+    it("translates preToolUse for Codex to shipped PreToolUse", () => {
+      const codex = getAgent("codex")!
+      expect(translateEvent("preToolUse", codex)).toBe("PreToolUse")
+    })
+
+    it("translates postToolUse for Codex to shipped PostToolUse", () => {
+      const codex = getAgent("codex")!
+      expect(translateEvent("postToolUse", codex)).toBe("PostToolUse")
+    })
+
     it("translates userPromptSubmit for Codex to shipped UserPromptSubmit", () => {
       const codex = getAgent("codex")!
       expect(translateEvent("userPromptSubmit", codex)).toBe("UserPromptSubmit")
@@ -449,9 +459,20 @@ describe("agents.ts", () => {
       })
     })
 
-    it("codex maps preToolUse to internal BeforeToolUse (not user hooks.json key)", () => {
+    it("codex maps preToolUse to public PreToolUse", () => {
       const codex = getAgent("codex")!
-      expect(codex.eventMap.preToolUse).toBe("BeforeToolUse")
+      expect(codex.eventMap.preToolUse).toBe("PreToolUse")
+    })
+
+    it("codex marks non-public hook events unsupported", () => {
+      const codex = getAgent("codex")!
+      expect(codex.unsupportedEvents).toEqual([
+        "sessionEnd",
+        "preCompact",
+        "notification",
+        "subagentStart",
+        "subagentStop",
+      ])
     })
 
     it("gemini marks subagent lifecycle events unsupported", () => {

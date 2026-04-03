@@ -11,29 +11,38 @@ import {
 import { getAgent, translateEvent } from "./agents.ts"
 
 /**
- * Contract for Codex CLI hooks.json (v0.116.0+): user-facing keys are
- * SessionStart, Stop, UserPromptSubmit (openai/codex#13276). Swiz must not
- * regress to internal-style names (e.g. AfterAgent, BeforeAgent) for those
- * canonical events — see swiz#385.
+ * Contract for Codex CLI hooks.json: the public hook surface is
+ * SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, and Stop.
+ * Swiz must install only those public keys and must not regress to internal
+ * engine identifiers.
  */
 describe("Codex eventMap contract (hooks.json)", () => {
   const codex = getAgent("codex")!
 
-  it("maps canonical stop/sessionStart/userPromptSubmit to shipped JSON keys", () => {
+  it("maps canonical public events to shipped JSON keys", () => {
     expect(codex.eventMap.stop).toBe("Stop")
+    expect(codex.eventMap.preToolUse).toBe("PreToolUse")
+    expect(codex.eventMap.postToolUse).toBe("PostToolUse")
     expect(codex.eventMap.sessionStart).toBe("SessionStart")
     expect(codex.eventMap.userPromptSubmit).toBe("UserPromptSubmit")
   })
 
   it("translateEvent matches eventMap for shipped keys", () => {
     expect(translateEvent("stop", codex)).toBe("Stop")
+    expect(translateEvent("preToolUse", codex)).toBe("PreToolUse")
+    expect(translateEvent("postToolUse", codex)).toBe("PostToolUse")
     expect(translateEvent("sessionStart", codex)).toBe("SessionStart")
     expect(translateEvent("userPromptSubmit", codex)).toBe("UserPromptSubmit")
   })
 
-  it("keeps tool-adjacent mappings on engine identifiers until exposed in user schema", () => {
-    expect(codex.eventMap.preToolUse).toBe("BeforeToolUse")
-    expect(codex.eventMap.postToolUse).toBe("AfterToolUse")
+  it("marks non-public events unsupported so install skips them", () => {
+    expect(codex.unsupportedEvents).toEqual([
+      "sessionEnd",
+      "preCompact",
+      "notification",
+      "subagentStart",
+      "subagentStop",
+    ])
   })
 
   it("installs hooks now that Codex ships a stable hooks.json format", () => {

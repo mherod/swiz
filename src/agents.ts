@@ -39,12 +39,10 @@ export interface AgentDef {
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
-// Codex hooks engine (v0.116.0+) ships user-facing hook events in hooks.json:
-//   SessionStart, Stop, UserPromptSubmit (see openai/codex#13276).
-// Rust-side identifiers (BeforeToolUse, AfterToolUse, …) still exist internally
-// but are not in the user-facing hooks.json schema yet. eventMap values below
-// match shipped names where applicable and keep internal names for other
-// canonical events until they appear in the user schema.
+// Codex's public hooks.json schema currently exposes exactly:
+//   SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, Stop.
+// Swiz should only install against that public surface, even if Codex has
+// additional internal engine identifiers behind the scenes.
 
 export const AGENTS: AgentDef[] = [
   {
@@ -174,15 +172,18 @@ export const AGENTS: AgentDef[] = [
     },
     eventMap: {
       stop: "Stop",
+      preToolUse: "PreToolUse",
+      postToolUse: "PostToolUse",
       sessionStart: "SessionStart",
       userPromptSubmit: "UserPromptSubmit",
-      // Not in user hooks.json schema as of v0.116+ — internal / future wiring
-      postToolUse: "AfterToolUse",
-      preToolUse: "BeforeToolUse",
-      sessionEnd: "SessionEnd",
-      preCompact: "PreCompress",
     },
-    unsupportedEvents: ["subagentStart", "subagentStop", "notification"],
+    unsupportedEvents: [
+      "sessionEnd",
+      "preCompact",
+      "notification",
+      "subagentStart",
+      "subagentStop",
+    ],
   },
   {
     id: "junie",
