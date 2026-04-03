@@ -49,6 +49,36 @@ function buildCountSummary(counts: {
   return parts.join(" ")
 }
 
+/**
+ * Apply the just-executed tool mutation on top of disk-read tasks.
+ * Claude's native TaskCreate/TaskUpdate writes to disk asynchronously —
+ * the PostToolUse hook may fire before the write lands. Overlaying the
+ * mutation from tool_input ensures accurate counts.
+ */
+function applyMutationOverlay(
+  tasks: Array<{ id: string; status: string }>,
+  toolName: string,
+  toolInput: Record<string, unknown>
+): Array<{ id: string; status: string }> {
+  if (toolName === "TaskUpdate" || toolName === "TodoWrite") {
+    const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
+    const newStatus = String(toolInput.status ?? "")
+    if (taskId && newStatus) {
+      const idx = tasks.findIndex((t) => t.id === taskId)
+      if (idx >= 0) {
+        tasks[idx] = { ...tasks[idx]!, status: newStatus }
+      }
+    }
+  } else if (toolName === "TaskCreate") {
+    // TaskCreate adds a new pending task — if disk read missed it, add a placeholder
+    const subject = String(toolInput.subject ?? "")
+    if (subject && !tasks.some((t) => t.status === "pending")) {
+      tasks.push({ id: "new", status: "pending" })
+    }
+  }
+  return tasks
+}
+
 export async function evaluatePosttooluseTaskCountContext(input: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
   const sessionId = resolveSafeSessionId(parsed.session_id)
@@ -57,7 +87,17 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   const tasksDir = getSessionTasksDir(sessionId)
   if (!tasksDir) return {}
 
-  const tasks = await readSessionTasksFresh(sessionId)
+  const diskTasks = await readSessionTasksFresh(sessionId)
+  if (diskTasks.length === 0 && parsed.tool_name !== "TaskCreate") return {}
+
+  const toolInput = (parsed.tool_input ?? {}) as Record<string, unknown>
+  const tasks = applyMutationOverlay(
+    diskTasks.map((t) => ({ id: t.id, status: t.status })),
+    parsed.tool_name ?? "",
+    toolInput
+  )
+
+  // For TaskCreate where disk had zero tasks, include the new one
   if (tasks.length === 0) return {}
 
   let pending = 0
