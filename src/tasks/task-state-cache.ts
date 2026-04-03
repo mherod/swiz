@@ -20,6 +20,7 @@ import { type FSWatcher, watch } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { clearAllEventState, pruneSession } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
@@ -202,7 +203,7 @@ export class TaskStateCache {
     }
   }
 
-  /** Stop watching a session and remove its cached state. */
+  /** Stop watching a session and remove its cached state + event state. */
   unwatchSession(sessionId: string): void {
     const watcher = this.watchers.get(sessionId)
     if (watcher) {
@@ -212,6 +213,7 @@ export class TaskStateCache {
     this.entries.delete(sessionId)
     this.tasksDirs.delete(sessionId)
     this.accessOrder = this.accessOrder.filter((id) => id !== sessionId)
+    pruneSession(sessionId)
   }
 
   /** Mark a session's cache entry as stale (fs.watch callback). */
@@ -383,7 +385,7 @@ export class TaskStateCache {
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
-  /** Close all watchers and clear the cache. */
+  /** Close all watchers and clear both the cache and in-memory event state. */
   close(): void {
     for (const watcher of this.watchers.values()) {
       watcher.close()
@@ -392,6 +394,7 @@ export class TaskStateCache {
     this.entries.clear()
     this.tasksDirs.clear()
     this.accessOrder = []
+    clearAllEventState()
   }
 
   /** Invalidate a single session entry (force full reload on next read). */
