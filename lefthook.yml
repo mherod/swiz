@@ -5,12 +5,6 @@ skip:
 
 pre-commit:
   commands:
-    disk-space:
-      priority: 1
-      run: bun scripts/check-disk-space.ts
-      skip:
-        - merge
-        - rebase
     # lint-staged fixes staged files; `bun run lint` verifies the whole tree (same as CI).
     lint:
       glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
@@ -43,12 +37,6 @@ pre-commit:
 
 pre-push:
   commands:
-    disk-space:
-      priority: 1
-      run: bun scripts/check-disk-space.ts
-      skip:
-        - merge
-        - rebase
     test:
       glob: "*.{ts,tsx,js,jsx,json}"
       run: |
