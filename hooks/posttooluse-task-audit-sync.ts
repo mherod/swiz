@@ -18,6 +18,7 @@ import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
+import { applyTaskCreateEvent, applyTaskUpdateEvent } from "../src/tasks/task-event-state.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
@@ -128,11 +129,59 @@ async function dispatchTaskAudit(resolved: ResolvedTaskInput): Promise<void> {
   }
 }
 
+async function applyCreateEventState(
+  sessionId: string,
+  toolInput: Record<string, any>
+): Promise<void> {
+  const subject = String(toolInput.subject ?? "")
+  if (!subject) return
+  const tasksDir = getSessionTasksDir(sessionId)
+  if (!tasksDir) return
+  const taskId = await findLatestTaskId(tasksDir)
+  if (taskId) {
+    applyTaskCreateEvent(sessionId, taskId, subject)
+  }
+}
+
+function applyUpdateEventState(sessionId: string, toolInput: Record<string, any>): void {
+  const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
+  if (!taskId) return
+  applyTaskUpdateEvent(sessionId, taskId, {
+    status: toolInput.status ? String(toolInput.status) : undefined,
+    subject: toolInput.subject ? String(toolInput.subject) : undefined,
+  })
+}
+
+/**
+ * Update in-memory event state so downstream hooks (e.g. task-count-context)
+ * see post-mutation state without disk reads. Called for every task tool event.
+ */
+async function updateEventState(
+  hookInput: ReturnType<typeof toolHookInputSchema.parse>
+): Promise<void> {
+  const sessionId = resolveSafeSessionId(hookInput.session_id)
+  if (!sessionId) return
+
+  const toolName = hookInput.tool_name ?? ""
+  const toolInput = (hookInput.tool_input ?? {}) as Record<string, any>
+
+  if (toolName === "TaskCreate") {
+    await applyCreateEventState(sessionId, toolInput)
+  } else if (toolName === "TaskUpdate" || toolName === "TodoWrite") {
+    applyUpdateEventState(sessionId, toolInput)
+  }
+}
+
 export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
   const resolved = resolveTaskInput(hookInput)
-  if (!resolved) return {}
-  await dispatchTaskAudit(resolved)
+  if (resolved) {
+    await dispatchTaskAudit(resolved)
+  }
+  // Always update event state, even when audit log write is skipped
+  // (e.g. TaskUpdate without subject — resolveTaskInput returns null but
+  // event state still needs the status change)
+  await updateEventState(hookInput)
   return {}
 }
 

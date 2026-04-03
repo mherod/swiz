@@ -6,12 +6,15 @@
  * Reads the session's task state (via cache when available) and emits an
  * additionalContext message with incomplete/pending/in_progress counts.
  * Warns urgently when pending tasks drop to 1 or 0, since the governance
- * system requires at least 1 pending task at all times.
+ * system requires at least 1 pending task at all times. When the queue is
+ * healthy (several pending plus an in_progress task), emits affirmative
+ * feedback so the model sees both correct and negligent patterns.
  */
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
+import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import {
   getSessionTasksDir,
   isIncompleteTaskStatus,
@@ -20,7 +23,10 @@ import {
 import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
-function buildCountSummary(counts: {
+/** Minimum pending count treated as a healthy planning buffer for positive feedback. */
+const PLENTY_PENDING_THRESHOLD = 2
+
+export function buildCountSummary(counts: {
   total: number
   incomplete: number
   pending: number
@@ -43,6 +49,10 @@ function buildCountSummary(counts: {
   if (counts.inProgress === 0 && counts.incomplete > 0) {
     parts.push(
       "No in_progress task. Transition a pending task to in_progress before starting implementation."
+    )
+  } else if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
+    parts.push(
+      "Good task hygiene: you have a planning buffer (multiple pending tasks) and a single clear in_progress focus. That matches workflow expectations—keep updating status as you complete work and add pending tasks before the queue runs low."
     )
   }
 
@@ -84,6 +94,15 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   const sessionId = resolveSafeSessionId(parsed.session_id)
   if (!sessionId) return {}
 
+  // Primary path: in-memory event state maintained by upstream hooks
+  // (audit-sync, list-sync) in the same dispatch process. Zero disk I/O.
+  const eventState = getSessionEventState(sessionId)
+  if (eventState && eventState.length > 0) {
+    return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(eventState))
+  }
+
+  // Fallback: disk read + mutation overlay for subprocess execution
+  // (when no event state exists, e.g. first tool call or standalone mode)
   const tasksDir = getSessionTasksDir(sessionId)
   if (!tasksDir) return {}
 
@@ -97,9 +116,12 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
     toolInput
   )
 
-  // For TaskCreate where disk had zero tasks, include the new one
   if (tasks.length === 0) return {}
 
+  return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(tasks))
+}
+
+function buildCountSummaryFromTasks(tasks: Array<{ id: string; status: string }>): string {
   let pending = 0
   let inProgress = 0
   let incomplete = 0
@@ -114,15 +136,12 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
       incomplete++
     }
   }
-
-  const summary = buildCountSummary({
+  return buildCountSummary({
     total: tasks.length,
     incomplete,
     pending,
     inProgress,
   })
-
-  return buildContextHookOutput("PostToolUse", summary)
 }
 
 const posttooluseTaskCountContext: SwizHook<Record<string, any>> = {

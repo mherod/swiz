@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { applyMutationOverlay } from "./posttooluse-task-count-context.ts"
+import { applyMutationOverlay, buildCountSummary } from "./posttooluse-task-count-context.ts"
 
 describe("applyMutationOverlay", () => {
   it("updates task status on TaskUpdate", () => {
@@ -58,5 +58,51 @@ describe("applyMutationOverlay", () => {
     const result = applyMutationOverlay(tasks, "TaskList", {})
     expect(result).toHaveLength(1)
     expect(result[0]?.status).toBe("pending")
+  })
+})
+
+describe("buildCountSummary", () => {
+  it("praises healthy state when several pending and in_progress exist", () => {
+    const s = buildCountSummary({
+      total: 4,
+      incomplete: 3,
+      pending: 2,
+      inProgress: 1,
+    })
+    expect(s).toContain("Good task hygiene")
+    expect(s).toContain("planning buffer")
+  })
+
+  it("does not praise when no in_progress despite pending buffer", () => {
+    const s = buildCountSummary({
+      total: 3,
+      incomplete: 3,
+      pending: 3,
+      inProgress: 0,
+    })
+    expect(s).not.toContain("Good task hygiene")
+    expect(s).toContain("No in_progress task")
+  })
+
+  it("does not praise when only one pending even with in_progress", () => {
+    const s = buildCountSummary({
+      total: 2,
+      incomplete: 2,
+      pending: 1,
+      inProgress: 1,
+    })
+    expect(s).not.toContain("Good task hygiene")
+    expect(s).toContain("Proactive task planning needed")
+  })
+
+  it("still shows urgent zero-pending message without praise", () => {
+    const s = buildCountSummary({
+      total: 1,
+      incomplete: 1,
+      pending: 0,
+      inProgress: 1,
+    })
+    expect(s).toContain("URGENT")
+    expect(s).not.toContain("Good task hygiene")
   })
 })

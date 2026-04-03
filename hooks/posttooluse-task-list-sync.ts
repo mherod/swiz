@@ -18,6 +18,7 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { applyTaskListEvent } from "../src/tasks/task-event-state.ts"
 import {
   getSessionTaskPath,
   getSessionTasksDir,
@@ -198,6 +199,13 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   const hookInput = input as PostToolHookInput
   const resolved = await resolveListSyncInput(hookInput)
   if (!resolved) return {}
+
+  // Update in-memory event state with the full task list from the response.
+  // Downstream hooks in the same dispatch see this immediately without disk reads.
+  applyTaskListEvent(
+    resolved.sessionId,
+    resolved.tasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject }))
+  )
 
   const counts = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
   const summary = formatSyncSummary(counts, resolved.tasks.length)
