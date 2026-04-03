@@ -443,6 +443,25 @@ export async function runHook(
   return { parsed, execution }
 }
 
+/**
+ * Check if the current tool payload is an Edit/Write targeting the hook's own
+ * source file. Used to allow self-repair edits when a hook is broken.
+ */
+function isEditTargetingSelf(payloadStr: string, hookSourceFile: string): boolean {
+  try {
+    const payload = JSON.parse(payloadStr) as Record<string, unknown>
+    const toolName = String(payload.tool_name ?? "")
+    if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
+    const toolInput = payload.tool_input as Record<string, unknown> | undefined
+    const filePath = String(toolInput?.file_path ?? "")
+    if (!filePath) return false
+    // Match by hook filename — the file_path is absolute, hookSourceFile is a basename or name
+    return filePath.includes(`/hooks/${hookSourceFile}`) || filePath.endsWith(hookSourceFile)
+  } catch {
+    return false
+  }
+}
+
 function createSkippedExecution(
   hook: HookDef,
   matcher: string | undefined,
@@ -749,15 +768,28 @@ export async function runEntry(
 
   log(`   → ${formatHookTarget(id, matcher)}`)
 
+  let result: { parsed: Record<string, any> | null; execution: HookExecution }
+
   if (isInlineHookDef(hook)) {
-    const { parsed, execution } = await runInlineHook(hook.hook, payloadStr, signal)
-    finalizeExecution(execution, matcher, hook, cwd, parsed)
-    return { execution, parsed }
+    result = await runInlineHook(hook.hook, payloadStr, signal)
+  } else {
+    result = await runHook(hook.file, payloadStr, hook.timeout, signal, spawnCtx)
   }
 
-  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal, spawnCtx)
-  finalizeExecution(execution, matcher, hook, cwd, parsed)
-  return { execution, parsed }
+  // Self-repair: when a hook errors and the current Edit/Write targets the
+  // hook's own source file, allow the edit through so the fix can be applied.
+  // Without this, a broken hook blocks all edits — including edits to itself.
+  if (result.execution.status === "error") {
+    const hookSourceFile = isInlineHookDef(hook) ? hook.hook.name : hook.file
+    if (isEditTargetingSelf(payloadStr, hookSourceFile)) {
+      log(`   ↻ ${id} errored but edit targets its source — allowing self-repair`)
+      result.parsed = null
+      result.execution.status = "ok"
+    }
+  }
+
+  finalizeExecution(result.execution, matcher, hook, cwd, result.parsed)
+  return result
 }
 
 // ─── Dispatch strategy helpers ───────────────────────────────────────────────
