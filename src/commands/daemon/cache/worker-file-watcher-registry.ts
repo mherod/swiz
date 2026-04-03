@@ -114,7 +114,7 @@ export class FileWatcherRegistry {
     // Cleanup local callbacks too
     let removed = 0
     for (const key of this.callbacks.keys()) {
-      if (key.split(":").pop()?.endsWith(suffix)) {
+      if (key.endsWith(suffix)) {
         this.callbacks.delete(key)
         removed++
       }
