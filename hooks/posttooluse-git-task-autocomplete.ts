@@ -17,7 +17,9 @@ import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { applyTaskUpdateEvent } from "../src/tasks/task-event-state.ts"
 import { getSessionTasksDir, readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { type TaskStatus, writeAudit } from "../src/tasks/task-repository.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"
 import {
   autoTransitionForComplete,
@@ -46,6 +48,7 @@ function shouldCompleteTask(
 }
 
 async function completeTasks(
+  sessionId: string,
   tasksDir: string,
   tasks: Array<{ id: string; status: string; subject: string }>,
   isCommit: boolean,
@@ -55,9 +58,24 @@ async function completeTasks(
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
     autoTransitionForComplete(task, autoTransitionEnabled)
+    const oldStatus = task.status as TaskStatus
     if (validateTransition(task.status, "completed")) continue
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
+    // Sync to event state, audit log, and cache so downstream hooks see the completion
+    applyTaskUpdateEvent(sessionId, task.id, { status: "completed" })
+    await writeAudit(sessionId, {
+      timestamp: new Date().toISOString(),
+      taskId: task.id,
+      action: "status_change",
+      oldStatus,
+      newStatus: "completed",
+      subject: task.subject,
+    })
+    try {
+      const { getGlobalTaskStateCache } = await import("../src/tasks/task-recovery.ts")
+      getGlobalTaskStateCache()?.applyTaskUpdate(sessionId, task)
+    } catch {}
   }
 }
 
@@ -103,7 +121,14 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
   const tasks = await readSessionTasks(op.sessionId, home)
 
   const settings = await readSwizSettings()
-  await completeTasks(tasksDir, tasks, op.isCommit, op.isPush, settings.autoTransition)
+  await completeTasks(
+    op.sessionId,
+    tasksDir,
+    tasks,
+    op.isCommit,
+    op.isPush,
+    settings.autoTransition
+  )
 
   if (op.isPush) {
     const cwd = hookInput.cwd ?? process.cwd()
