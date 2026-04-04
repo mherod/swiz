@@ -14,6 +14,8 @@ import { appendJsonlEntry, parseJsonl } from "../utils/jsonl.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
+const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
+
 export { sessionPrefix }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -102,6 +104,51 @@ export function compareTaskIds(a: string, b: string): number {
   return pa.seq - pb.seq
 }
 
+// ─── Audit-log recovery ─────────────────────────────────────────────────────
+
+/**
+ * Attempt to reconstruct a task from the audit log when its JSON file is
+ * unreadable (corrupt, partially written, etc.). Scans all audit entries
+ * for the given taskId and rebuilds the task from the most recent state.
+ * Returns null if the audit log has no entries for this task.
+ */
+async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Task | null> {
+  try {
+    const logPath = join(dir, AUDIT_LOG_FILENAME)
+    const text = await readFile(logPath, "utf-8")
+    const lines = text.trim().split("\n").filter(Boolean)
+
+    let lastStatus: Task["status"] = "pending"
+    let lastSubject = ""
+    let found = false
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as AuditEntry
+        if (entry.taskId !== taskId) continue
+        found = true
+        if (entry.newStatus) lastStatus = entry.newStatus
+        if (entry.subject) lastSubject = entry.subject
+      } catch {
+        // skip malformed audit lines
+      }
+    }
+
+    if (!found) return null
+
+    return {
+      id: taskId,
+      subject: lastSubject || `Recovered task ${taskId}`,
+      description: `Recovered from audit log — original task file was unreadable.`,
+      status: lastStatus,
+      blocks: [],
+      blockedBy: [],
+    }
+  } catch {
+    return null
+  }
+}
+
 // ─── Task I/O ────────────────────────────────────────────────────────────────
 
 export async function readTasks(
@@ -160,6 +207,7 @@ export async function readTasks(
     const taskFiles = files.filter(isSessionTaskJsonFile)
     // Read each file independently so a single corrupt or partially-written
     // file (e.g. during a concurrent push event) doesn't nuke the entire list.
+    // On failure, attempt recovery from the audit log before discarding.
     const results = await Promise.all(
       taskFiles.map(async (f): Promise<Task | null> => {
         try {
@@ -171,7 +219,9 @@ export async function readTasks(
           backfillTaskTimingFields(task, st.mtimeMs)
           return task
         } catch {
-          return null
+          // Task file unreadable — try to reconstruct from audit log
+          const taskId = f.replace(/\.json$/, "")
+          return recoverTaskFromAuditLog(dir, taskId)
         }
       })
     )

@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { createDefaultTaskStore } from "../task-roots.ts"
@@ -9,7 +9,7 @@ import {
   readRecentAuditEntries,
   verifyAuditEntry,
 } from "./task-audit-verification.ts"
-import type { Task } from "./task-repository.ts"
+import { readTasks, type Task } from "./task-repository.ts"
 import { writeTaskUpdate } from "./task-service.ts"
 
 describe("Task Audit Log Verification", () => {
@@ -187,5 +187,79 @@ describe("Task Audit Log Verification", () => {
     expect(entry!.timestamp).toBe(fixedTs)
 
     await rm(testSessionDir, { recursive: true, force: true })
+  })
+
+  describe("audit-log recovery in readTasks", () => {
+    it("recovers a task from audit log when task file is corrupt", async () => {
+      const sessionId = `${testSessionId}-recovery`
+      const testSessionDir = join(tasksDir, sessionId)
+      await mkdir(testSessionDir, { recursive: true })
+
+      // Write a valid task first to generate audit entries
+      const task: Task = {
+        id: "1",
+        subject: "Recoverable Task",
+        description: "Should survive corruption",
+        status: "pending",
+        blocks: [],
+        blockedBy: [],
+      }
+      await writeTaskUpdate(sessionId, "1", task, "in_progress")
+
+      // Corrupt the task file
+      await writeFile(join(testSessionDir, "1.json"), "{{invalid json!!")
+
+      // readTasks should recover from audit log
+      const tasks = await readTasks(sessionId)
+      expect(tasks).toHaveLength(1)
+      expect(tasks[0]!.id).toBe("1")
+      expect(tasks[0]!.subject).toBe("Recoverable Task")
+      expect(tasks[0]!.status).toBe("in_progress")
+
+      await rm(testSessionDir, { recursive: true, force: true })
+    })
+
+    it("skips task when both file and audit log have no data", async () => {
+      const sessionId = `${testSessionId}-no-audit`
+      const testSessionDir = join(tasksDir, sessionId)
+      await mkdir(testSessionDir, { recursive: true })
+
+      // Write corrupt file with no audit log
+      await writeFile(join(testSessionDir, "99.json"), "not json")
+
+      const tasks = await readTasks(sessionId)
+      expect(tasks).toHaveLength(0)
+
+      await rm(testSessionDir, { recursive: true, force: true })
+    })
+
+    it("recovers correct status from multiple audit entries", async () => {
+      const sessionId = `${testSessionId}-multi-audit`
+      const testSessionDir = join(tasksDir, sessionId)
+      await mkdir(testSessionDir, { recursive: true })
+
+      // Create task and transition through statuses
+      const task: Task = {
+        id: "2",
+        subject: "Multi-transition",
+        description: "Goes through several states",
+        status: "pending",
+        blocks: [],
+        blockedBy: [],
+      }
+      await writeTaskUpdate(sessionId, "2", task)
+      await writeTaskUpdate(sessionId, "2", task, "in_progress")
+      await writeTaskUpdate(sessionId, "2", task, "completed")
+
+      // Corrupt the file
+      await writeFile(join(testSessionDir, "2.json"), "")
+
+      const tasks = await readTasks(sessionId)
+      expect(tasks).toHaveLength(1)
+      expect(tasks[0]!.status).toBe("completed")
+      expect(tasks[0]!.subject).toBe("Multi-transition")
+
+      await rm(testSessionDir, { recursive: true, force: true })
+    })
   })
 })
