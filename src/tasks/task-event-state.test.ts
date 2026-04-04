@@ -6,16 +6,30 @@ import {
   applyTaskCreateEvent,
   applyTaskListEvent,
   applyTaskUpdateEvent,
+  clearReconciliation,
   eventStateSessionCount,
   getSessionEventState,
   hasSessionEventState,
+  isValidTransition,
+  needsReconciliation,
   pruneSession,
   seedSessionFromDisk,
 } from "./task-event-state.ts"
 
 /** Session IDs used by this test file — pruned after each test instead of
  *  calling clearAllEventState() which races with concurrent test files. */
-const TEST_SESSIONS = ["s1", "s2", "seed1", "seed2", "seed3", "unknown"]
+const TEST_SESSIONS = [
+  "s1",
+  "s2",
+  "seed1",
+  "seed2",
+  "seed3",
+  "unknown",
+  "recon1",
+  "recon2",
+  "recon3",
+  "recon4",
+]
 
 describe("task-event-state", () => {
   afterEach(() => {
@@ -223,6 +237,78 @@ describe("task-event-state", () => {
     it("skips dotfiles and handles missing directory", async () => {
       await seedSessionFromDisk("seed3", "/nonexistent/path")
       expect(getSessionEventState("seed3")).toBeNull()
+    })
+  })
+
+  describe("isValidTransition", () => {
+    it("allows valid transitions", () => {
+      expect(isValidTransition("pending", "in_progress")).toBe(true)
+      expect(isValidTransition("pending", "cancelled")).toBe(true)
+      expect(isValidTransition("in_progress", "completed")).toBe(true)
+      expect(isValidTransition("in_progress", "pending")).toBe(true)
+      expect(isValidTransition("completed", "in_progress")).toBe(true)
+      expect(isValidTransition("cancelled", "pending")).toBe(true)
+    })
+
+    it("rejects invalid transitions", () => {
+      expect(isValidTransition("pending", "completed")).toBe(false)
+      expect(isValidTransition("completed", "pending")).toBe(false)
+      expect(isValidTransition("completed", "cancelled")).toBe(false)
+      expect(isValidTransition("cancelled", "completed")).toBe(false)
+    })
+
+    it("allows same-status no-ops", () => {
+      expect(isValidTransition("pending", "pending")).toBe(true)
+      expect(isValidTransition("in_progress", "in_progress")).toBe(true)
+      expect(isValidTransition("completed", "completed")).toBe(true)
+    })
+
+    it("rejects unknown statuses", () => {
+      expect(isValidTransition("unknown", "pending")).toBe(false)
+      expect(isValidTransition("pending", "deleted")).toBe(false)
+    })
+  })
+
+  describe("reconciliation flag", () => {
+    it("is not set for fresh sessions", () => {
+      expect(needsReconciliation("recon1")).toBe(false)
+    })
+
+    it("is set when applyTaskUpdateEvent detects an invalid transition", () => {
+      applyTaskCreateEvent("recon1", "1", "Task")
+      // pending → completed is invalid
+      applyTaskUpdateEvent("recon1", "1", { status: "completed" })
+      expect(needsReconciliation("recon1")).toBe(true)
+    })
+
+    it("is not set for valid transitions", () => {
+      applyTaskCreateEvent("recon2", "1", "Task")
+      applyTaskUpdateEvent("recon2", "1", { status: "in_progress" })
+      expect(needsReconciliation("recon2")).toBe(false)
+    })
+
+    it("is cleared by applyTaskListEvent", () => {
+      applyTaskCreateEvent("recon3", "1", "Task")
+      applyTaskUpdateEvent("recon3", "1", { status: "completed" }) // invalid → flag set
+      expect(needsReconciliation("recon3")).toBe(true)
+      applyTaskListEvent("recon3", [{ id: "1", status: "completed", subject: "Task" }])
+      expect(needsReconciliation("recon3")).toBe(false)
+    })
+
+    it("is cleared by clearReconciliation", () => {
+      applyTaskCreateEvent("recon4", "1", "Task")
+      applyTaskUpdateEvent("recon4", "1", { status: "completed" })
+      expect(needsReconciliation("recon4")).toBe(true)
+      clearReconciliation("recon4")
+      expect(needsReconciliation("recon4")).toBe(false)
+    })
+
+    it("is cleared by pruneSession", () => {
+      applyTaskCreateEvent("recon1", "1", "Task")
+      applyTaskUpdateEvent("recon1", "1", { status: "completed" })
+      expect(needsReconciliation("recon1")).toBe(true)
+      pruneSession("recon1")
+      expect(needsReconciliation("recon1")).toBe(false)
     })
   })
 })
