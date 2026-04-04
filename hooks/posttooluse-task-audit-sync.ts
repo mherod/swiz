@@ -13,13 +13,17 @@
  * for every native task tool call.
  */
 
-import { appendFile, mkdir, readdir } from "node:fs/promises"
+import { appendFile, mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { applyTaskCreateEvent, applyTaskUpdateEvent } from "../src/tasks/task-event-state.ts"
-import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import {
+  applyCacheAuditWriteThrough,
+  findLatestTaskId,
+  getSessionTasksDir,
+} from "../src/tasks/task-recovery.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 interface AuditEntry {
@@ -30,27 +34,6 @@ interface AuditEntry {
   newStatus?: string
   subject?: string
   source: "native-tool-sync"
-}
-
-/**
- * Find the most recently created task file in the session directory.
- * Returns the task ID (filename without .json) or null.
- */
-async function findLatestTaskId(tasksDir: string): Promise<string | null> {
-  let files: string[]
-  try {
-    files = await readdir(tasksDir)
-  } catch {
-    return null
-  }
-
-  let maxId = -1
-  for (const f of files) {
-    if (!f.endsWith(".json") || f.startsWith(".")) continue
-    const id = Number.parseInt(f.replace(".json", ""), 10)
-    if (!Number.isNaN(id) && id > maxId) maxId = id
-  }
-  return maxId >= 0 ? String(maxId) : null
 }
 
 async function writeAuditEntry(tasksDir: string, entry: AuditEntry): Promise<void> {
@@ -182,6 +165,15 @@ export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<
   // (e.g. TaskUpdate without subject — resolveTaskInput returns null but
   // event state still needs the status change)
   await updateEventState(hookInput)
+
+  // Write-through to daemon's TaskStateCache — bypassed by local writeAuditEntry.
+  const sessionId = resolveSafeSessionId(hookInput.session_id)
+  if (sessionId) {
+    const toolInput = (hookInput.tool_input ?? {}) as Record<string, unknown>
+    const toolName = hookInput.tool_name ?? ""
+    await applyCacheAuditWriteThrough(sessionId, toolName, toolInput)
+  }
+
   return {}
 }
 

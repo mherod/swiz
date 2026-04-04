@@ -368,6 +368,80 @@ export function formatNativeTaskCompleteCommands(
     .join("\n")
 }
 
+// ─── Cache write-through helpers ────────────────────────────────────────────
+
+/**
+ * Find the most recently created task file in the session directory.
+ * Returns the task ID (filename without .json), or null if none found.
+ */
+export async function findLatestTaskId(tasksDir: string): Promise<string | null> {
+  let files: string[]
+  try {
+    const { readdir } = await import("node:fs/promises")
+    files = await readdir(tasksDir)
+  } catch {
+    return null
+  }
+  let maxId = -1
+  for (const f of files) {
+    if (!f.endsWith(".json") || f.startsWith(".")) continue
+    const id = Number.parseInt(f.replace(".json", ""), 10)
+    if (!Number.isNaN(id) && id > maxId) maxId = id
+  }
+  return maxId >= 0 ? String(maxId) : null
+}
+
+/**
+ * Apply a task tool event (TaskCreate / TaskUpdate / TodoWrite) to the global
+ * TaskStateCache. No-op when the cache is absent or the sessionId is empty.
+ * Safe to call from any hook — never throws.
+ */
+export async function applyCacheAuditWriteThrough(
+  sessionId: string,
+  toolName: string,
+  toolInput: Record<string, unknown>
+): Promise<void> {
+  const cache = getGlobalTaskStateCache()
+  if (!cache) return
+  try {
+    if (toolName === "TaskCreate") {
+      const tasksDir = getSessionTasksDir(sessionId)
+      if (!tasksDir) return
+      const taskId = await findLatestTaskId(tasksDir)
+      if (!taskId) return
+      cache.applyTaskAuditSnapshot(sessionId, {
+        taskId,
+        action: "create",
+        newStatus: "pending",
+        subject: String(toolInput.subject ?? ""),
+      })
+    } else if (toolName === "TaskUpdate" || toolName === "TodoWrite") {
+      const taskId = String(toolInput.taskId ?? toolInput.id ?? "")
+      if (!taskId) return
+      cache.applyTaskAuditSnapshot(sessionId, {
+        taskId,
+        action: "status_change",
+        newStatus: toolInput.status ? String(toolInput.status) : undefined,
+        subject: toolInput.subject ? String(toolInput.subject) : undefined,
+      })
+    }
+  } catch {
+    // Cache not available — safe to ignore
+  }
+}
+
+/**
+ * Apply a full task object update to the global TaskStateCache.
+ * No-op when the cache is absent. Safe to call from any hook — never throws.
+ */
+export function applyCacheTaskUpdate(sessionId: string, task: SessionTask): void {
+  try {
+    getGlobalTaskStateCache()?.applyTaskUpdate(sessionId, task)
+  } catch {
+    // Cache not available — safe to ignore
+  }
+}
+
 /** Strict task file shape with all timing fields required — used by builders. */
 export type TaskFile = Required<
   Pick<
