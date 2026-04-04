@@ -116,12 +116,19 @@ type HookResult = { execution: HookExecution; parsed: Record<string, any> | null
  * `onResult` is called per-hook to let the strategy short-circuit (abort)
  * when a deny/block is detected. `processResults` builds the final response
  * from the collected results.
+ *
+ * `collectionTimeoutMs` — when set, the pipeline waits up to this many
+ * milliseconds for all hooks to settle before aborting stragglers. This
+ * prevents fast-completing hooks from starving slower (but valuable) hooks
+ * that need network I/O or heavier processing.
  */
 async function runStrategyPipeline(
   ctx: HookStrategyContext,
   opts: {
     onResult?: (result: HookResult, abort: () => void) => void
     processResults: (results: HookResult[], executions: HookExecution[]) => Record<string, any>
+    /** Max time to wait for all hooks before aborting stragglers. */
+    collectionTimeoutMs?: number
   }
 ): Promise<Record<string, any>> {
   const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
@@ -136,6 +143,13 @@ async function runStrategyPipeline(
   const onDispatchAbort = () => controller.abort()
   ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
 
+  // When a collection timeout is set, abort remaining hooks after the window
+  // expires rather than relying solely on per-hook onResult abort.
+  let collectionTimer: ReturnType<typeof setTimeout> | null = null
+  if (opts.collectionTimeoutMs) {
+    collectionTimer = setTimeout(() => controller.abort(), opts.collectionTimeoutMs)
+  }
+
   const [results] = await Promise.all([
     Promise.all(
       entries.map(async (e) => {
@@ -146,6 +160,8 @@ async function runStrategyPipeline(
     ),
     launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal, spawnCtx),
   ])
+
+  if (collectionTimer) clearTimeout(collectionTimer)
 
   ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
@@ -262,9 +278,81 @@ export function processBlockingResults(
   }
 }
 
+/** Minimum time (ms) to collect stop hook responses before processing.
+ * Slower hooks (e.g. `stop-personal-repo-issues` which queries the GitHub API)
+ * are valuable for long-term session guidance but get starved when a faster
+ * file-based hook blocks first. This window lets all hooks race fairly. */
+const STOP_COLLECTION_TIMEOUT_MS = 10_000
+
+/**
+ * Process stop hook results by aggregating ALL blocking reasons into one
+ * combined response. Unlike {@link processBlockingResults} which forwards
+ * only the first block, this collects every block reason so the agent sees
+ * the full picture — including guidance from slower hooks that would
+ * previously have been aborted.
+ *
+ * Exported for unit tests.
+ */
+export function processAggregatedStopResults(
+  results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
+  executions: HookExecution[],
+  finalResponse: HookOutput,
+  hookEventName: string
+): void {
+  const blockReasons: string[] = []
+  const contexts: string[] = []
+
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped" || execution.status === "aborted") {
+      executions.push(execution)
+      continue
+    }
+
+    if (resp && isBlock(resp)) {
+      log(`   ✗ BLOCK from ${execution.file}`)
+      execution.status = "block"
+      const reason = (resp as { reason?: string }).reason
+      if (reason) blockReasons.push(reason)
+      const ctx = extractContext(resp)
+      if (ctx) contexts.push(ctx)
+      executions.push(execution)
+      continue
+    }
+
+    if (resp) {
+      const ctx = extractContext(resp)
+      if (ctx) contexts.push(ctx)
+    }
+
+    log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
+    executions.push(execution)
+  }
+
+  if (blockReasons.length > 0) {
+    finalResponse.decision = "block"
+    finalResponse.reason = blockReasons.join("\n\n---\n\n")
+    log(`   result: ${blockReasons.length} block(s) aggregated`)
+  }
+
+  if (contexts.length > 0) {
+    const mergedContext = contexts.join("\n\n")
+    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
+
+    const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
+    existingHso.additionalContext = mergedContext
+    finalResponse.hookSpecificOutput = existingHso
+  }
+}
+
 /**
  * Blocking strategy: forwards first block and aborts remaining hooks.
- * Used for stop and postToolUse events.
+ * Used for postToolUse events.
+ *
+ * For **stop** events the strategy switches to an aggregation mode: all hooks
+ * run concurrently for up to {@link STOP_COLLECTION_TIMEOUT_MS} and every
+ * blocking reason is merged into a single response. This prevents fast
+ * file-based checks from starving slower but valuable hooks (like
+ * `stop-personal-repo-issues`) that need network I/O.
  */
 async function resolveAutoSteerEnabled(
   payload: Record<string, any>,
@@ -364,9 +452,10 @@ async function tryAutoSteerStopBlock(
 class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const { canonicalEvent, enrichedPayloadStr } = ctx
+    const isStop = canonicalEvent === "stop"
 
     // on_session_stop: short-circuit all stop hooks if pending messages exist.
-    if (canonicalEvent === "stop") {
+    if (isStop) {
       const shortCircuited = await tryOnSessionStopDelivery(enrichedPayloadStr)
       if (shortCircuited) {
         const response: Record<string, any> = {}
@@ -380,13 +469,20 @@ class BlockingStrategy implements HookExecutionStrategy {
     const finalResponse: Record<string, any> = {}
 
     const response = await runStrategyPipeline(ctx, {
-      onResult: (result, abort) => {
-        if (result.parsed && isBlock(result.parsed)) {
-          abort()
-        }
-      },
+      // Stop events: don't abort on first block — let all hooks race fairly
+      // within the collection window so slower hooks get a chance to respond.
+      onResult: isStop
+        ? undefined
+        : (result, abort) => {
+            if (result.parsed && isBlock(result.parsed)) abort()
+          },
+      collectionTimeoutMs: isStop ? STOP_COLLECTION_TIMEOUT_MS : undefined,
       processResults: (results, executions) => {
-        processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
+        if (isStop) {
+          processAggregatedStopResults(results, executions, finalResponse, ctx.hookEventName)
+        } else {
+          processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
+        }
         if (!isBlock(finalResponse)) {
           log(`   result: all passed`)
         }
@@ -394,7 +490,7 @@ class BlockingStrategy implements HookExecutionStrategy {
       },
     })
 
-    if (canonicalEvent === "stop" && isBlock(response)) {
+    if (isStop && isBlock(response)) {
       await tryAutoSteerStopBlock(response, enrichedPayloadStr)
     }
 

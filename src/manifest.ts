@@ -213,10 +213,10 @@ export const manifest: HookGroup[] = [
       { hook: stopDependabotPrs },
       { hook: stopGdprDataModels },
       { hook: stopMemoryUpdateReminder },
+      { hook: stopPersonalRepoIssues },
       { hook: stopAutoContinue },
       { hook: posttooluseSpeakNarrator },
       { hook: stopGitStatus },
-      { hook: stopPersonalRepoIssues },
     ],
   },
   {

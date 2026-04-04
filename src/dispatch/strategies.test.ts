@@ -309,30 +309,27 @@ describe("processBlockingResults", () => {
   })
 })
 
-describe("BlockingStrategy stop abort regression", () => {
-  it("must abort remaining hooks after first block for stop events (regression guard)", () => {
-    // This test guards against a regression where stop events were excluded from
-    // the abort-on-first-block behavior. The condition `ctx.canonicalEvent !== "stop"`
-    // was previously added, causing all 24 stop hooks to run to completion even after
-    // the first one blocked — making Stop events unnecessarily slow.
+describe("BlockingStrategy stop aggregation", () => {
+  it("stop events must NOT abort on first block — they aggregate all responses", () => {
+    // Stop events use a collection window (STOP_COLLECTION_TIMEOUT_MS) to let all
+    // hooks race fairly. Slower hooks like stop-personal-repo-issues (GitHub API)
+    // were previously starved by fast file-based checks that blocked first.
     //
-    // The onResult callback must call abort() for ALL events including stop.
+    // The onResult for stop events must be undefined (no early abort).
+    // Non-stop events still abort on first block.
     const source = readFileSync(join(import.meta.dir, "strategies.ts"), "utf-8")
 
-    // Find the BlockingStrategy onResult callback
-    const onResultMatch = source.match(
-      /class\s+BlockingStrategy[\s\S]*?onResult:\s*\(result,\s*abort\)\s*=>\s*\{([\s\S]*?)\}/
+    // The BlockingStrategy must use processAggregatedStopResults for stop events
+    expect(source).toContain("processAggregatedStopResults")
+
+    // Non-stop events must still abort on first block
+    const nonStopAbort = source.match(
+      /onResult:\s*isStop\s*\?\s*undefined\s*:\s*\(result,\s*abort\)\s*=>/
     )
-    expect(onResultMatch).not.toBeNull()
+    expect(nonStopAbort).not.toBeNull()
 
-    const onResultBody = onResultMatch![1]!
-
-    // The abort condition must NOT exclude stop events
-    expect(onResultBody).not.toContain('canonicalEvent !== "stop"')
-    expect(onResultBody).not.toContain("canonicalEvent !== 'stop'")
-
-    // The abort must fire unconditionally on block
-    expect(onResultBody).toContain("isBlock(result.parsed)")
-    expect(onResultBody).toContain("abort()")
+    // Stop events must use a collection timeout
+    expect(source).toContain("STOP_COLLECTION_TIMEOUT_MS")
+    expect(source).toContain("collectionTimeoutMs: isStop ? STOP_COLLECTION_TIMEOUT_MS")
   })
 })
