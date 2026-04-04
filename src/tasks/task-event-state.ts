@@ -17,6 +17,8 @@
  *   - Pruned per session via pruneSession() on session eviction
  */
 
+import { debugLog } from "../debug.ts"
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface EventTaskState {
@@ -25,9 +27,62 @@ export interface EventTaskState {
   subject: string
 }
 
+// ─── Transition validation ─────────────────────────────────────────────────
+
+/**
+ * Lightweight mirror of VALID_TRANSITIONS from task-service.ts.
+ * Kept as a local constant to avoid circular imports — task-service.ts
+ * imports from this module's sibling (task-recovery.ts → task-event-state.ts).
+ */
+const VALID_TRANSITIONS: Record<string, Set<string>> = {
+  pending: new Set(["in_progress", "cancelled"]),
+  in_progress: new Set(["completed", "pending", "cancelled"]),
+  completed: new Set(["in_progress"]),
+  cancelled: new Set(["pending", "in_progress"]),
+}
+
+/**
+ * Check whether a status transition is valid. Returns true when valid
+ * (including same-status no-ops), false when the transition violates the
+ * state machine.
+ */
+export function isValidTransition(oldStatus: string, newStatus: string): boolean {
+  if (oldStatus === newStatus) return true
+  const allowed = VALID_TRANSITIONS[oldStatus]
+  return allowed !== undefined && allowed.has(newStatus)
+}
+
+/**
+ * Log a warning when an invalid state transition is detected in an
+ * unvalidated mutation path. Sets the per-session reconciliation flag
+ * so downstream PreToolUse hooks can force a TaskList call to resync.
+ */
+export function warnInvalidTransition(
+  layer: string,
+  sessionId: string,
+  taskId: string,
+  oldStatus: string,
+  newStatus: string
+): void {
+  debugLog(
+    `[task-transition] INVALID ${layer}: task #${taskId} ${oldStatus} → ${newStatus} ` +
+      `(session ${sessionId.slice(0, 8)}…). Reconciliation flag set.`
+  )
+  reconciliationNeeded.add(sessionId)
+}
+
 // ─── Module-level state ─────────────────────────────────────────────────────
 
 const sessionTasks = new Map<string, EventTaskState[]>()
+
+/**
+ * Per-session flag indicating that an invalid state transition was detected
+ * in an unvalidated mutation path. When set, PreToolUse hooks should force
+ * a TaskList call to reconcile in-memory state with the authoritative source.
+ *
+ * Cleared when a TaskList event replaces the session's state (full resync).
+ */
+const reconciliationNeeded = new Set<string>()
 
 // ─── Write API ──────────────────────────────────────────────────────────────
 
@@ -51,6 +106,7 @@ export function applyTaskCreateEvent(sessionId: string, taskId: string, subject:
 /**
  * Apply a TaskUpdate event: update status and/or subject of an existing task.
  * If the task isn't in the map yet (first event for this session), it's added.
+ * Logs a warning and sets the reconciliation flag on invalid transitions.
  */
 export function applyTaskUpdateEvent(
   sessionId: string,
@@ -61,9 +117,13 @@ export function applyTaskUpdateEvent(
   const idx = tasks.findIndex((t) => t.id === taskId)
   if (idx >= 0) {
     const existing = tasks[idx]!
+    const newStatus = updates.status ?? existing.status
+    if (updates.status && !isValidTransition(existing.status, newStatus)) {
+      warnInvalidTransition("event-state", sessionId, taskId, existing.status, newStatus)
+    }
     tasks[idx] = {
       id: taskId,
-      status: updates.status ?? existing.status,
+      status: newStatus,
       subject: updates.subject ?? existing.subject,
     }
   } else {
@@ -80,9 +140,11 @@ export function applyTaskUpdateEvent(
 /**
  * Apply a TaskList bulk sync: replace the session's entire task list with the
  * authoritative state from the TaskList tool response.
+ * Clears the reconciliation flag since TaskList is the full resync point.
  */
 export function applyTaskListEvent(sessionId: string, tasks: EventTaskState[]): void {
   sessionTasks.set(sessionId, [...tasks])
+  reconciliationNeeded.delete(sessionId)
 }
 
 // ─── Read API ───────────────────────────────────────────────────────────────
@@ -101,6 +163,23 @@ export function getSessionEventState(sessionId: string): EventTaskState[] | null
  */
 export function hasSessionEventState(sessionId: string): boolean {
   return sessionTasks.has(sessionId)
+}
+
+/**
+ * Check whether a session needs task reconciliation due to an invalid
+ * state transition detected in an unvalidated mutation path.
+ * PreToolUse hooks should call this and force a TaskList when true.
+ */
+export function needsReconciliation(sessionId: string): boolean {
+  return reconciliationNeeded.has(sessionId)
+}
+
+/**
+ * Clear the reconciliation flag for a session. Called after a TaskList
+ * resync has been performed.
+ */
+export function clearReconciliation(sessionId: string): void {
+  reconciliationNeeded.delete(sessionId)
 }
 
 /**
@@ -135,7 +214,12 @@ export function overlayEventState<T extends { id: string; status: string }>(
   const statusById = new Map(eventState.map((e) => [e.id, e.status]))
   for (const t of tasks) {
     const freshStatus = statusById.get(t.id)
-    if (freshStatus) t.status = freshStatus
+    if (freshStatus && freshStatus !== t.status) {
+      if (!isValidTransition(t.status, freshStatus)) {
+        warnInvalidTransition("overlay", sessionId, t.id, t.status, freshStatus)
+      }
+      t.status = freshStatus
+    }
   }
   return tasks
 }
@@ -192,6 +276,7 @@ export async function seedSessionFromDisk(sessionId: string, tasksDir: string): 
  */
 export function pruneSession(sessionId: string): void {
   sessionTasks.delete(sessionId)
+  reconciliationNeeded.delete(sessionId)
 }
 
 /**
@@ -199,6 +284,7 @@ export function pruneSession(sessionId: string): void {
  */
 export function clearAllEventState(): void {
   sessionTasks.clear()
+  reconciliationNeeded.clear()
 }
 
 /**

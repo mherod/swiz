@@ -14,6 +14,7 @@ import { orderBy } from "lodash-es"
 import type { HookOutput } from "../../hooks/schemas.ts"
 import { formatActionPlan } from "../action-plan.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { warnInvalidTransition } from "../tasks/task-event-state.ts"
 import {
   getSessionTasksDir,
   hasSessionTasksDir,
@@ -49,12 +50,16 @@ function isTaskDuplicate(
 async function completeStaleTask(
   stale: SessionTask,
   tasksDir: string,
-  autoTransitionEnabled: boolean
+  autoTransitionEnabled: boolean,
+  sessionId: string
 ): Promise<void> {
   try {
     const taskPath = join(tasksDir, `${stale.id}.json`)
     autoTransitionForComplete(stale, autoTransitionEnabled)
-    if (validateTransition(stale.status, "completed")) return
+    if (validateTransition(stale.status, "completed")) {
+      warnInvalidTransition("stop-dedup", sessionId, stale.id, stale.status, "completed")
+      return
+    }
     const updated = {
       ...stale,
       status: "completed" as const,
@@ -71,7 +76,8 @@ async function deduplicateStaleTasks(
   completedTasks: SessionTask[],
   incompleteTasks: SessionTask[],
   tasksDir: string,
-  autoTransitionEnabled: boolean
+  autoTransitionEnabled: boolean,
+  sessionId: string
 ): Promise<void> {
   if (completedTasks.length === 0 || incompleteTasks.length === 0) return
 
@@ -84,7 +90,7 @@ async function deduplicateStaleTasks(
 
   for (const stale of incompleteTasks) {
     if (!isTaskDuplicate(stale, completedFingerprints, completedNormalized)) continue
-    await completeStaleTask(stale, tasksDir, autoTransitionEnabled)
+    await completeStaleTask(stale, tasksDir, autoTransitionEnabled, sessionId)
   }
 }
 
@@ -153,7 +159,13 @@ export async function checkIncompleteTasks(
   const incompleteTasks = allTasks.filter(
     (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
   )
-  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir, autoTransitionEnabled)
+  await deduplicateStaleTasks(
+    completedTasks,
+    incompleteTasks,
+    tasksDir,
+    autoTransitionEnabled,
+    sessionId
+  )
 
   const incompleteDetails = getIncompleteDetails(allTasks)
   if (incompleteDetails.length === 0) {

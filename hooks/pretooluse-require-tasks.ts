@@ -17,7 +17,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { overlayEventState } from "../src/tasks/task-event-state.ts"
+import { needsReconciliation, overlayEventState } from "../src/tasks/task-event-state.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
@@ -35,6 +35,7 @@ import {
   isEditTool,
   isGitRepo,
   isShellTool,
+  isTaskListTool,
   isTaskTrackingExemptShellCommand,
   isTerminalTaskStatus,
   isWriteTool,
@@ -572,6 +573,15 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
+
+  // Force a TaskList call when an invalid state transition was detected.
+  // TaskList is the full resync point that clears the reconciliation flag.
+  if (needsReconciliation(sessionId) && isBlockedTool(toolName) && !isTaskListTool(toolName)) {
+    return preToolUseDeny(
+      "An invalid task state transition was detected (e.g. pending → completed). " +
+        "Call TaskList now to reconcile task state before continuing."
+    )
+  }
 
   // Check task deletion governance before other checks
   const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)

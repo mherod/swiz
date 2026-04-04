@@ -17,7 +17,7 @@ import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { applyTaskUpdateEvent } from "../src/tasks/task-event-state.ts"
+import { applyTaskUpdateEvent, warnInvalidTransition } from "../src/tasks/task-event-state.ts"
 import {
   applyCacheTaskUpdate,
   getSessionTasksDir,
@@ -63,7 +63,10 @@ async function completeTasks(
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
     autoTransitionForComplete(task, autoTransitionEnabled)
     const oldStatus = task.status
-    if (validateTransition(task.status, "completed")) continue
+    if (validateTransition(task.status, "completed")) {
+      warnInvalidTransition("git-autocomplete", sessionId, task.id, task.status, "completed")
+      continue
+    }
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
     // Sync to event state, audit log, and cache so downstream hooks see the completion

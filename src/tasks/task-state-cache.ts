@@ -20,7 +20,7 @@ import { type FSWatcher, watch } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { pruneSession } from "./task-event-state.ts"
+import { isValidTransition, pruneSession, warnInvalidTransition } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
@@ -331,6 +331,10 @@ export class TaskStateCache {
 
     const idx = entry.tasks.findIndex((t) => t.id === task.id)
     if (idx >= 0) {
+      const existing = entry.tasks[idx]!
+      if (existing.status !== task.status && !isValidTransition(existing.status, task.status)) {
+        warnInvalidTransition("cache-update", sessionId, task.id, existing.status, task.status)
+      }
       entry.tasks[idx] = task
     } else {
       entry.tasks.push(task)
@@ -398,7 +402,18 @@ export class TaskStateCache {
       }
     } else if (entry.action === "status_change" && entry.newStatus) {
       const task = cached.tasks.find((t) => t.id === entry.taskId)
-      if (task) task.status = entry.newStatus
+      if (task) {
+        if (!isValidTransition(task.status, entry.newStatus)) {
+          warnInvalidTransition(
+            "cache-audit",
+            sessionId,
+            entry.taskId,
+            task.status,
+            entry.newStatus
+          )
+        }
+        task.status = entry.newStatus
+      }
     } else if (entry.action === "delete") {
       cached.tasks = cached.tasks.filter((t) => t.id !== entry.taskId)
     }
