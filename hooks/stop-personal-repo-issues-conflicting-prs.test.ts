@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { orderRebaseSuggestionPRs, selectRebaseSuggestionPRs } from "./stop-personal-repo-issues.ts"
+import {
+  orderRebaseSuggestionPRs,
+  selectRebaseSuggestionPRs,
+} from "./stop-pr-feedback/pull-requests.ts"
 
 // ── PR interface (mirrors stop-personal-repo-issues.ts) ──────────────────────
 

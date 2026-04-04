@@ -1131,44 +1131,34 @@ describe("needsRefinement — edge case: needs-refinement overrides readiness", 
 })
 
 describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => {
-  test("null matches legacy default order", () => {
-    expect(sectionOrderForProjectState(null)).toEqual([
-      "feedbackPr",
-      "conflict",
-      "refinement",
-      "readyIssues",
-      "blocked",
-    ])
-    expect(planSectionOrderForProjectState(null)).toEqual([
-      "feedbackPr",
-      "conflict",
-      "refinement",
-      "readyIssues",
-      "blocked",
-    ])
+  test("null matches issue-only default order", () => {
+    expect(sectionOrderForProjectState(null)).toEqual(["refinement", "readyIssues", "blocked"])
+    expect(planSectionOrderForProjectState(null)).toEqual(["refinement", "readyIssues", "blocked"])
   })
 
-  test("planning prioritises refinement and blocked triage before ready PR/issue pickup", () => {
+  test("planning prioritises refinement and blocked triage before ready issue pickup", () => {
     expect(sectionOrderForProjectState("planning")).toEqual([
       "refinement",
       "blocked",
-      "conflict",
-      "feedbackPr",
       "readyIssues",
     ])
   })
 
-  test("reviewing matches unset-state (legacy) ordering — PR/conflict before backlog grooming", () => {
-    expect(sectionOrderForProjectState("reviewing")).toEqual(sectionOrderForProjectState(null))
-    expect(planSectionOrderForProjectState("reviewing")).toEqual(
-      planSectionOrderForProjectState(null)
-    )
+  test("reviewing prioritises refinement before ready issues", () => {
+    expect(sectionOrderForProjectState("reviewing")).toEqual([
+      "refinement",
+      "readyIssues",
+      "blocked",
+    ])
+    expect(planSectionOrderForProjectState("reviewing")).toEqual([
+      "refinement",
+      "readyIssues",
+      "blocked",
+    ])
   })
 
   test("developing surfaces ready issues before refinement backlog", () => {
     expect(sectionOrderForProjectState("developing")).toEqual([
-      "conflict",
-      "feedbackPr",
       "readyIssues",
       "refinement",
       "blocked",
@@ -1180,7 +1170,6 @@ describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => 
 
   test("addressing-feedback: ready issues before refinement in plan", () => {
     const plan = planSectionOrderForProjectState("addressing-feedback")
-    expect(plan.indexOf("feedbackPr")).toBeLessThan(plan.indexOf("readyIssues"))
     expect(plan.indexOf("readyIssues")).toBeLessThan(plan.indexOf("refinement"))
   })
 })

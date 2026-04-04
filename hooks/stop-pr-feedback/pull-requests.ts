@@ -1,8 +1,9 @@
 import { orderBy, uniqBy } from "lodash-es"
 import { getIssueStore } from "../../src/issue-store.ts"
 import { getRepoSlug, ghJson } from "../../src/utils/hook-utils.ts"
-import { REBASE_SUGGESTIONS_PER_SIDE } from "./constants.ts"
 import type { PR, StopContext } from "./types.ts"
+
+const REBASE_SUGGESTIONS_PER_SIDE = 2
 
 /** Open PRs that should surface in stop messaging (feedback pending or merge conflicts). */
 export function openPrNeedsStopAttention(p: PR): boolean {
@@ -119,15 +120,4 @@ export function partitionPRsForStop(
     if (p.mergeable === "CONFLICTING") conflictingPRs.push(p)
   }
   return { changesRequestedPRs, reviewRequiredPRs, conflictingPRs }
-}
-
-/** Extract issue numbers covered by open PRs via their closing references. */
-export function extractAllOpenPRIssueNumbers(prs: PR[]): Set<number> {
-  const issueNumbers = new Set<number>()
-  for (const pr of prs) {
-    for (const ref of pr.closingIssuesReferences ?? []) {
-      issueNumbers.add(ref.number)
-    }
-  }
-  return issueNumbers
 }

@@ -11,11 +11,6 @@ import {
   shouldUpdateStopCooldown,
 } from "./context.ts"
 import { updateCooldown } from "./cooldown.ts"
-import {
-  extractAllOpenPRIssueNumbers,
-  getOpenPRsWithFeedback,
-  openPrNeedsStopAttention,
-} from "./pull-requests.ts"
 import type { StopContext } from "./types.ts"
 
 /** Payload for composing `stop-ship-checklist` with issues/PR steps. */
@@ -43,23 +38,18 @@ export async function collectPersonalRepoIssuesStopParsed(
     const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
     const strictNoDirectMain = settings.strictNoDirectMain
 
-    // Parallelize: PR/issue fetching + project state read (independent)
-    const [prs, projectState] = await Promise.all([
-      getOpenPRsWithFeedback(ctx.cwd, ctx.currentUser),
-      readProjectState(ctx.cwd),
-    ])
-    const hasChangesRequested = prs.some(
-      (p) => openPrNeedsStopAttention(p) && p.reviewDecision === "CHANGES_REQUESTED"
-    )
-    const allOpenPRIssueNumbers = extractAllOpenPRIssueNumbers(prs)
+    // Fetch project state and issue data (independent)
+    const projectState = await readProjectState(ctx.cwd)
+
+    // Gather issues (no PR dependency needed since stop-pr-feedback handles PRs separately)
     const gathered = await gatherStopContext(
       ctx.cwd,
       ctx.isPersonalRepo,
       ctx.currentUser,
-      hasChangesRequested,
-      allOpenPRIssueNumbers
+      false, // hasChangesRequested: handled by stop-pr-feedback
+      new Set() // allOpenPRIssueNumbers: handled by stop-pr-feedback
     )
-    const stopCtx = buildStopContext(ctx, prs, gathered, projectState, strictNoDirectMain)
+    const stopCtx = buildStopContext(ctx, gathered, projectState, strictNoDirectMain)
     if (!stopCtx) return null
 
     const planSteps = buildStopPlanSteps(stopCtx)

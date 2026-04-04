@@ -14,18 +14,11 @@ import {
   getAllOpenIssues,
   sortIssuesByScoreAndNumber,
 } from "./issues.ts"
-import { partitionPRsForStop } from "./pull-requests.ts"
-import type { Issue, PR, RepoContext, StopContext } from "./types.ts"
-
-function feedbackPrCount(
-  ctx: Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs">
-): number {
-  return ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
-}
+import type { Issue, RepoContext, StopContext } from "./types.ts"
 
 /** Matches cooldown update in main: refinement-only blocks do not refresh cooldown. */
 export function shouldUpdateStopCooldown(ctx: StopContext): boolean {
-  return ctx.sortedIssues.length > 0 || feedbackPrCount(ctx) > 0 || ctx.conflictingPRs.length > 0
+  return ctx.sortedIssues.length > 0
 }
 
 export async function gatherStopContext(
@@ -105,20 +98,12 @@ export async function resolveRepoContext(input: {
 
 export function buildStopContext(
   ctx: RepoContext,
-  prs: PR[],
   gathered: Awaited<ReturnType<typeof gatherStopContext>>,
   projectState: ProjectState | null,
   strictNoDirectMain: boolean
 ): StopContext | null {
-  const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(prs)
-
   const total =
-    gathered.sortedIssues.length +
-    gathered.sortedRefinement.length +
-    gathered.blockedIssues.length +
-    changesRequestedPRs.length +
-    reviewRequiredPRs.length +
-    conflictingPRs.length
+    gathered.sortedIssues.length + gathered.sortedRefinement.length + gathered.blockedIssues.length
   if (total === 0) return null
 
   return {
@@ -126,9 +111,6 @@ export function buildStopContext(
     sessionId: ctx.sessionId,
     isPersonalRepo: ctx.isPersonalRepo,
     projectState,
-    changesRequestedPRs,
-    reviewRequiredPRs,
-    conflictingPRs,
     sortedRefinement: gathered.sortedRefinement,
     sortedIssues: gathered.sortedIssues,
     blockedIssues: gathered.blockedIssues,

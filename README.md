@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**112 hooks. 12 event types. Every agent. Zero compromises.**
+**113 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,11 +84,11 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-111 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+112 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (25)
+### Stop (26)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -105,6 +105,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-quality-checks.ts`         | Discovers and runs the project's lint and typecheck scripts from `package.json` (e.g. `lint`, `typecheck`) before allowing stop. Covers issues in already-committed code that lint-staged misses.                                                                                                                                                                                                        |
 | `stop-branch-conflicts.ts`       | Checks for potential merge conflicts with the base branch before the session ends, while there's still time to resolve them cleanly.                                                                                                                                                                                                                                                                     |
 | `stop-pr-description.ts`         | Validates that open PRs have a real description, not an empty template. Forces the agent to document what it built.                                                                                                                                                                                                                                                                                      |
+| `stop-pr-feedback.ts`            | Blocks stop if open PRs have pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED) or merge conflicts. Separates PR feedback handling from issue triage, focusing on review feedback and conflict resolution.                                                                                          |
 | `stop-pr-changes-requested.ts`   | Blocks stop if the current PR has unresolved change requests from reviewers. The agent doesn't get to declare done while reviewers are waiting.                                                                                                                                                                                                                                                          |
 | `stop-todo-tracker.ts`           | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high.                                                                                                                                                                                                                                                                     |
 | `stop-non-default-branch.ts`     | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it.                                                                                                                                                                                                  |

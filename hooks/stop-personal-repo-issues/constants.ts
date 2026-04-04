@@ -1,13 +1,7 @@
 import { normaliseLabel } from "../../src/issue-refinement.ts"
 import type { StopSection } from "./types.ts"
 
-export const DEFAULT_STOP_SECTION_ORDER: StopSection[] = [
-  "feedbackPr",
-  "conflict",
-  "refinement",
-  "readyIssues",
-  "blocked",
-]
+export const DEFAULT_STOP_SECTION_ORDER: StopSection[] = ["refinement", "readyIssues", "blocked"]
 
 /** Labels whose block reason should be reviewed when no ready issues remain. */
 export const REVIEWABLE_BLOCK_LABELS = new Set(["blocked", "upstream", "on-hold", "waiting"])

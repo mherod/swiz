@@ -7,11 +7,11 @@ const STATE_PRIORITY_HINT: Record<ProjectState, string> = {
   planning:
     "Project state: planning — prioritise refining and triaging the backlog before picking up ready work.",
   developing:
-    "Project state: developing — prioritise merge conflicts, PR feedback, and ready issues before grooming refinement backlog.",
+    "Project state: developing — prioritise ready issues before grooming refinement backlog.",
   reviewing:
-    "Project state: reviewing — prioritise open PRs, conflicts, and review feedback before new issue work.",
+    "Project state: reviewing — prioritise refinement and ready issues before blocked work.",
   "addressing-feedback":
-    "Project state: addressing-feedback — prioritise PR feedback and conflicts before new issues or backlog refinement.",
+    "Project state: addressing-feedback — prioritise ready issues and refinement before blocked work.",
 }
 
 export function statePriorityHint(state: ProjectState): string {
@@ -19,22 +19,22 @@ export function statePriorityHint(state: ProjectState): string {
 }
 
 /**
- * Full section order for reason text (and conflict mini-plan position).
+ * Full section order for reason text (issue-only, PR handling is separate).
  * `null` preserves the legacy order used before state-aware ordering.
  */
 export function sectionOrderForProjectState(state: ProjectState | null): StopSection[] {
   if (state === null) return [...DEFAULT_STOP_SECTION_ORDER]
   switch (state) {
     case "planning":
-      // Refinement + triage (blocked) before suggesting new ready work; PR hygiene before pickup
-      return ["refinement", "blocked", "conflict", "feedbackPr", "readyIssues"]
+      // Refinement + triage (blocked) before suggesting new ready work
+      return ["refinement", "blocked", "readyIssues"]
     case "reviewing":
-      return ["feedbackPr", "conflict", "refinement", "readyIssues", "blocked"]
+      return ["refinement", "readyIssues", "blocked"]
     case "developing":
-      // Unblock and ship; defer refinement grooming until active work is moving
-      return ["conflict", "feedbackPr", "readyIssues", "refinement", "blocked"]
+      // Ready work + refinement; defer blocked grooming until active work is moving
+      return ["readyIssues", "refinement", "blocked"]
     case "addressing-feedback":
-      return ["feedbackPr", "conflict", "readyIssues", "refinement", "blocked"]
+      return ["readyIssues", "refinement", "blocked"]
     default:
       return [...DEFAULT_STOP_SECTION_ORDER]
   }

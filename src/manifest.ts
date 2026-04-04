@@ -106,6 +106,7 @@ import stopOffensiveLanguage from "../hooks/stop-offensive-language.ts"
 import stopPersonalRepoIssues from "../hooks/stop-personal-repo-issues.ts"
 import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
 import stopPrDescription from "../hooks/stop-pr-description.ts"
+import stopPrFeedback from "../hooks/stop-pr-feedback.ts"
 import stopQualityChecks from "../hooks/stop-quality-checks.ts"
 import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
 import stopShipChecklist from "../hooks/stop-ship-checklist.ts"
@@ -206,6 +207,7 @@ export const manifest: HookGroup[] = [
       { hook: stopBranchConflicts },
       { hook: stopPrDescription },
       { hook: stopPrChangesRequested },
+      { hook: stopPrFeedback },
       { hook: stopTodoTracker },
       { hook: stopNonDefaultBranch },
       { hook: stopUpstreamBranchCount },

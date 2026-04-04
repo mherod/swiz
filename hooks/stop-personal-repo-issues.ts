@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Stop hook: Check for open issues and PRs needing attention
+ * Stop hook: Check for open issues needing attention
  * Blocks stop if a personal GitHub repo has open issues, or if
  * the current user has self-authored or self-assigned issues in an org repo.
  */
@@ -18,21 +18,11 @@ import {
   planSectionOrderForProjectState,
   sectionOrderForProjectState,
 } from "./stop-personal-repo-issues/project-state.ts"
-import {
-  orderRebaseSuggestionPRs,
-  selectRebaseSuggestionPRs,
-} from "./stop-personal-repo-issues/pull-requests.ts"
-import type { Issue, PR, StopSection } from "./stop-personal-repo-issues/types.ts"
+import type { Issue, StopSection } from "./stop-personal-repo-issues/types.ts"
 
 export { missingRefinementCategories, needsRefinement }
-export type { StopSection, Issue, PR }
-export {
-  sectionOrderForProjectState,
-  planSectionOrderForProjectState,
-  orderRebaseSuggestionPRs,
-  selectRebaseSuggestionPRs,
-  getActionableIssues,
-}
+export type { StopSection, Issue }
+export { sectionOrderForProjectState, planSectionOrderForProjectState, getActionableIssues }
 export { collectPersonalRepoIssuesStopParsed, evaluateStopPersonalRepoIssues }
 
 /** Subprocess/E2E entry only — manifest uses `stop-ship-checklist.ts`. */
