@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-04-04
+
+### New Features
+
+- **Task repair command** — Added `swiz tasks repair`
+  to reconstruct task files from the audit trail, fixing
+  missing or status-inconsistent tasks. Supports `--dry-run`
+  to preview changes without modifying files, and `--json`
+  for structured output with typed repair actions.
+- **Automatic task recovery** — When a task file is corrupt
+  or partially written, task reads now automatically
+  reconstruct from the audit log instead of silently
+  dropping the task.
+- **In-memory task state** — Task counts now update
+  instantly after TaskCreate/TaskUpdate without waiting
+  for disk writes, eliminating stale count displays
+  (closes [#506](https://github.com/mherod/swiz/issues/506)).
+- **Completion rate limiter** — Task completions are now
+  throttled to prevent rapid-fire batch completions from
+  bypassing governance checks (max 2 per 5-second window).
+- **Audit log verification module** — Added `readAuditLog`,
+  `getLastAuditEntry`, `verifyAuditEntry`, and
+  `appendAuditEntry` APIs for structured audit log access.
+
+### Bug Fixes
+
+- **Task loss during push events** — A single corrupt or
+  partially-written task file no longer causes all tasks in
+  the session to disappear. Each file is now read
+  independently with per-file error isolation.
+- **Session cleanup race condition** — Fixed concurrent test
+  failures caused by global event state cleanup interfering
+  with other sessions. Cleanup is now scoped per-session.
+- **Last-task completion gate** — Completing the final task
+  is now permitted when the git working tree is clean,
+  removing unnecessary friction at session end.
+- **Hook self-heal** — Session start now verifies dispatch
+  entries are present in settings even when the manifest
+  hash hasn't changed, catching cases where settings were
+  overwritten externally.
+- **Hook self-repair** — Broken PreToolUse hooks no longer
+  block edits to their own source file, preventing
+  unrecoverable deadlocks.
+
+### Improvements
+
+- **Faster task lookups** — The require-tasks hook now uses
+  cached reads via the daemon's TaskStateCache when
+  available, reducing disk I/O on every tool call.
+- **Session fs.watch coverage** — Active sessions
+  automatically get filesystem watch coverage for native
+  task writes when dispatched through the daemon.
+- **Task count guidance** — After task operations, context
+  now suggests creating two pending tasks: a verification
+  step and a broader next-step task.
+
 ## 2026-04-03
 
 ### Performance Analysis: `stop-personal-repo-issues`
