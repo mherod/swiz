@@ -17,7 +17,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { getSessionEventState } from "../src/tasks/task-event-state.ts"
+import { overlayEventState } from "../src/tasks/task-event-state.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
@@ -497,15 +497,7 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
 
   // Read full tasks from disk (needed for timing fields), then overlay
   // event state statuses which are fresher than async native disk writes.
-  const allTasks = await readSessionTasksFresh(sessionId)
-  const eventState = getSessionEventState(sessionId)
-  if (eventState && eventState.length > 0) {
-    const statusById = new Map(eventState.map((e) => [e.id, e.status]))
-    for (const t of allTasks) {
-      const freshStatus = statusById.get(t.id)
-      if (freshStatus) t.status = freshStatus
-    }
-  }
+  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)

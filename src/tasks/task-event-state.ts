@@ -120,6 +120,26 @@ export async function readSessionTasksFreshest(sessionId: string): Promise<Event
   return diskTasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject ?? "" }))
 }
 
+/**
+ * Overlay in-memory event state statuses onto disk-read tasks.
+ * Disk tasks retain full fields (timing, evidence); only the `status`
+ * field is replaced with the fresher value from event state when available.
+ * Mutates the input array in place and returns it for convenience.
+ */
+export function overlayEventState<T extends { id: string; status: string }>(
+  tasks: T[],
+  sessionId: string
+): T[] {
+  const eventState = sessionTasks.get(sessionId)
+  if (!eventState || eventState.length === 0) return tasks
+  const statusById = new Map(eventState.map((e) => [e.id, e.status]))
+  for (const t of tasks) {
+    const freshStatus = statusById.get(t.id)
+    if (freshStatus) t.status = freshStatus
+  }
+  return tasks
+}
+
 // ─── Seeding ────────────────────────────────────────────────────────────────
 
 async function readTaskEventStatesFromDir(tasksDir: string): Promise<EventTaskState[]> {
