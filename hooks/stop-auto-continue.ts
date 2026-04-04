@@ -1,14 +1,11 @@
 #!/usr/bin/env bun
-// Stop hook: Block stop with an AI-generated next-step suggestion and
-// extract confirmed patterns (reflections) to auto-memory.
-// Uses the Gemini API (promptGemini) for transcript analysis.
-// Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
+// Stop hook: Block stop with a deterministic next-step suggestion.
+// Uses hardcoded filler suggestions, changelog staleness, and issue refinement
+// checks to propose actionable next work. No external AI calls.
 
 import { z } from "zod"
-import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { resolveCwd } from "../src/cwd.ts"
-import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
@@ -20,16 +17,6 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import {
-  buildTaskSection,
-  buildUserMessagesSection,
-  extractTranscriptData,
-  formatTurnsAsContext,
-  isDocsOnlySession,
-  resolveTranscriptText,
-  type TranscriptResolution,
-} from "../src/transcript-utils.ts"
 import {
   blockStopObj,
   git,
@@ -39,85 +26,23 @@ import {
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
 import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
-import { buildPrompt } from "./stop-auto-continue/prompt.ts"
-import { writeReflections } from "./stop-auto-continue/reflections.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
 import {
-  isUngroundedSuggestion,
-  loadSuggestionLog,
   recordSuggestionAndGetCount,
   startSuggestionLogCleanup,
 } from "./stop-auto-continue/suggestion-log.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 
-const CONTEXT_TURNS = 20 // Recent turns to send as context
 const DEDUP_MAX_SEEN = 2 // Allow stop after suggestion seen this many times
-const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 120_000
 
 const WORKFLOW_FINDING =
   "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
 
-const agentResponseSchema = z.object({
-  processCritique: z.string(),
-  productCritique: z.string(),
-  next: z.string(),
-  reflections: z.array(z.string()),
-})
-
-type AgentResponse = z.infer<typeof agentResponseSchema>
-
-/**
- * Reads in_progress and completed tasks for the session.
- * Returns a formatted block like:
- *   IN PROGRESS: Fix auth bug (#3)
- *   COMPLETED: Add tests for parser (#1), Refactor CLI entry (#2)
- * Returns "" if no tasks found.
- */
-async function loadTaskContext(sessionId: string): Promise<string> {
-  if (!sessionId) return ""
-  const home = getHomeDirOrNull()
-  if (!home) return ""
-  const tasks = await readSessionTasks(sessionId, home)
-
-  const inProgress: string[] = []
-  const completed: string[] = []
-
-  for (const task of tasks) {
-    if (!task.id || task.id === "null") continue
-    const label = `${task.subject} (#${task.id})`
-    if (task.status === "in_progress") inProgress.push(label)
-    else if (task.status === "completed") completed.push(label)
-  }
-
-  const lines: string[] = []
-  if (completed.length > 0) lines.push(`COMPLETED: ${completed.join(", ")}`)
-  if (inProgress.length > 0) lines.push(`IN PROGRESS: ${inProgress.join(", ")}`)
-  return lines.join("\n")
-}
-
-// ─── Response sanitization ──────────────────────────────────────────────────
-
-/**
- * Returns the first non-empty line of the agent's raw response.
- * Returns "" (triggering fallback) if the line looks like XML/tool-call markup.
- */
-function sanitizeResponse(raw: string): string {
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    if (hasMarkup(trimmed)) return ""
-    return trimmed
-  }
-  return ""
-}
-
-/** True if text contains XML/tool-call markup after NFKC normalization. */
-function hasMarkup(text: string): boolean {
-  // NFKC folds fullwidth ＜→<; strip zero-width format chars to prevent ZWJ injection
-  const normalized = text.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
-  // Homoglyphs that don't NFKC-normalize to <:
-  // 〈U+3008 ‹U+2039 ⟨U+27E8 ˂U+02C2 ᐸU+1438 ❮U+276E ❰U+2770 ⟪U+27EA ⦑U+2991 ⧼U+29FC
-  return /[<〈‹⟨˂ᐸ❮❰⟪⦑⧼]\w/.test(normalized)
+interface AgentResponse {
+  processCritique: string
+  productCritique: string
+  next: string
+  reflections: string[]
 }
 
 // ─── Workflow suggestion filter ──────────────────────────────────────────────
@@ -169,22 +94,6 @@ export function isWorkflowSuggestion(
     if (opts.skipPrPattern && pattern.id === "pull_request") return false
     return pattern.re.test(text)
   })
-}
-
-/**
- * Apply markup and length filtering to a structured AgentResponse returned by the
- * AI SDK. sanitizeResponse() strips XML/tool-call injection from string fields;
- * reflections are also length-capped and de-duplication-ready.
- */
-function filterAgentResponse(parsed: AgentResponse): AgentResponse {
-  return {
-    processCritique: sanitizeResponse(parsed.processCritique),
-    productCritique: sanitizeResponse(parsed.productCritique),
-    next: sanitizeResponse(parsed.next),
-    reflections: parsed.reflections
-      .filter((r) => r.length >= 10 && r.length <= 300 && !hasMarkup(r))
-      .slice(0, 10),
-  }
 }
 
 function normalizeCreativeIssueDescription(next: string): string {
@@ -364,10 +273,6 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
   throw new AutoContinueExit(blockStopObj(reason))
 }
 
-// ─── Filler suggestion ───────────────────────────────────────────────────────
-// Deterministic fallback extracted to stop-auto-continue/filler-suggestions.ts.
-// Used in generateAiResponse catch block when AI backends fail.
-
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
@@ -378,113 +283,6 @@ function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string }
     const issues = err instanceof z.ZodError ? err.issues : []
     console.error("[stop-auto-continue] stopHookInputSchema parse failed:", JSON.stringify(issues))
     terminate("block", "Auto-continue received malformed stop-hook input.")
-  }
-}
-
-async function handleNoTranscript(
-  transcriptResolution: TranscriptResolution,
-  sessionId: string,
-  cwd: string,
-  inputCwd: string | undefined,
-  ambitionMode: AmbitionMode
-): Promise<void> {
-  // Parallelize all independent I/O operations
-  const [taskContext, refinementStatus, changelogStatus, repoFiles] = await Promise.all([
-    loadTaskContext(sessionId),
-    checkRefinementNeeds(cwd),
-    checkChangelogStaleness(cwd),
-    git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
-  ])
-  const statusParts = [changelogStatus, refinementStatus].filter(Boolean)
-  const fallbackPrompt = buildPrompt({
-    taskSection: buildTaskSection(taskContext),
-    userMessagesSection: "",
-    projectStatus: statusParts.join("\n"),
-    context: `Transcript unavailable. Failure reason: ${transcriptResolution.failureReason ?? "unknown transcript read failure"}`,
-    ambitionMode,
-    cwd: inputCwd,
-    docsOnly: false,
-    repoFiles,
-  })
-  terminate(
-    "block",
-    "Auto-continue could not analyze this session from transcript data. " +
-      "Continue directly using the internal-agent prompt below:\n\n" +
-      fallbackPrompt
-  )
-}
-
-interface GenerateAiResponseOpts {
-  turns: ReturnType<typeof extractTranscriptData>["turns"]
-  docsOnly: boolean
-  taskContext: string
-  refinementStatus: string
-  cwd: string
-  inputCwd: string | undefined
-  ambitionMode: AmbitionMode
-  sessionId: string
-}
-
-async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentResponse> {
-  const { turns, docsOnly, taskContext, refinementStatus, cwd, inputCwd, ambitionMode, sessionId } =
-    opts
-  // Cap context to ~30K chars (~8K tokens) to stay within model limits.
-  // Prioritize recent turns — trim from the front if over budget.
-  const MAX_CONTEXT_CHARS = 30_000
-  let context = formatTurnsAsContext(turns)
-  if (context.length > MAX_CONTEXT_CHARS) {
-    context = `[...earlier turns truncated for length...]\n\n${context.slice(-MAX_CONTEXT_CHARS)}`
-  }
-  const taskSection = buildTaskSection(taskContext)
-  const userMessagesSection = buildUserMessagesSection(turns)
-  // Parallelize I/O-bound pre-AI data gathering
-  const [changelogStatus, repoFiles, suggestionLog] = await Promise.all([
-    checkChangelogStaleness(cwd),
-    docsOnly ? Promise.resolve("") : git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
-    sessionId ? loadSuggestionLog(sessionId) : Promise.resolve({ seen: {} }),
-  ])
-  const statusParts = [changelogStatus, refinementStatus].filter(Boolean)
-  const prompt = buildPrompt({
-    taskSection,
-    userMessagesSection,
-    projectStatus: statusParts.join("\n"),
-    context,
-    ambitionMode,
-    cwd: inputCwd,
-    docsOnly,
-    repoFiles,
-    previousSuggestions: suggestionLog.seen,
-  })
-
-  try {
-    const parsed = await promptObject(prompt, agentResponseSchema, {
-      timeout: ATTEMPT_TIMEOUT_MS,
-    })
-    return filterAgentResponse(parsed)
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err)
-    console.error(`[stop-auto-continue] AI generation failed: ${errMsg}`)
-    if (errMsg.includes("Requested entity was not found")) {
-      console.error(
-        "[stop-auto-continue] Hint: check GEMINI_MODEL env var, API key project, and GEMINI_API_VERSION"
-      )
-    }
-    // Try deterministic filler suggestion before giving up
-    const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
-    const filler = await buildFillerSuggestion({
-      cwd: opts.cwd,
-      sessionId: opts.sessionId,
-    }).catch(() => "")
-    if (filler) {
-      return filterAgentResponse({
-        processCritique: "",
-        productCritique: "",
-        next: filler,
-        reflections: [],
-      })
-    }
-    // Allow stop gracefully — other stop hooks (memory reminder, etc.) handle fallback suggestions.
-    terminate("skip", "AI_BACKEND_FAILED", `AI generation failed: ${errMsg}`)
   }
 }
 
@@ -550,55 +348,6 @@ function buildFinalMessage(
   return parts.join("\n")
 }
 
-interface SessionContext {
-  transcriptData: ReturnType<typeof extractTranscriptData>
-  docsOnly: boolean
-  taskContext: string
-  refinementStatus: string
-}
-
-async function resolveSessionContext(
-  input: StopHookInput,
-  cwd: string,
-  ambitionMode: AmbitionMode
-): Promise<SessionContext> {
-  const transcriptResolution = await resolveTranscriptText(input.transcript_path, cwd)
-
-  if (!transcriptResolution.raw) {
-    await handleNoTranscript(
-      transcriptResolution,
-      input.session_id ?? "",
-      cwd,
-      input.cwd,
-      ambitionMode
-    )
-  }
-
-  const transcriptData = extractTranscriptData(
-    transcriptResolution.raw!,
-    transcriptResolution.formatHint
-  )
-  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
-  if (turns.length === 0) {
-    terminate(
-      "block",
-      "Auto-continue could not analyze this session: transcript has no parseable conversation turns."
-    )
-  }
-
-  // Parallelize independent I/O operations
-  const [taskContext, refinementStatus] = await Promise.all([
-    loadTaskContext(input.session_id ?? ""),
-    checkRefinementNeeds(cwd),
-  ])
-  return {
-    transcriptData,
-    docsOnly: isDocsOnlySession(transcriptData.editedPaths),
-    taskContext,
-    refinementStatus,
-  }
-}
-
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function validateMainInputsAndSettings(
@@ -610,8 +359,6 @@ async function validateMainInputsAndSettings(
 }> {
   const { input } = parseStopInput(hookRaw)
 
-  await ensureGeminiApiKey()
-
   const settings = await readSwizSettings()
   const projectSettings = await readProjectSettings(cwd)
   const effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
@@ -622,89 +369,46 @@ async function validateMainInputsAndSettings(
   return { input, effective }
 }
 
-async function validatePrerequisitesAndGenerateResponse(
+async function generateDeterministicResponse(
   cwd: string,
   input: StopHookInput,
   effective: ReturnType<typeof getEffectiveSwizSettings>,
   projectState: string | null
 ): Promise<{
-  response: ReturnType<typeof postProcessResponse>
-  repoFiles: string
+  response: AgentResponse
   refinementStatus: string | null
 }> {
   const reviewingDirective = await checkReviewingState(cwd, projectState)
   if (reviewingDirective) terminate("block", reviewingDirective)
 
-  if (!hasAiProvider()) {
-    // No AI backend — use deterministic filler suggestions instead of blocking
-    const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
-    const filler = await buildFillerSuggestion({
-      cwd,
-      sessionId: input.session_id ?? undefined,
-    }).catch(() => "")
-    if (filler) {
-      terminate("block", filler)
-    }
-    // No filler suggestion either — fail-closed: block when no AI backend
-    terminate(
-      "block",
-      "no AI backend available to generate a next-step suggestion. Install an AI provider (set ANTHROPIC_API_KEY or configure a provider) to enable auto-continue."
-    )
-  }
+  // Parallel: deterministic filler suggestion + refinement/changelog checks
+  const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
+  const [filler, refinementStatus, changelogStatus] = await Promise.all([
+    buildFillerSuggestion({ cwd, sessionId: input.session_id ?? undefined }).catch(() => ""),
+    checkRefinementNeeds(cwd),
+    checkChangelogStaleness(cwd),
+  ])
 
-  const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
-    input,
-    cwd,
-    effective.ambitionMode
+  const next = filler || changelogStatus || refinementStatus || ""
+  const response = postProcessResponse(
+    { processCritique: "", productCritique: "", next, reflections: [] },
+    effective.ambitionMode,
+    projectState
   )
 
-  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
-  const [rawResponse, repoFiles] = await Promise.all([
-    generateAiResponse({
-      turns,
-      docsOnly,
-      taskContext,
-      refinementStatus,
-      cwd,
-      inputCwd: input.cwd,
-      ambitionMode: effective.ambitionMode,
-      sessionId: input.session_id ?? "",
-    }),
-    docsOnly ? Promise.resolve("") : git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
-  ])
-  const response = postProcessResponse(rawResponse, effective.ambitionMode, projectState)
-
-  return { response, repoFiles, refinementStatus }
+  return { response, refinementStatus }
 }
 
 async function validateResponseAndChecks(
-  response: ReturnType<typeof postProcessResponse>,
+  response: AgentResponse,
   refinementStatus: string | null,
-  repoFiles: string,
-  sessionId: string,
-  cwd: string
+  sessionId: string
 ): Promise<void> {
-  if (response.reflections.length > 0) {
-    await writeReflections(cwd, response.reflections)
-  }
-
   if (!response.next && !refinementStatus) {
     terminate(
       "block",
       "Auto-continue could not identify a specific next step. Review your recent changes and ensure all tasks are complete before stopping."
     )
-  }
-
-  // Grounding check: if suggestion references hook/file names absent from repo, skip instead of block.
-  if (response.next && repoFiles) {
-    const ungrounded = isUngroundedSuggestion(response.next, repoFiles)
-    if (ungrounded) {
-      terminate(
-        "skip",
-        "UNGROUNDED_SUGGESTION",
-        `Suggestion references non-existent artifacts — allowing stop. Detail: ${ungrounded}`
-      )
-    }
   }
 
   // Dedup: allow stop if the same suggestion repeats.
@@ -741,20 +445,14 @@ async function runStopAutoContinueMain(hookRaw: Record<string, any>): Promise<vo
   const { effective } = await validateMainInputsAndSettings(hookRaw, cwd)
 
   const projectState = await readProjectState(cwd)
-  const { response, repoFiles, refinementStatus } = await validatePrerequisitesAndGenerateResponse(
+  const { response, refinementStatus } = await generateDeterministicResponse(
     cwd,
     input,
     effective,
     projectState
   )
 
-  await validateResponseAndChecks(
-    response,
-    refinementStatus,
-    repoFiles,
-    input.session_id ?? "",
-    cwd
-  )
+  await validateResponseAndChecks(response, refinementStatus, input.session_id ?? "")
 
   const finalMessage = buildFinalMessage(
     response,
@@ -778,7 +476,7 @@ export async function evaluateStopAutoContinue(input: StopHookInput): Promise<Sw
 const stopAutoContinue: SwizStopHook = {
   name: "stop-auto-continue",
   event: "stop",
-  timeout: 120,
+  timeout: 15,
 
   run(input) {
     return evaluateStopAutoContinue(input)
