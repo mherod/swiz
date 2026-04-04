@@ -8,7 +8,7 @@
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
+import { isGitWorkingTreeClean, validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   buildLastTaskStandingDenial,
   isRunningInAgent,
@@ -51,7 +51,8 @@ async function denyIfLastTaskStanding(
   cwd?: string
 ): Promise<SwizHookOutput | null> {
   const allTasks = await readSessionTasks(sessionId)
-  const error = validateLastTaskStanding(taskId, allTasks)
+  const repoClean = isGitWorkingTreeClean(cwd)
+  const error = validateLastTaskStanding(taskId, allTasks, { repoClean })
   if (error) {
     return preToolUseDeny(await buildLastTaskStandingDenial(taskId, cwd))
   }

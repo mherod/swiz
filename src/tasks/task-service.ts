@@ -395,17 +395,40 @@ export function validateTransition(oldStatus: string, newStatus: string): string
 }
 
 /**
+ * Check whether the git working tree is clean (no uncommitted or untracked files).
+ * Returns true when `git status --porcelain` produces no output.
+ * Falls back to false on any error (missing git, not a repo, etc.).
+ */
+export function isGitWorkingTreeClean(cwd?: string): boolean {
+  try {
+    const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
+      cwd: cwd ?? process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    return proc.exitCode === 0 && proc.stdout.toString().trim() === ""
+  } catch {
+    return false
+  }
+}
+
+/**
  * Validate that completing a task won't leave zero incomplete tasks in the session.
  * Returns an error string if blocked, null if allowed.
+ *
+ * When `repoClean` is true the guard is relaxed — the session is winding down
+ * with nothing left to commit, so forcing another task is unnecessary churn.
  */
 export function validateLastTaskStanding(
   taskId: string,
-  allTasks: Array<{ id: string; status: string }>
+  allTasks: Array<{ id: string; status: string }>,
+  options?: { repoClean?: boolean }
 ): string | null {
   const otherIncomplete = allTasks.filter(
     (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
   )
   if (otherIncomplete.length === 0) {
+    if (options?.repoClean) return null
     return `Completing task #${taskId} would leave zero incomplete tasks. Create a new task before completing this one.`
   }
   return null
@@ -471,9 +494,12 @@ export async function updateStatus(
   // Enforce last-task-standing invariant: completing a task must never leave
   // zero incomplete tasks. This is the canonical enforcement point — all code
   // paths that complete tasks flow through updateStatus.
+  // Relaxed when the git working tree is clean — no uncommitted work means
+  // the session can wind down without forcing another task.
   if (newStatus === "completed" && !options.skipLastTaskGuard) {
     const allTasks = await readTasks(effectiveSessionId)
-    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
+    const repoClean = isGitWorkingTreeClean(filterCwd)
+    const lastTaskError = validateLastTaskStanding(taskId, allTasks, { repoClean })
     if (lastTaskError) throw new Error(lastTaskError)
   }
 
