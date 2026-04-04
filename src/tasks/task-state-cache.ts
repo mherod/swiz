@@ -19,8 +19,14 @@
 import { type FSWatcher, watch } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { debugLog } from "../debug.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { isValidTransition, pruneSession, warnInvalidTransition } from "./task-event-state.ts"
+import {
+  computeTransitionPath,
+  isValidTransition,
+  pruneSession,
+  warnInvalidTransition,
+} from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
@@ -51,6 +57,35 @@ const DEFAULT_MAX_STALE_MS = 60_000
 const MAX_CACHED_SESSIONS = 50
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Apply timing side-effects for a status transition on a cached task.
+ * Mirrors the timing logic in task-service.ts applyStatusTransition
+ * without requiring that import (avoids circular deps).
+ *
+ * - Entering `in_progress`: sets `startedAt`
+ * - Leaving `in_progress`: accumulates `elapsedMs`
+ * - Entering `completed`: sets `completedAt` and `completionTimestamp`
+ * - Always updates `statusChangedAt`
+ */
+function applyTimingEffects(task: SessionTask, newStatus: string): void {
+  const now = Date.now()
+  const nowIso = new Date(now).toISOString()
+
+  // Accumulate elapsed time when leaving in_progress
+  if (task.status === "in_progress" && task.statusChangedAt) {
+    const elapsed = now - new Date(task.statusChangedAt).getTime()
+    task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
+  }
+
+  if (newStatus === "in_progress") task.startedAt = now
+  if (newStatus === "completed") {
+    task.completedAt = now
+    if (!task.completionTimestamp) task.completionTimestamp = nowIso
+  }
+
+  task.statusChangedAt = nowIso
+}
 
 function computeCounts(tasks: SessionTask[]) {
   let openCount = 0
@@ -332,10 +367,35 @@ export class TaskStateCache {
     const idx = entry.tasks.findIndex((t) => t.id === task.id)
     if (idx >= 0) {
       const existing = entry.tasks[idx]!
-      if (existing.status !== task.status && !isValidTransition(existing.status, task.status)) {
-        warnInvalidTransition("cache-update", sessionId, task.id, existing.status, task.status)
+      if (existing.status !== task.status) {
+        if (!isValidTransition(existing.status, task.status)) {
+          // Auto-transition through intermediate states for timing effects
+          const path = computeTransitionPath(existing.status, task.status)
+          if (path && path.length > 1) {
+            debugLog(
+              `[task-transition] cache-update: auto-transitioning task #${task.id} ` +
+                `${existing.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
+            )
+            for (const step of path.slice(0, -1)) {
+              applyTimingEffects(existing, step)
+              existing.status = step
+            }
+          } else {
+            warnInvalidTransition("cache-update", sessionId, task.id, existing.status, task.status)
+          }
+        }
+        // Apply timing for the final target status before replacing
+        applyTimingEffects(existing, task.status)
       }
-      entry.tasks[idx] = task
+      // Replace with the incoming task but preserve timing from intermediate steps
+      const merged = { ...task }
+      if (existing.status !== task.status) {
+        // Incoming task has the final status; keep accumulated timing from intermediates
+        merged.elapsedMs = existing.elapsedMs
+        merged.startedAt = existing.startedAt
+        merged.statusChangedAt = existing.statusChangedAt
+      }
+      entry.tasks[idx] = merged
     } else {
       entry.tasks.push(task)
       entry.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -355,12 +415,44 @@ export class TaskStateCache {
    * Replace the entire cached task list for a session from a TaskList response.
    * Recomputes counts and marks the entry as fresh. Creates a new entry if
    * none exists yet (unlike applyTaskUpdate which is a no-op on cold cache).
+   *
+   * When a cached entry exists, walks each task through valid intermediate
+   * transitions so timing effects are tracked incrementally rather than
+   * clobbered. Falls back to wholesale replacement when no prior state exists.
    */
   applyTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
     const sorted = [...tasks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    const counts = computeCounts(sorted)
     const now = Date.now()
     const existing = this.entries.get(sessionId)
+
+    // When prior state exists, reconcile each task's status incrementally
+    if (existing && existing.tasks.length > 0) {
+      const oldById = new Map(existing.tasks.map((t) => [t.id, t]))
+      for (const incoming of sorted) {
+        const old = oldById.get(incoming.id)
+        if (!old || old.status === incoming.status) continue
+        if (!isValidTransition(old.status, incoming.status)) {
+          const path = computeTransitionPath(old.status, incoming.status)
+          if (path && path.length > 1) {
+            debugLog(
+              `[task-transition] cache-snapshot: auto-transitioning task #${incoming.id} ` +
+                `${old.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
+            )
+            for (const step of path.slice(0, -1)) {
+              applyTimingEffects(old, step)
+              old.status = step
+            }
+          }
+        }
+        // Apply final timing and carry forward accumulated values
+        applyTimingEffects(old, incoming.status)
+        incoming.elapsedMs = old.elapsedMs
+        incoming.startedAt = old.startedAt
+        incoming.statusChangedAt = old.statusChangedAt
+      }
+    }
+
+    const counts = computeCounts(sorted)
     const state: SessionTaskState = {
       tasks: sorted,
       ...counts,
@@ -404,15 +496,33 @@ export class TaskStateCache {
       const task = cached.tasks.find((t) => t.id === entry.taskId)
       if (task) {
         if (!isValidTransition(task.status, entry.newStatus)) {
-          warnInvalidTransition(
-            "cache-audit",
-            sessionId,
-            entry.taskId,
-            task.status,
-            entry.newStatus
-          )
+          // Auto-transition through valid intermediate states so timing
+          // effects (elapsedMs, startedAt, completedAt) are tracked at each step.
+          const path = computeTransitionPath(task.status, entry.newStatus)
+          if (path && path.length > 1) {
+            debugLog(
+              `[task-transition] cache-audit: auto-transitioning task #${entry.taskId} ` +
+                `${task.status} → ${path.join(" → ")} (session ${sessionId.slice(0, 8)}…)`
+            )
+            for (const step of path) {
+              applyTimingEffects(task, step)
+              task.status = step
+            }
+          } else {
+            warnInvalidTransition(
+              "cache-audit",
+              sessionId,
+              entry.taskId,
+              task.status,
+              entry.newStatus
+            )
+            applyTimingEffects(task, entry.newStatus)
+            task.status = entry.newStatus
+          }
+        } else {
+          applyTimingEffects(task, entry.newStatus)
+          task.status = entry.newStatus
         }
-        task.status = entry.newStatus
       }
     } else if (entry.action === "delete") {
       cached.tasks = cached.tasks.filter((t) => t.id !== entry.taskId)

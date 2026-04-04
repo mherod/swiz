@@ -7,6 +7,7 @@ import {
   applyTaskListEvent,
   applyTaskUpdateEvent,
   clearReconciliation,
+  computeTransitionPath,
   eventStateSessionCount,
   getSessionEventState,
   hasSessionEventState,
@@ -309,6 +310,37 @@ describe("task-event-state", () => {
       expect(needsReconciliation("recon1")).toBe(true)
       pruneSession("recon1")
       expect(needsReconciliation("recon1")).toBe(false)
+    })
+  })
+
+  describe("computeTransitionPath", () => {
+    it("returns empty array for same-status no-op", () => {
+      expect(computeTransitionPath("pending", "pending")).toEqual([])
+    })
+
+    it("returns single step for valid direct transition", () => {
+      expect(computeTransitionPath("pending", "in_progress")).toEqual(["in_progress"])
+      expect(computeTransitionPath("in_progress", "completed")).toEqual(["completed"])
+    })
+
+    it("finds intermediate path for pending → completed", () => {
+      expect(computeTransitionPath("pending", "completed")).toEqual(["in_progress", "completed"])
+    })
+
+    it("finds intermediate path for completed → cancelled", () => {
+      expect(computeTransitionPath("completed", "cancelled")).toEqual(["in_progress", "cancelled"])
+    })
+
+    it("finds intermediate path for completed → pending", () => {
+      expect(computeTransitionPath("completed", "pending")).toEqual(["in_progress", "pending"])
+    })
+
+    it("returns null for unknown source status", () => {
+      expect(computeTransitionPath("deleted", "pending")).toBeNull()
+    })
+
+    it("returns null for unreachable target", () => {
+      expect(computeTransitionPath("pending", "nonexistent")).toBeNull()
     })
   })
 })

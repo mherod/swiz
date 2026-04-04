@@ -71,6 +71,43 @@ export function warnInvalidTransition(
   reconciliationNeeded.add(sessionId)
 }
 
+/**
+ * Compute the shortest path of valid intermediate transitions from
+ * `oldStatus` to `newStatus`. Returns the intermediate steps (excluding
+ * `oldStatus`, including `newStatus`), or null if no valid path exists
+ * (max depth 3 to avoid cycles in the small state graph).
+ *
+ * Examples:
+ *   computeTransitionPath("pending", "completed") → ["in_progress", "completed"]
+ *   computeTransitionPath("pending", "in_progress") → ["in_progress"]
+ *   computeTransitionPath("completed", "cancelled") → ["in_progress", "cancelled"]
+ */
+export function computeTransitionPath(oldStatus: string, newStatus: string): string[] | null {
+  if (oldStatus === newStatus) return []
+  if (isValidTransition(oldStatus, newStatus)) return [newStatus]
+
+  // BFS over valid transitions (max depth 3 — graph has 4 nodes)
+  const queue: Array<{ status: string; path: string[] }> = [{ status: oldStatus, path: [] }]
+  const visited = new Set<string>([oldStatus])
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (current.path.length >= 3) continue
+
+    const allowed = VALID_TRANSITIONS[current.status]
+    if (!allowed) continue
+
+    for (const next of allowed) {
+      if (visited.has(next)) continue
+      const newPath = [...current.path, next]
+      if (next === newStatus) return newPath
+      visited.add(next)
+      queue.push({ status: next, path: newPath })
+    }
+  }
+  return null
+}
+
 // ─── Module-level state ─────────────────────────────────────────────────────
 
 const sessionTasks = new Map<string, EventTaskState[]>()
