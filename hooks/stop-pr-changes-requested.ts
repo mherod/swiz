@@ -185,10 +185,17 @@ async function resolvePrContext(input: {
   if (!hasGhCli()) return null
   if (!(await isGitHubRemote(cwd))) return null
 
-  const branch = await git(["branch", "--show-current"], cwd)
+  // Parallelize independent git/gh calls: branch, defaultBranch, repo, currentUser
+  const [branch, defaultBranch, repo, currentUser] = await Promise.all([
+    git(["branch", "--show-current"], cwd),
+    getDefaultBranch(cwd),
+    getRepoNameWithOwner(cwd),
+    getCurrentGitHubUser(cwd),
+  ])
+
   if (!branch) return null
-  const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return null
+  if (!repo) return null
 
   const pr = await getOpenPrForBranch<{
     number: number
@@ -196,10 +203,6 @@ async function resolvePrContext(input: {
     author?: { login?: string }
   }>(branch, cwd, "number,title,author")
   if (!pr) return null
-
-  const repo = await getRepoNameWithOwner(cwd)
-  if (!repo) return null
-  const currentUser = await getCurrentGitHubUser(cwd)
 
   return { cwd, sessionId: input.session_id, pr, repo, currentUser }
 }
