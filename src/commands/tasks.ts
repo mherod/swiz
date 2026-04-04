@@ -439,20 +439,44 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
 
 // ─── Repair from audit trail ─────────────────────────────────────────────────
 
+interface RepairAction {
+  taskId: string
+  type: "reconstructed" | "status_fixed" | "orphaned"
+  subject: string
+  oldStatus?: string
+  newStatus?: string
+}
+
+interface RepairResult {
+  sessionId: string
+  dryRun: boolean
+  repaired: number
+  verified: number
+  total: number
+  actions: RepairAction[]
+}
+
 async function runRepairTasks(rest: string[]): Promise<void> {
   const dryRun = rest.includes("--dry-run")
-  const filteredRest = rest.filter((a) => a !== "--dry-run")
+  const jsonOutput = rest.includes("--json")
+  const filteredRest = rest.filter((a) => a !== "--dry-run" && a !== "--json")
   const sessionId = await resolveSession(filteredRest)
   const { createDefaultTaskStore } = await import("../task-roots.ts")
   const tasksDir = createDefaultTaskStore().tasksDir
 
   const auditEntries = await readAuditLog(sessionId, tasksDir)
   if (auditEntries.length === 0) {
-    console.log("  No audit log found for this session — nothing to repair.")
+    if (jsonOutput) {
+      console.log(
+        JSON.stringify({ sessionId, dryRun, repaired: 0, verified: 0, total: 0, actions: [] })
+      )
+    } else {
+      console.log("  No audit log found for this session — nothing to repair.")
+    }
     return
   }
 
-  if (dryRun) console.log("  [dry-run] No files will be modified.\n")
+  if (!jsonOutput && dryRun) console.log("  [dry-run] No files will be modified.\n")
 
   // Reconstruct authoritative task state from audit trail
   const reconstructed = new Map<string, { subject: string; status: string }>()
@@ -471,13 +495,12 @@ async function runRepairTasks(rest: string[]): Promise<void> {
 
   let repaired = 0
   let verified = 0
-  const discrepancies: string[] = []
+  const actions: RepairAction[] = []
 
   for (const [taskId, auditState] of reconstructed) {
     const fileTask = currentById.get(taskId)
 
     if (!fileTask) {
-      // Task file missing — reconstruct from audit
       if (!dryRun) {
         const task: Task = {
           id: taskId,
@@ -489,41 +512,70 @@ async function runRepairTasks(rest: string[]): Promise<void> {
         }
         await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(task, null, 2))
       }
-      const prefix = dryRun ? "[dry-run] would reconstruct" : "Reconstructed"
-      console.log(`  ✏️  ${prefix} #${taskId}: ${auditState.subject} [${auditState.status}]`)
+      actions.push({
+        taskId,
+        type: "reconstructed",
+        subject: auditState.subject,
+        newStatus: auditState.status,
+      })
+      if (!jsonOutput) {
+        const prefix = dryRun ? "[dry-run] would reconstruct" : "Reconstructed"
+        console.log(`  ✏️  ${prefix} #${taskId}: ${auditState.subject} [${auditState.status}]`)
+      }
       repaired++
     } else if (fileTask.status !== auditState.status) {
-      // Status mismatch — audit trail is authoritative
       const oldStatus = fileTask.status
       if (!dryRun) {
         fileTask.status = auditState.status as Task["status"]
         await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(fileTask, null, 2))
       }
-      const prefix = dryRun ? "[dry-run] would fix" : "Fixed"
-      console.log(
-        `  🔧 ${prefix} #${taskId} status: was "${oldStatus}", now "${auditState.status}"`
-      )
-      discrepancies.push(`#${taskId}: file="${oldStatus}" audit="${auditState.status}"`)
+      actions.push({
+        taskId,
+        type: "status_fixed",
+        subject: auditState.subject,
+        oldStatus,
+        newStatus: auditState.status,
+      })
+      if (!jsonOutput) {
+        const prefix = dryRun ? "[dry-run] would fix" : "Fixed"
+        console.log(`  🔧 ${prefix} #${taskId} status: "${oldStatus}" → "${auditState.status}"`)
+      }
       repaired++
     } else {
       verified++
     }
   }
 
-  // Post-repair validation: check for tasks on disk not in the audit log
+  // Post-repair validation: tasks on disk with no audit trail entry
   for (const task of currentTasks) {
     if (!reconstructed.has(task.id)) {
-      discrepancies.push(`#${task.id}: present on disk but absent from audit log`)
-      console.log(`  ⚠️  #${task.id} exists on disk but has no audit trail entry`)
+      actions.push({ taskId: task.id, type: "orphaned", subject: task.subject })
+      if (!jsonOutput) {
+        console.log(`  ⚠️  #${task.id} "${task.subject}" — on disk but absent from audit log`)
+      }
     }
   }
 
-  const verb = dryRun ? "would fix" : "fixed"
-  console.log(
-    `\n  Repair ${dryRun ? "(dry-run) " : ""}complete: ${repaired} ${verb}, ${verified} verified, ${reconstructed.size} total tasks.`
-  )
-  if (discrepancies.length > 0) {
-    console.log(`  ${discrepancies.length} discrepancy(ies) found.`)
+  const result: RepairResult = {
+    sessionId,
+    dryRun,
+    repaired,
+    verified,
+    total: reconstructed.size,
+    actions,
+  }
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(result, null, 2))
+  } else {
+    const verb = dryRun ? "would fix" : "fixed"
+    console.log(
+      `\n  Repair ${dryRun ? "(dry-run) " : ""}complete: ${repaired} ${verb}, ${verified} verified, ${reconstructed.size} total.`
+    )
+    if (actions.some((a) => a.type === "orphaned")) {
+      const orphanCount = actions.filter((a) => a.type === "orphaned").length
+      console.log(`  ${orphanCount} orphaned task(s) found on disk with no audit trail.`)
+    }
   }
 }
 
