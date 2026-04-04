@@ -103,6 +103,23 @@ export function hasSessionEventState(sessionId: string): boolean {
   return sessionTasks.has(sessionId)
 }
 
+/**
+ * Get the freshest task state for a session: event state when available
+ * (zero I/O, updated synchronously by PostToolUse hooks), falling back
+ * to a disk read via readSessionTasksFresh.
+ *
+ * Use this in PreToolUse and Stop hooks where Claude's native async disk
+ * writes may not have landed yet but the event state is already current.
+ */
+export async function readSessionTasksFreshest(sessionId: string): Promise<EventTaskState[]> {
+  const eventState = sessionTasks.get(sessionId)
+  if (eventState && eventState.length > 0) return eventState
+
+  const { readSessionTasksFresh } = await import("./task-recovery.ts")
+  const diskTasks = await readSessionTasksFresh(sessionId)
+  return diskTasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject ?? "" }))
+}
+
 // ─── Seeding ────────────────────────────────────────────────────────────────
 
 async function readTaskEventStatesFromDir(tasksDir: string): Promise<EventTaskState[]> {

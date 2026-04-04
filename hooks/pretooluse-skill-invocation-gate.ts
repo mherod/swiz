@@ -21,8 +21,11 @@ import {
   type SwizHook,
 } from "../src/SwizHook.ts"
 import { skillExists } from "../src/skill-utils.ts"
-import { isShellTool } from "../src/tool-matchers.ts"
-import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
+import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
+import {
+  getSkillsUsedForCurrentSession,
+  getToolsUsedForCurrentSession,
+} from "../src/transcript-summary.ts"
 import { GIT_COMMIT_RE, GIT_PUSH_DELETE_RE, GIT_PUSH_RE } from "../src/utils/git-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
@@ -66,6 +69,17 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const invokedSkills = await getSkillsUsedForCurrentSession(input)
 
     if (invokedSkills.includes(requiredSkill)) {
+      // For commits, also require TaskList to have been called — ensures the
+      // task state cache is synced before the commit workflow proceeds.
+      if (requiredSkill === "commit") {
+        const toolNames = await getToolsUsedForCurrentSession(input)
+        if (!toolNames.some((n) => isTaskListTool(n))) {
+          return preToolUseDeny(
+            "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
+              "Call TaskList to sync task state, then retry the commit."
+          )
+        }
+      }
       return preToolUseAllow(
         `/${requiredSkill} skill was invoked in this session.\n${formatSessionSkillsForReason(invokedSkills)}`
       )

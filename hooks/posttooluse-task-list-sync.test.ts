@@ -149,8 +149,9 @@ describe("posttooluse-task-list-sync", () => {
       { HOME: TMP_HOME }
     )
     expect(exitCode).toBe(0)
-    // No creates or updates → no output
-    expect(stdout).toBe("")
+    // No creates or updates, but count context is still emitted
+    const parsed = JSON.parse(stdout)
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Tasks: 1 total")
   })
 
   test("updates task file when status changes", async () => {

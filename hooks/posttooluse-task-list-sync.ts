@@ -18,6 +18,7 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { applyTaskListEvent } from "../src/tasks/task-event-state.ts"
 import {
   getSessionTaskPath,
@@ -226,10 +227,15 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
     }
   }
 
-  const summary = formatSyncSummary(syncResult, resolved.tasks.length)
-  if (!summary) return {}
+  // Build count context from the reconciled task state so the model sees
+  // task hygiene feedback (pending/in_progress warnings) after every TaskList.
+  const countContext = buildCountSummaryFromTasks(resolved.tasks)
 
-  return buildContextHookOutput("PostToolUse", summary)
+  const syncSummary = formatSyncSummary(syncResult, resolved.tasks.length)
+  const combinedContext = [syncSummary, countContext].filter(Boolean).join("\n\n")
+  if (!combinedContext) return {}
+
+  return buildContextHookOutput("PostToolUse", combinedContext)
 }
 
 const posttooluseTaskListSync: SwizHook<PostToolHookInput> = {
