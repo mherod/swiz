@@ -7,7 +7,8 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { isGitWorkingTreeClean, validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   buildLastTaskStandingDenial,
@@ -79,6 +80,28 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
+// ─── Task deletion governance ─────────────────────────────────────────────────
+// Block deletion if it would violate minimum pending task requirements.
+// Governance prevents accidentally deleting all pending tasks and losing the planning buffer.
+
+interface DeletionGovernanceThresholds {
+  minIncomplete: number
+  minPending: number
+}
+
+const DELETION_GOVERNANCE_THRESHOLDS = {
+  strict: { minIncomplete: 2, minPending: 1 },
+  relaxed: { minIncomplete: 1, minPending: 0 },
+  "local-dev": { minIncomplete: 1, minPending: 0 },
+} as const
+
+function resolveDeletionGovernanceThresholds(
+  auditStrictness: string
+): DeletionGovernanceThresholds {
+  const mode = auditStrictness as keyof typeof DELETION_GOVERNANCE_THRESHOLDS
+  return DELETION_GOVERNANCE_THRESHOLDS[mode] ?? DELETION_GOVERNANCE_THRESHOLDS.strict
+}
+
 // ─── Sliding-window completion rate limiter ─────────────────────────────────
 // Thresholds: 2 completions in 3s is fine. 3 in 5s is the top threshold.
 // 4+ in 5s triggers a hard cooldown block.
@@ -122,25 +145,98 @@ function checkCompletionRateLimit(sessionId: string): SwizHookOutput | null {
   return null
 }
 
+async function checkTaskDeletionGovernance(
+  taskId: string,
+  sessionId: string,
+  cwd: string | undefined
+): Promise<SwizHookOutput | null> {
+  try {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
+    ])
+    const allTasks = await readSessionTasks(sessionId)
+    const effectiveSettings = getEffectiveSwizSettings(
+      settings,
+      sessionId,
+      projectSettings ?? undefined
+    )
+    const thresholds = resolveDeletionGovernanceThresholds(effectiveSettings.auditStrictness)
+
+    // Count incomplete tasks if we remove this one
+    const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
+    const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
+    const taskBeingDeleted = allTasks.find((t) => t.id === taskId)
+
+    // If deleting an incomplete task, check if we'd fall below thresholds
+    if (taskBeingDeleted && isIncompleteTaskStatus(taskBeingDeleted.status)) {
+      const incompleteAfterDelete = incompleteTasks.length - 1
+      const isPendingTask = taskBeingDeleted.status === "pending"
+      const pendingAfterDelete = isPendingTask ? pendingTasks.length - 1 : pendingTasks.length
+
+      if (
+        incompleteAfterDelete < thresholds.minIncomplete ||
+        pendingAfterDelete < thresholds.minPending
+      ) {
+        return preToolUseDeny(
+          `STOP. Cannot delete task #${taskId} — it would violate governance thresholds.\n\n` +
+            `After deletion:\n` +
+            `  • Incomplete tasks: ${incompleteAfterDelete}/${thresholds.minIncomplete} (required)\n` +
+            `  • Pending tasks: ${pendingAfterDelete}/${thresholds.minPending} (required)\n\n` +
+            `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
+            `Use TaskCreate to add ${Math.max(0, thresholds.minIncomplete - incompleteAfterDelete)} incomplete task(s) ` +
+            `(including ${Math.max(0, thresholds.minPending - pendingAfterDelete)} pending), then retry the deletion.`
+        )
+      }
+    }
+  } catch {
+    // Settings/task read failures should not block deletion
+    return null
+  }
+  return null
+}
+
+async function handleTaskDeletionCompletion(
+  taskId: string,
+  sessionId: string,
+  cwd: string | undefined
+): Promise<SwizHookOutput | null> {
+  return await checkTaskDeletionGovernance(taskId, sessionId, cwd)
+}
+
+async function handleTaskCompletion(
+  taskId: string,
+  sessionId: string,
+  cwd: string | undefined
+): Promise<SwizHookOutput | null> {
+  const rateLimited = checkCompletionRateLimit(sessionId)
+  if (rateLimited) return rateLimited
+  return await denyIfLastTaskStanding(taskId, sessionId, cwd)
+}
+
 async function checkNativeTaskUpdateCompletion(
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
   const toolInput = (input.tool_input ?? {}) as Record<string, any>
-  if (toolInput.status !== "completed") return "early_exit"
-
   const taskId = String(toolInput.taskId ?? "")
   if (!taskId) return "early_exit"
 
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) return "early_exit"
 
-  // Rate limit: block completions that happen too quickly in succession
-  const rateLimited = checkCompletionRateLimit(sessionId)
-  if (rateLimited) return rateLimited
-
   const cwd = (input.cwd as string) ?? undefined
-  const denied = await denyIfLastTaskStanding(taskId, sessionId, cwd)
-  if (denied) return denied
+
+  // Check deletion governance before other validations
+  if (toolInput.status === "deleted") {
+    const deletionDenied = await handleTaskDeletionCompletion(taskId, sessionId, cwd)
+    if (deletionDenied) return deletionDenied
+    return "continue"
+  }
+
+  if (toolInput.status !== "completed") return "early_exit"
+
+  const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)
+  if (completionDenied) return completionDenied
   return "continue"
 }
 

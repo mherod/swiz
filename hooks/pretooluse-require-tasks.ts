@@ -480,6 +480,77 @@ async function tryParseAndGuard(input: Record<string, any>): Promise<ParsedInput
   return parsed
 }
 
+interface TaskDeletionContext {
+  taskBeingDeleted: { id: string; status: string; subject: string } | undefined
+  taskId: string
+  toolName: string
+  incompleteTasks: Array<{ id: string; status: string; subject: string }>
+  pendingTasks: Array<{ id: string; status: string; subject: string }>
+  thresholds: GovernanceThresholds
+}
+
+function checkTaskDeletionGovernance(ctx: TaskDeletionContext): SwizHookOutput | undefined {
+  if (!ctx.taskBeingDeleted || !isIncompleteTaskStatus(ctx.taskBeingDeleted.status)) {
+    return undefined
+  }
+
+  const incompleteAfterDelete = ctx.incompleteTasks.length - 1
+  const isPendingTask = ctx.taskBeingDeleted.status === "pending"
+  const pendingAfterDelete = isPendingTask ? ctx.pendingTasks.length - 1 : ctx.pendingTasks.length
+
+  if (
+    incompleteAfterDelete >= ctx.thresholds.minIncomplete &&
+    pendingAfterDelete >= ctx.thresholds.minPending
+  ) {
+    return undefined
+  }
+
+  return preToolUseDeny(
+    `STOP. Cannot delete task #${ctx.taskId} — it would violate governance thresholds.\n\n` +
+      `After deletion:\n` +
+      `  • Incomplete tasks: ${incompleteAfterDelete}/${ctx.thresholds.minIncomplete} (required)\n` +
+      `  • Pending tasks: ${pendingAfterDelete}/${ctx.thresholds.minPending} (required)\n\n` +
+      `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
+      formatActionPlan(
+        [
+          `Use TaskCreate to add ${Math.max(0, ctx.thresholds.minIncomplete - incompleteAfterDelete)} incomplete task(s) ` +
+            `(including ${Math.max(0, ctx.thresholds.minPending - pendingAfterDelete)} pending).`,
+          `Retry this ${ctx.toolName} call after the required tasks have been created.`,
+        ],
+        { translateToolNames: true }
+      )
+  )
+}
+
+function checkTaskDeletion(
+  toolName: string,
+  allTasks: Array<{ id: string; status: string; subject: string }>,
+  thresholds: GovernanceThresholds,
+  input: Record<string, any>
+): SwizHookOutput | undefined {
+  // Only check TaskUpdate calls to deleted status
+  if (toolName !== "TaskUpdate") return undefined
+  const toolInput = input?.tool_input as Record<string, any> | undefined
+  if (toolInput?.status !== "deleted") return undefined
+
+  const taskId = String(toolInput?.taskId ?? "")
+  if (!taskId) return undefined
+
+  // Count incomplete tasks if we remove this one
+  const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
+  const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
+  const taskBeingDeleted = allTasks.find((t) => t.id === taskId)
+
+  return checkTaskDeletionGovernance({
+    taskBeingDeleted,
+    taskId,
+    toolName,
+    incompleteTasks,
+    pendingTasks,
+    thresholds,
+  })
+}
+
 async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
 
@@ -501,6 +572,10 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
+
+  // Check task deletion governance before other checks
+  const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)
+  if (deletionOutcome) return deletionOutcome
 
   const noTasksOutcome = await checkNoTasks(toolName, cwd, sessionId, thresholds)(allTasks)
   if (noTasksOutcome) return noTasksOutcome
