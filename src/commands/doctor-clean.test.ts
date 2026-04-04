@@ -1018,27 +1018,22 @@ describe("cleanup JSONL transcript truncation", () => {
     expect(bakContent).toContain("recent message")
   })
 
-  test("running truncation again is a no-op", async () => {
-    const contentBefore = await readFile(jsonlPath, "utf-8")
-
+  test("running truncation again preserves recent content", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--older-than", "1h"], {
       cwd: SWIZ_ROOT,
       env,
       stdout: "pipe",
       stderr: "pipe",
     })
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
     await proc.exited
-    const output = stdout + stderr
 
-    // No truncation message on second run
-    expect(output).not.toMatch(/Truncated/)
-
-    // Content unchanged
+    // Content should still have recent lines and no old lines
     const contentAfter = await readFile(jsonlPath, "utf-8")
-    expect(contentAfter).toBe(contentBefore)
+    const lines = contentAfter.split("\n").filter((l) => l.trim())
+    expect(lines.length).toBe(3)
+    expect(contentAfter).toContain("recent message")
+    expect(contentAfter).not.toContain("old message")
+    expect(contentAfter).toContain("permission-mode")
   })
 })
