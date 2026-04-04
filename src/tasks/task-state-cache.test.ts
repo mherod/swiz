@@ -185,6 +185,68 @@ describe("TaskStateCache", () => {
     })
   })
 
+  describe("applyTaskListSnapshot", () => {
+    it("replaces cached state with full task list and recomputes counts", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-snap")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+
+      // Warm cache
+      await cache.getState("session-snap", sessionDir)
+
+      // Snapshot replaces with a different set of tasks
+      cache.applyTaskListSnapshot("session-snap", [
+        makeTask("1", "completed"),
+        makeTask("2", "in_progress"),
+        makeTask("3", "pending"),
+      ])
+
+      const state = await cache.getState("session-snap", sessionDir)
+      expect(state.tasks).toHaveLength(3)
+      expect(state.completedCount).toBe(1)
+      expect(state.inProgressCount).toBe(1)
+      expect(state.pendingCount).toBe(1)
+      expect(state.openCount).toBe(2)
+      expect(state.stale).toBe(false)
+      cache.close()
+    })
+
+    it("creates entry for uncached session", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-snap-cold")
+
+      // No prior getState — cold cache
+      cache.applyTaskListSnapshot("session-snap-cold", [
+        makeTask("1", "in_progress"),
+        makeTask("2", "pending"),
+      ])
+
+      expect(cache.has("session-snap-cold")).toBe(true)
+      const state = await cache.getState("session-snap-cold", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      expect(state.inProgressCount).toBe(1)
+      expect(state.pendingCount).toBe(1)
+      expect(state.stale).toBe(false)
+      cache.close()
+    })
+
+    it("sorts tasks by ID", () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+
+      cache.applyTaskListSnapshot("session-snap-sort", [
+        makeTask("3", "pending"),
+        makeTask("1", "pending"),
+        makeTask("2", "pending"),
+      ])
+
+      const entry = cache["entries"].get("session-snap-sort")!
+      expect(entry.tasks.map((t) => t.id)).toEqual(["1", "2", "3"])
+      cache.close()
+    })
+  })
+
   describe("removeTask", () => {
     it("removes task and recomputes counts", async () => {
       const cache = new TaskStateCache({ maxEntries: 10 })

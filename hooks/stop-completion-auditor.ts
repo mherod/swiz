@@ -20,6 +20,7 @@ import {
   readSessionTasksFresh,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
+import { isTaskListTool } from "../src/tool-matchers.ts"
 import {
   blockStopObj,
   computeTranscriptSummary,
@@ -309,6 +310,15 @@ async function runStopCompletionWhenTasksDirReady(opts: {
 
   const allTasks = await readSessionTasksFresh(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
+
+  // Require TaskList before stop when tasks exist — ensures cache is synced.
+  if (tasksDirExists && allTasks.length > 0 && !toolNames.some((n) => isTaskListTool(n))) {
+    return blockStopObj(
+      "Call TaskList before stopping to sync task state.\n\n" +
+        "Tasks exist but TaskList was never called this session. " +
+        "Run TaskList now, then retry stop."
+    )
+  }
 
   if (!tasksDirExists) {
     const block = await handleNoTasksDir(

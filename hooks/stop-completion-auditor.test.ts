@@ -161,7 +161,7 @@ async function createFixture(): Promise<{
   tasksDir: string
   transcriptPath: string
 }> {
-  return await createFixtureWithTools(Array.from({ length: 12 }, () => "Read"))
+  return await createFixtureWithTools([...Array.from({ length: 12 }, () => "Read"), "TaskList"])
 }
 
 async function createFixtureWithTools(toolNames: string[]): Promise<{
@@ -383,11 +383,15 @@ async function createFixtureWithPush(): Promise<{
       },
     })
   )
-  // TaskCreate + TaskUpdate to satisfy task detection
+  // TaskCreate + TaskList to satisfy task detection and TaskList gate
   lines.push(
     JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "TaskList", id: "tl1", input: {} }] },
     })
   )
 
@@ -543,6 +547,10 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
       JSON.stringify({
         type: "assistant",
         message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "TaskList", id: "tl1", input: {} }] },
       })
     )
 

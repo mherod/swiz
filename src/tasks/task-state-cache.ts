@@ -348,6 +348,28 @@ export class TaskStateCache {
   }
 
   /**
+   * Replace the entire cached task list for a session from a TaskList response.
+   * Recomputes counts and marks the entry as fresh. Creates a new entry if
+   * none exists yet (unlike applyTaskUpdate which is a no-op on cold cache).
+   */
+  applyTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
+    const sorted = [...tasks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    const counts = computeCounts(sorted)
+    const now = Date.now()
+    const existing = this.entries.get(sessionId)
+    const state: SessionTaskState = {
+      tasks: sorted,
+      ...counts,
+      loadedAtMs: existing?.loadedAtMs ?? now,
+      syncedAtMs: now,
+      stale: false,
+    }
+    this.entries.set(sessionId, state)
+    this.touchAccessOrder(sessionId)
+    this.evictIfNeeded()
+  }
+
+  /**
    * Remove a task from the cached state (e.g. after file deletion).
    */
   removeTask(sessionId: string, taskId: string): void {

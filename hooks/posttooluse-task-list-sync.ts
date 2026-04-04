@@ -102,18 +102,20 @@ function updateExistingTask(existing: SessionTask, task: NormalizedTask): Sessio
   return merged
 }
 
-interface SyncCounts {
+interface SyncResult {
   created: number
   updated: number
   skipped: number
+  /** All resolved SessionTask objects (written + unchanged) for cache write-through. */
+  resolvedTasks: SessionTask[]
 }
 
 async function reconcileTasks(
   tasks: NormalizedTask[],
   home: string,
   sessionId: string
-): Promise<SyncCounts> {
-  const counts: SyncCounts = { created: 0, updated: 0, skipped: 0 }
+): Promise<SyncResult> {
+  const result: SyncResult = { created: 0, updated: 0, skipped: 0, resolvedTasks: [] }
 
   for (const task of tasks) {
     const taskPath = getSessionTaskPath(sessionId, task.id, home)
@@ -126,7 +128,8 @@ async function reconcileTasks(
       const taskRecord = buildNewTaskRecord(task, new Date().toISOString(), Date.now())
       try {
         await Bun.write(taskPath, JSON.stringify(taskRecord, null, 2))
-        counts.created++
+        result.created++
+        result.resolvedTasks.push(taskRecord)
       } catch {}
       continue
     }
@@ -135,25 +138,28 @@ async function reconcileTasks(
     try {
       existing = (await file.json()) as SessionTask
     } catch {
-      counts.skipped++
+      result.skipped++
       continue
     }
 
     if (existing.subject === task.subject && existing.status === task.status) {
-      counts.skipped++
+      result.skipped++
+      result.resolvedTasks.push(existing)
       continue
     }
 
     const merged = updateExistingTask(existing, task)
     try {
       await Bun.write(taskPath, JSON.stringify(merged, null, 2))
-      counts.updated++
+      result.updated++
+      result.resolvedTasks.push(merged)
     } catch {
-      counts.skipped++
+      result.skipped++
+      result.resolvedTasks.push(existing)
     }
   }
 
-  return counts
+  return result
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -207,8 +213,20 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
     resolved.tasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject }))
   )
 
-  const counts = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
-  const summary = formatSyncSummary(counts, resolved.tasks.length)
+  const syncResult = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
+
+  // Write-through to the daemon's TaskStateCache so web UI and stop hooks
+  // see the reconciled state immediately without waiting for fs.watch.
+  if (syncResult.resolvedTasks.length > 0) {
+    try {
+      const { getGlobalTaskStateCache } = await import("../src/tasks/task-recovery.ts")
+      getGlobalTaskStateCache()?.applyTaskListSnapshot(resolved.sessionId, syncResult.resolvedTasks)
+    } catch {
+      // Cache not available — safe to ignore (subprocess or non-daemon path)
+    }
+  }
+
+  const summary = formatSyncSummary(syncResult, resolved.tasks.length)
   if (!summary) return {}
 
   return buildContextHookOutput("PostToolUse", summary)
