@@ -232,8 +232,10 @@ describe("TaskStateCache", () => {
       cache.close()
     })
 
-    it("sorts tasks by ID", () => {
+    it("sorts tasks by ID", async () => {
       const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-snap-sort")
 
       cache.applyTaskListSnapshot("session-snap-sort", [
         makeTask("3", "pending"),
@@ -241,8 +243,8 @@ describe("TaskStateCache", () => {
         makeTask("2", "pending"),
       ])
 
-      const entry = cache["entries"].get("session-snap-sort")!
-      expect(entry.tasks.map((t) => t.id)).toEqual(["1", "2", "3"])
+      const state = await cache.getState("session-snap-sort", sessionDir)
+      expect(state.tasks.map((t) => t.id)).toEqual(["1", "2", "3"])
       cache.close()
     })
   })

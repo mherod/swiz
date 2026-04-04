@@ -49,7 +49,7 @@ const VALID_TRANSITIONS: Record<string, Set<string>> = {
 export function isValidTransition(oldStatus: string, newStatus: string): boolean {
   if (oldStatus === newStatus) return true
   const allowed = VALID_TRANSITIONS[oldStatus]
-  return allowed !== undefined && allowed.has(newStatus)
+  return allowed?.has(newStatus) ?? false
 }
 
 /**
