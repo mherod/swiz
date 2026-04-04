@@ -13,8 +13,11 @@ import {
 
 export { isDefaultBranch } from "../git-helpers.ts"
 
+const _defaultBranchCache = new Map<string, string>()
+
 /**
  * Resolve the effective default branch for a repository.
+ * Caches result per-cwd for the lifetime of the process (default branch is immutable within a session).
  * Precedence:
  *   1. Project setting `.swiz/config.json` → `defaultBranch`
  *   2. Fork workflow: `upstream/HEAD` (the canonical repo's default branch)
@@ -24,29 +27,49 @@ export { isDefaultBranch } from "../git-helpers.ts"
  *   6. Fallback `main`
  */
 export async function getDefaultBranch(cwd: string): Promise<string> {
+  const cached = _defaultBranchCache.get(cwd)
+  if (cached) return cached
+
   const projectSettings = await readProjectSettings(cwd)
   const configured = projectSettings?.defaultBranch?.trim()
-  if (configured) return configured
+  if (configured) {
+    _defaultBranchCache.set(cwd, configured)
+    return configured
+  }
 
   // In fork workflows, the upstream remote is the source of truth for the default branch.
   const fork = await detectForkTopology(cwd)
   if (fork) {
     const upstreamHeadRef = await git(["symbolic-ref", "refs/remotes/upstream/HEAD"], cwd)
     const upstreamHead = upstreamHeadRef.replace(/^refs\/remotes\/upstream\//, "").trim()
-    if (upstreamHead) return upstreamHead
+    if (upstreamHead) {
+      _defaultBranchCache.set(cwd, upstreamHead)
+      return upstreamHead
+    }
   }
 
   const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
   const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
-  if (remoteHead) return remoteHead
+  if (remoteHead) {
+    _defaultBranchCache.set(cwd, remoteHead)
+    return remoteHead
+  }
 
   const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
-  if (localMain) return "main"
+  if (localMain) {
+    _defaultBranchCache.set(cwd, "main")
+    return "main"
+  }
 
   const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
-  if (localMaster) return "master"
+  if (localMaster) {
+    _defaultBranchCache.set(cwd, "master")
+    return "master"
+  }
 
-  return "main"
+  const result = "main"
+  _defaultBranchCache.set(cwd, result)
+  return result
 }
 
 // ── Git status parsing ────────────────────────────────────────────────────────

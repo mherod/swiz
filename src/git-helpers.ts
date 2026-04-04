@@ -255,10 +255,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   return (await git(["rev-parse", "--git-dir"], cwd)) !== ""
 }
 
-export async function isGitHubRemote(cwd: string): Promise<boolean> {
-  const url = await git(["remote", "get-url", "origin"], cwd)
-  return url.includes("github.com")
-}
+const _repoSlugCache = new Map<string, string | null>()
 
 /** Get the owner/repo slug from a git remote URL (e.g., "mherod/swiz"). */
 export function slugFromRemoteUrl(url: string): string | null {
@@ -272,10 +269,18 @@ export function slugFromRemoteUrl(url: string): string | null {
   return null
 }
 
-/** Get the owner/repo slug from the origin remote URL (e.g., "mherod/swiz"). */
+/** Get the owner/repo slug from the origin remote URL (e.g., "mherod/swiz"). Caches per-cwd. */
 export async function getRepoSlug(cwd: string): Promise<string | null> {
+  const cached = _repoSlugCache.get(cwd)
+  if (cached !== undefined) return cached
   const url = await git(["remote", "get-url", "origin"], cwd)
-  return slugFromRemoteUrl(url)
+  const slug = slugFromRemoteUrl(url)
+  _repoSlugCache.set(cwd, slug)
+  return slug
+}
+
+export async function isGitHubRemote(cwd: string): Promise<boolean> {
+  return (await getRepoSlug(cwd)) !== null
 }
 
 /** Get the owner/repo slug from the "upstream" remote, if configured. */

@@ -32,14 +32,22 @@ export async function collectPersonalRepoIssuesStopParsed(
   parsed: StopHookInput
 ): Promise<PersonalRepoIssuesCollect | null> {
   try {
-    const ctx = await resolveRepoContext(parsed)
+    // Parallelize: resolveRepoContext + settings import (independent)
+    const [ctx, settingsModule] = await Promise.all([
+      resolveRepoContext(parsed),
+      import("../../src/settings.ts"),
+    ])
     if (!ctx) return null
 
-    const { getEffectiveSwizSettings, readSwizSettings } = await import("../../src/settings.ts")
+    const { getEffectiveSwizSettings, readSwizSettings } = settingsModule
     const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
     const strictNoDirectMain = settings.strictNoDirectMain
 
-    const prs = await getOpenPRsWithFeedback(ctx.cwd, ctx.currentUser)
+    // Parallelize: PR/issue fetching + project state read (independent)
+    const [prs, projectState] = await Promise.all([
+      getOpenPRsWithFeedback(ctx.cwd, ctx.currentUser),
+      readProjectState(ctx.cwd),
+    ])
     const hasChangesRequested = prs.some(
       (p) => openPrNeedsStopAttention(p) && p.reviewDecision === "CHANGES_REQUESTED"
     )
@@ -51,8 +59,6 @@ export async function collectPersonalRepoIssuesStopParsed(
       hasChangesRequested,
       allOpenPRIssueNumbers
     )
-
-    const projectState = await readProjectState(ctx.cwd)
     const stopCtx = buildStopContext(ctx, prs, gathered, projectState, strictNoDirectMain)
     if (!stopCtx) return null
 

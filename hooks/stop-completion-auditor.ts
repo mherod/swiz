@@ -136,31 +136,38 @@ async function checkAuditLogAllowsStop(
   return null
 }
 
-/** Search sibling sessions (by transcript) for CI evidence. */
+/** Search sibling sessions (by transcript) for CI evidence. Parallelizes session reads. */
 async function findCiEvidenceInSiblings(
   transcript: string,
   sessionId: string,
   home: string
 ): Promise<boolean> {
   const siblingIds = await findProjectSessionIds(transcript, sessionId)
-  for (const sibId of siblingIds) {
-    const sibTasks = await readSessionTasks(sibId, home)
-    if (anyTaskHasCiEvidence(sibTasks)) return true
-  }
-  return false
+  if (siblingIds.length === 0) return false
+  const results = await Promise.all(
+    siblingIds.map(async (sibId) => {
+      const sibTasks = await readSessionTasks(sibId, home)
+      return anyTaskHasCiEvidence(sibTasks)
+    })
+  )
+  return results.some(Boolean)
 }
 
-/** Fallback: scan all task directories for CI evidence. */
+/** Fallback: scan all task directories for CI evidence. Parallelizes session reads. */
 async function findCiEvidenceInAllSessions(sessionId: string, home: string): Promise<boolean> {
   const tasksRoot = getTasksRoot(home)
   if (!tasksRoot) return false
   try {
     const taskSessionIds = await readdir(tasksRoot)
-    for (const sibId of taskSessionIds) {
-      if (sibId === sessionId) continue
-      const sibTasks = await readSessionTasks(sibId, home)
-      if (anyTaskHasCiEvidence(sibTasks)) return true
-    }
+    const otherSessionIds = taskSessionIds.filter((sibId) => sibId !== sessionId)
+    if (otherSessionIds.length === 0) return false
+    const results = await Promise.all(
+      otherSessionIds.map(async (sibId) => {
+        const sibTasks = await readSessionTasks(sibId, home)
+        return anyTaskHasCiEvidence(sibTasks)
+      })
+    )
+    return results.some(Boolean)
   } catch {
     // Ignore unreadable task roots; CI evidence check will fail closed.
   }
