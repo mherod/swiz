@@ -138,6 +138,18 @@ export function applyTaskCreateEvent(sessionId: string, taskId: string, subject:
     tasks.push({ id: taskId, status: "pending", subject })
   }
   sessionTasks.set(sessionId, tasks)
+
+  // Post-condition: after creating a task, there must be at least one
+  // incomplete (pending/in_progress) task. If not, the event state is
+  // inconsistent — flag for reconciliation via TaskList.
+  const hasIncomplete = tasks.some((t) => t.status === "pending" || t.status === "in_progress")
+  if (!hasIncomplete) {
+    debugLog(
+      `[task-transition] impossible state after create: task #${taskId} in session ` +
+        `${sessionId.slice(0, 8)}… has zero incomplete tasks. Reconciliation flag set.`
+    )
+    reconciliationNeeded.add(sessionId)
+  }
 }
 
 /**
