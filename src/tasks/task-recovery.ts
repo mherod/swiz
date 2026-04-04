@@ -442,6 +442,18 @@ export function applyCacheTaskUpdate(sessionId: string, task: SessionTask): void
   }
 }
 
+/**
+ * Replace the entire cached task list for a session (TaskList snapshot).
+ * No-op when the cache is absent. Safe to call from any hook — never throws.
+ */
+export function applyCacheTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
+  try {
+    getGlobalTaskStateCache()?.applyTaskListSnapshot(sessionId, tasks)
+  } catch {
+    // Cache not available — safe to ignore
+  }
+}
+
 /** Strict task file shape with all timing fields required — used by builders. */
 export type TaskFile = Required<
   Pick<

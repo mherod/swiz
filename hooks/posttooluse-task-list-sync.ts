@@ -21,6 +21,7 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { applyTaskListEvent } from "../src/tasks/task-event-state.ts"
 import {
+  applyCacheTaskListSnapshot,
   getSessionTaskPath,
   getSessionTasksDir,
   type SessionTask,
@@ -219,12 +220,7 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   // Write-through to the daemon's TaskStateCache so web UI and stop hooks
   // see the reconciled state immediately without waiting for fs.watch.
   if (syncResult.resolvedTasks.length > 0) {
-    try {
-      const { getGlobalTaskStateCache } = await import("../src/tasks/task-recovery.ts")
-      getGlobalTaskStateCache()?.applyTaskListSnapshot(resolved.sessionId, syncResult.resolvedTasks)
-    } catch {
-      // Cache not available — safe to ignore (subprocess or non-daemon path)
-    }
+    applyCacheTaskListSnapshot(resolved.sessionId, syncResult.resolvedTasks)
   }
 
   // Build count context from the reconciled task state so the model sees
