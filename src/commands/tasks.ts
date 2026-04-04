@@ -1,6 +1,9 @@
+import { writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { PROJECT_STATES } from "../settings.ts"
+import { readAuditLog } from "../tasks/task-audit-verification.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
 import {
@@ -434,6 +437,71 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
 }
 
+// ─── Repair from audit trail ─────────────────────────────────────────────────
+
+async function runRepairTasks(rest: string[]): Promise<void> {
+  const sessionId = await resolveSession(rest)
+  const { createDefaultTaskStore } = await import("../task-roots.ts")
+  const tasksDir = createDefaultTaskStore().tasksDir
+
+  const auditEntries = await readAuditLog(sessionId, tasksDir)
+  if (auditEntries.length === 0) {
+    console.log("  No audit log found for this session — nothing to repair.")
+    return
+  }
+
+  // Reconstruct authoritative task state from audit trail
+  const reconstructed = new Map<string, { subject: string; status: string }>()
+  for (const entry of auditEntries) {
+    const existing = reconstructed.get(entry.taskId)
+    reconstructed.set(entry.taskId, {
+      subject: entry.subject ?? existing?.subject ?? `Task ${entry.taskId}`,
+      status: entry.newStatus ?? existing?.status ?? "pending",
+    })
+  }
+
+  // Compare against current task files
+  const currentTasks = await readTasks(sessionId, tasksDir)
+  const currentById = new Map(currentTasks.map((t) => [t.id, t]))
+  const sessionDir = join(tasksDir, sessionId)
+
+  let repaired = 0
+  let verified = 0
+
+  for (const [taskId, auditState] of reconstructed) {
+    const fileTask = currentById.get(taskId)
+
+    if (!fileTask) {
+      // Task file missing — reconstruct from audit
+      const task: Task = {
+        id: taskId,
+        subject: auditState.subject,
+        description: "Reconstructed from audit trail.",
+        status: auditState.status as Task["status"],
+        blocks: [],
+        blockedBy: [],
+      }
+      await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(task, null, 2))
+      console.log(`  ✏️  Reconstructed #${taskId}: ${auditState.subject} [${auditState.status}]`)
+      repaired++
+    } else if (fileTask.status !== auditState.status) {
+      // Status mismatch — audit trail is authoritative
+      fileTask.status = auditState.status as Task["status"]
+      await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(fileTask, null, 2))
+      console.log(
+        `  🔧 Fixed #${taskId} status: was "${currentById.get(taskId)!.status}", now "${auditState.status}"`
+      )
+      repaired++
+    } else {
+      verified++
+    }
+  }
+
+  console.log(
+    `\n  Repair complete: ${repaired} fixed, ${verified} verified, ${reconstructed.size} total tasks.`
+  )
+}
+
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   TaskCreate: (rest) => {
@@ -468,12 +536,13 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
     const sessionId = await resolveSession(rest)
     await adoptOrphanedTasks(sessionId, process.cwd())
   },
+  repair: (rest) => runRepairTasks(rest),
 }
 
 // ─── Claude Code native-tool guard ───────────────────────────────────────────
 
 /** Subcommands with no native equivalent — only these may run via CLI inside Claude Code. */
-const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt", "TaskCreate", "TaskUpdate"])
+const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt", "repair", "TaskCreate", "TaskUpdate"])
 
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()

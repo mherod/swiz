@@ -397,7 +397,8 @@ export function validateTransition(oldStatus: string, newStatus: string): string
 /**
  * Check whether the git working tree is clean (no uncommitted or untracked files).
  * Returns true when `git status --porcelain` produces no output.
- * Falls back to false on any error (missing git, not a repo, etc.).
+ * Also returns true when not in a git repo or git is unavailable — there's
+ * no repository to protect, so the guard should be relaxed.
  */
 export function isGitWorkingTreeClean(cwd?: string): boolean {
   try {
@@ -406,9 +407,11 @@ export function isGitWorkingTreeClean(cwd?: string): boolean {
       stdout: "pipe",
       stderr: "pipe",
     })
-    return proc.exitCode === 0 && proc.stdout.toString().trim() === ""
+    // Non-zero exit = not a git repo or git unavailable → treat as clean
+    if (proc.exitCode !== 0) return true
+    return proc.stdout.toString().trim() === ""
   } catch {
-    return false
+    return true
   }
 }
 
