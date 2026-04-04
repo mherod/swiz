@@ -17,13 +17,14 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { readSessionTasksFreshest } from "../src/tasks/task-event-state.ts"
+import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
   formatTaskList,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
+  readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
@@ -494,7 +495,17 @@ async function runChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
     // Settings read failure → use strict thresholds as default
   }
 
-  const allTasks = await readSessionTasksFreshest(sessionId)
+  // Read full tasks from disk (needed for timing fields), then overlay
+  // event state statuses which are fresher than async native disk writes.
+  const allTasks = await readSessionTasksFresh(sessionId)
+  const eventState = getSessionEventState(sessionId)
+  if (eventState && eventState.length > 0) {
+    const statusById = new Map(eventState.map((e) => [e.id, e.status]))
+    for (const t of allTasks) {
+      const freshStatus = statusById.get(t.id)
+      if (freshStatus) t.status = freshStatus
+    }
+  }
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
