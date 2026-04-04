@@ -152,12 +152,9 @@ export function scheduleIncomingDispatchCapture(args: IncomingDispatchCaptureArg
   })
 }
 
-async function writeIncomingDispatchCapture(args: IncomingDispatchCaptureArgs): Promise<void> {
-  await mkdir(SWIZ_INCOMING_ROOT, { recursive: true })
-  await pruneStaleIncomingCaptures()
-  const filename = buildIncomingCaptureFilename(args.hookEventName)
-  const path = join(SWIZ_INCOMING_ROOT, filename)
-
+export function buildIncomingDispatchCaptureEnvelope(
+  args: IncomingDispatchCaptureArgs
+): Record<string, any> {
   const envelope: Record<string, any> = {
     _swizIncomingCapture: {
       canonicalEvent: args.canonicalEvent,
@@ -176,5 +173,16 @@ async function writeIncomingDispatchCapture(args: IncomingDispatchCaptureArgs): 
     envelope.afterNormalizeAndBackfill = sanitizeDispatchPayloadForCapture(args.normalizedPayload)
   }
 
+  return envelope
+}
+
+export async function writeIncomingDispatchCapture(
+  args: IncomingDispatchCaptureArgs
+): Promise<void> {
+  await mkdir(SWIZ_INCOMING_ROOT, { recursive: true })
+  await pruneStaleIncomingCaptures()
+  const filename = buildIncomingCaptureFilename(args.hookEventName)
+  const path = join(SWIZ_INCOMING_ROOT, filename)
+  const envelope = buildIncomingDispatchCaptureEnvelope(args)
   await Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`)
 }

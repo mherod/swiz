@@ -132,9 +132,69 @@ describe("dispatch routing", () => {
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
 
-    expect(proc.exitCode).toBe(1)
-    expect(stdout.trim()).toBe("")
+    expect(proc.exitCode).toBe(0)
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed.systemMessage).toContain("Dispatch runtime failure in preToolUse")
+    expect(parsed.systemMessage).toContain("/tmp/swiz-dispatch.log")
+    expect(stderr).toContain("Falling back to allow")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
+  })
+
+  test("falls back to allow on invalid stdin JSON and captures the error", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "postToolUse", "PostToolUse"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+      },
+    })
+
+    await proc.stdin.write("{")
+    await proc.stdin.end()
+
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed.systemMessage).toContain("Dispatch runtime failure in postToolUse")
+    expect(parsed.systemMessage).toContain("/tmp/swiz-dispatch.log")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain(
+      'Invalid dispatch payload for event "postToolUse"'
+    )
+    expect(stderr).toContain("Falling back to allow")
+    expect(stderr).toContain('Invalid dispatch payload for event "postToolUse"')
+  })
+
+  test("falls back to allow on forced runtime failure after stdin parsing", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "postToolUse", "PostToolUse"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+        SWIZ_TEST_FORCE_DISPATCH_FAILURE: "1",
+      },
+    })
+
+    await proc.stdin.write(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: "echo ok" } })
+    )
+    await proc.stdin.end()
+
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed.systemMessage).toContain("Dispatch runtime failure in postToolUse")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("forced dispatch failure")
+    expect(stderr).toContain("Falling back to allow")
   })
 
   test("dispatches directly to daemon without health check", async () => {

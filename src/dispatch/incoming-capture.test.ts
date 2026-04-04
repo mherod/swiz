@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   buildIncomingCaptureFilename,
+  buildIncomingDispatchCaptureEnvelope,
   normalizeEventNameToCanonical,
   pruneStaleIncomingCaptures,
   SWIZ_INCOMING_RETENTION_MS,
@@ -57,6 +58,35 @@ describe("incoming-capture", () => {
     expect(out.user_email).toBe("[redacted]")
     expect(out.cwd).toBe("/proj")
     expect(out.tool_name).toBe("Bash")
+  })
+
+  it("buildIncomingDispatchCaptureEnvelope keeps incoming raw before normalization", () => {
+    const envelope = buildIncomingDispatchCaptureEnvelope({
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      parseError: false,
+      payloadStr: '{"tool_name":"raw","user_email":"user@example.com"}',
+      incomingBeforeNormalize: {
+        tool_name: "raw",
+        user_email: "user@example.com",
+        _env: { SECRET: "x" },
+      },
+      normalizedPayload: {
+        tool_name: "normalized",
+        user_email: "user@example.com",
+        cwd: "/proj",
+        _env: { SECRET: "x" },
+      },
+    })
+
+    expect(envelope._swizIncomingCapture.canonicalEvent).toBe("preToolUse")
+    expect(envelope._swizIncomingCapture.hookEventName).toBe("PreToolUse")
+    expect(envelope._swizIncomingCapture.parseError).toBe(false)
+    expect(envelope.incoming.tool_name).toBe("raw")
+    expect(envelope.incoming._env).toBeUndefined()
+    expect(envelope.incoming.user_email).toBe("[redacted]")
+    expect(envelope.afterNormalizeAndBackfill.tool_name).toBe("normalized")
+    expect(envelope.afterNormalizeAndBackfill.cwd).toBe("/proj")
   })
 
   it("sanitizeHookFilenameSegment strips unsafe characters", () => {

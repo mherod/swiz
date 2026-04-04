@@ -37,10 +37,6 @@ import {
 } from "./dispatch-zod-surfaces.ts"
 import { type HookExecution, writeResponse } from "./engine.ts"
 import {
-  scheduleIncomingDispatchCapture,
-  shouldCaptureIncomingPayloads,
-} from "./incoming-capture.ts"
-import {
   applyHookSettingFilters,
   countHooks,
   DISPATCH_ROUTES,
@@ -335,12 +331,6 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
   const { payload, parseError } = parsePayload(payloadStr)
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
 
-  const captureIncoming = shouldCaptureIncomingPayloads()
-  let incomingBeforeNormalize: Record<string, any> | null = null
-  if (captureIncoming) {
-    incomingBeforeNormalize = structuredClone(payload) as Record<string, any>
-  }
-
   normalizeAgentHookPayload(payload)
   backfillPayloadDefaults(payload)
   const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
@@ -353,17 +343,6 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
   logPayloadDiagnostics(payloadStr, payload, canonicalEvent)
 
   const cwd = (payload.cwd as string) ?? process.cwd()
-
-  if (captureIncoming) {
-    scheduleIncomingDispatchCapture({
-      canonicalEvent,
-      hookEventName,
-      parseError: false,
-      payloadStr,
-      incomingBeforeNormalize,
-      normalizedPayload: structuredClone(payload) as Record<string, any>,
-    })
-  }
 
   return { canonicalEvent, hookEventName, payload, payloadStr, cwd, toolName, trigger }
 }

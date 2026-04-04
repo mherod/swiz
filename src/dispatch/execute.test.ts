@@ -77,6 +77,27 @@ describe("dispatch execute integration", () => {
       expect(executeDispatch(req)).rejects.toBeInstanceOf(DispatchPayloadValidationError)
     })
 
+    it("accepts Codex-style postToolUse payloads with nullable transcript_path", async () => {
+      const req: DispatchRequest = {
+        canonicalEvent: "postToolUse",
+        hookEventName: "PostToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "codex-session",
+          transcript_path: null,
+          turn_id: "turn-1",
+          tool_name: "Bash",
+          tool_use_id: "tool-1",
+          tool_input: { command: "echo hi" },
+          tool_response: '{"output":"hi"}',
+        }),
+        daemonContext: true,
+      }
+      const result = await executeDispatch(req)
+      expect(result).toBeDefined()
+      expect(result.response).toBeDefined()
+    })
+
     it("accepts daemonContext flag without error", async () => {
       const req: DispatchRequest = {
         canonicalEvent: "nonexistentEvent",

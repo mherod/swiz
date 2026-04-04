@@ -44,8 +44,23 @@ import {
 
 const LOG_PATH = swizDispatchLogPath()
 
+// CLI dispatches run in a dedicated process, so a module-global flag is enough
+// to avoid emitting a second fallback JSON envelope after a response is already written.
+let responseWritten = false
+
 // Re-export for barrel (index.ts) and downstream consumers.
 export { classifyHookOutput, DEFAULT_TIMEOUT }
+export function markDispatchResponseWritten(): void {
+  responseWritten = true
+}
+
+export function resetDispatchResponseWriteState(): void {
+  responseWritten = false
+}
+
+export function didWriteDispatchResponse(): boolean {
+  return responseWritten
+}
 
 /** Slow-hook threshold: hooks taking longer than this are flagged in the log.
  *  Configurable via SWIZ_SLOW_HOOK_THRESHOLD_MS env var. Default: 3 seconds. */
@@ -544,6 +559,7 @@ export { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields }
 /** Write the final hook response to process.stdout. Exported for strategies. */
 export function writeResponse(response: Record<string, any>): void {
   const agent = stripInternalDispatchFields(response)
+  markDispatchResponseWritten()
   process.stdout.write(`${JSON.stringify(agent)}\n`)
 }
 

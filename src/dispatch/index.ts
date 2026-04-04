@@ -48,6 +48,7 @@ export {
   buildSpawnContext,
   classifyHookOutput,
   DEFAULT_TIMEOUT,
+  didWriteDispatchResponse,
   extractAllowReason,
   extractContext,
   groupMatches,
@@ -60,7 +61,9 @@ export {
   launchAsyncHooks,
   log,
   logHeader,
+  markDispatchResponseWritten,
   type PreParsedSpawnContext,
+  resetDispatchResponseWriteState,
   runHook,
   type SkipReason,
   toolMatchesToken,
@@ -87,6 +90,10 @@ export {
   markHookCooldown,
   resolvePrMergeActive,
 } from "./filters.ts"
+export {
+  scheduleIncomingDispatchCapture,
+  shouldCaptureIncomingPayloads,
+} from "./incoming-capture.ts"
 export { normalizeAgentHookPayload } from "./payload-normalize.ts"
 export {
   formatTrace,

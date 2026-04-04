@@ -31,6 +31,10 @@ import {
   type StopHookInput,
   type ToolHookInput,
 } from "../hooks/schemas.ts"
+import {
+  shouldCaptureIncomingPayloads,
+  writeIncomingDispatchCapture,
+} from "./dispatch/incoming-capture.ts"
 import type { EffectiveSwizSettings } from "./settings"
 import {
   extractHookSystemMessagePreview,
@@ -73,11 +77,16 @@ async function handleSwizHookStdinParseError(
   process.exit(1)
 }
 
+async function readSwizHookStdinRaw(): Promise<string> {
+  return await new Response(Bun.stdin.stream()).text()
+}
+
 async function parseSwizHookStdin(
+  raw: string,
   options?: RunSwizHookAsMainOptions
 ): Promise<Record<string, any>> {
   try {
-    const parsed = (await Bun.stdin.json()) as unknown
+    const parsed = JSON.parse(raw) as unknown
     if (!isJsonLikeRecord(parsed)) process.exit(0)
     return parsed
   } catch (err) {
@@ -126,8 +135,20 @@ export async function runSwizHookAsMain(
   hook: SwizHook<Record<string, any>>,
   options?: RunSwizHookAsMainOptions
 ): Promise<void> {
-  const input = await parseSwizHookStdin(options)
+  const raw = await readSwizHookStdinRaw()
+  const input = await parseSwizHookStdin(raw, options)
+  const incomingBeforeNormalize = structuredClone(input)
   await injectEffectiveSettingsIfMissing(input)
+  if (shouldCaptureIncomingPayloads()) {
+    await writeIncomingDispatchCapture({
+      canonicalEvent: hook.event,
+      hookEventName: hook.name,
+      parseError: false,
+      payloadStr: raw,
+      incomingBeforeNormalize,
+      normalizedPayload: structuredClone(input),
+    })
+  }
   const output = await hook.run(input)
   await emitHookOutputIfNonEmpty(output)
 }

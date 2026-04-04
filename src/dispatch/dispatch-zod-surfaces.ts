@@ -6,6 +6,11 @@
 import { merge, omit, unset } from "lodash-es"
 import { z } from "zod"
 import {
+  codexPostToolUseInputSchema,
+  codexPreToolUseInputSchema,
+  codexSessionStartInputSchema,
+  codexStopInputSchema,
+  codexUserPromptSubmitInputSchema,
   hookOutputSchema,
   notificationHookInputSchema,
   postCompactHookInputSchema,
@@ -36,12 +41,21 @@ const fallbackInboundSchema = dispatchInboundObjectSchema
  * Unknown events use a plain object record schema.
  */
 export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record<string, any>>> = {
-  preToolUse: toolHookInputSchema as z.ZodType<Record<string, any>>,
-  postToolUse: postToolUseHookInputSchema as z.ZodType<Record<string, any>>,
-  stop: stopHookInputSchema as z.ZodType<Record<string, any>>,
+  preToolUse: z.union([toolHookInputSchema, codexPreToolUseInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
+  postToolUse: z.union([postToolUseHookInputSchema, codexPostToolUseInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
+  stop: z.union([stopHookInputSchema, codexStopInputSchema]) as z.ZodType<Record<string, any>>,
   subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
-  sessionStart: sessionStartHookInputSchema as z.ZodType<Record<string, any>>,
-  userPromptSubmit: userPromptSubmitHookInputSchema as z.ZodType<Record<string, any>>,
+  sessionStart: z.union([sessionStartHookInputSchema, codexSessionStartInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
+  userPromptSubmit: z.union([
+    userPromptSubmitHookInputSchema,
+    codexUserPromptSubmitInputSchema,
+  ]) as z.ZodType<Record<string, any>>,
   preCompact: postCompactHookInputSchema as z.ZodType<Record<string, any>>,
   notification: notificationHookInputSchema as z.ZodType<Record<string, any>>,
   subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, any>>,

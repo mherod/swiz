@@ -6,26 +6,33 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
-import { debugLog } from "../debug.ts"
+import { appendFile } from "node:fs/promises"
+import { debugLog, stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
   assertDispatchInboundNotParseError,
   assertNormalizedDispatchPayload,
   DISPATCH_ROUTES,
+  didWriteDispatchResponse,
   formatTrace,
   getHookContext,
   groupMatches,
   log,
+  markDispatchResponseWritten,
   normalizeAgentHookPayload,
   parsePayload,
   replayBlocking,
   replayContext,
   replayPreToolUse,
+  resetDispatchResponseWriteState,
+  shouldCaptureIncomingPayloads,
   withLogBuffer,
 } from "../dispatch"
+import { writeIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
+import { swizDispatchLogPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
@@ -242,6 +249,82 @@ interface DispatchTiming {
   stdinMs: number
 }
 
+function isStopLikeEvent(canonicalEvent: string): boolean {
+  return canonicalEvent === "stop" || canonicalEvent === "subagentStop"
+}
+
+function describeDispatchFailure(err: unknown): { message: string; detail: string } {
+  if (err instanceof Error) {
+    return {
+      message: err.message,
+      detail: err.stack ?? `${err.name}: ${err.message}`,
+    }
+  }
+
+  const fallback = typeof err === "string" ? err : JSON.stringify(err, null, 2)
+  return {
+    message: fallback,
+    detail: fallback,
+  }
+}
+
+async function captureDispatchFailure(
+  scope: string,
+  canonicalEvent: string,
+  hookEventName: string | undefined,
+  err: unknown
+): Promise<string> {
+  const { detail } = describeDispatchFailure(err)
+  const logPath = swizDispatchLogPath()
+  const details = [
+    "",
+    `── ${new Date().toISOString()} ── dispatch failure ──`,
+    `   scope: ${scope}`,
+    `   event: ${canonicalEvent}`,
+    `   hookEventName: ${hookEventName ?? "(none)"}`,
+    `   pid: ${process.pid}`,
+    `   cwd: ${process.cwd()}`,
+    ...detail.split("\n").map((line) => `   ${line}`),
+    "",
+  ].join("\n")
+
+  try {
+    await appendFile(logPath, details)
+  } catch {}
+  return logPath
+}
+
+function buildDispatchFailureFallback(
+  canonicalEvent: string,
+  hookEventName: string,
+  err: unknown,
+  logPath: string
+): Record<string, any> {
+  const { message } = describeDispatchFailure(err)
+  const systemMessage = `Dispatch runtime failure in ${canonicalEvent}. Allowed by fallback; details captured in ${logPath}.`
+  const response = isStopLikeEvent(canonicalEvent)
+    ? {
+        continue: true,
+        reason: message,
+        stopReason: message,
+        systemMessage,
+      }
+    : {
+        systemMessage,
+        hookSpecificOutput: {
+          hookEventName,
+          additionalContext: `Dispatch failed: ${message}. See ${logPath}.`,
+        },
+      }
+  return response
+}
+
+function maybeForceDispatchFailureForTesting(): void {
+  if (process.env.SWIZ_TEST_FORCE_DISPATCH_FAILURE === "1") {
+    throw new Error("forced dispatch failure")
+  }
+}
+
 /** In-process incomplete-tasks check — skips daemon round-trip when tasks block. */
 async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
   const { canonicalEvent, sessionId } = timing
@@ -257,6 +340,7 @@ async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
   if (!blockResult) return false
 
   process.stdout.write(`${JSON.stringify(blockResult)}\n`)
+  markDispatchResponseWritten()
   const totalMs = Math.round(performance.now() - timing.t0)
   log(`   ⏱ cli:total: ${totalMs}ms (fast-path)`)
   void appendCliTimingLog({
@@ -272,12 +356,14 @@ async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
 
 async function runDispatch(canonicalEvent: string, hookEventName: string): Promise<void> {
   const t0 = performance.now()
+  maybeForceDispatchFailureForTesting()
   const payloadStr = await readStdinPayloadWithTimeout()
   const stdinMs = Math.round(performance.now() - t0)
   log(`   ⏱ cli:stdin: ${stdinMs}ms`)
 
   const { payload, parseError } = parsePayload(payloadStr)
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
+  const incomingBeforeNormalize = structuredClone(payload)
   normalizeAgentHookPayload(payload)
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
   // Inject CLI process cwd into payload when agent didn't provide it.
@@ -288,8 +374,23 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   if (!payload.cwd) {
     payload.cwd = process.cwd()
   }
+  if (!payload.session_id) {
+    payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
+  }
   const cwd = payload.cwd as string
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
+  const normalizedPayloadForCapture = structuredClone(payload)
+
+  if (shouldCaptureIncomingPayloads()) {
+    await writeIncomingDispatchCapture({
+      canonicalEvent,
+      hookEventName,
+      parseError: false,
+      payloadStr,
+      incomingBeforeNormalize,
+      normalizedPayload: normalizedPayloadForCapture,
+    })
+  }
 
   // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
   if (!payload._terminal) {
@@ -326,6 +427,7 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
 
   if (daemonResponse !== null) {
     // Mirror engine `writeResponse`: always emit one JSON line (even `{}`).
+    markDispatchResponseWritten()
     process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
     const totalMs = Math.round(performance.now() - t0)
     log(`   ⏱ cli:total: ${totalMs}ms`)
@@ -380,64 +482,117 @@ export const dispatchCommand: Command = {
     },
   ],
   async run(args) {
-    // ─── Replay mode ─────────────────────────────────────────────────────
-    if (args[0] === "replay") {
-      const canonicalEvent = args[1]
-      const jsonMode = args.includes("--json")
+    try {
+      resetDispatchResponseWriteState()
+      // ─── Replay mode ─────────────────────────────────────────────────────
+      if (args[0] === "replay") {
+        const canonicalEvent = args[1]
+        const jsonMode = args.includes("--json")
+        if (!canonicalEvent) {
+          throw new Error("Usage: swiz dispatch replay <event> [--json]")
+        }
+
+        const t0 = performance.now()
+        const payloadStr = await readStdinPayloadWithTimeout()
+        log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
+
+        const { payload, parseError } = parsePayload(payloadStr)
+        if (parseError) {
+          throw new Error("Replay requires valid JSON object stdin payload")
+        }
+        normalizeAgentHookPayload(payload)
+        if (!payload.cwd) {
+          payload.cwd =
+            process.env.GEMINI_CWD ||
+            process.env.GEMINI_PROJECT_DIR ||
+            process.env.CLAUDE_PROJECT_DIR ||
+            process.cwd()
+        }
+        if (!payload.session_id) {
+          payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
+        }
+        const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
+        for (const k of Object.keys(payload)) delete payload[k]
+        Object.assign(payload, validated)
+        const { toolName, trigger } = getHookContext(canonicalEvent, payload)
+
+        const matchingGroups = manifest.filter(
+          (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
+        )
+        const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
+
+        const tReplay = performance.now()
+        const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+        const traces =
+          strategy === "preToolUse"
+            ? await replayPreToolUse(filteredGroups, payloadStr)
+            : strategy === "blocking"
+              ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
+              : await replayContext(filteredGroups, payloadStr)
+        log(`   ⏱ cli:replay: ${Math.round(performance.now() - tReplay)}ms`)
+
+        formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
+        log(`   ⏱ cli:total: ${Math.round(performance.now() - t0)}ms`)
+        return
+      }
+
+      const canonicalEvent = args[0]
       if (!canonicalEvent) {
-        throw new Error("Usage: swiz dispatch replay <event> [--json]")
+        throw new Error("Usage: swiz dispatch <event> [agentEventName]")
+      }
+      const hookEventName = args[1] ?? canonicalEvent
+
+      await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName))
+    } catch (err) {
+      const isReplay = args[0] === "replay"
+      const canonicalEvent = isReplay
+        ? (args[1] ?? "(missing-event)")
+        : (args[0] ?? "(missing-event)")
+      const hookEventName =
+        !isReplay && canonicalEvent !== "(missing-event)" ? (args[1] ?? canonicalEvent) : undefined
+      const message = err instanceof Error ? err.message : String(err)
+      const scope = isReplay
+        ? `dispatch replay ${canonicalEvent}`
+        : `dispatch ${canonicalEvent}${hookEventName && hookEventName !== canonicalEvent ? ` (${hookEventName})` : ""}`
+
+      if (isReplay || canonicalEvent === "(missing-event)") {
+        stderrLog(
+          "dispatch command last-resort failure reporting",
+          `Dispatch failed for ${scope}: ${message}`
+        )
+        process.exitCode = 1
+        return
       }
 
-      const t0 = performance.now()
-      const payloadStr = await readStdinPayloadWithTimeout()
-      log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
-
-      const { payload, parseError } = parsePayload(payloadStr)
-      if (parseError) {
-        throw new Error("Replay requires valid JSON object stdin payload")
-      }
-      normalizeAgentHookPayload(payload)
-      if (!payload.cwd) {
-        payload.cwd =
-          process.env.GEMINI_CWD ||
-          process.env.GEMINI_PROJECT_DIR ||
-          process.env.CLAUDE_PROJECT_DIR ||
-          process.cwd()
-      }
-      if (!payload.session_id) {
-        payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-      }
-      const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
-      for (const k of Object.keys(payload)) delete payload[k]
-      Object.assign(payload, validated)
-      const { toolName, trigger } = getHookContext(canonicalEvent, payload)
-
-      const matchingGroups = manifest.filter(
-        (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
+      const logPath = await captureDispatchFailure(scope, canonicalEvent, hookEventName, err)
+      stderrLog(
+        "dispatch command fail-open reporting",
+        `Dispatch failed for ${scope}: ${message}. Falling back to allow and capturing details in ${logPath}`
       )
-      const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
-      const tReplay = performance.now()
-      const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-      const traces =
-        strategy === "preToolUse"
-          ? await replayPreToolUse(filteredGroups, payloadStr)
-          : strategy === "blocking"
-            ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
-            : await replayContext(filteredGroups, payloadStr)
-      log(`   ⏱ cli:replay: ${Math.round(performance.now() - tReplay)}ms`)
+      if (!didWriteDispatchResponse()) {
+        try {
+          const fallback = buildDispatchFailureFallback(
+            canonicalEvent,
+            hookEventName!,
+            err,
+            logPath
+          )
+          process.stdout.write(`${JSON.stringify(fallback)}\n`)
+          markDispatchResponseWritten()
+        } catch {
+          const emergencyFallback = buildDispatchFailureFallback(
+            canonicalEvent,
+            hookEventName!,
+            "dispatch fallback generation failed",
+            logPath
+          )
+          process.stdout.write(`${JSON.stringify(emergencyFallback)}\n`)
+          markDispatchResponseWritten()
+        }
+      }
 
-      formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
-      log(`   ⏱ cli:total: ${Math.round(performance.now() - t0)}ms`)
-      return
+      process.exitCode = 0
     }
-
-    const canonicalEvent = args[0]
-    if (!canonicalEvent) {
-      throw new Error("Usage: swiz dispatch <event> [agentEventName]")
-    }
-    const hookEventName = args[1] ?? canonicalEvent
-
-    await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName))
   },
 }

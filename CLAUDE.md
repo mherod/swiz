@@ -71,7 +71,7 @@ alwaysApply: false
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. Read from payload; don't call `detectTerminal()` in daemon code.
-- **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts`, `execute.ts` `buildDispatchContext`. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
+- **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts`, `src/commands/dispatch.ts` for CLI dispatch and `src/SwizHook.ts` `runSwizHookAsMain` for standalone hook subprocesses. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
 - **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
 - **Git Utilities Policy** — canonical locations:
   - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
