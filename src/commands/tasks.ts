@@ -440,7 +440,9 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
 // ─── Repair from audit trail ─────────────────────────────────────────────────
 
 async function runRepairTasks(rest: string[]): Promise<void> {
-  const sessionId = await resolveSession(rest)
+  const dryRun = rest.includes("--dry-run")
+  const filteredRest = rest.filter((a) => a !== "--dry-run")
+  const sessionId = await resolveSession(filteredRest)
   const { createDefaultTaskStore } = await import("../task-roots.ts")
   const tasksDir = createDefaultTaskStore().tasksDir
 
@@ -449,6 +451,8 @@ async function runRepairTasks(rest: string[]): Promise<void> {
     console.log("  No audit log found for this session — nothing to repair.")
     return
   }
+
+  if (dryRun) console.log("  [dry-run] No files will be modified.\n")
 
   // Reconstruct authoritative task state from audit trail
   const reconstructed = new Map<string, { subject: string; status: string }>()
@@ -467,39 +471,60 @@ async function runRepairTasks(rest: string[]): Promise<void> {
 
   let repaired = 0
   let verified = 0
+  const discrepancies: string[] = []
 
   for (const [taskId, auditState] of reconstructed) {
     const fileTask = currentById.get(taskId)
 
     if (!fileTask) {
       // Task file missing — reconstruct from audit
-      const task: Task = {
-        id: taskId,
-        subject: auditState.subject,
-        description: "Reconstructed from audit trail.",
-        status: auditState.status as Task["status"],
-        blocks: [],
-        blockedBy: [],
+      if (!dryRun) {
+        const task: Task = {
+          id: taskId,
+          subject: auditState.subject,
+          description: "Reconstructed from audit trail.",
+          status: auditState.status as Task["status"],
+          blocks: [],
+          blockedBy: [],
+        }
+        await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(task, null, 2))
       }
-      await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(task, null, 2))
-      console.log(`  ✏️  Reconstructed #${taskId}: ${auditState.subject} [${auditState.status}]`)
+      const prefix = dryRun ? "[dry-run] would reconstruct" : "Reconstructed"
+      console.log(`  ✏️  ${prefix} #${taskId}: ${auditState.subject} [${auditState.status}]`)
       repaired++
     } else if (fileTask.status !== auditState.status) {
       // Status mismatch — audit trail is authoritative
-      fileTask.status = auditState.status as Task["status"]
-      await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(fileTask, null, 2))
+      const oldStatus = fileTask.status
+      if (!dryRun) {
+        fileTask.status = auditState.status as Task["status"]
+        await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(fileTask, null, 2))
+      }
+      const prefix = dryRun ? "[dry-run] would fix" : "Fixed"
       console.log(
-        `  🔧 Fixed #${taskId} status: was "${currentById.get(taskId)!.status}", now "${auditState.status}"`
+        `  🔧 ${prefix} #${taskId} status: was "${oldStatus}", now "${auditState.status}"`
       )
+      discrepancies.push(`#${taskId}: file="${oldStatus}" audit="${auditState.status}"`)
       repaired++
     } else {
       verified++
     }
   }
 
+  // Post-repair validation: check for tasks on disk not in the audit log
+  for (const task of currentTasks) {
+    if (!reconstructed.has(task.id)) {
+      discrepancies.push(`#${task.id}: present on disk but absent from audit log`)
+      console.log(`  ⚠️  #${task.id} exists on disk but has no audit trail entry`)
+    }
+  }
+
+  const verb = dryRun ? "would fix" : "fixed"
   console.log(
-    `\n  Repair complete: ${repaired} fixed, ${verified} verified, ${reconstructed.size} total tasks.`
+    `\n  Repair ${dryRun ? "(dry-run) " : ""}complete: ${repaired} ${verb}, ${verified} verified, ${reconstructed.size} total tasks.`
   )
+  if (discrepancies.length > 0) {
+    console.log(`  ${discrepancies.length} discrepancy(ies) found.`)
+  }
 }
 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
