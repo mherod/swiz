@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
+import { debugLog } from "../debug.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
@@ -425,8 +426,8 @@ export async function applyCacheAuditWriteThrough(
         subject: toolInput.subject ? String(toolInput.subject) : undefined,
       })
     }
-  } catch {
-    // Cache not available — safe to ignore
+  } catch (err) {
+    debugLog("[task-recovery] applyCacheAuditWriteThrough error:", err)
   }
 }
 
@@ -437,8 +438,8 @@ export async function applyCacheAuditWriteThrough(
 export function applyCacheTaskUpdate(sessionId: string, task: SessionTask): void {
   try {
     getGlobalTaskStateCache()?.applyTaskUpdate(sessionId, task)
-  } catch {
-    // Cache not available — safe to ignore
+  } catch (err) {
+    debugLog("[task-recovery] applyCacheTaskUpdate error:", err)
   }
 }
 
@@ -449,8 +450,8 @@ export function applyCacheTaskUpdate(sessionId: string, task: SessionTask): void
 export function applyCacheTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
   try {
     getGlobalTaskStateCache()?.applyTaskListSnapshot(sessionId, tasks)
-  } catch {
-    // Cache not available — safe to ignore
+  } catch (err) {
+    debugLog("[task-recovery] applyCacheTaskListSnapshot error:", err)
   }
 }
 
