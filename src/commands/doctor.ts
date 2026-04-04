@@ -1,5 +1,5 @@
 import type { Dirent, Stats } from "node:fs"
-import { chmod, cp, mkdir, readdir, readFile, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, getAgent, translateEvent } from "../agents.ts"
@@ -1737,6 +1737,15 @@ async function dirSize(dirPath: string): Promise<number> {
 
 const trashDir = defaultTrashPath
 
+async function hardDelete(path: string): Promise<boolean> {
+  try {
+    await rm(path, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 type DaemonStopState = "not-installed" | "not-running" | "stopped" | "failed"
 
 async function stopDaemonForCleanup(): Promise<DaemonStopState> {
@@ -2047,7 +2056,11 @@ async function findOldTaskFiles(
  * Lines without a parseable timestamp are kept (e.g. permission-mode lines).
  * Returns the number of lines removed, or 0 if no truncation was needed.
  */
-async function truncateJsonlFile(filePath: string, cutoffMs: number): Promise<number> {
+async function truncateJsonlFile(
+  filePath: string,
+  cutoffMs: number,
+  skipBackup?: boolean
+): Promise<number> {
   let raw: string
   try {
     raw = await readFile(filePath, "utf-8")
@@ -2085,8 +2098,10 @@ async function truncateJsonlFile(filePath: string, cutoffMs: number): Promise<nu
 
   if (removed === 0) return 0
 
-  // Create .bak backup before rewriting
-  await cp(filePath, `${filePath}.bak`)
+  // Create .bak backup before rewriting (unless --skip-trash)
+  if (!skipBackup) {
+    await cp(filePath, `${filePath}.bak`)
+  }
 
   // Rewrite the file with only the kept lines
   const newContent = kept.join("\n")
@@ -2100,7 +2115,8 @@ async function truncateJsonlFile(filePath: string, cutoffMs: number): Promise<nu
  */
 async function truncateKeptSessions(
   results: ProjectResult[],
-  cutoffMs: number
+  cutoffMs: number,
+  skipBackup?: boolean
 ): Promise<{ filesAffected: number; linesRemoved: number }> {
   let filesAffected = 0
   let linesRemoved = 0
@@ -2109,7 +2125,7 @@ async function truncateKeptSessions(
     for (const session of keep) {
       for (const p of session.paths) {
         if (p.endsWith(".jsonl")) {
-          const removed = await truncateJsonlFile(p, cutoffMs)
+          const removed = await truncateJsonlFile(p, cutoffMs, skipBackup)
           if (removed > 0) {
             filesAffected++
             linesRemoved += removed
@@ -2139,7 +2155,8 @@ async function truncateKeptSessions(
 }
 
 async function trashSession(
-  session: SessionInfo
+  session: SessionInfo,
+  deleteFn: (path: string) => Promise<boolean> = trashDir
 ): Promise<{ succeeded: number; failed: number; taskRemoved: boolean }> {
   let sessionPartSucceeded = false
   let failed = 0
@@ -2147,13 +2164,13 @@ async function trashSession(
     sessionPartSucceeded = true
   } else {
     for (const p of session.paths) {
-      if (await trashDir(p)) sessionPartSucceeded = true
+      if (await deleteFn(p)) sessionPartSucceeded = true
       else failed++
     }
   }
   let taskRemoved = false
   if (session.taskDirPath) {
-    if (await trashDir(session.taskDirPath)) {
+    if (await deleteFn(session.taskDirPath)) {
       taskRemoved = true
     } else {
       failed++
@@ -2638,11 +2655,14 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
   return { ...totals, totalBytes, nothingToTrash: false }
 }
 
-async function trashFileList(files: string[]): Promise<{ removed: number; failed: number }> {
+async function trashFileList(
+  files: string[],
+  deleteFn: (path: string) => Promise<boolean> = trashDir
+): Promise<{ removed: number; failed: number }> {
   let removed = 0
   let failed = 0
   for (const file of files) {
-    if (await trashDir(file)) removed++
+    if (await deleteFn(file)) removed++
     else failed++
   }
   return { removed, failed }
@@ -2657,6 +2677,7 @@ interface ExecuteCleanupOpts {
   totalOldTaskDirs: number
   totalBytes: number
   cutoffMs: number
+  skipTrash?: boolean
 }
 
 function buildCleanupSuffix(opts: ExecuteCleanupOpts): string {
@@ -2678,14 +2699,15 @@ function buildCleanupSuffix(opts: ExecuteCleanupOpts): string {
 }
 
 async function trashAllSessions(
-  results: ProjectResult[]
+  results: ProjectResult[],
+  deleteFn: (path: string) => Promise<boolean> = trashDir
 ): Promise<{ succeeded: number; failed: number; taskDirsRemoved: number }> {
   let succeeded = 0
   let failed = 0
   let taskDirsRemoved = 0
   for (const { old } of results) {
     for (const session of old) {
-      const r = await trashSession(session)
+      const r = await trashSession(session, deleteFn)
       succeeded += r.succeeded
       failed += r.failed
       if (r.taskRemoved) taskDirsRemoved++
@@ -2714,12 +2736,13 @@ function printCleanupResult(
   tasks: { removed: number; failed: number },
   claude: { removed: number; failed: number },
   gemini: { removed: number; failed: number },
-  totalBytes: number
+  totalBytes: number,
+  doneVerb = "moved to Trash"
 ): void {
   const notes = buildCleanupNotes(sessions, tasks, claude, gemini)
   console.log(
     `  ${GREEN}${BOLD}Done.${RESET} ${sessions.succeeded} session(s)${notes}` +
-      ` moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
+      ` ${doneVerb} (~${formatBytes(totalBytes)} reclaimed).`
   )
 
   const totalFailed = sessions.failed + tasks.failed + claude.failed + gemini.failed
@@ -2746,16 +2769,22 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
     console.log(`  ${YELLOW}Warning: failed to stop ${DAEMON_LABEL}; continuing cleanup.${RESET}`)
   }
 
+  const deleteFn = opts.skipTrash ? hardDelete : trashDir
+  const verb = opts.skipTrash ? "Deleting" : "Moving"
+  const doneVerb = opts.skipTrash ? "deleted" : "moved to Trash"
   const suffix = buildCleanupSuffix(opts)
   try {
-    console.log(`  Moving ${opts.totalOldCount} session(s)${suffix} to Trash...`)
-    const sessions = await trashAllSessions(opts.results)
-    const claude = await trashFileList(opts.claudeBackups.files)
-    const gemini = await trashFileList(opts.geminiBackups.files)
-    const tasks = await trashFileList(opts.oldTaskFiles.map((t) => t.path))
+    console.log(`  ${verb} ${opts.totalOldCount} session(s)${suffix}...`)
+    const sessions = await trashAllSessions(opts.results, deleteFn)
+    const claude = await trashFileList(opts.claudeBackups.files, deleteFn)
+    const gemini = await trashFileList(opts.geminiBackups.files, deleteFn)
+    const tasks = await trashFileList(
+      opts.oldTaskFiles.map((t) => t.path),
+      deleteFn
+    )
 
     // Truncate JSONL transcripts in kept sessions — remove lines older than cutoff
-    const truncation = await truncateKeptSessions(opts.results, opts.cutoffMs)
+    const truncation = await truncateKeptSessions(opts.results, opts.cutoffMs, opts.skipTrash)
     if (truncation.linesRemoved > 0) {
       console.log(
         `  ${DIM}Truncated ${truncation.linesRemoved} old line(s) from ${truncation.filesAffected} transcript(s).${RESET}`
@@ -2763,7 +2792,7 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
     }
 
     console.log()
-    printCleanupResult(sessions, tasks, claude, gemini, opts.totalBytes)
+    printCleanupResult(sessions, tasks, claude, gemini, opts.totalBytes, doneVerb)
   } finally {
     if (daemonStopState === "stopped") {
       const restarted = await restartDaemonAfterCleanup()
@@ -2928,7 +2957,7 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
   if (totals.nothingToTrash && cleanupArgs.dryRun) return
   if (totals.nothingToTrash) {
     // Nothing to trash, but still truncate kept session transcripts
-    const truncation = await truncateKeptSessions(results, cutoffMs)
+    const truncation = await truncateKeptSessions(results, cutoffMs, cleanupArgs.skipTrash)
     if (truncation.linesRemoved > 0) {
       console.log(
         `  ${DIM}Truncated ${truncation.linesRemoved} old line(s) from ${truncation.filesAffected} transcript(s).${RESET}`
@@ -2950,6 +2979,7 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
     totalOldTaskDirs: totals.totalOldTaskDirs,
     totalBytes: totals.totalBytes,
     cutoffMs,
+    skipTrash: cleanupArgs.skipTrash,
   })
 }
 
@@ -2971,6 +3001,10 @@ export const doctorCommand: Command = {
     { flags: "--task-older-than <time>", description: "Separate window for task files" },
     { flags: "--project <name>", description: "Filter by project name or path" },
     { flags: "--dry-run", description: "Show what would be removed without trashing" },
+    {
+      flags: "--skip-trash",
+      description: "Hard delete instead of moving to Trash (skips .bak backups)",
+    },
     { flags: "--junie-only", description: "Only scan Junie sessions" },
   ],
   async run(args) {

@@ -84,6 +84,7 @@ export interface CleanupArgs {
   dryRun: boolean
   projectFilter: string | undefined
   junieOnly?: boolean
+  skipTrash?: boolean
 }
 
 /** Parse a time value like "7", "7d", or "48h" into milliseconds + display label. */
@@ -110,6 +111,7 @@ interface CleanupFlagState {
   dryRun: boolean
   projectFilter: string | undefined
   junieOnly: boolean
+  skipTrash: boolean
 }
 
 function consumeCleanupFlag(
@@ -123,6 +125,10 @@ function consumeCleanupFlag(
   }
   if (arg === "--junie-only") {
     state.junieOnly = true
+    return false
+  }
+  if (arg === "--skip-trash") {
+    state.skipTrash = true
     return false
   }
   if (arg === "--older-than" && next) {
@@ -147,6 +153,7 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     dryRun: false,
     projectFilter: undefined as string | undefined,
     junieOnly: false,
+    skipTrash: false,
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -163,5 +170,6 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     dryRun: state.dryRun,
     projectFilter: state.projectFilter,
     junieOnly: state.junieOnly,
+    skipTrash: state.skipTrash,
   }
 }
