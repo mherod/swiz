@@ -42,13 +42,15 @@ async function cacheIssuesAndReplayMutations(
   }
 }
 
+const FIVE_MINUTES_MS = 5 * 60 * 1000
+
 async function readCachedIssues(repoSlug: string): Promise<Issue[]> {
   try {
     const reader = getIssueStoreReader()
-    // Pass ttlMs=0 so the stop hook always gets fresh data from the store.
-    // Without this, issues closed between retries remain cached for up to 5
-    // minutes, blocking session termination indefinitely. (#325)
-    return await reader.listIssues<Issue>(repoSlug, 0)
+    // Use a 5-minute TTL so daemon-synced data is served from the store.
+    // The old ttlMs=0 bypassed the store entirely, forcing every read through
+    // the gh CLI fallback chain even when fresh data existed. (#325)
+    return await reader.listIssues<Issue>(repoSlug, FIVE_MINUTES_MS)
   } catch {
     return []
   }
