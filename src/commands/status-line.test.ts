@@ -5,10 +5,12 @@ import { join } from "node:path"
 import { DEFAULT_SETTINGS } from "../settings.ts"
 import {
   buildSettingsFlags,
+  buildTaskCountsFromTasks,
   computeWarmStatusLineSnapshot,
   formatCountSegment,
   formatGitHubCiSegment,
   formatProjectState,
+  formatTaskCountSegment,
   getContextStatsPath,
   readContextStats,
   renderStatusLineFromSnapshot,
@@ -410,6 +412,31 @@ describe("summarizeGitHubCiRuns", () => {
       { ...baseRun, event: "dynamic", conclusion: "failure", createdAt: "2026-03-12T12:01:00Z" },
     ])
     expect(summary).toBeNull()
+  })
+})
+
+describe("formatTaskCountSegment", () => {
+  it("returns empty string when no tasks", () => {
+    expect(formatTaskCountSegment(null)).toBe("")
+    expect(formatTaskCountSegment({ total: 0, incomplete: 0, pending: 0, inProgress: 0 })).toBe("")
+  })
+
+  it("renders in_progress, pending, and completed symbols", () => {
+    const seg = formatTaskCountSegment({ total: 5, incomplete: 3, pending: 2, inProgress: 1 })
+    expect(seg).toContain("✔✔") // 2 completed
+    expect(seg).toContain("◼") // 1 in_progress
+    expect(seg).toContain("◻◻") // 2 pending
+  })
+
+  it("builds counts from task array", () => {
+    const tasks = [
+      { status: "in_progress" },
+      { status: "pending" },
+      { status: "pending" },
+      { status: "completed" },
+    ]
+    const counts = buildTaskCountsFromTasks(tasks)
+    expect(counts).toEqual({ total: 4, incomplete: 3, pending: 2, inProgress: 1 })
   })
 })
 

@@ -21,7 +21,11 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
-import type { WarmStatusLineSnapshot } from "../status-line.ts"
+import {
+  buildTaskCountsFromTasks,
+  type TaskCounts,
+  type WarmStatusLineSnapshot,
+} from "../status-line.ts"
 import {
   getActiveAgentProcesses,
   getCachedAgentProcesses,
@@ -1324,6 +1328,22 @@ function handleCacheStatus(ctx: DaemonWebServerContext): Response {
   })
 }
 
+async function resolveTaskCountsFromCache(
+  sessionId: string | null | undefined,
+  cache: DaemonWebServerContext["taskStateCache"]
+): Promise<TaskCounts | null> {
+  if (!sessionId) return null
+  try {
+    const { createDefaultTaskStore } = await import("../../task-roots.ts")
+    const { tasksDir } = createDefaultTaskStore()
+    const state = await cache.getState(sessionId, join(tasksDir, sessionId))
+    if (state.tasks.length === 0) return null
+    return buildTaskCountsFromTasks(state.tasks)
+  } catch {
+    return null
+  }
+}
+
 async function handleStatusLineSnapshot(
   req: Request,
   ctx: DaemonWebServerContext
@@ -1335,8 +1355,12 @@ async function handleStatusLineSnapshot(
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  const snapshot = await ctx.resolveSnapshot(body.cwd, body?.sessionId ?? null)
-  return Response.json({ snapshot })
+  const sessionId = body?.sessionId ?? null
+  const [snapshot, taskCounts] = await Promise.all([
+    ctx.resolveSnapshot(body.cwd, sessionId),
+    resolveTaskCountsFromCache(sessionId, ctx.taskStateCache),
+  ])
+  return Response.json({ snapshot: { ...snapshot, taskCounts } })
 }
 
 type TopRouteHandler = (

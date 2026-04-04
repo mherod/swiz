@@ -162,6 +162,7 @@ export const ALL_STATUS_LINE_SEGMENTS = [
   "model",
   "ctx",
   "state",
+  "tasks",
   "backlog",
   "metrics",
   "mode",

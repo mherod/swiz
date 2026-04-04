@@ -21,6 +21,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../settings.ts"
+import { isIncompleteTaskStatus, readSessionTasks } from "../tasks/task-recovery.ts"
 import type { Command } from "../types.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -55,6 +56,7 @@ export interface WarmStatusLineSnapshot {
   commentCount: number
   projectState: ProjectState | null
   settingsParts: string[]
+  taskCounts?: TaskCounts | null
 }
 
 export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -670,7 +672,8 @@ function assembleSnapshot(
   gitResult: { branch: string; info: string },
   activeSegments: string[],
   gh: GhFetchResults,
-  effective: EffectiveSwizSettings | null
+  effective: EffectiveSwizSettings | null,
+  taskCounts: TaskCounts | null
 ): WarmStatusLineSnapshot {
   const suppressCi = Boolean(effective?.ignoreCi)
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
@@ -686,6 +689,7 @@ function assembleSnapshot(
     fetchStatus: gh.fetchStatus,
     projectState: gh.projectState ?? null,
     settingsParts: buildSettingsFlags(effective),
+    taskCounts,
   }
 }
 
@@ -694,11 +698,12 @@ export async function computeWarmStatusLineSnapshot(
   sessionId: string | null | undefined
 ): Promise<WarmStatusLineSnapshot> {
   const shortCwd = shortenPath(cwd)
-  const [gitResult, swizSettings, projectSettings, ciProviders] = await Promise.all([
+  const [gitResult, swizSettings, projectSettings, ciProviders, sessionTasks] = await Promise.all([
     getGitBranchAndInfo(cwd),
     readSwizSettings().catch(() => null),
     readProjectSettings(cwd).catch(() => null),
     detectCiProviders(cwd).catch(() => new Set()),
+    sessionId ? readSessionTasks(sessionId).catch(() => []) : Promise.resolve([]),
   ])
 
   const effective = swizSettings
@@ -709,7 +714,8 @@ export async function computeWarmStatusLineSnapshot(
   if (!ciProviders.has("github-actions")) needs.ci = false
   if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
-  return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective)
+  const taskCounts = sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
+  return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective, taskCounts)
 }
 
 async function readWarmSnapshotFromDaemon(
@@ -818,6 +824,41 @@ function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {
   return ""
 }
 
+export interface TaskCounts {
+  total: number
+  incomplete: number
+  pending: number
+  inProgress: number
+}
+
+export function buildTaskCountsFromTasks(tasks: ReadonlyArray<{ status: string }>): TaskCounts {
+  let pending = 0
+  let inProgress = 0
+  let incomplete = 0
+  for (const t of tasks) {
+    if (t.status === "pending") {
+      pending++
+      incomplete++
+    } else if (t.status === "in_progress") {
+      inProgress++
+      incomplete++
+    } else if (isIncompleteTaskStatus(t.status)) {
+      incomplete++
+    }
+  }
+  return { total: tasks.length, incomplete, pending, inProgress }
+}
+
+export function formatTaskCountSegment(counts: TaskCounts | null | undefined): string {
+  if (!counts || counts.total === 0) return ""
+  const parts: string[] = []
+  const done = counts.total - counts.incomplete
+  if (done > 0) parts.push(`\x1b[92m${"✔".repeat(done)}${R}`)
+  if (counts.inProgress > 0) parts.push(`\x1b[93m${"◼".repeat(counts.inProgress)}${R}`)
+  if (counts.pending > 0) parts.push(`\x1b[96m${"◻".repeat(counts.pending)}${R}`)
+  return parts.join(" ")
+}
+
 function buildDaemonMetricsSegment(metrics: StatusLineDaemonMetrics | null | undefined): string {
   if (!metrics || metrics.totalDispatches <= 0) return ""
   const dispatchLabel = metrics.totalDispatches === 1 ? "dispatch" : "dispatches"
@@ -854,16 +895,19 @@ function buildLine3(
   daemonMetrics: StatusLineDaemonMetrics | null | undefined,
   a4: string,
   agentName: string | undefined,
-  vimMode: string | undefined
+  vimMode: string | undefined,
+  taskCounts: TaskCounts | null | undefined
 ): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
   const daemonMetricsSeg = buildDaemonMetricsSegment(daemonMetrics)
+  const taskSeg = formatTaskCountSegment(taskCounts)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
     seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
+    seg("tasks") && taskSeg ? `${lbl("tasks")} ${taskSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
     seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
     seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
@@ -893,12 +937,23 @@ export function renderStatusLineFromSnapshot(opts: {
   input: StatusLineInput
   snapshot: WarmStatusLineSnapshot
   daemonMetrics?: StatusLineDaemonMetrics | null
+  taskCounts?: TaskCounts | null
   ctxPct: number
   ctxTokens: number
   ctxStats: ContextStats | null
   timeOffset: number
 }): string {
-  const { input, snapshot, daemonMetrics = null, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
+  const {
+    input,
+    snapshot,
+    daemonMetrics = null,
+    taskCounts: explicitTaskCounts,
+    ctxPct,
+    ctxTokens,
+    ctxStats,
+    timeOffset,
+  } = opts
+  const taskCounts = explicitTaskCounts ?? snapshot.taskCounts ?? null
   const activeSegmentSet =
     snapshot.activeSegments.length > 0 ? new Set(snapshot.activeSegments) : null
   const seg: SegChecker = (name) => activeSegmentSet?.has(name) ?? true
@@ -910,7 +965,15 @@ export function renderStatusLineFromSnapshot(opts: {
 
   const line1 = buildLine1(seg, snapshot, a2)
   const line2 = buildLine2({ seg, ctxPct, ctxTokens, ctxStats, model, rb })
-  const line3 = buildLine3(seg, snapshot, daemonMetrics, a4, input.agent?.name, input.vim?.mode)
+  const line3 = buildLine3(
+    seg,
+    snapshot,
+    daemonMetrics,
+    a4,
+    input.agent?.name,
+    input.vim?.mode,
+    taskCounts
+  )
 
   const fill = `${DIM}─${R}`
   return [
@@ -934,22 +997,32 @@ export const statusLineCommand: Command = {
     // Time-based offset: cycles through full rainbow every ~1 minute (~1.7s per step)
     const timeOffset = Math.floor(Date.now() / 1667) % RL
 
-    const [ctxStats, warmSnapshot, daemonMetrics, renderSettings] = await Promise.all([
-      updateContextStats(cwd, ctxPct),
-      readWarmSnapshotFromDaemon(cwd, input.session_id ?? null),
-      readProjectMetricsFromDaemon(cwd),
-      resolveStatusLineRenderSettings(cwd, input.session_id ?? null),
-    ])
+    const sessionId = input.session_id ?? null
+    const [ctxStats, warmSnapshot, daemonMetrics, renderSettings, sessionTasks] = await Promise.all(
+      [
+        updateContextStats(cwd, ctxPct),
+        readWarmSnapshotFromDaemon(cwd, sessionId),
+        readProjectMetricsFromDaemon(cwd),
+        resolveStatusLineRenderSettings(cwd, sessionId),
+        sessionId ? readSessionTasks(sessionId).catch(() => []) : Promise.resolve([]),
+      ]
+    )
     const snapshot = applyRenderSettingsToSnapshot(
-      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null)),
+      warmSnapshot ?? (await computeWarmStatusLineSnapshot(cwd, sessionId)),
       renderSettings
     )
+    // Fallback: if the daemon snapshot doesn't include taskCounts (old daemon),
+    // compute from the locally-read session tasks.
+    const taskCounts =
+      snapshot.taskCounts ??
+      (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
 
     console.log(
       renderStatusLineFromSnapshot({
         input,
         snapshot,
         daemonMetrics,
+        taskCounts,
         ctxPct,
         ctxTokens,
         ctxStats,
