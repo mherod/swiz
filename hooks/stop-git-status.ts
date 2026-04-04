@@ -392,14 +392,18 @@ async function detectBackgroundPush(cwd: string): Promise<boolean> {
 
   const pushPids = pgrepResult.stdout.trim().split("\n").map(Number).filter(Boolean)
 
-  const psResult = await spawnWithTimeout(["ps", "-eo", "pid,ppid"], {
-    timeoutMs: PROC_INSPECT_TIMEOUT_MS,
-  })
+  // Parallelize ps and git rev-parse (both independent of pgrep result)
+  const [psResult, gitRoot] = await Promise.all([
+    spawnWithTimeout(["ps", "-eo", "pid,ppid"], {
+      timeoutMs: PROC_INSPECT_TIMEOUT_MS,
+    }),
+    git(["rev-parse", "--show-toplevel"], cwd),
+  ])
+
   if (psResult.timedOut) return false
 
   const parentMap = buildParentMap(psResult.stdout)
   const ancestors = collectAncestors(parentMap, process.ppid)
-  const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 
   const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
   if (nonAncestorPids.length === 0) return false
