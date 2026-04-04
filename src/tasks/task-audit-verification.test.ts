@@ -1,8 +1,13 @@
-import { mkdir, readFile, rm } from "node:fs/promises"
+import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { parseJsonlTailUntyped } from "../utils/jsonl.ts"
+import {
+  getLastAuditEntry,
+  readAuditLog,
+  readRecentAuditEntries,
+  verifyAuditEntry,
+} from "./task-audit-verification.ts"
 import type { Task } from "./task-repository.ts"
 import { writeTaskUpdate } from "./task-service.ts"
 
@@ -31,18 +36,15 @@ describe("Task Audit Log Verification", () => {
     const testSessionDir = join(tasksDir, sessionId)
     await mkdir(testSessionDir, { recursive: true })
 
-    // Update only description
     task.description = "Updated Description"
     await writeTaskUpdate(sessionId, "1", task)
 
-    const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
-    const logContent = await readFile(auditLogPath, "utf-8")
-    const entry = parseJsonlTailUntyped(logContent, 1)[0] as Record<string, any>
-
-    expect(entry.action).toBe("field_update")
-    expect(entry.taskId).toBe("1")
-    expect(entry.oldStatus).toBe("pending")
-    expect(entry.newStatus).toBe("pending")
+    const entry = await getLastAuditEntry(sessionId)
+    expect(entry).not.toBeNull()
+    expect(entry!.action).toBe("field_update")
+    expect(entry!.taskId).toBe("1")
+    expect(entry!.oldStatus).toBe("pending")
+    expect(entry!.newStatus).toBe("pending")
 
     await rm(testSessionDir, { recursive: true, force: true })
   })
@@ -63,15 +65,82 @@ describe("Task Audit Log Verification", () => {
 
     await writeTaskUpdate(sessionId, "2", task, "in_progress")
 
-    const auditLogPath = join(testSessionDir, ".audit-log.jsonl")
-    const logContent = await readFile(auditLogPath, "utf-8")
-    const entry = parseJsonlTailUntyped(logContent, 1)[0] as Record<string, any>
-
-    expect(entry.action).toBe("status_change")
-    expect(entry.taskId).toBe("2")
-    expect(entry.oldStatus).toBe("pending")
-    expect(entry.newStatus).toBe("in_progress")
+    const entry = await getLastAuditEntry(sessionId)
+    expect(entry).not.toBeNull()
+    expect(entry!.action).toBe("status_change")
+    expect(entry!.taskId).toBe("2")
+    expect(entry!.oldStatus).toBe("pending")
+    expect(entry!.newStatus).toBe("in_progress")
 
     await rm(testSessionDir, { recursive: true, force: true })
+  })
+
+  it("readAuditLog returns all entries in order", async () => {
+    const sessionId = `${testSessionId}-full-log`
+    const task: Task = {
+      id: "3",
+      subject: "Multi Task",
+      description: "Desc",
+      status: "pending",
+      blocks: [],
+      blockedBy: [],
+    }
+
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
+
+    await writeTaskUpdate(sessionId, "3", task)
+    await writeTaskUpdate(sessionId, "3", task, "in_progress")
+
+    const entries = await readAuditLog(sessionId)
+    expect(entries).toHaveLength(2)
+    expect(entries[0]!.action).toBe("field_update")
+    expect(entries[1]!.action).toBe("status_change")
+
+    await rm(testSessionDir, { recursive: true, force: true })
+  })
+
+  it("readRecentAuditEntries returns only the N most recent", async () => {
+    const sessionId = `${testSessionId}-recent`
+    const task: Task = {
+      id: "4",
+      subject: "Recent Task",
+      description: "Desc",
+      status: "pending",
+      blocks: [],
+      blockedBy: [],
+    }
+
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
+
+    await writeTaskUpdate(sessionId, "4", task)
+    await writeTaskUpdate(sessionId, "4", task, "in_progress")
+    await writeTaskUpdate(sessionId, "4", task, "completed")
+
+    const recent = await readRecentAuditEntries(sessionId, 1)
+    expect(recent).toHaveLength(1)
+    expect(recent[0]!.newStatus).toBe("completed")
+
+    await rm(testSessionDir, { recursive: true, force: true })
+  })
+
+  it("readAuditLog returns empty array for missing session", async () => {
+    const entries = await readAuditLog("nonexistent-session-xyz")
+    expect(entries).toEqual([])
+  })
+
+  it("verifyAuditEntry detects mismatches", () => {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      taskId: "1",
+      action: "status_change" as const,
+      oldStatus: "pending" as const,
+      newStatus: "in_progress" as const,
+    }
+
+    expect(verifyAuditEntry(entry, { taskId: "1", action: "status_change" })).toBeNull()
+    expect(verifyAuditEntry(entry, { action: "field_update" })).toContain("action")
+    expect(verifyAuditEntry(entry, { taskId: "99" })).toContain("taskId")
   })
 })
