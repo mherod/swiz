@@ -19,7 +19,7 @@ import {
   getSessionTasksDir,
   hasSessionTasksDir,
   isIncompleteTaskStatus,
-  readSessionTasksFresh,
+  readSessionTasks,
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { validateTransition } from "../tasks/task-service.ts"
@@ -141,7 +141,10 @@ export async function checkIncompleteTasks(
     return null
   }
 
-  const allTasks = await readSessionTasksFresh(sessionId, home)
+  // Use direct disk read — not cache-backed readSessionTasksFresh — because the
+  // daemon's TaskStateCache can contain phantom tasks from inline PostToolUse
+  // hooks that processed subagent skill transcripts (e.g. /commit, /push).
+  const allTasks = await readSessionTasks(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   await logStopDiagnostic(
