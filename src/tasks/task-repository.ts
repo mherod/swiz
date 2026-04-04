@@ -158,17 +158,24 @@ export async function readTasks(
   try {
     const files = await readdir(dir)
     const taskFiles = files.filter(isSessionTaskJsonFile)
-    const tasks = await Promise.all(
-      taskFiles.map(async (f) => {
-        const filePath = join(dir, f)
-        const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
-        const st = await stat(filePath)
-        // Backfill timing fields for legacy tasks that predate explicit timestamps.
-        if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
-        backfillTaskTimingFields(task, st.mtimeMs)
-        return task
+    // Read each file independently so a single corrupt or partially-written
+    // file (e.g. during a concurrent push event) doesn't nuke the entire list.
+    const results = await Promise.all(
+      taskFiles.map(async (f): Promise<Task | null> => {
+        try {
+          const filePath = join(dir, f)
+          const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
+          const st = await stat(filePath)
+          // Backfill timing fields for legacy tasks that predate explicit timestamps.
+          if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
+          backfillTaskTimingFields(task, st.mtimeMs)
+          return task
+        } catch {
+          return null
+        }
       })
     )
+    const tasks = results.filter((t): t is Task => t !== null)
     return tasks.sort((a, b) => compareTaskIds(a.id, b.id))
   } catch {
     return []
