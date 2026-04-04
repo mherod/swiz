@@ -53,7 +53,7 @@ describe("manifest.ts", () => {
       })
     })
 
-    it("stop-auto-continue has extended timeout of 120s", () => {
+    it("stop-auto-continue has extended timeout of 15s", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       const autoContinue = stopGroup?.hooks.find((h) => hookIdentifier(h).includes("auto-continue"))
       const timeout = autoContinue
@@ -61,7 +61,7 @@ describe("manifest.ts", () => {
           ? autoContinue.hook.timeout
           : autoContinue.timeout
         : undefined
-      expect(timeout ?? 0).toBe(120)
+      expect(timeout ?? 0).toBe(15)
     })
 
     it("stop event hooks appear in correct order", () => {

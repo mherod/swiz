@@ -375,7 +375,7 @@ describe("dispatch.ts unit tests", () => {
       expect(longTimeouts.length).toBeLessThanOrEqual(3)
     })
 
-    it("stop-auto-continue has extended 120s timeout", () => {
+    it("stop-auto-continue has extended 15s timeout", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       const autoContinue = stopGroup?.hooks.find((h) => hookIdentifier(h).includes("auto-continue"))
       const timeout = autoContinue
@@ -384,7 +384,7 @@ describe("dispatch.ts unit tests", () => {
           : autoContinue.timeout
         : undefined
 
-      expect(timeout).toBe(120)
+      expect(timeout).toBe(15)
     })
   })
 
