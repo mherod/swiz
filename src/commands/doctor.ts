@@ -2040,6 +2040,104 @@ async function findOldTaskFiles(
   return oldTaskFiles
 }
 
+// ─── JSONL transcript truncation ─────────────────────────────────────────────
+
+/**
+ * Truncate a single JSONL file by removing lines with timestamps before the cutoff.
+ * Lines without a parseable timestamp are kept (e.g. permission-mode lines).
+ * Returns the number of lines removed, or 0 if no truncation was needed.
+ */
+async function truncateJsonlFile(filePath: string, cutoffMs: number): Promise<number> {
+  let raw: string
+  try {
+    raw = await readFile(filePath, "utf-8")
+  } catch {
+    return 0
+  }
+  if (!raw) return 0
+
+  const lines = raw.split("\n")
+  const kept: string[] = []
+  let removed = 0
+
+  for (const line of lines) {
+    if (!line.trim()) {
+      // Preserve trailing newline structure
+      if (kept.length > 0) kept.push(line)
+      continue
+    }
+    let ts: number | null = null
+    try {
+      const obj = JSON.parse(line) as { timestamp?: string }
+      if (obj.timestamp) {
+        const parsed = Date.parse(obj.timestamp)
+        if (!Number.isNaN(parsed)) ts = parsed
+      }
+    } catch {
+      // Unparseable line — keep it
+    }
+    if (ts !== null && ts < cutoffMs) {
+      removed++
+    } else {
+      kept.push(line)
+    }
+  }
+
+  if (removed === 0) return 0
+
+  // Create .bak backup before rewriting
+  await cp(filePath, `${filePath}.bak`)
+
+  // Rewrite the file with only the kept lines
+  const newContent = kept.join("\n")
+  await Bun.write(filePath, newContent)
+  return removed
+}
+
+/**
+ * Truncate JSONL transcript files in kept sessions, removing lines older than cutoffMs.
+ * Returns total lines removed and files affected.
+ */
+async function truncateKeptSessions(
+  results: ProjectResult[],
+  cutoffMs: number
+): Promise<{ filesAffected: number; linesRemoved: number }> {
+  let filesAffected = 0
+  let linesRemoved = 0
+
+  for (const { keep } of results) {
+    for (const session of keep) {
+      for (const p of session.paths) {
+        if (p.endsWith(".jsonl")) {
+          const removed = await truncateJsonlFile(p, cutoffMs)
+          if (removed > 0) {
+            filesAffected++
+            linesRemoved += removed
+          }
+        } else {
+          // Session directory — look for .jsonl files inside
+          let entries: string[]
+          try {
+            entries = await readdir(p)
+          } catch {
+            continue
+          }
+          for (const entry of entries) {
+            if (!entry.endsWith(".jsonl")) continue
+            const removed = await truncateJsonlFile(join(p, entry), cutoffMs)
+            if (removed > 0) {
+              filesAffected++
+              linesRemoved += removed
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { filesAffected, linesRemoved }
+}
+
 async function trashSession(
   session: SessionInfo
 ): Promise<{ succeeded: number; failed: number; taskRemoved: boolean }> {
@@ -2558,6 +2656,7 @@ interface ExecuteCleanupOpts {
   totalOldCount: number
   totalOldTaskDirs: number
   totalBytes: number
+  cutoffMs: number
 }
 
 function buildCleanupSuffix(opts: ExecuteCleanupOpts): string {
@@ -2655,6 +2754,14 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
     const gemini = await trashFileList(opts.geminiBackups.files)
     const tasks = await trashFileList(opts.oldTaskFiles.map((t) => t.path))
 
+    // Truncate JSONL transcripts in kept sessions — remove lines older than cutoff
+    const truncation = await truncateKeptSessions(opts.results, opts.cutoffMs)
+    if (truncation.linesRemoved > 0) {
+      console.log(
+        `  ${DIM}Truncated ${truncation.linesRemoved} old line(s) from ${truncation.filesAffected} transcript(s).${RESET}`
+      )
+    }
+
     console.log()
     printCleanupResult(sessions, tasks, claude, gemini, opts.totalBytes)
   } finally {
@@ -2707,7 +2814,16 @@ async function autoCleanup(): Promise<void> {
     claudeBackups.fileCount === 0 &&
     geminiBackups.fileCount === 0
 
-  if (nothingToTrash) return
+  const cutoffMs = Date.now() - cleanupArgs.olderThanMs
+
+  // Truncate kept session transcripts even when there's nothing to trash
+  const hasKeptSessions = results.some(({ keep }) => keep.length > 0)
+  if (nothingToTrash) {
+    if (hasKeptSessions) {
+      await truncateKeptSessions(results, cutoffMs)
+    }
+    return
+  }
 
   console.log(`\n  ${BOLD}Cleaning up old session data (> 24h)...${RESET}`)
   await executeCleanup({
@@ -2718,6 +2834,7 @@ async function autoCleanup(): Promise<void> {
     totalOldCount: totals.totalOldCount,
     totalOldTaskDirs: totals.totalOldTaskDirs,
     totalBytes: totalBytes,
+    cutoffMs,
   })
 }
 
@@ -2806,7 +2923,19 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
     cleanupArgs,
   })
 
-  if (totals.nothingToTrash) return
+  const cutoffMs = Date.now() - cleanupArgs.olderThanMs
+
+  if (totals.nothingToTrash && cleanupArgs.dryRun) return
+  if (totals.nothingToTrash) {
+    // Nothing to trash, but still truncate kept session transcripts
+    const truncation = await truncateKeptSessions(results, cutoffMs)
+    if (truncation.linesRemoved > 0) {
+      console.log(
+        `  ${DIM}Truncated ${truncation.linesRemoved} old line(s) from ${truncation.filesAffected} transcript(s).${RESET}`
+      )
+    }
+    return
+  }
   if (cleanupArgs.dryRun) {
     console.log(`  ${DIM}Run without --dry-run to proceed.${RESET}`)
     return
@@ -2820,6 +2949,7 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
     totalOldCount: totals.totalOldCount,
     totalOldTaskDirs: totals.totalOldTaskDirs,
     totalBytes: totals.totalBytes,
+    cutoffMs,
   })
 }
 

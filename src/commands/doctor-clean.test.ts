@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, rm, utimes, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { decodeProjectPath, walkDecode } from "./doctor/cleanup-path.ts"
@@ -912,5 +912,133 @@ describe("cleanup Junie sessions", () => {
 
     const noMatchOutput = await runCleanup("--project", "/other/path", "--older-than", "30d")
     expect(noMatchOutput).not.toMatch(OLD_SESSION_ID)
+  })
+})
+
+// ─── JSONL transcript truncation ────────────────────────────────────────────
+//
+// When cleanup runs with --older-than, kept sessions (those with recent activity)
+// should have their .jsonl transcript files truncated: lines with timestamps
+// older than the cutoff are removed, while recent lines and lines without
+// timestamps are preserved.
+
+describe("cleanup JSONL transcript truncation", () => {
+  const TRUNC_HOME = join(tmpdir(), `swiz-cleanup-trunc-${process.pid}`)
+  const TRUNC_ENCODED_HOME = TRUNC_HOME.replace(/[/.]/g, "-")
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: TRUNC_HOME }
+
+  const PROJECT_NAME = `${TRUNC_ENCODED_HOME}-Development-trunc-project`
+  const SESSION_ID = "00000000-0000-0000-0000-eeee00000001"
+
+  // Timestamps: one old (30 days ago), one recent (5 minutes ago)
+  const oldTimestamp = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const recentTimestamp = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  const jsonlContent = [
+    JSON.stringify({ type: "permission-mode", sessionId: SESSION_ID }),
+    JSON.stringify({
+      type: "user",
+      timestamp: oldTimestamp,
+      message: { role: "user", content: "old message" },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: oldTimestamp,
+      message: { role: "assistant", content: "old reply" },
+    }),
+    JSON.stringify({
+      type: "user",
+      timestamp: recentTimestamp,
+      message: { role: "user", content: "recent message" },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: recentTimestamp,
+      message: { role: "assistant", content: "recent reply" },
+    }),
+    "", // trailing newline
+  ].join("\n")
+
+  let jsonlPath: string
+
+  beforeAll(async () => {
+    await mkdir(join(TRUNC_HOME, "Development", "trunc-project"), { recursive: true })
+
+    // Create session as a .jsonl file (flat format, not directory)
+    const projectDir = join(TRUNC_HOME, ".claude", "projects", PROJECT_NAME)
+    await mkdir(projectDir, { recursive: true })
+    jsonlPath = join(projectDir, `${SESSION_ID}.jsonl`)
+    await Bun.write(jsonlPath, jsonlContent)
+  })
+
+  afterAll(async () => {
+    await rm(TRUNC_HOME, { recursive: true, force: true })
+  })
+
+  test("truncation removes old lines and keeps recent ones", async () => {
+    // Run cleanup with 1h window — old lines (30d ago) should be removed
+    const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--older-than", "1h"], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const output = stdout + stderr
+
+    expect(proc.exitCode).toBe(0)
+    expect(output).toMatch(/Truncated.*old line/)
+
+    // Verify the file was rewritten
+    const newContent = await readFile(jsonlPath, "utf-8")
+    const lines = newContent.split("\n").filter((l) => l.trim())
+
+    // Should have: permission-mode (no timestamp) + 2 recent lines = 3
+    expect(lines.length).toBe(3)
+
+    // Old messages should be gone
+    expect(newContent).not.toContain("old message")
+    expect(newContent).not.toContain("old reply")
+
+    // Recent messages should remain
+    expect(newContent).toContain("recent message")
+    expect(newContent).toContain("recent reply")
+
+    // Permission-mode line (no timestamp) should be preserved
+    expect(newContent).toContain("permission-mode")
+
+    // .bak backup should exist with original content
+    const bakContent = await readFile(`${jsonlPath}.bak`, "utf-8")
+    expect(bakContent).toContain("old message")
+    expect(bakContent).toContain("recent message")
+  })
+
+  test("running truncation again is a no-op", async () => {
+    const contentBefore = await readFile(jsonlPath, "utf-8")
+
+    const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--older-than", "1h"], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const output = stdout + stderr
+
+    // No truncation message on second run
+    expect(output).not.toMatch(/Truncated/)
+
+    // Content unchanged
+    const contentAfter = await readFile(jsonlPath, "utf-8")
+    expect(contentAfter).toBe(contentBefore)
   })
 })
