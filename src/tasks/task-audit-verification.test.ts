@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import {
+  appendAuditEntry,
   getLastAuditEntry,
   readAuditLog,
   readRecentAuditEntries,
@@ -142,5 +143,49 @@ describe("Task Audit Log Verification", () => {
     expect(verifyAuditEntry(entry, { taskId: "1", action: "status_change" })).toBeNull()
     expect(verifyAuditEntry(entry, { action: "field_update" })).toContain("action")
     expect(verifyAuditEntry(entry, { taskId: "99" })).toContain("taskId")
+  })
+
+  it("appendAuditEntry writes entry and auto-fills timestamp", async () => {
+    const sessionId = `${testSessionId}-append`
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
+
+    await appendAuditEntry(sessionId, {
+      taskId: "10",
+      action: "create",
+      oldStatus: undefined,
+      newStatus: "pending",
+      subject: "Appended task",
+    })
+
+    const entry = await getLastAuditEntry(sessionId)
+    expect(entry).not.toBeNull()
+    expect(entry!.taskId).toBe("10")
+    expect(entry!.action).toBe("create")
+    expect(entry!.newStatus).toBe("pending")
+    expect(entry!.subject).toBe("Appended task")
+    expect(entry!.timestamp).toBeTruthy()
+
+    await rm(testSessionDir, { recursive: true, force: true })
+  })
+
+  it("appendAuditEntry preserves explicit timestamp", async () => {
+    const sessionId = `${testSessionId}-ts`
+    const testSessionDir = join(tasksDir, sessionId)
+    await mkdir(testSessionDir, { recursive: true })
+
+    const fixedTs = "2026-01-01T00:00:00.000Z"
+    await appendAuditEntry(sessionId, {
+      taskId: "11",
+      action: "status_change",
+      oldStatus: "pending",
+      newStatus: "in_progress",
+      timestamp: fixedTs,
+    })
+
+    const entry = await getLastAuditEntry(sessionId)
+    expect(entry!.timestamp).toBe(fixedTs)
+
+    await rm(testSessionDir, { recursive: true, force: true })
   })
 })

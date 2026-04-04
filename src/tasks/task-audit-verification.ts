@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { parseJsonlTailUntyped } from "../utils/jsonl.ts"
-import type { AuditEntry, TaskMutationAction } from "./task-repository.ts"
+import { type AuditEntry, type TaskMutationAction, writeAudit } from "./task-repository.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
 
@@ -83,4 +83,22 @@ export function verifyAuditEntry(
     mismatches.push(`newStatus: expected "${expected.newStatus}", got "${entry.newStatus}"`)
   }
   return mismatches.length > 0 ? `Audit entry mismatch: ${mismatches.join("; ")}` : null
+}
+
+/**
+ * Append a new audit entry to a session's audit log.
+ *
+ * This is a convenience wrapper around `writeAudit()` from `task-repository.ts`
+ * that auto-fills the `timestamp` field when not provided.
+ */
+export async function appendAuditEntry(
+  sessionId: string,
+  entry: Omit<AuditEntry, "timestamp"> & { timestamp?: string },
+  tasksDir?: string
+): Promise<void> {
+  const full: AuditEntry = {
+    timestamp: entry.timestamp ?? new Date().toISOString(),
+    ...entry,
+  }
+  await writeAudit(sessionId, full, tasksDir)
 }
