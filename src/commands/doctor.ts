@@ -50,6 +50,8 @@ export {
   walkDecode,
 } from "./doctor/cleanup-path.ts"
 
+export { truncateJsonlFile }
+
 /**
  * Built-in allowed values for the `category:` frontmatter field in SKILL.md files.
  * Projects can override this list via `allowedSkillCategories` in `.swiz/config.json`.
