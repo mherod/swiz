@@ -14,11 +14,15 @@ import {
   seedSessionFromDisk,
 } from "./task-event-state.ts"
 
-afterEach(() => {
-  clearAllEventState()
-})
+/** Session IDs used by this test file — pruned after each test instead of
+ *  calling clearAllEventState() which races with concurrent test files. */
+const TEST_SESSIONS = ["s1", "s2", "seed1", "seed2", "seed3", "unknown"]
 
 describe("task-event-state", () => {
+  afterEach(() => {
+    for (const id of TEST_SESSIONS) pruneSession(id)
+  })
+
   describe("getSessionEventState", () => {
     it("returns null for unknown session", () => {
       expect(getSessionEventState("unknown")).toBeNull()
@@ -157,17 +161,18 @@ describe("task-event-state", () => {
       applyTaskCreateEvent("s1", "1", "A")
       applyTaskCreateEvent("s2", "1", "B")
       clearAllEventState()
-      expect(eventStateSessionCount()).toBe(0)
+      expect(hasSessionEventState("s1")).toBe(false)
+      expect(hasSessionEventState("s2")).toBe(false)
     })
   })
 
   describe("eventStateSessionCount", () => {
-    it("tracks session count", () => {
-      expect(eventStateSessionCount()).toBe(0)
+    it("tracks session count changes", () => {
+      const before = eventStateSessionCount()
       applyTaskCreateEvent("s1", "1", "A")
-      expect(eventStateSessionCount()).toBe(1)
+      expect(eventStateSessionCount()).toBe(before + 1)
       applyTaskCreateEvent("s2", "1", "B")
-      expect(eventStateSessionCount()).toBe(2)
+      expect(eventStateSessionCount()).toBe(before + 2)
     })
   })
 

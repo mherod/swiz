@@ -2,11 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
-import {
-  applyTaskCreateEvent,
-  clearAllEventState,
-  getSessionEventState,
-} from "./task-event-state.ts"
+import { applyTaskCreateEvent, getSessionEventState, pruneSession } from "./task-event-state.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { TaskStateCache } from "./task-state-cache.ts"
 
@@ -353,7 +349,6 @@ describe("TaskStateCache", () => {
 
   describe("event state pruning", () => {
     it("unwatchSession prunes event state for that session", async () => {
-      clearAllEventState()
       const cache = new TaskStateCache({ maxEntries: 10 })
       const base = await tmp.create()
       const sessionDir = await createSessionDir(base, "s-evict")
@@ -367,36 +362,38 @@ describe("TaskStateCache", () => {
 
       cache.unwatchSession("s-evict")
       expect(getSessionEventState("s-evict")).toBeNull()
-      cache.close()
+      // Don't call cache.close() — it calls clearAllEventState() which
+      // races with concurrent tests that share the module-level Map.
     })
 
     it("LRU eviction prunes event state for evicted session", async () => {
-      clearAllEventState()
       const cache = new TaskStateCache({ maxEntries: 2 })
       const base = await tmp.create()
-
-      const dir1 = await createSessionDir(base, "lru1")
-      const dir2 = await createSessionDir(base, "lru2")
-      const dir3 = await createSessionDir(base, "lru3")
+      const pid = process.pid
+      const dir1 = await createSessionDir(base, `lru-a-${pid}`)
+      const dir2 = await createSessionDir(base, `lru-b-${pid}`)
+      const dir3 = await createSessionDir(base, `lru-c-${pid}`)
       await writeTaskFile(dir1, makeTask("1", "pending"))
       await writeTaskFile(dir2, makeTask("1", "pending"))
       await writeTaskFile(dir3, makeTask("1", "pending"))
 
-      await cache.getState("lru1", dir1)
-      await cache.getState("lru2", dir2)
+      await cache.getState(`lru-a-${pid}`, dir1)
+      await cache.getState(`lru-b-${pid}`, dir2)
 
-      applyTaskCreateEvent("lru1", "10", "Will be evicted")
-      applyTaskCreateEvent("lru2", "10", "Will survive")
+      applyTaskCreateEvent(`lru-a-${pid}`, "10", "Will be evicted")
+      applyTaskCreateEvent(`lru-b-${pid}`, "10", "Will survive")
 
-      await cache.getState("lru3", dir3)
+      // Adding lru-c evicts lru-a (oldest), which prunes its event state
+      await cache.getState(`lru-c-${pid}`, dir3)
 
-      expect(getSessionEventState("lru1")).toBeNull()
-      expect(getSessionEventState("lru2")).toHaveLength(1)
-      cache.close()
+      expect(getSessionEventState(`lru-a-${pid}`)).toBeNull()
+      expect(getSessionEventState(`lru-b-${pid}`)).toHaveLength(1)
+      // Cleanup: prune remaining event state without close()
+      pruneSession(`lru-b-${pid}`)
+      pruneSession(`lru-c-${pid}`)
     })
 
     it("close() clears all event state", async () => {
-      clearAllEventState()
       const cache = new TaskStateCache({ maxEntries: 10 })
       const base = await tmp.create()
       const sessionDir = await createSessionDir(base, "s-close-evt")

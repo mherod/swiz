@@ -105,22 +105,13 @@ export function hasSessionEventState(sessionId: string): boolean {
 
 // ─── Seeding ────────────────────────────────────────────────────────────────
 
-/**
- * Seed event state from task files on disk. Only populates when no event
- * state exists for this session yet — avoids overwriting fresher data from
- * PostToolUse hooks that already fired.
- *
- * Call this alongside `watchSession()` when a session first dispatches so
- * task counts are accurate from the very first tool call.
- */
-export async function seedSessionFromDisk(sessionId: string, tasksDir: string): Promise<void> {
-  if (sessionTasks.has(sessionId)) return
+async function readTaskEventStatesFromDir(tasksDir: string): Promise<EventTaskState[]> {
   const { readdir } = await import("node:fs/promises")
   let files: string[]
   try {
     files = await readdir(tasksDir)
   } catch {
-    return
+    return []
   }
   const tasks: EventTaskState[] = []
   for (const f of files) {
@@ -138,6 +129,20 @@ export async function seedSessionFromDisk(sessionId: string, tasksDir: string): 
       // skip unreadable files
     }
   }
+  return tasks
+}
+
+/**
+ * Seed event state from task files on disk. Only populates when no event
+ * state exists for this session yet — avoids overwriting fresher data from
+ * PostToolUse hooks that already fired.
+ *
+ * Call this alongside `watchSession()` when a session first dispatches so
+ * task counts are accurate from the very first tool call.
+ */
+export async function seedSessionFromDisk(sessionId: string, tasksDir: string): Promise<void> {
+  if (sessionTasks.has(sessionId)) return
+  const tasks = await readTaskEventStatesFromDir(tasksDir)
   if (tasks.length > 0) {
     sessionTasks.set(sessionId, tasks)
   }
