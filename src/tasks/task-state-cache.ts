@@ -370,6 +370,48 @@ export class TaskStateCache {
   }
 
   /**
+   * Apply an audit entry's mutation to the cached session state.
+   * Handles create (adds a stub task), status_change (updates status),
+   * and delete (removes task). No-op when no cached entry exists.
+   */
+  applyTaskAuditSnapshot(
+    sessionId: string,
+    entry: { taskId: string; action: string; newStatus?: string; subject?: string }
+  ): void {
+    const cached = this.entries.get(sessionId)
+    if (!cached) return
+
+    if (entry.action === "create" && entry.subject) {
+      const exists = cached.tasks.some((t) => t.id === entry.taskId)
+      if (!exists) {
+        const stub: SessionTask = {
+          id: entry.taskId,
+          subject: entry.subject,
+          status: entry.newStatus ?? "pending",
+          statusChangedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          startedAt: entry.newStatus === "in_progress" ? Date.now() : null,
+          completedAt: null,
+        }
+        cached.tasks.push(stub)
+        cached.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      }
+    } else if (entry.action === "status_change" && entry.newStatus) {
+      const task = cached.tasks.find((t) => t.id === entry.taskId)
+      if (task) task.status = entry.newStatus
+    } else if (entry.action === "delete") {
+      cached.tasks = cached.tasks.filter((t) => t.id !== entry.taskId)
+    }
+
+    const counts = computeCounts(cached.tasks)
+    cached.openCount = counts.openCount
+    cached.pendingCount = counts.pendingCount
+    cached.inProgressCount = counts.inProgressCount
+    cached.completedCount = counts.completedCount
+    cached.stale = false
+  }
+
+  /**
    * Remove a task from the cached state (e.g. after file deletion).
    */
   removeTask(sessionId: string, taskId: string): void {

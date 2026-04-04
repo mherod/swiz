@@ -356,4 +356,12 @@ export async function writeAudit(
     await mkdir(dir, { recursive: true })
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
   } catch {}
+  // Write-through audit mutations to the global TaskStateCache so hooks
+  // and web UI see status changes immediately without waiting for fs.watch.
+  try {
+    const { getGlobalTaskStateCache } = await import("./task-recovery.ts")
+    getGlobalTaskStateCache()?.applyTaskAuditSnapshot(sessionId, entry)
+  } catch {
+    // Cache not available — safe to ignore (subprocess or non-daemon path)
+  }
 }

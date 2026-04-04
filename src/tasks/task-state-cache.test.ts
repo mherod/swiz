@@ -247,6 +247,78 @@ describe("TaskStateCache", () => {
     })
   })
 
+  describe("applyTaskAuditSnapshot", () => {
+    it("adds a new task on create action", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-audit-create")
+      await writeTaskFile(sessionDir, makeTask("1", "in_progress"))
+      await cache.getState("session-audit-create", sessionDir)
+
+      cache.applyTaskAuditSnapshot("session-audit-create", {
+        taskId: "2",
+        action: "create",
+        newStatus: "pending",
+        subject: "New audit task",
+      })
+
+      const state = await cache.getState("session-audit-create", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      expect(state.pendingCount).toBe(1)
+      expect(state.inProgressCount).toBe(1)
+      cache.close()
+    })
+
+    it("updates status on status_change action", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-audit-status")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await cache.getState("session-audit-status", sessionDir)
+
+      cache.applyTaskAuditSnapshot("session-audit-status", {
+        taskId: "1",
+        action: "status_change",
+        newStatus: "in_progress",
+      })
+
+      const state = await cache.getState("session-audit-status", sessionDir)
+      expect(state.pendingCount).toBe(0)
+      expect(state.inProgressCount).toBe(1)
+      cache.close()
+    })
+
+    it("removes task on delete action", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-audit-delete")
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+      await cache.getState("session-audit-delete", sessionDir)
+
+      cache.applyTaskAuditSnapshot("session-audit-delete", {
+        taskId: "1",
+        action: "delete",
+      })
+
+      const state = await cache.getState("session-audit-delete", sessionDir)
+      expect(state.tasks).toHaveLength(1)
+      expect(state.pendingCount).toBe(0)
+      cache.close()
+    })
+
+    it("is a no-op when session has no cached state", () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      cache.applyTaskAuditSnapshot("uncached", {
+        taskId: "1",
+        action: "status_change",
+        newStatus: "completed",
+      })
+      expect(cache.has("uncached")).toBe(false)
+      cache.close()
+    })
+  })
+
   describe("removeTask", () => {
     it("removes task and recomputes counts", async () => {
       const cache = new TaskStateCache({ maxEntries: 10 })
