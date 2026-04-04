@@ -20,7 +20,7 @@ import { type FSWatcher, watch } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { clearAllEventState, pruneSession } from "./task-event-state.ts"
+import { pruneSession } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
@@ -391,10 +391,17 @@ export class TaskStateCache {
       watcher.close()
     }
     this.watchers.clear()
+    // Prune event state only for sessions this cache tracked — avoids
+    // clearing state owned by other cache instances in concurrent tests.
+    for (const sessionId of this.entries.keys()) {
+      pruneSession(sessionId)
+    }
+    for (const sessionId of this.tasksDirs.keys()) {
+      pruneSession(sessionId)
+    }
     this.entries.clear()
     this.tasksDirs.clear()
     this.accessOrder = []
-    clearAllEventState()
   }
 
   /** Invalidate a single session entry (force full reload on next read). */

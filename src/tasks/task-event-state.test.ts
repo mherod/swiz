@@ -6,7 +6,6 @@ import {
   applyTaskCreateEvent,
   applyTaskListEvent,
   applyTaskUpdateEvent,
-  clearAllEventState,
   eventStateSessionCount,
   getSessionEventState,
   hasSessionEventState,
@@ -157,12 +156,21 @@ describe("task-event-state", () => {
   })
 
   describe("clearAllEventState", () => {
-    it("removes all sessions", () => {
+    it("removes targeted sessions via pruneSession", () => {
+      // clearAllEventState() is tested via TaskStateCache.close() in
+      // task-state-cache.test.ts. Calling it here races with concurrent
+      // test files that share the module-level Map. Instead, verify the
+      // per-session pruning that afterEach relies on.
       applyTaskCreateEvent("s1", "1", "A")
       applyTaskCreateEvent("s2", "1", "B")
-      clearAllEventState()
+      const before = eventStateSessionCount()
+      expect(hasSessionEventState("s1")).toBe(true)
+      expect(hasSessionEventState("s2")).toBe(true)
+      pruneSession("s1")
+      pruneSession("s2")
       expect(hasSessionEventState("s1")).toBe(false)
       expect(hasSessionEventState("s2")).toBe(false)
+      expect(eventStateSessionCount()).toBe(before - 2)
     })
   })
 

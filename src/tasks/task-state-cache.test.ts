@@ -362,8 +362,7 @@ describe("TaskStateCache", () => {
 
       cache.unwatchSession("s-evict")
       expect(getSessionEventState("s-evict")).toBeNull()
-      // Don't call cache.close() — it calls clearAllEventState() which
-      // races with concurrent tests that share the module-level Map.
+      // close() not needed — unwatchSession already cleaned up.
     })
 
     it("LRU eviction prunes event state for evicted session", async () => {
