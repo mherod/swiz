@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-04-05
+
+### Refactoring
+
+- **Phase 2.2.2.1: stop-pr-description extraction** — Extracted
+  into canonical 6-module architecture (types, context,
+  format-validator, completeness-validator, action-plan,
+  evaluate, wrapper). Reduced from 142 to 26 lines in wrapper.
+  Added 12 comprehensive tests covering all validators and
+  output formatting.
+- **Phase 2.2.2.2: stop-pr-changes-requested extraction** —
+  Extracted into canonical 6-module architecture (types,
+  context, review-validators, review-data-fetcher,
+  action-plan, evaluate, wrapper). Reduced from 262 to 23 lines
+  in wrapper. Added 10 comprehensive tests covering review
+  state detection and blocking message formatting.
+
+### Phase 3.0 Planning
+
+- **Hook extraction roadmap established** — Identified 32+
+  remaining non-modular hooks as Phase 3.0 candidates.
+  Planned 4-phase pipeline: verification, execution (5-6
+  extractions per batch), Phase 4.0 consolidation. Canonical
+  6-module pattern proven across 4 hooks.
+
 ## 2026-04-04
 
 ### New Features
