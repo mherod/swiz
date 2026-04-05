@@ -271,7 +271,8 @@ describe("dispatch replay", () => {
   async function replay(
     event: string,
     payload: Record<string, any>,
-    extraArgs: string[] = []
+    extraArgs: string[] = [],
+    envOverrides: Record<string, string> = {}
   ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", event, ...extraArgs], {
       stdin: "pipe",
@@ -283,6 +284,7 @@ describe("dispatch replay", () => {
         SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
         // Keep replay deterministic in CI without contacting external providers.
         AI_TEST_NO_BACKEND: "1",
+        ...envOverrides,
       },
     })
     await proc.stdin.write(JSON.stringify(payload))
@@ -397,6 +399,11 @@ describe("dispatch replay", () => {
 
   test("stop replay short-circuits on secret-scanner block", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
+    const fakeHome = await mkdtemp(join(tmpdir(), "swiz-replay-home-"))
+    // Empty session_id causes stop-completion-auditor to fail open
+    // (resolveCompletionAuditContext returns null when sessionId is empty).
+    // This isolates the test to focus on stop-secret-scanner behavior.
+    const sessionId = ""
     try {
       await runGit(repoDir, ["init"])
       await runGit(repoDir, ["config", "user.email", "swiz-tests@example.com"])
@@ -443,9 +450,9 @@ describe("dispatch replay", () => {
       await runGit(repoDir, ["add", "secrets.ts"])
       await runGit(repoDir, ["commit", "-m", "test: add committed secret fixture"])
 
-      const result = await replay("stop", { session_id: "replay-stop-all-hooks", cwd: repoDir }, [
-        "--json",
-      ])
+      const result = await replay("stop", { session_id: sessionId, cwd: repoDir }, ["--json"], {
+        HOME: fakeHome,
+      })
       expect(result.exitCode).toBe(0)
 
       const parsed = JSON.parse(result.stdout) as Record<string, any>
@@ -464,6 +471,7 @@ describe("dispatch replay", () => {
       expect(resultField.by).toBe("stop-secret-scanner.ts")
     } finally {
       await rm(repoDir, { recursive: true, force: true })
+      await rm(fakeHome, { recursive: true, force: true })
     }
   })
 })
