@@ -31,10 +31,11 @@ async function runStopHook(
   payload: unknown,
   opts: { env?: Record<string, string>; cwd?: string } = {}
 ): Promise<HookResult> {
-  const env: Record<string, string | undefined> = { ...process.env, ...opts.env }
+  const env: Record<string, string | undefined> = { ...process.env }
   for (const agent of AGENTS) {
     for (const v of agent.envVars ?? []) env[v] = ""
   }
+  Object.assign(env, opts.env)
   const proc = Bun.spawn(["bun", join(HOOKS_DIR, hookFile)], {
     stdin: "pipe",
     stdout: "pipe",
@@ -154,6 +155,35 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
       "stop-lockfile-drift.ts",
       { cwd: dir, session_id: sessionId },
       { cwd: dir }
+    )
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain(FOOTER_MARKER)
+  })
+
+  test("stop-reflect-on-session-mistakes: missing skill invocation block includes footer", async () => {
+    const dir = await tmp.create("swiz-stop-reflect-")
+    await mkdir(join(dir, ".skills", "reflect-on-session-mistakes"), { recursive: true })
+    await writeFile(join(dir, ".skills", "reflect-on-session-mistakes", "SKILL.md"), "# Reflect\n")
+    const transcriptPath = join(dir, "transcript.jsonl")
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              input: { command: "echo test" },
+            },
+          ],
+        },
+      })}\n`
+    )
+    const result = await runStopHook(
+      "stop-reflect-on-session-mistakes.ts",
+      { cwd: dir, session_id: "test-reflect", transcript_path: transcriptPath },
+      { cwd: dir, env: { CLAUDECODE: "1" } }
     )
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)

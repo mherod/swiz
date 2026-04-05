@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
-const HOOK = "hooks/stop-reflect-on-session-mistakes.ts"
+const HOOK = join(import.meta.dir, "stop-reflect-on-session-mistakes.ts")
 
 const tmp = useTempDir("swiz-stop-reflect-")
 
