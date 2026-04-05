@@ -35,7 +35,7 @@ import {
 
 // ─── Deduplication ──────────────────────────────────────────────────────────
 
-function isTaskDuplicate(
+export function isTaskDuplicate(
   stale: SessionTask,
   completedFingerprints: Set<string>,
   completedNormalized: string[]
@@ -47,7 +47,7 @@ function isTaskDuplicate(
   return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
 }
 
-async function completeStaleTask(
+export async function completeStaleTask(
   stale: SessionTask,
   tasksDir: string,
   autoTransitionEnabled: boolean,
@@ -72,7 +72,7 @@ async function completeStaleTask(
   }
 }
 
-async function deduplicateStaleTasks(
+export async function deduplicateStaleTasks(
   completedTasks: SessionTask[],
   incompleteTasks: SessionTask[],
   tasksDir: string,
@@ -96,7 +96,7 @@ async function deduplicateStaleTasks(
 
 // ─── Incomplete detail formatting ───────────────────────────────────────────
 
-function getIncompleteDetails(allTasks: SessionTask[]): string[] {
+export function getIncompleteDetails(allTasks: SessionTask[]): string[] {
   const incompleteTaskRows = allTasks
     .filter((t) => t.id && t.id !== "null")
     .filter((t): t is SessionTask => isIncompleteTaskStatus(t.status))

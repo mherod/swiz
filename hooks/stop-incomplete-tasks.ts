@@ -1,27 +1,26 @@
 #!/usr/bin/env bun
 
-// Block stop when incomplete tasks remain in the current session.
-// Runs before the completion auditor so incomplete tasks are caught early.
+// Modular stop hook: Block stop when incomplete tasks remain in the current session.
+//
+// Architecture: This hook modularizes task checking into independent,
+// testable validators (types, context, task-dedup-validator, incomplete-check-validator,
+// action-plan, evaluate).
+// Each component can be tested separately and composed into a unified validation pipeline.
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { isCurrentAgent } from "../src/agent-paths.ts"
-import { getHomeDirOrNull } from "../src/home.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { isTaskListTool, isTaskTool } from "../src/tool-matchers.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
-import { blockStopObj } from "../src/utils/hook-utils.ts"
-import { checkIncompleteTasks } from "../src/utils/stop-incomplete-tasks-core.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
+import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
+import type { StopHookInput } from "./schemas.ts"
+import { stopHookInputSchema } from "./schemas.ts"
+import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
 
-export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise<SwizHookOutput> {
+export async function evaluateStopIncompleteTasksHook(
+  input: StopHookInput
+): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
-  const sessionId = parsed.session_id ?? ""
-  const home = getHomeDirOrNull()
-  if (!home) return {}
-
-  if (isCurrentAgent("gemini")) return {}
 
   // Require TaskList before stop when the session has used task tools.
   // This ensures the task-state-cache is synced via posttooluse-task-list-sync.
@@ -39,8 +38,7 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     }
   }
 
-  const result = await checkIncompleteTasks(sessionId, home)
-  return result ?? {}
+  return await evaluateStopIncompleteTasks(parsed)
 }
 
 const stopIncompleteTasks: SwizStopHook = {
@@ -49,7 +47,7 @@ const stopIncompleteTasks: SwizStopHook = {
   timeout: 10,
 
   run(input) {
-    return evaluateStopIncompleteTasks(input)
+    return evaluateStopIncompleteTasksHook(input)
   },
 }
 

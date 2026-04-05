@@ -55,10 +55,9 @@ async function completeTasks(
   sessionId: string,
   tasksDir: string,
   tasks: Array<{ id: string; status: string; subject: string }>,
-  isCommit: boolean,
-  isPush: boolean,
-  autoTransitionEnabled: boolean
+  opts: { isCommit: boolean; isPush: boolean; autoTransitionEnabled: boolean }
 ): Promise<void> {
+  const { isCommit, isPush, autoTransitionEnabled } = opts
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
     autoTransitionForComplete(task, autoTransitionEnabled)
@@ -129,9 +128,7 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
     op.sessionId,
     tasksDir,
     tasks as Array<{ id: string; status: string; subject: string }>,
-    op.isCommit,
-    op.isPush,
-    settings.autoTransition
+    { isCommit: op.isCommit, isPush: op.isPush, autoTransitionEnabled: settings.autoTransition }
   )
 
   if (op.isPush) {
