@@ -892,6 +892,19 @@ async function checkNativeTaskUpdateCompletion(
 
   if (toolInput.status !== "completed") return "early_exit"
 
+  // Reject pending → completed: must transition through in_progress first.
+  // This prevents the "validation lag" gap where an illegal state is written
+  // but subsequent tools are blocked by the reconciliation gate.
+  const allTasks = await readSessionTasks(sessionId)
+  const currentTask = allTasks.find((t) => t.id === taskId)
+  if (currentTask && currentTask.status === "pending") {
+    return preToolUseDeny(
+      `Cannot complete task #${taskId} directly from pending.\n\n` +
+        `Required transition: pending → in_progress → completed.\n\n` +
+        `Use TaskUpdate to set task #${taskId} to in_progress first, then complete it.`
+    )
+  }
+
   const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)
   if (completionDenied) return completionDenied
   return "continue"

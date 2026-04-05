@@ -81,7 +81,10 @@ export async function evaluateStopTodoTracker(input: StopHookInput): Promise<Swi
     "These should be resolved or converted to tracked issues.",
   ].join("\n")
 
-  const r = await tryFileFollowUpIssue(
+  // Fire-and-forget: issue creation is best-effort and must not consume the
+  // hook's remaining timeout budget. The primary contract is surfacing TODOs
+  // in the stop response — if gh is slow, findings are still reported.
+  tryFileFollowUpIssue(
     {
       title: `chore: resolve ${todos.length} TODO/FIXME comment(s)`,
       body: issueBody,
@@ -91,15 +94,16 @@ export async function evaluateStopTodoTracker(input: StopHookInput): Promise<Swi
     },
     reason
   )
-
-  if (r.status === "blocked") return r.output
-
-  if (r.issueNum) {
-    console.error(
-      `[swiz][stop-todo-tracker] Filed follow-up issue #${r.issueNum} for ${todos.length} TODO(s)`
-    )
-    return {}
-  }
+    .then((r) => {
+      if (r.status === "filed" && r.issueNum) {
+        console.error(
+          `[swiz][stop-todo-tracker] Filed follow-up issue #${r.issueNum} for ${todos.length} TODO(s)`
+        )
+      }
+    })
+    .catch(() => {
+      // Silent — issue creation is best-effort
+    })
 
   return blockStopObj(reason)
 }
