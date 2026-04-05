@@ -19,11 +19,13 @@ import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
 import posttooluseSpeakNarrator from "../hooks/posttooluse-speak-narrator.ts"
 import posttooluseStateTransition from "../hooks/posttooluse-state-transition.ts"
 import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
-import posttooluseTaskAuditSync from "../hooks/posttooluse-task-audit-sync.ts"
 import posttooluseTaskCountContext from "../hooks/posttooluse-task-count-context.ts"
-import posttooluseTaskListSync from "../hooks/posttooluse-task-list-sync.ts"
 import posttooluseTaskOutput from "../hooks/posttooluse-task-output.ts"
 import posttooluseTaskSubjectValidation from "../hooks/posttooluse-task-subject-validation.ts"
+import {
+  taskAuditSyncHook as posttooluseTaskAuditSync,
+  taskListSyncHook as posttooluseTaskListSync,
+} from "../hooks/posttooluse-task-sync.ts"
 import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
