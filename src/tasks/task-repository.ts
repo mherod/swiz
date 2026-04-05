@@ -7,6 +7,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
+import { debugLog } from "../debug.ts"
 import { sessionPrefix } from "../session-id.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { CappedMap } from "../utils/capped-map.ts"
@@ -259,7 +260,9 @@ async function countOpenTasks(dir: string, files: string[]): Promise<number> {
     try {
       const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
       if (t.status && isIncompleteTaskStatus(t.status)) count++
-    } catch {}
+    } catch (e) {
+      debugLog(`countOpenTasks: failed to read task file ${f}:`, e)
+    }
   }
   return count
 }
@@ -287,7 +290,9 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
       ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
     }
     await writeFile(join(dir, SESSION_META_FILE), JSON.stringify(meta))
-  } catch {}
+  } catch (e) {
+    debugLog(`updateSessionMeta: failed to write session metadata to ${dir}:`, e)
+  }
 }
 
 /**
@@ -355,13 +360,16 @@ export async function writeAudit(
     const dir = join(tasksDir, sessionId)
     await mkdir(dir, { recursive: true })
     await appendJsonlEntry(join(dir, ".audit-log.jsonl"), entry)
-  } catch {}
+  } catch (e) {
+    debugLog(`writeAudit: failed to write audit entry for session ${sessionId}:`, e)
+  }
   // Write-through audit mutations to the global TaskStateCache so hooks
   // and web UI see status changes immediately without waiting for fs.watch.
   try {
     const { getGlobalTaskStateCache } = await import("./task-recovery.ts")
     getGlobalTaskStateCache()?.applyTaskAuditSnapshot(sessionId, entry)
-  } catch {
+  } catch (e) {
     // Cache not available — safe to ignore (subprocess or non-daemon path)
+    debugLog(`writeAudit: failed to apply cache update for session ${sessionId}:`, e)
   }
 }
