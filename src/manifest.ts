@@ -112,6 +112,7 @@ import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
 import stopPrDescription from "../hooks/stop-pr-description.ts"
 import stopPrFeedback from "../hooks/stop-pr-feedback.ts"
 import stopQualityChecks from "../hooks/stop-quality-checks.ts"
+import stopReflectOnSessionMistakes from "../hooks/stop-reflect-on-session-mistakes.ts"
 import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
 import stopShipChecklist from "../hooks/stop-ship-checklist.ts"
 import stopSuppressionPatterns from "../hooks/stop-suppression-patterns.ts"
@@ -218,6 +219,7 @@ export const manifest: HookGroup[] = [
       { hook: stopMemorySize },
       { hook: stopDependabotPrs },
       { hook: stopGdprDataModels },
+      { hook: stopReflectOnSessionMistakes },
       { hook: stopMemoryUpdateReminder },
       { hook: stopPersonalRepoIssues },
       { hook: stopAutoContinue },

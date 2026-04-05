@@ -411,3 +411,30 @@ export const taskListSyncHook: SwizHook<PostToolHookInput> = {
     return evaluatePosttooluseTaskListSync(input)
   },
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// § 3. Merged Task Sync — single entry point for all postToolUse task sync
+// ═══════════════════════════════════════════════════════════════════════════
+
+const posttooluseTaskSync: SwizHook<Record<string, any>> = {
+  name: "posttooluse-task-sync",
+  event: "postToolUse",
+  timeout: 5,
+
+  async run(input) {
+    const rec = input as Record<string, any>
+    const toolName = String(rec.tool_name ?? "")
+
+    if (toolName === "TaskList") {
+      return await evaluatePosttooluseTaskListSync(input)
+    }
+
+    if (toolName === "TaskUpdate" || toolName === "TaskCreate" || toolName === "TodoWrite") {
+      return await evaluatePosttooluseTaskAuditSync(input)
+    }
+
+    return {}
+  },
+}
+
+export default posttooluseTaskSync
