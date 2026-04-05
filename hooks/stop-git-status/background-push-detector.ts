@@ -8,7 +8,7 @@
 import { git } from "../../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../../src/utils/process-utils.ts"
 
-const PROC_INSPECT_TIMEOUT_MS = 5_000
+const PROC_INSPECT_TIMEOUT_MS = 2_500
 
 interface ParentMap {
   get(pid: number): number | undefined
