@@ -1,33 +1,22 @@
 {
-  // Policy: explicit `any` is an ESLint error (@typescript-eslint/no-explicit-any). The `unknown` keyword
-  // is banned via @typescript-eslint/no-restricted-types (currently **warn** until ~1k call sites migrate;
-  // set that rule to "error" in eslint.config.mjs for fatal CI). TypeScript does not reject `any`/`unknown`.
   "compilerOptions": {
-    // Environment setup & latest features
     "lib": ["ESNext", "DOM"],
     "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
-
-    // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-
-    // Best practices
     "strict": true,
-    // Implicit `any` is an error (also implied by strict). Explicit `any` is still allowed by tsc — ban it in eslint.config.mjs.
     "noImplicitAny": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noImplicitReturns": true,
-
-    // Some stricter flags (disabled by default)
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": false
