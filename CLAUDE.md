@@ -49,11 +49,15 @@ alwaysApply: false
 - `classifyHookOutput` (`src/dispatch/worker-types.ts`) validates stdout against `hookOutputSchema`; returns `"invalid-schema"` on failure. Requires `systemMessage`, `reason`, `stopReason`, or `additionalContext`; `{}` valid. Stop/SubagentStop normalized via `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` for stdout fields by event.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
-- **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
-- **Inline SwizHook migration unit**: Helper extraction and dependent hook migration ship as one commit — run `bun run typecheck` after extraction, then migrate and commit together.
+- **Inline SwizHook imports**: Avoid `hook-utils.ts`, `git-utils.ts` (circular deps). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
+- **Inline SwizHook migration**: Helper extraction and hook migration ship as one commit — run `bun run typecheck` after extraction, then migrate and commit together.
 - **Inline SwizHook output**: Use `preToolUseAllow()`/`preToolUseDeny()` from `SwizHook.ts` — return objects instead of calling `process.exit`. Use `runSwizHookAsMain()` for standalone `import.meta.main` compatibility.
 - **Inline SwizHook import.meta.main**: Replace the old standalone block with `if (import.meta.main) await runSwizHookAsMain(hook)`. DON'T keep a `Bun.stdin.json()` read alongside it — `runSwizHookAsMain` owns stdin; double-read causes null input, silent exit 0, empty subprocess stdout (`JSON.parse(stdout)` throws `Unexpected EOF`).
 - **Debt marker self-detection**: Hook files containing keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` format for headers or dynamic regex construction (`"TO" + "DO"`) to avoid self-detection.
+## Phase 2 Hook Extraction
+- **6-module structure**: types → context → validators → action-plan → evaluate → wrapper.
+- **Deduplication**: Export from core, import by orchestrator only. Delete re-export wrappers.
+- Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
