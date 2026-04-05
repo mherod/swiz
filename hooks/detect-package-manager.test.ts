@@ -375,6 +375,17 @@ describe("detectPackageManager — conflicting lockfiles in same directory", () 
     expect(pnpmDecision).toBe("allow")
   })
 
+  test("bun.lock + pnpm-lock.yaml + node_modules/.pnpm/lock.yaml → pnpm wins", async () => {
+    const dir = await makeTempDir("-conflict-bun-pnpm-confirmed")
+    await writeFile(join(dir, "bun.lock"), "")
+    await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+    await mkdir(join(dir, "node_modules", ".pnpm"), { recursive: true })
+    await writeFile(join(dir, "node_modules", ".pnpm", "lock.yaml"), "lockfileVersion: 9.0\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
   test("pnpm-lock.yaml + yarn.lock → pnpm wins", async () => {
     const dir = await makeTempDir("-conflict-pnpm-yarn")
     await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")

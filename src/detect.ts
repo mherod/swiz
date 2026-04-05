@@ -13,6 +13,13 @@ import { resolveCwd } from "./cwd.ts"
 // Re-exported from hooks/utils/terminal-detection.ts so both src/ and hooks/
 // consumers can access it via this central detect module.
 
+export type { PackageManager, Runtime } from "./utils/package-detection.ts"
+export {
+  detectPackageManager,
+  detectPkgRunner,
+  detectRuntime,
+} from "./utils/package-detection.ts"
+
 export type {
   EnvironmentInfo,
   ShellInfo,

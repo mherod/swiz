@@ -43,25 +43,29 @@ async function detectFromNpmrc(dir: string): Promise<boolean> {
   }
 }
 
+async function hasPnpmNodeModulesLock(dir: string): Promise<boolean> {
+  return fileExists(join(dir, "node_modules", ".pnpm", "lock.yaml"))
+}
+
+async function hasAnyLockfile(dir: string, lockfiles: readonly string[]): Promise<boolean> {
+  for (const lockfile of lockfiles) {
+    if (await fileExists(join(dir, lockfile))) return true
+  }
+  return false
+}
+
 async function detectFromLockfiles(dir: string): Promise<PackageManager | null> {
-  if ((await fileExists(join(dir, "bun.lockb"))) || (await fileExists(join(dir, "bun.lock"))))
-    return "bun"
-  if (
-    (await fileExists(join(dir, "pnpm-lock.yaml"))) ||
-    (await fileExists(join(dir, "shrinkwrap.yaml")))
-  )
+  const hasBunLock = await hasAnyLockfile(dir, ["bun.lockb", "bun.lock"])
+  const hasPnpmLock = await hasAnyLockfile(dir, ["pnpm-lock.yaml", "shrinkwrap.yaml"])
+
+  if (hasBunLock && hasPnpmLock && (await hasPnpmNodeModulesLock(dir))) {
     return "pnpm"
-  if (
-    (await fileExists(join(dir, "yarn.lock"))) ||
-    (await fileExists(join(dir, ".pnp.cjs"))) ||
-    (await fileExists(join(dir, ".pnp.js")))
-  )
-    return "yarn"
-  if (
-    (await fileExists(join(dir, "package-lock.json"))) ||
-    (await fileExists(join(dir, "npm-shrinkwrap.json")))
-  )
-    return "npm"
+  }
+
+  if (hasBunLock) return "bun"
+  if (hasPnpmLock) return "pnpm"
+  if (await hasAnyLockfile(dir, ["yarn.lock", ".pnp.cjs", ".pnp.js"])) return "yarn"
+  if (await hasAnyLockfile(dir, ["package-lock.json", "npm-shrinkwrap.json"])) return "npm"
   return null
 }
 
