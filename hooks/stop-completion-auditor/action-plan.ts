@@ -51,5 +51,5 @@ export function formatBlockReason(
     translateToolNames: true,
     observedToolNames,
   })
-  return plan.reason + "\n\n" + formatted
+  return `${plan.reason}\n\n${formatted}`
 }
