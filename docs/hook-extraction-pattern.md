@@ -253,10 +253,71 @@ Successfully extracted into 8 modular validation layers:
 - ✅ No circular dependencies
 - ✅ Clear separation: task-creation vs audit-log vs ci-evidence vs reconciliation
 
+### ✅ Completed: stop-lockfile-drift (April 5, 2026)
+
+Successfully extracted into 6 modular validation layers:
+- **types.ts** — `LockfileInfo`, `DriftedPackage`, `DriftValidationResult`, `LockfileDriftContext`
+- **context.ts** — `resolveLockfileDriftContext()` resolves git range and changed files
+- **lockfile-detector.ts** — `detectLockfile()`, `findDriftedPackages()` with LOCKFILE_MAP
+- **drift-validator.ts** — `validateLockfileDrift()` returns ok or drift-detected
+- **action-plan.ts** — `formatDriftBlockReason()` generates blocking guidance
+- **evaluate.ts** — Orchestrates validation with fail-open error handling
+
+**Metrics:**
+- 2 commits (43b0082, b76c7f3) deployed to origin/main
+- 5793+ tests passing in CI (run 23991023927)
+- Fail-open pattern: null returns on missing prerequisites
+- Pattern validated and replicable
+
+**Reusability Checklist Verification:**
+- ✅ Module structure follows types → context → validators → action-plan → evaluate pattern
+- ✅ All functions independently testable
+- ✅ Error handling fail-open
+- ✅ Parallel capable with Promise.all()
+- ✅ CI green on deployment
+- ✅ README documentation updated
+- ✅ Clear separation of concerns
+
+### ✅ Completed: stop-git-status (April 5, 2026)
+
+Successfully extracted into 8 modular validation layers:
+- **types.ts** — `GitContext`, `GitStatus`, `GitWorkflowCollectResult`, `ActionPlanItem`
+- **context.ts** — `resolveGitContext()`, `resolveEffectiveSettings()` resolve collaboration mode
+- **uncommitted-changes-validator.ts** — `buildUncommittedReason()` detects modified/added/deleted
+- **remote-state-validator.ts** — `describeRemoteState()`, `selectTaskSubject()`, `buildTaskDesc()`
+- **push-cooldown-validator.ts** — `isPushCooldownActive()`, `markPushPrompted()` with sentinel file
+- **background-push-detector.ts** — `detectBackgroundPush()` with pgrep/ps/lsof process inspection
+- **action-plan.ts** — `buildGitWorkflowSections()` generates commit/pull/push steps
+- **evaluate.ts** — `evaluateStopGitStatus()`, `collectGitWorkflowStop()` (exported for stop-ship-checklist)
+
+**Metrics:**
+- 1 commit (632bc4d) deployed to origin/main
+- 6329+ tests passing (exit 0)
+- Fail-open pattern: null returns on missing prerequisites
+- Reusable for stop-ship-checklist composition
+
+**Reusability Checklist Verification:**
+- ✅ Module structure follows types → context → validators → action-plan → evaluate pattern
+- ✅ All functions independently testable (7 focused validators + orchestration)
+- ✅ Error handling fail-open
+- ✅ Parallel capable (Promise.all for context resolution)
+- ✅ 6329+ tests cover all validation paths
+- ✅ Manifest registration correct with SwizStopHook
+- ✅ README documentation updated
+- ✅ Re-exports for stop-ship-checklist composition
+- ✅ Clear separation: uncommitted/remote/cooldown/background/action-plan concerns
+
 ## Next Hooks to Extract
 
-Candidates for this pattern:
-1. **stop-git-status** — Multiple validation layers (uncommitted changes, untracked files, unpushed commits, branch divergence)
-2. **stop-lockfile-drift** — Validation layers (lockfile sync detection, package manager state)
+Phase 1.5 complete. Phase 2 candidates:
+1. **stop-ship-checklist** — Composition hook (already uses modular workflow validators)
+2. **stop-incomplete-tasks** — Simple validator, good extraction target
+3. **stop-branch-conflicts** — Single responsibility, can be modularized
 
 Apply this pattern when a hook has multiple responsibilities that can be tested independently. Prefer composition with existing extracted hooks over creating new duplicates.
+
+**Pattern Coverage:**
+- Phase 1: ✅ stop-completion-auditor (8 modules)
+- Phase 1.5: ✅ stop-lockfile-drift (6 modules), ✅ stop-git-status (8 modules)
+- Phase 2: 🔵 stop-ship-checklist, stop-incomplete-tasks, stop-branch-conflicts
+- Phase 3: 🔵 stop-todo-tracker, stop-pr-feedback, stop-personal-repo-issues
