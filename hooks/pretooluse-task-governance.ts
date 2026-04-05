@@ -957,3 +957,103 @@ export const enforceTaskupdateHook: SwizToolHook = {
     return evaluatePretooluseEnforceTaskupdate(input)
   },
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// § 5. Merged Task Governance — single entry point for all preToolUse
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
+  const parsed = toolHookInputSchema.parse(rawInput)
+  const input = parsed as unknown as Record<string, any>
+  const toolName = String(input.tool_name ?? "")
+  const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
+
+  // ── TaskUpdate / update_plan path ──────────────────────────────────────
+  if (isNativeTaskTool(toolName)) {
+    // Schema validation (sync, cheap)
+    const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
+    if (unsupported.length > 0) {
+      const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
+      return preToolUseDeny(
+        `TaskUpdate received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
+          `Allowed fields: ${allowed}.`
+      )
+    }
+
+    // Completion / deletion / rate-limit governance
+    const n = await checkNativeTaskUpdateCompletion(input)
+    if (n === "early_exit") return {}
+    if (n !== "continue") return n
+
+    // CLI enforcement for shell-based task commands
+    if (shouldInspectShellInput(parsed)) {
+      return await runSwizTasksEnforcement(input)
+    }
+    return {}
+  }
+
+  // ── TaskCreate / TodoWrite path ────────────────────────────────────────
+  if (toolName === "TaskCreate" || toolName === "TodoWrite") {
+    const subject: string = (toolInput?.subject as string) ?? ""
+    const result = detect(subject)
+    if (result.matched) {
+      return preToolUseDeny(formatMessage(result))
+    }
+    return preToolUseAllow()
+  }
+
+  // ── Edit / Write / Bash path (blocked tools) ──────────────────────────
+  if (isBlockedTool(toolName)) {
+    // Guard conditions: only enforce in git repos with CLAUDE.md, not gemini
+    const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
+    const cwd: string = (input.cwd as string) ?? process.cwd()
+
+    if (!validateGuardConditions(sessionId, toolName, input)) return {}
+    if (!(await isTaskEnforcementProject(cwd))) return {}
+
+    const transcriptPath: string = (input.transcript_path as string) ?? ""
+
+    // CLI enforcement runs first for shell tools (catches `swiz tasks` misuse)
+    if (shouldInspectShellInput(parsed)) {
+      const cliResult = await runSwizTasksEnforcement(input)
+      if (cliResult && Object.keys(cliResult).length > 0) {
+        const hso = (cliResult as Record<string, any>).hookSpecificOutput as
+          | Record<string, any>
+          | undefined
+        if (hso?.permissionDecision === "deny") return cliResult
+      }
+    }
+
+    // Full task requirement checks
+    return await runRequireTasksChecks({
+      input,
+      toolName,
+      sessionId: sessionId as string,
+      transcriptPath,
+      cwd,
+    })
+  }
+
+  // ── Other shell tools (not blocked, but check CLI enforcement) ─────────
+  if (shouldInspectShellInput(parsed)) {
+    return await runSwizTasksEnforcement(input)
+  }
+
+  return {}
+}
+
+const pretooluseTaskGovernance: SwizToolHook = {
+  name: "pretooluse-task-governance",
+  event: "preToolUse",
+  timeout: 5,
+
+  async run(input) {
+    try {
+      return await evaluatePretooluseTaskGovernance(input)
+    } catch (err: unknown) {
+      return unexpectedHookFailureOutput(err)
+    }
+  },
+}
+
+export default pretooluseTaskGovernance

@@ -74,7 +74,7 @@ import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
 import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
-import {
+import pretooluseTaskGovernance, {
   enforceTaskupdateHook as pretooluseEnforceTaskupdate,
   requireTasksHook as pretooluseRequireTasks,
   taskSubjectValidationHook as pretoolusTaskSubjectValidation,
@@ -227,7 +227,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    hooks: [{ hook: posttooluseSpeakNarrator }],
+    hooks: [{ hook: posttooluseSpeakNarrator }, { hook: pretooluseTaskGovernance }],
   },
   {
     event: "preToolUse",

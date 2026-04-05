@@ -87,6 +87,11 @@ describe("manifest.ts", () => {
         const allFireAndForgetAsync =
           group.hooks.length > 0 && group.hooks.every((h) => isAsyncFireAndForgetHook(h))
         if (allFireAndForgetAsync) return
+        // The merged task governance hook handles all tool types internally
+        const hasMergedGovernance = group.hooks.some(
+          (h) => hookIdentifier(h) === "pretooluse-task-governance.ts"
+        )
+        if (hasMergedGovernance) return
         expect(group.matcher).toBeDefined()
         expect(typeof group.matcher).toBe("string")
       })
