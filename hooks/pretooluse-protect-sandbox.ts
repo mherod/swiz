@@ -19,6 +19,14 @@ const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits",
 // All recognised aliases for the trunkMode setting
 const TRUNK_MODE_ALIASES = ["trunk-mode", "trunkmode", "trunk_mode", "trunkMode"]
 
+// All recognised aliases for the personalRepoIssuesGate setting
+const PERSONAL_ISSUES_ALIASES = [
+  "personal-repo-issues-gate",
+  "personalrepoissuesgate",
+  "personal_repo_issues_gate",
+  "personalRepoIssuesGate",
+]
+
 // Matches any JSON file directly inside a .swiz/ directory.
 // Direct edits to these files bypass setting validation and schema enforcement,
 // and can be used to disable sandbox protections — so we block them unconditionally,
@@ -40,6 +48,13 @@ export function isSandboxDisableCommand(command: string): boolean {
  */
 export function isTrunkModeDisableCommand(command: string): boolean {
   return isSettingDisableCommand(command, TRUNK_MODE_ALIASES)
+}
+
+/**
+ * Returns true when the command attempts to disable the personalRepoIssuesGate setting.
+ */
+export function isPersonalIssuesGateDisableCommand(command: string): boolean {
+  return isSettingDisableCommand(command, PERSONAL_ISSUES_ALIASES)
 }
 
 const pretoolUseProtectSandbox: SwizToolHook = {
@@ -66,6 +81,13 @@ const pretoolUseProtectSandbox: SwizToolHook = {
         return preToolUseDeny(
           "Disabling trunk-mode is not permitted from agent Bash commands.\n\n" +
             "Trunk mode can only be disabled by the user directly at the terminal.\n" +
+            buildIssueGuidance(null)
+        )
+      }
+      if (isPersonalIssuesGateDisableCommand(command)) {
+        return preToolUseDeny(
+          "Disabling personalRepoIssuesGate is not permitted from agent Bash commands.\n\n" +
+            "This gate can only be disabled by the user directly at the terminal.\n" +
             buildIssueGuidance(null)
         )
       }
