@@ -38,7 +38,6 @@ import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent
 import pretoolusClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
-import pretooluseEnforceTaskupdate from "../hooks/pretooluse-enforce-taskupdate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
@@ -68,15 +67,18 @@ import pretoolusePushChecksGate from "../hooks/pretooluse-push-checks-gate.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-guard.ts"
 import pretooluseRepeatedLintTest from "../hooks/pretooluse-repeated-lint-test.ts"
-import pretooluseRequireTasks from "../hooks/pretooluse-require-tasks.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
 import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
-import pretoolusTaskSubjectValidation from "../hooks/pretooluse-task-subject-validation.ts"
+import {
+  enforceTaskupdateHook as pretooluseEnforceTaskupdate,
+  requireTasksHook as pretooluseRequireTasks,
+  taskSubjectValidationHook as pretoolusTaskSubjectValidation,
+  taskupdateSchemaHook as pretoolusTaskupdateSchema,
+} from "../hooks/pretooluse-task-governance.ts"
 import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
-import pretoolusTaskupdateSchema from "../hooks/pretooluse-taskupdate-schema.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import pretooluseTrunkModeBranchGate from "../hooks/pretooluse-trunk-mode-branch-gate.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
