@@ -197,11 +197,34 @@ return blockStopObj(reason)  // → SwizHookOutput
 - [ ] No circular dependencies between modules
 - [ ] Clear separation of concerns with related hooks
 
+## Lessons from stop-ship-checklist Extraction
+
+The stop-ship-checklist refactoring demonstrated several valuable learnings:
+
+### 1. Composition Over Duplication
+Instead of extracting all three concerns (git, CI, issues) from scratch, the pattern works well when it reuses existing extracted modules (collectGitWorkflowStop, collectPersonalRepoIssuesStopParsed). This avoids duplicating logic and allows each workflow to evolve independently.
+
+**Applied**: stop-ship-checklist delegates to stop-git-status and stop-personal-repo-issues, orchestrating their results into a unified output.
+
+### 2. Unified Output Ordering Matters
+When combining multiple concerns, output ordering significantly affects user experience. The stop-ship-checklist orders action plans consistently (git → CI → issues) so agents see a logical workflow progression, not scattered guidance.
+
+**Applied**: formatStopMessage() applies fixed ordering regardless of which workflows are blocking.
+
+### 3. Caching Across Workflows
+When multiple workflows fetch similar data (e.g., CI runs, issues), IssueStore caching becomes critical. The unified orchestrator must respect per-workflow cache keys to avoid cache thrashing.
+
+**Applied**: collectCiWorkflow uses getIssueStore().getCiBranchRuns() alongside collectPersonalRepoIssuesStopParsed's own caching, with clean separation.
+
+### 4. Fail-Open at Every Layer
+Each workflow concerns must fail-open independently (return null on missing prerequisites), AND the orchestrator must fail-open on any unhandled error. This prevents one broken workflow from blocking the entire checklist.
+
+**Applied**: All three workflows in evaluate.ts use try-catch + return null pattern; if all workflows fail-open, evaluateStopShipChecklist returns empty {}.
+
 ## Next Hooks to Extract
 
 Candidates for this pattern:
-1. **stop-ship-checklist** — Combine git status, CI waiting, and issues guidance
-2. **stop-completion-auditor** — Multiple validation layers
-3. **stop-git-status** + **stop-lockfile-drift** — Git state concerns could be separated
+1. **stop-completion-auditor** — Multiple validation layers (audit log, CI evidence, task enforcement)
+2. **stop-git-status** + **stop-lockfile-drift** — Git state concerns could be separated
 
-Apply this pattern when a hook has multiple responsibilities that can be tested independently.
+Apply this pattern when a hook has multiple responsibilities that can be tested independently. Prefer composition with existing extracted hooks over creating new duplicates.
