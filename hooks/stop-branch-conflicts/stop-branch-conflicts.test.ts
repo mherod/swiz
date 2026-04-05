@@ -150,6 +150,6 @@ describe("Action Plan - Output Formatting", () => {
     }
     const output = buildStaleBranchOutput(ctx, merge, STALE_BRANCH_THRESHOLD)
     expect(output).toBeDefined()
-    expect(JSON.stringify(output)).toContain("stale")
+    expect(JSON.stringify(output)).toContain("significantly behind")
   })
 })
