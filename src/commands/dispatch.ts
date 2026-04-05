@@ -108,6 +108,30 @@ function daemonTimeoutForEvent(canonicalEvent: string): number {
   return DEFAULT_DAEMON_TIMEOUT_MS
 }
 
+// ── Daemon failure backoff ────────────────────────────────────────────────
+// After a transport failure (timeout, connection refused, non-200), skip the
+// daemon for BACKOFF_MS to avoid burning the full timeout budget on every
+// dispatch when the daemon is down. State is per-process — each CLI
+// invocation starts fresh, which is fine because dispatch.ts exits after
+// one dispatch cycle. The backoff matters for the daemon's own in-process
+// re-dispatch (e.g. sessionStart triggering preToolUse internally).
+
+const BACKOFF_MS = 30_000
+let lastDaemonFailureAt = 0
+
+function isDaemonBackedOff(): boolean {
+  return lastDaemonFailureAt > 0 && Date.now() - lastDaemonFailureAt < BACKOFF_MS
+}
+
+function recordDaemonFailure(): void {
+  lastDaemonFailureAt = Date.now()
+}
+
+/** Exported for testing — reset backoff state between test cases. */
+export function resetDaemonBackoff(): void {
+  lastDaemonFailureAt = 0
+}
+
 async function tryDaemonDispatch(
   canonicalEvent: string,
   hookEventName: string,
@@ -115,6 +139,11 @@ async function tryDaemonDispatch(
 ): Promise<Record<string, any> | null> {
   if (process.env.SWIZ_NO_DAEMON === "1") {
     debugLog("daemon dispatch: skipped (SWIZ_NO_DAEMON=1)")
+    return null
+  }
+
+  if (isDaemonBackedOff()) {
+    debugLog("daemon dispatch: skipped (backoff active after recent failure)")
     return null
   }
 
@@ -132,7 +161,10 @@ async function tryDaemonDispatch(
     )
 
     if (!resp.ok) {
-      debugLog(`daemon dispatch: failed (status ${resp.status}), falling back to local`)
+      recordDaemonFailure()
+      debugLog(
+        `daemon dispatch: failed (status ${resp.status}), falling back to local (backoff ${BACKOFF_MS}ms)`
+      )
       return null
     }
 
@@ -144,8 +176,9 @@ async function tryDaemonDispatch(
     debugLog(`daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
     return json
   } catch (err) {
+    recordDaemonFailure()
     const msg = err instanceof Error ? err.message : String(err)
-    debugLog(`daemon dispatch: error (${msg}), falling back to local`)
+    debugLog(`daemon dispatch: error (${msg}), falling back to local (backoff ${BACKOFF_MS}ms)`)
     return null
   }
 }
