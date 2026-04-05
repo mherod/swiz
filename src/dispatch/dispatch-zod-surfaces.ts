@@ -14,6 +14,7 @@ import {
   hookOutputSchema,
   notificationHookInputSchema,
   postCompactHookInputSchema,
+  postToolUseFailureHookInputSchema,
   postToolUseHookInputSchema,
   preCommitHookInputSchema,
   prePushHookInputSchema,
@@ -44,9 +45,11 @@ export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record
   preToolUse: z.union([toolHookInputSchema, codexPreToolUseInputSchema]) as z.ZodType<
     Record<string, any>
   >,
-  postToolUse: z.union([postToolUseHookInputSchema, codexPostToolUseInputSchema]) as z.ZodType<
-    Record<string, any>
-  >,
+  postToolUse: z.union([
+    postToolUseHookInputSchema,
+    postToolUseFailureHookInputSchema,
+    codexPostToolUseInputSchema,
+  ]) as z.ZodType<Record<string, any>>,
   stop: z.union([stopHookInputSchema, codexStopInputSchema]) as z.ZodType<Record<string, any>>,
   subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
   sessionStart: z.union([sessionStartHookInputSchema, codexSessionStartInputSchema]) as z.ZodType<

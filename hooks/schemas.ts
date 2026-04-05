@@ -320,6 +320,10 @@ export const postToolUseHookInputSchema = z
     ...PkgPostToolUseInputSchema.partial().shape,
     // Override package enum — swiz must accept unknown permission modes
     permission_mode: PermissionModeSchema.optional(),
+    // Override package literal — allow PostToolUseFailure events routed through postToolUse
+    hook_event_name: HookEventNameSchema.optional(),
+    // Override package JsonObject — MCP tools may return arrays, strings, or null
+    tool_response: z.unknown().optional(),
   })
   .transform((val) => {
     if (val.tool_input) {
