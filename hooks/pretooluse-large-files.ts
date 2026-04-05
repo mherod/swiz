@@ -13,6 +13,7 @@
 // Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { formatActionPlan } from "../src/action-plan.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -136,21 +137,21 @@ const pretooluseLargeFiles: SwizFileEditHook = {
     const projectedKb = check.projectedKb!
     const sizeLimitKb = check.sizeLimitKb!
 
-    return preToolUseDeny(
+    const plan = formatActionPlan(
       [
-        `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
-        "",
-        `Projected size: ${projectedKb}KB`,
-        `Limit: ${sizeLimitKb}KB`,
-        "",
-        "Options:",
-        '  1. Track this file with Git LFS: git lfs track "<pattern>" && git add .gitattributes',
-        "  2. Split large content across multiple smaller files",
-        "  3. Store large binary assets outside the repository (cloud storage, CDN)",
-        "",
-        "If this file should be LFS-tracked, add the pattern to .gitattributes first,",
-        "then retry the write.",
-      ].join("\n")
+        'Track this file with Git LFS: `git lfs track "<pattern>" && git add .gitattributes`',
+        "Split large content across multiple smaller files",
+        "Store large binary assets outside the repository (cloud storage, CDN)",
+      ],
+      { header: "Remediation options:" }
+    )
+
+    return preToolUseDeny(
+      `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).\n\n` +
+        `Projected size: ${projectedKb}KB\n` +
+        `Limit: ${sizeLimitKb}KB\n\n` +
+        plan +
+        "If this file should be LFS-tracked, add the pattern to .gitattributes first, then retry the write."
     )
   },
 }

@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**113 hooks. 12 event types. Every agent. Zero compromises.**
+**115 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,11 +84,11 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-112 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+115 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (26)
+### Stop (27)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -122,7 +122,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (54)
+### PreToolUse (55)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -147,6 +147,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-direct-deps.ts`                 | Blocks direct edits to dependency blocks in `package.json`. Dependencies must go through the package manager, not hand-edited.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `pretooluse-update-memory-enforcement.ts`      | If a prior hook explicitly told the agent to record an `/update-memory` DO/DON'T rule, blocks normal work until the agent reads that skill and writes the rule into a markdown file.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pretooluse-state-gate.ts`                     | Blocks disallowed tool categories based on current project state. In `released` state, code-change and shell tools are blocked — the project is done.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `pretooluse-task-governance.ts`                | Comprehensive task lifecycle enforcement — blocks tools when tasks are missing, stale, exceed the in-progress cap, or violate governance thresholds. Nine block paths covering no-task, stale-task, over-cap, prior-session incomplete, missing-pending, and deletion-guard scenarios. Uses `STOP.` prefix and `formatActionPlan()` for all denial messages.                                                                                                                                                                                                                                                          |
 | `pretooluse-require-tasks.ts`                  | Blocks Edit, Write, and Shell tools unless the agent has active tasks. No more undisciplined free-form editing — work must be tracked.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `pretooluse-no-task-delegation.ts`             | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `pretooluse-task-subject-validation.ts`        | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
