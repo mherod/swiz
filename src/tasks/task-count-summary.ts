@@ -16,10 +16,13 @@ export function buildCountSummary(counts: {
   incomplete: number
   pending: number
   inProgress: number
+  issueHints?: string[]
 }): string {
   const parts: string[] = [
     `Tasks: ${counts.total} total, ${counts.incomplete} incomplete (${counts.inProgress} in_progress, ${counts.pending} pending).`,
   ]
+
+  const needsPlanning = counts.pending === 0 || (counts.pending === 1 && counts.incomplete <= 2)
 
   if (counts.pending === 0) {
     parts.push(
@@ -29,6 +32,10 @@ export function buildCountSummary(counts: {
     parts.push(
       "Proactive task planning needed: only 1 pending task remains. Create 1 more pending task to maintain the planning buffer. Aim for two pending tasks: one immediate verification step and one broader logical next task."
     )
+  }
+
+  if (needsPlanning && counts.issueHints && counts.issueHints.length > 0) {
+    parts.push(`Open issues you could plan for: ${counts.issueHints.join("; ")}.`)
   }
 
   if (counts.inProgress === 0 && counts.incomplete > 0) {
@@ -45,7 +52,8 @@ export function buildCountSummary(counts: {
 }
 
 export function buildCountSummaryFromTasks(
-  tasks: ReadonlyArray<{ id: string; status: string }>
+  tasks: ReadonlyArray<{ id: string; status: string }>,
+  issueHints?: string[]
 ): string {
   let pending = 0
   let inProgress = 0
@@ -61,5 +69,5 @@ export function buildCountSummaryFromTasks(
       incomplete++
     }
   }
-  return buildCountSummary({ total: tasks.length, incomplete, pending, inProgress })
+  return buildCountSummary({ total: tasks.length, incomplete, pending, inProgress, issueHints })
 }

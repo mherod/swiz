@@ -118,4 +118,53 @@ describe("buildCountSummary", () => {
     expect(s).toContain("immediate verification step")
     expect(s).toContain("broader logical next task")
   })
+
+  it("appends issue hints when pending is low and hints provided", () => {
+    const s = buildCountSummary({
+      total: 2,
+      incomplete: 2,
+      pending: 1,
+      inProgress: 1,
+      issueHints: ["#42 Fix auth timeout", "#57 Add retry logic"],
+    })
+    expect(s).toContain("Open issues you could plan for")
+    expect(s).toContain("#42 Fix auth timeout")
+    expect(s).toContain("#57 Add retry logic")
+  })
+
+  it("does not append issue hints when pending buffer is healthy", () => {
+    const s = buildCountSummary({
+      total: 4,
+      incomplete: 3,
+      pending: 2,
+      inProgress: 1,
+      issueHints: ["#42 Fix auth timeout"],
+    })
+    expect(s).not.toContain("Open issues you could plan for")
+  })
+
+  it("does not append issue hints when hints array is empty", () => {
+    const s = buildCountSummary({
+      total: 1,
+      incomplete: 1,
+      pending: 0,
+      inProgress: 1,
+      issueHints: [],
+    })
+    expect(s).not.toContain("Open issues you could plan for")
+    expect(s).toContain("URGENT")
+  })
+
+  it("appends issue hints on urgent zero-pending state", () => {
+    const s = buildCountSummary({
+      total: 1,
+      incomplete: 1,
+      pending: 0,
+      inProgress: 1,
+      issueHints: ["#100 Critical bug in login"],
+    })
+    expect(s).toContain("URGENT")
+    expect(s).toContain("Open issues you could plan for")
+    expect(s).toContain("#100 Critical bug in login")
+  })
 })
