@@ -45,11 +45,14 @@ async function fetchIssueHints(cwd: string | undefined, limit = 3): Promise<stri
     if (!slug) return []
 
     const store = getIssueStore()
+    // Use a 24-hour TTL — hints are suggestions, not enforcement.
+    // The default 5-minute TTL filters out data between daemon sync cycles.
+    const HINT_TTL_MS = 24 * 60 * 60 * 1000
     const issues = store.listIssues<{
       number: number
       title: string
       labels: Array<{ name: string }>
-    }>(slug)
+    }>(slug, HINT_TTL_MS)
 
     const hints: string[] = []
     for (const issue of issues) {
