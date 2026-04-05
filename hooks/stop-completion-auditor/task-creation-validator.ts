@@ -15,8 +15,9 @@ export async function validateTaskCreation(ctx: CompletionAuditContext): Promise
   // Skip validation if gate is disabled
   if (!ctx.gates.taskCreation) return { kind: "ok" }
 
-  // Skip if task tools were already used
-  if (ctx.taskToolUsed) return { kind: "ok" }
+  // Skip if task tools were already used OR tasks exist on disk (authoritative
+  // after compaction truncates the transcript, losing TaskCreate evidence).
+  if (ctx.taskToolUsed || ctx.allTasks.length > 0) return { kind: "ok" }
 
   // Skip if agent doesn't have task tools
   if (!agentHasTaskTools()) return { kind: "ok" }
