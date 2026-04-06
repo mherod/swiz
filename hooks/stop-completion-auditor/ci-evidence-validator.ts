@@ -31,7 +31,7 @@ function anyTaskHasCiEvidence(tasks: SessionTask[]): boolean {
 
 /**
  * Search sibling sessions (by transcript) for CI evidence.
- * Returns true if any sibling session has CI evidence.
+ * Reads all sibling task files in parallel via {@link Promise.all}.
  */
 async function findCiEvidenceInSiblings(
   transcript: string,
