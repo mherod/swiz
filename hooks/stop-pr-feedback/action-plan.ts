@@ -7,7 +7,8 @@ import {
 import { selectRebaseSuggestionPRs } from "./pull-requests.ts"
 import type { StopContext } from "./types.ts"
 
-function feedbackPrCount(
+/** Count of PRs with pending review feedback (changes requested + review required). */
+export function feedbackPrCount(
   ctx: Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs">
 ): number {
   return ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
