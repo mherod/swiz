@@ -271,8 +271,18 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "largeFileSizeKb",
     "dirtyWorktreeThreshold",
     "taskDurationWarningMinutes",
-    "transcriptMonitorMaxConcurrentDispatches",
   ])
+
+  // transcriptMonitorMaxConcurrentDispatches allows 0 (unlimited) — non-negative guard
+  const maxDispatches = obj.transcriptMonitorMaxConcurrentDispatches
+  if (
+    typeof maxDispatches === "number" &&
+    Number.isInteger(maxDispatches) &&
+    maxDispatches >= 0 &&
+    maxDispatches <= 64
+  ) {
+    result.transcriptMonitorMaxConcurrentDispatches = maxDispatches
+  }
 
   const defaultBranch = parseDefaultBranch(obj.defaultBranch)
   if (defaultBranch) result.defaultBranch = defaultBranch

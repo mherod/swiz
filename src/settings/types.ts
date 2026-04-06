@@ -282,7 +282,7 @@ export const projectSettingsSchema = z.object({
   collaborationMode: collaborationModeSchema.optional(),
   speak: z.boolean().optional(),
   autoSteerTranscriptWatching: z.boolean().optional(),
-  transcriptMonitorMaxConcurrentDispatches: z.number().int().min(1).max(64).optional(),
+  transcriptMonitorMaxConcurrentDispatches: z.number().int().min(0).max(64).optional(),
   pushGate: z.boolean().optional(),
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
