@@ -11,6 +11,20 @@ const FIELD_LABELS: Record<string, string> = {
   commentCount: "comments",
 }
 
+/** Human-friendly CI status labels with icons. */
+function formatCiStatus(status: string, conclusion: string): string {
+  if (status === "completed") {
+    if (conclusion === "success") return "CI ✓ passed"
+    if (conclusion === "failure") return "CI ✗ failed"
+    if (conclusion === "cancelled") return "CI ⊘ cancelled"
+    if (conclusion === "timed_out") return "CI ✗ timed out"
+    return `CI ${conclusion || "done"}`
+  }
+  if (status === "in_progress") return "CI ⏳ in progress"
+  if (status === "queued") return "CI ⏳ queued"
+  return `${status}/${conclusion}`
+}
+
 /** Human-friendly labels for review decision values. */
 const REVIEW_LABELS: Record<string, string> = {
   APPROVED: "approved",
@@ -276,7 +290,7 @@ function syncCiRuns(
       result.ciStatuses.changes.push({
         kind: isNew ? "new" : "updated",
         key: record.sha.slice(0, 7),
-        reason: isNew ? "new run" : `${record.status}/${record.conclusion}`,
+        reason: isNew ? "new run" : formatCiStatus(record.status, record.conclusion),
       })
     }
   }
