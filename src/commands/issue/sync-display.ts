@@ -105,7 +105,20 @@ export async function handleSync(args: string[]): Promise<void> {
     )
   }
 
-  console.log(`🔄 Syncing upstream state for ${repo}...`)
+  let syncAge = ""
+  try {
+    const { getIssueStoreDbPath } = await import("../../issue-store.ts")
+    const dbPath = getIssueStoreDbPath()
+    const s = await Bun.file(dbPath).stat()
+    const ageMs = Date.now() - s.mtimeMs
+    if (ageMs < 60_000) syncAge = ` (last synced <1m ago)`
+    else if (ageMs < 3_600_000) syncAge = ` (last synced ${Math.floor(ageMs / 60_000)}m ago)`
+    else if (ageMs < 86_400_000) syncAge = ` (last synced ${Math.floor(ageMs / 3_600_000)}h ago)`
+    else syncAge = ` (last synced ${Math.floor(ageMs / 86_400_000)}d ago)`
+  } catch {
+    syncAge = " (first sync)"
+  }
+  console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
   const result = await syncUpstreamState(repo, cwd)
 
   const allChanges = [
