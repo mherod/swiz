@@ -4,7 +4,7 @@
  * PostToolUse hook: Inject task count context after TaskCreate/TaskUpdate.
  *
  * Reads the session's task state (via cache when available) and emits an
- * additionalContext message with incomplete/pending/in_progress counts.
+ * additionalContext message with in_progress/pending counts.
  * Warns urgently when pending tasks drop to 1 or 0, since the governance
  * system requires at least 1 pending task at all times. When the queue is
  * healthy (several pending plus an in_progress task), emits affirmative

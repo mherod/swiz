@@ -185,11 +185,13 @@ function buildIncompleteTaskSummary(
   allTasks: Array<{ id: string; status: string; subject: string }>
 ): {
   incompleteTasks: Array<{ id: string; status: string; subject: string }>
+  inProgressTasks: Array<{ id: string; status: string; subject: string }>
   pendingTasks: Array<{ id: string; status: string; subject: string }>
   allTasksDone: boolean
   incompleteTaskList: string
 } {
   const incompleteTasks = allTasks.filter((task) => isIncompleteTaskStatus(task.status))
+  const inProgressTasks = incompleteTasks.filter((task) => task.status === "in_progress")
   const pendingTasks = incompleteTasks.filter((task) => task.status === "pending")
   const allTasksDone =
     allTasks.length > 0 && allTasks.every((task) => isTerminalTaskStatus(task.status))
@@ -197,7 +199,7 @@ function buildIncompleteTaskSummary(
     .map((task) => `  • #${task.id} (${task.status}): ${task.subject}`)
     .join("\n")
 
-  return { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList }
+  return { incompleteTasks, inProgressTasks, pendingTasks, allTasksDone, incompleteTaskList }
 }
 
 function buildSlowTaskWarning(
@@ -286,7 +288,8 @@ function checkTaskMinimums(
   summary: ReturnType<typeof buildIncompleteTaskSummary>,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | undefined {
-  const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
+  const { incompleteTasks, inProgressTasks, pendingTasks, allTasksDone, incompleteTaskList } =
+    summary
   if (allTasksDone) return undefined
   if (
     incompleteTasks.length >= thresholds.minIncomplete &&
@@ -313,7 +316,7 @@ function checkTaskMinimums(
   return preToolUseDeny(
     `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
       `Current:\n` +
-      `  • Incomplete tasks: ${incompleteTasks.length}\n` +
+      `  • In progress tasks: ${inProgressTasks.length}\n` +
       `  • Pending tasks: ${pendingTasks.length}\n` +
       `${incompleteTaskList ? `\nCurrent incomplete tasks:\n${incompleteTaskList}\n` : "\n"}` +
       formatActionPlan(
@@ -564,6 +567,7 @@ function checkTaskDeletionGovernance(ctx: TaskDeletionContext): SwizHookOutput |
   const incompleteAfterDelete = ctx.incompleteTasks.length - 1
   const isPendingTask = ctx.taskBeingDeleted.status === "pending"
   const pendingAfterDelete = isPendingTask ? ctx.pendingTasks.length - 1 : ctx.pendingTasks.length
+  const inProgressAfterDelete = incompleteAfterDelete - pendingAfterDelete
 
   if (
     incompleteAfterDelete >= ctx.thresholds.minIncomplete &&
@@ -575,8 +579,8 @@ function checkTaskDeletionGovernance(ctx: TaskDeletionContext): SwizHookOutput |
   return preToolUseDeny(
     `STOP. Cannot delete task #${ctx.taskId} — it would violate governance thresholds.\n\n` +
       `After deletion:\n` +
-      `  • Incomplete tasks: ${incompleteAfterDelete}/${ctx.thresholds.minIncomplete} (required)\n` +
-      `  • Pending tasks: ${pendingAfterDelete}/${ctx.thresholds.minPending} (required)\n\n` +
+      `  • In progress tasks: ${inProgressAfterDelete}\n` +
+      `  • Pending tasks: ${pendingAfterDelete}\n\n` +
       `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
       formatActionPlan(
         [
@@ -830,6 +834,7 @@ async function checkNativeTaskDeletionGovernance(
       const incompleteAfterDelete = incompleteTasks.length - 1
       const isPendingTask = taskBeingDeleted.status === "pending"
       const pendingAfterDelete = isPendingTask ? pendingTasks.length - 1 : pendingTasks.length
+      const inProgressAfterDelete = incompleteAfterDelete - pendingAfterDelete
 
       if (
         incompleteAfterDelete < thresholds.minIncomplete ||
@@ -838,8 +843,8 @@ async function checkNativeTaskDeletionGovernance(
         return preToolUseDeny(
           `STOP. Cannot delete task #${taskId} — it would violate governance thresholds.\n\n` +
             `After deletion:\n` +
-            `  • Incomplete tasks: ${incompleteAfterDelete}/${thresholds.minIncomplete} (required)\n` +
-            `  • Pending tasks: ${pendingAfterDelete}/${thresholds.minPending} (required)\n\n` +
+            `  • In progress tasks: ${inProgressAfterDelete}\n` +
+            `  • Pending tasks: ${pendingAfterDelete}\n\n` +
             `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
             `Use TaskCreate to add ${Math.max(0, thresholds.minIncomplete - incompleteAfterDelete)} incomplete task(s) ` +
             `(including ${Math.max(0, thresholds.minPending - pendingAfterDelete)} pending), then retry the deletion.`

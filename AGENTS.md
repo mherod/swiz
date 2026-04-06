@@ -1,15 +1,15 @@
 # CLAUDE.md
 Direct guide for Swiz CLI project conventions.
 ---
-description: Swiz CLI project guidance — architecture, patterns, and conventions.
+description: Swiz CLI guidance — architecture, patterns, and conventions.
 globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
 alwaysApply: false
 ---
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
-- Prefer `swiz <command>` for normal CLI usage.
-- Use `bun run index.ts <command>` when you must guarantee execution against the current checkout (avoid PATH/global `swiz` version drift).
+- Prefer `swiz <command>` for CLI usage.
+- Use `bun run index.ts <command>` when you must guarantee execution against the checkout (avoid PATH `swiz` version drift).
 - Use `Bun.file()` and `Bun.write()` for file I/O.
 - Use `node:fs/promises` only for directory operations (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture

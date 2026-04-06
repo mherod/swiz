@@ -151,7 +151,7 @@ describe("posttooluse-task-list-sync", () => {
     expect(exitCode).toBe(0)
     // No creates or updates, but count context is still emitted
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("Tasks: 1 total")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Tasks: 0 in_progress, 1 pending")
   })
 
   test("updates task file when status changes", async () => {

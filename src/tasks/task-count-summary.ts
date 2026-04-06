@@ -18,9 +18,7 @@ export function buildCountSummary(counts: {
   inProgress: number
   issueHints?: string[]
 }): string {
-  const parts: string[] = [
-    `Tasks: ${counts.total} total, ${counts.incomplete} incomplete (${counts.inProgress} in_progress, ${counts.pending} pending).`,
-  ]
+  const parts: string[] = [`Tasks: ${counts.inProgress} in_progress, ${counts.pending} pending.`]
 
   const needsPlanning = counts.pending === 0 || (counts.pending === 1 && counts.incomplete <= 2)
 
