@@ -17,7 +17,8 @@ const _defaultBranchCache = new Map<string, string>()
 
 /**
  * Resolve the effective default branch for a repository.
- * Caches result per-cwd for the lifetime of the process (default branch is immutable within a session).
+ * Caches result per-cwd via {@link _defaultBranchCache} for the process lifetime
+ * (default branch is immutable within a session).
  * Precedence:
  *   1. Project setting `.swiz/config.json` → `defaultBranch`
  *   2. Fork workflow: `upstream/HEAD` (the canonical repo's default branch)
