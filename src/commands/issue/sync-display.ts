@@ -125,7 +125,19 @@ export async function handleSync(args: string[]): Promise<void> {
     result.milestones.skipped
 
   if (allChanges.length === 0 && totalUnchanged > 0) {
-    console.log(`✅ Already up to date (${totalUnchanged} entities unchanged)`)
+    const parts: string[] = []
+    if (result.issues.skipped > 0)
+      parts.push(`${result.issues.skipped} issue${result.issues.skipped === 1 ? "" : "s"}`)
+    if (result.pullRequests.skipped > 0)
+      parts.push(`${result.pullRequests.skipped} PR${result.pullRequests.skipped === 1 ? "" : "s"}`)
+    if (result.labels.skipped > 0)
+      parts.push(`${result.labels.skipped} label${result.labels.skipped === 1 ? "" : "s"}`)
+    if (result.milestones.skipped > 0)
+      parts.push(
+        `${result.milestones.skipped} milestone${result.milestones.skipped === 1 ? "" : "s"}`
+      )
+    const breakdown = parts.length > 0 ? parts.join(", ") : `${totalUnchanged} entities`
+    console.log(`✅ Already up to date (${breakdown} unchanged)`)
   } else {
     console.log("✅ Sync complete:\n")
     printSyncSummary(result)
