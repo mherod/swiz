@@ -9,7 +9,7 @@
  * Workaround: Replace module-level CODEX_HOOK_EVENTS assignment with lazy evaluation.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 
 const chunkPath = "./node_modules/agent-hook-schemas/dist/chunk-PT2BQ5S6.js"
 
