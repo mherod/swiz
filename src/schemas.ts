@@ -178,16 +178,15 @@ function nfkc(s: string | undefined): string | undefined {
   return s?.normalize("NFKC")
 }
 
+/** Recursive JSON-like value — avoids `unknown` in type annotations. */
+export type JsonLike = string | number | boolean | null | JsonLike[] | { [key: string]: JsonLike }
+
 /** Recursively NFKC-normalize all string values in a JSON-like structure. */
-function nfkcDeep(val: unknown): unknown {
+function nfkcDeep(val: JsonLike): JsonLike {
   if (typeof val === "string") return val.normalize("NFKC")
   if (Array.isArray(val)) return val.map(nfkcDeep)
   if (isJsonLikeRecord(val)) {
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(val)) {
-      out[k] = nfkcDeep(v)
-    }
-    return out
+    return Object.fromEntries(Object.entries(val).map(([k, v]) => [k, nfkcDeep(v)]))
   }
   return val
 }
@@ -265,7 +264,7 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  */
 export const toolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
   if (val.tool_input) {
-    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+    val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
   }
   return val
 })
@@ -297,7 +296,7 @@ export type SkillToolInput = z.infer<typeof skillToolInputSchema>
 
 /** PostToolUse input — extends ToolHookInput with the tool's response payload. */
 export interface PostToolHookInput extends ToolHookInput {
-  tool_response?: unknown
+  tool_response?: JsonLike
 }
 
 /**
@@ -317,7 +316,7 @@ export const postToolUseHookInputSchema = z
   })
   .transform((val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
     }
     return val
   })
@@ -607,7 +606,7 @@ export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSele
 export const geminiBeforeToolInputSchema = allOptional(PkgGeminiBeforeToolInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
     }
     return val
   }
@@ -624,7 +623,7 @@ export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
 export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
     }
     return val
   }
@@ -712,7 +711,7 @@ export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema
 export const codexPreToolUseInputSchema = allOptional(PkgCodexPreToolUseInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
     }
     return val
   }
@@ -728,7 +727,7 @@ export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
 export const codexPostToolUseInputSchema = allOptional(PkgCodexPostToolUseInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
     }
     return val
   }
@@ -851,23 +850,8 @@ const hookOutputRefinedSchema = z
   )
   .refine(
     (o) => {
-      // Silent allows (continue: true without any context) are invalid
-      // Only reject when continue is EXPLICITLY true AND there's no explanation
-      if (o.continue === true) {
-        const hasSystemMsg = typeof o.systemMessage === "string" && o.systemMessage.trim()
-        const hasReason = typeof o.reason === "string" && o.reason.trim()
-        const hasStopReason = typeof o.stopReason === "string" && o.stopReason.trim()
-        const hso = getHookSpecificOutput(o as Record<string, unknown>)
-        const hasHsoContext =
-          hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim()
-
-        // continue: true requires at least one context field
-        if (!hasSystemMsg && !hasReason && !hasStopReason && !hasHsoContext) {
-          return false
-        }
-      }
-
-      return true
+      if (o.continue !== true) return true
+      return continueHookOutputHasContext(o as Parameters<typeof getHookSpecificOutput>[0])
     },
     {
       message:
@@ -883,14 +867,25 @@ export const hookOutputSchema = hookOutputRefinedSchema
 
 export type HookOutput = z.infer<typeof hookOutputSchema>
 
+/** Returns true when a `continue: true` output has at least one context field. */
+function continueHookOutputHasContext(o: Parameters<typeof getHookSpecificOutput>[0]): boolean {
+  if (typeof o.systemMessage === "string" && o.systemMessage.trim()) return true
+  if (typeof o.reason === "string" && o.reason.trim()) return true
+  if (typeof o.stopReason === "string" && o.stopReason.trim()) return true
+  const hso = getHookSpecificOutput(o)
+  return Boolean(hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim())
+}
+
 /** Merged stop dispatch must carry an agent-visible stop narrative — not context-only. */
-function stopHookOutputHasReasonOrStopReason(o: Record<string, unknown>): boolean {
+function stopHookOutputHasReasonOrStopReason(
+  o: Parameters<typeof getHookSpecificOutput>[0]
+): boolean {
   const r = typeof o.reason === "string" && o.reason.trim()
   const s = typeof o.stopReason === "string" && o.stopReason.trim()
   return Boolean(r || s)
 }
 
-function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
+function stopHookOutputHasBlockDecision(o: Parameters<typeof getHookSpecificOutput>[0]): boolean {
   if (o.decision === "block" || o.decision === "deny") return true
   const hso = getHookSpecificOutput(o)
   if (!hso) return false
@@ -902,7 +897,7 @@ function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
  * `continue: true`; or **`continue: false`** with non-empty **`stopReason`** (Claude universal
  * output); or top-level **`decision: "block"` / `"deny"`** (may omit `continue`).
  */
-function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
+function stopHookOutputContinueValid(o: Parameters<typeof getHookSpecificOutput>[0]): boolean {
   if (o.continue === false) {
     return typeof o.stopReason === "string" && o.stopReason.trim().length > 0
   }
@@ -911,7 +906,9 @@ function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
 }
 
 /** Stop / SubagentStop: `decision: "block"` / `"deny"` requires **`reason`** (not `stopReason` alone). */
-function stopHookOutputBlockDecisionRequiresReason(o: Record<string, unknown>): boolean {
+function stopHookOutputBlockDecisionRequiresReason(
+  o: Parameters<typeof getHookSpecificOutput>[0]
+): boolean {
   if (o.decision === "block" || o.decision === "deny") {
     return typeof o.reason === "string" && o.reason.trim().length > 0
   }
