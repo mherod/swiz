@@ -140,7 +140,7 @@ export async function getAllOpenIssues(
   // Final fallback: direct gh CLI
   const jsonFields = "number,title,labels,author,assignees,updatedAt"
   const liveIssues = await ghJson<Issue[]>(
-    ["issue", "list", "--state", "open", "--json", jsonFields],
+    ["issue", "list", "--state", "open", "--limit", "100", "--json", jsonFields],
     cwd
   )
 
