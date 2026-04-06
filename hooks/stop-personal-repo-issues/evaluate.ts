@@ -38,17 +38,17 @@ export async function collectPersonalRepoIssuesStopParsed(
     const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
     const strictNoDirectMain = settings.strictNoDirectMain
 
-    // Fetch project state and issue data (independent)
-    const projectState = await readProjectState(ctx.cwd)
-
-    // Gather issues (no PR dependency needed since stop-pr-feedback handles PRs separately)
-    const gathered = await gatherStopContext(
-      ctx.cwd,
-      ctx.isPersonalRepo,
-      ctx.currentUser,
-      false, // hasChangesRequested: handled by stop-pr-feedback
-      new Set() // allOpenPRIssueNumbers: handled by stop-pr-feedback
-    )
+    // Parallelize: project state + issue gathering (independent)
+    const [projectState, gathered] = await Promise.all([
+      readProjectState(ctx.cwd),
+      gatherStopContext(
+        ctx.cwd,
+        ctx.isPersonalRepo,
+        ctx.currentUser,
+        false, // hasChangesRequested: handled by stop-pr-feedback
+        new Set() // allOpenPRIssueNumbers: handled by stop-pr-feedback
+      ),
+    ])
     const stopCtx = buildStopContext(ctx, gathered, projectState, strictNoDirectMain)
     if (!stopCtx) return null
 
