@@ -447,9 +447,13 @@ export function applyCacheTaskUpdate(sessionId: string, task: SessionTask): void
  * Replace the entire cached task list for a session (TaskList snapshot).
  * No-op when the cache is absent. Safe to call from any hook — never throws.
  */
-export function applyCacheTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
+export function applyCacheTaskListSnapshot(
+  sessionId: string,
+  tasks: SessionTask[],
+  canonicalTaskListSyncedAtMs?: number | null
+): void {
   try {
-    getGlobalTaskStateCache()?.applyTaskListSnapshot(sessionId, tasks)
+    getGlobalTaskStateCache()?.applyTaskListSnapshot(sessionId, tasks, canonicalTaskListSyncedAtMs)
   } catch (err) {
     debugLog("[task-recovery] applyCacheTaskListSnapshot error:", err)
   }

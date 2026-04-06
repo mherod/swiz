@@ -21,6 +21,7 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { taskListSyncSentinelPath } from "../temp-paths.ts"
 import {
   computeTransitionPath,
   isValidTransition,
@@ -39,6 +40,8 @@ export interface SessionTaskState {
   pendingCount: number
   inProgressCount: number
   completedCount: number
+  /** Epoch ms of the most recent canonical TaskList sync, if known. */
+  canonicalTaskListSyncedAtMs: number | null
   /** Epoch ms of the newest task file mtime at last full load. */
   loadedAtMs: number
   /** Wall-clock epoch ms when this entry was last synced from disk. */
@@ -53,10 +56,37 @@ const INCREMENTAL_FILE_LIMIT = 3
 /** Default max age (ms) for freshness-guaranteed reads. */
 const DEFAULT_MAX_STALE_MS = 60_000
 
+/** Canonical TaskList snapshots must be refreshed within 5 minutes. */
+export const CANONICAL_TASKLIST_SYNC_MAX_AGE_MS = 5 * 60_000
+
 /** Maximum cached sessions before LRU eviction. */
 const MAX_CACHED_SESSIONS = 50
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+export async function readCanonicalTaskListSyncAtMs(sessionId: string): Promise<number | null> {
+  if (!sessionId) return null
+  try {
+    const raw = (await Bun.file(taskListSyncSentinelPath(sessionId)).text()).trim()
+    const parsed = Number.parseInt(raw, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export async function writeCanonicalTaskListSyncSentinel(
+  sessionId: string,
+  syncedAtMs = Date.now()
+): Promise<number> {
+  if (!sessionId) return syncedAtMs
+  try {
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(syncedAtMs))
+  } catch {
+    // Best-effort: TaskList sync should still succeed even if the sentinel write fails.
+  }
+  return syncedAtMs
+}
 
 /**
  * Apply timing side-effects for a status transition on a cached task.
@@ -295,6 +325,7 @@ export class TaskStateCache {
       const state: SessionTaskState = {
         tasks,
         ...counts,
+        canonicalTaskListSyncedAtMs: await readCanonicalTaskListSyncAtMs(sessionId),
         loadedAtMs: maxMtimeMs,
         syncedAtMs: now,
         stale: false,
@@ -420,7 +451,11 @@ export class TaskStateCache {
    * transitions so timing effects are tracked incrementally rather than
    * clobbered. Falls back to wholesale replacement when no prior state exists.
    */
-  applyTaskListSnapshot(sessionId: string, tasks: SessionTask[]): void {
+  applyTaskListSnapshot(
+    sessionId: string,
+    tasks: SessionTask[],
+    canonicalTaskListSyncedAtMs: number | null = Date.now()
+  ): void {
     const sorted = [...tasks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const now = Date.now()
     const existing = this.entries.get(sessionId)
@@ -456,6 +491,7 @@ export class TaskStateCache {
     const state: SessionTaskState = {
       tasks: sorted,
       ...counts,
+      canonicalTaskListSyncedAtMs,
       loadedAtMs: existing?.loadedAtMs ?? now,
       syncedAtMs: now,
       stale: false,
@@ -613,6 +649,7 @@ export class TaskStateCache {
     const state: SessionTaskState = {
       tasks,
       ...counts,
+      canonicalTaskListSyncedAtMs: await readCanonicalTaskListSyncAtMs(sessionId),
       loadedAtMs: maxMtimeMs,
       syncedAtMs: now,
       stale: false,

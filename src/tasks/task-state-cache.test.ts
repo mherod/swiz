@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { taskListSyncSentinelPath } from "../temp-paths.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 import { applyTaskCreateEvent, getSessionEventState, pruneSession } from "./task-event-state.ts"
 import type { SessionTask } from "./task-recovery.ts"
@@ -29,6 +30,13 @@ async function createSessionDir(baseDir: string, sessionId: string): Promise<str
   const dir = join(baseDir, sessionId)
   await mkdir(dir, { recursive: true })
   return dir
+}
+
+async function writeTaskListSyncSentinel(
+  sessionId: string,
+  syncedAtMs = Date.now()
+): Promise<void> {
+  await Bun.write(taskListSyncSentinelPath(sessionId), String(syncedAtMs))
 }
 
 describe("TaskStateCache", () => {
@@ -209,6 +217,19 @@ describe("TaskStateCache", () => {
       expect(state.pendingCount).toBe(1)
       expect(state.openCount).toBe(2)
       expect(state.stale).toBe(false)
+      cache.close()
+    })
+
+    it("records canonical TaskList sync time on snapshot", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-snap-sync-time")
+      const syncedAtMs = Date.now() - 1_000
+
+      cache.applyTaskListSnapshot("session-snap-sync-time", [makeTask("1", "pending")], syncedAtMs)
+
+      const state = await cache.getState("session-snap-sync-time", sessionDir)
+      expect(state.canonicalTaskListSyncedAtMs).toBe(syncedAtMs)
       cache.close()
     })
 
@@ -432,6 +453,20 @@ describe("TaskStateCache", () => {
       // But since we have a watcher AND entry is fresh, cache is trusted
       const fresh = await cache.getTasksFresh("session-fresh-watched", sessionDir)
       expect(fresh).toHaveLength(1) // cached value, not re-read from disk
+      cache.close()
+    })
+
+    it("loads canonical TaskList sync time from sentinel on full load", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionId = `session-fresh-sentinel-${process.pid}`
+      const sessionDir = await createSessionDir(base, sessionId)
+      const syncedAtMs = Date.now() - 2_000
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      await writeTaskListSyncSentinel(sessionId, syncedAtMs)
+
+      const state = await cache.getState(sessionId, sessionDir)
+      expect(state.canonicalTaskListSyncedAtMs).toBe(syncedAtMs)
       cache.close()
     })
   })

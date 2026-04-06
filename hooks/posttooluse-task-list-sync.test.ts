@@ -3,12 +3,13 @@ import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getSessionTaskPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { runHook } from "../src/utils/test-utils.ts"
 
 const HOOK = join(import.meta.dir, "posttooluse-task-list-sync.ts")
 
 const TMP_HOME = join(tmpdir(), `task-list-sync-test-${process.pid}`)
-const SESSION_ID = "test-session-sync-abc"
+const SESSION_ID = `test-session-sync-${process.pid}`
 const TASKS_DIR =
   getSessionTasksDir(SESSION_ID, TMP_HOME) ??
   (() => {
@@ -128,6 +129,9 @@ describe("posttooluse-task-list-sync", () => {
     expect(task.id).toBe("20")
     expect(task.subject).toBe("Brand new task")
     expect(task.status).toBe("in_progress")
+
+    const sentinel = await Bun.file(taskListSyncSentinelPath(SESSION_ID)).text()
+    expect(Number.parseInt(sentinel.trim(), 10)).toBeGreaterThan(0)
   })
 
   test("skips task with no change (idempotent)", async () => {

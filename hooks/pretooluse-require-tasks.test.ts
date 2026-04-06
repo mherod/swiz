@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { DIRECT_MERGE_INTENT_RE, isLargeContentPayload } from "./pretooluse-require-tasks.ts"
 
@@ -21,6 +22,7 @@ async function runHook({
   filePath,
   newString,
   content,
+  seedFreshTaskListSync = true,
   envOverrides = {},
 }: {
   homeDir: string
@@ -32,6 +34,7 @@ async function runHook({
   filePath?: string
   newString?: string
   content?: string
+  seedFreshTaskListSync?: boolean
   envOverrides?: Record<string, string | undefined>
 }): Promise<HookResult> {
   const toolInput: Record<string, string> = {}
@@ -50,6 +53,9 @@ async function runHook({
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   for (const agent of AGENTS) {
     for (const v of agent.envVars ?? []) env[v] = ""
+  }
+  if (seedFreshTaskListSync && sessionId) {
+    await writeTaskListSyncSentinel(sessionId)
   }
   const proc = Bun.spawn(["bun", "hooks/pretooluse-require-tasks.ts"], {
     stdin: "pipe",
@@ -129,6 +135,10 @@ async function writeTask(
       2
     )
   )
+}
+
+async function writeTaskListSyncSentinel(sessionId: string, syncedAtMs = Date.now()) {
+  await Bun.write(taskListSyncSentinelPath(sessionId), String(syncedAtMs))
 }
 
 async function writeSwizSettings(homeDir: string, settings: Record<string, any>) {
@@ -280,7 +290,11 @@ describe("pretooluse-require-tasks", () => {
       status: "pending",
     })
 
-    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+    })
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("Task #1 has been in_progress for 12m")
     expect(result.reason).toContain("consider backgrounding or switching approach")
@@ -305,7 +319,11 @@ describe("pretooluse-require-tasks", () => {
       status: "pending",
     })
 
-    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+    })
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("Task #1 has been in_progress for 2m")
   })
@@ -410,6 +428,76 @@ describe("pretooluse-require-tasks", () => {
     await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId, transcriptPath })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("denies when canonical TaskList sync is missing", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-missing-tasklist-sync-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+      seedFreshTaskListSync: false,
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("Canonical task state is stale")
+    expect(result.reason).toContain("Run TaskList now")
+  })
+
+  test("denies when canonical TaskList sync is older than 5 minutes", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-stale-tasklist-sync-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+    await writeTaskListSyncSentinel(sessionId, Date.now() - 6 * 60_000)
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      newString: "x",
+      seedFreshTaskListSync: false,
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("Last TaskList sync was")
+  })
+
+  test("allows when canonical TaskList sync is within 5 minutes", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-fresh-tasklist-sync-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+    await writeTaskListSyncSentinel(sessionId, Date.now() - 60_000)
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
     expect(result.decision).toBeUndefined()
   })
 

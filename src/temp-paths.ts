@@ -20,6 +20,10 @@ export function swizPushCooldownSentinelPath(repoKey: string): string {
   return `${TMP_ROOT}/swiz-push-cooldown-${repoKey}.timestamp`
 }
 
+export function taskListSyncSentinelPath(sessionId: string): string {
+  return `${TMP_ROOT}/swiz-tasklist-sync-${sessionId}.timestamp`
+}
+
 export function stopGitPushPromptedFlagPath(safeSession: string): string {
   return `${TMP_ROOT}/stop-git-push-prompted-${safeSession}.flag`
 }

@@ -31,6 +31,10 @@ import {
   readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
 import { isGitWorkingTreeClean, validateLastTaskStanding } from "../src/tasks/task-service.ts"
+import {
+  CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
+  readCanonicalTaskListSyncAtMs,
+} from "../src/tasks/task-state-cache.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
@@ -472,6 +476,37 @@ async function checkTaskStaleness(
   )
 }
 
+async function checkCanonicalTaskListSync(
+  toolName: string,
+  sessionId: string
+): Promise<SwizHookOutput | undefined> {
+  if (isTaskListTool(toolName)) return undefined
+
+  const lastSyncAtMs = await readCanonicalTaskListSyncAtMs(sessionId)
+  const ageMs = lastSyncAtMs === null ? null : Date.now() - lastSyncAtMs
+  if (ageMs !== null && ageMs <= CANONICAL_TASKLIST_SYNC_MAX_AGE_MS) {
+    return undefined
+  }
+
+  const freshnessLine =
+    ageMs === null
+      ? "No TaskList sync has been recorded for this session yet."
+      : `Last TaskList sync was ${formatDuration(ageMs)} ago.`
+
+  return preToolUseDeny(
+    `STOP. Canonical task state is stale. ${toolName} is BLOCKED.\n\n` +
+      `${freshnessLine}\n` +
+      `Swiz requires a fresh TaskList sync at least every ${formatDuration(CANONICAL_TASKLIST_SYNC_MAX_AGE_MS)}.\n\n` +
+      formatActionPlan(
+        [
+          "Run TaskList now to refresh the canonical tasklist.",
+          `Retry this ${toolName} call after TaskList completes.`,
+        ],
+        { translateToolNames: true }
+      )
+  )
+}
+
 interface SlowTaskEntry {
   id: string
   status: string
@@ -646,6 +681,9 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
         "Call TaskList now to reconcile task state before continuing."
     )
   }
+
+  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId)
+  if (taskListSyncOutcome) return taskListSyncOutcome
 
   const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)
   if (deletionOutcome) return deletionOutcome

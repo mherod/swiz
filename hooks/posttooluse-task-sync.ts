@@ -30,6 +30,7 @@ import {
   getSessionTasksDir,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
+import { writeCanonicalTaskListSyncSentinel } from "../src/tasks/task-state-cache.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 
@@ -384,11 +385,16 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   )
 
   const syncResult = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
+  const canonicalTaskListSyncedAtMs = await writeCanonicalTaskListSyncSentinel(resolved.sessionId)
 
   // Write-through to the daemon's TaskStateCache so web UI and stop hooks
   // see the reconciled state immediately without waiting for fs.watch.
   if (syncResult.resolvedTasks.length > 0) {
-    applyCacheTaskListSnapshot(resolved.sessionId, syncResult.resolvedTasks)
+    applyCacheTaskListSnapshot(
+      resolved.sessionId,
+      syncResult.resolvedTasks,
+      canonicalTaskListSyncedAtMs
+    )
   }
 
   // Build count context from the reconciled task state so the model sees
