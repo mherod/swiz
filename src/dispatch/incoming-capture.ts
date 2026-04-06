@@ -18,7 +18,6 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { merge, omit } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
 
@@ -77,17 +76,16 @@ export function normalizeEventNameToCanonical(eventName: string): string {
  * `process.env` as `_env` — that must not be persisted in `/tmp`.
  */
 export function sanitizeDispatchPayloadForCapture(o: Record<string, any>): Record<string, any> {
-  let out = structuredClone(o) as Record<string, any>
-  if (out._env && typeof out._env === "object" && !Array.isArray(out._env)) {
-    out = omit(
-      merge({}, out, {
-        _envKeys: Object.keys(out._env as Record<string, any>).sort(),
-      }),
-      ["_env"]
-    )
+  const out: Record<string, any> = {}
+  for (const key of Object.keys(o)) {
+    if (key === "_env") continue
+    out[key] = o[key]
+  }
+  if (o._env && typeof o._env === "object" && !Array.isArray(o._env)) {
+    out._envKeys = Object.keys(o._env as Record<string, any>).sort()
   }
   if (typeof out.user_email === "string" && out.user_email.includes("@")) {
-    out = merge({}, out, { user_email: "[redacted]" })
+    out.user_email = "[redacted]"
   }
   return out
 }
