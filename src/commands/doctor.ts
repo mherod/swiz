@@ -2282,14 +2282,16 @@ async function getRealSessionMtime(taskDirPath: string): Promise<number | null> 
     let s: Stats
     try {
       s = await stat(p)
-    } catch {
+    } catch (err) {
+      debugLog(`[doctor] stat failed for ${p}: ${(err as NodeJS.ErrnoException).code ?? err}`)
       continue
     }
     let taskMs = s.mtimeMs
     let raw: string
     try {
       raw = await readFile(p, "utf-8")
-    } catch {
+    } catch (err) {
+      debugLog(`[doctor] readFile failed for ${p}: ${(err as NodeJS.ErrnoException).code ?? err}`)
       if (taskMs > maxMs) maxMs = taskMs
       continue
     }

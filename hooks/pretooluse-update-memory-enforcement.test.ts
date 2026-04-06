@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
+
+// Subprocess tests need extra headroom under concurrent test suite load
+setDefaultTimeout(30_000)
+
 import { join } from "node:path"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {

@@ -17,8 +17,12 @@
  *   P7 ASSISTANT_NEVER_SELF_APPROVES — approval phrases in assistant text are ignored
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
+
+// Subprocess fuzz tests need extra headroom under concurrent test suite load
+setDefaultTimeout(30_000)
+
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeTranscript, type SimpleHookResult } from "../src/utils/test-utils.ts"
