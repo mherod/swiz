@@ -1,5 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
+
+// Subprocess tests need extra headroom under concurrent test suite load
+setDefaultTimeout(30_000)
+
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeTranscript, type SimpleHookResult } from "../src/utils/test-utils.ts"
