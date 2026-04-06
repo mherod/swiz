@@ -128,9 +128,11 @@ export class TranscriptMonitor {
   terminate(): void {}
 
   async checkProject(cwd: string): Promise<void> {
-    const cached = await this.caches.projectSettingsCache.get(cwd)
+    const [cached, globalSettings] = await Promise.all([
+      this.caches.projectSettingsCache.get(cwd),
+      readSwizSettings(),
+    ])
     const settings = cached.settings
-    const globalSettings = await readSwizSettings()
     if (!globalSettings.swizNotifyHooks) return
     const autoSteerEnabled =
       settings?.autoSteerTranscriptWatching ?? globalSettings.autoSteerTranscriptWatching
