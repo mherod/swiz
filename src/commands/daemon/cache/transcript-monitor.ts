@@ -190,7 +190,8 @@ export class TranscriptMonitor {
               hookEventName: "postToolUse",
               payloadStr: JSON.stringify(payload),
               daemonContext: true,
-              manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
+              manifestProvider: async (c: string) =>
+                c === cwd ? manifestGroups : this.caches.manifestCache.get(c),
             })
           )
         }
@@ -232,7 +233,8 @@ export class TranscriptMonitor {
               hookEventName: "notification",
               payloadStr: JSON.stringify(payload),
               daemonContext: true,
-              manifestProvider: async (cwd: string) => this.caches.manifestCache.get(cwd),
+              manifestProvider: async (c: string) =>
+                c === cwd ? manifestGroups : this.caches.manifestCache.get(c),
             })
           )
         }
