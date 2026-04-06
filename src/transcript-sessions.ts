@@ -63,6 +63,8 @@ export async function findAllProviderSessions(
     findJunieSessions(targetDir, effectiveHome),
   ])
 
+  // Merge all provider results, sort deterministically, then truncate to limit.
+  // For limit===1, a fast path above avoids the full sort.
   const providerArrays: Session[][] = [
     claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     geminiSessions,
