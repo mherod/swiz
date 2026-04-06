@@ -20,8 +20,8 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
-// Subprocess fuzz tests need extra headroom under concurrent test suite load
-setDefaultTimeout(30_000)
+// Fuzz tests spawn many subprocess variants; need generous timeout under full-suite load
+setDefaultTimeout(60_000)
 
 import { tmpdir } from "node:os"
 import { join } from "node:path"

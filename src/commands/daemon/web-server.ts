@@ -208,6 +208,11 @@ export function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): st
   return parts.join(" | ")
 }
 
+/**
+ * Full daemon context assembled at bootstrap. Route groups use narrowed interfaces:
+ * {@link DispatchRoutesContext}, {@link CacheRoutesContext}, and session routes via
+ * {@link buildSessionRoutesContext}.
+ */
 export interface DaemonWebServerContext {
   port: number
   pruneTranscriptMemory: () => void
