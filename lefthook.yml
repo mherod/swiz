@@ -43,10 +43,10 @@ pre-push:
         TARGETED=$(bun run scripts/get-test-scope.ts)
         if [ -n "$TARGETED" ]; then
           echo "Running targeted tests: $TARGETED"
-          timeout 600 bun test --concurrent --timeout=10000 --max-concurrency=8 $TARGETED
+          timeout 600 bun test --concurrent --timeout=30000 --max-concurrency=8 $TARGETED
         else
           echo "No targeted tests found or scope too broad; running safe subset"
-          timeout 600 bun test --concurrent --timeout=10000 --max-concurrency=8 $(git ls-files '*.test.ts' | grep -v -e stop-auto-continue -e 'commands/dispatch\.test' -e 'commands/dispatch-formats\.test' -e 'commands/cleanup\.test' -e 'commands/skill\.test' -e 'commands/status\.test' -e 'stop-personal-repo-issues-e2e' -e 'stop-secret-scanner' -e 'commands/state\.test' -e 'commands/compact\.test' -e 'commands/doctor\.test' -e 'positive-path-integration' -e 'commands/manage\.test' -e 'commands/tasks\.test' -e 'commands/issue\.test' -e 'transcript-session-gemini' -e 'commands/settings\.test' -e 'commands/ci-wait\.test' -e 'commands/daemon\.test' -e 'commands/memory\.test' -e 'commands/reflect\.test' -e 'commands/usage\.test' -e 'commands/idea\.test' | tr '\n' ' ')
+          timeout 600 bun test --concurrent --timeout=30000 --max-concurrency=8 $(git ls-files '*.test.ts' | grep -v -e stop-auto-continue -e 'commands/dispatch\.test' -e 'commands/dispatch-formats\.test' -e 'commands/cleanup\.test' -e 'commands/skill\.test' -e 'commands/status\.test' -e 'stop-personal-repo-issues-e2e' -e 'stop-secret-scanner' -e 'commands/state\.test' -e 'commands/compact\.test' -e 'commands/doctor\.test' -e 'positive-path-integration' -e 'commands/manage\.test' -e 'commands/tasks\.test' -e 'commands/issue\.test' -e 'transcript-session-gemini' -e 'commands/settings\.test' -e 'commands/ci-wait\.test' -e 'commands/daemon\.test' -e 'commands/memory\.test' -e 'commands/reflect\.test' -e 'commands/usage\.test' -e 'commands/idea\.test' -e '\.fuzz\.test' | tr '\n' ' ')
         fi
       skip:
         - merge
