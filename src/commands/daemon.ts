@@ -317,6 +317,7 @@ function setupWatchers(
   return { registeredProjects, registerProjectWatchers, evictProject, invalidateProject }
 }
 
+/** Sample memory into metrics state (no stdout; exposed via /metrics endpoint). */
 function startMemoryMonitoring(metrics: DaemonMetrics) {
   setInterval(() => {
     metrics.memoryUsage = process.memoryUsage()
