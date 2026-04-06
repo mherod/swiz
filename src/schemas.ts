@@ -244,7 +244,7 @@ const nfkcSchema = z.string().transform(nfkc)
 
 const shellHookToolInputSchema = z
   .looseObject({
-    command: nfkcSchema,
+    command: nfkcSchema.optional(),
   })
   .optional()
 
