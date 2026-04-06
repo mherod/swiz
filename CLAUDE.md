@@ -65,33 +65,26 @@ alwaysApply: false
   2. README intro `**N hooks**` (line 7) matches manifest total.
   3. Every README hook filename exists on disk.
 - Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
-- Hooks are TypeScript, use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
-- Output helpers (call `process.exit(0)`; no stdout after):
-  - PreToolUse: `denyPreToolUse(reason)` — block with footer; `allowPreToolUse(reason)` — allow with hint; `allowPreToolUseWithUpdatedInput(updatedInput, reason?)` — allow with modified input.
-  - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
-  - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
-  - Stop: `blockStop(reason, opts?)` — block with footer; `blockStopRaw(reason)` — block without footer.
+- Hooks are TypeScript. Use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
+- Output helpers (call `process.exit(0)`; no stdout after): `denyPreToolUse(reason)`, `allowPreToolUse(reason)`, `allowPreToolUseWithUpdatedInput(updatedInput, reason?)`, `denyPostToolUse(reason)`, `emitContext(eventName, context, cwd?)`, `blockStop(reason, opts?)`, `blockStopRaw(reason)`.
 - **DO NOT** write raw `console.log(JSON.stringify(...))` — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
-- **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual timers.
+- **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })`. DON'T use `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. Read from payload; don't call `detectTerminal()` in daemon code.
 - **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts`, `src/commands/dispatch.ts` for CLI dispatch and `src/SwizHook.ts` `runSwizHookAsMain` for standalone hook subprocesses. See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
-- **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
-- **Git Utilities Policy** — canonical locations:
-  - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
-  - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
-  - DO NOT define Git utilities locally — import from canonical source.
-- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr limit. Exempt: `gh auth status`, `gh run watch`.
-- Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
+- **File-path guard**: Use `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
+- **Git utilities**: `src/utils/hook-utils.ts` (regexes, extractors, helpers), `src/git-helpers.ts` (classifiers, queries). DO NOT define locally; import canonical source.
+- **GitHub API throttle**: `await acquireGhSlot()` before `gh` calls (4500 req/hr limit). Exempt: `gh auth status`, `gh run watch`.
+- Skill helpers: `skillExists`, `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
-- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns to `RECOVERY_CMD_RE`.
+- Task exemptions: read-only git, `gh`, `swiz`, setup, recovery. DON'T add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
-- Hook schemas (`hooks/schemas.ts`, `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema` — module doc = stdout fields by event. Settings (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
+- Hook schemas (`hooks/schemas.ts`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema`. Settings schemas: `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas: `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
-- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` (`hook-utils.ts`); pass `cwd`, branch on return (allow vs deny PreToolUse), `store.consumeOne()`. `requiredSettings: ["autoSteer"]`. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
-- **DO**: Memory-threshold checkpoints use `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
-- **DO**: Use `computeProjectedContent()` from `hook-utils.ts` — suppresses `$&`/`$'`/`` $` `` interpolation. DON'T call `.replace()` directly. Fail-open on errors.
+- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
+- **DO**: Use `resolveThresholds(cwd)` for memory thresholds (default 5000). Never hardcode.
+- **DO**: Use `computeProjectedContent()` — suppresses interpolation. DON'T call `.replace()`. Fail-open on errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
@@ -114,8 +107,33 @@ alwaysApply: false
 - **In-memory event state**: `src/tasks/task-event-state.ts` — module-level `Map<sessionId, EventTaskState[]>` updated synchronously by inline PostToolUse hooks. `posttooluse-task-audit-sync` writes TaskCreate/TaskUpdate events; `posttooluse-task-list-sync` writes TaskList bulk state. `posttooluse-task-count-context` reads from `getSessionEventState()` first (zero disk I/O), falls back to disk + `applyMutationOverlay` when no event state exists. Eliminates stale reads from async native task writes.
 - **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` — calls `validateLastTaskStanding` when `newStatus === "completed"`. `skipLastTaskGuard` for explicit overrides only.
 
+## Task Lifecycle & Enforcement
+
+**State Machine:** `pending` → `in_progress` → `completed` (or `deleted`).
+
+**Enforcement (3-gate system):**
+1. **Stop gate** (`hooks/stop-incomplete-tasks/evaluate.ts`): Blocks stop if incomplete tasks remain. Allow only when all tasks `completed` or `deleted`.
+2. **Transition gate** (`pretooluse-task-transition-validator.ts`): Block `TaskUpdate` from `pending` to `completed`. Require `pending` → `in_progress` → `completed`.
+3. **Phantom gate** (`pretooluse-phantom-task-detector.ts`): Block `TaskUpdate` to `completed` without substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep). Require evidence in description.
+
+**Rate limit:** `pretooluse-task-completion-rate-limit.ts` — max 2 completions per 5 seconds. Requires `TaskList` before each completion.
+
+**Deduplication:** `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
+
+**Exemptions:** Gemini agent skips incomplete task blocking.
+
+**Evidence prefixes:** `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
+
+**Workflow:**
+1. `TaskCreate` (starts `pending`)
+2. Mark `in_progress` before work
+3. Perform substantive work
+4. Gather evidence
+5. Mark `completed` with evidence
+6. Maintain ≥2 pending tasks as planning buffer
+
 - After compaction: `TaskList`, close stale tasks via `git log --oneline -3`.
-- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Create pending next-step before completing the final incomplete task.
+- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete AND ≥1 `pending`.
 - Prior-session task blocks: complete `in_progress` tasks (`TaskUpdate status: completed`) before new Bash.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
@@ -220,7 +238,7 @@ alwaysApply: false
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
-- DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
+- DO NOT embed ESC (0x1b) in regex literals; construct at runtime. See `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.

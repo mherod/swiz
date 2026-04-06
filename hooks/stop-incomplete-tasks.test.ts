@@ -95,4 +95,69 @@ describe("stop-incomplete-tasks", () => {
     })
     expect(result.decision).toBeUndefined()
   })
+
+  test("integration: blocks on pending task, allows after completion transition", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-integration"
+
+    // Phase 1: Pending task created
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Feature implementation",
+      status: "pending",
+    })
+
+    // Phase 2: Agent transitions to in_progress
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Feature implementation",
+      status: "in_progress",
+    })
+
+    // Phase 3: Hook blocks on in_progress task
+    const blockResult = await runHook({ homeDir, sessionId })
+    expect(blockResult.decision).toBe("block")
+    expect(blockResult.reason).toContain("Incomplete tasks remain")
+    expect(blockResult.reason).toContain("Feature implementation")
+
+    // Phase 4: Agent completes task with evidence
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Feature implementation",
+      status: "completed",
+    })
+
+    // Phase 5: Hook allows stop after completion
+    const allowResult = await runHook({ homeDir, sessionId })
+    expect(allowResult.decision).toBeUndefined()
+    expect(allowResult.reason).toBeUndefined()
+  })
+
+  test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-task-ordering"
+
+    // Create tasks with different subjects (avoid dedup matching)
+    // Task ordering should prioritize in_progress, then sort numerically
+    await writeTask(homeDir, sessionId, {
+      id: "10",
+      subject: "Implement API endpoint",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "5",
+      subject: "Add unit tests for validation",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, sessionId })
+    expect(result.decision).toBe("block")
+    // Verify both incomplete tasks are listed
+    expect(result.reason).toContain("Implement API endpoint")
+    expect(result.reason).toContain("Add unit tests for validation")
+    // in_progress should appear first in the listing
+    const endpointIdx = result.reason?.indexOf("Implement API endpoint") ?? -1
+    const testIdx = result.reason?.indexOf("Add unit tests for validation") ?? -1
+    expect(endpointIdx).toBeLessThan(testIdx)
+  })
 })
