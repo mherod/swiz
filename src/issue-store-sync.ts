@@ -116,6 +116,14 @@ function describeChanges(oldJson: string, newJson: string): string {
       continue
     }
 
+    // Title: show truncated new value in quotes
+    if (field === "title" && typeof newObj[field] === "string") {
+      const title = newObj[field] as string
+      const truncated = title.length > 50 ? `${title.slice(0, 47)}…` : title
+      changed.push(`${label} → "${truncated}"`)
+      continue
+    }
+
     // Scalar transition: "state → closed", "review → approved"
     if (typeof newObj[field] === "string") {
       const display =
