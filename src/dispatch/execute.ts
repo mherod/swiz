@@ -15,7 +15,9 @@ import { tryReplayPendingMutations } from "../issue-store.ts"
 import { DISPATCH_TIMEOUTS, type HookGroup, hookIdentifier, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import {
+  type EffectiveSwizSettings,
   getEffectiveSwizSettings,
+  type ProjectState,
   type ProjectSwizSettings,
   readProjectSettings,
   readProjectState,
@@ -48,6 +50,25 @@ import {
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
+
+// ─── Enriched dispatch payload type ───────────────────────────────────────────
+
+/**
+ * Dispatch payload enriched with typed fields injected during dispatch execution.
+ * Extends the base agent payload with settings, state, and transcript metadata.
+ */
+export interface EnrichedDispatchPayload extends Record<string, unknown> {
+  /** Agent-supplied or normalized fields from the inbound event. */
+  [key: string]: unknown
+  /** Effective settings resolved from global+project+session configuration. */
+  _effectiveSettings?: EffectiveSwizSettings
+  /** Current project state (planning/developing/reviewing/addressing-feedback) or null if not set. */
+  _projectState?: ProjectState | null
+  /** Current session tool invocation counts and skill names. */
+  _currentSessionToolUsage?: CurrentSessionToolUsage
+  /** Pre-parsed transcript metadata (tool calls, commands, skills, elapsed time). */
+  _transcriptSummary?: TranscriptSummary
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -531,8 +552,9 @@ async function injectEffectiveSettings(
   ])
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
   const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
-  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, any>
-  ctx.payload._projectState = projectState as unknown
+  const enrichedCtx = ctx as { payload: EnrichedDispatchPayload }
+  enrichedCtx.payload._effectiveSettings = effectiveSettings
+  enrichedCtx.payload._projectState = projectState
 }
 
 async function prepareDispatchGroups(

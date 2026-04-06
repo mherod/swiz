@@ -22,6 +22,7 @@ import {
   runEntry,
   writeResponse,
 } from "./engine.ts"
+import type { EnrichedDispatchPayload } from "./execute.ts"
 import { extractCwd } from "./filters.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import type { DispatchStrategy } from "./types.ts"
@@ -355,10 +356,10 @@ export function processAggregatedStopResults(
  * `stop-personal-repo-issues`) that need network I/O.
  */
 async function resolveAutoSteerEnabled(
-  payload: Record<string, any>,
+  payload: EnrichedDispatchPayload,
   sessionId: string
 ): Promise<boolean> {
-  const injected = payload._effectiveSettings as Record<string, any> | undefined
+  const injected = payload._effectiveSettings
   if (injected && typeof injected.autoSteer === "boolean") return injected.autoSteer
   const { isAutoSteerAvailable } = await import("../utils/hook-utils.ts")
   return (await isAutoSteerAvailable(sessionId)) !== null

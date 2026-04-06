@@ -24,7 +24,7 @@ type BunWorker = Pick<globalThis.Worker, "postMessage" | "onmessage" | "onerror"
 interface HookResult {
   id: string
   type: "hook-result"
-  parsed: Record<string, any> | null
+  parsed: Record<string, unknown> | null
   execution: HookExecution
 }
 
@@ -39,7 +39,7 @@ interface QueuedHook {
   workerIndex?: number
   /** Supervisor-level timeout timer — fires if worker doesn't respond in time. */
   supervisorTimer?: ReturnType<typeof setTimeout>
-  resolve: (result: { parsed: Record<string, any> | null; execution: HookExecution }) => void
+  resolve: (result: { parsed: Record<string, unknown> | null; execution: HookExecution }) => void
   reject: (error: Error) => void
 }
 
