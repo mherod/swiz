@@ -63,16 +63,31 @@ export async function findAllProviderSessions(
     findJunieSessions(targetDir, effectiveHome),
   ])
 
-  // Merge sessions from all providers, using CappedMap to bound memory when a limit is requested.
-  const allSessions: Session[] = [
-    ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
-    ...geminiSessions,
-    ...cursorSessions,
-    ...cursorAgentSessions,
-    ...antigravitySessions,
-    ...codexSessions,
-    ...junieSessions,
+  const providerArrays: Session[][] = [
+    claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
+    geminiSessions,
+    cursorSessions,
+    cursorAgentSessions,
+    antigravitySessions,
+    codexSessions,
+    junieSessions,
   ]
+
+  // Fast path for limit === 1: pick latest from each provider, sort only those candidates
+  if (limit === 1) {
+    const candidates: Session[] = []
+    for (const arr of providerArrays) {
+      if (arr.length === 0) continue
+      let best = arr[0]!
+      for (let i = 1; i < arr.length; i++) {
+        if ((arr[i]!.mtime ?? 0) > (best.mtime ?? 0)) best = arr[i]!
+      }
+      candidates.push(best)
+    }
+    return candidates.length > 0 ? [sortSessionsDeterministic(candidates)[0]!] : []
+  }
+
+  const allSessions: Session[] = providerArrays.flat()
   const sorted = sortSessionsDeterministic(allSessions)
   return limit !== undefined ? sorted.slice(0, limit) : sorted
 }
