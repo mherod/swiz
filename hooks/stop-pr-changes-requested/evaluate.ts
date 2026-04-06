@@ -15,6 +15,7 @@ import type { Review } from "./types.ts"
 
 /**
  * Evaluate PR review state and return blocking output or empty object.
+ * Independent gh/git lookups are parallelized in {@link resolvePRCheckContext}.
  */
 export async function evaluateStopPrChangesRequested(
   input: StopHookInput
