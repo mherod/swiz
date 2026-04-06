@@ -450,6 +450,10 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
 
   // ── Fast path: in-process incomplete-tasks check for stop events ──
   if (await tryStopFastPath(timing)) return
+  // Signal to hooks that the fast path already scanned tasks (no blockers found)
+  if (canonicalEvent === "stop" && sessionId) {
+    payload._fastPathTaskScanComplete = true
+  }
 
   // ── Try daemon first, fall back to local execution ──
   const tDaemon = performance.now()

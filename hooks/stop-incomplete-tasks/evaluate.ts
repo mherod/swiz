@@ -19,6 +19,9 @@ import { filterIncompleteStatus } from "./incomplete-check-validator.ts"
  * Evaluate incomplete tasks and return blocking output or empty object.
  */
 export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise<SwizHookOutput> {
+  // CLI fast path already scanned tasks and found no blockers — skip redundant disk read
+  if ((input as Record<string, unknown>)._fastPathTaskScanComplete) return {}
+
   const ctx = await resolveTaskCheckContext(input)
   if (!ctx) return {}
 
