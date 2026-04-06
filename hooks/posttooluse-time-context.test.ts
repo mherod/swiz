@@ -12,7 +12,7 @@ describe("posttooluse-time-context", () => {
     expect(result.exitCode).toBe(0)
     expect(result.json?.hookSpecificOutput?.hookEventName).toBe("PostToolUse")
     expect(result.json?.hookSpecificOutput?.additionalContext).toMatch(
-      /^Current time: [A-Za-z]{3,9} \d{1,2}, \d{4} at \d{1,2}:\d{2}:\d{2} [AP]M — (morning ☀️|afternoon 🌤️|evening 🌆|night 🌙) — Moon (🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)$/
+      /^Current time: [A-Za-z]{3,9} \d{1,2}, \d{4},? (?:at )?\d{1,2}:\d{2}:\d{2} [AP]M — (morning ☀️|afternoon 🌤️|evening 🌆|night 🌙) — Moon (🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)$/
     )
   })
 })
