@@ -253,70 +253,6 @@ async function checkManifestHandlerPaths(): Promise<CheckResult> {
   }
 }
 
-/** Return basenames of .ts entry points in hooks/ not referenced by the manifest or any agent config. */
-async function findOrphanedHookScripts(): Promise<string[]> {
-  const manifestFiles = new Set(
-    manifest.flatMap((g) => g.hooks.flatMap((h) => (isInlineHookDef(h) ? [] : [h.file])))
-  )
-
-  // Extract inline hook filenames from manifest.ts import statements.
-  // Inline hooks are imported as: import hookName from "../hooks/hook-name.ts"
-  try {
-    const manifestPath = join(dirname(import.meta.filename), "../manifest.ts")
-    const manifestSource = await Bun.file(manifestPath).text()
-    const inlineHookImports =
-      manifestSource.match(/^import\s+\w+\s+from\s+['"]\.\.\/hooks\/([\w-]+)\.ts['"]/gm) ?? []
-    for (const importStmt of inlineHookImports) {
-      const match = importStmt.match(/from\s+['"]\.\.\/hooks\/([\w-]+)\.ts['"]/)
-      if (match?.[1]) {
-        manifestFiles.add(`${match[1]}.ts`)
-      }
-    }
-  } catch {
-    // Ignore errors reading manifest — orphaned check is optional
-  }
-
-  // Scripts referenced by agent configs that live inside hooks/ (by basename)
-  const configPaths = await collectInstalledConfigScriptPaths()
-  const configBasenames = new Set(
-    configPaths
-      .filter((p) => p.startsWith(`${HOOKS_DIR}/`))
-      .map((p) => p.slice(HOOKS_DIR.length + 1))
-  )
-
-  const glob = new Bun.Glob("*.ts")
-  const orphaned: string[] = []
-  for await (const file of glob.scan({ cwd: HOOKS_DIR })) {
-    if (file.endsWith(".test.ts")) continue
-    if (manifestFiles.has(file)) continue
-    if (configBasenames.has(file)) continue
-    // Only flag hook entry points — library files lack a bun shebang
-    const chunk = await Bun.file(join(HOOKS_DIR, file)).slice(0, 256).text()
-    const firstLine = chunk.split("\n", 1)[0] ?? ""
-    if (!firstLine.startsWith("#!/") || !firstLine.includes("bun")) continue
-    orphaned.push(file)
-  }
-  orphaned.sort()
-  return orphaned
-}
-
-function buildOrphanedResult(orphaned: string[]): CheckResult {
-  if (orphaned.length === 0) {
-    return {
-      name: "Orphaned hook scripts",
-      status: "pass",
-      detail: `no orphaned scripts found in hooks/`,
-    }
-  }
-  return {
-    name: "Orphaned hook scripts",
-    status: "warn",
-    detail: `${orphaned.length} script(s) in hooks/ not referenced by manifest or config: ${orphaned.join(", ")} — run: swiz doctor --fix`,
-  }
-}
-
-/** Orphaned hook scripts are reported by the check but no longer auto-disabled. */
-
 /** Return config-referenced script paths that do not exist on disk. */
 async function findMissingConfigScriptPaths(): Promise<string[]> {
   const configPaths = await collectInstalledConfigScriptPaths()
@@ -1247,7 +1183,6 @@ interface AutoFixContext {
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
   pluginCacheInfos: PluginCacheInfo[]
-  orphanedScripts: string[]
 }
 
 async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
@@ -1469,101 +1404,6 @@ async function fixSkillConflicts(conflicts: SkillConflict[], fix: boolean): Prom
   console.log(`  ${GREEN}✓${RESET} Skill conflicts resolved${RESET}\n`)
 }
 
-async function fixOrphanedHookScripts(scripts: string[], fix: boolean): Promise<void> {
-  if (scripts.length === 0) return
-
-  if (!fix) {
-    for (const script of scripts) {
-      console.log(
-        `  ${YELLOW}!${RESET} ${script}: not referenced by manifest or agent config — remove manually`
-      )
-    }
-    console.log()
-    return
-  }
-
-  console.log(`  ${BOLD}Orphaned hook scripts detected${RESET}. Adding to manifest...\n`)
-
-  const manifestPath = join(SWIZ_ROOT, "src", "manifest.ts")
-  let manifestContent: string
-  try {
-    manifestContent = await Bun.file(manifestPath).text()
-  } catch (err) {
-    console.log(`  ${RED}✗${RESET} Failed to read manifest.ts: ${err}`)
-    return
-  }
-
-  for (const script of scripts) {
-    // Derive variable name from filename: stop-git-status.ts -> stopGitStatus
-    const varName = script
-      .replace(/\.[^.]+$/, "") // remove extension
-      .replace(/-(\w)/g, (_, c) => c.toUpperCase())
-    const importLine = `import ${varName} from "../hooks/${script}"`
-
-    // Add import if not present
-    if (!manifestContent.includes(importLine)) {
-      const debugLogImport = 'import { debugLog } from "./debug.ts"'
-      if (manifestContent.includes(debugLogImport)) {
-        manifestContent = manifestContent.replace(
-          debugLogImport,
-          `${importLine}\n${debugLogImport}`
-        )
-      } else {
-        // Append at end of imports
-        manifestContent = `${manifestContent}\n${importLine}`
-      }
-    }
-
-    // Determine event from hook file content
-    const hookPath = join(HOOKS_DIR, script)
-    let hookContent: string
-    try {
-      hookContent = await Bun.file(hookPath).text()
-    } catch {
-      console.log(`  ${YELLOW}!${RESET} Cannot read ${script}, skipping`)
-      continue
-    }
-    const eventMatch = hookContent.match(/event:\s*"([^"]+)"/)
-    const event = eventMatch ? eventMatch[1] : null
-    if (!event) {
-      console.log(`  ${YELLOW}!${RESET} Could not determine event for ${script}, skipping`)
-      continue
-    }
-
-    // Add hook entry to the appropriate group in manifest
-    const groupPattern = new RegExp(
-      `(\\{\\s*event:\\s*"${event}"[^}]*?hooks:\\s*\\[)(.*?)(\\])`,
-      "s"
-    )
-    if (!groupPattern.test(manifestContent)) {
-      console.log(`  ${YELLOW}!${RESET} No event group for "${event}" in manifest, skipping`)
-      continue
-    }
-
-    // Check if hook already present
-    if (manifestContent.includes(`hook: ${varName}`)) {
-      console.log(`  ${YELLOW}!${RESET} ${script} already in manifest, skipping`)
-      continue
-    }
-
-    manifestContent = manifestContent.replace(groupPattern, (_match, p1, p2, p3) => {
-      // Insert new entry before closing bracket, preserving indentation
-      const newEntry = `\n      { hook: ${varName} },`
-      return p1 + p2 + newEntry + p3
-    })
-
-    console.log(`  ${GREEN}✓${RESET} Added ${script} to manifest (event: ${event})`)
-  }
-
-  // Write updated manifest
-  try {
-    await Bun.write(manifestPath, manifestContent)
-    console.log(`  ${GREEN}✓${RESET} Orphaned hooks added to manifest${RESET}\n`)
-  } catch (err) {
-    console.log(`  ${RED}✗${RESET} Failed to write manifest.ts: ${err}`)
-  }
-}
-
 async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<void> {
   if (infos.length === 0) return
   console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
@@ -1584,8 +1424,7 @@ async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<void> {
 }
 
 async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
-  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts } =
-    ctx
+  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
   const hasStaleConfigs = results.some(
     (r) =>
       r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
@@ -1593,7 +1432,6 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
   if (fix) {
     await fixStaleConfigs(results)
     await fixMissingConfigs()
-    await fixOrphanedHookScripts(orphanedScripts, fix)
     await fixSkillConflicts(skillConflicts, fix)
     await fixInvalidSkills(invalidSkillEntries)
     await fixStalePluginCache(pluginCacheInfos)
@@ -1608,17 +1446,11 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
     }
     return
   }
-  if (
-    hasStaleConfigs ||
-    invalidSkillEntries.length > 0 ||
-    pluginCacheInfos.length > 0 ||
-    orphanedScripts.length > 0
-  ) {
+  if (hasStaleConfigs || invalidSkillEntries.length > 0 || pluginCacheInfos.length > 0) {
     const fixables = [
       hasStaleConfigs ? "stale configs" : null,
       invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
       pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
-      orphanedScripts.length > 0 ? "orphaned hook scripts" : null,
     ]
       .filter(Boolean)
       .join(" and ")
@@ -1633,7 +1465,6 @@ interface DoctorCheckResults {
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
   pluginCacheInfos: PluginCacheInfo[]
-  orphanedScripts: string[]
 }
 
 async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
@@ -1657,8 +1488,6 @@ async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   }
   results.push(await checkHookScripts())
   results.push(await checkManifestHandlerPaths())
-  const orphanedScripts = await findOrphanedHookScripts()
-  results.push(buildOrphanedResult(orphanedScripts))
   results.push(await checkInstalledConfigScripts())
   results.push(await checkScriptExecutePermissions(fix))
   for (const agent of CONFIGURABLE_AGENTS) {
@@ -1675,7 +1504,7 @@ async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   const pluginCacheInfos = await checkPluginCacheStaleness()
   results.push(...buildPluginCacheResults(pluginCacheInfos))
   results.push(await checkSwizSettings())
-  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts }
+  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos }
 }
 
 // ─── Runner ─────────────────────────────────────────────────────────────────
@@ -1690,10 +1519,11 @@ async function runDoctorChecks(args: string[]): Promise<void> {
   const fix = args.includes("--fix")
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
-  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts } =
-    await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>
-      collectDoctorChecks(fix)
-    )
+  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = await runWithTimeout(
+    "diagnostic checks",
+    DOCTOR_CHECK_TIMEOUT_MS,
+    () => collectDoctorChecks(fix)
+  )
 
   for (const result of results) {
     printResult(result)
@@ -1717,7 +1547,6 @@ async function runDoctorChecks(args: string[]): Promise<void> {
     skillConflicts,
     invalidSkillEntries,
     pluginCacheInfos,
-    orphanedScripts,
   })
 
   if (failures.length > 0) {

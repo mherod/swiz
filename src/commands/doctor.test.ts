@@ -89,11 +89,6 @@ describe("swiz doctor", () => {
       )
     })
 
-    test("reports orphaned hook scripts check", () => {
-      expect(result.stdout).toContain("Orphaned hook scripts")
-      expect(result.stdout).toMatch(/Orphaned hook scripts/)
-    })
-
     test("reports script execute permissions check", () => {
       expect(result.stdout).toContain("Script execute permissions")
       expect(result.stdout).toMatch(/Script execute permissions/)
@@ -152,27 +147,9 @@ describe("swiz doctor", () => {
       expect(result.stdout).toContain("config sync")
     })
 
-    test("reports no orphaned hook scripts in a healthy install", () => {
-      expect(result.stdout).toContain("Orphaned hook scripts")
-      expect(result.stdout).toContain("no orphaned scripts found")
-    })
-
     test("reports no invalid skill entries in a healthy install", () => {
       expect(result.stdout).toContain("Invalid skill entries")
       expect(result.stdout).toContain("no invalid skill entries found")
-    })
-  })
-
-  describe("orphaned hook manifest paths (#479)", () => {
-    test("fixOrphanedHookScripts resolves manifest and hooks from package root, not cwd", async () => {
-      const doctorSrc = await Bun.file(join(import.meta.dir, "doctor.ts")).text()
-      const start = doctorSrc.indexOf("async function fixOrphanedHookScripts")
-      expect(start).toBeGreaterThanOrEqual(0)
-      const block = doctorSrc.slice(start, start + 4000)
-      expect(block).toContain('join(SWIZ_ROOT, "src", "manifest.ts")')
-      expect(block).toContain("join(HOOKS_DIR, script)")
-      expect(block).not.toContain('join(process.cwd(), "src", "manifest.ts")')
-      expect(block).not.toContain('join(process.cwd(), "hooks", script)')
     })
   })
 
