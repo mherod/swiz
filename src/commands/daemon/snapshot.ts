@@ -62,7 +62,9 @@ export async function buildSnapshotFingerprint(cwd: string): Promise<SnapshotFin
     safeMtime(getIssueStoreDbPath()),
   ])
   return {
-    git: gitStatus ? JSON.stringify(gitStatus) : "not-git",
+    git: gitStatus
+      ? `${gitStatus.branch}:${gitStatus.ahead}:${gitStatus.behind}:${gitStatus.staged}:${gitStatus.unstaged}:${gitStatus.untracked}:${gitStatus.conflicts}:${gitStatus.stash}:${gitStatus.changedFallback}`
+      : "not-git",
     projectSettingsMtimeMs,
     projectStateMtimeMs,
     globalSettingsMtimeMs,
