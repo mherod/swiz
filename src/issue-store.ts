@@ -145,6 +145,7 @@ export interface GitHubPullRequestRecord {
   reviewDecision?: string
   statusCheckRollup?: unknown
   mergeable?: string
+  requestedReviewers?: Array<{ login: string }>
   url?: string
   createdAt?: string
   updatedAt?: string

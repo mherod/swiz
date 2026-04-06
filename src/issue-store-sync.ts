@@ -5,6 +5,7 @@ import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.
 /** Human-friendly labels for fields that have domain-specific names. */
 const FIELD_LABELS: Record<string, string> = {
   reviewDecision: "review",
+  requestedReviewers: "reviewers",
   statusCheckRollup: "checks",
   headRefName: "branch",
 }
@@ -53,6 +54,7 @@ const DISPLAY_FIELDS = [
   "labels",
   "assignees",
   "reviewDecision",
+  "requestedReviewers",
   "mergeable",
   "statusCheckRollup",
   "milestone",
@@ -94,7 +96,7 @@ function describeChanges(oldJson: string, newJson: string): string {
     }
 
     // Array fields: show added/removed names
-    if (field === "labels" || field === "assignees") {
+    if (field === "labels" || field === "assignees" || field === "requestedReviewers") {
       const diff = describeArrayDiff(oldObj[field], newObj[field])
       if (diff) {
         changed.push(`${label} ${diff}`)
@@ -429,9 +431,11 @@ async function syncBranchData(
   for (const pr of prs) {
     if (!pr.headRefName) continue
     const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
-    const prData = pr as { reviewDecision?: string }
+    const prData = pr as { reviewDecision?: string; requestedReviewers?: Array<{ login: string }> }
+    const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
     const detail = {
       reviewDecision: prData.reviewDecision ?? "",
+      requestedReviewers: reviewerLogins,
       commentCount: comments?.length ?? 0,
     }
     const newJson = JSON.stringify(detail)
@@ -442,7 +446,10 @@ async function syncBranchData(
     ctx.result.prBranchDetail.changes.push({
       kind: existingJson === null ? "new" : "updated",
       key: pr.headRefName,
-      reason: existingJson === null ? `PR #${pr.number}` : `review/comments changed`,
+      reason:
+        existingJson === null
+          ? `PR #${pr.number}`
+          : describeChanges(existingJson, newJson) || "review/comments changed",
     })
   }
 }

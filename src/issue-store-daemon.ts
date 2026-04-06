@@ -71,7 +71,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       "--state",
       "open",
       "--json",
-      "number,title,url,reviewDecision,mergeable,createdAt,author",
+      "number,title,url,reviewDecision,mergeable,requestedReviewers,createdAt,author",
     ])
     return result ?? []
   }

@@ -47,7 +47,7 @@ export class GhCliGitHubClient implements GitHubClient {
     const fields =
       state === "closed"
         ? "number"
-        : "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt"
+        : "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,requestedReviewers,url,createdAt,updatedAt"
     return fetchGhJson<GitHubPullRequestRecord[]>(
       ["pr", "list", "--state", state, "--json", fields, "--limit", limit],
       cwd
