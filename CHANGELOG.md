@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-04-06
+
+### New Features
+
+- **Field-level sync diffs** — GitHub sync logging now shows
+  specific field changes (e.g., "title: old → new") instead of
+  generic "data changed" messages. Includes array deltas and
+  human-friendly field labels.
+- **Agent-hook-schemas 0.2.0** — Upgraded to v0.2.0 with
+  bundling fix and JsonLike type replacing `unknown`.
+
+### Refactoring
+
+- **Extract changelog staleness to submodule** — Moved
+  `checkChangelogStaleness` from `stop-auto-continue.ts` into
+  `hooks/stop-auto-continue/changelog-staleness.ts`.
+- **Remove orphaned hook scripts check** — Removed
+  `findOrphanedHookScripts` and related fix logic from
+  `swiz doctor`.
+- **Remove prPoll infrastructure** — Removed prPoll hook,
+  manifest entry, and LaunchAgent infrastructure.
+- **Replace unknown with JsonLike** — Replaced
+  `Record<string, unknown>` casts with typed `JsonLike` across
+  schemas and NFKC normalization.
+- **Merge task hooks** — Consolidated task sync and task
+  governance into single merged modules.
+
+### Fixes
+
+- **README hook counts** — Updated hook counts and fixed time
+  format test regex for date-fns PPpp format.
+- **Schema optionality** — Made `shellHookToolInputSchema`
+  command field optional.
+- **Task visibility** — Hidden total count from task display;
+  enhanced time context in hooks.
+- **Dispatch validation** — Accept MCP tool responses in
+  postToolUse validation.
+
 ## 2026-04-05
 
 ### Refactoring
