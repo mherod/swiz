@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, getAgent, translateEvent } from "../agents.ts"
-import { stderrLog } from "../debug.ts"
+import { debugLog, stderrLog } from "../debug.ts"
 import { suggest } from "../fuzzy.ts"
 import { getHomeDir, getHomeDirWithFallback } from "../home.ts"
 import {
@@ -85,6 +85,37 @@ const HOME = getHomeDirWithFallback("")
 const PASS = `${GREEN}✓${RESET}`
 const FAIL = `${RED}✗${RESET}`
 const WARN = `${YELLOW}!${RESET}`
+
+const DOCTOR_CHECK_TIMEOUT_MS = 60_000
+const AUTO_CLEANUP_TIMEOUT_MS = 75_000
+
+class DoctorTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label} timed out after ${timeoutMs}ms`)
+    this.name = "DoctorTimeoutError"
+  }
+}
+
+async function runWithTimeout<T>(
+  label: string,
+  timeoutMs: number,
+  task: () => Promise<T>
+): Promise<T> {
+  const start = Date.now()
+  debugLog("doctor", `Starting ${label} (timeout ${timeoutMs}ms)`)
+  let timerId: ReturnType<typeof setTimeout> | undefined
+  try {
+    const timerPromise = new Promise<never>((_, reject) => {
+      timerId = setTimeout(() => reject(new DoctorTimeoutError(label, timeoutMs)), timeoutMs)
+    })
+    const taskPromise = task()
+    return await Promise.race([taskPromise, timerPromise])
+  } finally {
+    if (timerId) clearTimeout(timerId)
+    const elapsed = Date.now() - start
+    debugLog("doctor", `${label} finished after ${elapsed}ms`)
+  }
+}
 
 // ─── Individual checks ──────────────────────────────────────────────────────
 
@@ -1567,9 +1598,13 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
     await fixInvalidSkills(invalidSkillEntries)
     await fixStalePluginCache(pluginCacheInfos)
     try {
-      await autoCleanup()
+      await runWithTimeout("auto-cleanup", AUTO_CLEANUP_TIMEOUT_MS, autoCleanup)
     } catch (err) {
-      stderrLog("auto-cleanup", `  ${YELLOW}Warning: auto-cleanup failed: ${err}${RESET}`)
+      const message =
+        err instanceof DoctorTimeoutError
+          ? `  ${YELLOW}Warning: auto-cleanup timed out after ${AUTO_CLEANUP_TIMEOUT_MS}ms${RESET}`
+          : `  ${YELLOW}Warning: auto-cleanup failed: ${err}${RESET}`
+      stderrLog("auto-cleanup", message)
     }
     return
   }
@@ -1656,7 +1691,9 @@ async function runDoctorChecks(args: string[]): Promise<void> {
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
   const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos, orphanedScripts } =
-    await collectDoctorChecks(fix)
+    await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>
+      collectDoctorChecks(fix)
+    )
 
   for (const result of results) {
     printResult(result)

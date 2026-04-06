@@ -165,6 +165,13 @@ describe("manifest.ts", () => {
       )
     })
 
+    it("postToolUse has time-context hook", () => {
+      const basePostToolUse = manifest.find((g) => g.event === "postToolUse" && !g.matcher)
+      expect(basePostToolUse?.hooks.some((h) => hookIdentifier(h).includes("time-context"))).toBe(
+        true
+      )
+    })
+
     it("postToolUse has task-specific hooks for TaskCreate", () => {
       const taskCreatePost = manifest.find(
         (g) => g.event === "postToolUse" && g.matcher === "TaskCreate|TodoWrite"

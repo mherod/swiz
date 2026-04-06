@@ -22,11 +22,12 @@ import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
 import posttooluseTaskCountContext from "../hooks/posttooluse-task-count-context.ts"
 import posttooluseTaskOutput from "../hooks/posttooluse-task-output.ts"
 import posttooluseTaskSubjectValidation from "../hooks/posttooluse-task-subject-validation.ts"
-import {
+import posttooluseTaskSync, {
   taskAuditSyncHook as posttooluseTaskAuditSync,
   taskListSyncHook as posttooluseTaskListSync,
 } from "../hooks/posttooluse-task-sync.ts"
 import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
+import posttooluseTimeContext from "../hooks/posttooluse-time-context.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
 import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
@@ -331,8 +332,11 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttoolusGitContext },
+      { hook: posttooluseTimeContext },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
+
+      { hook: posttooluseTaskSync },
     ],
   },
   {
