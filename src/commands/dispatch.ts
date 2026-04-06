@@ -475,6 +475,7 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
     canonicalEvent,
     hookEventName,
     payloadStr: enrichedPayloadStr,
+    preParsedPayload: payload,
   })
   const localMs = Math.round(performance.now() - tLocal)
   const totalMs = Math.round(performance.now() - t0)

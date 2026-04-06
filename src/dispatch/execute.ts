@@ -245,6 +245,8 @@ export interface DispatchRequest {
   canonicalEvent: string
   hookEventName: string
   payloadStr: string
+  /** Pre-parsed+normalized payload from CLI local fallback — skips reparse when provided. */
+  preParsedPayload?: Record<string, any>
   /**
    * When true, fire-and-forget async file hooks use the worker pool and are awaited;
    * fire-and-forget inline hooks are also awaited. Does not change
@@ -326,11 +328,17 @@ interface DispatchContext {
 }
 
 function buildDispatchContext(req: DispatchRequest): DispatchContext {
-  const { canonicalEvent, hookEventName, payloadStr } = req
-  const { payload, parseError } = parsePayload(payloadStr)
-  assertDispatchInboundNotParseError(canonicalEvent, parseError)
+  const { canonicalEvent, hookEventName, payloadStr, preParsedPayload } = req
 
-  normalizeAgentHookPayload(payload)
+  let payload: Record<string, any>
+  if (preParsedPayload) {
+    payload = preParsedPayload
+  } else {
+    const parsed = parsePayload(payloadStr)
+    assertDispatchInboundNotParseError(canonicalEvent, parsed.parseError)
+    payload = parsed.payload
+    normalizeAgentHookPayload(payload)
+  }
   backfillPayloadDefaults(payload)
   const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
   for (const k of Object.keys(payload)) unset(payload, k)
