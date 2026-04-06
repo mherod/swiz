@@ -71,12 +71,26 @@ async function resolvePidCwds(allPids: number[]): Promise<Record<number, string>
   return pidCwds
 }
 
+/** Pluggable provider classifier — order matters (first match wins). */
+export interface ProviderClassifier {
+  id: string
+  match: (command: string, executable: string) => boolean
+}
+
+/** Registry of provider classifiers. Add new providers here instead of editing an if-chain. */
+export const PROVIDER_CLASSIFIERS: ProviderClassifier[] = [
+  { id: "claude", match: (cmd) => cmd.includes("claude-agent-sdk/cli.js") },
+  { id: "codex", match: (cmd) => cmd.includes("/codex") || cmd.includes(" codex ") },
+  { id: "gemini", match: (cmd) => cmd.includes("gemini") },
+  {
+    id: "cursor",
+    match: (cmd, exe) => isCursorMacProcess(cmd) || exe === "agent" || exe.endsWith("/agent"),
+  },
+]
+
 function classifyProviderPid(command: string, executable: string): string | null {
-  if (command.includes("claude-agent-sdk/cli.js")) return "claude"
-  if (command.includes("/codex") || command.includes(" codex ")) return "codex"
-  if (command.includes("gemini")) return "gemini"
-  if (isCursorMacProcess(command) || executable === "agent" || executable.endsWith("/agent")) {
-    return "cursor"
+  for (const classifier of PROVIDER_CLASSIFIERS) {
+    if (classifier.match(command, executable)) return classifier.id
   }
   return null
 }
