@@ -2,6 +2,119 @@ import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.
 
 // ─── Upstream sync ─────────────────────────────────────────────────────────
 
+/** Human-friendly labels for fields that have domain-specific names. */
+const FIELD_LABELS: Record<string, string> = {
+  reviewDecision: "review",
+  statusCheckRollup: "checks",
+  headRefName: "branch",
+}
+
+/** Human-friendly labels for review decision values. */
+const REVIEW_LABELS: Record<string, string> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes requested",
+  REVIEW_REQUIRED: "review required",
+}
+
+/** Extract `.name` or `.login` from an array of objects for readable diffs. */
+function extractNames(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return []
+  return arr
+    .map((item) => {
+      if (typeof item === "string") return item
+      if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>
+        return typeof o.name === "string" ? o.name : typeof o.login === "string" ? o.login : null
+      }
+      return null
+    })
+    .filter((n): n is string => n !== null)
+}
+
+/** Describe a set-difference between two name arrays, e.g. "+bug, -wontfix". */
+function describeArrayDiff(oldArr: unknown, newArr: unknown): string | null {
+  const oldNames = extractNames(oldArr)
+  const newNames = extractNames(newArr)
+  if (oldNames.length === 0 && newNames.length === 0) return null
+  const oldSet = new Set(oldNames)
+  const newSet = new Set(newNames)
+  const added = newNames.filter((n) => !oldSet.has(n))
+  const removed = oldNames.filter((n) => !newSet.has(n))
+  const parts: string[] = []
+  if (added.length > 0) parts.push(`+${added.join(", +")}`)
+  if (removed.length > 0) parts.push(`-${removed.join(", -")}`)
+  return parts.length > 0 ? parts.join(" ") : null
+}
+
+/** Fields worth surfacing in change descriptions (order = display priority). */
+const DISPLAY_FIELDS = [
+  "state",
+  "title",
+  "labels",
+  "assignees",
+  "reviewDecision",
+  "mergeable",
+  "statusCheckRollup",
+  "milestone",
+  "description",
+  "color",
+] as const
+
+/**
+ * Produce a human-readable summary of what changed between two JSON-serialised
+ * entities.  Returns e.g. `"state → closed"`, `"labels +bug"`, `"review → approved"`.
+ * Falls back to `"N fields updated"` when the diff is too noisy to summarise.
+ */
+function describeChanges(oldJson: string, newJson: string): string {
+  let oldObj: Record<string, unknown>
+  let newObj: Record<string, unknown>
+  try {
+    oldObj = JSON.parse(oldJson)
+    newObj = JSON.parse(newJson)
+  } catch {
+    return "updated"
+  }
+
+  const changed: string[] = []
+  for (const field of DISPLAY_FIELDS) {
+    const oldVal = JSON.stringify(oldObj[field])
+    const newVal = JSON.stringify(newObj[field])
+    if (oldVal === newVal) continue
+
+    const label = FIELD_LABELS[field] ?? field
+
+    // Scalar transition: "state → closed", "review → approved"
+    if (typeof newObj[field] === "string") {
+      const display =
+        field === "reviewDecision"
+          ? (REVIEW_LABELS[newObj[field] as string] ?? newObj[field])
+          : newObj[field]
+      changed.push(`${label} → ${display}`)
+      continue
+    }
+
+    // Array fields: show added/removed names
+    if (field === "labels" || field === "assignees") {
+      const diff = describeArrayDiff(oldObj[field], newObj[field])
+      if (diff) {
+        changed.push(`${label} ${diff}`)
+        continue
+      }
+    }
+
+    changed.push(label)
+  }
+  if (changed.length > 0) return changed.join(", ")
+
+  // Fall back: count how many top-level keys differ
+  const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)])
+  let diffCount = 0
+  for (const k of allKeys) {
+    if (JSON.stringify(oldObj[k]) !== JSON.stringify(newObj[k])) diffCount++
+  }
+  return diffCount > 0 ? `${diffCount} field${diffCount > 1 ? "s" : ""} updated` : "updated"
+}
+
 /** Describes why a single entity was mutated during sync. */
 export interface SyncChange {
   kind: "new" | "updated" | "removed"
@@ -85,7 +198,7 @@ function syncEntityGroup(
         bucket.changes.push({
           kind: isNew ? "new" : "updated",
           key: `#${item.number}`,
-          reason: isNew ? "new entity" : "data changed",
+          reason: isNew ? "new entity" : describeChanges(existingJson, newJson),
         })
       }
     }
@@ -170,7 +283,7 @@ function syncLabels(
         result.labels.changes.push({
           kind: existingJson === null ? "new" : "updated",
           key: label.name,
-          reason: existingJson === null ? "new label" : "data changed",
+          reason: existingJson === null ? "new label" : describeChanges(existingJson, newJson),
         })
       }
     }
@@ -205,7 +318,7 @@ function syncMilestones(
         result.milestones.changes.push({
           kind: existingJson === null ? "new" : "updated",
           key: ms.title ?? `#${milestone.number}`,
-          reason: existingJson === null ? "new milestone" : "data changed",
+          reason: existingJson === null ? "new milestone" : describeChanges(existingJson, newJson),
         })
       }
     }
