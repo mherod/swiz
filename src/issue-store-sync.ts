@@ -8,6 +8,7 @@ const FIELD_LABELS: Record<string, string> = {
   requestedReviewers: "reviewers",
   statusCheckRollup: "checks",
   headRefName: "branch",
+  commentCount: "comments",
 }
 
 /** Human-friendly labels for review decision values. */
@@ -57,6 +58,7 @@ const DISPLAY_FIELDS = [
   "requestedReviewers",
   "mergeable",
   "statusCheckRollup",
+  "commentCount",
   "milestone",
   "description",
   "color",
@@ -84,6 +86,21 @@ function describeChanges(oldJson: string, newJson: string): string {
     if (oldVal === newVal) continue
 
     const label = FIELD_LABELS[field] ?? field
+
+    // Numeric delta: "comments +3" or "comments 5 → 2"
+    if (
+      field === "commentCount" &&
+      typeof oldObj[field] === "number" &&
+      typeof newObj[field] === "number"
+    ) {
+      const delta = (newObj[field] as number) - (oldObj[field] as number)
+      if (delta > 0) {
+        changed.push(`+${delta} ${delta === 1 ? "comment" : "comments"}`)
+      } else {
+        changed.push(`${label} ${oldObj[field]} → ${newObj[field]}`)
+      }
+      continue
+    }
 
     // Scalar transition: "state → closed", "review → approved"
     if (typeof newObj[field] === "string") {
