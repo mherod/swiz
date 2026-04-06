@@ -7,9 +7,9 @@ import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
+import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { isSessionstartSelfHealPaused } from "../src/sessionstart-self-heal-state.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { sessionStartHookInputSchema } from "./schemas.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 
@@ -78,7 +78,7 @@ async function findMissingDispatchEntries(): Promise<string[]> {
       }
     }
 
-    // Scheduled events (preCommit, commitMsg, prePush, prPoll) use lefthook, not settings.json
+    // Scheduled events (preCommit, commitMsg, prePush) use lefthook, not settings.json
     const { manifest } = await import("../src/manifest.ts")
     const missing: string[] = []
     for (const group of manifest) {

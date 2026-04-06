@@ -11,8 +11,8 @@
 
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
-import type { HookOutput } from "../../hooks/schemas.ts"
 import { formatActionPlan } from "../action-plan.ts"
+import type { HookOutput } from "../schemas.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { warnInvalidTransition } from "../tasks/task-event-state.ts"
 import {

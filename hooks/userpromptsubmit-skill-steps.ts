@@ -9,8 +9,8 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
 import { createTasksFromSkillSteps, formatSkillStepsSummary } from "../src/utils/skill-steps.ts"
-import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "./schemas.ts"
 
 const SKILL_INVOCATION_RE = /^\s*\/([a-z][a-z0-9-]*)/i
 

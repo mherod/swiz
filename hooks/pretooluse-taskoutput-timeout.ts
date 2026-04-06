@@ -13,7 +13,7 @@ import {
   runSwizHookAsMain,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
-import type { ToolHookInput } from "./schemas.ts"
+import type { ToolHookInput } from "../src/schemas.ts"
 
 const MAX_TIMEOUT_MS = 120_000
 

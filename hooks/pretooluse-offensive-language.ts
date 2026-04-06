@@ -15,6 +15,7 @@
 import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { preToolUseAllow, preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
@@ -24,7 +25,6 @@ import {
   type LazyPattern,
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 // ── AI-refined feedback ──────────────────────────────────────────────────────
 

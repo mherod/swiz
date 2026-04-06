@@ -5,7 +5,7 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
-import type { StopHookInput } from "../schemas.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   buildEmptyDescriptionOutput,
   buildPlaceholderOutput,

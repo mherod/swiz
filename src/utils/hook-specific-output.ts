@@ -6,11 +6,7 @@
  */
 
 import { merge } from "lodash-es"
-import {
-  type HookSpecificOutput,
-  hookOutputSchema,
-  hookSpecificOutputSchema,
-} from "../../hooks/schemas.ts"
+import { type HookSpecificOutput, hookOutputSchema, hookSpecificOutputSchema } from "../schemas.ts"
 
 /** Non-array plain object `hookSpecificOutput` from a hook or dispatch envelope. */
 export function getHookSpecificOutput(resp: {

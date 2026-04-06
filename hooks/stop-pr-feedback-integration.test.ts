@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { StopHookInput } from "./schemas.ts"
+import type { StopHookInput } from "../src/schemas.ts"
 import { evaluateStopPersonalRepoIssues } from "./stop-personal-repo-issues/evaluate.ts"
 import { evaluateStopPrFeedback } from "./stop-pr-feedback/evaluate.ts"
 

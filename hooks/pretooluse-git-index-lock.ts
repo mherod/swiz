@@ -18,11 +18,11 @@ import {
   type SwizHookOutput,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GIT_ANY_CMD_RE } from "../src/utils/git-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { type ShellHookInput, shellHookInputSchema } from "./schemas.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

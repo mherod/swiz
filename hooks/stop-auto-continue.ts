@@ -10,6 +10,7 @@ import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
   type AmbitionMode,
   getEffectiveSwizSettings,
@@ -25,7 +26,6 @@ import {
   isGitRepo,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
 import {
   recordSuggestionAndGetCount,

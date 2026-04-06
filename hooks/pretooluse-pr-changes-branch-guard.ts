@@ -14,6 +14,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { shellHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   detectForkTopology,
@@ -31,7 +32,6 @@ import {
   isShellTool,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { shellHookInputSchema } from "./schemas.ts"
 
 type Review = {
   state: string

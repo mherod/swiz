@@ -10,7 +10,7 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { evaluateStopShipChecklist } from "./stop-ship-checklist/evaluate.ts"
 
 export async function evaluateStopShipChecklistHook(input: StopHookInput): Promise<SwizHookOutput> {

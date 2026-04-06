@@ -22,6 +22,7 @@
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import {
   extractCheckoutBranch,
@@ -39,7 +40,6 @@ import {
   getGitStatusV2,
   isDefaultBranch,
 } from "../src/utils/git-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 type ProjectState = "developing" | "reviewing" | "addressing-feedback" | "planning"
 

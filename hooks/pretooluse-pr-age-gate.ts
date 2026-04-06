@@ -23,6 +23,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
   extractMergeBranch,
@@ -36,7 +37,6 @@ import {
   git,
   isShellTool,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 /** Format milliseconds as "Xm Ys". */
 export function formatRemaining(ms: number): string {

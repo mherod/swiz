@@ -11,6 +11,7 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import {
   blockStopObj,
@@ -18,7 +19,6 @@ import {
   skillAdvice,
   skillExists,
 } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 function formatSessionSkillsForReason(skills: string[]): string {
   if (skills.length === 0) return "Skills used this session: (none)"

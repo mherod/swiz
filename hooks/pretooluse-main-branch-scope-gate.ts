@@ -15,6 +15,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -36,7 +37,6 @@ import {
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
 import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 function buildRepoContext(isCollaborative: boolean, signals: string[]): string {
   return isCollaborative

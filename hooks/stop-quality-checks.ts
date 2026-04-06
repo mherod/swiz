@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { getOpenPrForBranch } from "../src/git-helpers.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   blockStopObj,
@@ -16,7 +17,6 @@ import {
   git,
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const
 export const TYPECHECK_SCRIPTS = ["typecheck", "type-check", "tsc", "check:types"] as const

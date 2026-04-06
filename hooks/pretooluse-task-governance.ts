@@ -13,6 +13,7 @@
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { TASK_UPDATE_ALLOWED_FIELDS, toolHookInputSchema } from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -54,7 +55,6 @@ import {
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
 import { shellTokenCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
-import { TASK_UPDATE_ALLOWED_FIELDS, toolHookInputSchema } from "./schemas.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
 

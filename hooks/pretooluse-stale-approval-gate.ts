@@ -12,6 +12,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   formatActionPlan,
   GIT_COMMIT_RE,
@@ -27,7 +28,6 @@ import {
   isShellTool,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 interface PrWithReviews {
   number: number

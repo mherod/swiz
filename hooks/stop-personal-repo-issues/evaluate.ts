@@ -1,8 +1,8 @@
 import type { ActionPlanItem } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../../src/schemas.ts"
 import { readProjectState } from "../../src/settings.ts"
 import { blockStopObj, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "../schemas.ts"
 import { buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
 import {
   buildStopContext,

@@ -19,10 +19,8 @@ export { installDaemonLaunchAgent, uninstallDaemonLaunchAgent }
 
 import {
   installMergeTool,
-  installPrPoll,
   installStatusLine,
   uninstallMergeTool,
-  uninstallPrPoll,
   uninstallStatusLine,
 } from "./install/optional-helpers.ts"
 
@@ -51,7 +49,6 @@ function parseInstallRunOptions(args: string[]): InstallRunOptions {
     uninstall: args.includes("--uninstall"),
     mergeTool: args.includes("--merge-tool"),
     statusLine: args.includes("--status-line"),
-    prPoll: args.includes("--pr-poll"),
     daemon,
     daemonPort,
     targets: getAgentByFlag(args),
@@ -60,7 +57,7 @@ function parseInstallRunOptions(args: string[]): InstallRunOptions {
 
 /** True when `install --uninstall` should remove every swiz integration (no scope flags). */
 function isFullUninstall(opts: InstallRunOptions): boolean {
-  return opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.prPoll && !opts.daemon
+  return opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.daemon
 }
 
 function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
@@ -70,7 +67,6 @@ function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
 async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
   if (opts.mergeTool) await installMergeTool(opts.dryRun)
   if (opts.statusLine) await installStatusLine(opts.dryRun)
-  if (opts.prPoll) await installPrPoll(opts.dryRun)
   if (opts.daemon) await installDaemonForCli(opts.daemonPort, opts.dryRun)
 }
 
@@ -78,7 +74,6 @@ async function runOptionalUninstallSteps(opts: InstallRunOptions): Promise<void>
   const all = isFullUninstall(opts)
   if (all || opts.mergeTool) await uninstallMergeTool(opts.dryRun)
   if (all || opts.statusLine) await uninstallStatusLine(opts.dryRun)
-  if (all || opts.prPoll) await uninstallPrPoll(opts.dryRun)
   if (all || opts.daemon) await uninstallDaemonForCli(opts.dryRun)
 }
 

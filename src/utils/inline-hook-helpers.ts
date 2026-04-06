@@ -10,7 +10,7 @@
  * Hooks that need tool-name translation must remain file-based.
  */
 
-import type { ToolHookInput } from "../../hooks/schemas.ts"
+import type { ToolHookInput } from "../schemas.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 // ─── Issue guidance ──────────────────────────────────────────────────────────

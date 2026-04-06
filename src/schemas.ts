@@ -68,7 +68,6 @@
 // Gemini, and Cursor. Local schemas that need NFKC transforms or custom
 // refinements extend or wrap these; pure-validation schemas re-export directly.
 import {
-  ParseBashToolInput,
   ParseEditToolInput,
   ParseWriteToolInput,
   ConfigChangeInputSchema as PkgConfigChangeInputSchema,
@@ -122,17 +121,11 @@ import {
   GeminiSessionStartInputSchema as PkgGeminiSessionStartInputSchema,
 } from "agent-hook-schemas/gemini"
 import { z } from "zod"
-import { isJsonLikeRecord } from "../src/utils/hook-json-helpers.ts"
-import { getHookSpecificOutput } from "../src/utils/hook-specific-output.ts"
+import { isJsonLikeRecord } from "./utils/hook-json-helpers.ts"
+import { getHookSpecificOutput } from "./utils/hook-specific-output.ts"
 
 // Re-export typed tool input parsers for direct consumer use
-export {
-  ParseBashToolInput,
-  ParseEditToolInput,
-  ParseWriteToolInput,
-  ToolInputCommand,
-  ToolInputFilePath,
-}
+export { ParseEditToolInput, ParseWriteToolInput, ToolInputCommand, ToolInputFilePath }
 
 /**
  * Make all fields of a `z.looseObject` schema optional.
@@ -190,7 +183,7 @@ function nfkcDeep(val: unknown): unknown {
   if (typeof val === "string") return val.normalize("NFKC")
   if (Array.isArray(val)) return val.map(nfkcDeep)
   if (isJsonLikeRecord(val)) {
-    const out: Record<string, any> = {}
+    const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(val)) {
       out[k] = nfkcDeep(v)
     }
@@ -248,24 +241,21 @@ export const fileEditHookInputSchema = toolHookBaseObjectSchema
 
 export type FileEditHookInput = z.infer<typeof fileEditHookInputSchema>
 
+const nfkcSchema = z.string().transform(nfkc)
+
+const shellHookToolInputSchema = z
+  .looseObject({
+    command: nfkcSchema,
+  })
+  .optional()
+
 /**
  * Shell tool_input payload — used by hooks that inspect shell commands.
  * Covers Bash, Shell, run_shell_command and equivalent cross-agent tools.
  */
-export const shellHookInputSchema = toolHookBaseObjectSchema
-  .extend({
-    tool_input: z
-      .looseObject({
-        command: z.string().optional(),
-      })
-      .optional(),
-  })
-  .transform((val) => {
-    if (val.tool_input) {
-      val.tool_input.command = nfkc(val.tool_input.command)
-    }
-    return val
-  })
+export const shellHookInputSchema = toolHookBaseObjectSchema.extend({
+  tool_input: shellHookToolInputSchema,
+})
 
 export type ShellHookInput = z.infer<typeof shellHookInputSchema>
 
@@ -275,7 +265,7 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  */
 export const toolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
   if (val.tool_input) {
-    val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+    val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
   }
   return val
 })
@@ -327,7 +317,7 @@ export const postToolUseHookInputSchema = z
   })
   .transform((val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   })
@@ -373,13 +363,6 @@ export const prePushHookInputSchema = z.looseObject({
 })
 
 export type PrePushHookInput = z.infer<typeof prePushHookInputSchema>
-
-/**
- * PrPoll scheduled hook input. Dispatcher sends hook base fields (typically `cwd`).
- */
-export const prPollHookInputSchema = hookBaseSchema
-
-export type PrPollHookInput = z.infer<typeof prPollHookInputSchema>
 
 // ─── Updated existing schemas with missing fields ───────────────────────────
 
@@ -624,7 +607,7 @@ export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSele
 export const geminiBeforeToolInputSchema = allOptional(PkgGeminiBeforeToolInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   }
@@ -641,7 +624,7 @@ export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
 export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   }
@@ -729,7 +712,7 @@ export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema
 export const codexPreToolUseInputSchema = allOptional(PkgCodexPreToolUseInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   }
@@ -745,7 +728,7 @@ export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
 export const codexPostToolUseInputSchema = allOptional(PkgCodexPostToolUseInputSchema).transform(
   (val) => {
     if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   }
@@ -874,7 +857,7 @@ const hookOutputRefinedSchema = z
         const hasSystemMsg = typeof o.systemMessage === "string" && o.systemMessage.trim()
         const hasReason = typeof o.reason === "string" && o.reason.trim()
         const hasStopReason = typeof o.stopReason === "string" && o.stopReason.trim()
-        const hso = getHookSpecificOutput(o as Record<string, any>)
+        const hso = getHookSpecificOutput(o as Record<string, unknown>)
         const hasHsoContext =
           hso && typeof hso.additionalContext === "string" && hso.additionalContext.trim()
 
@@ -901,13 +884,13 @@ export const hookOutputSchema = hookOutputRefinedSchema
 export type HookOutput = z.infer<typeof hookOutputSchema>
 
 /** Merged stop dispatch must carry an agent-visible stop narrative — not context-only. */
-function stopHookOutputHasReasonOrStopReason(o: Record<string, any>): boolean {
+function stopHookOutputHasReasonOrStopReason(o: Record<string, unknown>): boolean {
   const r = typeof o.reason === "string" && o.reason.trim()
   const s = typeof o.stopReason === "string" && o.stopReason.trim()
   return Boolean(r || s)
 }
 
-function stopHookOutputHasBlockDecision(o: Record<string, any>): boolean {
+function stopHookOutputHasBlockDecision(o: Record<string, unknown>): boolean {
   if (o.decision === "block" || o.decision === "deny") return true
   const hso = getHookSpecificOutput(o)
   if (!hso) return false
@@ -919,7 +902,7 @@ function stopHookOutputHasBlockDecision(o: Record<string, any>): boolean {
  * `continue: true`; or **`continue: false`** with non-empty **`stopReason`** (Claude universal
  * output); or top-level **`decision: "block"` / `"deny"`** (may omit `continue`).
  */
-function stopHookOutputContinueValid(o: Record<string, any>): boolean {
+function stopHookOutputContinueValid(o: Record<string, unknown>): boolean {
   if (o.continue === false) {
     return typeof o.stopReason === "string" && o.stopReason.trim().length > 0
   }
@@ -928,7 +911,7 @@ function stopHookOutputContinueValid(o: Record<string, any>): boolean {
 }
 
 /** Stop / SubagentStop: `decision: "block"` / `"deny"` requires **`reason`** (not `stopReason` alone). */
-function stopHookOutputBlockDecisionRequiresReason(o: Record<string, any>): boolean {
+function stopHookOutputBlockDecisionRequiresReason(o: Record<string, unknown>): boolean {
   if (o.decision === "block" || o.decision === "deny") {
     return typeof o.reason === "string" && o.reason.trim().length > 0
   }

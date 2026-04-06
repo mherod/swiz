@@ -4,12 +4,6 @@
 
 import { dirname, join } from "node:path"
 import {
-  type HookOutput,
-  hookOutputSchema,
-  type SessionHookInput,
-  type ToolHookInput,
-} from "../../hooks/schemas.ts"
-import {
   type ActionPlanItem,
   expandSkillReferences,
   formatActionPlan,
@@ -36,6 +30,12 @@ import {
   preToolUseAllowWithContext,
   preToolUseDeny,
 } from "../SwizHook.ts"
+import {
+  type HookOutput,
+  hookOutputSchema,
+  type SessionHookInput,
+  type ToolHookInput,
+} from "../schemas.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
@@ -275,7 +275,7 @@ export function filePathGuardHook(
 ): () => Promise<void> {
   return async (): Promise<void> => {
     // Load input schema dynamically to avoid circular dependencies
-    const { fileEditHookInputSchema } = await import("../../hooks/schemas.ts")
+    const { fileEditHookInputSchema } = await import("../schemas.ts")
     const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
     const filePath = input.tool_input?.file_path ?? ""
 

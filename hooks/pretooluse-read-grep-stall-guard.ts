@@ -20,10 +20,10 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
 const STALL_THRESHOLD = 30

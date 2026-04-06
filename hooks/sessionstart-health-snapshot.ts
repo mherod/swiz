@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import {
   buildContextHookOutput,
   ghJson,
@@ -14,7 +15,6 @@ import {
   isGitHubRemote,
   isGitRepo,
 } from "../src/utils/hook-utils.ts"
-import { sessionStartHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 interface PluginEnvRequirement {

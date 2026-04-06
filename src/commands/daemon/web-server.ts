@@ -956,45 +956,6 @@ async function handleCiRoutes(
   return null
 }
 
-async function handlePrPollRoute(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as { cwd?: string } | null
-  if (typeof body?.cwd !== "string" || !body.cwd) {
-    return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
-  }
-  const cwd = body.cwd
-  const start = performance.now()
-  try {
-    const payloadStr = JSON.stringify({ cwd })
-    const result = await executeDispatch({
-      canonicalEvent: "prPoll",
-      hookEventName: "prPoll",
-      payloadStr,
-      daemonContext: true,
-      currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
-        getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
-      disableTranscriptSummaryFallback: true,
-      manifestProvider: async (projectCwd) => ctx.manifestCache.get(projectCwd),
-    })
-    const durationMs = performance.now() - start
-    recordDispatch(ctx.globalMetrics, "prPoll", durationMs)
-    ctx.touchProject(cwd)
-    recordDispatch(ctx.getProjectMetrics(cwd), "prPoll", durationMs)
-    ctx.registerProjectWatchers(cwd)
-    return Response.json({ success: true, response: result.response, durationMs, exitCode: 0 })
-  } catch (error) {
-    const durationMs = performance.now() - start
-    return Response.json(
-      {
-        success: false,
-        stderr: error instanceof Error ? error.message : String(error),
-        durationMs,
-        exitCode: 1,
-      },
-      { status: 500 }
-    )
-  }
-}
-
 async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     cwd?: string
@@ -1392,7 +1353,6 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /projects/issues": (req, _url, ctx) => handleProjectIssuesRoute(req, ctx),
   "POST /projects/prs": (req, _url, ctx) => handleProjectPrsRoute(req, ctx),
   "POST /projects/sync-now": (req, _url, ctx) => handleProjectSyncNow(req, ctx),
-  "POST /pr-poll": (req, _url, ctx) => handlePrPollRoute(req, ctx),
   "GET /cache/status": (_req, _url, ctx) => handleCacheStatus(ctx),
   "POST /status-line/snapshot": (req, _url, ctx) => handleStatusLineSnapshot(req, ctx),
 }

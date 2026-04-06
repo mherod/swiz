@@ -20,6 +20,7 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
+import { fileEditHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
   getEffectiveSwizSettings,
@@ -29,7 +30,6 @@ import {
 } from "../src/settings.ts"
 import { isEditTool, isWriteTool } from "../src/tool-matchers.ts"
 import { computeProjectedContent } from "../src/utils/edit-projection.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Find .gitattributes content searching cwd and up to 5 parent directories. */
 async function findGitattributesLfsLines(cwd: string): Promise<string[]> {

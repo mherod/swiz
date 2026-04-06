@@ -8,8 +8,8 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const BRANCH_LIMIT = 40
 

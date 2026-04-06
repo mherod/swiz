@@ -6,6 +6,7 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_DIRTY_WORKTREE_THRESHOLD,
   readProjectSettings,
@@ -22,7 +23,6 @@ import {
   preToolUseAllow,
   preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 /**
  * When on the default branch in a non-trunk-mode project, return advice

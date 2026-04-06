@@ -13,9 +13,9 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 import type { ProjectState } from "../src/settings"
 import { isCodeChangeTool } from "../src/tool-matchers.ts"
-import type { FileEditHookInput } from "./schemas.ts"
 
 const ALLOWED_STATES = new Set<ProjectState>(["developing", "reviewing", "addressing-feedback"])
 

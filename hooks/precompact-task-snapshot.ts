@@ -11,6 +11,7 @@
 import { getHomeDirWithFallback } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { sessionHookInputSchema } from "../src/schemas.ts"
 import {
   getSessionCompactSnapshotPath,
   isIncompleteTaskStatus,
@@ -18,7 +19,6 @@ import {
   readSessionTasks,
   type SessionTask,
 } from "../src/tasks/task-recovery.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
 
 export interface CompactSnapshot {
   sessionId: string

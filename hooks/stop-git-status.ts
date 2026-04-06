@@ -11,8 +11,8 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import type { StopHookInput } from "./schemas.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import type { StopHookInput } from "../src/schemas.ts"
+import { stopHookInputSchema } from "../src/schemas.ts"
 import { collectGitWorkflowStop, evaluateStopGitStatus } from "./stop-git-status/evaluate.ts"
 import { markPushPrompted } from "./stop-git-status/push-cooldown-validator.ts"
 

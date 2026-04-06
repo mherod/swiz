@@ -11,12 +11,12 @@
 import { z } from "zod"
 import { promptObject } from "../src/ai-providers.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import type { ToolHookInput } from "../src/schemas.ts"
 import {
   appendBranchProtectionFromStore,
   buildGitRelevantSettingLines,
 } from "../src/utils/git-post-tool-directives.ts"
 import { buildGitContextLine, type GitStatusV2 } from "../src/utils/git-utils.ts"
-import type { ToolHookInput } from "./schemas.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
 

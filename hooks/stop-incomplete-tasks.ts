@@ -11,10 +11,10 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import type { StopHookInput } from "../src/schemas.ts"
+import { stopHookInputSchema } from "../src/schemas.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
-import type { StopHookInput } from "./schemas.ts"
-import { stopHookInputSchema } from "./schemas.ts"
 import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
 
 export async function evaluateStopIncompleteTasksHook(

@@ -6,8 +6,8 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preCommitHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj, git, isGitRepo } from "../src/utils/hook-utils.ts"
-import { preCommitHookInputSchema } from "./schemas.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
 const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/

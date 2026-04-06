@@ -19,8 +19,8 @@ import {
   runSwizHookAsMain,
   type SwizHook,
 } from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
-import type { FileEditHookInput } from "./schemas.ts"
 
 /**
  * Patterns that indicate inline issue-guidance text that should use buildIssueGuidance().

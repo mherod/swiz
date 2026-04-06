@@ -10,6 +10,7 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import type { PostToolHookInput } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
 import {
@@ -18,7 +19,6 @@ import {
   ghJson,
   stripAnsi,
 } from "../src/utils/hook-utils.ts"
-import type { PostToolHookInput } from "./schemas.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

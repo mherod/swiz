@@ -6,6 +6,7 @@
  */
 
 import { getIssueStore, getIssueStoreReader } from "../../src/issue-store.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import type { ActionPlanItem } from "../../src/utils/hook-utils.ts"
 import {
   getDefaultBranch,
@@ -17,7 +18,6 @@ import {
   isGitHubRemote,
   skillExists,
 } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { WorkflowStep } from "./types.ts"
 
 const POLL_INTERVAL_MS = 5_000

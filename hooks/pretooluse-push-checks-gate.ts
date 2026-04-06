@@ -23,6 +23,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   BRANCH_CHECK_RE,
@@ -38,7 +39,6 @@ import {
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

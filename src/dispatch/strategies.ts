@@ -1,6 +1,6 @@
 import { merge, unset } from "lodash-es"
-import { type HookOutput, hookOutputSchema } from "../../hooks/schemas.ts"
 import type { HookGroup } from "../manifest.ts"
+import { type HookOutput, hookOutputSchema } from "../schemas.ts"
 import {
   getHookSpecificOutput,
   hsoContextEvent,

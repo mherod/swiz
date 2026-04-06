@@ -1,15 +1,8 @@
 import { AGENTS } from "../../agents.ts"
-import { DIM, GREEN, RED, RESET, YELLOW } from "../../ansi.ts"
-import {
-  getLaunchAgentPlistPath,
-  loadLaunchAgentSync,
-  SWIZ_PR_POLL_LABEL,
-  unloadLaunchAgentSync,
-} from "../../launch-agents.ts"
-import { swizPrPollErrorLogPath, swizPrPollLogPath } from "../../temp-paths.ts"
+import { DIM, GREEN, RED, RESET } from "../../ansi.ts"
 import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
 import { readFileText, readJsonFile } from "../../utils/file-utils.ts"
-import { exists, removeFile, writeWithBackup } from "./file-helpers.ts"
+import { writeWithBackup } from "./file-helpers.ts"
 
 // ─── Status line configuration ───────────────────────────────────────────────
 
@@ -81,111 +74,6 @@ export async function uninstallStatusLine(dryRun: boolean): Promise<void> {
   delete proposed.statusLine
   await writeWithBackup(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
   console.log(`  ${GREEN}✓${RESET} statusLine removed from ${settingsPath}\n`)
-}
-
-// ─── PR poll LaunchAgent ─────────────────────────────────────────────────────
-
-const PR_POLL_LABEL = SWIZ_PR_POLL_LABEL
-const PR_POLL_PLIST = getLaunchAgentPlistPath(PR_POLL_LABEL)
-
-export function buildPrPollPlist(bunBin: string, indexPath: string): string {
-  const logPath = swizPrPollLogPath()
-  const errorLogPath = swizPrPollErrorLogPath()
-  const projectCwd = process.cwd()
-  const shellQuotedCwd = projectCwd.replaceAll("'", "'\"'\"'")
-
-  // Route prPoll through daemon dispatch first; fallback to standalone dispatch.
-  const payload = JSON.stringify({ cwd: projectCwd })
-  const dispatchUrl = "http://localhost:7943/dispatch?event=prPoll&hookEventName=prPoll"
-  const curlCmd = `curl -sSf -X POST "${dispatchUrl}" -d '${payload}' -H 'Content-Type: application/json'`
-  const fallbackCmd = `cd '${shellQuotedCwd}' && '${bunBin}' '${indexPath}' dispatch prPoll`
-
-  const cmd = `${curlCmd} > /dev/null 2>>${errorLogPath} || ${fallbackCmd} >>${logPath} 2>>${errorLogPath}`
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-\t<key>Label</key>
-\t<string>${PR_POLL_LABEL}</string>
-\t<key>ProgramArguments</key>
-\t<array>
-\t\t<string>/bin/sh</string>
-\t\t<string>-c</string>
-\t\t<string>${cmd}</string>
-\t</array>
-\t<key>StartInterval</key>
-\t<integer>300</integer>
-\t<key>RunAtLoad</key>
-\t<false/>
-\t<key>StandardOutPath</key>
-\t<string>${logPath}</string>
-\t<key>StandardErrorPath</key>
-\t<string>${errorLogPath}</string>
-</dict>
-</plist>
-`
-}
-
-export async function installPrPoll(dryRun: boolean): Promise<void> {
-  const bunBin = Bun.which("bun") ?? "bun"
-  const indexPath = Bun.main
-  const plistContent = buildPrPollPlist(bunBin, indexPath)
-
-  const existingContent = await readFileText(PR_POLL_PLIST)
-  const alreadyCurrent = existingContent.trim() === plistContent.trim()
-
-  if (dryRun) {
-    if (alreadyCurrent) {
-      console.log(`  ${DIM}prPoll LaunchAgent: already installed${RESET}\n`)
-    } else {
-      console.log(`  ${GREEN}+ prPoll LaunchAgent: ${PR_POLL_PLIST}${RESET}\n`)
-      console.log(formatUnifiedDiff(PR_POLL_PLIST, existingContent, plistContent))
-    }
-    return
-  }
-
-  if (alreadyCurrent) {
-    console.log(`  ${DIM}prPoll LaunchAgent: already installed${RESET}\n`)
-    return
-  }
-
-  await Bun.write(PR_POLL_PLIST, plistContent)
-  unloadLaunchAgentSync(PR_POLL_PLIST)
-  const loadExitCode = loadLaunchAgentSync(PR_POLL_PLIST)
-  if (loadExitCode !== 0) {
-    console.log(
-      `  ${YELLOW}⚠${RESET} prPoll LaunchAgent written but launchctl load failed — reload manually:\n` +
-        `    launchctl load ${PR_POLL_PLIST}\n`
-    )
-  } else {
-    console.log(`  ${GREEN}✓${RESET} prPoll LaunchAgent installed and loaded:\n`)
-    console.log(`    ${DIM}${PR_POLL_PLIST}${RESET}`)
-    console.log(`    Polls every 5 minutes for new PR review/comment notifications.\n`)
-  }
-}
-
-export async function uninstallPrPoll(dryRun: boolean): Promise<void> {
-  const isInstalled = await exists(PR_POLL_PLIST)
-
-  if (dryRun) {
-    if (!isInstalled) {
-      console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
-    } else {
-      console.log(`  ${RED}- prPoll LaunchAgent: unload + trash ${PR_POLL_PLIST}${RESET}\n`)
-    }
-    return
-  }
-
-  if (!isInstalled) {
-    console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
-    return
-  }
-
-  unloadLaunchAgentSync(PR_POLL_PLIST)
-  await removeFile(PR_POLL_PLIST)
-  console.log(`  ${GREEN}✓${RESET} prPoll LaunchAgent unloaded and removed:\n`)
-  console.log(`    ${DIM}${PR_POLL_PLIST}${RESET}\n`)
 }
 
 // ─── Git mergetool configuration ─────────────────────────────────────────────

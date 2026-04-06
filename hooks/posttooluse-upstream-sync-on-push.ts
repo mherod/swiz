@@ -17,8 +17,8 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { GIT_PUSH_RE, GIT_SYNC_RE, isShellTool } from "../src/utils/hook-utils.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen)|issue\s+(create|close|comment|edit|reopen))\b/i

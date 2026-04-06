@@ -23,6 +23,10 @@
  */
 
 import {
+  shouldCaptureIncomingPayloads,
+  writeIncomingDispatchCapture,
+} from "./dispatch/incoming-capture.ts"
+import {
   type FileEditHookInput,
   type HookOutput,
   hookOutputSchema,
@@ -30,11 +34,7 @@ import {
   type ShellHookInput,
   type StopHookInput,
   type ToolHookInput,
-} from "../hooks/schemas.ts"
-import {
-  shouldCaptureIncomingPayloads,
-  writeIncomingDispatchCapture,
-} from "./dispatch/incoming-capture.ts"
+} from "./schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
 import {
   extractHookSystemMessagePreview,
@@ -284,7 +284,7 @@ export interface SwizHookMeta {
    */
   requiredSettings?: (keyof EffectiveSwizSettings)[]
   /**
-   * When true, this hook is a non-agent/scheduled event (e.g. preCommit, prPoll).
+   * When true, this hook is a non-agent/scheduled event (e.g. preCommit, commitMsg).
    * Skips agent eventMap validation and `swiz install`.
    */
   scheduled?: boolean

@@ -5,8 +5,8 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import type { StopHookInput } from "../../src/schemas.ts"
 import { git, isGitRepo, recentHeadRange } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { LockfileDriftContext } from "./types.ts"
 
 /**

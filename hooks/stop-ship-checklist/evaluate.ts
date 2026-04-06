@@ -6,12 +6,12 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   blockStopObj,
   createSessionTask,
   mergeActionPlanIntoTasks,
 } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { collectGitWorkflowStop, markPushPrompted } from "../stop-git-status.ts"
 import { updateCooldown } from "../stop-personal-repo-issues/cooldown.ts"
 import { collectPersonalRepoIssuesStopParsed } from "../stop-personal-repo-issues/evaluate.ts"

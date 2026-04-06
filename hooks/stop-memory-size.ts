@@ -23,9 +23,9 @@ import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj, formatActionPlan, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 interface MemoryViolation {
   filePath: string

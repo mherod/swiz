@@ -9,8 +9,8 @@ import { join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 

@@ -9,8 +9,8 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
 import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "./schemas.ts"
 
 export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
   const hookInput: UserPromptSubmitHookInput = userPromptSubmitHookInputSchema.parse(input)

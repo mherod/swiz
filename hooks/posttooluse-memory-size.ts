@@ -14,6 +14,7 @@ import {
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -26,7 +27,6 @@ import {
   isFileEditTool,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
 export function isMemoryFile(filePath: string): boolean {

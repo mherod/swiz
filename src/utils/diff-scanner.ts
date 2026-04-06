@@ -1,7 +1,7 @@
 // Shared types and utilities for stop hooks that scan git diffs for violations.
 
-import type { HookOutput } from "../../hooks/schemas.ts"
-import { stopHookInputSchema } from "../../hooks/schemas.ts"
+import type { HookOutput } from "../schemas.ts"
+import { stopHookInputSchema } from "../schemas.ts"
 import { hasNonEmptyHookOutput } from "./hook-json-helpers.ts"
 import { blockStopObj, exitWithHookObject, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
 

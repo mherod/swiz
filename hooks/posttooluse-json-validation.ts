@@ -4,8 +4,8 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 export async function evaluatePosttooluseJsonValidation(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

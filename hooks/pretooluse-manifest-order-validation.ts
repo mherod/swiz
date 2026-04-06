@@ -13,8 +13,8 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
-import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
 function extractStopHookOrder(source: string): string[] {

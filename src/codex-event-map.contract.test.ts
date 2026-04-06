@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { getAgent, translateEvent } from "./agents.ts"
 import {
   codexCommonInputSchema,
   codexHookOutputSchema,
@@ -7,8 +8,7 @@ import {
   codexSessionStartInputSchema,
   codexStopInputSchema,
   codexUserPromptSubmitInputSchema,
-} from "../hooks/schemas.ts"
-import { getAgent, translateEvent } from "./agents.ts"
+} from "./schemas.ts"
 
 /**
  * Contract for Codex CLI hooks.json: the public hook surface is

@@ -14,10 +14,10 @@ import {
   type SwizHookOutput,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { detectPackageManager, type PackageManager } from "../src/utils/package-detection.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 // Equivalent subcommands across package managers
 interface CmdMap {

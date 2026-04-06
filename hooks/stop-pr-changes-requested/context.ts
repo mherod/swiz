@@ -5,6 +5,7 @@
  */
 
 import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -21,7 +22,6 @@ import {
   isGitHubRemote,
   isGitRepo,
 } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { PRCheckContext } from "./types.ts"
 
 export async function resolvePRCheckContext(input: StopHookInput): Promise<PRCheckContext | null> {

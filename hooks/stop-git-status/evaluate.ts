@@ -6,8 +6,8 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj, createSessionTask, formatActionPlan } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { buildGitWorkflowSections } from "./action-plan.ts"
 import { detectBackgroundPush } from "./background-push-detector.ts"
 import { resolveGitContext } from "./context.ts"

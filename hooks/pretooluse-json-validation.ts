@@ -13,7 +13,7 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
-import type { FileEditHookInput } from "./schemas.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 
 async function evaluate(input: FileEditHookInput) {
   const filePath: string = input.tool_input?.file_path ?? ""

@@ -5,7 +5,7 @@
 
 import { join } from "node:path"
 import { z } from "zod"
-import { hookOutputSchema } from "../../hooks/schemas.ts"
+import { hookOutputSchema } from "../schemas.ts"
 import type { HookStatus } from "./engine.ts"
 
 // ─── Shared constants ──────────────────────────────────────────────────────

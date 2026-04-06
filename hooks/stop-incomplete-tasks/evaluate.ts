@@ -6,11 +6,11 @@
 
 import { isCurrentAgent } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   deduplicateStaleTasks,
   getIncompleteDetails,
 } from "../../src/utils/stop-incomplete-tasks-core.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { buildIncompleteBlockOutput } from "./action-plan.ts"
 import { resolveTaskCheckContext } from "./context.ts"
 import { filterIncompleteStatus } from "./incomplete-check-validator.ts"

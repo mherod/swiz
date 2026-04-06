@@ -5,7 +5,7 @@
  */
 
 import { unset } from "lodash-es"
-import { stopHookOutputSchema } from "../../hooks/schemas.ts"
+import { stopHookOutputSchema } from "../schemas.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { isBlock } from "./engine.ts"
 

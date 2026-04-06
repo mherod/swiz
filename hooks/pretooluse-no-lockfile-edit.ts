@@ -12,7 +12,7 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
-import type { FileEditHookInput } from "./schemas.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 
 const LOCKFILE_RE =
   /(^|[\\/])(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|shrinkwrap\.yaml)$/i

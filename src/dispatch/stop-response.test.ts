@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { stopHookOutputSchema } from "../../hooks/schemas.ts"
+import { stopHookOutputSchema } from "../schemas.ts"
 import {
   DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
   normalizeStopDispatchResponseInPlace,

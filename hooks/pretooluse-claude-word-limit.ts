@@ -13,9 +13,9 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { countFileWords, formatActionPlan, isShellTool } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 export async function evaluatePretooluseClaudeWordLimit(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

@@ -19,8 +19,8 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import type { StopHookInput } from "../src/schemas.ts"
 import { type DiffViolation, evaluateDiffScanStopHook } from "../src/utils/diff-scanner.ts"
-import type { StopHookInput } from "./schemas.ts"
 
 export type { DiffViolation } from "../src/utils/diff-scanner.ts"
 /** @deprecated Use DiffViolation from utils/diff-scanner.ts */

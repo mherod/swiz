@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { getAgent, translateEvent } from "./agents.ts"
 import {
   geminiAfterAgentInputSchema,
   geminiAfterModelInputSchema,
@@ -11,8 +12,7 @@ import {
   geminiNotificationInputSchema,
   geminiSessionEndInputSchema,
   geminiSessionStartInputSchema,
-} from "../hooks/schemas.ts"
-import { getAgent, translateEvent } from "./agents.ts"
+} from "./schemas.ts"
 
 describe("Gemini eventMap contract (settings.json)", () => {
   const gemini = getAgent("gemini")!

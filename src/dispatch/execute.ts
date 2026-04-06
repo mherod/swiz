@@ -69,7 +69,6 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "preCommit",
   "commitMsg",
   "prePush",
-  "prPoll",
   "notification",
 ])
 

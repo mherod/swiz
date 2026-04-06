@@ -14,8 +14,8 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
-import type { FileEditHookInput } from "./schemas.ts"
 
 // ─── stripNonCode ────────────────────────────────────────────────────────────
 

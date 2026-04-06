@@ -6,6 +6,7 @@
  */
 
 import { getHomeDirOrNull } from "../../src/home.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -13,7 +14,6 @@ import {
 } from "../../src/settings.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../../src/tasks/task-recovery.ts"
 import { getTranscriptSummary } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { CompletionAuditContext, CompletionValidationGate } from "./types.ts"
 
 /**

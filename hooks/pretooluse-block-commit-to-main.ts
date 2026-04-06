@@ -12,6 +12,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
@@ -23,7 +24,6 @@ import {
   isShellTool,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 async function getBranchInfo(
   cwd: string

@@ -7,6 +7,7 @@
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
   blockStopObj,
   ghJson,
@@ -14,7 +15,6 @@ import {
   isGitHubRemote,
   isGitRepo,
 } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const STALE_DAYS = 7
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000

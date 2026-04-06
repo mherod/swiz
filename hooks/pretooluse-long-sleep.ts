@@ -10,11 +10,12 @@ import {
   preToolUseAllow,
   preToolUseDeny,
   runSwizHookAsMain,
+  type SwizHookOutput,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
-import type { ShellHookInput } from "./schemas.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 
-function evaluate(input: ShellHookInput) {
+function evaluate(input: ShellHookInput): SwizHookOutput {
   const command = input.tool_input?.command || ""
 
   const sleepMatch = command.match(/sleep\s+(\d+)/)

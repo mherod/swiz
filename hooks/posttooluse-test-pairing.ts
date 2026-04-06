@@ -8,12 +8,12 @@ import { stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import {
   buildContextHookOutput,
   isFileEditTool,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
-import { type PostToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs)$/
 const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__/

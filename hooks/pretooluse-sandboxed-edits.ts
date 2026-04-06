@@ -18,11 +18,11 @@ import {
   type SwizFileEditHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import { fileEditHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
 
 /**
  * Resolve the canonical (real) path for any path, whether or not it exists.

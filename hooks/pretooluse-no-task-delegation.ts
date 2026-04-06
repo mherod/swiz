@@ -9,8 +9,8 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { preToolUseDeny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 const delegationPatterns = [
   /\bTaskCreate\b/,

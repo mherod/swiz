@@ -25,6 +25,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
@@ -37,7 +38,6 @@ import {
   stripAnsi,
 } from "../src/utils/hook-utils.ts"
 import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 

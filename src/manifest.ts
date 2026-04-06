@@ -87,7 +87,6 @@ import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory-enforcement.ts"
 import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
-import prpollNotify from "../hooks/prpoll-notify.ts"
 import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
 import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-detects.ts"
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
@@ -431,11 +430,6 @@ export const manifest: HookGroup[] = [
     hooks: [],
   },
   {
-    event: "prPoll",
-    scheduled: true,
-    hooks: [{ hook: prpollNotify }],
-  },
-  {
     event: "notification",
     scheduled: true,
     hooks: [{ hook: notificationSpeak }],
@@ -532,5 +526,4 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   preCommit: 30,
   commitMsg: 10,
   prePush: 30,
-  prPoll: 20,
 }

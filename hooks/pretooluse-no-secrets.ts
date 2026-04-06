@@ -21,7 +21,7 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
-import type { FileEditHookInput } from "./schemas.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 
 // Duplicated from git-utils.ts to avoid circular deps via settings.ts → manifest.ts
 const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//

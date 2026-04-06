@@ -5,6 +5,7 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
@@ -12,7 +13,6 @@ import {
   readSwizSettings,
 } from "../../src/settings.ts"
 import { getDefaultBranch, getGitStatusV2, git, isGitRepo } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
 /**

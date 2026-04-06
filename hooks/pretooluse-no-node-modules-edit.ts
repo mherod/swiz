@@ -14,7 +14,7 @@ import {
   runSwizHookAsMain,
   type SwizFileEditHook,
 } from "../src/SwizHook.ts"
-import type { FileEditHookInput } from "./schemas.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",

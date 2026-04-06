@@ -6,8 +6,8 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { buildActionPlan, formatBlockReason } from "./action-plan.ts"
 import { validateAuditLog } from "./audit-log-validator.ts"
 import { validateCiEvidence } from "./ci-evidence-validator.ts"

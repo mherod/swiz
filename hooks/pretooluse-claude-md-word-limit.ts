@@ -21,10 +21,10 @@ import {
   runSwizHookAsMain,
   type SwizHook,
 } from "../src/SwizHook.ts"
+import type { FileEditHookInput } from "../src/schemas.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
-import type { FileEditHookInput } from "./schemas.ts"
 
 async function buildWordLimitDenyReason(
   filePath: string,

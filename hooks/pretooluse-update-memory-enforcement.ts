@@ -12,6 +12,7 @@ import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
   extractToolBlocksFromEntry,
@@ -24,7 +25,6 @@ import {
   preToolUseDeny,
   readSessionLines,
 } from "../src/utils/hook-utils.ts"
-import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."

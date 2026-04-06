@@ -5,6 +5,7 @@
  * Returns null if any prerequisite is missing (fail-open).
  */
 
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   detectForkTopology,
   forkRemoteRef,
@@ -13,7 +14,6 @@ import {
   isDefaultBranch,
   isGitRepo,
 } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { BranchCheckContext } from "./types.ts"
 
 export async function resolveBranchCheckContext(

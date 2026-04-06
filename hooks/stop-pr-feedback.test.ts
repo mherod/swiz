@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { StopHookInput } from "./schemas.ts"
+import type { StopHookInput } from "../src/schemas.ts"
 import { evaluateStopPrFeedback } from "./stop-pr-feedback/evaluate.ts"
 import { partitionPRsForStop } from "./stop-pr-feedback/pull-requests.ts"
 import type { PR } from "./stop-pr-feedback/types.ts"

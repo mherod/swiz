@@ -12,9 +12,9 @@ import {
   runSwizHookAsMain,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 const DENY_REASON = [
   "Do not use `cp` for file copying in this workflow.",

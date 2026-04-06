@@ -5,6 +5,7 @@
 
 import { merge, omit, unset } from "lodash-es"
 import { z } from "zod"
+import { debugLog } from "../debug.ts"
 import {
   codexPostToolUseInputSchema,
   codexPreToolUseInputSchema,
@@ -18,7 +19,6 @@ import {
   postToolUseHookInputSchema,
   preCommitHookInputSchema,
   prePushHookInputSchema,
-  prPollHookInputSchema,
   sessionEndHookInputSchema,
   sessionStartHookInputSchema,
   stopHookExtendedInputSchema,
@@ -27,8 +27,7 @@ import {
   subagentStartHookInputSchema,
   toolHookInputSchema,
   userPromptSubmitHookInputSchema,
-} from "../../hooks/schemas.ts"
-import { debugLog } from "../debug.ts"
+} from "../schemas.ts"
 import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isStopLikeDispatchEvent } from "./stop-response.ts"
 
@@ -63,7 +62,6 @@ export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record
   notification: notificationHookInputSchema as z.ZodType<Record<string, any>>,
   subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, any>>,
   sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, any>>,
-  prPoll: prPollHookInputSchema as z.ZodType<Record<string, any>>,
   preCommit: preCommitHookInputSchema as z.ZodType<Record<string, any>>,
   prePush: prePushHookInputSchema as z.ZodType<Record<string, any>>,
 }

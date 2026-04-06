@@ -16,6 +16,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { applyTaskUpdateEvent, warnInvalidTransition } from "../src/tasks/task-event-state.ts"
 import {
@@ -36,7 +37,6 @@ import {
   stripHeredocs,
   toolNameForCurrentAgent,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
 

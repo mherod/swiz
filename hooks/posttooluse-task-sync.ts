@@ -14,6 +14,7 @@ import { appendFile, mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import {
@@ -31,7 +32,6 @@ import {
 } from "../src/tasks/task-recovery.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
-import { type PostToolHookInput, toolHookInputSchema } from "./schemas.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // § 1. Task Audit Sync (TaskCreate / TaskUpdate / TodoWrite)

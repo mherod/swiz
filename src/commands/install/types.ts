@@ -6,7 +6,6 @@ export interface InstallRunOptions {
   uninstall: boolean
   mergeTool: boolean
   statusLine: boolean
-  prPoll: boolean
   daemon: boolean
   daemonPort: number
   targets: AgentDef[]

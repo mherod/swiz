@@ -7,6 +7,7 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
   getEffectiveSwizSettings,
@@ -15,7 +16,6 @@ import {
   resolveNumericSetting,
 } from "../src/settings.ts"
 import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 async function checkFileSize(
   filePath: string,

@@ -5,6 +5,7 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   buildContextHookOutput,
   getCurrentSessionTaskToolStats,
@@ -13,7 +14,6 @@ import {
   scheduleAutoSteer,
   toolNameForCurrentAgent,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 const CREATION_THRESHOLD = 5
 const STALENESS_THRESHOLD = 10

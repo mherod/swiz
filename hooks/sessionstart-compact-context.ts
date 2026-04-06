@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
+import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommand,
@@ -22,7 +23,6 @@ import {
   type CompactSnapshot,
   type CompactSnapshotSummary,
 } from "./precompact-task-snapshot.ts"
-import { sessionStartHookInputSchema } from "./schemas.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 const TASK_SUBJECT_MAX_CHARS = 120

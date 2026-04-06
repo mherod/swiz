@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { isInlineHookDef, manifest } from "../src/manifest.ts"
+import { hookOutputSchema, stopHookOutputSchema } from "../src/schemas.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type JsonObject, useTempDir } from "../src/utils/test-utils.ts"
-import { hookOutputSchema, stopHookOutputSchema } from "./schemas.ts"
 
 const HOOK_CONTRACT_TIMEOUT_MS = 30_000
 

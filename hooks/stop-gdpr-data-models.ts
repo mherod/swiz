@@ -8,8 +8,8 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { buildContextHookOutput, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 const DATA_MODEL_PATTERNS = [
   /\b(?:models?|schemas?|entities|types)\/.*(?:user|account|profile|person|customer|member)\b/i,

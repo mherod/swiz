@@ -2,7 +2,6 @@ import { join } from "node:path"
 import { getHomeDir } from "./home.ts"
 
 export const SWIZ_DAEMON_LABEL = "com.swiz.daemon"
-export const SWIZ_PR_POLL_LABEL = "com.swiz.prpoll"
 
 export function getLaunchAgentPlistPath(label: string): string {
   return join(getHomeDir(), "Library/LaunchAgents", `${label}.plist`)

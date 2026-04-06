@@ -3,12 +3,12 @@
  */
 
 import { getHomeDirOrNull } from "../../src/home.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getSessionTasksDir,
   hasSessionTasksDir,
   readSessionTasks,
 } from "../../src/tasks/task-recovery.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { TaskCheckContext } from "./types.ts"
 
 /**

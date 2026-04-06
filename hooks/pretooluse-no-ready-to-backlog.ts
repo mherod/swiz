@@ -13,8 +13,8 @@ import {
   runSwizHookAsMain,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 const GH_ISSUE_EDIT_RE = /gh\s+issue\s+edit\b/
 

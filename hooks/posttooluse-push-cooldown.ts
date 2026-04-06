@@ -16,6 +16,7 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import type { PostToolHookInput } from "../src/schemas.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
   GIT_PUSH_RE,
@@ -24,7 +25,6 @@ import {
   hasGitPushForceFlag,
   isShellTool,
 } from "../src/utils/hook-utils.ts"
-import type { PostToolHookInput } from "./schemas.ts"
 
 function getEligibleCommand(hookInput: PostToolHookInput): string | null {
   if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return null

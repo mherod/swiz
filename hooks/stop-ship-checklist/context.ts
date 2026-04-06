@@ -6,13 +6,13 @@
  * shared across the three workflow concerns.
  */
 
+import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
 import { isGitRepo } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import type { ShipChecklistContext, WorkflowGates } from "./types.ts"
 
 /**

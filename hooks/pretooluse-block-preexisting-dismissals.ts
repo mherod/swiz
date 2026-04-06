@@ -25,6 +25,7 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
@@ -36,7 +37,6 @@ import {
   readAllTranscriptLines,
 } from "../src/utils/hook-utils.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 // ── Dismissal patterns ──────────────────────────────────────────────────────
 

@@ -5,8 +5,8 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import { ghJson } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { buildChangesRequestedOutput, buildNoReviewsOutput } from "./action-plan.ts"
 import { resolvePRCheckContext } from "./context.ts"
 import { fetchReviewData } from "./review-data-fetcher.ts"

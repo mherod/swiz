@@ -4,8 +4,8 @@
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { buildContextHookOutput, isGitRepo } from "../src/utils/hook-utils.ts"
-import { sessionStartHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 export async function evaluateSessionstartStateContext(input: unknown): Promise<SwizHookOutput> {

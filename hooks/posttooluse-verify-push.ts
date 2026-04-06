@@ -27,6 +27,7 @@
  */
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import type { PostToolHookInput } from "../src/schemas.ts"
 import {
   buildContextHookOutput,
   buildDenyPostToolUseOutput,
@@ -34,7 +35,6 @@ import {
   git,
   isShellTool,
 } from "../src/utils/hook-utils.ts"
-import type { PostToolHookInput } from "./schemas.ts"
 
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
 

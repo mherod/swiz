@@ -948,7 +948,7 @@ function extractDispatchEvents(hooks: Record<string, unknown>): Set<string> {
 }
 
 /** Get the set of canonical events the manifest expects to be dispatched via agent configs.
- *  Scheduled events (preCommit, commitMsg, prePush, prPoll) are dispatched via lefthook,
+ *  Scheduled events (preCommit, commitMsg, prePush) are dispatched via lefthook,
  *  not agent settings — exclude them to match what `swiz install` actually writes. */
 function getExpectedCanonicalEvents(): Set<string> {
   const events = new Set<string>()

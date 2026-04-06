@@ -5,7 +5,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks"
-import type { HookOutput } from "../hooks/schemas.ts"
+import type { HookOutput } from "./schemas.ts"
 
 const inlineRun = new AsyncLocalStorage<boolean>()
 

@@ -10,6 +10,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { detectPackageManager, isShellTool, skillExists } from "../src/utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
@@ -22,7 +23,6 @@ import {
   stripQuotedShellStrings,
 } from "../src/utils/shell-patterns.ts"
 import { extractReadFilePaths } from "../src/utils/transcript.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 interface Rule {
   /** Returns true if this rule matches the command. */

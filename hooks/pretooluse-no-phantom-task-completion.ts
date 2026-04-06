@@ -18,6 +18,7 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   extractToolBlocksFromEntry,
   formatActionPlan,
@@ -28,7 +29,6 @@ import {
   readSessionLines,
   resolveSafeSessionId,
 } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 /** Evidence prefixes that indicate traceable real work was done. */
 const EVIDENCE_RE = /\b(?:commit|pr|file|test|ci_green|run):[^\s]/

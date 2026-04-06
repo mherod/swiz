@@ -11,6 +11,7 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
 import {
   blockStopObj,
@@ -25,7 +26,6 @@ import {
   isGitRepo,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)

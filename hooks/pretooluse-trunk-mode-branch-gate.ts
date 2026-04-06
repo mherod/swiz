@@ -14,6 +14,7 @@ import {
   type SwizHookOutput,
   type SwizToolHook,
 } from "../src/SwizHook.ts"
+import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import {
   collectCheckoutNewBranchNames,
@@ -30,7 +31,6 @@ import {
   isGitRepo,
   isShellTool,
 } from "../src/utils/hook-utils.ts"
-import { shellHookInputSchema } from "./schemas.ts"
 
 function isAllowedTrunkCheckoutTarget(target: string, defaultBranch: string): boolean {
   if (target === "." || target === "-" || target === "@{-1}") return true

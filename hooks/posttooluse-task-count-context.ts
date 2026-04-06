@@ -15,11 +15,11 @@ import { getRepoSlug } from "../src/git-helpers.ts"
 import { getIssueStore } from "../src/issue-store.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { buildCountSummary, buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 export { buildCountSummary, buildCountSummaryFromTasks }
 

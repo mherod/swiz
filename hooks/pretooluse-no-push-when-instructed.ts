@@ -28,8 +28,8 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
+import type { ToolHookInput } from "../src/schemas.ts"
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
-import type { ToolHookInput } from "./schemas.ts"
 
 async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
   const injected = (input as Record<string, any>)._effectiveSettings as

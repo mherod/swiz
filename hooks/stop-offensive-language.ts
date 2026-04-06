@@ -9,6 +9,7 @@
 
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj } from "../src/utils/hook-utils.ts"
 import {
   extractLastAssistantText,
@@ -16,7 +17,6 @@ import {
   formatAllDenialMessages,
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
-import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 
 export async function evaluateStopOffensiveLanguage(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)

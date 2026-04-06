@@ -12,9 +12,9 @@ import {
   runSwizHookAsMain,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 // Evaluate each shell segment independently so chained commands are handled.
 // Try \d>&\d? before [^|;&] so redirections like 2>&1 aren't split on &

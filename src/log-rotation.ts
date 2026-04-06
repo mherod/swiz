@@ -4,18 +4,11 @@
  * Prevents unbounded growth of:
  * - swiz-dispatch.log
  * - swiz-pseudohooks.log
- * - swiz-prpoll.log
- * - swiz-prpoll-error.log
  *
  * Each log is capped at MAX_LOG_LINES to prevent filesystem issues.
  */
 
-import {
-  swizDispatchLogPath,
-  swizPrPollErrorLogPath,
-  swizPrPollLogPath,
-  swizPseudoHookLogPath,
-} from "./temp-paths.ts"
+import { swizDispatchLogPath, swizPseudoHookLogPath } from "./temp-paths.ts"
 
 const MAX_LOG_LINES = 10_000
 
@@ -27,8 +20,6 @@ interface LogFile {
 const LOG_FILES: LogFile[] = [
   { path: swizDispatchLogPath(), name: "dispatch" },
   { path: swizPseudoHookLogPath(), name: "pseudohooks" },
-  { path: swizPrPollLogPath(), name: "prpoll" },
-  { path: swizPrPollErrorLogPath(), name: "prpoll-error" },
 ]
 
 /**

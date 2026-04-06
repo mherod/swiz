@@ -13,7 +13,7 @@ import {
 import { detectFrameworks, detectProjectStack } from "../src/detect-frameworks.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
-import { sessionStartHookInputSchema } from "./schemas.ts"
+import { sessionStartHookInputSchema } from "../src/schemas.ts"
 
 function formatList(items: string[], emptyLabel: string): string {
   return items.length > 0 ? items.join(", ") : emptyLabel

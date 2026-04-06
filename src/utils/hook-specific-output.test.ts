@@ -53,8 +53,8 @@ describe("builders", () => {
   })
 
   test("hsoContextEvent", () => {
-    expect(hsoContextEvent("prPoll", "x")).toEqual({
-      hookEventName: "prPoll",
+    expect(hsoContextEvent("notification", "x")).toEqual({
+      hookEventName: "notification",
       additionalContext: "x",
     })
   })

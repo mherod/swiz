@@ -8,7 +8,7 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
-import type { SkillToolInput } from "./schemas.ts"
+import type { SkillToolInput } from "../src/schemas.ts"
 
 function extractSkillParams(input: SkillToolInput) {
   if (input.tool_name !== "Skill") return null

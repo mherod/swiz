@@ -24,11 +24,11 @@ import {
   runSwizHookAsMain,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GIT_PUSH_RE, hasGitPushForceFlag } from "../src/utils/git-utils.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 const DEFAULT_COOLDOWN_MS = 60_000
 

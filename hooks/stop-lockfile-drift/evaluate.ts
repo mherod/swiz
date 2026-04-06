@@ -6,8 +6,8 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
+import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-utils.ts"
-import type { StopHookInput } from "../schemas.ts"
 import { formatDriftBlockReason } from "./action-plan.ts"
 import { resolveLockfileDriftContext } from "./context.ts"
 import { validateLockfileDrift } from "./drift-validator.ts"

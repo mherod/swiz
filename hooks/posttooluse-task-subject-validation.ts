@@ -8,9 +8,9 @@
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
 
 export function evaluatePosttooluseTaskSubjectValidation(input: unknown): SwizHookOutput {
   const parsed = toolHookInputSchema.parse(input)

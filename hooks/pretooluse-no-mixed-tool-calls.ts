@@ -17,6 +17,7 @@ import {
   runSwizHookAsMain,
   type SwizShellHook,
 } from "../src/SwizHook.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
 import {
   EDIT_TOOLS,
   isShellTool,
@@ -28,7 +29,6 @@ import {
   WRITE_TOOLS,
 } from "../src/tool-matchers.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
-import type { ShellHookInput } from "./schemas.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
 

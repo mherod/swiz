@@ -7,7 +7,7 @@ import {
   type SwizHook,
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
-import { userPromptSubmitHookInputSchema } from "./schemas.ts"
+import { userPromptSubmitHookInputSchema } from "../src/schemas.ts"
 
 export async function evaluateUserpromptsubmitGitContext(input: unknown): Promise<SwizHookOutput> {
   const hookInput = userPromptSubmitHookInputSchema.parse(input)

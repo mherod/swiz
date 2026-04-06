@@ -9,11 +9,11 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { merge } from "lodash-es"
-import { hookBaseSchema, hookOutputSchema } from "../../hooks/schemas.ts"
 import { debugLog } from "../debug.ts"
 import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
 import type { SwizHook } from "../SwizHook.ts"
+import { hookBaseSchema, hookOutputSchema } from "../schemas.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
   isEditTool,
