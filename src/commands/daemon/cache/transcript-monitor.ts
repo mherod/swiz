@@ -50,15 +50,18 @@ export class TranscriptMonitor {
     const cached = this.latestSessionCache.get(cwd)
     // Check if the transcript directories have changed since we last scanned
     const watchPaths = transcriptWatchPathsForProject(cwd)
-    let maxMtime = 0
-    for (const watch of watchPaths) {
-      try {
-        const stat = await Bun.file(watch.path).stat()
-        maxMtime = Math.max(maxMtime, stat.mtimeMs ?? 0)
-      } catch {
-        // Path might not exist or be unreadable
-      }
-    }
+    // Stat all watch paths concurrently — they are independent directories
+    const mtimes = await Promise.all(
+      watchPaths.map(async (watch) => {
+        try {
+          const s = await Bun.file(watch.path).stat()
+          return s.mtimeMs ?? 0
+        } catch {
+          return 0 // Path might not exist or be unreadable
+        }
+      })
+    )
+    const maxMtime = Math.max(0, ...mtimes)
 
     if (cached && cached.mtimeMs >= maxMtime) {
       // Confirm the cached session path still exists
