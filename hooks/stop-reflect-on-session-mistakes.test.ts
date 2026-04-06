@@ -106,6 +106,41 @@ describe("stop-reflect-on-session-mistakes", () => {
     expect(result.reason).toContain("reflect-on-session-mistakes")
   })
 
+  test("fails open when agent does not support Skill tool", async () => {
+    const dir = await tmp.create()
+    const transcriptPath = await createTranscript(dir, "Bash")
+
+    // Run without CLAUDECODE env — agent detection fails, skillExists returns false
+    const env: Record<string, string | undefined> = { ...process.env }
+    for (const agent of AGENTS) {
+      for (const v of agent.envVars ?? []) env[v] = ""
+    }
+    // Explicitly unset all agent env vars — no agent detected means skill check fails open
+    const proc = Bun.spawn(["bun", HOOK], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: dir,
+      env: env as Record<string, string>,
+    })
+    await proc.stdin.write(
+      JSON.stringify({
+        cwd: dir,
+        session_id: "test-session",
+        transcript_path: transcriptPath,
+      })
+    )
+    await proc.stdin.end()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    expect(stdout.trim()).toBe("")
+  })
+
   test("allows stop once the reflect skill has been invoked", async () => {
     const dir = await tmp.create()
     await createReflectSkill(dir)
