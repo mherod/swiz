@@ -324,6 +324,12 @@ swiz settings enable auto-continue --session <id> --dir <path> # set override fo
 
 Session overrides are keyed by session ID. If no override exists, that session inherits the global setting.
 
+**Daemon Settings:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `transcriptMonitorMaxConcurrentDispatches` | 0 (unlimited) | Limits concurrent transcript dispatch operations in the daemon. When set to a positive value (e.g., 2), at most that many dispatch handlers run in parallel; additional dispatches queue until slots free up. Useful for throttling daemon load when many sessions are active. Configure via `swiz settings set transcriptMonitorMaxConcurrentDispatches <N>`. Set to 0 to disable limiting. |
+
 ### `swiz memory`
 
 Inspect rule and memory/context files for the detected agent (or force one with flags). Optionally validate against configured thresholds.
