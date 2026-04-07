@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { taskListSyncSentinelPath } from "./temp-paths.ts"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-require-tasks.ts")
 
@@ -72,6 +73,8 @@ describe("pretooluse-require-tasks hook", () => {
   test("denies when session has no tasks and does not auto-create a bootstrap task", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-test-"))
     const sessionId = `test-bootstrap-${Date.now()}`
+    // Write sync sentinel so the canonical staleness gate doesn't fire first
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now()))
     try {
       const result = await runHook(
         {
@@ -217,6 +220,8 @@ describe("pretooluse-require-tasks hook", () => {
   test("allows Bash when all tasks are completed (wrap-up exemption)", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-wrapup-"))
     const sessionId = `test-wrapup-${Date.now()}`
+    // Write sync sentinel so the canonical staleness gate doesn't fire first
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now()))
     const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(tasksDir, { recursive: true })
