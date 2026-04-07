@@ -40,7 +40,7 @@ import {
   parseOlderThan,
   walkDecode,
 } from "./doctor/cleanup-path.ts"
-import type { CheckResult } from "./doctor/types.ts"
+import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
 
 export {
@@ -1475,6 +1475,87 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
   }
 }
 
+// ─── Registered diagnostic checks ───────────────────────────────────────────
+
+export const agentBinaryAndSettingsCheck: DiagnosticCheck = {
+  name: "agent-binary-and-settings",
+  async run() {
+    const results: CheckResult[] = []
+    for (const agent of AGENTS) {
+      results.push(await checkAgentBinary(agent))
+      results.push(await checkAgentSettings(agent))
+    }
+    return results
+  },
+}
+
+export const hookScriptsCheck: DiagnosticCheck = {
+  name: "hook-scripts",
+  run: () => checkHookScripts().then((r) => [r]),
+}
+
+export const manifestPathsCheck: DiagnosticCheck = {
+  name: "manifest-paths",
+  run: () => checkManifestHandlerPaths().then((r) => [r]),
+}
+
+export const configScriptsCheck: DiagnosticCheck = {
+  name: "config-scripts",
+  run: () => checkInstalledConfigScripts().then((r) => [r]),
+}
+
+export const scriptPermissionsCheck: DiagnosticCheck = {
+  name: "script-permissions",
+  run: (ctx) => checkScriptExecutePermissions(ctx.fix).then((r) => [r]),
+}
+
+export const agentConfigSyncCheck: DiagnosticCheck = {
+  name: "agent-config-sync",
+  async run() {
+    const results: CheckResult[] = []
+    for (const agent of CONFIGURABLE_AGENTS) {
+      results.push(await checkAgentConfigSync(agent))
+    }
+    return results
+  },
+}
+
+export const skillConflictsCheck: DiagnosticCheck = {
+  name: "skill-conflicts",
+  async run(ctx) {
+    const conflicts = await findSkillConflicts()
+    ctx.store.skillConflicts = conflicts
+    return buildSkillConflictResults(conflicts)
+  },
+}
+
+export const invalidSkillEntriesCheck: DiagnosticCheck = {
+  name: "invalid-skill-entries",
+  async run(ctx) {
+    const projectSettings = await readProjectSettings(process.cwd())
+    const allowedCategories = new Set(
+      projectSettings?.allowedSkillCategories ?? DEFAULT_ALLOWED_SKILL_CATEGORIES
+    )
+    const entries = await findInvalidSkillEntries(allowedCategories)
+    ctx.store.invalidSkillEntries = entries
+    return buildInvalidSkillResults(entries)
+  },
+}
+
+export const pluginCacheCheck: DiagnosticCheck = {
+  name: "plugin-cache",
+  async run(ctx) {
+    const infos = await checkPluginCacheStaleness()
+    ctx.store.pluginCacheInfos = infos
+    return buildPluginCacheResults(infos)
+  },
+}
+
+export const swizSettingsCheck: DiagnosticCheck = {
+  name: "swiz-settings",
+  run: () => checkSwizSettings().then((r) => [r]),
+}
+
 // ─── Check collection ───────────────────────────────────────────────────────
 
 interface DoctorCheckResults {
@@ -1484,12 +1565,26 @@ interface DoctorCheckResults {
   pluginCacheInfos: PluginCacheInfo[]
 }
 
+/** All checks including registry and inline. Order determines display order. */
+const ALL_CHECKS: DiagnosticCheck[] = [
+  ...DIAGNOSTIC_CHECKS,
+  agentBinaryAndSettingsCheck,
+  hookScriptsCheck,
+  manifestPathsCheck,
+  configScriptsCheck,
+  scriptPermissionsCheck,
+  agentConfigSyncCheck,
+  skillConflictsCheck,
+  invalidSkillEntriesCheck,
+  pluginCacheCheck,
+  swizSettingsCheck,
+]
+
 async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   const results: CheckResult[] = []
-  const ctx = { fix }
+  const ctx: DiagnosticContext = { fix, store: {} }
 
-  // Run pluggable checks from the registry
-  for (const check of DIAGNOSTIC_CHECKS) {
+  for (const check of ALL_CHECKS) {
     const result = await check.run(ctx)
     if (Array.isArray(result)) {
       results.push(...result)
@@ -1498,30 +1593,12 @@ async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
     }
   }
 
-  // Inline checks not yet extracted to the registry
-  for (const agent of AGENTS) {
-    results.push(await checkAgentBinary(agent))
-    results.push(await checkAgentSettings(agent))
+  return {
+    results,
+    skillConflicts: (ctx.store.skillConflicts ?? []) as SkillConflict[],
+    invalidSkillEntries: (ctx.store.invalidSkillEntries ?? []) as InvalidSkillEntry[],
+    pluginCacheInfos: (ctx.store.pluginCacheInfos ?? []) as PluginCacheInfo[],
   }
-  results.push(await checkHookScripts())
-  results.push(await checkManifestHandlerPaths())
-  results.push(await checkInstalledConfigScripts())
-  results.push(await checkScriptExecutePermissions(fix))
-  for (const agent of CONFIGURABLE_AGENTS) {
-    results.push(await checkAgentConfigSync(agent))
-  }
-  const skillConflicts = await findSkillConflicts()
-  results.push(...buildSkillConflictResults(skillConflicts))
-  const projectSettings = await readProjectSettings(process.cwd())
-  const allowedCategories = new Set(
-    projectSettings?.allowedSkillCategories ?? DEFAULT_ALLOWED_SKILL_CATEGORIES
-  )
-  const invalidSkillEntries = await findInvalidSkillEntries(allowedCategories)
-  results.push(...buildInvalidSkillResults(invalidSkillEntries))
-  const pluginCacheInfos = await checkPluginCacheStaleness()
-  results.push(...buildPluginCacheResults(pluginCacheInfos))
-  results.push(await checkSwizSettings())
-  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos }
 }
 
 // ─── Runner ─────────────────────────────────────────────────────────────────

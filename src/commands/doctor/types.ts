@@ -8,6 +8,8 @@ export interface CheckResult {
 /** Context passed to each diagnostic check. */
 export interface DiagnosticContext {
   fix: boolean
+  /** Mutable store for checks that produce data consumed by auto-fix handlers. */
+  store: Record<string, unknown>
 }
 
 /** A pluggable diagnostic check for `swiz doctor`. */
