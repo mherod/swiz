@@ -33,7 +33,7 @@ export interface SyncResult {
  * Parse a single task object from TaskList response into normalized shape.
  * Returns null if required fields (id, subject) are missing.
  */
-export function parseNormalizedTask(t: Record<string, any>): NormalizedTask | null {
+export function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
   const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
   const subject = typeof t.subject === "string" ? t.subject : ""
   const status = typeof t.status === "string" ? t.status : "pending"
@@ -56,7 +56,7 @@ export function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[
     }
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
-  const items = (parsed as Record<string, any>).tasks
+  const items = (parsed as Record<string, unknown>).tasks
   return Array.isArray(items) ? items : null
 }
 
@@ -70,7 +70,7 @@ export function parseToolResponse(raw: PostToolHookInput["tool_response"]): Norm
   const result: NormalizedTask[] = []
   for (const item of items) {
     if (typeof item !== "object" || item === null) continue
-    const normalized = parseNormalizedTask(item as Record<string, any>)
+    const normalized = parseNormalizedTask(item as Record<string, unknown>)
     if (normalized) result.push(normalized)
   }
   return result

@@ -22,6 +22,7 @@ import {
   type SwizHook,
 } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
+import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
@@ -56,12 +57,16 @@ async function buildWordLimitDenyReason(
   )
 }
 
-async function checkWordLimit(
-  input: FileEditHookInput & { _effectiveSettings?: { memoryWordThreshold?: number } }
-) {
+async function checkWordLimit(input: FileEditHookInput) {
   const toolName = input.tool_name ?? ""
   const filePath = input.tool_input?.file_path ?? ""
-  const wordThreshold = input._effectiveSettings?.memoryWordThreshold ?? 5000
+  const cwd = input.cwd ?? process.cwd()
+
+  const wordThreshold = await resolveNumericSetting(
+    cwd,
+    "memoryWordThreshold",
+    DEFAULT_MEMORY_WORD_THRESHOLD
+  )
   const projectedContent = await computeProjectedContent(
     toolName,
     filePath,
@@ -86,9 +91,7 @@ const pretoolusClaudeMdWordLimit: SwizHook<FileEditHookInput> = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as FileEditHookInput & {
-      _effectiveSettings?: { memoryWordThreshold?: number }
-    }
+    const input = rawInput as FileEditHookInput
     if (!isFileEditForPath(input, "CLAUDE.md")) return {}
 
     try {
