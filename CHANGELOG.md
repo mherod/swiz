@@ -2,8 +2,24 @@
 
 ## 2026-04-07
 
+### New Features
+
+- **Transcript dispatch concurrency metrics** — Added `getActive()`,
+  `getQueueDepth()`, `getMaxConcurrent()` accessors to
+  `TranscriptDispatchConcurrencyGate`, integrated into daemon `/metrics`
+  endpoint and `swiz daemon status` output.
+- **Document transcriptMonitorMaxConcurrentDispatches** — Added setting
+  documentation to README daemon settings table.
+
 ### Refactoring
 
+- **Discriminated kinds for doctor skill dispatch** — Replaced
+  string-matching `reason` dispatch with `InvalidSkillKind` union
+  and `switch(entry.kind)` in `fixInvalidSkillEntries`.
+- **Register inline doctor checks** — Extracted all inline checks from
+  `collectDoctorChecks` into `DiagnosticCheck` objects registered via
+  `ALL_CHECKS` array. Extended `DiagnosticContext` with `store` for
+  side-data.
 - **Extract task list reconciliation** — Moved parsing, normalization,
   and reconciliation functions from `posttooluse-task-sync.ts` into
   canonical `src/tasks/task-list-reconciliation.ts` module. Enables
