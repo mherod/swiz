@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-04-07
+
+### Refactoring
+
+- **Extract task list reconciliation** — Moved parsing, normalization,
+  and reconciliation functions from `posttooluse-task-sync.ts` into
+  canonical `src/tasks/task-list-reconciliation.ts` module. Enables
+  reuse beyond hook context.
+
+### Fixes
+
+- **Respect project-level memory-word-threshold** — Fixed
+  `pretooluse-claude-md-word-limit` hook to use `resolveNumericSetting()`
+  for reading project-level configuration instead of relying on
+  dispatch payload injection. Now respects `swiz settings set
+  memory-word-threshold <N> --project` overrides.
+- **Type-enrich dispatch payload** — Introduced `EnrichedDispatchPayload`
+  interface with typed `_effectiveSettings` and `_projectState` fields,
+  eliminating unsafe `Record<string, any>` casts in dispatch execution.
+
 ## 2026-04-06
 
 ### New Features
