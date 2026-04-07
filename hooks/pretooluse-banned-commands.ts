@@ -102,6 +102,26 @@ export function extractPlainRedirectTarget(c: string, cwd: string): string | nul
   return target
 }
 
+/** Extract the target file path from a `tee` command (e.g. `| tee [-a] <file>`). */
+export function extractTeeTarget(c: string, cwd: string): string | null {
+  const m = c.match(/\btee\s+(?:-[a-zA-Z]\s+)*(\S+)/)
+  if (!m?.[1]) return null
+  let target = m[1]
+  if (target.startsWith("/dev/") || target === "-") return null
+  target = expandTilde(target.replace(/^['"]|['"]$/g, ""))
+  if (!target.startsWith("/")) target = `${cwd}/${target}`
+  return target
+}
+
+// Well-known ephemeral/temp directories — writes here don't affect the project.
+// /private/tmp is the canonical macOS path (/tmp symlinks to it).
+// /var/folders/ is where macOS $TMPDIR resolves (per-user temp).
+const SAFE_TEMP_PREFIXES = ["/tmp/", "/private/tmp/", "/var/tmp/", "/var/folders/"]
+
+export function isSafeTempPath(target: string): boolean {
+  return SAFE_TEMP_PREFIXES.some((prefix) => target.startsWith(prefix))
+}
+
 function isShellFileWrite(c: string): boolean {
   return (
     SHELL_REDIRECT_PLAIN_RE.test(c) ||
@@ -324,8 +344,15 @@ async function isRedirectExempt(
   cwd: string,
   transcriptPath: string
 ): Promise<boolean> {
-  if (!isShellFileWrite(strippedCommand) || !isPlainRedirectOnly(strippedCommand)) return false
-  const target = extractPlainRedirectTarget(strippedCommand, cwd)
+  if (!isShellFileWrite(strippedCommand)) return false
+  const target =
+    extractPlainRedirectTarget(strippedCommand, cwd) ?? extractTeeTarget(strippedCommand, cwd)
+
+  // Allow any redirect form targeting well-known temp directories
+  if (target && isSafeTempPath(target)) return true
+
+  // Allow plain redirects to previously-read files
+  if (!isPlainRedirectOnly(strippedCommand)) return false
   if (!target || !transcriptPath) return false
   const readPaths = await extractReadFilePaths(transcriptPath)
   return readPaths.has(target)

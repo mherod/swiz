@@ -295,7 +295,7 @@ describe("pretooluse-banned-commands", () => {
     })
 
     test("cat src > file is blocked", async () => {
-      const result = await runHook("cat src/foo.ts > /tmp/foo.ts")
+      const result = await runHook("cat src/foo.ts > ~/output.ts")
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("Write tool")
     })
@@ -480,6 +480,53 @@ describe("pretooluse-banned-commands", () => {
     test("brace group redirect to /dev/null passes through", async () => {
       const result = await runHook("{ echo hello; } > /dev/null")
       expect(result.decision).toBeUndefined()
+    })
+
+    // ── Temp-directory redirect exemptions ───────────────────────────────────
+
+    test("plain redirect to /tmp/ passes through", async () => {
+      const result = await runHook("echo hello > /tmp/pr_body.md")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("heredoc redirect to /tmp/ passes through", async () => {
+      const result = await runHook("cat <<'BODY' > /tmp/pr_body.md")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("append redirect to /tmp/ passes through", async () => {
+      const result = await runHook("echo line >> /tmp/log.txt")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("tee to /tmp/ passes through", async () => {
+      const result = await runHook("echo hello | tee /tmp/out.txt")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("tee -a to /tmp/ passes through", async () => {
+      const result = await runHook("echo hello | tee -a /tmp/out.txt")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("redirect to /private/tmp/ passes through (macOS canonical)", async () => {
+      const result = await runHook("echo hello > /private/tmp/body.md")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("redirect to /var/tmp/ passes through", async () => {
+      const result = await runHook("echo hello > /var/tmp/body.md")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("redirect to /var/folders/ passes through (macOS $TMPDIR)", async () => {
+      const result = await runHook("echo hello > /var/folders/xx/yyy/T/body.md")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("redirect to project file is still blocked", async () => {
+      const result = await runHook("echo hello > src/output.ts")
+      expect(result.decision).toBe("deny")
     })
 
     test("rg passes through", async () => {
