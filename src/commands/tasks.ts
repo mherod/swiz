@@ -656,7 +656,7 @@ export const tasksCommand: Command = {
       flags: "--status <status>",
       description: "Hidden option to guide users (did you mean --state?)",
       hidden: true,
-    } as any,
+    },
     {
       flags: "status <id> <status>",
       description: "Set status: pending | in_progress | completed | cancelled",

@@ -1,6 +1,7 @@
 export interface CommandOption {
   flags: string
   description: string
+  hidden?: boolean
 }
 
 export interface Command<Opts = never> {
