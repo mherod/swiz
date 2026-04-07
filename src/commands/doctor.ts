@@ -350,11 +350,24 @@ function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResult[] {
 
 // ─── Invalid skill entries check ────────────────────────────────────────────
 
+type InvalidSkillKind =
+  | "missing_skill_md"
+  | "empty_skill_md"
+  | "no_frontmatter"
+  | "missing_frontmatter_fields"
+  | "name_mismatch"
+  | "placeholder_description"
+  | "missing_category"
+  | "invalid_category"
+
 interface InvalidSkillEntry {
   name: string
   skillDir: string
   entryDir: string
+  kind: InvalidSkillKind
   reason: string
+  /** name_mismatch: actual frontmatter name */
+  actualName?: string
 }
 
 /** Required frontmatter fields that every SKILL.md must declare. */
@@ -373,7 +386,11 @@ function validateSkillFrontmatter(
   const issues: InvalidSkillEntry[] = []
   const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
   if (missing.length > 0) {
-    issues.push({ ...base, reason: `missing required frontmatter field(s): ${missing.join(", ")}` })
+    issues.push({
+      ...base,
+      kind: "missing_frontmatter_fields",
+      reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
+    })
   }
   const rawName = parseFrontmatterField(content, "name") ?? ""
   if (rawName) {
@@ -381,7 +398,9 @@ function validateSkillFrontmatter(
     if (unquotedName !== dirName) {
       issues.push({
         ...base,
+        kind: "name_mismatch",
         reason: `frontmatter name "${unquotedName}" does not match directory name "${dirName}"`,
+        actualName: unquotedName,
       })
     }
   }
@@ -389,6 +408,7 @@ function validateSkillFrontmatter(
   if (description?.trim() === SKILL_PLACEHOLDER_DESCRIPTION) {
     issues.push({
       ...base,
+      kind: "placeholder_description",
       reason: `description is the generated placeholder — update SKILL.md with a real description`,
     })
   }
@@ -409,7 +429,7 @@ function validateSkillContent(
   const issues: InvalidSkillEntry[] = []
   const rawCategory = parseFrontmatterField(content, "category")
   if (!rawCategory) {
-    issues.push({ ...base, reason: MISSING_CATEGORY_REASON })
+    issues.push({ ...base, kind: "missing_category", reason: "missing category field" })
     return issues
   }
   const cat = rawCategory.trim()
@@ -418,7 +438,8 @@ function validateSkillContent(
     const hint = suggestion ? ` (did you mean: "${suggestion}"?)` : ""
     issues.push({
       ...base,
-      reason: `${INVALID_CATEGORY_REASON_PREFIX}${cat}"${hint} — allowed: ${[...allowedCategories].sort().join(", ")}`,
+      kind: "invalid_category",
+      reason: `unknown category "${cat}"${hint} — allowed: ${[...allowedCategories].sort().join(", ")}`,
     })
   }
   return issues
@@ -435,11 +456,18 @@ async function validateSkillEntry(
   const skillPath = join(entryDir, "SKILL.md")
   const base = { name: entry.name, skillDir, entryDir }
   const file = Bun.file(skillPath)
-  if (!(await file.exists())) return [{ ...base, reason: "missing SKILL.md" }]
+  if (!(await file.exists()))
+    return [{ ...base, kind: "missing_skill_md", reason: "missing SKILL.md" }]
   const content = await file.text()
-  if (!content.trim()) return [{ ...base, reason: "empty SKILL.md" }]
+  if (!content.trim()) return [{ ...base, kind: "empty_skill_md", reason: "empty SKILL.md" }]
   if (!/^---/m.test(content)) {
-    return [{ ...base, reason: "SKILL.md has no frontmatter block (expected --- delimiters)" }]
+    return [
+      {
+        ...base,
+        kind: "no_frontmatter",
+        reason: "SKILL.md has no frontmatter block (expected --- delimiters)",
+      },
+    ]
   }
   return validateSkillContent(content, entry.name, skillDir, entryDir, allowedCategories)
 }
@@ -499,10 +527,6 @@ interface InvalidSkillFixFailure {
   error: string
 }
 
-const NAME_MISMATCH_PREFIX = 'frontmatter name "'
-const MISSING_SKILL_MD_REASON = "missing SKILL.md"
-const MISSING_CATEGORY_REASON = "missing category field"
-const INVALID_CATEGORY_REASON_PREFIX = 'unknown category "'
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
 /** Default category used by swiz doctor --fix when no category field is present or it is invalid. */
@@ -587,67 +611,60 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   const categoryFixed: InvalidSkillCategoryFixSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
   for (const entry of entries) {
-    if (entry.reason === MISSING_SKILL_MD_REASON) {
-      const skillPath = join(entry.entryDir, "SKILL.md")
-      if (await generateSkillMd(entry)) {
-        generated.push({ name: entry.name, skillPath })
-      } else {
-        failed.push({
-          name: entry.name,
-          originalDir: entry.entryDir,
-          error: "could not create SKILL.md",
-        })
+    const skillPath = join(entry.entryDir, "SKILL.md")
+    switch (entry.kind) {
+      case "missing_skill_md": {
+        if (await generateSkillMd(entry)) {
+          generated.push({ name: entry.name, skillPath })
+        } else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not create SKILL.md",
+          })
+        }
+        break
       }
-      continue
-    }
-    if (entry.reason.startsWith(NAME_MISMATCH_PREFIX)) {
-      const result = await fixSkillNameMismatch(entry)
-      if (result !== null) {
-        nameFixed.push({
-          name: entry.name,
-          skillPath: join(entry.entryDir, "SKILL.md"),
-          oldName: result.oldName,
-        })
-      } else {
-        failed.push({
-          name: entry.name,
-          originalDir: entry.entryDir,
-          error: "could not update SKILL.md name field",
-        })
+      case "name_mismatch": {
+        const result = await fixSkillNameMismatch(entry)
+        if (result !== null) {
+          nameFixed.push({ name: entry.name, skillPath, oldName: result.oldName })
+        } else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not update SKILL.md name field",
+          })
+        }
+        break
       }
-      continue
-    }
-    if (entry.reason === MISSING_CATEGORY_REASON) {
-      const skillPath = join(entry.entryDir, "SKILL.md")
-      if (await fixMissingCategory(entry)) {
-        categoryFixed.push({ name: entry.name, skillPath })
-      } else {
-        failed.push({
-          name: entry.name,
-          originalDir: entry.entryDir,
-          error: "could not insert category field into SKILL.md",
-        })
+      case "missing_category": {
+        if (await fixMissingCategory(entry)) {
+          categoryFixed.push({ name: entry.name, skillPath })
+        } else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not insert category field into SKILL.md",
+          })
+        }
+        break
       }
-      continue
-    }
-    if (entry.reason.startsWith(INVALID_CATEGORY_REASON_PREFIX)) {
-      const skillPath = join(entry.entryDir, "SKILL.md")
-      if (await fixCategoryValue(entry)) {
-        categoryFixed.push({ name: entry.name, skillPath })
-      } else {
-        failed.push({
-          name: entry.name,
-          originalDir: entry.entryDir,
-          error: "could not update category field in SKILL.md",
-        })
+      case "invalid_category": {
+        if (await fixCategoryValue(entry)) {
+          categoryFixed.push({ name: entry.name, skillPath })
+        } else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not update category field in SKILL.md",
+          })
+        }
+        break
       }
-      continue
+      default:
+        failed.push({ name: entry.name, originalDir: entry.entryDir, error: entry.reason })
     }
-    failed.push({
-      name: entry.name,
-      originalDir: entry.entryDir,
-      error: entry.reason,
-    })
   }
   return { nameFixed, generated, categoryFixed, failed }
 }
