@@ -125,6 +125,22 @@ export class TranscriptMonitor {
     }
   }
 
+  /**
+   * Get current transcript dispatch concurrency metrics (active, queued, max).
+   * Used by daemon to expose metrics.
+   */
+  getDispatchConcurrencyMetrics(): {
+    active: number
+    queued: number
+    maxConcurrent: number
+  } {
+    return {
+      active: this.dispatchConcurrency.getActive(),
+      queued: this.dispatchConcurrency.getQueueDepth(),
+      maxConcurrent: this.dispatchConcurrency.getMaxConcurrent(),
+    }
+  }
+
   terminate(): void {}
 
   async checkProject(cwd: string): Promise<void> {

@@ -562,14 +562,15 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   void caches.upstreamSyncRegistry.register(cwd)
   registerProjectWatchers(cwd)
 
-  startTranscriptMonitoring(registeredProjects, transcriptMonitor)
+  startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics)
 
   console.log(`Daemon listening on ${server.url}`)
 }
 
 function startTranscriptMonitoring(
   registeredProjects: Set<string>,
-  transcriptMonitor: TranscriptMonitor
+  transcriptMonitor: TranscriptMonitor,
+  globalMetrics: DaemonMetrics
 ) {
   // Start periodic transcript monitoring for all registered projects
   void logPseudoHook("Transcript monitor starting")
@@ -582,6 +583,10 @@ function startTranscriptMonitoring(
         await Promise.allSettled(
           [...registeredProjects].map((cwd) => transcriptMonitor.checkProject(cwd))
         )
+        // Update global metrics with current transcript dispatch concurrency state
+        const metricsPromise = transcriptMonitor.getDispatchConcurrencyMetrics()
+        const metrics = await Promise.resolve(metricsPromise)
+        globalMetrics.transcriptDispatch = metrics
       } catch (err) {
         stderrLog("monitoring loop exception", `[daemon] Transcript monitor error: ${err}`)
         void logPseudoHook(`Error in monitor loop: ${err}`)

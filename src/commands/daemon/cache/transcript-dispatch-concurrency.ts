@@ -53,4 +53,17 @@ export class TranscriptDispatchConcurrencyGate {
       this.queue.push(run)
     }
   }
+
+  /** Read-only accessors for metrics. */
+  getActive(): number {
+    return this.active
+  }
+
+  getQueueDepth(): number {
+    return this.queue.length
+  }
+
+  getMaxConcurrent(): number {
+    return this.maxConcurrent
+  }
 }

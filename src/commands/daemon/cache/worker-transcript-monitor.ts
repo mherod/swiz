@@ -101,6 +101,27 @@ export class WorkerTranscriptMonitor
     } satisfies TranscriptMonitorWorkerMessage)
   }
 
+  getDispatchConcurrencyMetrics(): Promise<{
+    active: number
+    queued: number
+    maxConcurrent: number
+  }> {
+    const requestId = Math.random().toString(36).slice(2, 11)
+    return new Promise((resolve) => {
+      const handler = (msg: TranscriptMonitorParentMessage) => {
+        if (msg.type === "dispatchConcurrencyMetricsResponse" && msg.requestId === requestId) {
+          this.worker.off("message", handler)
+          resolve(msg.metrics)
+        }
+      }
+      this.worker.on("message", handler)
+      this.worker.postMessage({
+        type: "getDispatchConcurrencyMetrics",
+        requestId,
+      } satisfies TranscriptMonitorWorkerMessage)
+    })
+  }
+
   terminate(): void {
     void this.worker.terminate()
   }

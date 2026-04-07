@@ -3,9 +3,16 @@ export interface EventMetrics {
   totalMs: number
 }
 
+export interface TranscriptDispatchMetrics {
+  active: number
+  queued: number
+  maxConcurrent: number
+}
+
 export interface DaemonMetrics {
   startedAt: number
   dispatches: Map<string, EventMetrics>
+  transcriptDispatch?: TranscriptDispatchMetrics
   memoryUsage?: NodeJS.MemoryUsage
 }
 
@@ -14,6 +21,7 @@ export interface SerializedDaemonMetrics {
   uptimeHuman: string
   totalDispatches: number
   byEvent: Record<string, { count: number; avgMs: number }>
+  transcriptDispatch?: TranscriptDispatchMetrics
   memoryUsage?: NodeJS.MemoryUsage
 }
 
@@ -44,6 +52,7 @@ export function serializeMetrics(metrics: DaemonMetrics): SerializedDaemonMetric
     uptimeHuman: formatUptime(uptimeMs),
     totalDispatches,
     byEvent,
+    ...(metrics.transcriptDispatch && { transcriptDispatch: metrics.transcriptDispatch }),
     ...(metrics.memoryUsage && { memoryUsage: metrics.memoryUsage }),
   }
 }

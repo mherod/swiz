@@ -57,4 +57,31 @@ describe("TranscriptDispatchConcurrencyGate", () => {
     await new Promise((r) => setTimeout(r, 150))
     expect(completed).toBe(4)
   })
+
+  test("getActive/getQueueDepth/getMaxConcurrent expose metrics", async () => {
+    const gate = new TranscriptDispatchConcurrencyGate()
+    gate.setMaxConcurrent(2)
+    expect(gate.getMaxConcurrent()).toBe(2)
+    expect(gate.getActive()).toBe(0)
+    expect(gate.getQueueDepth()).toBe(0)
+
+    let running = 0
+    for (let i = 0; i < 5; i++) {
+      gate.schedule(async () => {
+        running++
+        await new Promise((r) => setTimeout(r, 50))
+        running--
+      })
+    }
+    await new Promise((r) => setTimeout(r, 5))
+    // 2 should be active, 3 should be queued
+    expect(gate.getActive()).toBe(2)
+    expect(gate.getQueueDepth()).toBe(3)
+    expect(gate.getMaxConcurrent()).toBe(2)
+
+    await new Promise((r) => setTimeout(r, 200))
+    expect(gate.getActive()).toBe(0)
+    expect(gate.getQueueDepth()).toBe(0)
+    expect(running).toBe(0)
+  })
 })

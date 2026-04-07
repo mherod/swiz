@@ -94,6 +94,17 @@ if (parentPort) {
           }
           break
         }
+        case "getDispatchConcurrencyMetrics": {
+          if (monitor) {
+            const metrics = monitor.getDispatchConcurrencyMetrics()
+            pp.postMessage({
+              type: "dispatchConcurrencyMetricsResponse",
+              requestId: msg.requestId,
+              metrics,
+            } satisfies TranscriptMonitorParentMessage)
+          }
+          break
+        }
       }
     } catch (err) {
       stderrLog("transcript-monitor-worker", `Error in worker: ${err}`)

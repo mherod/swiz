@@ -33,6 +33,7 @@ export type TranscriptMonitorWorkerMessage =
   | { type: "init" }
   | { type: "checkProject"; cwd: string }
   | { type: "pruneOldSessions"; activeSessions: string[] }
+  | { type: "getDispatchConcurrencyMetrics"; requestId: string }
   | { type: "manifestResponse"; id: string; manifest: HookGroup[] }
   | { type: "settingsResponse"; id: string; settings: ProjectSwizSettings | null }
   | { type: "cooldownCheckResponse"; requestId: string; withinCooldown: boolean }
@@ -47,4 +48,9 @@ export type TranscriptMonitorParentMessage =
       hookId: string
       cooldown: number
       cwd: string
+    }
+  | {
+      type: "dispatchConcurrencyMetricsResponse"
+      requestId: string
+      metrics: { active: number; queued: number; maxConcurrent: number }
     }

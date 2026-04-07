@@ -56,3 +56,20 @@ describe("TranscriptMonitor isEventOnCooldown", () => {
     expect(await check(groups, "postToolUse", "/p")).toBe(true)
   })
 })
+
+describe("TranscriptMonitor getDispatchConcurrencyMetrics", () => {
+  test("exposes concurrency gate metrics", () => {
+    const monitor = new TranscriptMonitor({
+      manifestCache: { get: async () => [] },
+      cooldownRegistry: new CooldownRegistry(),
+      projectSettingsCache: { get: async () => ({ settings: null }) },
+    })
+
+    const metrics = monitor.getDispatchConcurrencyMetrics()
+    expect(metrics).toEqual({
+      active: 0,
+      queued: 0,
+      maxConcurrent: 0,
+    })
+  })
+})
