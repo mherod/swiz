@@ -102,12 +102,34 @@ export function extractPlainRedirectTarget(c: string, cwd: string): string | nul
   return target
 }
 
-/** Extract the target file path from a `tee` command (e.g. `| tee [-a] <file>`). */
+/** Extract the target file path from `tee` (e.g. `| tee [-a] <file>`). */
 export function extractTeeTarget(c: string, cwd: string): string | null {
   const m = c.match(/\btee\s+(?:-[a-zA-Z]\s+)*(\S+)/)
   if (!m?.[1]) return null
   let target = m[1]
   if (target.startsWith("/dev/") || target === "-") return null
+  target = expandTilde(target.replace(/^['"]|['"]$/g, ""))
+  if (!target.startsWith("/")) target = `${cwd}/${target}`
+  return target
+}
+
+/** Extract target from `&>` or `&>>` redirects (stderr and stdout combined). */
+export function extractBothRedirectTarget(c: string, cwd: string): string | null {
+  const m = c.match(/&>>?\s+(\S+)/)
+  if (!m?.[1]) return null
+  let target = m[1]
+  if (target.startsWith("/dev/") || target.startsWith("&")) return null
+  target = expandTilde(target.replace(/^['"]|['"]$/g, ""))
+  if (!target.startsWith("/")) target = `${cwd}/${target}`
+  return target
+}
+
+/** Extract target from numbered fd redirects like `2>`, `2>>`, `1>`, etc. */
+export function extractNumberedRedirectTarget(c: string, cwd: string): string | null {
+  const m = c.match(/(\d)>>?\s+(\S+)/)
+  if (!m?.[2]) return null
+  let target = m[2]
+  if (target.startsWith("/dev/") || target.startsWith("&")) return null
   target = expandTilde(target.replace(/^['"]|['"]$/g, ""))
   if (!target.startsWith("/")) target = `${cwd}/${target}`
   return target
@@ -345,13 +367,18 @@ async function isRedirectExempt(
   transcriptPath: string
 ): Promise<boolean> {
   if (!isShellFileWrite(strippedCommand)) return false
+
+  // Try all redirect target extractors for temp path exemption
   const target =
-    extractPlainRedirectTarget(strippedCommand, cwd) ?? extractTeeTarget(strippedCommand, cwd)
+    extractPlainRedirectTarget(strippedCommand, cwd) ??
+    extractTeeTarget(strippedCommand, cwd) ??
+    extractBothRedirectTarget(strippedCommand, cwd) ??
+    extractNumberedRedirectTarget(strippedCommand, cwd)
 
   // Allow any redirect form targeting well-known temp directories
   if (target && isSafeTempPath(target)) return true
 
-  // Allow plain redirects to previously-read files
+  // Allow plain redirects to previously-read files (only for simple > / >>)
   if (!isPlainRedirectOnly(strippedCommand)) return false
   if (!target || !transcriptPath) return false
   const readPaths = await extractReadFilePaths(transcriptPath)
