@@ -246,6 +246,17 @@ function formatSyncSummary(
 
 export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
+
+  // Always write the sentinel when we see a TaskList response, even if zero
+  // tasks were returned. This resets the 5-minute freshness mandate so the
+  // PreToolUse staleness gate doesn't block after an empty TaskList.
+  if (hookInput.tool_name === "TaskList") {
+    const sessionId = resolveSafeSessionId(hookInput.session_id)
+    if (sessionId) {
+      await writeCanonicalTaskListSyncSentinel(sessionId)
+    }
+  }
+
   const resolved = await resolveListSyncInput(hookInput)
   if (!resolved) return {}
 

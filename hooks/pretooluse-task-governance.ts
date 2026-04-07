@@ -47,6 +47,7 @@ import {
   isGitRepo,
   isRunningInAgent,
   isShellTool,
+  isTaskCreateTool,
   isTaskListTool,
   isTaskTrackingExemptShellCommand,
   isTerminalTaskStatus,
@@ -480,7 +481,7 @@ async function checkCanonicalTaskListSync(
   toolName: string,
   sessionId: string
 ): Promise<SwizHookOutput | undefined> {
-  if (isTaskListTool(toolName)) return undefined
+  if (isTaskListTool(toolName) || isTaskCreateTool(toolName)) return undefined
 
   const lastSyncAtMs = await readCanonicalTaskListSyncAtMs(sessionId)
   const ageMs = lastSyncAtMs === null ? null : Date.now() - lastSyncAtMs

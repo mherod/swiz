@@ -93,7 +93,7 @@ alwaysApply: false
 - DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
-- Reference implementation: `hooks/stop-ship-checklist.ts` (git + CI + issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop` / `evaluateStopGitStatus` for tests.
+- Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
 - In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
@@ -103,8 +103,8 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU cache with `fs.watch`. Updates via (1) `fs.watch` on session dirs, (2) `applyTaskUpdate()` write-through from `writeTask()`. `getTasksFresh()` forces full disk reload when no watcher active or openCount zero. **DO**: Call `watchSession()` when sessions activate in daemon. **DON'T**: Trust cached state for stop hooks — use `readSessionTasksFresh()`.
-- **In-memory event state**: `src/tasks/task-event-state.ts` — module-level `Map<sessionId, EventTaskState[]>` updated synchronously by inline PostToolUse hooks. `posttooluse-task-audit-sync` writes TaskCreate/TaskUpdate events; `posttooluse-task-list-sync` writes TaskList bulk state. `posttooluse-task-count-context` reads from `getSessionEventState()` first (zero disk I/O), falls back to disk + `applyMutationOverlay` when no event state exists. Eliminates stale reads from async native task writes.
+- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + `applyTaskUpdate()` write-through. `getTasksFresh()` forces disk reload when no watcher/openCount zero. **DO**: `watchSession()` on daemon activate. **DON'T**: Trust cache for stop hooks — use `readSessionTasksFresh()`.
+- **In-memory event state**: `src/tasks/task-event-state.ts` — `Map<sessionId, EventTaskState[]>` updated by PostToolUse hooks. `posttooluse-task-count-context` reads `getSessionEventState()` first (zero I/O), falls back to disk + `applyMutationOverlay`.
 - **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` — calls `validateLastTaskStanding` when `newStatus === "completed"`. `skipLastTaskGuard` for explicit overrides only.
 
 ## Task Lifecycle & Enforcement
@@ -241,6 +241,7 @@ alwaysApply: false
 - DO NOT embed ESC (0x1b) in regex literals; construct at runtime. See `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
+- **CRITICAL**: When adding a new symbol to a self-referential PreToolUse hook file (import + usage), **always add the import first**, then the usage in a second edit. Adding usage before import leaves the hook in a broken intermediate state that crashes on every subsequent tool call, deadlocking the session. Only the user can recover via `git checkout -- <file>`.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
