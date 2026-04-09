@@ -191,10 +191,11 @@ export async function evalCondition(condition: string | undefined): Promise<bool
   return true
 }
 
+import { agentHasTaskTools } from "./agent-paths.ts"
 // Local import for types used in this file (re-exports don't create local bindings).
-import type { HookGroup } from "./hook-types.ts"
+import { type HookGroup, hookIdentifier } from "./hook-types.ts"
 
-export const manifest: HookGroup[] = [
+const RAW_MANIFEST: HookGroup[] = [
   {
     event: "stop",
     hooks: [
@@ -455,12 +456,50 @@ export const manifest: HookGroup[] = [
   },
 ]
 
+const TASK_HOOK_IDENTIFIERS = new Set([
+  "stop-incomplete-tasks.ts",
+  "posttooluse-git-task-autocomplete.ts",
+  "posttooluse-task-advisor.ts",
+  "posttooluse-task-count-context.ts",
+  "posttooluse-task-output.ts",
+  "posttooluse-task-subject-validation.ts",
+  "posttooluse-task-sync.ts",
+  "precompact-task-snapshot.ts",
+  "pretooluse-enforce-taskupdate.ts",
+  "pretooluse-no-phantom-task-completion.ts",
+  "pretooluse-no-task-delegation.ts",
+  "pretooluse-require-tasks.ts",
+  "pretooluse-task-governance.ts",
+  "pretooluse-task-subject-validation.ts",
+  "pretooluse-taskoutput-timeout.ts",
+  "pretooluse-taskupdate-schema.ts",
+  "userpromptsubmit-task-advisor.ts",
+])
+
+export const manifest: HookGroup[] = (() => {
+  const tasksEnabled = agentHasTaskTools()
+  if (tasksEnabled) return RAW_MANIFEST
+
+  return RAW_MANIFEST.map((group) => {
+    // Drop groups matched exclusively for task tools
+    if (group.matcher && /Task|TodoWrite|update_plan/.test(group.matcher)) {
+      return { ...group, hooks: [] }
+    }
+
+    return {
+      ...group,
+      hooks: group.hooks.filter((h) => !TASK_HOOK_IDENTIFIERS.has(hookIdentifier(h))),
+    }
+  }).filter((group) => group.hooks.length > 0)
+})()
+
 // ─── Runtime routing validator ──────────────────────────────────────────────
 // Called at dispatch startup and install time to catch manifest/route/agent drift
 // before it causes silent misrouting. Throws with actionable fix instructions.
 
 type AgentDef = {
   id: string
+  tasksEnabled: boolean
   hooksConfigurable: boolean
   eventMap: Record<string, string>
   unsupportedEvents?: string[]

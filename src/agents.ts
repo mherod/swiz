@@ -23,6 +23,8 @@ export interface AgentDef {
   eventMap: Record<string, string>
   /** Canonical events intentionally unsupported by this agent runtime. */
   unsupportedEvents?: string[]
+  /** Whether this agent supports tasks (TaskCreate, TaskUpdate, etc.) */
+  tasksEnabled: boolean
   /** Whether this agent supports user-configurable hooks via a settings file */
   hooksConfigurable: boolean
   /** One or more env vars — any being set (truthy) identifies this agent */
@@ -123,6 +125,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "claude",
+    tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CLAUDECODE"],
     toolAliases: {
@@ -154,6 +157,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     wrapsHooks: { version: 1 },
     configStyle: "flat",
     binary: "cursor",
+    tasksEnabled: true,
     hooksConfigurable: true,
     processPattern: /__CURSOR_SANDBOX_ENV_RESTORE/,
     toolAliases: {
@@ -193,6 +197,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "gemini",
+    tasksEnabled: true,
     hooksConfigurable: true,
     // GEMINI_CLI=1 is injected by shellExecutionService; GEMINI_PROJECT_DIR by hookRunner
     envVars: ["GEMINI_CLI", "GEMINI_PROJECT_DIR"],
@@ -227,6 +232,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
+    tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
     toolAliases: {
@@ -265,6 +271,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     binary: "junie",
     // Junie uses allowlist.json for execution permissions, not user-configurable hooks.
     // No hook events fired at all — it's an external agent with its own session lifecycle.
+    tasksEnabled: false,
     hooksConfigurable: false,
     envVars: ["JUNIE_DATA"],
     processPattern: /\/junie(\.app\/)?/,

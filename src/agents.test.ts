@@ -58,6 +58,7 @@ describe("agents.ts", () => {
         expect(agent).toHaveProperty("hooksKey")
         expect(agent).toHaveProperty("configStyle")
         expect(agent).toHaveProperty("binary")
+        expect(agent).toHaveProperty("tasksEnabled")
         expect(agent).toHaveProperty("toolAliases")
         expect(agent).toHaveProperty("eventMap")
         expect(agent).toHaveProperty("hooksConfigurable")
@@ -726,6 +727,7 @@ describe("agents.ts", () => {
         settingsPath: "/nonexistent/path/settings.json",
         hooksKey: "hooks",
         configStyle: "nested" as const,
+        tasksEnabled: false,
         hooksConfigurable: false,
         toolAliases: {},
         eventMap: {},
