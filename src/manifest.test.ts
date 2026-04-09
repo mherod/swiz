@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { agentHasTaskTools } from "./agent-paths.ts"
 import { isAsyncFireAndForgetHook } from "./dispatch/engine.ts"
 import {
   type HookDef,
@@ -9,6 +10,8 @@ import {
 } from "./manifest.ts"
 
 describe("manifest.ts", () => {
+  const tasksEnabled = agentHasTaskTools()
+
   describe("manifest structure", () => {
     it("exports manifest as array of HookGroup", () => {
       expect(Array.isArray(manifest)).toBe(true)
@@ -69,12 +72,21 @@ describe("manifest.ts", () => {
       const files = stopGroup?.hooks.map((h) => hookIdentifier(h)) || []
       // Offensive language check runs first so lazy patterns are caught before anything else
       expect(files[0]).toBe("stop-offensive-language.ts")
-      // Incomplete tasks block early — before auditor and git checks
-      expect(files[1]).toBe("stop-incomplete-tasks.ts")
-      // Completion auditor verifies evidence and CI after tasks are complete
-      expect(files[2]).toBe("stop-completion-auditor.ts")
-      // Security hooks follow immediately after
-      expect(files[3]).toBe("stop-secret-scanner.ts")
+      if (tasksEnabled) {
+        // Incomplete tasks block early — before auditor and git checks
+        expect(files[1]).toBe("stop-incomplete-tasks.ts")
+        // Completion auditor verifies evidence and CI after tasks are complete
+        expect(files[2]).toBe("stop-completion-auditor.ts")
+      } else {
+        // Codex strips task-specific hooks from the runtime manifest.
+        expect(files[1]).toBe("stop-completion-auditor.ts")
+      }
+      const completionAuditorIndex = files.indexOf("stop-completion-auditor.ts")
+      const secretScannerIndex = files.indexOf("stop-secret-scanner.ts")
+      const workflowPermissionsIndex = files.indexOf("stop-workflow-permissions.ts")
+      expect(completionAuditorIndex).toBeGreaterThanOrEqual(0)
+      expect(secretScannerIndex).toBeGreaterThan(completionAuditorIndex)
+      expect(workflowPermissionsIndex).toBeGreaterThan(secretScannerIndex)
     })
   })
 
@@ -118,9 +130,9 @@ describe("manifest.ts", () => {
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|Bash"
       )
       expect(requireTasksGroup).toBeDefined()
-      expect(
-        requireTasksGroup?.hooks.some((h) => hookIdentifier(h).includes("require-tasks"))
-      ).toBe(true)
+      const hasRequireTasksHook =
+        requireTasksGroup?.hooks.some((h) => hookIdentifier(h).includes("require-tasks")) ?? false
+      expect(hasRequireTasksHook).toBe(tasksEnabled)
     })
 
     it("Edit|Write|NotebookEdit|Bash matcher has update-memory enforcement hook", () => {

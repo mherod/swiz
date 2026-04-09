@@ -490,7 +490,7 @@ export const manifest: HookGroup[] = (() => {
       ...group,
       hooks: group.hooks.filter((h) => !TASK_HOOK_IDENTIFIERS.has(hookIdentifier(h))),
     }
-  }).filter((group) => group.hooks.length > 0)
+  })
 })()
 
 // ─── Runtime routing validator ──────────────────────────────────────────────

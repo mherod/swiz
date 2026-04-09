@@ -232,7 +232,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
-    tasksEnabled: true,
+    tasksEnabled: false,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
     toolAliases: {
