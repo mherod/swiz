@@ -16,7 +16,7 @@ import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -104,18 +104,24 @@ export async function evaluatePretooluseOffensiveLanguage(
   const matches = findAllLazyPatterns(assistantText)
   if (matches.length > 0) {
     const refined = await tryRefinedFeedback(assistantText, matches)
-    const reason = refined
-      ? `${refined}\n\n${BLOCKING_SUFFIX}`
-      : formatAllDenialMessages(matches, BLOCKING_SUFFIX)
+    let reason: string
+    if (refined) {
+      reason = `${refined}\n\n${BLOCKING_SUFFIX}`
+    } else {
+      reason = formatAllDenialMessages(matches, BLOCKING_SUFFIX)
+    }
 
     const sessionId = (input.session_id as string) ?? ""
-    if (sessionId && (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd))) {
-      return preToolUseAllow("")
+    if (sessionId) {
+      if (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd)) {
+        return {}
+      }
     }
+
     return preToolUseDeny(reason)
   }
 
-  return preToolUseAllow("")
+  return {}
 }
 
 const pretooluseOffensiveLanguage: SwizToolHook = {
