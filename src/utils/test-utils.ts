@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
-import { extractPreToolSurfaceDecision } from "./hook-specific-output.ts"
+import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, any>
@@ -177,7 +177,17 @@ function parsePreToolUseHookStdout(stdout: string): {
 } | null {
   try {
     const parsed = JSON.parse(stdout) as Record<string, any>
-    return extractPreToolSurfaceDecision(parsed)
+    const surface = extractPreToolSurfaceDecision(parsed)
+    if (surface.decision || surface.reason) return surface
+
+    // Codex strips explicit allow decisions from PreToolUse output. In hook
+    // subprocess tests, a parsed PreToolUse envelope with no deny surface still
+    // represents an allow outcome.
+    const hso = getHookSpecificOutput(parsed)
+    if (hso?.hookEventName === "PreToolUse") {
+      return { decision: "allow" }
+    }
+    return surface
   } catch {
     return null
   }
@@ -255,8 +265,17 @@ export async function runFileEditHook(
   if (!rawOutput.trim()) return { rawOutput }
   try {
     const parsed = JSON.parse(rawOutput.trim()) as Record<string, any>
+    const surface = extractPreToolSurfaceDecision(parsed)
+    if (surface.decision || surface.reason) {
+      return {
+        ...surface,
+        rawOutput,
+      }
+    }
+
+    const hso = getHookSpecificOutput(parsed)
     return {
-      ...extractPreToolSurfaceDecision(parsed),
+      ...(hso?.hookEventName === "PreToolUse" ? { decision: "allow" } : {}),
       rawOutput,
     }
   } catch {

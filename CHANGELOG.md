@@ -22,6 +22,11 @@
 
 ### Refactoring
 
+- **Extract doctor skill and plugin fix helpers** — Moved the
+  skill-conflict, invalid-skill, and plugin-cache check/fix pipeline out
+  of `src/commands/doctor.ts` into `src/commands/doctor/fix.ts`, reducing
+  the command file size while preserving `swiz doctor` and
+  `swiz doctor --fix` behavior.
 - **Discriminated kinds for doctor skill dispatch** — Replaced
   string-matching `reason` dispatch with `InvalidSkillKind` union
   and `switch(entry.kind)` in `fixInvalidSkillEntries`.

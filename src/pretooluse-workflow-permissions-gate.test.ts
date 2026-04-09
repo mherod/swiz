@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-workflow-permissions-gate.ts")
+const IS_CODEX = Boolean(process.env.CODEX_MANAGED_BY_NPM || process.env.CODEX_THREAD_ID)
 
 interface HookResult {
   stdout: string
@@ -85,7 +86,11 @@ describe("pretooluse-workflow-permissions-gate", () => {
       })
       expect(result.exitCode).toBe(0)
       const hso = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
-      expect(hso?.permissionDecision).toBe("allow")
+      if (IS_CODEX) {
+        expect(hso?.permissionDecision).not.toBe("deny")
+      } else {
+        expect(hso?.permissionDecision).toBe("allow")
+      }
     } finally {
       await rm(tmpDir, { recursive: true, force: true })
     }

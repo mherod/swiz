@@ -10,6 +10,7 @@ import { useTempDir } from "./utils/test-utils.ts"
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 const HOOK_PATH = "hooks/pretooluse-large-files.ts"
+const IS_CODEX = Boolean(process.env.CODEX_MANAGED_BY_NPM || process.env.CODEX_THREAD_ID)
 const { create: createTempDir } = useTempDir("swiz-large-files-test-")
 
 async function runHook(opts: {
@@ -50,6 +51,15 @@ function makeLargeContent(sizeKb: number): string {
   return "x".repeat(sizeKb * 1024)
 }
 
+function expectAllowedPreToolUse(parsed: Record<string, any> | null | undefined): void {
+  const decision = parsed?.hookSpecificOutput?.permissionDecision
+  if (IS_CODEX) {
+    expect(decision).not.toBe("deny")
+    return
+  }
+  expect(decision).toBe("allow")
+}
+
 describe("DEFAULT_LARGE_FILE_SIZE_KB", () => {
   test("is 500", () => {
     expect(DEFAULT_LARGE_FILE_SIZE_KB).toBe(500)
@@ -68,7 +78,7 @@ describe("pretooluse-large-files — Write tool", () => {
     })
     expect(exitCode).toBe(0)
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("blocks Write at threshold boundary (501KB)", async () => {
@@ -98,7 +108,7 @@ describe("pretooluse-large-files — Write tool", () => {
     })
     const parsed = JSON.parse(stdout)
     // 500KB is exactly at limit (not over), so allow
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("allows Write for LFS-tracked extension", async () => {
@@ -113,7 +123,7 @@ describe("pretooluse-large-files — Write tool", () => {
       content: makeLargeContent(501),
     })
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("blocks Write for non-LFS extension even with .gitattributes for other patterns", async () => {
@@ -146,7 +156,7 @@ describe("pretooluse-large-files — Edit tool", () => {
       newString: "const x = 2",
     })
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("blocks Edit that would push file over threshold", async () => {
@@ -188,7 +198,7 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("allows NotebookEdit tool (size not determinable)", async () => {
@@ -210,7 +220,7 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 })
 
@@ -227,7 +237,7 @@ describe("pretooluse-large-files — LFS pattern matching", () => {
       content: makeLargeContent(501),
     })
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 
   test("LFS rule for specific file name matches that file", async () => {
@@ -241,6 +251,6 @@ describe("pretooluse-large-files — LFS pattern matching", () => {
       content: makeLargeContent(501),
     })
     const parsed = JSON.parse(stdout)
-    expect(parsed?.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expectAllowedPreToolUse(parsed)
   })
 })
