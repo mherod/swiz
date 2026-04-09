@@ -4,7 +4,6 @@
  */
 
 import { join } from "node:path"
-import { spawn as bunSpawn } from "bun"
 import { merge } from "lodash-es"
 import type { HookExecution } from "./engine.ts"
 import {
@@ -45,7 +44,7 @@ async function runHookInWorker(
     const env = callerEnv ? merge({}, process.env, callerEnv) : undefined
     const spawnCwd = extractPayloadCwd(payloadStr)
 
-    const proc = bunSpawn(cmd, {
+    const proc = Bun.spawn(cmd, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

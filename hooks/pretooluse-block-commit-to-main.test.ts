@@ -68,7 +68,12 @@ async function runHook(
   if (!raw) return { raw, parsed: null }
   const parsed = JSON.parse(raw) as Record<string, any>
   const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
-  const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
+  const decision =
+    (hso?.permissionDecision as string | undefined) ??
+    (parsed.decision as string | undefined) ??
+    // Codex strips explicit allow decisions from PreToolUse output. In subprocess
+    // tests, a parsed PreToolUse envelope with no deny surface still represents allow.
+    (hso?.hookEventName === "PreToolUse" ? "allow" : undefined)
   return { raw, parsed, decision }
 }
 
