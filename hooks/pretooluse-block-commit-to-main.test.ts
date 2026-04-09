@@ -6,7 +6,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createTestRepo } from "../src/utils/test-utils.ts"
 
-const BUN_EXE = Bun.which("bun") ?? "bun"
+// Use the currently running Bun binary rather than resolving via PATH, which
+// can accidentally pick up the npm `bun` shim (requires postinstall).
+const BUN_EXE = process.execPath
 const WORKSPACE_ROOT = process.cwd()
 
 async function createFakeGhBin(currentUser: string): Promise<string> {
