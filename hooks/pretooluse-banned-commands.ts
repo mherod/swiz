@@ -74,6 +74,13 @@ const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs(?:\s+-\S+)*\s+rm\b|&&\s*rm\b|;\s*rm\
 const FIND_DELETE_RE = /find\s.*-delete/
 const FIND_EXEC_RM_RE = /find\s.*-exec\s+rm\s/
 
+const CD_BANNED_MESSAGE =
+  "Do not use `cd`. Changing directory loses workspace context.\n\nInstead, use one of these approaches:\n  • Absolute paths: `git status /path/to/repo`\n  • Tool directory flags: `git -C /repo status`, `pnpm --prefix /path test`\n  • Workspace filters: `pnpm --filter @scope/app test` (for monorepos)\n  • Read tool: Use Read or Glob tools for file operations (no cd needed)"
+
+function buildCdDenyMessage(cwd: string): string {
+  return `${CD_BANNED_MESSAGE}\n\nCurrent directory: ${cwd}`
+}
+
 function isDestructiveDelete(c: string): boolean {
   const first = c.trimStart().split(/\s+/)[0]
   if (DESTRUCTIVE_FIRST_CMDS.has(first ?? "")) return true
@@ -185,8 +192,7 @@ function buildShellToolRules(): Rule[] {
     },
     {
       match: (c) => CD_CMD_RE.test(c),
-      message:
-        "Do not use `cd`. Changing directory loses workspace context.\n\nInstead, use one of these approaches:\n  • Absolute paths: `git status /path/to/repo`\n  • Tool directory flags: `git -C /repo status`, `pnpm --prefix /path test`\n  • Workspace filters: `pnpm --filter @scope/app test` (for monorepos)\n  • Read tool: Use Read or Glob tools for file operations (no cd needed)",
+      message: CD_BANNED_MESSAGE,
     },
     {
       match: (c) => FIND_CMD_RE.test(c),
@@ -407,6 +413,10 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
 
   const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
+
+  if (CD_CMD_RE.test(strippedCommand)) {
+    return preToolUseDeny(buildCdDenyMessage(cwd))
+  }
 
   const effectiveRules = (await isRedirectExempt(strippedCommand, cwd, transcriptPath))
     ? RULES.filter((r) => r.match !== isShellFileWrite)

@@ -21,13 +21,13 @@ describe("pretooluse-banned-commands", () => {
     test("grep gets a gentle nudge", async () => {
       const result = await runHook("grep -r TODO src/")
       expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("rg")
+      expect(result.stdout).toContain("rg")
     })
 
     test("find gets a gentle nudge", async () => {
       const result = await runHook("find . -name '*.ts'")
       expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("fd")
+      expect(result.stdout).toContain("fd")
     })
   })
 
@@ -88,6 +88,7 @@ describe("pretooluse-banned-commands", () => {
     test("cd is blocked", async () => {
       const result = await runHook("cd /tmp && ls")
       expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Current directory:")
     })
 
     test("touch is blocked", async () => {
