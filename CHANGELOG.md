@@ -2,6 +2,14 @@
 
 ## 2026-04-09
 
+### Refactoring
+
+- **Extract doctor cleanup module** — Moved the `swiz doctor clean`
+  cleanup runner, session discovery, backup pruning, transcript
+  truncation, and daemon stop/restart flow out of
+  `src/commands/doctor.ts` into `src/commands/doctor/cleanup.ts`,
+  leaving `doctor.ts` as a thinner diagnostics and command entrypoint.
+
 ### Fixes
 
 - **Codex PreToolUse compatibility** — Sanitized Codex hook output so

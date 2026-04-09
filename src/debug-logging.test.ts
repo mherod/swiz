@@ -87,6 +87,8 @@ const STDOUT_ALLOWLIST = new Set([
   // incoming-inspect — list/query captured incoming payloads (JSON/summaries to stdout)
   "src/dispatch/incoming-inspect.ts",
   "src/commands/doctor.ts",
+  // cleanup command extraction — still user-facing CLI output for swiz doctor clean
+  "src/commands/doctor/cleanup.ts",
   "src/commands/help.ts",
   "src/commands/hooks.ts",
   // idea — generates and prints creative issue proposal from Gemini
