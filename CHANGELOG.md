@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-04-09
+
+### Fixes
+
+- **Codex PreToolUse compatibility** — Sanitized Codex hook output so
+  PreToolUse allow responses no longer emit unsupported `suppressOutput`
+  or `permissionDecision: "allow"` fields while still preserving advisory
+  context and rewritten tool input.
+
 ## 2026-04-07
 
 ### New Features
