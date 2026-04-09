@@ -89,6 +89,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/doctor.ts",
   // cleanup command extraction — still user-facing CLI output for swiz doctor clean
   "src/commands/doctor/cleanup.ts",
+  // check runner extraction — still user-facing CLI output for swiz doctor
+  "src/commands/doctor/check-runner.ts",
   "src/commands/help.ts",
   "src/commands/hooks.ts",
   // idea — generates and prints creative issue proposal from Gemini

@@ -8,6 +8,7 @@ import { isInlineHookDef, manifest } from "../manifest.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { isDaemonReady } from "./daemon/daemon-admin.ts"
+import { runDoctorChecks } from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import { autoCleanup, runCleanupCommand } from "./doctor/cleanup.ts"
 import {
@@ -26,7 +27,7 @@ import {
   SKILL_PLACEHOLDER_CATEGORY,
   type SkillConflict,
 } from "./doctor/fix.ts"
-import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "./doctor/types.ts"
+import type { CheckResult, DiagnosticCheck } from "./doctor/types.ts"
 import { whichExists } from "./doctor/utils.ts"
 
 export { truncateJsonlFile } from "./doctor/cleanup.ts"
@@ -66,10 +67,6 @@ const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
 const HOME = getHomeDirWithFallback("")
-
-const PASS = `${GREEN}✓${RESET}`
-const FAIL = `${RED}✗${RESET}`
-const WARN = `${YELLOW}!${RESET}`
 
 const DOCTOR_CHECK_TIMEOUT_MS = 60_000
 const AUTO_CLEANUP_TIMEOUT_MS = 75_000
@@ -860,15 +857,6 @@ export const swizSettingsCheck: DiagnosticCheck = {
   run: () => checkSwizSettings().then((r) => [r]),
 }
 
-// ─── Check collection ───────────────────────────────────────────────────────
-
-interface DoctorCheckResults {
-  results: CheckResult[]
-  skillConflicts: SkillConflict[]
-  invalidSkillEntries: InvalidSkillEntry[]
-  pluginCacheInfos: PluginCacheInfo[]
-}
-
 /** All checks including registry and inline. Order determines display order. */
 const ALL_CHECKS: DiagnosticCheck[] = [
   ...DIAGNOSTIC_CHECKS,
@@ -883,78 +871,6 @@ const ALL_CHECKS: DiagnosticCheck[] = [
   pluginCacheCheck,
   swizSettingsCheck,
 ]
-
-async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
-  const results: CheckResult[] = []
-  const ctx: DiagnosticContext = { fix, store: {} }
-
-  for (const check of ALL_CHECKS) {
-    const result = await check.run(ctx)
-    if (Array.isArray(result)) {
-      results.push(...result)
-    } else {
-      results.push(result)
-    }
-  }
-
-  return {
-    results,
-    skillConflicts: (ctx.store.skillConflicts ?? []) as SkillConflict[],
-    invalidSkillEntries: (ctx.store.invalidSkillEntries ?? []) as InvalidSkillEntry[],
-    pluginCacheInfos: (ctx.store.pluginCacheInfos ?? []) as PluginCacheInfo[],
-  }
-}
-
-// ─── Runner ─────────────────────────────────────────────────────────────────
-
-function printResult(result: CheckResult): void {
-  const icon = result.status === "pass" ? PASS : result.status === "warn" ? WARN : FAIL
-  const detailColor = result.status === "fail" ? RED : result.status === "warn" ? YELLOW : DIM
-  console.log(`  ${icon} ${BOLD}${result.name}${RESET}  ${detailColor}${result.detail}${RESET}`)
-}
-
-async function runDoctorChecks(args: string[]): Promise<void> {
-  const fix = args.includes("--fix")
-  console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
-
-  const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = await runWithTimeout(
-    "diagnostic checks",
-    DOCTOR_CHECK_TIMEOUT_MS,
-    () => collectDoctorChecks(fix)
-  )
-
-  for (const result of results) {
-    printResult(result)
-  }
-
-  const failures = results.filter((r) => r.status === "fail")
-  const warnings = results.filter((r) => r.status === "warn")
-  const passes = results.filter((r) => r.status === "pass")
-
-  console.log()
-  console.log(
-    `  ${GREEN}${passes.length} passed${RESET}` +
-      (warnings.length > 0 ? `, ${YELLOW}${warnings.length} warnings${RESET}` : "") +
-      (failures.length > 0 ? `, ${RED}${failures.length} failed${RESET}` : "")
-  )
-  console.log()
-
-  await handleAutoFixes({
-    fix,
-    results,
-    skillConflicts,
-    invalidSkillEntries,
-    pluginCacheInfos,
-  })
-
-  if (failures.length > 0) {
-    throw new Error(
-      `${failures.length} check(s) failed:\n` +
-        failures.map((f) => `  - ${f.name}: ${f.detail}`).join("\n")
-    )
-  }
-  await notifyDaemon(false)
-}
 
 /** Best-effort daemon notification after fixing issues (similar to settings write). */
 async function notifyDaemon(jsonOutput: boolean): Promise<void> {
@@ -992,6 +908,12 @@ export const doctorCommand: Command = {
       await runCleanupCommand(args.slice(1))
       return
     }
-    await runDoctorChecks(args)
+    await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>
+      runDoctorChecks(args, {
+        allChecks: ALL_CHECKS,
+        handleAutoFixes,
+        notifyDaemon,
+      })
+    )
   },
 }

@@ -4,6 +4,11 @@
 
 ### Refactoring
 
+- **Extract doctor checks runner module** — Moved `swiz doctor`
+  check collection, report rendering, and summary/error assembly into
+  `src/commands/doctor/check-runner.ts`, leaving `doctor.ts` to define
+  checks and wire the command entrypoint.
+
 - **Extract doctor cleanup module** — Moved the `swiz doctor clean`
   cleanup runner, session discovery, backup pruning, transcript
   truncation, and daemon stop/restart flow out of
