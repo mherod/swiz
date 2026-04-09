@@ -31,8 +31,8 @@ const WAIT_TIMEOUT_MS = 8000
 const WAIT_INTERVAL_MS = 200
 const LSOF_TIMEOUT_MS = 500
 const MAX_ANCESTRY_DEPTH = 20
-const REMOVE_MAX_RETRIES = 3
-const REMOVE_RETRY_DELAY_MS = 150
+const REMOVE_MAX_RETRIES = 5
+const REMOVE_RETRY_DELAY_MS = 100
 const STALE_LOCK_AGE_MS = 10_000
 
 // ── Validation & resolution ─────────────────────────────────────────────────
@@ -133,9 +133,27 @@ async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
     }
   }
 
-  // All retries exhausted — allow anyway and let git report the error if lock persists.
-  return preToolUseAllow(
-    `\`${LOCK_RELATIVE_PATH}\` cleanup exhausted ${REMOVE_MAX_RETRIES} retries — proceeding (git will report if lock persists).`
+  // All retries exhausted — do NOT let the git command through if the lock still exists.
+  if (!(await Bun.file(lockPath).exists())) {
+    return preToolUseAllow(`Auto-removed stale \`${LOCK_RELATIVE_PATH}\` — proceeding.`)
+  }
+
+  return preToolUseDeny(
+    [
+      `\`${LOCK_RELATIVE_PATH}\` still present after ${REMOVE_MAX_RETRIES} removal attempts.`,
+      "",
+      "This lock will cause your git command to fail with:",
+      `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
+      "",
+      formatActionPlan(
+        [
+          `Check for stuck git processes: ps aux | grep git`,
+          `Remove the lock manually: trash ${lockPath}`,
+          "Then retry the command.",
+        ],
+        { header: "To resolve:" }
+      ).trimEnd(),
+    ].join("\n")
   )
 }
 
@@ -173,7 +191,7 @@ async function getLockAgeMs(lockPath: string): Promise<number> {
  *
  * Two-stage filter (consistent with stop-git-status.ts):
  *   1. Ancestry: exclude git processes that are ancestors of this process
- *      (e.g., git push → pre-push hook → bun → this hook).
+ *      (e.g., git push -> pre-push hook -> bun -> this hook).
  *   2. Repo scope: exclude git processes whose CWD is outside our repo root.
  */
 async function isGitProcessActiveForRepo(repoRoot: string): Promise<boolean> {

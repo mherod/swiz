@@ -151,8 +151,10 @@ async function printSessionTasks(sessionId: string, filterCwd: string | undefine
   const agent = detectCurrentAgent()
   if (!agent) return
 
-  // Some agent runtimes surface stderr as a "system message" channel. When we're
-  // running inside an agent, mirror the full task list as plain text there.
+  if (process.env.SWIZ_TASKS_SYSTEM_MESSAGE === "0") return
+
+  // Some agent runtimes surface stderr as a "system message" channel. Mirror a
+  // plain-text summary so it's visible even when stdout is hidden/collapsed.
   const tasks = await readTasks(sessionId)
   const lines: string[] = []
   lines.push(`Tasks (${sessionId.slice(0, 8)}...)`)
@@ -164,7 +166,7 @@ async function printSessionTasks(sessionId: string, filterCwd: string | undefine
     for (const t of group) lines.push(`- #${t.id} ${t.subject}`)
     lines.push("")
   }
-  console.error(lines.join("\n").trimEnd())
+  process.stderr.write(`${lines.join("\n").trimEnd()}\n`)
 }
 
 async function runListTasks(args: string[]): Promise<void> {

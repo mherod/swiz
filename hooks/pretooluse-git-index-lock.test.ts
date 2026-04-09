@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
@@ -15,26 +15,38 @@ let REPO_WITHOUT_LOCK = ""
 /** Create a fresh git repo with a lock file, returning the resolved path. */
 async function createLockedRepo(name: string): Promise<string> {
   const rawDir = join(TMP, name)
-  mkdirSync(joinGitPath(rawDir), { recursive: true })
+  mkdirSync(rawDir, { recursive: true })
   const proc = Bun.spawn(["git", "init"], { cwd: rawDir, stdout: "pipe", stderr: "pipe" })
   await proc.exited
   const resolved = realpathSync(rawDir)
-  writeFileSync(joinGitPath(resolved, GIT_INDEX_LOCK), "")
+  await Bun.write(joinGitPath(resolved, GIT_INDEX_LOCK), "")
   return resolved
 }
 
 beforeAll(async () => {
   const rawTmp = join(tmpdir(), `swiz-git-lock-test-${process.pid}`)
   const rawClean = join(rawTmp, "repo-clean")
-  mkdirSync(joinGitPath(rawClean), { recursive: true })
+  mkdirSync(rawClean, { recursive: true })
   const cleanProc = Bun.spawn(["git", "init"], { cwd: rawClean, stdout: "pipe", stderr: "pipe" })
   await cleanProc.exited
   TMP = realpathSync(rawTmp)
   REPO_WITHOUT_LOCK = realpathSync(rawClean)
 })
 
-afterAll(() => {
-  if (TMP) rmSync(TMP, { recursive: true, force: true })
+afterAll(async () => {
+  if (TMP) {
+    // Clear immutable flags before cleanup to avoid EPERM.
+    try {
+      await Bun.spawn(["chflags", "-R", "nouchg", TMP]).exited
+    } catch {
+      // ignore if no immutable files exist
+    }
+    try {
+      await Bun.file(TMP).delete()
+    } catch {
+      // best-effort cleanup
+    }
+  }
 })
 
 async function runHook(
@@ -127,6 +139,27 @@ describe("pretooluse-git-index-lock", () => {
     )
   })
 
+  describe("denies when lock cannot be removed", () => {
+    test(
+      "git command is denied after retries on an immutable lock",
+      async () => {
+        const repo = await createLockedRepo("deny-immutable")
+        const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
+        // Make the lock file immutable so unlink will fail.
+        const chflagsProc = Bun.spawn(["chflags", "uchg", lockPath], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        await chflagsProc.exited
+        const result = await runHook("git status", repo)
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("index.lock")
+        expect(result.reason).toContain("removal attempts")
+      },
+      { timeout: 30_000 }
+    )
+  })
+
   describe("allows git commands when no lock", () => {
     test("git status is allowed", async () => {
       const result = await runHook("git status", REPO_WITHOUT_LOCK)
@@ -143,7 +176,7 @@ describe("pretooluse-git-index-lock", () => {
     test("allows when lock is removed before hook runs", async () => {
       const repo = await createLockedRepo("disappear-before-hook")
       // Remove the lock before running the hook — simulates another process clearing it.
-      rmSync(joinGitPath(repo, GIT_INDEX_LOCK), { force: true })
+      await Bun.file(joinGitPath(repo, GIT_INDEX_LOCK)).delete()
       const result = await runHook("git status", repo)
       // No lock → early exit with no output
       expect(result.decision).toBeUndefined()
