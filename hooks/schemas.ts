@@ -634,14 +634,18 @@ export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
  * `matcher` is regex against tool name.
  * Derived from `GeminiAfterToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
  */
-export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema).transform(
-  (val) => {
+export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema)
+  .extend({
+    // Some Gemini tool responses are plain strings (e.g., shell stdout).
+    // Accept any JSON type for forward compatibility.
+    tool_response: z.unknown().optional(),
+  })
+  .transform((val) => {
     if (val.tool_input) {
       val.tool_input = nfkcDeep(val.tool_input) as Record<string, any>
     }
     return val
-  }
-)
+  })
 
 export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
 
