@@ -13,6 +13,14 @@ function getGitOutput(args: string[]): string {
 }
 
 function resolveBase(): string {
+  // Prefer comparing against the remote tracking branch (feature branches / dependabot)
+  // so pre-push doesn't fall back to the huge "safe subset" when origin/main differs
+  // by many unrelated commits.
+  const current = getGitOutput(["rev-parse", "--abbrev-ref", "HEAD"])
+  if (current && current !== "HEAD") {
+    const hasOriginCurrent = getGitOutput(["rev-parse", "--verify", `origin/${current}`])
+    if (hasOriginCurrent) return `origin/${current}`
+  }
   // If we have origin/main, use it as the base
   const hasOriginMain = getGitOutput(["rev-parse", "--verify", "origin/main"])
   if (hasOriginMain) {
@@ -32,6 +40,8 @@ for (const file of changedFiles) {
 
   if (file.endsWith(".test.ts") || file.endsWith(".test.tsx") || file.endsWith(".spec.ts")) {
     testFiles.add(file)
+  } else if (file === "hooks/schemas.ts") {
+    testFiles.add("src/gemini-event-map.contract.test.ts")
   } else if (file.endsWith(".ts") || file.endsWith(".tsx")) {
     // Check for sibling test file
     const baseName = file.replace(/\.tsx?$/, "")
@@ -60,7 +70,6 @@ const SKIP_PATTERNS = [
   "commands/doctor.test",
   "positive-path-integration",
   "commands/manage.test",
-  "commands/tasks.test",
   "commands/issue.test",
   "transcript-session-gemini",
   "commands/settings.test",
