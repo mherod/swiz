@@ -139,6 +139,34 @@ function resolveFilterCwd(args: string[]): string | undefined {
   return args.includes("--all-projects") ? undefined : process.cwd()
 }
 
+async function printSessionTasks(sessionId: string, filterCwd: string | undefined): Promise<void> {
+  const orphanIds = await getOrphanSessionIds()
+  await listTasks(
+    sessionId,
+    filterCwd ? "current project" : "all projects",
+    "relative",
+    orphanIds.has(sessionId)
+  )
+
+  const agent = detectCurrentAgent()
+  if (!agent) return
+
+  // Some agent runtimes surface stderr as a "system message" channel. When we're
+  // running inside an agent, mirror the full task list as plain text there.
+  const tasks = await readTasks(sessionId)
+  const lines: string[] = []
+  lines.push(`Tasks (${sessionId.slice(0, 8)}...)`)
+  const order: Task["status"][] = ["in_progress", "pending", "completed", "cancelled"]
+  for (const status of order) {
+    const group = tasks.filter((t) => t.status === status)
+    if (group.length === 0) continue
+    lines.push(`${status.toUpperCase()} (${group.length})`)
+    for (const t of group) lines.push(`- #${t.id} ${t.subject}`)
+    lines.push("")
+  }
+  console.error(lines.join("\n").trimEnd())
+}
+
 async function runListTasks(args: string[]): Promise<void> {
   const allProjects = args.includes("--all-projects")
   const allSessions = args.includes("--all-sessions")
@@ -186,6 +214,7 @@ async function runCreateTask(rest: string[]): Promise<void> {
   const sessionId = await resolveSession(sessionArgs)
   await createTask(sessionId, subject, description)
   await applyStateUpdate(stateFlag, process.cwd())
+  await printSessionTasks(sessionId, process.cwd())
 }
 
 async function handleCompleteError(
@@ -283,6 +312,9 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     return
   }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+
+  const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
+  await printSessionTasks(effectiveSessionId, filterCwd)
 }
 
 async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> {
@@ -313,6 +345,9 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
     filterCwd,
   })
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+
+  const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
+  await printSessionTasks(effectiveSessionId, filterCwd)
 }
 
 const UPDATE_USAGE =
@@ -435,6 +470,7 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   }
 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
+  await printSessionTasks(sessionId, filterCwd)
 }
 
 // ─── Repair from audit trail ─────────────────────────────────────────────────
@@ -577,6 +613,10 @@ async function runRepairTasks(rest: string[]): Promise<void> {
       console.log(`  ${orphanCount} orphaned task(s) found on disk with no audit trail.`)
     }
   }
+
+  if (!dryRun && !jsonOutput) {
+    await printSessionTasks(sessionId, process.cwd())
+  }
 }
 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
@@ -612,6 +652,7 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   adopt: async (rest) => {
     const sessionId = await resolveSession(rest)
     await adoptOrphanedTasks(sessionId, process.cwd())
+    await printSessionTasks(sessionId, process.cwd())
   },
   repair: (rest) => runRepairTasks(rest),
 }
