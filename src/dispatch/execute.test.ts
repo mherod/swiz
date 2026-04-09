@@ -167,7 +167,9 @@ describe("dispatch execute integration", () => {
 
     it("sanitizes Codex-unsupported preToolUse allow fields during coercion", () => {
       const prevCodexThreadId = process.env.CODEX_THREAD_ID
+      const prevClaudeCode = process.env.CLAUDECODE
       process.env.CODEX_THREAD_ID = "codex-dispatch-test"
+      delete process.env.CLAUDECODE
       try {
         const r: Record<string, any> = {
           suppressOutput: true,
@@ -188,6 +190,8 @@ describe("dispatch execute integration", () => {
       } finally {
         if (prevCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID
         else process.env.CODEX_THREAD_ID = prevCodexThreadId
+        if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaudeCode
       }
     })
   })
