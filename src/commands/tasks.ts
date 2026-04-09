@@ -136,6 +136,11 @@ function resolveFilterCwd(args: string[]): string | undefined {
   return args.includes("--all-projects") ? undefined : process.cwd()
 }
 
+async function printTasksAfterMutation(sessionId: string, label: string): Promise<void> {
+  const orphanIds = await getOrphanSessionIds()
+  await listTasks(sessionId, label, "relative", orphanIds.has(sessionId))
+}
+
 async function runListTasks(args: string[]): Promise<void> {
   const allProjects = args.includes("--all-projects")
   const allSessions = args.includes("--all-sessions")
@@ -183,6 +188,10 @@ async function runCreateTask(rest: string[]): Promise<void> {
   const sessionId = await resolveSession(sessionArgs)
   await createTask(sessionId, subject, description)
   await applyStateUpdate(stateFlag, process.cwd())
+  await printTasksAfterMutation(
+    sessionId,
+    sessionArgs.includes("--session") ? "selected session" : "current project"
+  )
 }
 
 async function handleCompleteError(
@@ -195,7 +204,7 @@ async function handleCompleteError(
     filterCwd: string | undefined
     skipLastTaskGuard?: boolean
   }
-): Promise<void> {
+): Promise<boolean> {
   const msg = e instanceof Error ? e.message : String(e)
   if (msg.includes("Invalid transition") && msg.includes("pending")) {
     console.log(`  ⚡ Auto-transitioning #${opts.taskId}: pending → in_progress → completed`)
@@ -205,7 +214,7 @@ async function handleCompleteError(
       filterCwd: opts.filterCwd,
       skipLastTaskGuard: opts.skipLastTaskGuard,
     })
-    return
+    return true
   }
   if (msg.includes("not found")) {
     const sessionSuffix = opts.sessionId ? ` --session ${opts.sessionId.slice(0, 8)}` : ""
@@ -257,8 +266,13 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     allowPlaceholderSubject: true,
   })
 
+  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
+    taskId,
+    sessionId,
+    filterCwd
+  )
+
   if (!verify) {
-    const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
     verify = task.subject
   }
 
@@ -269,7 +283,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       filterCwd,
     })
   } catch (e) {
-    await handleCompleteError(e, {
+    const handled = await handleCompleteError(e, {
       sessionId,
       taskId,
       evidence,
@@ -277,9 +291,13 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       filterCwd,
       skipLastTaskGuard,
     })
-    return
+    if (!handled) return
   }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+  await printTasksAfterMutation(
+    effectiveSessionId,
+    rest.includes("--session") ? "selected session" : "current project"
+  )
 }
 
 async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> {
@@ -304,12 +322,18 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
     subject: subjectFlag,
   })
 
+  const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
+
   await updateStatus(sessionId, taskId, newStatus, {
     evidence,
     verifyText: verify,
     filterCwd,
   })
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+  await printTasksAfterMutation(
+    effectiveSessionId,
+    rest.includes("--session") ? "selected session" : "current project"
+  )
 }
 
 const UPDATE_USAGE =
@@ -432,6 +456,10 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   }
 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
+  await printTasksAfterMutation(
+    sessionId,
+    flagArgs.includes("--session") ? "selected session" : "current project"
+  )
 }
 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
@@ -467,6 +495,10 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   adopt: async (rest) => {
     const sessionId = await resolveSession(rest)
     await adoptOrphanedTasks(sessionId, process.cwd())
+    await printTasksAfterMutation(
+      sessionId,
+      rest.includes("--session") ? "selected session" : "current project"
+    )
   },
 }
 

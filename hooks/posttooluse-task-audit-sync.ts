@@ -16,9 +16,10 @@
 import { appendFile, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
-import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import { formatTaskList, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import { readTasks } from "../src/tasks/task-repository.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 interface AuditEntry {
@@ -94,6 +95,7 @@ async function handleTaskUpdate(
 }
 
 interface ResolvedTaskInput {
+  sessionId: string
   tasksDir: string
   toolName: string
   subject: string
@@ -105,21 +107,20 @@ function resolveTaskInput(
 ): ResolvedTaskInput | null {
   const sessionId = resolveSafeSessionId(input.session_id)
   if (!sessionId) return null
-  const subject = String(input.tool_input?.subject ?? "")
-  if (!subject) return null
   const tasksDir = getSessionTasksDir(sessionId)
   if (!tasksDir) return null
   return {
+    sessionId,
     tasksDir,
     toolName: input.tool_name ?? "",
-    subject,
+    subject: String(input.tool_input?.subject ?? ""),
     toolInput: (input.tool_input ?? {}) as Record<string, any>,
   }
 }
 
 async function dispatchTaskAudit(resolved: ResolvedTaskInput): Promise<void> {
   if (resolved.toolName === "TaskCreate") {
-    await handleTaskCreate(resolved.tasksDir, resolved.subject)
+    if (resolved.subject) await handleTaskCreate(resolved.tasksDir, resolved.subject)
   } else if (resolved.toolName === "TaskUpdate") {
     const taskId = String(resolved.toolInput.taskId ?? "")
     if (!taskId) return
@@ -133,7 +134,17 @@ export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<
   const resolved = resolveTaskInput(hookInput)
   if (!resolved) return {}
   await dispatchTaskAudit(resolved)
-  return {}
+
+  const tasks = await readTasks(resolved.sessionId)
+  if (tasks.length === 0) return {}
+
+  const taskList = formatTaskList(
+    tasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject })),
+    { indent: "" }
+  )
+  if (!taskList) return {}
+
+  return buildContextHookOutput("PostToolUse", `Current tasks:\n${taskList}`)
 }
 
 const posttooluseTaskAuditSync: SwizHook<Record<string, any>> = {
