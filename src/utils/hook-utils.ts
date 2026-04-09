@@ -47,6 +47,7 @@ import {
   SETUP_CMD_RE,
 } from "./git-utils.ts"
 import { extractHookSystemMessagePreview, messageFromUnknownError } from "./hook-json-helpers.ts"
+import { sanitizeHookOutputForCurrentAgent } from "./hook-output-agent-compat.ts"
 import {
   hsoPostToolUseDenyBlock,
   hsoPreToolUseAllow,
@@ -302,10 +303,11 @@ export function buildDenyPostToolUseOutput(reason: string): HookOutput {
 }
 
 export function exitWithHookObject(obj: HookOutput): never {
+  const safeObj = sanitizeHookOutputForCurrentAgent(obj)
   if (isInlineSwizHookRun()) {
-    throw new SwizHookExit(obj)
+    throw new SwizHookExit(safeObj)
   }
-  process.stdout.write(`${JSON.stringify(obj)}\n`)
+  process.stdout.write(`${JSON.stringify(safeObj)}\n`)
   process.exit(0)
 }
 

@@ -164,6 +164,32 @@ describe("dispatch execute integration", () => {
       const r: Record<string, any> = { continue: true }
       expect(() => coerceDispatchAgentEnvelopeInPlace(r, "stop", "Stop")).toThrow()
     })
+
+    it("sanitizes Codex-unsupported preToolUse allow fields during coercion", () => {
+      const prevCodexThreadId = process.env.CODEX_THREAD_ID
+      process.env.CODEX_THREAD_ID = "codex-dispatch-test"
+      try {
+        const r: Record<string, any> = {
+          suppressOutput: true,
+          systemMessage: "Heads up",
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
+            permissionDecisionReason: "Heads up",
+            updatedInput: { command: "echo safe" },
+          },
+        }
+        coerceDispatchAgentEnvelopeInPlace(r, "preToolUse", "PreToolUse")
+        expect(r).not.toHaveProperty("suppressOutput")
+        expect(r.hookSpecificOutput.permissionDecision).toBeUndefined()
+        expect(r.hookSpecificOutput.permissionDecisionReason).toBeUndefined()
+        expect(r.hookSpecificOutput.additionalContext).toBe("Heads up")
+        expect(r.hookSpecificOutput.updatedInput).toEqual({ command: "echo safe" })
+      } finally {
+        if (prevCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID
+        else process.env.CODEX_THREAD_ID = prevCodexThreadId
+      }
+    })
   })
 
   describe("transcriptSummaryProvider", () => {

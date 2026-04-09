@@ -13,6 +13,17 @@ async function runHelper(code: string): Promise<{
   parsed: JsonObject
   stdout: string
 }> {
+  return runHelperWithEnv(code)
+}
+
+async function runHelperWithEnv(
+  code: string,
+  envOverrides: Record<string, string> = {}
+): Promise<{
+  exitCode: number | null
+  parsed: JsonObject
+  stdout: string
+}> {
   const home = await mkdtemp(join(tmpdir(), "swiz-hook-utils-"))
   const script = `import { ${code}`
   try {
@@ -20,7 +31,17 @@ async function runHelper(code: string): Promise<{
       stdout: "pipe",
       stderr: "pipe",
       cwd: import.meta.dir,
-      env: { ...process.env, HOME: home },
+      env: {
+        ...process.env,
+        HOME: home,
+        CLAUDECODE: "",
+        CURSOR_TRACE_ID: "",
+        GEMINI_CLI: "",
+        GEMINI_PROJECT_DIR: "",
+        CODEX_THREAD_ID: "",
+        CODEX_MANAGED_BY_NPM: "",
+        ...envOverrides,
+      },
     })
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
@@ -257,6 +278,21 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
     )
     expect(() => JSON.parse(stdout)).not.toThrow()
     expect(stdout.split("\n").filter(Boolean).length).toBe(1)
+  })
+
+  test("omits Codex-unsupported allow and suppressOutput fields", async () => {
+    const { exitCode, parsed } = await runHelperWithEnv(
+      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput({ command: "echo safe" }, "Sanitized path")`,
+      { CODEX_THREAD_ID: "codex-test-thread" }
+    )
+    expect(exitCode).toBe(0)
+    expect(parsed).not.toHaveProperty("suppressOutput")
+    const hso = parsed.hookSpecificOutput as JsonObject
+    expect(hso).not.toHaveProperty("permissionDecision")
+    expect(hso).not.toHaveProperty("permissionDecisionReason")
+    expect(hso.additionalContext).toBe("Sanitized path")
+    expect(hso.updatedInput).toEqual({ command: "echo safe" })
   })
 })
 
