@@ -342,6 +342,9 @@ export const sessionHookInputSchema = allOptional(PkgPreCompactInputSchema)
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 
+/** Alias for dispatch validation — preCompact uses the PreCompact input shape. */
+export const preCompactHookInputSchema = sessionHookInputSchema
+
 /**
  * PreCommit hook input envelope.
  * Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
