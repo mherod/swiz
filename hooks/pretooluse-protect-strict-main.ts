@@ -11,13 +11,9 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 
 // All recognised aliases for the strictNoDirectMain setting
@@ -68,4 +64,6 @@ const pretoolusePprotectStrictMain: SwizHook = {
 export default pretoolusePprotectStrictMain
 
 // ─── Standalone execution (file-based dispatch / manual testing) ────────────
-if (import.meta.main) await runSwizHookAsMain(pretoolusePprotectStrictMain)
+if (import.meta.main) {
+  await runSwizHookAsMain(pretoolusePprotectStrictMain)
+}

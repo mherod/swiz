@@ -10,15 +10,11 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizShellHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const GH_PR_COMMENT_RE = /\bgh\s+pr\s+comment\b/
 const GH_PR_REVIEW_COMMENT_RE = /\bgh\s+pr\s+review\b.*--comment\b/

@@ -7,15 +7,15 @@ import {
   compactionChecklistSteps,
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
-import {
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import { countFileWords, formatActionPlan, isShellTool } from "../src/utils/hook-utils.ts"
+import {
+  countFileWords,
+  formatActionPlan,
+  isShellTool,
+  preToolUseDeny,
+} from "../src/utils/hook-utils.ts"
 
 export async function evaluatePretooluseClaudeWordLimit(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

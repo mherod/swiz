@@ -38,7 +38,7 @@ import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-mai
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
-import pretoolusClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
+import pretooluseClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
@@ -48,17 +48,17 @@ import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretooluseMainBranchScopeGate from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
-import pretoolusNoCp from "../hooks/pretooluse-no-cp.ts"
+import pretooluseNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
-import pretoolusNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
+import pretooluseNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
-import pretoolusNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
-import pretoolusNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
+import pretooluseNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
+import pretooluseNoMixedToolCalls from "../hooks/pretooluse-no-mixed-tool-calls.ts"
 import pretoolusNoNodeModulesEdit from "../hooks/pretooluse-no-node-modules-edit.ts"
-import pretoolusNoNpm from "../hooks/pretooluse-no-npm.ts"
+import pretooluseNoNpm from "../hooks/pretooluse-no-npm.ts"
 import pretooluseNoPhantomTaskCompletion from "../hooks/pretooluse-no-phantom-task-completion.ts"
-import pretoolusNoPushWhenInstructed from "../hooks/pretooluse-no-push-when-instructed.ts"
-import pretoolusNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
+import pretooluseNoPushWhenInstructed from "../hooks/pretooluse-no-push-when-instructed.ts"
+import pretooluseNoReadyToBacklog from "../hooks/pretooluse-no-ready-to-backlog.ts"
 import pretoolusNoSecrets from "../hooks/pretooluse-no-secrets.ts"
 import pretooluseNoTaskDelegation from "../hooks/pretooluse-no-task-delegation.ts"
 import pretooluseOffensiveLanguage from "../hooks/pretooluse-offensive-language.ts"
@@ -72,22 +72,22 @@ import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-gu
 import pretooluseRepeatedLintTest from "../hooks/pretooluse-repeated-lint-test.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
-import pretoolusSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
+import pretooluseSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
 import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
 import pretooluseTaskGovernance, {
   enforceTaskupdateHook as pretooluseEnforceTaskupdate,
   requireTasksHook as pretooluseRequireTasks,
+  taskupdateSchemaHook as pretooluseTaskupdateSchema,
   taskSubjectValidationHook as pretoolusTaskSubjectValidation,
-  taskupdateSchemaHook as pretoolusTaskupdateSchema,
 } from "../hooks/pretooluse-task-governance.ts"
-import pretoolusTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
+import pretooluseTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import pretooluseTrunkModeBranchGate from "../hooks/pretooluse-trunk-mode-branch-gate.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory-enforcement.ts"
-import pretoolusWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
+import pretooluseWorkflowPermissionsGate from "../hooks/pretooluse-workflow-permissions-gate.ts"
 import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
 import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-detects.ts"
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
@@ -246,7 +246,7 @@ const RAW_MANIFEST: HookGroup[] = [
     event: "preToolUse",
     matcher: "TaskUpdate|update_plan",
     hooks: [
-      { hook: pretoolusTaskupdateSchema },
+      { hook: pretooluseTaskupdateSchema },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseNoPhantomTaskCompletion },
       { hook: pretooluseDirtyWorktreeGate },
@@ -255,7 +255,7 @@ const RAW_MANIFEST: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "TaskOutput",
-    hooks: [{ hook: pretoolusTaskoutputTimeout }],
+    hooks: [{ hook: pretooluseTaskoutputTimeout }],
   },
   {
     event: "preToolUse",
@@ -288,22 +288,22 @@ const RAW_MANIFEST: HookGroup[] = [
       { hook: pretooluseBunApiEnforce },
       { hook: pretooluseTodoTracker },
       { hook: pretooluseLargeFiles },
-      { hook: pretoolusWorkflowPermissionsGate },
+      { hook: pretooluseWorkflowPermissionsGate },
       { hook: pretoolUseManiOrderValidation },
-      { hook: pretoolusClaudeMdWordLimit },
+      { hook: pretooluseClaudeMdWordLimit },
     ],
   },
   {
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
-      { hook: pretoolusNoMixedToolCalls },
+      { hook: pretooluseNoMixedToolCalls },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseBannedCommands },
-      { hook: pretoolusNoMergeConflictComments },
-      { hook: pretoolusNoCp },
+      { hook: pretooluseNoMergeConflictComments },
+      { hook: pretooluseNoCp },
       { hook: pretooluseGitIndexLock },
-      { hook: pretoolusNoNpm },
+      { hook: pretooluseNoNpm },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
       { hook: pretoolusePprotectStrictMain },
@@ -316,12 +316,12 @@ const RAW_MANIFEST: HookGroup[] = [
       { hook: pretooluseBlockCommitToMain },
       { hook: pretoolusePrChangesBranchGuard },
       { hook: pretooluseTrunkModeBranchGate },
-      { hook: pretoolusSkillInvocationGate },
-      { hook: pretoolusNoPushWhenInstructed },
+      { hook: pretooluseSkillInvocationGate },
+      { hook: pretooluseNoPushWhenInstructed },
       { hook: pretoolusePrAgeGate },
       { hook: pretooluseRepeatedLintTest },
-      { hook: pretoolusNoReadyToBacklog },
-      { hook: pretoolusNoIssueClose },
+      { hook: pretooluseNoReadyToBacklog },
+      { hook: pretooluseNoIssueClose },
     ],
   },
   {
@@ -336,7 +336,6 @@ const RAW_MANIFEST: HookGroup[] = [
       { hook: posttooluseTimeContext },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
-
       { hook: posttooluseTaskSync },
     ],
   },
@@ -476,7 +475,7 @@ const TASK_HOOK_IDENTIFIERS = new Set([
   "userpromptsubmit-task-advisor.ts",
 ])
 
-export const manifest: HookGroup[] = (() => {
+const buildManifest = () => {
   const tasksEnabled = agentHasTaskTools()
   if (tasksEnabled) return RAW_MANIFEST
 
@@ -491,7 +490,8 @@ export const manifest: HookGroup[] = (() => {
       hooks: group.hooks.filter((h) => !TASK_HOOK_IDENTIFIERS.has(hookIdentifier(h))),
     }
   })
-})()
+}
+export const manifest: HookGroup[] = buildManifest()
 
 // ─── Runtime routing validator ──────────────────────────────────────────────
 // Called at dispatch startup and install time to catch manifest/route/agent drift

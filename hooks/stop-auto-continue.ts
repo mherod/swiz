@@ -5,7 +5,7 @@
 
 import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
-import { resolveCwd } from "../src/cwd.ts"
+import { resolveSpawnCwd } from "../src/cwd.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
@@ -234,7 +234,7 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
   try {
     const input = stopHookInputSchema.parse(hookRaw)
-    return { input, cwd: resolveCwd(input.cwd) }
+    return { input, cwd: resolveSpawnCwd(input.cwd) }
   } catch (err) {
     const issues = err instanceof z.ZodError ? err.issues : []
     console.error("[stop-auto-continue] stopHookInputSchema parse failed:", JSON.stringify(issues))

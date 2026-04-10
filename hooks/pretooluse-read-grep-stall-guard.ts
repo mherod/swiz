@@ -14,15 +14,11 @@
 // Dual-mode: exports a SwizToolHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
+import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 /** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */

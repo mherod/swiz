@@ -14,14 +14,10 @@
  */
 
 import { formatActionPlan } from "../src/action-plan.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizFileEditHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
 import { fileEditHookInputSchema } from "../src/schemas.ts"
 import { resolveEditDelta } from "../src/utils/edit-projection.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
 
 const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//

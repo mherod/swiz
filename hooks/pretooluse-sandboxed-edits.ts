@@ -11,17 +11,12 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { git, isGitHubHost, isGitRepo, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizFileEditHook,
-  type SwizHookOutput,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { fileEditHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
 
 /**

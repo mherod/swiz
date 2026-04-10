@@ -3,10 +3,12 @@ import { getHomeDir } from "./home.ts"
 
 const HOME = getHomeDir()
 
+export type AgentId = "claude" | "cursor" | "gemini" | "codex" | "junie"
+
 // ─── Agent definition ───────────────────────────────────────────────────────
 
 export interface AgentDef {
-  id: string
+  id: AgentId
   name: string
   settingsPath: string
   /** JSON key path where hooks live inside the settings file */

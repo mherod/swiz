@@ -5,13 +5,7 @@
 // Fires once per 5 minutes (cooldownSeconds: 300 in manifest).
 // Fails open on all error paths — missing gh, no PR, no protection, API 404.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   formatActionPlan,
@@ -26,6 +20,8 @@ import {
   isGitHubRemote,
   isGitRepo,
   isShellTool,
+  preToolUseAllow,
+  preToolUseDeny,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
 

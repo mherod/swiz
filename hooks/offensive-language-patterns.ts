@@ -1123,7 +1123,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:it (?:might|would|could) be (?:worth|good|wise|smart|better|helpful) (?:to )?(?:check(?:ing)?|run(?:ning)? (?:this|it) by|consult(?:ing)?|get(?:ting)? (?:input|feedback|sign-?off|approval) from))|(?:(?:i |we )?(?:should|need to|must|ought to) (?:check with|consult|run (?:this|it) by|get (?:sign-?off|approval|input|feedback) from))/i,
+      /it (?:might|would|could) be (?:worth|good|wise|smart|better|helpful) (?:to )?(?:check(?:ing)?|run(?:ning)? (?:this|it) by|consult(?:ing)?|get(?:ting)? (?:input|feedback|sign-?off|approval) from)|(?:(?:i |we )?(?:should|need to|must|ought to) (?:check with|consult|run (?:this|it) by|get (?:sign-?off|approval|input|feedback) from))/i,
     response:
       "You do not need anyone's sign-off to do the work assigned to you. " +
       "Inventing an approval chain that doesn't exist is a delay tactic.",
@@ -1340,7 +1340,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "trailing_deferral",
     pattern:
-      /(?:(?:just )?let me know (?:(?:if|when) you(?:'re| are) ready|how to proceed|what you(?:'d| would) prefer|your (?:thoughts|preference)))\s*[.!]?\s*$/im,
+      /(?:just )?let me know (?:(?:if|when) you(?:'re| are) ready|how to proceed|what you(?:'d| would) prefer|your (?:thoughts|preference))\s*[.!]?\s*$/im,
     response:
       "The user is always ready. They were ready when they gave you the task. " +
       "Ending with 'let me know' is a soft refusal to own the next step. Own it.",
@@ -1348,7 +1348,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "trailing_deferral",
     pattern:
-      /(?:(?:i )?(?:await|look forward to|am waiting for|am ready for) your (?:feedback|input|direction|guidance|decision|approval|instructions|thoughts|response))\s*[.!]?\s*$/im,
+      /(?:i )?(?:await|look forward to|am waiting for|am ready for) your (?:feedback|input|direction|guidance|decision|approval|instructions|thoughts|response)\s*[.!]?\s*$/im,
     response:
       "Closing with a request for user input inverts the delegation. " +
       "You were handed full ownership precisely so the user does not need to provide ongoing direction. " +

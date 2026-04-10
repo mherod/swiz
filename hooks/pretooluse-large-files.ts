@@ -14,12 +14,7 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { formatActionPlan } from "../src/action-plan.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizFileEditHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
 import { fileEditHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
@@ -30,6 +25,7 @@ import {
 } from "../src/settings.ts"
 import { isEditTool, isWriteTool } from "../src/tool-matchers.ts"
 import { computeProjectedContent } from "../src/utils/edit-projection.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 /** Find .gitattributes content searching cwd and up to 5 parent directories. */
 async function findGitattributesLfsLines(cwd: string): Promise<string[]> {

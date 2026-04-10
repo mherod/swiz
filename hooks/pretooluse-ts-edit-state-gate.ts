@@ -6,16 +6,11 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-  type SwizHookOutput,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
 import type { ProjectState } from "../src/settings"
 import { isCodeChangeTool } from "../src/tool-matchers.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const ALLOWED_STATES = new Set<ProjectState>(["developing", "reviewing", "addressing-feedback"])
 

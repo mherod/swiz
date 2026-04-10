@@ -7,7 +7,7 @@ import {
   isRunningInAgent,
   resolveTranslationAgent,
 } from "./agent-paths.ts"
-import { resolveCwd } from "./cwd.ts"
+import { resolveSpawnCwd } from "./cwd.ts"
 
 // ─── Terminal & shell detection ──────────────────────────────────────────────
 // Re-exported from hooks/utils/terminal-detection.ts so both src/ and hooks/
@@ -115,7 +115,7 @@ async function detectCiProvidersInDir(dir: string): Promise<Set<CiProvider>> {
  * directory up to the filesystem root.
  */
 export async function detectCiProviders(startDir?: string): Promise<Set<CiProvider>> {
-  let dir = resolveCwd(startDir)
+  let dir = resolveSpawnCwd(startDir)
   const providers = new Set<CiProvider>()
 
   while (true) {

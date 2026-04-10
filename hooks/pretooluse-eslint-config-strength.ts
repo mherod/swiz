@@ -6,12 +6,8 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 // Check if file is an ESLint config file
 // Legacy: .eslintrc, .eslintrc.json, .eslintrc.js, .eslintrc.cjs, .eslintrc.yml, .eslintrc.yaml

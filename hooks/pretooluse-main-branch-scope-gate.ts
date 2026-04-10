@@ -8,13 +8,7 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
@@ -34,6 +28,8 @@ import {
   isDefaultBranch,
   isShellTool,
   parseGitStatSummary,
+  preToolUseAllow,
+  preToolUseDeny,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
 import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"

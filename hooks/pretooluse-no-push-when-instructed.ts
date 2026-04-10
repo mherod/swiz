@@ -21,15 +21,10 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-  type SwizHookOutput,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
   const injected = (input as Record<string, any>)._effectiveSettings as

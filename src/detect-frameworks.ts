@@ -12,7 +12,7 @@
 
 import { access } from "node:fs/promises"
 import { join } from "node:path"
-import { resolveCwd } from "./cwd.ts"
+import { resolveSpawnCwd } from "./cwd.ts"
 import { CappedMap } from "./utils/capped-map.ts"
 
 /** Async file-existence check using `access()`. */
@@ -109,7 +109,7 @@ async function readPackageDeps(dir: string): Promise<Record<string, string>> {
  * Results are cached per resolved `cwd` for the lifetime of the process.
  */
 export async function detectFrameworks(cwd?: string): Promise<Set<Framework>> {
-  const dir = resolveCwd(cwd)
+  const dir = resolveSpawnCwd(cwd)
   const cached = _frameworkCache.get(dir)
   if (cached !== undefined) return cached
 
@@ -198,7 +198,7 @@ export function clearFrameworkCache(): void {
  * Results are cached per resolved `cwd` for the lifetime of the process.
  */
 export async function detectProjectStack(cwd?: string): Promise<string[]> {
-  const dir = resolveCwd(cwd)
+  const dir = resolveSpawnCwd(cwd)
   const cached = _stackCache.get(dir)
   if (cached !== undefined) return cached
 

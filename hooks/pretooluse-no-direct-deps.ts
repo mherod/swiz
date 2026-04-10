@@ -11,14 +11,10 @@
 
 import { dirname } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isEditTool, isFileEditTool, isWriteTool } from "../src/tool-matchers.ts"
 import { computeProjectedContent } from "../src/utils/edit-projection.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { detectPackageManager } from "../src/utils/package-detection.ts"
 
 const DEP_FIELDS = [

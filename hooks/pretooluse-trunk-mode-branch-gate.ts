@@ -8,12 +8,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import {
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import {
@@ -30,6 +25,7 @@ import {
   ghJson,
   isGitRepo,
   isShellTool,
+  preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
 
 function isAllowedTrunkCheckoutTarget(target: string, defaultBranch: string): boolean {

@@ -102,13 +102,6 @@ export function hsoPreToolUseAllowWithUpdatedInput(
   }
 }
 
-export function hsoContextEvent(
-  hookEventName: string,
-  additionalContext: string
-): Partial<HookSpecificOutput> {
-  return hookSpecificOutputSchema.parse({ hookEventName, additionalContext })
-}
-
 export function hsoPostToolUseDenyBlock(reason: string): HookSpecificOutput {
   return hookSpecificOutputSchema.parse({
     hookEventName: "PostToolUse",

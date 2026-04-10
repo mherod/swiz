@@ -3,15 +3,15 @@
 // Rules with severity "warn" allow the command through with a gentle nudge.
 // Rules with severity "deny" (default) block the command entirely.
 
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
 import {
+  detectPackageManager,
+  isShellTool,
   preToolUseAllow,
   preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
-import { detectPackageManager, isShellTool, skillExists } from "../src/utils/hook-utils.ts"
+  skillExists,
+} from "../src/utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,

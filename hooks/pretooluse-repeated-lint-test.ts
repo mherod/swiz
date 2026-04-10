@@ -19,12 +19,7 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { orderBy } from "lodash-es"
-import {
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
@@ -34,6 +29,7 @@ import {
   isCodeChangeTool,
   isGitRepo,
   isShellTool,
+  preToolUseDeny,
   readSessionLines,
   stripAnsi,
 } from "../src/utils/hook-utils.ts"

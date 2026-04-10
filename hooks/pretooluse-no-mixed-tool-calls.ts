@@ -11,12 +11,7 @@
  */
 
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizShellHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import {
   EDIT_TOOLS,
@@ -28,6 +23,7 @@ import {
   TASK_TOOLS,
   WRITE_TOOLS,
 } from "../src/tool-matchers.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]

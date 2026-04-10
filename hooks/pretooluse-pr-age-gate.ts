@@ -16,13 +16,7 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
@@ -36,6 +30,8 @@ import {
   ghJson,
   git,
   isShellTool,
+  preToolUseAllow,
+  preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
 
 /** Format milliseconds as "Xm Ys". */

@@ -15,13 +15,9 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizFileEditHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 // Duplicated from git-utils.ts to avoid circular deps via settings.ts → manifest.ts
 const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//

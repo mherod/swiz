@@ -14,25 +14,20 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
-import { skillExists } from "../src/skill-utils.ts"
+import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import { formatSkillReferenceForAgent, skillExists } from "../src/skill-utils.ts"
 import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
 } from "../src/transcript-summary.ts"
 import { GIT_COMMIT_RE, GIT_PUSH_DELETE_RE, GIT_PUSH_RE } from "../src/utils/git-utils.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
 function formatSessionSkillsForReason(skills: string[]): string {
-  if (skills.length === 0) return "Skills used this session: (none)"
-  return `Skills used this session: ${skills.map((s) => `/${s}`).join(", ")}`
+  return `Skills used this session: ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
 const pretoolusSkillInvocationGate: SwizHook = {
@@ -41,7 +36,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
   matcher: "Bash",
   timeout: 5,
 
-  async run(rawInput) {
+  run: async (rawInput: Record<string, any>): Promise<SwizHookOutput> => {
     const input = rawInput as Record<string, any>
     if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
@@ -67,6 +62,8 @@ const pretoolusSkillInvocationGate: SwizHook = {
     if (!transcriptPath) return {}
 
     const invokedSkills = await getSkillsUsedForCurrentSession(input)
+    const reason = formatSessionSkillsForReason(invokedSkills)
+    const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
     if (invokedSkills.includes(requiredSkill)) {
       // For commits, also require TaskList to have been called — ensures the
@@ -81,7 +78,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
         }
       }
       return preToolUseAllow(
-        `/${requiredSkill} skill was invoked in this session.\n${formatSessionSkillsForReason(invokedSkills)}`
+        `${skillReferenceForAgent} skill was invoked in this session.\n${reason}`
       )
     }
 
@@ -90,12 +87,15 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const verb = requiredSkill === "commit" ? "commit" : "push"
 
     return preToolUseDeny(
-      `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
-        `${formatSessionSkillsForReason(invokedSkills)}\n\n` +
-        formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {
-          header: `The /${requiredSkill} skill has not been invoked in this session:`,
-        }) +
-        `\nWhy this matters: the /${requiredSkill} skill enforces the complete ` +
+      `BLOCKED: git ${verb} requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+        `${reason}\n\n` +
+        formatActionPlan(
+          [`Invoke the ${skillReferenceForAgent} skill before running git ${verb}.`],
+          {
+            header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+          }
+        ) +
+        `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete ` +
         `${verb} workflow (branch checks, task preflight, message format). ` +
         `Running git ${verb} directly skips these safeguards.`
     )

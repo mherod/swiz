@@ -1,4 +1,4 @@
-import { resolveCwd } from "./cwd.ts"
+import { resolveSpawnCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import type { IssueStore, MutationPayload, PendingMutation } from "./issue-store.ts"
 import { isGraphQLRateLimited, tryMutationRestFallback } from "./issue-store-rest-fallback.ts"
@@ -271,7 +271,7 @@ function logReplayExecFailed(
  */
 export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
   try {
-    const dir = resolveCwd(cwd)
+    const dir = resolveSpawnCwd(cwd)
     const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
     if (!hasGhCli()) return
     if (!(await isGitRepo(dir))) return

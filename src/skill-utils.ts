@@ -3,14 +3,14 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
 import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
-import { resolveCwd } from "./cwd.ts"
+import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
 // Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
-export const SKILL_DIRS = [join(resolveCwd(), ".skills"), ...getAllProviderSkillDirs()]
+export const SKILL_DIRS = [join(resolveSpawnCwd(), ".skills"), ...getAllProviderSkillDirs()]
 // Deterministic precedence for duplicate names: first directory wins.
 export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 
@@ -125,7 +125,7 @@ function processAllowedToolsLine(
 }
 
 export function extractMandatedSkillTools(content: string): string[] {
-  const match = content.match(/^---\n([\s\S]*?)\n---(?:[ \t]*\n?)/)
+  const match = content.match(/^---\n([\s\S]*?)\n---[ \t]*\n?/)
   if (!match?.[1]) return []
 
   const lines = match[1].split("\n")
@@ -238,10 +238,11 @@ function detectActiveSkillTools(): string[] {
   const tools = new Set<string>()
 
   // Agent-specific aliases are the primary invocation names.
-  for (const alias of Object.values(active.toolAliases)) tools.add(alias)
+  const toolAliases = active.toolAliases
+  for (const alias of Object.values(toolAliases)) tools.add(alias)
 
   // Include canonical names that map for this agent.
-  for (const canonical of Object.keys(active.toolAliases)) {
+  for (const canonical of Object.keys(toolAliases)) {
     if (agentSupportsTool(active, canonical)) {
       tools.add(canonical)
     }
@@ -262,6 +263,17 @@ export interface SkillToolAvailabilityWarning {
   activeTools: string[]
   requiredTools: string[]
   message: string
+}
+
+export function formatSkillReferenceForAgent(skillName: string): string {
+  const a = detectCurrentAgent()
+  switch (a?.id) {
+    case "claude":
+      return `\`/${skillName}\``
+    case "codex":
+      return `\`$${skillName}\``
+  }
+  return `Skill(${skillName})`
 }
 
 /**
@@ -287,10 +299,7 @@ export function getSkillToolAvailabilityWarning(
     missingTools,
     activeTools: available,
     requiredTools,
-    message:
-      `⚠ Skill tool availability warning for /${skillName}: ` +
-      `required tool(s) not active in this session: ${missingTools.join(", ")}. ` +
-      `Active tool list: ${available.join(", ")}.`,
+    message: `⚠ Skill tool availability warning for ${formatSkillReferenceForAgent(skillName)}: required tool(s) not active in this session: ${missingTools.join(", ")}. Active tool list: ${available.join(", ")}.`,
   }
 }
 
@@ -426,12 +435,11 @@ const BACKTICK_DOMINANT_RE = /^`[^`]+`/
 export function filterQualitySteps(steps: SkillStep[]): SkillStep[] {
   return steps.filter((step) => {
     const subject = step.subject.trim()
-    // Strip markdown formatting for word counting
+    // Strip Markdown formatting for word counting
     const plain = subject.replace(/`[^`]*`/g, "").trim()
     const wordCount = plain.split(/\s+/).filter(Boolean).length
     if (wordCount < 2) return false
-    if (BACKTICK_DOMINANT_RE.test(subject)) return false
-    return true
+    return !BACKTICK_DOMINANT_RE.test(subject)
   })
 }
 

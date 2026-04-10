@@ -6,14 +6,10 @@
 // Dual-mode: exports a SwizToolHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { parseBunEnforcementInput, usesBunApis } from "../src/utils/bun-enforcement-utils.ts"
 import { computeProjectedContent } from "../src/utils/edit-projection.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 // ── Blocked operations ──────────────────────────────────────────────────────
 

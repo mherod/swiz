@@ -30,6 +30,7 @@ import {
   type FileEditHookInput,
   type HookOutput,
   hookOutputSchema,
+  hookSpecificOutputSchema,
   type SessionHookInput,
   type ShellHookInput,
   type StopHookInput,
@@ -37,17 +38,10 @@ import {
 } from "./schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
 import {
-  extractHookSystemMessagePreview,
   hasNonEmptyHookOutput,
   isJsonLikeRecord,
   messageFromUnknownError,
 } from "./utils/hook-json-helpers.ts"
-import {
-  hsoContextEvent,
-  hsoPreToolUseAllow,
-  hsoPreToolUseAllowContextual,
-  hsoPreToolUseDeny,
-} from "./utils/hook-specific-output.ts"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -172,7 +166,10 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
   return hookOutputSchema.parse({
     systemMessage: context,
     suppressOutput: true,
-    hookSpecificOutput: hsoContextEvent(eventName, context),
+    hookSpecificOutput: hookSpecificOutputSchema.parse({
+      hookEventName: eventName,
+      additionalContext: context,
+    }),
   })
 }
 
@@ -180,46 +177,6 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
 // Inline equivalents of the process.exit-based helpers in hook-utils.ts.
 // These return output objects instead of terminating the process, making them
 // safe for use in SwizHook.run() implementations.
-
-/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
-export function preToolUseAllow(reason = ""): SwizHookOutput {
-  const preview = extractHookSystemMessagePreview(reason)
-  return {
-    suppressOutput: true,
-    systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseAllow(reason),
-  }
-}
-
-/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
-export function preToolUseDeny(reason: string): SwizHookOutput {
-  const fullReason = `${reason}
-
-You must act on this now. Do not try to stop again without completing the required action.`
-
-  const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
-  return {
-    suppressOutput: true,
-    systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
-  }
-}
-
-/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
-export function preToolUseAllowWithContext(
-  reason: string,
-  additionalContext: string
-): SwizHookOutput {
-  const effectiveReason = reason || additionalContext
-  return {
-    suppressOutput: true,
-    ...(additionalContext && { systemMessage: additionalContext }),
-    hookSpecificOutput: hsoPreToolUseAllowContextual(
-      effectiveReason || undefined,
-      additionalContext || undefined
-    ),
-  }
-}
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
 

@@ -1,9 +1,8 @@
 import { merge, unset } from "lodash-es"
 import type { HookGroup } from "../manifest.ts"
-import { type HookOutput, hookOutputSchema } from "../schemas.ts"
+import { type HookOutput, hookOutputSchema, hookSpecificOutputSchema } from "../schemas.ts"
 import {
   getHookSpecificOutput,
-  hsoContextEvent,
   hsoPreToolUseMergedAllow,
   mergeHookSpecificOutputClone,
 } from "../utils/hook-specific-output.ts"
@@ -537,7 +536,10 @@ class ContextStrategy implements HookExecutionStrategy {
         }
         log(`   result: merged ${contexts.length} context(s), hookEventName=${hookEventName}`)
         return hookOutputSchema.parse({
-          hookSpecificOutput: hsoContextEvent(hookEventName, contexts.join("\n\n")),
+          hookSpecificOutput: hookSpecificOutputSchema.parse({
+            hookEventName,
+            additionalContext: contexts.join("\n\n"),
+          }),
         })
       },
     })

@@ -15,14 +15,10 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { git } from "../src/git-helpers.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const pretoolusWorkflowPermissionsGate: SwizHook = {
   name: "pretooluse-workflow-permissions-gate",

@@ -5,19 +5,13 @@
  * Extracted from hook-utils.ts (issue #422).
  */
 
-import {
-  isAutoSteerDeferredForForegroundAppName,
-  shouldDeferAutoSteerForForegroundChatApp,
-} from "./auto-steer-foreground.ts"
-
-export { isAutoSteerDeferredForForegroundAppName, shouldDeferAutoSteerForForegroundChatApp }
-
-type Trigger = import("../auto-steer-store.ts").AutoSteerTrigger
+import type { AutoSteerTrigger } from "../auto-steer-store.ts"
+import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
 
 export interface AutoSteerRequest {
   message: string
   timestamp: number
-  trigger?: Trigger
+  trigger?: AutoSteerTrigger
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
@@ -212,7 +206,7 @@ export async function sendAutoSteer(
 export async function scheduleAutoSteer(
   sessionId: string,
   message = "Continue",
-  trigger?: Trigger,
+  trigger?: AutoSteerTrigger,
   cwd?: string
 ): Promise<boolean> {
   const { terminalApp, settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
@@ -233,7 +227,7 @@ export async function scheduleAutoSteer(
  */
 export async function consumeAutoSteerRequest(
   sessionId: string,
-  trigger?: Trigger
+  trigger?: AutoSteerTrigger
 ): Promise<AutoSteerRequest | null> {
   const safeSession = await sanitizeSessionOrReturnNull(sessionId)
   if (!safeSession) return null

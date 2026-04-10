@@ -11,16 +11,11 @@
 import { unlink } from "node:fs/promises"
 import { compact } from "lodash-es"
 import { GIT_DIR_NAME, GIT_INDEX_LOCK, git, joinGitPath } from "../src/git-helpers.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizShellHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GIT_ANY_CMD_RE } from "../src/utils/git-utils.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 

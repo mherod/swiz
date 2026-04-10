@@ -15,16 +15,12 @@ import {
   manualCompactionGuidanceFallback,
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { skillAdvice } from "../src/skill-utils.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 async function buildWordLimitDenyReason(

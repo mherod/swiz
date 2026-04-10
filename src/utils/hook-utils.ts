@@ -24,15 +24,11 @@ import {
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { isInlineSwizHookRun, SwizHookExit } from "../inline-hook-context.ts"
-import {
-  buildContextHookOutput,
-  preToolUseAllow,
-  preToolUseAllowWithContext,
-  preToolUseDeny,
-} from "../SwizHook.ts"
+import { buildContextHookOutput, type SwizHookOutput } from "../SwizHook.ts"
 import {
   type HookOutput,
   hookOutputSchema,
+  hookSpecificOutputSchema,
   type SessionHookInput,
   type ToolHookInput,
 } from "../schemas.ts"
@@ -252,9 +248,6 @@ export function allowPreToolUseWithUpdatedInput(
 ): never {
   exitWithHookObject(allowPreToolUseWithUpdatedInputObj(updatedInput, reason))
 }
-
-// ── SwizHook inline output builders — canonical implementations in SwizHook.ts ─
-export { preToolUseAllow, preToolUseAllowWithContext, preToolUseDeny }
 
 /**
  * Factory for file-path guard PreToolUse hooks.
@@ -912,21 +905,18 @@ export function forkRemoteRef(
 //   hook_event_name?: string
 // }
 
-export { spawnSpeak } from "../speech.ts"
-
 // ─── File utilities ───────────────────────────────────────────────────────
 
 export { countFileWords } from "../file-metrics.ts"
+export { spawnSpeak } from "../speech.ts"
 // ─── Auto-steer scheduling (extracted to auto-steer-helpers.ts) ────────────
 export {
   type AutoSteerRequest,
   consumeAutoSteerRequest,
   isAutoSteerAvailable,
-  isAutoSteerDeferredForForegroundAppName,
   type SendAutoSteerOptions,
   scheduleAutoSteer,
   sendAutoSteer,
-  shouldDeferAutoSteerForForegroundChatApp,
 } from "./auto-steer-helpers.ts"
 /**
  * Returns true when a file path should be skipped by source-scanning hooks.
@@ -951,5 +941,57 @@ export interface TaskToolInput extends ToolHookInput {
     activeForm?: string
     metadata?: Record<string, any>
     [key: string]: unknown
+  }
+}
+
+/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
+export function preToolUseAllow(reason = ""): SwizHookOutput {
+  const preview = extractHookSystemMessagePreview(reason)
+  return {
+    suppressOutput: true,
+    systemMessage: preview,
+    hookSpecificOutput: hsoPreToolUseAllow(reason),
+  }
+}
+
+/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
+export function preToolUseDeny(reason: string): SwizHookOutput {
+  const fullReason = `${reason}
+
+You must act on this now. Do not try to stop again without completing the required action.`
+
+  const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
+  return {
+    suppressOutput: true,
+    systemMessage: preview,
+    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
+  }
+}
+
+/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
+export function preToolUseAllowWithContext(
+  reason: string,
+  additionalContext: string
+): SwizHookOutput {
+  const effectiveReason = reason || additionalContext
+  return {
+    suppressOutput: true,
+    ...(additionalContext && { systemMessage: additionalContext }),
+    hookSpecificOutput: hsoPreToolUseAllowContextual(
+      effectiveReason || undefined,
+      additionalContext || undefined
+    ),
+  }
+}
+
+/** Same envelope as `emitContext` in hook-utils, without `process.exit` (safe for inline dispatch). */
+export function postToolUseAdditionalContext(context: string): SwizHookOutput {
+  return {
+    systemMessage: context,
+    suppressOutput: true,
+    hookSpecificOutput: hookSpecificOutputSchema.parse({
+      hookEventName: "PostToolUse",
+      additionalContext: context,
+    }),
   }
 }

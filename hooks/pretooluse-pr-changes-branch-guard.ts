@@ -7,13 +7,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHookOutput,
-  type SwizToolHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
@@ -30,6 +24,8 @@ import {
   isGitHubRemote,
   isGitRepo,
   isShellTool,
+  preToolUseAllow,
+  preToolUseDeny,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
 

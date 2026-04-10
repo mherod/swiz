@@ -13,14 +13,10 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizHook } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 /**
  * Patterns that indicate inline issue-guidance text that should use buildIssueGuidance().

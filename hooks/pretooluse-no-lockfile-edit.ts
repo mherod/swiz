@@ -6,13 +6,9 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import {
-  preToolUseAllow,
-  preToolUseDeny,
-  runSwizHookAsMain,
-  type SwizFileEditHook,
-} from "../src/SwizHook.ts"
+import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
+import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const LOCKFILE_RE =
   /(^|[\\/])(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|shrinkwrap\.yaml)$/i
