@@ -145,16 +145,30 @@ describe("pretooluse-git-index-lock", () => {
       async () => {
         const repo = await createLockedRepo("deny-immutable")
         const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
+        const gitDir = join(repo, ".git")
         // Make the lock file immutable so unlink will fail.
-        const chflagsProc = Bun.spawn(["chflags", "uchg", lockPath], {
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        await chflagsProc.exited
+        // macOS: chflags uchg; Linux: chmod 000 on parent directory.
+        try {
+          const chflagsProc = Bun.spawn(["chflags", "uchg", lockPath], {
+            stdout: "pipe",
+            stderr: "pipe",
+          })
+          await chflagsProc.exited
+          if (chflagsProc.exitCode !== 0) throw new Error("chflags failed")
+        } catch {
+          // Linux fallback: restrict the parent .git directory.
+          Bun.spawnSync(["chmod", "500", gitDir])
+        }
         const result = await runHook("git status", repo)
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("index.lock")
         expect(result.reason).toContain("removal attempts")
+        // Restore permissions so cleanup can remove the repo.
+        try {
+          Bun.spawnSync(["chflags", "nouchg", lockPath])
+        } catch {
+          Bun.spawnSync(["chmod", "755", gitDir])
+        }
       },
       { timeout: 30_000 }
     )
