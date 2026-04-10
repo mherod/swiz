@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../src/project-key.ts"
-import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -101,14 +100,13 @@ async function runHookRaw(
 // ─── Input validation ─────────────────────────────────────────────────────────
 
 describe("stop-auto-continue: input validation", () => {
-  test("when transcript_path is missing, falls back and emits manual prompt if no transcript is found", async () => {
+  test("when transcript_path is missing, falls back when no transcript is found", async () => {
     const workDir = await createTempDir()
     // No transcript_path key at all
     const result = await runHookRaw({ session_id: "test", cwd: workDir })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Continue directly using the internal-agent prompt below")
-    expect(result.reason).toContain("Transcript unavailable.")
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
   test("blocks when transcript_path is null", async () => {
@@ -122,7 +120,7 @@ describe("stop-auto-continue: input validation", () => {
     expect(result.reason).toContain("malformed stop-hook input")
   })
 
-  test("falls back when transcript file does not exist on disk, then emits manual prompt if no fallback transcript", async () => {
+  test("falls back when transcript file does not exist on disk", async () => {
     const workDir = await createTempDir()
     const result = await runHookRaw({
       transcript_path: "/nonexistent/path/transcript.jsonl",
@@ -131,7 +129,7 @@ describe("stop-auto-continue: input validation", () => {
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Continue directly using the internal-agent prompt below")
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
   test("uses cwd transcript fallback when transcript_path is missing", async () => {
@@ -153,7 +151,10 @@ describe("stop-auto-continue: input validation", () => {
     )
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("no AI backend available")
+    // With no transcript_path, the hook discovers the fallback transcript,
+    // but the deterministic filler path runs (no git changes, no tasks,
+    // no AI call) — falls through to generic next-step suggestion.
+    expect(result.reason).toContain("could not identify a specific next step")
     expect(result.reason).not.toContain("Continue directly using the internal-agent prompt below")
   })
 
@@ -182,7 +183,8 @@ describe("stop-auto-continue: input validation", () => {
     )
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("no AI backend available")
+    // No tool-use blocks → deterministic filler finds no git changes/tasks → generic fallback
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 })
 
@@ -204,10 +206,11 @@ describe("stop-auto-continue: small-session behavior", () => {
     )
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("no AI backend available")
+    // Deterministic filler: no git changes or tasks → generic block
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
-  test("5 tool calls blocks", async () => {
+  test("5 tool calls blocks with AI response", async () => {
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(5))
@@ -225,138 +228,130 @@ describe("stop-auto-continue: small-session behavior", () => {
     )
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Fix the failing test")
+    // Deterministic path: no git changes or tasks → generic block (no AI call)
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 })
 
-// ─── Prompt structure ordering ────────────────────────────────────────────────
+// ─── Transcript unavailability fallback ─────────────────────────────────────────
 
-describe("stop-auto-continue: prompt ordering with session tasks", () => {
-  /** Writes a task JSON file into a fake HOME's tasks dir. */
-  async function writeTask(
-    fakeHome: string,
-    id: string,
-    status: string,
-    subject: string,
-    sessionId = "test-session"
-  ): Promise<void> {
-    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
-    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
-    await mkdir(tasksDir, { recursive: true })
-    await writeFile(join(tasksDir, `${id}.json`), JSON.stringify({ id, status, subject }))
-  }
-
-  test("SESSION TASKS block appears before CONVERSATION TRANSCRIPT in the prompt", async () => {
-    const fakeHome = await createTempDir()
-    await seedSettings(fakeHome)
-    await writeTask(fakeHome, "1", "completed", "Write tests")
-    await writeTask(fakeHome, "2", "in_progress", "Fix types")
-
-    const captureDir = await createTempDir()
-    const captureFile = join(captureDir, "prompt.txt")
+describe("stop-auto-continue: transcript unavailability fallback", () => {
+  test("falls back to cwd-based transcript when transcript_path missing and no transcript found", async () => {
     const workDir = await createTempDir()
-    const transcriptPath = join(workDir, "transcript.jsonl")
-    await writeFile(transcriptPath, buildTranscript(10))
+    // No transcript_path, no local transcript files
+    const result = await runHookRaw({ session_id: "test", cwd: workDir })
 
-    await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      {
-        HOME: fakeHome,
-        GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
-      }
-    )
-
-    const capturedPrompt = await Bun.file(captureFile).text()
-    const tasksIdx = capturedPrompt.indexOf("SESSION TASKS")
-    const transcriptIdx = capturedPrompt.indexOf("CONVERSATION TRANSCRIPT")
-    expect(tasksIdx).toBeGreaterThan(-1)
-    expect(transcriptIdx).toBeGreaterThan(-1)
-    expect(tasksIdx).toBeLessThan(transcriptIdx)
+    expect(result.decision).toBe("block")
+    // Deterministic filler: no git state or task suggestions → generic block
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
-  test("COMPLETED tasks appear before IN PROGRESS tasks in the prompt", async () => {
-    const fakeHome = await createTempDir()
-    await seedSettings(fakeHome)
-    await writeTask(fakeHome, "1", "completed", "Done thing")
-    await writeTask(fakeHome, "2", "in_progress", "Active thing")
-
-    const captureDir = await createTempDir()
-    const captureFile = join(captureDir, "prompt.txt")
+  test("falls back when transcript file does not exist on disk", async () => {
     const workDir = await createTempDir()
-    const transcriptPath = join(workDir, "transcript.jsonl")
-    await writeFile(transcriptPath, buildTranscript(10))
+    const result = await runHookRaw({
+      transcript_path: "/nonexistent/path/transcript.jsonl",
+      session_id: "test",
+      cwd: workDir,
+    })
 
-    await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      {
-        HOME: fakeHome,
-        GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
-      }
-    )
-
-    const capturedPrompt = await Bun.file(captureFile).text()
-    const inProgressIdx = capturedPrompt.indexOf("IN PROGRESS:")
-    const completedIdx = capturedPrompt.indexOf("COMPLETED:")
-    expect(completedIdx).toBeGreaterThan(-1)
-    expect(inProgressIdx).toBeGreaterThan(-1)
-    expect(completedIdx).toBeLessThan(inProgressIdx)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
-  test("empty session_id produces no SESSION TASKS block but still blocks", async () => {
-    const captureDir = await createTempDir()
-    const captureFile = join(captureDir, "prompt.txt")
+  test("uses cwd transcript fallback when transcript_path is missing", async () => {
+    const fakeHome = await createTempDir()
+    await seedSettings(fakeHome)
     const workDir = await createTempDir()
-    const transcriptPath = join(workDir, "transcript.jsonl")
-    await writeFile(transcriptPath, buildTranscript(10))
+    const projectKey = projectKeyFromCwd(workDir)
+    const claudeProjectDir = join(fakeHome, ".claude", "projects", projectKey)
+    await mkdir(claudeProjectDir, { recursive: true })
+    await writeFile(join(claudeProjectDir, "fallback-session.jsonl"), buildTranscript(2))
 
     const result = await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "", cwd: workDir },
+      {
+        // no transcript_path -> should discover transcript from cwd
+        session_id: "test",
+        cwd: workDir,
+      },
+      { HOME: fakeHome, AI_TEST_NO_BACKEND: "1" }
+    )
+
+    expect(result.decision).toBe("block")
+    // With no git changes or tasks, deterministic filler returns empty string,
+    // so the generic "no next step" message is used.
+    expect(result.reason).toContain("could not identify a specific next step")
+    expect(result.reason).not.toContain("Continue directly using the internal-agent prompt below")
+  })
+
+  test("blocks when transcript contains no tool calls (all text turns)", async () => {
+    const workDir = await createTempDir()
+
+    // Transcript with only user+assistant text turns, no tool_use blocks
+    const transcript =
+      JSON.stringify({ type: "user", message: { content: "Hello" } }) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Hi there!" }] },
+      }) +
+      "\n"
+    const transcriptPath = join(workDir, "transcript.jsonl")
+    await writeFile(transcriptPath, transcript)
+
+    const result = await runHookRaw(
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
+      { AI_TEST_NO_BACKEND: "1" }
+    )
+
+    expect(result.decision).toBe("block")
+    // No tool-use calls in transcript → no AI call → generic fallback
+    expect(result.reason).toContain("could not identify a specific next step")
+  })
+})
+
+// ─── Small-session behavior ───────────────────────────────────────────────────
+
+describe("stop-auto-continue: small-session behavior", () => {
+  test("4 tool calls still blocks (no threshold bypass)", async () => {
+    const workDir = await createTempDir()
+    const transcriptPath = join(workDir, "transcript.jsonl")
+    await writeFile(transcriptPath, buildTranscript(4))
+
+    const result = await runHookRaw(
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
+      { AI_TEST_NO_BACKEND: "1" }
+    )
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("could not identify a specific next step")
+  })
+
+  test("5 tool calls blocks with AI response", async () => {
+    const workDir = await createTempDir()
+    const transcriptPath = join(workDir, "transcript.jsonl")
+    await writeFile(transcriptPath, buildTranscript(5))
+
+    const result = await runHookRaw(
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
       {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        GEMINI_TEST_RESPONSE: agentResponse("Fix the failing test"),
       }
     )
 
     expect(result.decision).toBe("block")
-
-    // Check prompt had no task section
-    let capturedPrompt = ""
-    try {
-      capturedPrompt = await Bun.file(captureFile).text()
-    } catch {}
-    expect(capturedPrompt).not.toContain("=== SESSION TASKS ===")
-  })
-
-  test("combined tasks + transcript: suggestion incorporates both sources", async () => {
-    const fakeHome = await createTempDir()
-    await seedSettings(fakeHome)
-    await writeTask(fakeHome, "1", "in_progress", "Implement auth flow")
-
-    const captureDir = await createTempDir()
-    const captureFile = join(captureDir, "prompt.txt")
-    const workDir = await createTempDir()
-    const transcriptPath = join(workDir, "transcript.jsonl")
-    await writeFile(transcriptPath, buildTranscript(10))
-
-    const result = await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      {
-        HOME: fakeHome,
-        GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
-      }
-    )
-
-    expect(result.decision).toBe("block")
-    const capturedPrompt = await Bun.file(captureFile).text()
-    // Both data sources present in the prompt
-    expect(capturedPrompt).toContain("Implement auth flow (#1)")
-    expect(capturedPrompt).toContain("CONVERSATION TRANSCRIPT")
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 })

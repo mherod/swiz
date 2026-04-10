@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { hookSpecificOutputSchema } from "../schemas.ts"
 import {
   extractPreToolSurfaceDecision,
   getHookSpecificOutput,
-  hsoContextEvent,
   hsoPreToolUseAllow,
   mergeHookSpecificOutputClone,
 } from "./hook-specific-output.ts"
@@ -53,7 +53,9 @@ describe("builders", () => {
   })
 
   test("hsoContextEvent", () => {
-    expect(hsoContextEvent("notification", "x")).toEqual({
+    expect(
+      hookSpecificOutputSchema.parse({ hookEventName: "notification", additionalContext: "x" })
+    ).toEqual({
       hookEventName: "notification",
       additionalContext: "x",
     })

@@ -20,8 +20,8 @@ import {
 } from "../../src/utils/hook-utils.ts"
 import type { WorkflowStep } from "./types.ts"
 
-const POLL_INTERVAL_MS = 5_000
-const MAX_POLL_MS = 30_000
+const POLL_INTERVAL_MS = 15_000
+const MAX_POLL_MS = 15_000
 
 interface CIRun {
   databaseId?: number

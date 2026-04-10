@@ -23,12 +23,10 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import {
-  GIT_COMMIT_RE,
-  isShellTool,
-  sendAutoSteer,
-  shouldDeferAutoSteerForForegroundChatApp,
-} from "../src/utils/hook-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
+import { sendAutoSteer } from "../src/utils/hook-utils.ts"
+import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
 import { detectTerminal } from "../src/utils/terminal-detection.ts"
 

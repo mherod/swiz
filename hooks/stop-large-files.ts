@@ -17,28 +17,90 @@ import {
 } from "../src/settings.ts"
 import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
 
-async function checkFileSize(
-  filePath: string,
-  cwd: string,
-  sizeLimitKb: number
-): Promise<string | null> {
-  const treeEntry = await git(["ls-tree", "HEAD", "--", filePath], cwd)
-  if (!treeEntry) return null
+/** Parse one line of `git ls-tree` output into [name, blobHash]. */
+function parseLsTreeLine(line: string): [string, string] | null {
+  const match = line.match(/^(\S+)\s+blob\s+(\S+)\s+(.*)$/)
+  if (match) return [match[3]!, match[2]!]
+  return null
+}
 
-  const blobHash = treeEntry.split(/\s+/)[2]
-  if (!blobHash || blobHash === "0000000000000000000000000000000000000000") return null
-
-  const sizeStr = await git(["cat-file", "-s", blobHash], cwd)
-  const sizeKb = Math.floor(parseInt(sizeStr, 10) / 1024)
-  if (Number.isNaN(sizeKb) || sizeKb < sizeLimitKb) return null
-
-  const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
-  if (gitattributes?.includes("filter=lfs")) {
-    const escaped = filePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    if (new RegExp(escaped).test(gitattributes)) return null
+/** Parse per-blob size from `git cat-file --batch` output. */
+function parseCatFileBatch(raw: string): Map<string, number> {
+  const sizes = new Map<string, number>()
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^([0-9a-f]{40}) blob (\d+)$/)
+    if (m) sizes.set(m[1]!, parseInt(m[2]!, 10))
   }
+  return sizes
+}
 
-  return `${sizeKb}KB — ${filePath}`
+/** If the file exceeds the size limit and isn't LFS-tracked, return the reason string. */
+function classifyFileSize(
+  hash: string,
+  name: string,
+  sizes: Map<string, number>,
+  limitKb: number,
+  gitattributes: string
+): string | null {
+  const byteSize = sizes.get(hash)
+  if (!byteSize) return null
+  const sizeKb = Math.floor(byteSize / 1024)
+  if (sizeKb < limitKb) return null
+  if (isLfsTracked(name, gitattributes)) return null
+  return `${sizeKb}KB — ${name}`
+}
+
+function isLfsTracked(name: string, gitattributes: string): boolean {
+  if (!gitattributes.includes("filter=lfs")) return false
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(escaped).test(gitattributes)
+}
+
+async function checkFileSizes(
+  fileCandidates: string[],
+  cwd: string,
+  sizeLimitKb: number,
+  gitattributes: string | null
+): Promise<string[]> {
+  if (fileCandidates.length === 0) return []
+
+  // Batch git ls-tree for all files
+  const treeRaw = await git(["ls-tree", "HEAD", "--", ...fileCandidates], cwd)
+  if (!treeRaw) return []
+
+  const entries = treeRaw
+    .split("\n")
+    .map(parseLsTreeLine)
+    .filter((e): e is [string, string] => e !== null)
+  const validEntries = entries.filter(([, h]) => h !== "0000000000000000000000000000000000000000")
+  if (validEntries.length === 0) return []
+
+  // Batch git cat-file --batch for all blob sizes
+  const batchInput = `${validEntries.map(([, h]) => h).join("\n")}\n`
+  const catProc = Bun.spawn(["git", "cat-file", "--batch"], {
+    cwd,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  await catProc.stdin!.write(new TextEncoder().encode(batchInput))
+  await catProc.stdin!.end()
+  await catProc.exited
+  const catRaw = await new Response(catProc.stdout).text()
+  if (catRaw.trim().length === 0) return []
+
+  const sizes = parseCatFileBatch(catRaw)
+  const largeFiles: string[] = []
+
+  const limit = sizeLimitKb
+  const attributes = gitattributes ?? ""
+  for (const [name, hash] of validEntries) {
+    const result = classifyFileSize(hash, name, sizes, limit, attributes)
+    if (!result) continue
+    largeFiles.push(result)
+    if (largeFiles.length >= 10) break
+  }
+  return largeFiles
 }
 
 function isAllowed(filePath: string, patterns: string[]): boolean {
@@ -66,15 +128,16 @@ async function findLargeFiles(
   if (!addedRaw) return []
 
   const addedFiles = addedRaw.split("\n").filter((l) => l.trim())
-  const largeFiles: string[] = []
+  if (addedFiles.length === 0) return []
 
-  for (const filePath of addedFiles) {
-    if (allowPatterns.length > 0 && isAllowed(filePath, allowPatterns)) continue
-    const entry = await checkFileSize(filePath, cwd, sizeLimitKb)
-    if (entry) largeFiles.push(entry)
-    if (largeFiles.length >= 10) break
-  }
-  return largeFiles
+  // Read .gitattributes once (cached for all files)
+  const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
+
+  // Filter allowed files before batching
+  const candidates =
+    allowPatterns.length > 0 ? addedFiles.filter((f) => !isAllowed(f, allowPatterns)) : addedFiles
+
+  return await checkFileSizes(candidates, cwd, sizeLimitKb, gitattributes)
 }
 
 function formatLargeFilesReason(largeFiles: string[], sizeLimitKb: number): string {

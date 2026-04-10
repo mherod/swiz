@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   AGENTS,
   type AgentDef,
+  type AgentId,
   agentSupportsTool,
   CONFIGURABLE_AGENTS,
   detectInstalledAgents,
@@ -721,7 +722,7 @@ describe("agents.ts", () => {
   describe("isAgentInstalled", () => {
     function fakeAgent(overrides: Partial<AgentDef> = {}): AgentDef {
       return {
-        id: "fake",
+        id: "claude" as AgentId,
         name: "Fake Agent",
         binary: "nonexistent-binary-xyz",
         settingsPath: "/nonexistent/path/settings.json",
