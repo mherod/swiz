@@ -32,7 +32,10 @@ export async function detectLockfile(cwd: string, pkgDir: string): Promise<Lockf
 }
 
 /**
- * Check if root-level lockfile covers the given changed files.
+ * Check root-level lockfile coverage once for the entire scan.
+ *
+ * Returns true when a root-level lockfile exists and was changed,
+ * meaning it covers all nested package changes.
  */
 async function rootLockfileCovers(cwd: string, changedFiles: Set<string>): Promise<boolean> {
   for (const rootLf of Object.keys(LOCKFILE_MAP)) {
@@ -61,41 +64,76 @@ function depsActuallyChanged(pkgDiff: string): boolean {
 }
 
 /**
+ * Parse a batched git diff result to extract per-file diffs.
+ * Splits on `diff --git a/` headers to attribute hunks to their source file.
+ */
+function batchDiffPerFile(raw: string): Map<string, string> {
+  const result = new Map<string, string>()
+  const parts = raw.split(/\ndiff --git a\//)
+
+  for (const part of parts) {
+    if (!part.trim()) continue
+    const full = part.startsWith("diff --git a/") ? part : `diff --git a/${part}`
+    const match = full.match(/^diff --git a\/[^ ]+ b\/([^\n]+)/)
+    if (match) {
+      result.set(match[1]!, full)
+    }
+  }
+
+  return result
+}
+
+/**
  * Find packages with drifted lockfiles.
+ *
+ * Uses a single `git diff` subprocess for all changed package.json files
+ * (instead of one per file), and parallel lockfile detection via Promise.all.
  */
 export async function findDriftedPackages(ctx: LockfileDriftContext): Promise<DriftedPackage[]> {
-  const drifted: DriftedPackage[] = []
-
-  // Get list of changed package.json files
   const changedPkgs = [...ctx.changedFiles].filter(
     (f) => f.endsWith("package.json") && !isNodeModulesPath(f)
   )
 
   if (changedPkgs.length === 0) return []
 
-  for (const pkgFile of changedPkgs) {
-    const pkgDir = dirname(pkgFile)
+  // Parallel lockfile detection for all packages at once
+  const lockfileResults = await Promise.all(
+    changedPkgs.map(async (pkgFile) => {
+      const pkgDir = dirname(pkgFile)
+      const lockfileInfo = await detectLockfile(ctx.cwd, pkgDir)
+      return { pkgFile, pkgDir, lockfileInfo }
+    })
+  )
 
-    const lockfileInfo = await detectLockfile(ctx.cwd, pkgDir)
-    if (!lockfileInfo) continue
+  // Check root lockfile coverage once (not per-package)
+  const rootCovers = await rootLockfileCovers(ctx.cwd, ctx.changedFiles)
 
-    const { lockfile, installCmd } = lockfileInfo
+  // Filter to packages needing drift check
+  const candidates = lockfileResults.filter(({ lockfileInfo, pkgDir }) => {
+    if (!lockfileInfo) return false
+    if (ctx.changedFiles.has(lockfileInfo.lockfile)) return false
+    if (pkgDir !== "." && rootCovers) return false
+    return true
+  })
 
-    // Skip if lockfile was also changed
-    if (ctx.changedFiles.has(lockfile)) continue
+  if (candidates.length === 0) return []
 
-    // Skip if root lockfile covers this package
-    if (pkgDir !== "." && (await rootLockfileCovers(ctx.cwd, ctx.changedFiles))) continue
+  // Batch all git diff calls into a single subprocess
+  const diffArgs = ["diff", ctx.range, "--", ...candidates.map((c) => c.pkgFile)]
+  const rawDiff = await git(diffArgs, ctx.cwd)
+  if (!rawDiff) return []
 
-    // Analyze the diff to see if dependencies actually changed
-    const pkgDiff = await git(["diff", ctx.range, "--", pkgFile], ctx.cwd)
+  const perFileDiffs = batchDiffPerFile(rawDiff)
+  const drifted: DriftedPackage[] = []
+
+  for (const { pkgFile, lockfileInfo } of candidates) {
+    const pkgDiff = perFileDiffs.get(pkgFile)
     if (!pkgDiff) continue
-
     if (depsActuallyChanged(pkgDiff)) {
       drifted.push({
         pkgFile,
-        lockfile,
-        installCmd,
+        lockfile: lockfileInfo!.lockfile,
+        installCmd: lockfileInfo!.installCmd,
       })
     }
   }
