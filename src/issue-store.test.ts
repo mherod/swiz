@@ -1161,6 +1161,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1186,6 +1187,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listMilestones: async () => null,
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1225,6 +1227,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1271,6 +1274,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1303,6 +1307,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1401,6 +1406,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       listMilestones: async () => [{ number: 1, title: "v1.0", state: "open" }],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1444,6 +1450,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
         return null
       },
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1470,6 +1477,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       listMilestones: async () => null,
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1574,6 +1582,7 @@ describe("syncUpstreamState with branch protection", () => {
         }
         return null
       },
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1598,6 +1607,7 @@ describe("syncUpstreamState with branch protection", () => {
       listMilestones: async () => [],
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
     }
 
     try {
@@ -1928,6 +1938,159 @@ describe("Store migration", () => {
       store.upsertCiStatuses("owner/repo", [{ sha: "abc", status: "completed" }])
       const ci = store.getCiStatus<{ status: string }>("owner/repo", "abc")
       expect(ci!.status).toBe("completed")
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStore event-sourced sync (#521)", () => {
+  test("appendIssueEvents inserts distinct rows and dedupes by event_id", () => {
+    const store = createStore()
+    try {
+      const repo = "owner/repo"
+      const first = store.appendIssueEvents(repo, [
+        {
+          id: 1,
+          event: "closed",
+          created_at: "2026-04-10T10:00:00Z",
+          actor: { login: "alice" },
+          issue: { number: 42 },
+        },
+        {
+          id: 2,
+          event: "reopened",
+          created_at: "2026-04-10T11:00:00Z",
+          actor: { login: "bob" },
+          issue: { number: 42 },
+        },
+      ])
+      expect(first).toBe(2)
+
+      // Replay the same page plus one new event — only the new one inserts.
+      const second = store.appendIssueEvents(repo, [
+        {
+          id: 1,
+          event: "closed",
+          created_at: "2026-04-10T10:00:00Z",
+          actor: { login: "alice" },
+          issue: { number: 42 },
+        },
+        {
+          id: 3,
+          event: "labeled",
+          created_at: "2026-04-10T12:00:00Z",
+          actor: { login: "alice" },
+          issue: { number: 42 },
+        },
+      ])
+      expect(second).toBe(1)
+
+      const all = store.listIssueEvents<{ id: number }>(repo)
+      expect(all).toHaveLength(3)
+      expect(all[0]?.eventType).toBe("labeled")
+      expect(all[0]?.createdAt).toBe("2026-04-10T12:00:00Z")
+
+      const scoped = store.listIssueEvents(repo, { issueNumber: 42 })
+      expect(scoped).toHaveLength(3)
+
+      // Latest timestamp tracks the newest stored event.
+      expect(store.getLatestIssueEventTimestamp(repo)).toBe("2026-04-10T12:00:00Z")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("sync_cursors stores and replaces per-repo kind values", () => {
+    const store = createStore()
+    try {
+      expect(store.getSyncCursor("owner/repo", "issue_events")).toBeNull()
+      store.setSyncCursor("owner/repo", "issue_events", "2026-04-10T10:00:00Z")
+      expect(store.getSyncCursor("owner/repo", "issue_events")).toBe("2026-04-10T10:00:00Z")
+
+      store.setSyncCursor("owner/repo", "issue_events", "2026-04-11T10:00:00Z")
+      expect(store.getSyncCursor("owner/repo", "issue_events")).toBe("2026-04-11T10:00:00Z")
+
+      // Different kind is isolated.
+      expect(store.getSyncCursor("owner/repo", "pr_events")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("syncUpstreamState appends new events and advances cursor", async () => {
+    const store = createStore()
+    try {
+      const repo = "owner/repo"
+      store.setSyncCursor(repo, "issue_events", "2026-04-10T10:00:00Z")
+
+      const client: GitHubClient = {
+        listIssues: async () => [],
+        listPullRequests: async () => [],
+        listWorkflowRuns: async () => [],
+        listIssueComments: async () => null,
+        listLabels: async () => [],
+        listMilestones: async () => [],
+        listBranchWorkflowRuns: async () => null,
+        getBranchProtection: async () => null,
+        listIssueEventsSince: async (_repo: string, sinceIso: string | null) => {
+          // The client contract filters by sinceIso — mimic that here.
+          const all = [
+            {
+              id: 10,
+              event: "closed" as const,
+              created_at: "2026-04-10T09:00:00Z",
+              actor: { login: "alice" },
+              issue: { number: 1 },
+            },
+            {
+              id: 11,
+              event: "reopened" as const,
+              created_at: "2026-04-10T12:00:00Z",
+              actor: { login: "bob" },
+              issue: { number: 1 },
+            },
+          ]
+          return sinceIso ? all.filter((e) => e.created_at > sinceIso) : all
+        },
+      }
+
+      const result = await syncUpstreamState(repo, "/tmp", { store, client })
+      expect(result.events.inserted).toBe(1)
+      expect(result.events.cursor).toBe("2026-04-10T12:00:00Z")
+      expect(store.getSyncCursor(repo, "issue_events")).toBe("2026-04-10T12:00:00Z")
+
+      const stored = store.listIssueEvents(repo)
+      expect(stored).toHaveLength(1)
+      expect(stored[0]?.eventId).toBe(11)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("syncUpstreamState leaves cursor unchanged when client returns null", async () => {
+    const store = createStore()
+    try {
+      const repo = "owner/repo"
+      store.setSyncCursor(repo, "issue_events", "2026-04-09T10:00:00Z")
+
+      const client: GitHubClient = {
+        listIssues: async () => [],
+        listPullRequests: async () => [],
+        listWorkflowRuns: async () => [],
+        listIssueComments: async () => null,
+        listLabels: async () => [],
+        listMilestones: async () => [],
+        listBranchWorkflowRuns: async () => null,
+        getBranchProtection: async () => null,
+        listIssueEventsSince: async () => null, // API error path
+      }
+
+      const result = await syncUpstreamState(repo, "/tmp", { store, client })
+      expect(result.events.inserted).toBe(0)
+      expect(result.events.cursor).toBeNull()
+      // Cursor preserved for next-sync retry.
+      expect(store.getSyncCursor(repo, "issue_events")).toBe("2026-04-09T10:00:00Z")
     } finally {
       store.close()
     }

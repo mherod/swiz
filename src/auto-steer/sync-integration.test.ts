@@ -33,6 +33,7 @@ describe("Sync Integration", () => {
         ],
       },
       branchProtection: { upserted: 0, changes: [] },
+      events: { inserted: 0, cursor: null },
     }
   })
 

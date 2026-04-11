@@ -11,6 +11,7 @@ import type {
   GitHubCiRunRecord,
   GitHubClient,
   GitHubCommentRecord,
+  GitHubIssueEventRecord,
   GitHubIssueRecord,
   GitHubLabelRecord,
   GitHubMilestoneRecord,
@@ -127,6 +128,48 @@ export class GhCliGitHubClient implements GitHubClient {
     try {
       const raw = JSON.parse(stdout) as Record<string, any>
       return normalizeBranchProtection(branch, raw)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Fetch repo-wide issue events via `gh api repos/{slug}/issues/events`.
+   *
+   * GitHub's `/issues/events` endpoint does not accept a `since` query param
+   * (that lives on `/issues`), so this implementation fetches a single 100-row
+   * page (newest first) and client-side filters by `created_at > sinceIso`.
+   * That is sufficient for incremental append-only replay as long as sync
+   * cadence keeps up — a future follow-up can add `--paginate` with a cutoff
+   * loop when we start caring about deep historical backfill.
+   *
+   * `repo` is the full `owner/name` slug (not a cwd) because `gh api` takes
+   * the slug directly and does not infer it from working directory.
+   */
+  async listIssueEventsSince(
+    repo: string,
+    sinceIso: string | null
+  ): Promise<GitHubIssueEventRecord[] | null> {
+    await acquireGhSlot()
+    const proc = Bun.spawn(["gh", "api", `repos/${repo}/issues/events?per_page=100`], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) {
+      void stderr
+      return null
+    }
+    try {
+      const events = JSON.parse(stdout) as GitHubIssueEventRecord[]
+      if (!Array.isArray(events)) return null
+      if (!sinceIso) return events
+      return events.filter((e) => typeof e.created_at === "string" && e.created_at > sinceIso)
     } catch {
       return null
     }

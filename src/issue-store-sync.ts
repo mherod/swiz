@@ -182,6 +182,8 @@ export interface UpstreamSyncResult {
   branchCi: { upserted: number; changes: SyncChange[] }
   prBranchDetail: { upserted: number; changes: SyncChange[] }
   branchProtection: { upserted: number; changes: SyncChange[] }
+  /** Event-sourced sync (#521): rows appended to the issue_events log and the cursor advanced to. */
+  events: { inserted: number; cursor: string | null }
 }
 
 /** Extract the maximum `updatedAt` ISO string from a list of entities. */
@@ -562,6 +564,7 @@ export async function syncUpstreamState(
     branchCi: tracked(),
     prBranchDetail: tracked(),
     branchProtection: tracked(),
+    events: { inserted: 0, cursor: null },
   }
 
   // ─── Snapshot existing state for fast-path decisions ────────────────────
@@ -632,5 +635,41 @@ export async function syncUpstreamState(
   // Sync comments for blocked/stalled issues AND recently-updated issues
   await syncComments(ctx, issues, issuesChanged)
 
+  // ─── Event-sourced sync (#521) ──────────────────────────────────────────
+  // Append new issue events to the append-only log so intermediate
+  // transitions (open→closed→reopened, label churn, review_requested) are
+  // captured even when they don't alter the snapshot state we just diffed.
+  await syncIssueEvents(s, gh, repo, result)
+
   return result
+}
+
+/**
+ * Fetch new issue events via the GitHub REST Events API, append them to the
+ * local log idempotently, and advance the per-repo sync cursor to the newest
+ * event's `created_at`. A null return from the client (API error, gh failure)
+ * leaves the cursor untouched so the next sync retries the same window.
+ */
+async function syncIssueEvents(
+  store: IssueStore,
+  gh: GitHubClient,
+  repo: string,
+  result: UpstreamSyncResult
+): Promise<void> {
+  const EVENT_CURSOR_KIND = "issue_events"
+  const cursor = store.getSyncCursor(repo, EVENT_CURSOR_KIND)
+  const events = await gh.listIssueEventsSince(repo, cursor)
+  if (!events) return // leave cursor unchanged so next sync retries
+
+  if (events.length === 0) {
+    result.events.cursor = cursor
+    return
+  }
+
+  const inserted = store.appendIssueEvents(repo, events)
+  const newCursor = store.getLatestIssueEventTimestamp(repo) ?? cursor
+  if (newCursor) store.setSyncCursor(repo, EVENT_CURSOR_KIND, newCursor)
+
+  result.events.inserted = inserted
+  result.events.cursor = newCursor
 }

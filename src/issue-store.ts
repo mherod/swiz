@@ -219,6 +219,19 @@ export interface GitHubBranchProtectionRecord {
  * Abstraction over GitHub data fetching. Allows sync logic to be tested
  * without spawning real `gh` CLI processes.
  */
+/**
+ * Raw GitHub issue-event record returned by `/repos/{owner}/{repo}/issues/events`.
+ * Shape matches the REST API payload; only the fields we persist or inspect
+ * are declared. Consumers treat the full JSON as opaque via `payload_json`.
+ */
+export interface GitHubIssueEventRecord {
+  id: number
+  event: string
+  created_at: string
+  actor?: { login?: string } | null
+  issue?: { number?: number } | null
+}
+
 export interface GitHubClient {
   /** When `state` is `"closed"`, implementations may only populate `number`. */
   listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null>
@@ -235,6 +248,15 @@ export interface GitHubClient {
   listBranchWorkflowRuns(cwd: string, branch: string): Promise<GitHubCiRunRecord[] | null>
   /** Fetch branch protection rules for a branch. Returns null on error or insufficient permissions. */
   getBranchProtection(cwd: string, branch: string): Promise<GitHubBranchProtectionRecord | null>
+  /**
+   * List repo-wide issue events newer than `sinceIso` (ISO-8601 timestamp).
+   * When `sinceIso` is null, returns the most recent page for backfill.
+   * Returns null on API error — the sync path leaves the cursor unchanged.
+   */
+  listIssueEventsSince(
+    repo: string,
+    sinceIso: string | null
+  ): Promise<GitHubIssueEventRecord[] | null>
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -378,6 +400,43 @@ export class IssueStore {
         data TEXT NOT NULL,
         synced_at INTEGER NOT NULL,
         PRIMARY KEY (repo, branch)
+      )
+    `)
+    // Append-only event log for issue state transitions. Written by the
+    // event-sourced sync path (issue-store-sync.ts), consumed by effect
+    // handlers. event_id is the GitHub numeric event id (primary key) so
+    // re-inserts are idempotent via INSERT OR IGNORE.
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS issue_events (
+        repo TEXT NOT NULL,
+        event_id INTEGER NOT NULL,
+        issue_number INTEGER,
+        event_type TEXT NOT NULL,
+        actor TEXT,
+        created_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, event_id)
+      )
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_issue_events_repo_created
+      ON issue_events (repo, created_at)
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_issue_events_repo_issue
+      ON issue_events (repo, issue_number)
+    `)
+    // Small KV table for per-repo sync cursors. Currently stores
+    // `issue_events` cursor (ISO-8601) separate from the snapshot sync's
+    // lastSyncAt so event sync and snapshot sync can diverge safely.
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS sync_cursors (
+        repo TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, kind)
       )
     `)
   }
@@ -873,9 +932,127 @@ export class IssueStore {
     this.db.query("DELETE FROM branch_protection WHERE repo = ? AND branch = ?").run(repo, branch)
   }
 
+  // ─── Event-sourced sync (#521) ──────────────────────────────────────────
+
+  /**
+   * Append GitHub issue events to the local append-only log. Uses
+   * `INSERT OR IGNORE` on the `(repo, event_id)` primary key so replaying the
+   * same page across two overlapping `since=` windows is safe. Returns the
+   * number of rows actually inserted (ignores don't count).
+   */
+  appendIssueEvents<
+    T extends {
+      id: number
+      event: string
+      created_at: string
+      actor?: { login?: string } | null
+      issue?: { number?: number } | null
+    },
+  >(repo: string, events: T[]): number {
+    const stmt = this.db.prepare(
+      "INSERT OR IGNORE INTO issue_events (repo, event_id, issue_number, event_type, actor, created_at, payload_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    let inserted = 0
+    const tx = this.db.transaction(() => {
+      for (const ev of events) {
+        const issueNumber = ev.issue?.number ?? null
+        const actor = ev.actor?.login ?? null
+        const result = stmt.run(
+          repo,
+          ev.id,
+          issueNumber,
+          ev.event,
+          actor,
+          ev.created_at,
+          JSON.stringify(ev),
+          now
+        )
+        if (result.changes > 0) inserted++
+      }
+    })
+    tx()
+    return inserted
+  }
+
+  /**
+   * Read the latest `created_at` timestamp for stored events in a repo,
+   * falling back to `null` when the log is empty. Used to advance the
+   * event-sync cursor after a successful page fetch.
+   */
+  getLatestIssueEventTimestamp(repo: string): string | null {
+    const row = this.db
+      .query("SELECT MAX(created_at) as ts FROM issue_events WHERE repo = ?")
+      .get(repo) as { ts: string | null } | undefined
+    return row?.ts ?? null
+  }
+
+  /** List stored issue events for a repo, optionally scoped to a single issue. */
+  listIssueEvents<T = unknown>(
+    repo: string,
+    opts?: { issueNumber?: number; limit?: number }
+  ): Array<{
+    eventId: number
+    eventType: string
+    createdAt: string
+    actor: string | null
+    payload: T
+  }> {
+    const issueNumber = opts?.issueNumber
+    const limit = opts?.limit ?? 500
+    const rows =
+      typeof issueNumber === "number"
+        ? (this.db
+            .query(
+              "SELECT event_id, event_type, created_at, actor, payload_json FROM issue_events WHERE repo = ? AND issue_number = ? ORDER BY created_at DESC LIMIT ?"
+            )
+            .all(repo, issueNumber, limit) as Array<{
+            event_id: number
+            event_type: string
+            created_at: string
+            actor: string | null
+            payload_json: string
+          }>)
+        : (this.db
+            .query(
+              "SELECT event_id, event_type, created_at, actor, payload_json FROM issue_events WHERE repo = ? ORDER BY created_at DESC LIMIT ?"
+            )
+            .all(repo, limit) as Array<{
+            event_id: number
+            event_type: string
+            created_at: string
+            actor: string | null
+            payload_json: string
+          }>)
+    return rows.map((r) => ({
+      eventId: r.event_id,
+      eventType: r.event_type,
+      createdAt: r.created_at,
+      actor: r.actor,
+      payload: JSON.parse(r.payload_json) as T,
+    }))
+  }
+
+  /** Read a per-repo sync cursor by kind (e.g. `issue_events`). Null when absent. */
+  getSyncCursor(repo: string, kind: string): string | null {
+    const row = this.db
+      .query("SELECT value FROM sync_cursors WHERE repo = ? AND kind = ?")
+      .get(repo, kind) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  /** Upsert a per-repo sync cursor. Stores `updated_at` for debugging/prune. */
+  setSyncCursor(repo: string, kind: string, value: string): void {
+    this.db
+      .query(
+        "INSERT OR REPLACE INTO sync_cursors (repo, kind, value, updated_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(repo, kind, value, Date.now())
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
-  /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection) for a repo. Preserves pending mutations. */
+  /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection, event log, sync cursors) for a repo. Preserves pending mutations. */
   clearCachedData(repo: string): void {
     this.db.query("DELETE FROM issues WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM pull_requests WHERE repo = ?").run(repo)
@@ -886,6 +1063,8 @@ export class IssueStore {
     this.db.query("DELETE FROM labels WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM milestones WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM branch_protection WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM issue_events WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM sync_cursors WHERE repo = ?").run(repo)
   }
 
   /** Clear ALL cached data across all repos. Preserves pending mutations. */
@@ -899,6 +1078,8 @@ export class IssueStore {
     this.db.query("DELETE FROM labels").run()
     this.db.query("DELETE FROM milestones").run()
     this.db.query("DELETE FROM branch_protection").run()
+    this.db.query("DELETE FROM issue_events").run()
+    this.db.query("DELETE FROM sync_cursors").run()
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
