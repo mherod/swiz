@@ -209,25 +209,19 @@ export async function runHookInProcess(
 }
 
 /**
- * Run a hook script. Uses in-process execution when `envOverrides` is empty
- * and the hook default-exports a SwizHook; otherwise spawns `bun hooks/<script>`
- * to preserve env-override semantics.
+ * Run a hook script as a subprocess with controlled env.
+ * Returns parsed hookSpecificOutput decision if present.
+ *
+ * Prefer `runHookInProcess` for new tests — it avoids the Bun cold-start cost.
+ * This function stays on the subprocess path so existing tests that rely on
+ * subprocess-specific semantics (env isolation, process.cwd inheritance,
+ * fire-and-forget side effects) keep working.
  */
 export async function runHook(
   script: string,
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  if (Object.keys(envOverrides).length === 0) {
-    try {
-      return await runHookInProcess(script, stdinPayload)
-    } catch (err) {
-      // If the hook isn't SwizHook-compatible, fall through to subprocess path.
-      const message = err instanceof Error ? err.message : String(err)
-      if (!message.includes("does not default-export a SwizHook")) throw err
-    }
-  }
-
   const payload = JSON.stringify(stdinPayload)
   const env = mergeHookEnv(envOverrides)
 

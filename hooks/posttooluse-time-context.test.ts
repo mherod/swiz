@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { runHook } from "../src/utils/test-utils.ts"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 
 describe("posttooluse-time-context", () => {
   test("emits the current time with descriptor and moon phase", async () => {
-    const result = await runHook("hooks/posttooluse-time-context.ts", {
+    const result = await runHookInProcess("hooks/posttooluse-time-context.ts", {
       tool_name: "Read",
       tool_input: { file_path: "/tmp/example.txt" },
       cwd: "/tmp",
