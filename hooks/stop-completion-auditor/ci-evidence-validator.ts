@@ -18,9 +18,13 @@ import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from ".
 
 const CI_EVIDENCE_RE = /\bci\b.*(?:green|pass|success)|conclusion.*success/i
 
+/** Matches bash commands that perform explicit CI verification. */
+const CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/
+
 function taskHasCiEvidence(t: SessionTask): boolean {
   return (
     (!!t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
+    (!!t.description && CI_EVIDENCE_RE.test(t.description)) ||
     (!!t.subject && CI_EVIDENCE_RE.test(t.subject))
   )
 }
@@ -84,6 +88,15 @@ export async function validateCiEvidence(ctx: CompletionAuditContext): Promise<V
 
   // Check for CI evidence in current session tasks
   let hasCiEvidence = anyTaskHasCiEvidence(ctx.allTasks)
+
+  // When task files are absent (cleaned up after completion), fall back to
+  // scanning transcript bash commands for explicit CI verification calls.
+  // Native task tools delete JSON files on completion, so allTasks=[] is
+  // normal for a clean session — the transcript is the authoritative record.
+  if (!hasCiEvidence && ctx.allTasks.length === 0) {
+    const bashCmds = effectiveSummary?.bashCommands ?? []
+    hasCiEvidence = bashCmds.some((cmd) => CI_CMD_RE.test(cmd))
+  }
 
   // If not found locally, search sibling sessions
   if (!hasCiEvidence && ctx.transcript) {
