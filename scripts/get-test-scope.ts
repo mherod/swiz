@@ -14,6 +14,19 @@ function getGitOutput(args: string[]): string {
 }
 
 function resolveBase(): string {
+  // CI passes its base sha explicitly via CI_BASE so we honor the event
+  // context (previous push head for `push`, PR base for `pull_request`).
+  // The raw zero-sha that GitHub sends for brand-new branches is treated
+  // the same as "no base" so we drop through to the local fallbacks.
+  const envBase = process.env.CI_BASE
+  if (
+    envBase &&
+    envBase.trim() !== "" &&
+    envBase !== "0000000000000000000000000000000000000000" &&
+    getGitOutput(["rev-parse", "--verify", `${envBase}^{commit}`]) !== ""
+  ) {
+    return envBase
+  }
   // If we have origin/main, use it as the base
   const hasOriginMain = getGitOutput(["rev-parse", "--verify", "origin/main"])
   if (hasOriginMain) {
