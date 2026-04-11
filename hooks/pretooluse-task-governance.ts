@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Consolidated task governance PreToolUse hooks.
 //
 // Contains 4 hook objects covering:
@@ -10,6 +11,7 @@
 // Each hook is exported as a named export for manifest registration.
 // Original files are thin wrappers for standalone subprocess execution.
 
+import { agentHasTaskTools } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
@@ -580,6 +582,7 @@ function validateGuardConditions(
   input: Record<string, any>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
+  if (!agentHasTaskTools()) return false
   return !isExemptToolCall(input, toolName)
 }
 
@@ -1054,7 +1057,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
 
   // ── Global pending-task overflow guard ────────────────────────────────
   // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
-  if (!isTaskListTool(toolName)) {
+  if (!isTaskListTool(toolName) && agentHasTaskTools()) {
     const sessionIdForOverflow = resolveSafeSessionId(input.session_id as string | undefined)
     const cwdForOverflow: string = (input.cwd as string) ?? process.cwd()
     if (sessionIdForOverflow && (await isTaskEnforcementProject(cwdForOverflow))) {
@@ -1103,7 +1106,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
 
   // ── Edit / Write / Bash path (blocked tools) ──────────────────────────
   if (isBlockedTool(toolName)) {
-    // Guard conditions: only enforce in git repos with CLAUDE.md
+    // Guard conditions: only enforce in git repos with CLAUDE.md, on agents with task tools
     const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
     const cwd: string = (input.cwd as string) ?? process.cwd()
 
