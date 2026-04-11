@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 /**
  * Behavioral tests for scripts/get-test-scope.ts.
@@ -11,12 +14,15 @@ import { spawnSync } from "node:child_process"
  * issue #541.
  */
 
+const PROJECT_ROOT = new URL("..", import.meta.url).pathname
+const SCOPE_SCRIPT = join(PROJECT_ROOT, "scripts/get-test-scope.ts")
+
 function runScopeScript(env: Record<string, string> = {}): {
   stdout: string
   exitCode: number
 } {
   const proc = spawnSync("bun", ["run", "scripts/get-test-scope.ts"], {
-    cwd: new URL("..", import.meta.url).pathname,
+    cwd: PROJECT_ROOT,
     encoding: "utf8",
     env: { ...process.env, ...env },
   })
@@ -74,5 +80,96 @@ describe("get-test-scope CI_BASE handling", () => {
       CI_BASE: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
     })
     expect(result.exitCode).toBe(0)
+  })
+})
+
+describe("get-test-scope parent-bundle lookup", () => {
+  /**
+   * Run the scope script from a controlled temp git repo so we can assert
+   * exactly which test paths are emitted for a given set of changed files.
+   * The temp repo mirrors the hooks/<bundle>/<file>.ts → hooks/<bundle>.test.ts
+   * convention verified by issue #547.
+   */
+  function runScopeScriptFromDir(dir: string, env: Record<string, string> = {}) {
+    const proc = spawnSync("bun", ["run", SCOPE_SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    })
+    return { stdout: (proc.stdout ?? "").trim(), exitCode: proc.status ?? -1 }
+  }
+
+  function git(args: string[], cwd: string) {
+    return spawnSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "test",
+        GIT_AUTHOR_EMAIL: "test@test.com",
+        GIT_COMMITTER_NAME: "test",
+        GIT_COMMITTER_EMAIL: "test@test.com",
+      },
+    })
+  }
+
+  function makeTempFixtureRepo(): { dir: string; baseCommit: string } {
+    const dir = join(
+      tmpdir(),
+      `swiz-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(join(dir, "hooks", "my-bundle"), { recursive: true })
+
+    // Seed files that must be present for readdirSync to find them
+    writeFileSync(join(dir, "hooks", "my-bundle.test.ts"), "// bundle test\n")
+    writeFileSync(join(dir, "hooks", "my-bundle.ts"), "// bundle entry\n")
+    writeFileSync(join(dir, "hooks", "my-bundle", "helper.ts"), "// helper\n")
+
+    git(["init"], dir)
+    git(["add", "."], dir)
+    git(["commit", "--allow-empty-message", "-m", "init"], dir)
+
+    const baseCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).stdout.trim()
+
+    // Modify the nested file to create a diff against the base commit
+    writeFileSync(join(dir, "hooks", "my-bundle", "helper.ts"), "// helper (modified)\n")
+    git(["add", "."], dir)
+    git(["commit", "-m", "edit nested"], dir)
+
+    return { dir, baseCommit }
+  }
+
+  test("hooks/<bundle>/<file>.ts returns hooks/<bundle>.test.ts (issue #547)", () => {
+    const { dir, baseCommit } = makeTempFixtureRepo()
+    const result = runScopeScriptFromDir(dir, { CI_BASE: baseCommit })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("hooks/my-bundle.test.ts")
+  })
+
+  test("direct entry hooks/<bundle>.ts still returns hooks/<bundle>.test.ts", () => {
+    const dir = join(
+      tmpdir(),
+      `swiz-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(join(dir, "hooks"), { recursive: true })
+    writeFileSync(join(dir, "hooks", "my-bundle.test.ts"), "// bundle test\n")
+    writeFileSync(join(dir, "hooks", "my-bundle.ts"), "// bundle entry\n")
+    git(["init"], dir)
+    git(["add", "."], dir)
+    git(["commit", "--allow-empty-message", "-m", "init"], dir)
+    const baseCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).stdout.trim()
+    writeFileSync(join(dir, "hooks", "my-bundle.ts"), "// bundle entry (modified)\n")
+    git(["add", "."], dir)
+    git(["commit", "-m", "edit entry"], dir)
+
+    const result = runScopeScriptFromDir(dir, { CI_BASE: baseCommit })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("hooks/my-bundle.test.ts")
   })
 })
