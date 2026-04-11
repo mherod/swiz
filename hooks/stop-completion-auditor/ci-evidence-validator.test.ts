@@ -155,4 +155,84 @@ describe("validateCiEvidence", () => {
     const result = await validateCiEvidence(ctx)
     expect(result.kind).toBe("ci-evidence")
   })
+
+  test("blocks when in_progress task has CI evidence — only completed tasks count", async () => {
+    // An in_progress task with CI text must NOT satisfy the validator.
+    // anyTaskHasCiEvidence filters to status === "completed" only.
+    const ctx = makeCtx({
+      allTasks: [
+        {
+          id: "1",
+          subject: "Verify CI green",
+          status: "in_progress",
+          description: "note:CI green — conclusion: success, run 99999",
+        },
+      ],
+      transcript: "",
+      summary: makeSummary({ bashCommands: [] }),
+    })
+    const result = await validateCiEvidence(ctx)
+    expect(result.kind).toBe("ci-evidence")
+  })
+
+  test("passes when CI evidence is in task subject field", async () => {
+    const ctx = makeCtx({
+      allTasks: [
+        {
+          id: "1",
+          subject: "CI green — conclusion: success",
+          status: "completed",
+        },
+      ],
+      summary: makeSummary(),
+    })
+    const result = await validateCiEvidence(ctx)
+    expect(result.kind).toBe("ok")
+  })
+
+  test("passes with mixed tasks when at least one completed task has CI evidence", async () => {
+    // in_progress task without evidence + completed task with evidence → should pass
+    const ctx = makeCtx({
+      allTasks: [
+        { id: "1", subject: "Push code", status: "completed", description: "commit:abc" },
+        {
+          id: "2",
+          subject: "Verify CI",
+          status: "completed",
+          completionEvidence: "CI green — conclusion: success, run 11111",
+        },
+        { id: "3", subject: "Remaining work", status: "in_progress" },
+      ],
+      summary: makeSummary(),
+    })
+    const result = await validateCiEvidence(ctx)
+    expect(result.kind).toBe("ok")
+  })
+
+  test("blocks when tasks exist but bash CI commands are present — fallback only for empty allTasks", async () => {
+    // The bashCommands fallback only runs when allTasks.length === 0.
+    // If tasks exist but none have CI evidence, bash commands are irrelevant.
+    const ctx = makeCtx({
+      allTasks: [{ id: "1", subject: "Push code", status: "completed", description: "commit:abc" }],
+      transcript: "",
+      summary: makeSummary({
+        bashCommands: ["gh run watch 12345 --exit-status"],
+      }),
+    })
+    const result = await validateCiEvidence(ctx)
+    expect(result.kind).toBe("ci-evidence")
+  })
+
+  test("passes (fail-open) when summary is null and allTasks is empty — push undetectable", async () => {
+    // With no transcript and no summary, hasGitPush defaults to false → skip CI check.
+    // This is correct fail-open behavior: don't block if we can't detect a push.
+    const ctx = makeCtx({
+      allTasks: [],
+      transcript: "", // triggers computeTranscriptSummary("") → null
+      summary: null,
+    })
+    const result = await validateCiEvidence(ctx)
+    // No push detectable → passes regardless of CI evidence
+    expect(result.kind).toBe("ok")
+  })
 })

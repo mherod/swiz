@@ -104,6 +104,9 @@ alwaysApply: false
 - **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + `applyTaskUpdate()` write-through. `getTasksFresh()` forces disk reload when no watcher/openCount zero. **DO**: `watchSession()` on daemon activate. **DON'T**: Trust cache for stop hooks — use `readSessionTasksFresh()`.
 - **In-memory event state**: `src/tasks/task-event-state.ts` — `Map<sessionId, EventTaskState[]>` updated by PostToolUse hooks. `posttooluse-task-count-context` reads `getSessionEventState()` first (zero I/O), falls back to disk + `applyMutationOverlay`.
 - **Last-task-standing enforcement**: `updateStatus()` in `task-service.ts` — calls `validateLastTaskStanding` when `newStatus === "completed"`. `skipLastTaskGuard` for explicit overrides only.
+- **Native task file lifecycle**: Native `TaskCreate`/`TaskUpdate` DELETE `.json` files on completion; session dir keeps only `.highwatermark` + `.lock`. `readSessionTasksFresh` returns `[]` on clean sessions. **DON'T** treat `allTasks.length === 0` as "no tasks created" in stop hooks.
+- **CI evidence field**: Native `TaskUpdate description` stores evidence in `t.description`, NOT `t.completionEvidence` (only set by `swiz tasks complete --evidence`). Stop hooks MUST check both. See `ci-evidence-validator.ts::taskHasCiEvidence`.
+- **CI evidence transcript fallback**: When `allTasks = []`, `ci-evidence-validator` scans `TranscriptSummary.bashCommands` for CI verification commands. Regex: `CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/`.
 
 ## Task Lifecycle & Enforcement
 
@@ -118,17 +121,11 @@ alwaysApply: false
 
 **Deduplication:** `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 
-**Exemptions:** Gemini agent skips incomplete task blocking.
+**Exemptions:** Agents where `AgentDef.tasksEnabled=false` (Codex, Junie) skip all task enforcement.
 
 **Evidence prefixes:** `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
 
-**Workflow:**
-1. `TaskCreate` (starts `pending`)
-2. Mark `in_progress` before work
-3. Perform substantive work
-4. Gather evidence
-5. Mark `completed` with evidence
-6. Maintain ≥2 pending tasks as planning buffer
+**Workflow:** `TaskCreate` → `in_progress` → work → evidence → `completed`. Maintain ≥2 pending as buffer.
 
 - After compaction: `TaskList`, close stale tasks via `git log --oneline -3`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete AND ≥1 `pending`.
@@ -149,15 +146,10 @@ alwaysApply: false
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **Subject changes**: `TaskUpdate` `subject`/`description` — not the CLI.
 - **DON'T**: Assume CI success from partial output. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
-- Mark tasks complete immediately.
-- Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
-- Run `git diff <files>` before `git add`; `git status` after each `git commit`.
 - **DON'T** commit untracked files (`.lock`, local state) without checking `.gitignore` first — stop hooks flag all uncommitted files regardless.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
-- Before adding a `CLAUDE.md` rule, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`. After `gh issue create`, run `/refine-issue <number>`.
 - DON'T use `$(cat <<'EOF')` in `gh issue create --body` — write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
-- Before stop, audit open issue labels; pick actionable issues via `/work-on-issue <number>` (`ready` over `backlog`).
 ## Standard Work Sequence
 - Order: TaskCreate→in_progress → Edit/Bash → git add+commit → TaskUpdate→completed → SHA capture → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
 - Keep push task `in_progress` until `gh run view --json` confirms. Use `swiz push-wait`/`swiz ci-wait`; no sleeps, no `--force-with-lease`.
@@ -211,8 +203,8 @@ alwaysApply: false
 - DO NOT use top-level `await` in `src/` — use lazy async (`let cache; async load() {...}`). Hooks exempt.
 - DO NOT embed ESC (0x1b) in regex literals; construct at runtime. See `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
-- **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
-- **CRITICAL**: When adding a new symbol to a self-referential PreToolUse hook file (import + usage), **always add the import first**, then the usage in a second edit. Adding usage before import leaves the hook in a broken intermediate state that crashes on every subsequent tool call, deadlocking the session. Only the user can recover via `git checkout -- <file>`.
+- **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames.
+- **CRITICAL**: In self-referential PreToolUse hooks, add import first, then usage in a second edit. Reversed order deadlocks the session; only `git checkout -- <file>` recovers.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
