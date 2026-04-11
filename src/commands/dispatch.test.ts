@@ -3,8 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Test dispatch end-to-end by running swiz dispatch with different payloads
-
+// Test dispatch end-to-end. The fast path calls `executeDispatch` in-process
+// (avoids Bun cold-start + module-init per test). The slow path still spawns
+// `bun run index.ts dispatch` when `options.env` is present, because env
+// overrides like `SWIZ_DAEMON_PORT` or `SWIZ_NO_DAEMON: undefined` require a
+// fresh process that sees the modified environment — mutating `process.env`
+// in-process is unsafe with `--concurrent`.
 async function dispatch(
   event: string,
   payload: Record<string, any>,
@@ -15,27 +19,24 @@ async function dispatch(
   exitCode: number | null
   parsed: Record<string, any> | null
 }> {
-  const proc = Bun.spawn(
-    [
-      "bun",
-      "run",
-      "index.ts",
-      "dispatch",
-      event,
-      event === "preToolUse" ? "PreToolUse" : event === "stop" ? "Stop" : event,
-    ],
-    {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        SWIZ_NO_DAEMON: "1",
-        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
-        ...options.env,
-      },
-    }
-  )
+  const hookEventName = event === "preToolUse" ? "PreToolUse" : event === "stop" ? "Stop" : event
+
+  if (!options.env) {
+    const { dispatchInProcess } = await import("../utils/test-utils.ts")
+    return dispatchInProcess(event, payload, { hookEventName })
+  }
+
+  const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      SWIZ_NO_DAEMON: "1",
+      SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+      ...options.env,
+    },
+  })
   await proc.stdin.write(JSON.stringify(payload))
   await proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()

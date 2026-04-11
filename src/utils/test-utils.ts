@@ -9,6 +9,70 @@ import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-spe
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, any>
 
+/**
+ * Result of an in-process dispatch call. Mirrors the fields tests used to
+ * extract from subprocess stdout, so converting from `Bun.spawn([...dispatch])`
+ * to `dispatchInProcess()` is a mechanical rename of the destructure.
+ */
+export interface DispatchInProcessResult {
+  /** Raw response object returned by the dispatch engine. */
+  response: Record<string, any>
+  /** Alias for `response` — matches the `parsed` field from the old subprocess helper. */
+  parsed: Record<string, any> | null
+  /** JSON serialization of the response, empty string when the response is `{}`. */
+  stdout: string
+  /** Empty string placeholder so callers that check `result.stderr` don't crash. */
+  stderr: string
+  /** Always 0 for in-process success. Dispatch throws on hard failure. */
+  exitCode: number | null
+}
+
+/**
+ * Run `swiz dispatch <event>` in-process by calling `executeDispatch` directly.
+ *
+ * Replaces `Bun.spawn(["bun", "run", "index.ts", "dispatch", event], ...)` —
+ * avoids ~200-300ms Bun cold-start and module-init cost per test.
+ *
+ * The full CLI path (`runDispatch`) reads stdin, probes the daemon, writes to
+ * stdout, and calls `process.exit(0)`. None of that is useful in tests. This
+ * helper skips straight to `executeDispatch(req)` which returns the response
+ * object directly. Tests that previously parsed `stdout.trim()` as JSON can
+ * read `result.parsed` instead.
+ *
+ * Payload normalization matches `runDispatch`: default `cwd` to `process.cwd()`,
+ * default `session_id` to the env or "unknown-session".
+ */
+export async function dispatchInProcess(
+  canonicalEvent: string,
+  payload: JsonObject,
+  opts?: { hookEventName?: string }
+): Promise<DispatchInProcessResult> {
+  const { executeDispatch } = await import("../dispatch/execute.ts")
+  const { normalizeAgentHookPayload } = await import("../dispatch/payload-normalize.ts")
+  const normalized: JsonObject = { ...payload }
+  normalizeAgentHookPayload(normalized)
+  if (!normalized.cwd) normalized.cwd = process.cwd()
+  if (!normalized.session_id) {
+    normalized.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
+  }
+  const hookEventName = opts?.hookEventName ?? canonicalEvent
+  const { response } = await executeDispatch({
+    canonicalEvent,
+    hookEventName,
+    payloadStr: JSON.stringify(normalized),
+    preParsedPayload: normalized,
+  })
+  const isEmpty = Object.keys(response).length === 0
+  const stdout = isEmpty ? "" : JSON.stringify(response)
+  return {
+    response,
+    parsed: isEmpty ? null : response,
+    stdout,
+    stderr: "",
+    exitCode: 0,
+  }
+}
+
 /** Simplified hook result for tests that check blocked/allowed state. */
 export interface SimpleHookResult {
   blocked: boolean
