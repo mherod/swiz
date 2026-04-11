@@ -1,5 +1,126 @@
 # Changelog
 
+## 2026-04-11
+
+### New Features
+
+- **`swiz mcp` Model Context Protocol server** — Added a stdio MCP
+  server that Claude Code (and other MCP clients) can spawn. Declares
+  the `experimental["claude/channel"]` capability so swiz can push
+  `<channel source="swiz">` events into a running agent session. Registers a
+  single `noop` tool as a reachability probe and exports
+  `pushChannelEvent()` as the producer-side hook for all future
+  channel events. Implementation in `src/commands/mcp.ts`.
+- **Channel-delivered auto-steers** — `swiz mcp` drains the existing
+  SQLite auto-steer queue by `project_key` (cwd) on a 500 ms poll and
+  pushes each `next_turn` message as a `notifications/claude/channel`
+  frame with `{ trigger, session_id, created_at }` meta. Auto-steers
+  produced from hooks now reach a running session through the MCP
+  channel path in addition to the existing AppleScript terminal path;
+  the atomic SQLite dequeue ensures only one path delivers each row.
+  New `scheduleAutoSteerViaChannel()` helper enqueues without the
+  AppleScript terminal prerequisite. Added
+  `consumeOneByProjectKey(projectKey, trigger)` to `AutoSteerStore`.
+- **Auto-install swiz as an MCP server** — `swiz install` now writes a
+  `swiz` entry into every known agent's MCP config file (Cursor,
+  Claude Code, Claude Desktop, Gemini CLI, Junie, AI) so fresh agents
+  pick up the stdio server without manual configuration. `swiz install
+  --uninstall` removes the entries. Idempotent upsert via
+  `installSwizAsMcpServer` / `uninstallSwizAsMcpServer` re-exported
+  from `src/commands/manage.ts`.
+- **Pretooluse issue-sync before checkout** — New
+  `pretooluse-issue-sync-before-checkout` hook that runs issue sync
+  before a `git checkout` so the agent has fresh issue/PR/CI state
+  before switching branches.
+- **Pending-task overflow gate** — New pre-tool guard that blocks
+  Bash/Edit when the pending-task count exceeds the configured
+  ceiling, with trace context for observability.
+- **Forward agent env vars to daemon hooks** — Dispatch now carries
+  agent-specific env vars (e.g. `CLAUDECODE_*`, `CURSOR_*`) from the
+  CLI process through to hooks running under the daemon.
+
+### Performance
+
+- **Cap CI poll wall-clock at 15s** — `pollUntilComplete` in
+  `stop-ship-checklist` had `POLL_INTERVAL_MS` equal to `MAX_POLL_MS`
+  (both 15000), causing a degenerate loop that slept the full budget
+  between two fetches (~30s wall time). Reduced `POLL_INTERVAL_MS` to
+  5000 so the loop runs up to 3 iterations inside the 15s budget,
+  leaving 50+ seconds of headroom in the 65s hook timeout. Exports
+  `CIRun`, `PollDeps`, `pollUntilComplete`, and the two constants for
+  unit testing via a virtual-clock injection seam. Adds 9 unit tests
+  pinning AC1–AC4 in `hooks/stop-ship-checklist/ci-workflow.test.ts`.
+  Closes #509.
+- **Dedupe `.gitattributes` read in `stop-large-files`** — Eliminated
+  the duplicate `git show HEAD:.gitattributes` subprocess in
+  team-mode evaluation. `evaluateStopLargeFiles` reads once and
+  threads the value through `findLargeFiles` / `checkFileSizes`.
+  Total git subprocess spawns per invocation now bounded at ≤ 4
+  (log + show + ls-tree + cat-file --batch) regardless of file
+  count. Adds 11 unit tests covering AC1–AC4 in
+  `hooks/stop-large-files.test.ts`. Closes #510.
+
+### Fixes
+
+- **Use `buildContextHookOutput` for trace visibility** — Fixed hooks
+  that were emitting raw context strings instead of structured
+  `ContextHookOutput`, preventing trace context from being visible in
+  the debug log pipeline.
+
+### Tests
+
+- **Serialize issue-sync tests for `--concurrent`** — Added gate
+  serialization around issue-sync test modules that share mutable
+  mock state, preventing races under `bun test --concurrent`.
+
+### Chore
+
+- **Sync `pnpm-lock.yaml` with MCP SDK add** — Added
+  `@modelcontextprotocol/sdk@1.27.1` to the pnpm lockfile and
+  upgraded the zod peer from 3.25.76 to 4.3.6 to match
+  `package.json`.
+
+## 2026-04-10
+
+### Performance
+
+- **Batch per-package git diffs in `stop-lockfile-drift`** — Replaced
+  the serial per-package `git diff` loop with a single batched call
+  plus parallel lockfile detection. Closes #512.
+
+### Refactoring
+
+- **Consolidate hook utilities and resolve type errors** — Merged
+  duplicated hook-side helpers into canonical locations and resolved
+  lingering type errors that were hiding behind `any` casts.
+- **Replace `preToolUseAllow("")` with empty object in offensive-language**
+  — The offensive-language hook now returns `{}` instead of
+  `preToolUseAllow("")`, eliminating a no-op call and a misleading
+  empty-string reason in trace logs.
+- **Consolidate duplicated patterns in auto-steer** — Extracted shared
+  helpers out of the auto-steer family of modules for readability.
+
+### Fixes
+
+- **Use `PreCompact` schema for `preCompact` validation** — Dispatch
+  was validating `preCompact` events against the generic session
+  schema, missing the `PreCompact`-specific fields. Added a dedicated
+  `preCompactHookInputSchema` alias and wired it into the dispatch
+  route.
+- **Aggressively deny when lock cannot be removed** — The
+  git-index-lock hook now denies the tool call when a stale lock file
+  cannot be removed, rather than silently allowing the operation to
+  proceed.
+
+### Tests
+
+- **Deterministic path in `stop-auto-continue` tests** — Updated tests
+  to use a deterministic transcript path and fixed the lint cleanup.
+- **Cross-platform immutability in git-index-lock test** — Replaced
+  platform-specific chmod with a cross-platform immutable-file shim.
+- **Unset `CLAUDECODE` env var in Codex sanitization test** — Isolated
+  the Codex sanitization test from parent Claude Code env leakage.
+
 ## 2026-04-09
 
 ### Refactoring
