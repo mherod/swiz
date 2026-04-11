@@ -159,14 +159,75 @@ function mergeHookEnv(overrides: Record<string, string | undefined>): Record<str
 }
 
 /**
- * Run a hook script as a subprocess with controlled env.
- * Returns parsed hookSpecificOutput decision if present.
+ * Run a SwizHook default-export in-process without spawning a subprocess.
+ *
+ * Dynamic-imports the script, invokes `hook.run(payload)` inside
+ * `withInlineSwizHookRun` so subprocess-only helpers (`denyPreToolUse`,
+ * `emitContext`, …) redirect via `SwizHookExit` instead of calling
+ * `process.exit`. Returns the same shape as the subprocess `runHook`.
+ *
+ * Only safe for hooks that default-export a SwizHook AND don't need env
+ * overrides — mutating `process.env` under `--concurrent` would leak across
+ * test files. Use `runHook` (subprocess) when either condition fails.
+ */
+export async function runHookInProcess(
+  script: string,
+  stdinPayload: Record<string, any>
+): Promise<HookResult> {
+  const { withInlineSwizHookRun, SwizHookExit } = await import("../inline-hook-context.ts")
+  const absPath = resolve(process.cwd(), script)
+  const mod = (await import(absPath)) as { default?: { run?: (input: any) => Promise<any> } }
+  const hook = mod.default
+  if (!hook || typeof hook.run !== "function") {
+    throw new Error(`${script} does not default-export a SwizHook; use runHook() instead`)
+  }
+  let output: Record<string, any> | null = null
+  try {
+    const result = await withInlineSwizHookRun(() => hook.run!(stdinPayload))
+    if (result && typeof result === "object") {
+      output = result as Record<string, any>
+    }
+  } catch (err) {
+    if (err instanceof SwizHookExit) {
+      output = err.output as Record<string, any>
+    } else {
+      throw err
+    }
+  }
+  const hasOutput = output !== null && Object.keys(output).length > 0
+  const stdout = hasOutput ? JSON.stringify(output) : ""
+  let decision: string | undefined
+  let reason: string | undefined
+  let json: Record<string, any> | null = null
+  if (hasOutput && output) {
+    json = output
+    const surface = extractPreToolSurfaceDecision(output)
+    decision = surface.decision
+    reason = surface.reason
+  }
+  return { exitCode: 0, stdout, stderr: "", json, decision, reason }
+}
+
+/**
+ * Run a hook script. Uses in-process execution when `envOverrides` is empty
+ * and the hook default-exports a SwizHook; otherwise spawns `bun hooks/<script>`
+ * to preserve env-override semantics.
  */
 export async function runHook(
   script: string,
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
+  if (Object.keys(envOverrides).length === 0) {
+    try {
+      return await runHookInProcess(script, stdinPayload)
+    } catch (err) {
+      // If the hook isn't SwizHook-compatible, fall through to subprocess path.
+      const message = err instanceof Error ? err.message : String(err)
+      if (!message.includes("does not default-export a SwizHook")) throw err
+    }
+  }
+
   const payload = JSON.stringify(stdinPayload)
   const env = mergeHookEnv(envOverrides)
 
