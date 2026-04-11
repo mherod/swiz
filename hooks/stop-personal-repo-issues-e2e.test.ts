@@ -490,8 +490,8 @@ describe("E2E stop-personal-repo-issues: project state ordering", () => {
 
 // ─── PR blocking and issue suppression ───────────────────────────────────────
 
-describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () => {
-  test("CHANGES_REQUESTED PR blocks stop with PR details in reason", async () => {
+describe("E2E stop-personal-repo-issues: PR fixtures are isolated from the issue hook", () => {
+  test("CHANGES_REQUESTED PR fixture does not override issue refinement guidance", async () => {
     const dir = await createGitRepoWithGitHubRemote("-prblock", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
@@ -499,12 +499,12 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
       issues: [makeIssue(1, "Bug fix", ["bug"])],
     })
     expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("#7")
-    expect(result.reason).toContain("feat: add new dashboard")
-    expect(result.reason).toContain("changes requested")
+    expect(result.reason).toContain("#1")
+    expect(result.reason).toContain("Bug fix")
+    expect(result.reason).not.toContain("#7")
   })
 
-  test("CHANGES_REQUESTED PR suppresses issue list (issues not shown in reason)", async () => {
+  test("CHANGES_REQUESTED PR fixture does not suppress the issue list", async () => {
     const dir = await createGitRepoWithGitHubRemote("-prsuppresses", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
@@ -512,11 +512,11 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
       issues: [makeIssue(42, "Critical bug", ["critical"])],
     })
     expect(result.blocked).toBe(true)
-    // Issue list is suppressed when CHANGES_REQUESTED PR exists
-    expect(result.reason).not.toContain("#42")
+    expect(result.reason).toContain("#42")
+    expect(result.reason).not.toContain("#7")
   })
 
-  test("REVIEW_REQUIRED PR blocks stop and issues are still shown", async () => {
+  test("REVIEW_REQUIRED PR fixture is ignored and issue guidance remains", async () => {
     const dir = await createGitRepoWithGitHubRemote("-reviewreq", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
@@ -524,9 +524,8 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
       issues: [makeIssue(10, "Bug report", ["bug"])],
     })
     expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("#3")
-    // Issues should still be shown (only CHANGES_REQUESTED suppresses them)
     expect(result.reason).toContain("#10")
+    expect(result.reason).not.toContain("#3")
   })
 
   test("no PRs and no issues allows stop", async () => {
@@ -598,7 +597,7 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
     expect(result.reason).toContain("#30")
   })
 
-  test("conflicting PR suggestions show only the two newest and two oldest", async () => {
+  test("conflicting PR fixtures alone do not block the issue hook", async () => {
     const dir = await createGitRepoWithGitHubRemote("-conflictbookends", "testuser", "myrepo")
     const result = await runHook(dir, {
       user: "testuser",
@@ -630,15 +629,8 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
       ],
     })
 
-    expect(result.blocked).toBe(true)
-    const r = result.reason!
-    expect(r).toContain("#106")
-    expect(r).toContain("#105")
-    expect(r).toContain("#101")
-    expect(r).toContain("#102")
-    expect(r).not.toContain("#103")
-    expect(r).not.toContain("#104")
-    expect(r).toContain("and 2 more")
+    expect(result.blocked).toBe(false)
+    expect(result.raw).toBe("")
   })
 })
 

@@ -556,6 +556,67 @@ async function mergeMcpServers(parsed: ParsedManageArgs, base: string): Promise<
   }
 }
 
+const SWIZ_MCP_SERVER_NAME = "swiz"
+const SWIZ_MCP_SERVER_DEF: McpServerDef = { command: "swiz", args: ["mcp"] }
+
+function mcpServersEqual(a: McpServerDef, b: McpServerDef): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * Register swiz as an MCP server in each target agent's config file.
+ * Idempotent: no-ops when the existing entry already matches. Used by
+ * `swiz install` so fresh agents pick up the `swiz mcp` stdio server.
+ */
+export async function installSwizAsMcpServer(
+  targetAgentIds: AgentId[],
+  base: string,
+  project: boolean,
+  dryRun: boolean
+): Promise<{ updated: string[]; skipped: string[] }> {
+  const updated: string[] = []
+  const skipped: string[] = []
+  for (const agentId of targetAgentIds) {
+    const agent = getAgentConfig(agentId, project)
+    const path = agent.resolvePath(base)
+    const json = await readMcpFile(path)
+    const mcpServers = { ...(json.mcpServers ?? {}) }
+    const existing = mcpServers[SWIZ_MCP_SERVER_NAME]
+    if (existing && mcpServersEqual(existing, SWIZ_MCP_SERVER_DEF)) {
+      skipped.push(`${agent.displayName} (${path})`)
+      continue
+    }
+    mcpServers[SWIZ_MCP_SERVER_NAME] = SWIZ_MCP_SERVER_DEF
+    if (!dryRun) await writeMcpFile(path, { ...json, mcpServers })
+    updated.push(`${agent.displayName} (${path})`)
+  }
+  return { updated, skipped }
+}
+
+/** Remove the swiz MCP server entry from each target agent's config file. */
+export async function uninstallSwizAsMcpServer(
+  targetAgentIds: AgentId[],
+  base: string,
+  project: boolean,
+  dryRun: boolean
+): Promise<{ removed: string[] }> {
+  const removed: string[] = []
+  for (const agentId of targetAgentIds) {
+    const agent = getAgentConfig(agentId, project)
+    const path = agent.resolvePath(base)
+    const json = await readMcpFile(path)
+    if (!json.mcpServers?.[SWIZ_MCP_SERVER_NAME]) continue
+    const mcpServers = { ...json.mcpServers }
+    delete mcpServers[SWIZ_MCP_SERVER_NAME]
+    if (!dryRun) await writeMcpFile(path, { ...json, mcpServers })
+    removed.push(`${agent.displayName} (${path})`)
+  }
+  return { removed }
+}
+
+/** Agent IDs that `manage mcp` knows how to configure globally. */
+export const MCP_MANAGED_AGENT_IDS: AgentId[] = GLOBAL_AGENTS.map((a) => a.id)
+
 export const manageCommand: Command = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",

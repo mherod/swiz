@@ -34,6 +34,7 @@ import { ideaCommand } from "./src/commands/idea.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
 import { manageCommand } from "./src/commands/manage.ts"
+import { mcpCommand } from "./src/commands/mcp.ts"
 import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
 import { modelCommand } from "./src/commands/model.ts"
@@ -78,6 +79,7 @@ registerCommand(memoryCommand)
 registerCommand(modelCommand)
 registerCommand(pluginsCommand)
 registerCommand(manageCommand)
+registerCommand(mcpCommand)
 registerCommand(compactCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)

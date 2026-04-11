@@ -149,6 +149,56 @@ describe("pretooluse-update-memory-enforcement", () => {
     expect(result.stdout).toBe("")
   })
 
+  test("ignores later plain transcript mentions of the reminder fragment after the hook was satisfied", async () => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const transcript = await createTranscript(dir, [
+      hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      toolUse("Read", { file_path: "/Users/test/.codex/skills/update-memory/SKILL.md" }),
+      toolUse("Write", {
+        file_path: "CLAUDE.md",
+        content: "DO: update memory immediately.\n",
+      }),
+      {
+        type: "user",
+        message: {
+          content: `Investigate the earlier reminder phrase "${REMINDER_FRAGMENT}" without re-triggering it.`,
+        },
+      },
+    ])
+
+    const result = await runHook({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "export const quoted = true\n" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
+  test("ignores plain user mentions of the reminder fragment when no hook feedback triggered it", async () => {
+    const dir = await createEnforcementProjectDir(createTempDir)
+    const transcript = await createTranscript(dir, [
+      {
+        type: "user",
+        message: {
+          content: `Fix the transcript matcher for "${REMINDER_FRAGMENT}" without blocking normal work.`,
+        },
+      },
+    ])
+
+    const result = await runHook({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "export const plain = true\n" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
   test("allows the markdown write even when the skill read is not yet in the transcript (same-turn case)", async () => {
     // Reproduces the deadlock: skill Read and Edit happen in the same response turn,
     // so the transcript hasn't captured the skill Read yet when the Edit hook fires.

@@ -15,6 +15,11 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import {
+  extractTextFromUnknownContent,
+  isHookFeedback,
+  stripQuotedText,
+} from "../src/transcript-utils.ts"
+import {
   extractToolBlocksFromEntry,
   formatActionPlan,
   hasFileInTree,
@@ -159,11 +164,30 @@ function scanTranscript(lines: string[], startIndex: number): EnforcementState {
   return state
 }
 
+function isReminderTriggerEntry(line: string): boolean {
+  let entry: Record<string, any>
+  try {
+    entry = JSON.parse(line) as Record<string, any>
+  } catch {
+    return false
+  }
+
+  if (entry?.type !== "user") return false
+
+  const content = (entry as { message?: { content?: unknown } })?.message?.content
+  if ((typeof content !== "string" && !Array.isArray(content)) || !isHookFeedback(content)) {
+    return false
+  }
+
+  const text = stripQuotedText(extractTextFromUnknownContent(content))
+  return text.includes(REMINDER_FRAGMENT) && !text.includes(SELF_SENTINEL)
+}
+
 function findLastTriggerIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]
     if (!line) continue
-    if (line.includes(REMINDER_FRAGMENT) && !line.includes(SELF_SENTINEL)) return i
+    if (isReminderTriggerEntry(line)) return i
   }
   return -1
 }
@@ -231,27 +255,44 @@ function isCurrentToolSatisfying(
   return !state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)
 }
 
+function parseToolHookInput(raw: Record<string, any>): ToolHookInput | null {
+  try {
+    return toolHookInputSchema.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+async function getPendingReminderLines(
+  transcriptPath: string,
+  cwd: string,
+  toolName: string
+): Promise<{ lines: string[]; lastTriggerIndex: number } | null> {
+  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return null
+
+  const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
+  if (lines.length === 0) return null
+
+  const lastTriggerIndex = findLastTriggerIndex(lines)
+  if (lastTriggerIndex < 0) return null
+
+  return { lines, lastTriggerIndex }
+}
+
 export async function evaluatePretooluseUpdateMemoryEnforcement(
   raw: Record<string, any>
 ): Promise<SwizHookOutput> {
-  let input: ToolHookInput
-  try {
-    input = toolHookInputSchema.parse(raw)
-  } catch {
-    return {}
-  }
+  const input = parseToolHookInput(raw)
+  if (!input) return {}
+
   const transcriptPath = input.transcript_path ?? ""
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}
   const cwd = input.cwd ?? process.cwd()
 
-  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return {}
-
-  const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
-  if (lines.length === 0) return {}
-
-  const lastTriggerIndex = findLastTriggerIndex(lines)
-  if (lastTriggerIndex < 0) return {}
+  const pendingReminder = await getPendingReminderLines(transcriptPath, cwd, toolName)
+  if (!pendingReminder) return {}
+  const { lines, lastTriggerIndex } = pendingReminder
   if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}
 
   const state = scanTranscript(lines, lastTriggerIndex)

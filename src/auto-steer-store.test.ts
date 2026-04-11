@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AutoSteerStore } from "./auto-steer-store.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
 
 describe("AutoSteerStore", () => {
   const tmpDirs: string[] = []
@@ -326,5 +327,72 @@ describe("AutoSteerStore", () => {
     const r1 = store.consume("sess1")
     expect(r1).toHaveLength(1)
     store.close()
+  })
+
+  describe("consumeOneByProjectKey (MCP channel delivery path)", () => {
+    it("drains FIFO across sessions sharing a project_key", () => {
+      const store = createStore()
+      const cwd = "/repo/mcp-channel"
+      const key = projectKeyFromCwd(cwd)
+      store.enqueue("sessA", "first", "next_turn", { cwd })
+      store.enqueue("sessB", "second", "next_turn", { cwd })
+
+      const r1 = store.consumeOneByProjectKey(key, "next_turn")
+      expect(r1?.message).toBe("first")
+      expect(r1?.sessionId).toBe("sessA")
+      expect(r1?.deliveredAt).toBeNumber()
+
+      const r2 = store.consumeOneByProjectKey(key, "next_turn")
+      expect(r2?.message).toBe("second")
+      expect(r2?.sessionId).toBe("sessB")
+
+      expect(store.consumeOneByProjectKey(key, "next_turn")).toBeNull()
+      store.close()
+    })
+
+    it("returns null when another project has messages", () => {
+      const store = createStore()
+      store.enqueue("sess", "for repo A", "next_turn", { cwd: "/repo/a" })
+      const result = store.consumeOneByProjectKey(projectKeyFromCwd("/repo/b"), "next_turn")
+      expect(result).toBeNull()
+      store.close()
+    })
+
+    it("respects trigger filter", () => {
+      const store = createStore()
+      const cwd = "/repo/triggers"
+      const key = projectKeyFromCwd(cwd)
+      store.enqueue("sess", "continue work", "next_turn", { cwd })
+      store.enqueue("sess", "commit soon", "after_commit", { cwd })
+
+      // next_turn drain ignores after_commit rows
+      const r1 = store.consumeOneByProjectKey(key, "next_turn")
+      expect(r1?.message).toBe("continue work")
+      expect(store.consumeOneByProjectKey(key, "next_turn")).toBeNull()
+
+      // after_commit row still pending under its trigger
+      const r2 = store.consumeOneByProjectKey(key, "after_commit")
+      expect(r2?.message).toBe("commit soon")
+      store.close()
+    })
+
+    it("skips expired rows", () => {
+      const store = createStore()
+      const cwd = "/repo/ttl"
+      const key = projectKeyFromCwd(cwd)
+      store.enqueue("sess", "alive", "next_turn", { cwd, ttlMs: 60_000 })
+      store.enqueue("sess", "stale", "next_turn", { cwd, ttlMs: 1 })
+
+      // Wait for the stale row to expire.
+      const start = Date.now()
+      while (Date.now() - start < 5) {
+        // Synchronous busy-wait keeps the test deterministic without a timer.
+      }
+
+      const first = store.consumeOneByProjectKey(key, "next_turn")
+      expect(first?.message).toBe("alive")
+      expect(store.consumeOneByProjectKey(key, "next_turn")).toBeNull()
+      store.close()
+    })
   })
 })

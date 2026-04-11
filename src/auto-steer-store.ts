@@ -98,6 +98,7 @@ export class AutoSteerStore {
     trigger: string
     created_at: number
   }>
+  private _stmtConsumeOneByProjectKey!: Statement
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getAutoSteerDbPath()
@@ -191,6 +192,16 @@ export class AutoSteerStore {
        WHERE session_id = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
        ORDER BY id ASC`
+    )
+    // ConsumeOne by project_key — used by the MCP channel delivery path where
+    // the server process knows its cwd but not the host agent's session id.
+    this._stmtConsumeOneByProjectKey = this.db.prepare(
+      `SELECT id, session_id, message, trigger_type as trigger, created_at
+       FROM auto_steer_queue
+       WHERE project_key = ? AND trigger_type = ? AND delivered_at IS NULL
+         AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
+       ORDER BY id ASC
+       LIMIT 1`
     )
   }
 
@@ -286,6 +297,52 @@ export class AutoSteerStore {
     }
 
     return results
+  }
+
+  /**
+   * Atomically consume the next pending message for a project_key+trigger.
+   * Used by the MCP channel delivery path: the `swiz mcp` server process
+   * knows its cwd (→ project_key) but not the host agent's session id, so
+   * it drains messages keyed by project instead.
+   */
+  consumeOneByProjectKey(
+    projectKey: string,
+    trigger: AutoSteerTrigger = "next_turn"
+  ): QueuedAutoSteerRequest | null {
+    const now = Date.now()
+    try {
+      this.db.run("BEGIN IMMEDIATE")
+      const row = this._stmtConsumeOneByProjectKey.get(projectKey, trigger, now) as
+        | {
+            id: number
+            session_id: string
+            message: string
+            trigger: string
+            created_at: number
+          }
+        | undefined
+      if (!row) {
+        this.db.run("COMMIT")
+        return null
+      }
+      this._stmtMarkDelivered.run(now, row.id)
+      this.db.run("COMMIT")
+      return {
+        id: row.id,
+        sessionId: row.session_id,
+        message: row.message,
+        trigger: row.trigger as AutoSteerTrigger,
+        createdAt: row.created_at,
+        deliveredAt: now,
+      }
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK")
+      } catch {
+        // Ignore rollback errors
+      }
+      throw e
+    }
   }
 
   /**

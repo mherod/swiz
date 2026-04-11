@@ -1,5 +1,6 @@
 import { AGENTS, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
 import { DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
 import { readProjectSettings, writeProjectSettings } from "../settings.ts"
@@ -14,6 +15,11 @@ import {
   uninstallDaemonLaunchAgent,
 } from "./install/daemon-helpers.ts"
 import type { InstallRunOptions } from "./install/types.ts"
+import {
+  installSwizAsMcpServer,
+  MCP_MANAGED_AGENT_IDS,
+  uninstallSwizAsMcpServer,
+} from "./manage.ts"
 import { uninstallSwizFromAgents } from "./uninstall.ts"
 export { installDaemonLaunchAgent, uninstallDaemonLaunchAgent }
 
@@ -68,6 +74,45 @@ async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
   if (opts.mergeTool) await installMergeTool(opts.dryRun)
   if (opts.statusLine) await installStatusLine(opts.dryRun)
   if (opts.daemon) await installDaemonForCli(opts.daemonPort, opts.dryRun)
+}
+
+async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (!shouldInstallHooks(args, opts)) return
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const { updated, skipped } = await installSwizAsMcpServer(
+    MCP_MANAGED_AGENT_IDS,
+    home,
+    false,
+    opts.dryRun
+  )
+  if (updated.length === 0 && skipped.length === 0) return
+  console.log(`  MCP server "swiz":`)
+  for (const entry of updated) {
+    console.log(`    ${GREEN}${opts.dryRun ? "+" : "✓"}${RESET} ${entry}`)
+  }
+  for (const entry of skipped) {
+    console.log(`    ${DIM}· ${entry} (already registered)${RESET}`)
+  }
+  console.log()
+}
+
+async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (!isFullUninstall(opts) && !shouldInstallHooks(args, opts)) return
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const { removed } = await uninstallSwizAsMcpServer(
+    MCP_MANAGED_AGENT_IDS,
+    home,
+    false,
+    opts.dryRun
+  )
+  if (removed.length === 0) return
+  console.log(`  MCP server "swiz":`)
+  for (const entry of removed) {
+    console.log(`    ${YELLOW}${opts.dryRun ? "-" : "✗"}${RESET} ${entry}`)
+  }
+  console.log()
 }
 
 async function runOptionalUninstallSteps(opts: InstallRunOptions): Promise<void> {
@@ -209,6 +254,7 @@ export const installCommand: Command = {
     if (opts.uninstall) {
       console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
       await runOptionalUninstallSteps(opts)
+      await uninstallSwizMcpServerStep(args, opts)
       await uninstallHooksForTargets(args, opts)
       if (!opts.dryRun && isFullUninstall(opts)) await pauseSessionstartSelfHeal()
       if (opts.dryRun) {
@@ -220,6 +266,7 @@ export const installCommand: Command = {
     console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
     await runOptionalInstallSteps(opts)
     await installProjectHooks(opts.dryRun)
+    await installSwizMcpServerStep(args, opts)
     if (await installHooksForTargets(args, opts)) return
     if (opts.dryRun) {
       console.log("  No changes written.\n")

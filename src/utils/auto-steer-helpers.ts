@@ -222,6 +222,36 @@ export async function scheduleAutoSteer(
 }
 
 /**
+ * Schedule an auto-steer targeted at the MCP channel path.
+ *
+ * Unlike `scheduleAutoSteer`, this does NOT require an AppleScript-controllable
+ * terminal: delivery happens through the `swiz mcp` stdio server, which drains
+ * the SQLite queue by project_key (cwd) and pushes each message to the
+ * connected agent as a `<channel source="swiz">` event.
+ *
+ * Returns true if enqueued, false if the store de-duplicated it or the
+ * session id could not be sanitized. The `autoSteer` setting is still
+ * respected — channel delivery is a transport, not a bypass of policy.
+ */
+export async function scheduleAutoSteerViaChannel(
+  sessionId: string,
+  message: string,
+  cwd: string,
+  trigger: AutoSteerTrigger = "next_turn",
+  opts?: { ttlMs?: number }
+): Promise<boolean> {
+  const { settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
+  if (!settingsAutoSteer) return false
+
+  const safeSession = await sanitizeSessionOrReturnNull(sessionId)
+  if (!safeSession) return false
+
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  return store.enqueue(safeSession, message, trigger, { cwd, ttlMs: opts?.ttlMs })
+}
+
+/**
  * Check whether an auto-steer request is pending for this session.
  * Atomically consumes the request — returns the steering message if pending, null otherwise.
  */
