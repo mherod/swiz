@@ -111,12 +111,16 @@ describe("dispatch execute integration", () => {
     })
 
     it("normalizes stop dispatch when cwd is not a git repo", async () => {
+      // Isolation: non-git cwd causes an early exit in performDispatch before any
+      // stop hooks run, so this test never reads ~/.claude/tasks/ regardless of
+      // the developer's real session state. Use a random session id to ensure no
+      // collision with a real tasks directory under concurrent execution.
       const req: DispatchRequest = {
         canonicalEvent: "stop",
         hookEventName: "Stop",
         payloadStr: JSON.stringify({
           cwd: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
-          session_id: "stop-no-git",
+          session_id: crypto.randomUUID(),
         }),
         daemonContext: true,
       }
