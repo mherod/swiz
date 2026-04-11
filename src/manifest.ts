@@ -27,7 +27,6 @@ import posttooluseTaskSync, {
   taskListSyncHook as posttooluseTaskListSync,
 } from "../hooks/posttooluse-task-sync.ts"
 import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
-import posttooluseTimeContext from "../hooks/posttooluse-time-context.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
 import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
@@ -335,7 +334,6 @@ const RAW_MANIFEST: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttoolusGitContext },
-      { hook: posttooluseTimeContext },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
       { hook: posttooluseTaskSync },
