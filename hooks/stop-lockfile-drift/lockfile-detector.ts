@@ -53,7 +53,7 @@ const DEP_SECTIONS = [
   "optionalDependencies",
 ] as const
 
-type PkgJson = Record<string, unknown> & {
+export type PkgJson = Record<string, unknown> & {
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
@@ -81,6 +81,19 @@ async function readNewPkgJson(ctx: LockfileDriftContext, pkgFile: string): Promi
   } catch {
     return null
   }
+}
+
+/**
+ * Pure comparison of the dependency-relevant fields between two parsed
+ * package.json objects. Exposed so tests can cover the drift classifier
+ * without constructing a git fixture.
+ */
+export function pkgJsonDepsChanged(oldPkg: PkgJson, newPkg: PkgJson): boolean {
+  for (const section of DEP_SECTIONS) {
+    if (!sameDepMap(oldPkg[section], newPkg[section])) return true
+  }
+  if (oldPkg.packageManager !== newPkg.packageManager) return true
+  return false
 }
 
 function sameDepMap(
@@ -118,11 +131,7 @@ async function depsActuallyChangedBetween(
     // than silently ignoring a real drift.
     return true
   }
-  for (const section of DEP_SECTIONS) {
-    if (!sameDepMap(oldPkg[section], newPkg[section])) return true
-  }
-  if (oldPkg.packageManager !== newPkg.packageManager) return true
-  return false
+  return pkgJsonDepsChanged(oldPkg, newPkg)
 }
 
 /**
