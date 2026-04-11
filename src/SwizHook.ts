@@ -145,6 +145,10 @@ export async function runSwizHookAsMain(
   }
   const output = await hook.run(input)
   await emitHookOutputIfNonEmpty(output)
+  // Always exit explicitly: dynamic imports (settings.ts, hook-utils.ts) may open
+  // SQLite connections or file watchers that prevent natural process exit when
+  // the hook returns {} (empty output, e.g. non-TS file passthrough).
+  process.exit(0)
 }
 
 // ─── Output type ─────────────────────────────────────────────────────────────
