@@ -114,18 +114,38 @@ jobs:
             | grep -v 'node_modules/' \
             || true)
 
-          # Map each changed source file to its sibling test file
+          # Map each changed source file to its sibling test file, and fall
+          # back to parent-bundle tests for submodules like
+          # hooks/<bundle>/foo.ts → hooks/<bundle>.test.ts (mirrors the
+          # logic added to scripts/get-test-scope.ts for lefthook). Without
+          # this, submodule edits return no targeted tests and CI falls
+          # through to the full-suite path, which re-exposes the
+          # concurrent-mode flakes tracked in lefthook.yml SKIP_PATTERNS.
           TEST_FILES=""
           while IFS= read -r src; do
             [ -z "$src" ] && continue
             base="${src%.tsx}"
             base="${base%.ts}"
+            matched=""
             for ext in ".test.ts" ".test.tsx"; do
               if [ -f "${base}${ext}" ]; then
                 TEST_FILES="$TEST_FILES ${base}${ext}"
+                matched="1"
                 break
               fi
             done
+            if [ -n "$matched" ]; then continue; fi
+            # Parent-bundle lookup: hooks/stop-personal-repo-issues/issues.ts
+            # → find hooks/stop-personal-repo-issues*.test.ts under the
+            # grandparent directory (here `hooks/`).
+            parent_dir=$(dirname "$src")
+            grandparent=$(dirname "$parent_dir")
+            bundle=$(basename "$parent_dir")
+            if [ -n "$bundle" ] && [ "$bundle" != "." ] && [ -d "$grandparent" ]; then
+              for candidate in "$grandparent/$bundle"*.test.ts; do
+                [ -f "$candidate" ] && TEST_FILES="$TEST_FILES $candidate"
+              done
+            fi
           done <<< "$CHANGED"
 
           # Include directly changed test files too

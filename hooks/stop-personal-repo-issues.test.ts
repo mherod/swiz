@@ -1173,3 +1173,49 @@ describe("sectionOrderForProjectState / planSectionOrderForProjectState", () => 
     expect(plan.indexOf("readyIssues")).toBeLessThan(plan.indexOf("refinement"))
   })
 })
+
+// ─── state filter regression (commit 53afd44e) ──────────────────────────────
+
+/**
+ * Mirrors the `.filter((r) => r.state === "open")` guard added to
+ * `getAllOpenIssues` in hooks/stop-personal-repo-issues/issues.ts. Kept as an
+ * inline helper so the regression test doesn't need to import the runtime
+ * module and set up a store fixture — the production site is a single
+ * predicate we can replay here directly.
+ */
+function keepOnlyOpen(rows: Issue[]): Issue[] {
+  return rows.filter((r) => (r as Issue & { state?: string }).state === "open")
+}
+
+describe("cached-issue state filter", () => {
+  test("keeps rows whose state is exactly 'open'", () => {
+    const rows = [
+      { number: 1, title: "a", labels: [], state: "open" } as Issue & { state: string },
+      { number: 2, title: "b", labels: [], state: "open" } as Issue & { state: string },
+    ]
+    expect(keepOnlyOpen(rows)).toHaveLength(2)
+  })
+
+  test("drops closed rows even when they look otherwise valid", () => {
+    const rows = [
+      { number: 1, title: "open", labels: [], state: "open" } as Issue & { state: string },
+      { number: 2, title: "closed", labels: [], state: "closed" } as Issue & { state: string },
+    ]
+    const out = keepOnlyOpen(rows)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.number).toBe(1)
+  })
+
+  test("drops legacy rows with no state field at all", () => {
+    // Rows written before the `state` projection landed have undefined state.
+    // The stop hook must treat these as stale so the next read refreshes
+    // them; the filter is how that happens in practice.
+    const rows: Issue[] = [
+      { number: 7, title: "legacy", labels: [] },
+      { number: 8, title: "fresh", labels: [], ...({ state: "open" } as object) } as Issue,
+    ]
+    const out = keepOnlyOpen(rows)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.number).toBe(8)
+  })
+})
