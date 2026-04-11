@@ -43,6 +43,7 @@ import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
+import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
@@ -316,6 +317,7 @@ const RAW_MANIFEST: HookGroup[] = [
       { hook: pretooluseBlockCommitToMain },
       { hook: pretoolusePrChangesBranchGuard },
       { hook: pretooluseTrunkModeBranchGate },
+      { hook: pretooluseIssueSyncBeforeCheckout },
       { hook: pretooluseSkillInvocationGate },
       { hook: pretooluseNoPushWhenInstructed },
       { hook: pretoolusePrAgeGate },

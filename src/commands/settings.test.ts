@@ -62,6 +62,13 @@ async function runSwiz(
     return { stdout, stderr, exitCode: proc.exitCode }
   }
 
+  // Scope is required by the CLI; tests that don't specify one default to --global.
+  const SCOPE_FLAGS_RE = /^(--global|-g|--user|-u|--project|-p|--session|-s)$/
+  const settingsArgs = args.slice(1)
+  if (!settingsArgs.some((a) => SCOPE_FLAGS_RE.test(a))) {
+    settingsArgs.push("--global")
+  }
+
   // Enqueue to serialize — concurrent callers wait for the previous to finish
   const result = _inProcessQueue.then(async () => {
     const prevHome = process.env.HOME
@@ -78,7 +85,7 @@ async function runSwiz(
 
     let exitCode = 0
     try {
-      await settingsCommand.run(args.slice(1))
+      await settingsCommand.run(settingsArgs)
     } catch (err) {
       exitCode = 1
       stderrLines.push(err instanceof Error ? err.message : String(err))

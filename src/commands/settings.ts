@@ -108,8 +108,8 @@ function aliasesForScope(scope: SettingsScope): string {
 
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>] [--force]\n" +
-    "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] (--global | --project | --session [id]) [--dir <path>] [--force]\n" +
+    "Scope (required): --global (~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
     `Settings (--global): ${aliasesForScope("global")}\n` +
     `Settings (--project): ${aliasesForScope("project")}\n` +
     `Settings (--session): ${aliasesForScope("session")}\n` +
@@ -142,6 +142,8 @@ function isStringSetting(key: SettingKey): boolean {
 const SCOPE_FLAGS: Record<string, SettingsScope> = {
   "--global": "global",
   "-g": "global",
+  "--user": "global",
+  "-u": "global",
   "--project": "project",
   "-p": "project",
   "--session": "session",
@@ -216,6 +218,9 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   const rawAction = (state.positionals[0] ?? "show").toLowerCase()
   if (!VALID_ACTIONS.has(rawAction)) {
     throw new Error(`Unknown subcommand: ${state.positionals[0]}\n${usage()}`)
+  }
+  if (!state.scopeExplicitlySet) {
+    throw new Error(`Scope is required. Pass --global, --project, or --session [id].\n${usage()}`)
   }
 
   return {
