@@ -20,10 +20,16 @@ import {
 } from "../../src/utils/hook-utils.ts"
 import type { WorkflowStep } from "./types.ts"
 
-const POLL_INTERVAL_MS = 15_000
-const MAX_POLL_MS = 15_000
+// CI poll budget for the stop-ship checklist. MAX_POLL_MS caps the total
+// wall-clock time the hook will spend waiting for in-flight CI to settle;
+// POLL_INTERVAL_MS is the gap between fetches. With MAX_POLL_MS=15000 and
+// POLL_INTERVAL_MS=5000 the loop does at most 3 sleep iterations (~15s
+// wall-clock), keeping the hook well inside its 65s timeout budget. Exported
+// so unit tests can pin the bound (issue #509).
+export const POLL_INTERVAL_MS = 5_000
+export const MAX_POLL_MS = 15_000
 
-interface CIRun {
+export interface CIRun {
   databaseId?: number
   status: string
   conclusion: string
@@ -83,15 +89,37 @@ async function resolveTargetBranch(cwd: string): Promise<string | null> {
   return branch
 }
 
-async function pollUntilComplete(branch: string, cwd: string): Promise<CIRun[]> {
-  let relevant = await fetchRuns(branch, cwd)
+/**
+ * Injection seam for tests: the poll loop accepts a fetcher (defaulting to
+ * the real `fetchRuns`) and a sleep function (defaulting to `Bun.sleep`).
+ * The default behaviour is unchanged — the extra parameters only exist so
+ * unit tests can drive the loop without real subprocesses or real time.
+ */
+export interface PollDeps {
+  fetcher: (branch: string, cwd: string) => Promise<CIRun[]>
+  sleep: (ms: number) => Promise<void>
+  now: () => number
+}
+
+const defaultPollDeps: PollDeps = {
+  fetcher: fetchRuns,
+  sleep: (ms) => Bun.sleep(ms),
+  now: () => Date.now(),
+}
+
+export async function pollUntilComplete(
+  branch: string,
+  cwd: string,
+  deps: PollDeps = defaultPollDeps
+): Promise<CIRun[]> {
+  let relevant = await deps.fetcher(branch, cwd)
   if (!relevant.length) return relevant
   if (findActive(relevant).length === 0) return relevant
 
-  const deadline = Date.now() + MAX_POLL_MS
-  while (Date.now() < deadline && findActive(relevant).length > 0) {
-    await Bun.sleep(POLL_INTERVAL_MS)
-    relevant = await fetchRuns(branch, cwd)
+  const deadline = deps.now() + MAX_POLL_MS
+  while (deps.now() < deadline && findActive(relevant).length > 0) {
+    await deps.sleep(POLL_INTERVAL_MS)
+    relevant = await deps.fetcher(branch, cwd)
   }
   return relevant
 }
