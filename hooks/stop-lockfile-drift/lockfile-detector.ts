@@ -46,41 +46,83 @@ async function rootLockfileCovers(cwd: string, changedFiles: Set<string>): Promi
   return false
 }
 
-/**
- * Analyze package.json diff to detect actual dependency changes.
- */
-function depsActuallyChanged(pkgDiff: string): boolean {
-  const lines = pkgDiff.split("\n")
-  const depsChanged = lines.some(
-    (line) =>
-      line.startsWith("+") &&
-      !line.startsWith("+++") &&
-      /(dependencies|devDependencies|peerDependencies|optionalDependencies)/.test(line)
-  )
-  const depLineAdded = lines.some(
-    (line) => line.startsWith("+") && !line.startsWith("+++") && /^\+\s+"[^"]+": "[^"]+"/.test(line)
-  )
-  return depsChanged || depLineAdded
+const DEP_SECTIONS = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+] as const
+
+type PkgJson = Record<string, unknown> & {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
+  packageManager?: string
+}
+
+/** Parse the pre-change version of `pkgFile` via `git show <base>:<file>`. */
+async function readOldPkgJson(ctx: LockfileDriftContext, pkgFile: string): Promise<PkgJson | null> {
+  const base = ctx.range.includes("..") ? (ctx.range.split("..")[0] ?? "HEAD") : ctx.range
+  const raw = await git(["show", `${base}:${pkgFile}`], ctx.cwd)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as PkgJson
+  } catch {
+    return null
+  }
+}
+
+/** Parse the current on-disk version of `pkgFile`. */
+async function readNewPkgJson(ctx: LockfileDriftContext, pkgFile: string): Promise<PkgJson | null> {
+  try {
+    const text = await Bun.file(`${ctx.cwd}/${pkgFile}`).text()
+    return JSON.parse(text) as PkgJson
+  } catch {
+    return null
+  }
+}
+
+function sameDepMap(
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined
+): boolean {
+  const left = a ?? {}
+  const right = b ?? {}
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+  if (leftKeys.length !== rightKeys.length) return false
+  for (let i = 0; i < leftKeys.length; i++) {
+    const key = leftKeys[i]!
+    if (key !== rightKeys[i]) return false
+    if (left[key] !== right[key]) return false
+  }
+  return true
 }
 
 /**
- * Parse a batched git diff result to extract per-file diffs.
- * Splits on `diff --git a/` headers to attribute hunks to their source file.
+ * Compare dependency-relevant fields in package.json before vs. after the diff
+ * range. Script changes, field reorders, whitespace edits, and metadata-only
+ * updates (name/version/description) do not count as drift.
  */
-function batchDiffPerFile(raw: string): Map<string, string> {
-  const result = new Map<string, string>()
-  const parts = raw.split(/\ndiff --git a\//)
-
-  for (const part of parts) {
-    if (!part.trim()) continue
-    const full = part.startsWith("diff --git a/") ? part : `diff --git a/${part}`
-    const match = full.match(/^diff --git a\/[^ ]+ b\/([^\n]+)/)
-    if (match) {
-      result.set(match[1]!, full)
-    }
+async function depsActuallyChangedBetween(
+  ctx: LockfileDriftContext,
+  pkgFile: string
+): Promise<boolean> {
+  const [oldPkg, newPkg] = await Promise.all([
+    readOldPkgJson(ctx, pkgFile),
+    readNewPkgJson(ctx, pkgFile),
+  ])
+  if (!oldPkg || !newPkg) {
+    // Fall back to assuming a change when we can't parse either side — safer
+    // than silently ignoring a real drift.
+    return true
   }
-
-  return result
+  for (const section of DEP_SECTIONS) {
+    if (!sameDepMap(oldPkg[section], newPkg[section])) return true
+  }
+  if (oldPkg.packageManager !== newPkg.packageManager) return true
+  return false
 }
 
 /**
@@ -118,24 +160,25 @@ export async function findDriftedPackages(ctx: LockfileDriftContext): Promise<Dr
 
   if (candidates.length === 0) return []
 
-  // Batch all git diff calls into a single subprocess
-  const diffArgs = ["diff", ctx.range, "--", ...candidates.map((c) => c.pkgFile)]
-  const rawDiff = await git(diffArgs, ctx.cwd)
-  if (!rawDiff) return []
+  // Parse each candidate's package.json before + after and compare dep sections
+  // directly. A line-by-line diff scan false-positives on script/metadata
+  // edits (e.g. bumping a "test" script line).
+  const driftChecks = await Promise.all(
+    candidates.map(async ({ pkgFile, lockfileInfo }) => ({
+      pkgFile,
+      lockfileInfo,
+      drifted: await depsActuallyChangedBetween(ctx, pkgFile),
+    }))
+  )
 
-  const perFileDiffs = batchDiffPerFile(rawDiff)
   const drifted: DriftedPackage[] = []
-
-  for (const { pkgFile, lockfileInfo } of candidates) {
-    const pkgDiff = perFileDiffs.get(pkgFile)
-    if (!pkgDiff) continue
-    if (depsActuallyChanged(pkgDiff)) {
-      drifted.push({
-        pkgFile,
-        lockfile: lockfileInfo!.lockfile,
-        installCmd: lockfileInfo!.installCmd,
-      })
-    }
+  for (const { pkgFile, lockfileInfo, drifted: isDrifted } of driftChecks) {
+    if (!isDrifted) continue
+    drifted.push({
+      pkgFile,
+      lockfile: lockfileInfo!.lockfile,
+      installCmd: lockfileInfo!.installCmd,
+    })
   }
 
   return drifted
