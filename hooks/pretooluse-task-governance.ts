@@ -13,6 +13,7 @@
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
+import { buildContextHookOutput } from "../src/SwizHook.ts"
 import { TASK_UPDATE_ALLOWED_FIELDS, toolHookInputSchema } from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
@@ -1176,7 +1177,7 @@ const pretooluseTaskGovernance: SwizToolHook = {
       const result = await evaluatePretooluseTaskGovernance(input)
       if (isDenyOutput(result)) return result
       const trace = await buildTraceContext(input)
-      return preToolUseAllowWithContext(trace, trace)
+      return buildContextHookOutput("PreToolUse", trace)
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err)
     }
