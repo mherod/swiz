@@ -4,6 +4,15 @@
 
 ### New Features
 
+- **Event-sourced issue sync** — Added an append-only `issue_events`
+  SQLite log plus a per-repo `sync_cursors` KV table so the upstream
+  sync path captures intermediate state transitions (open→closed→
+  reopened, label churn, `review_requested`) that the snapshot-diff
+  path silently drops. `syncUpstreamState` now advances a separate
+  `issue_events` cursor after each successful page fetch; a null
+  client response leaves the cursor untouched so the next sync
+  retries the same window. Effect handlers, pagination beyond one
+  page, and retention policy remain as follow-ups. Closes #521.
 - **`swiz mcp` Model Context Protocol server** — Added a stdio MCP
   server that Claude Code (and other MCP clients) can spawn. Declares
   the `experimental["claude/channel"]` capability so swiz can push
