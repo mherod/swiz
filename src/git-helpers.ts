@@ -14,6 +14,17 @@ import { getHomeDirOrNull } from "./home.ts"
 export const GIT_DIR_NAME = ".git"
 export const GIT_INDEX_LOCK = "index.lock"
 
+// Capture the real Bun.spawn / Bun.spawnSync at module-load time. Some tests
+// (issue-store.test.ts et al.) monkey-patch the global `Bun.spawn` inside a
+// test-local mutex to simulate subprocess failures. In `bun test --concurrent`
+// those mocks leak across files for the duration of the test body, so any
+// concurrent call to `git()` / `gh()` in an unrelated file was picking up
+// fake response shapes (returning `null`, objects, wrong booleans). Binding
+// the original references here makes git-helpers immune to runtime patches
+// while still letting tests mock the global for their own callers.
+const spawnOriginal = Bun.spawn.bind(Bun)
+const spawnSyncOriginal = Bun.spawnSync.bind(Bun)
+
 /** Join a path under `<repoRoot>/.git/...`. */
 export function joinGitPath(repoRoot: string, ...segments: string[]): string {
   return join(repoRoot, GIT_DIR_NAME, ...segments)
@@ -28,7 +39,7 @@ export async function git(args: string[], cwd: string): Promise<string> {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))
     )
-    const proc = Bun.spawn(["git", ...args], {
+    const proc = spawnOriginal(["git", ...args], {
       cwd: effectiveCwd,
       stdout: "pipe",
       stderr: "pipe",
@@ -84,7 +95,7 @@ export async function gh(args: string[], cwd: string): Promise<string> {
   const effectiveArgs = args[0] === "api" ? withApiCache(args) : args
 
   try {
-    const proc = Bun.spawn(["gh", ...effectiveArgs], {
+    const proc = spawnOriginal(["gh", ...effectiveArgs], {
       cwd: effectiveCwd,
       stdout: "pipe",
       stderr: "pipe",
@@ -323,7 +334,7 @@ export async function detectForkTopology(cwd: string): Promise<ForkTopology | nu
   // Strategy 2: query GitHub API to check if origin is a fork
   try {
     await acquireGhSlot()
-    const proc = Bun.spawn(
+    const proc = spawnOriginal(
       ["gh", "api", `repos/${originSlug}`, "--jq", "{fork,parent:.parent.full_name}"],
       { cwd, stdout: "pipe", stderr: "pipe" }
     )
@@ -563,7 +574,7 @@ function parseStatusV2Lines(out: string): StatusCounts {
 
 function gitSpawnSyncLines(args: string[], workTree: string): string {
   try {
-    const proc = Bun.spawnSync(["git", ...args], {
+    const proc = spawnSyncOriginal(["git", ...args], {
       cwd: workTree,
       stdout: "pipe",
       stderr: "ignore",
