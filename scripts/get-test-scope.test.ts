@@ -88,7 +88,10 @@ describe("get-test-scope parent-bundle lookup", () => {
    * Run the scope script from a controlled temp git repo so we can assert
    * exactly which test paths are emitted for a given set of changed files.
    * The temp repo mirrors the hooks/<bundle>/<file>.ts → hooks/<bundle>.test.ts
-   * convention verified by issue #547.
+   * convention required by issue #547.
+   *
+   * The walk-up logic was added in commit 27a9d4e5 via findParentBundleTests().
+   * These tests lock in that behavior so future refactors cannot regress it.
    */
   function runScopeScriptFromDir(dir: string, env: Record<string, string> = {}) {
     const proc = spawnSync("bun", ["run", SCOPE_SCRIPT], {
