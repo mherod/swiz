@@ -5,18 +5,24 @@
  *
  * All detection logic (patterns, scanning, formatting) lives in
  * offensive-language-patterns.ts. This file is a thin shell that reads the
- * transcript, runs detection, and returns allow/deny outputs.
+ * transcript, runs detection, and schedules a steering auto-steer when lazy
+ * phrases are found — the current tool call is never blocked.
  *
- * When an AI provider is available, generates a refined denial message that
- * uses transcript context to directly challenge the specific objection —
- * falling back to static messages when no provider exists.
+ * Delivery is auto-steer-only: the agent receives the rebuttal on the next
+ * turn (either through the MCP channel when it is live, or via the
+ * AppleScript terminal path). When auto-steer cannot be scheduled (setting
+ * off, terminal unsupported), the hook emits nothing and the tool proceeds.
+ *
+ * When an AI provider is available, generates a refined message that uses
+ * transcript context to directly challenge the specific objection — falling
+ * back to static messages when no provider exists.
  */
 
 import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { preToolUseDeny, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -76,15 +82,18 @@ async function tryRefinedFeedback(
   }
 }
 
-// ── Suffix shared by both paths ──────────────────────────────────────────────
+// ── Steering suffix shared by refined + static paths ────────────────────────
 
-const BLOCKING_SUFFIX = "Demonstrate corrected behavior through action, not words."
+const STEER_SUFFIX = "Demonstrate corrected behavior through action, not words."
 
+/**
+ * Unexpected errors always fail open: the hook is advisory-only and must not
+ * block tool calls. The error is logged to stderr for operator visibility.
+ */
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
   const message = err instanceof Error ? err.message : String(err)
-  return preToolUseDeny(
-    `Hook error: pretooluse-offensive-language encountered an unexpected error.\n\n${message}`
-  )
+  process.stderr.write(`pretooluse-offensive-language: unexpected error — ${message}\n`)
+  return {}
 }
 
 export async function evaluatePretooluseOffensiveLanguage(
@@ -102,25 +111,17 @@ export async function evaluatePretooluseOffensiveLanguage(
   if (!assistantText) return {}
 
   const matches = findAllLazyPatterns(assistantText)
-  if (matches.length > 0) {
-    const refined = await tryRefinedFeedback(assistantText, matches)
-    let reason: string
-    if (refined) {
-      reason = `${refined}\n\n${BLOCKING_SUFFIX}`
-    } else {
-      reason = formatAllDenialMessages(matches, BLOCKING_SUFFIX)
-    }
+  if (matches.length === 0) return {}
 
-    const sessionId = (input.session_id as string) ?? ""
-    if (sessionId) {
-      if (await scheduleAutoSteer(sessionId, reason, undefined, input.cwd)) {
-        return {}
-      }
-    }
+  const sessionId = (input.session_id as string) ?? ""
+  if (!sessionId) return {}
 
-    return preToolUseDeny(reason)
-  }
+  const refined = await tryRefinedFeedback(assistantText, matches)
+  const message = refined
+    ? `${refined}\n\n${STEER_SUFFIX}`
+    : formatAllDenialMessages(matches, STEER_SUFFIX)
 
+  await scheduleAutoSteer(sessionId, message, undefined, input.cwd)
   return {}
 }
 
