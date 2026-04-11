@@ -8,9 +8,9 @@
   },
   "scripts": {
     "start": "bun run index.ts",
-    "test": "bun test --concurrent --timeout=10000",
+    "test": "bun test --concurrent --timeout=5000",
     "test:vitest": "vitest",
-    "test:bun": "bun test --concurrent --timeout=10000",
+    "test:bun": "bun test --concurrent --timeout=5000",
     "typecheck": "tsc --noEmit",
     "lint": "biome check . && eslint . --max-warnings=9999",
     "lint:eslint": "eslint .",
