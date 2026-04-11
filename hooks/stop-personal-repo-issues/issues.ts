@@ -50,7 +50,15 @@ async function readCachedIssues(repoSlug: string): Promise<Issue[]> {
     // Use a 5-minute TTL so daemon-synced data is served from the store.
     // The old ttlMs=0 bypassed the store entirely, forcing every read through
     // the gh CLI fallback chain even when fresh data existed. (#325)
-    return await reader.listIssues<Issue>(repoSlug, FIVE_MINUTES_MS)
+    const rows = await reader.listIssues<Issue>(repoSlug, FIVE_MINUTES_MS)
+    // Defensive filter: drop rows whose state is anything other than "open".
+    // Legacy cached rows pre-dated the `state` projection (see Issue type
+    // header) and would be returned as `state === undefined`; treat those
+    // as stale so the next caller falls through to gh/daemon refresh, which
+    // overwrites them with state-bearing rows. Closed issues that survive
+    // a sync gap are also filtered here so the stop hook never re-flags
+    // them as actionable blocked work after they've been closed upstream.
+    return rows.filter((r) => r.state === "open")
   } catch {
     return []
   }
@@ -126,8 +134,14 @@ export async function getAllOpenIssues(
   const cached = await readCachedIssues(repoSlug)
   if (cached.length > 0) return { issues: cached, repoSlug }
 
-  // Daemon-backed store: try daemon HTTP API directly when SQLite is empty
-  const daemonIssues = await getDaemonBackedStore().listIssues<Issue>(repoSlug)
+  // Daemon-backed store: try daemon HTTP API directly when SQLite is empty.
+  // Apply the same state-filter as readCachedIssues — the daemon serves
+  // whatever its own snapshot sync wrote, which on a stale daemon may
+  // include closed issues until the next sync. Filtering here keeps the
+  // stop-hook visible-issue set consistent regardless of which path served.
+  const daemonIssues = (await getDaemonBackedStore().listIssues<Issue>(repoSlug)).filter(
+    (i) => i.state === "open"
+  )
   if (daemonIssues.length > 0) {
     try {
       getIssueStore().upsertIssues(repoSlug, daemonIssues)
@@ -137,8 +151,12 @@ export async function getAllOpenIssues(
     return { issues: daemonIssues, repoSlug }
   }
 
-  // Final fallback: direct gh CLI
-  const jsonFields = "number,title,labels,author,assignees,updatedAt"
+  // Final fallback: direct gh CLI. `state` is required so cached rows can
+  // be filtered when an issue closes upstream between syncs (see
+  // readCachedIssues). Without it, closed issues persist in the store as
+  // state-less rows and the blocked-issue stop section keeps re-flagging
+  // them after they've been closed.
+  const jsonFields = "number,title,state,labels,author,assignees,updatedAt"
   const liveIssues = await ghJson<Issue[]>(
     ["issue", "list", "--state", "open", "--limit", "100", "--json", jsonFields],
     cwd

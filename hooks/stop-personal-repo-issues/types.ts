@@ -10,6 +10,12 @@ export interface Issue {
   author?: { login: string }
   assignees?: Array<{ login: string }>
   updatedAt?: string
+  /**
+   * Upstream issue state (`"open"` | `"closed"`). Optional only because
+   * legacy cached rows pre-date this field; new fetches always include it
+   * and `readCachedIssues` filters out anything not equal to `"open"`.
+   */
+  state?: string
 }
 
 export interface StopContext {
