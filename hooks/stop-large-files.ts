@@ -121,7 +121,8 @@ function isAllowed(filePath: string, patterns: string[]): boolean {
 async function findLargeFiles(
   cwd: string,
   sizeLimitKb: number,
-  allowPatterns: string[]
+  allowPatterns: string[],
+  gitattributes: string | null
 ): Promise<string[]> {
   const range = await recentHeadRange(cwd, 10)
   const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd)
@@ -129,9 +130,6 @@ async function findLargeFiles(
 
   const addedFiles = addedRaw.split("\n").filter((l) => l.trim())
   if (addedFiles.length === 0) return []
-
-  // Read .gitattributes once (cached for all files)
-  const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
 
   // Filter allowed files before batching
   const candidates =
@@ -160,8 +158,13 @@ export async function evaluateStopLargeFiles(input: StopHookInput): Promise<Swiz
     readProjectSettings(cwd),
   ])
   const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+
+  // Read .gitattributes once and reuse for both the team-mode gate and the
+  // per-file LFS classification in findLargeFiles. Eliminates a duplicate
+  // `git show HEAD:.gitattributes` subprocess per invocation (AC1).
+  const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
+
   if (effective.collaborationMode === "team") {
-    const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
     if (!gitattributes?.includes("filter=lfs")) return {}
   }
 
@@ -171,7 +174,7 @@ export async function evaluateStopLargeFiles(input: StopHookInput): Promise<Swiz
     DEFAULT_LARGE_FILE_SIZE_KB
   )
   const allowPatterns = projectSettings?.largeFileAllowPatterns ?? []
-  const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns)
+  const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns, gitattributes)
   if (largeFiles.length === 0) return {}
 
   return blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb))
