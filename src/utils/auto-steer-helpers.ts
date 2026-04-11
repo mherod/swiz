@@ -5,8 +5,31 @@
  * Extracted from hook-utils.ts (issue #422).
  */
 
+import { utimesSync, writeFileSync } from "node:fs"
 import type { AutoSteerTrigger } from "../auto-steer-store.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
+import { swizMcpChannelNotifyPath } from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
+
+/**
+ * Touch the MCP channel notify sentinel so the `swiz mcp` drain loop wakes
+ * up immediately instead of waiting for its poll interval. Advisory — failure
+ * to touch the file is swallowed because the drain loop still polls as a
+ * safety fallback.
+ */
+function touchMcpChannelNotify(cwd: string): void {
+  const path = swizMcpChannelNotifyPath(projectKeyFromCwd(cwd))
+  const now = new Date()
+  try {
+    utimesSync(path, now, now)
+  } catch {
+    try {
+      writeFileSync(path, "")
+    } catch {
+      // swallow — notify is advisory
+    }
+  }
+}
 
 export interface AutoSteerRequest {
   message: string
@@ -248,7 +271,9 @@ export async function scheduleAutoSteerViaChannel(
 
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  return store.enqueue(safeSession, message, trigger, { cwd, ttlMs: opts?.ttlMs })
+  const enqueued = store.enqueue(safeSession, message, trigger, { cwd, ttlMs: opts?.ttlMs })
+  if (enqueued) touchMcpChannelNotify(cwd)
+  return enqueued
 }
 
 /**

@@ -84,3 +84,21 @@ export function swizMcpChannelHeartbeatPath(projectKey: string): string {
 
 /** MCP heartbeat freshness window. Must exceed the drain interval plus a margin. */
 export const SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS = 5_000
+
+/**
+ * Notify sentinel touched by auto-steer producers to wake the MCP drain loop.
+ * The loop watches this path with `fs.watch`; any mtime bump triggers an
+ * immediate drain instead of waiting for the next poll tick.
+ */
+export function swizMcpChannelNotifyPath(projectKey: string): string {
+  return `${TMP_ROOT}/swiz-mcp-channel-${projectKey}.notify`
+}
+
+/**
+ * JSONL sink for messages sent back by the Claude session through the swiz
+ * MCP `reply` tool. Producers append one JSON line per reply; consumers tail
+ * the file. Kept in ~/.swiz so replies survive /tmp cleanup on reboot.
+ */
+export function swizMcpRepliesLogPath(home: string): string {
+  return `${home}/.swiz/mcp-replies.jsonl`
+}

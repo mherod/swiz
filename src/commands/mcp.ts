@@ -1,37 +1,48 @@
-import { unlinkSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  utimesSync,
+  watch,
+  writeFileSync,
+} from "node:fs"
+import { dirname } from "node:path"
+import { z } from "zod"
+import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { swizMcpChannelHeartbeatPath } from "../temp-paths.ts"
+import {
+  swizMcpChannelHeartbeatPath,
+  swizMcpChannelNotifyPath,
+  swizMcpRepliesLogPath,
+} from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 
 // Run swiz as a Model Context Protocol (MCP) stdio server.
 //
-// This is the foundation layer for Swiz → agent-session push. We use
-// McpServer from the official SDK and declare the `claude/channel`
-// experimental capability so Claude Code registers a listener and we can
-// push `<channel source="swiz" ...>` events into a running session via
-// `pushChannelEvent()`. For now a single no-op tool is registered; more
-// producers (auto-steers, CI watcher, issue sync) will wire into
-// `pushChannelEvent` without touching the transport layer.
+// Four-way channel: inbound auto-steers drain onto the session as
+// <channel source="swiz"> events, outbound `reply` messages land in a JSONL
+// sink, permission prompts are relayed through a policy file, and the drain
+// loop wakes via fs.watch instead of tight polling.
 //
-// IMPORTANT: the SDK is loaded lazily via dynamic import. The command module
-// is eagerly imported by `index.ts` for command registration, and pulling in
-// `@modelcontextprotocol/sdk` at the top level measurably slows every swiz
-// CLI invocation (enough to time out CLI subprocess tests). Dynamic import
-// defers the cost to the single invocation that actually runs the server.
+// The SDK is loaded lazily via dynamic import — top-level imports measurably
+// slowed every swiz CLI invocation.
 //
-// stdout is reserved for the JSON-RPC stream (the stdio transport writes to
-// it). Any human-facing output must go to stderr.
+// stdout is reserved for the JSON-RPC stream; human output goes to stderr.
 
 const SERVER_NAME = "swiz"
-const SERVER_VERSION = "0.1.0"
+const SERVER_VERSION = "0.2.0"
 
 const INSTRUCTIONS = [
   'Events from swiz arrive as <channel source="swiz" trigger="..." session_id="...">.',
   'When trigger="next_turn" the content is an auto-steer: a directive from',
   "the swiz task system telling you what to do next (e.g. complete a",
   "specific task, push a commit, address a hook block). Read the content and",
-  "act on it as if the user had just typed it. Other triggers forward CI",
-  "results, issue activity, and push completions. No reply is expected.",
+  'act on it as if the user had just typed it. Triggers "after_commit" and',
+  '"after_all_tasks_complete" forward post-action steers the same way.',
+  "To send a message back through swiz (log, iMessage bridge, etc.) call the",
+  '"reply" tool with { content, kind? }. No chat_id is required — swiz tags',
+  "the entry with the project key automatically.",
 ].join(" ")
 
 interface ChannelEvent {
@@ -39,10 +50,9 @@ interface ChannelEvent {
   meta?: Record<string, string>
 }
 
-// The active server, captured once connected. Typed loosely because the SDK
-// is only loaded at runtime via dynamic import and we don't want the type
-// system to pull those modules at compile time from every call site that
-// transitively reaches this file.
+// Typed loosely because the SDK is only loaded at runtime via dynamic import
+// and we don't want the type system to pull those modules at compile time
+// from every call site that transitively reaches this file.
 let activeServer: {
   server: { notification: (msg: { method: string; params: unknown }) => Promise<void> }
 } | null = null
@@ -63,48 +73,44 @@ export async function pushChannelEvent(event: ChannelEvent): Promise<void> {
   })
 }
 
-// How often the auto-steer drain loop checks the SQLite queue while the MCP
-// server is connected. 500ms keeps latency low for `next_turn` steers without
-// hammering the DB (reads are WAL-backed and cheap).
-const AUTO_STEER_POLL_INTERVAL_MS = 500
+// ─── Auto-steer drain loop ──────────────────────────────────────────────────
+
+// Safety fallback only — the fast path is fs.watch on the notify sentinel.
+// Keep this loose so we don't hammer SQLite when nothing is enqueued.
+const AUTO_STEER_POLL_INTERVAL_MS = 5_000
+
+// Triggers delivered via the MCP channel. `on_session_stop` stays on the
+// AppleScript path because by the time stop fires, the MCP transport is
+// tearing down alongside the agent session.
+const CHANNEL_TRIGGERS = ["next_turn", "after_commit", "after_all_tasks_complete"] as const
 
 async function drainAutoSteersOnce(projectKey: string): Promise<void> {
   if (activeServer === null) return
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  // Only `next_turn` is delivered via the channel path. `after_commit` and
-  // `after_all_tasks_complete` require tool-event context that only the
-  // PostToolUse hook sees, and `on_session_stop` fires during stop teardown.
-  // They stay on the existing AppleScript path.
-  while (true) {
-    const req = store.consumeOneByProjectKey(projectKey, "next_turn")
-    if (!req) break
-    try {
-      await pushChannelEvent({
-        content: req.message,
-        meta: {
-          trigger: req.trigger,
-          session_id: req.sessionId,
-          created_at: String(req.createdAt),
-        },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      process.stderr.write(`swiz mcp: failed to push auto-steer event: ${message}\n`)
-      // Don't re-enqueue: the message has already been marked delivered, and
-      // requeueing would race with the AppleScript path. Surface the error
-      // and move on.
-      break
+  for (const trigger of CHANNEL_TRIGGERS) {
+    while (true) {
+      const req = store.consumeOneByProjectKey(projectKey, trigger)
+      if (!req) break
+      try {
+        await pushChannelEvent({
+          content: req.message,
+          meta: {
+            trigger: req.trigger,
+            session_id: req.sessionId,
+            created_at: String(req.createdAt),
+          },
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`swiz mcp: failed to push auto-steer event: ${message}\n`)
+        // Don't re-enqueue: the row is marked delivered. Move on.
+        return
+      }
     }
   }
 }
 
-/**
- * Touch the heartbeat sentinel for this project so PostToolUse auto-steer
- * knows the MCP channel is live and should own `next_turn` delivery.
- * Creating the file on first call ensures the sentinel exists even when the
- * drain loop runs before any other producer writes it.
- */
 function refreshChannelHeartbeat(projectKey: string): void {
   const path = swizMcpChannelHeartbeatPath(projectKey)
   const now = new Date()
@@ -127,38 +133,212 @@ function clearChannelHeartbeat(projectKey: string): void {
   }
 }
 
+/**
+ * Ensure the notify sentinel exists so `fs.watch` can bind to it. The path
+ * must exist at watch time; we also recreate it if a consumer unlinks it.
+ */
+function ensureNotifyFile(projectKey: string): string {
+  const path = swizMcpChannelNotifyPath(projectKey)
+  try {
+    writeFileSync(path, "", { flag: "a" })
+  } catch {
+    // best-effort; watch may fall back to poll
+  }
+  return path
+}
+
 function startAutoSteerDrainLoop(cwd: string): () => void {
   const projectKey = projectKeyFromCwd(cwd)
   let stopped = false
+  let draining = false
+  let pending = false
+
   refreshChannelHeartbeat(projectKey)
-  const tick = async (): Promise<void> => {
+
+  const drain = async (): Promise<void> => {
     if (stopped) return
-    refreshChannelHeartbeat(projectKey)
+    if (draining) {
+      pending = true
+      return
+    }
+    draining = true
     try {
+      refreshChannelHeartbeat(projectKey)
       await drainAutoSteersOnce(projectKey)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       process.stderr.write(`swiz mcp: auto-steer drain error: ${message}\n`)
+    } finally {
+      draining = false
+      if (pending && !stopped) {
+        pending = false
+        void drain()
+      }
     }
   }
-  const timer = setInterval(() => void tick(), AUTO_STEER_POLL_INTERVAL_MS)
+
+  // Fast path: watch the notify sentinel for any mtime bump.
+  const notifyPath = ensureNotifyFile(projectKey)
+  let watcher: ReturnType<typeof watch> | null = null
+  try {
+    watcher = watch(notifyPath, { persistent: false }, () => void drain())
+    watcher.on("error", (err) => {
+      process.stderr.write(`swiz mcp: notify watch error: ${String(err)}\n`)
+    })
+  } catch (err) {
+    process.stderr.write(`swiz mcp: notify watch failed to start: ${String(err)}\n`)
+  }
+
+  // Safety fallback poll — catches any missed notify (rename, nfs, etc.).
+  const timer = setInterval(() => void drain(), AUTO_STEER_POLL_INTERVAL_MS)
   timer.unref?.()
+
+  // Kick once at startup so any messages queued before we connected are flushed.
+  void drain()
+
   return () => {
     stopped = true
     clearInterval(timer)
+    try {
+      watcher?.close()
+    } catch {
+      // watcher already closed
+    }
     clearChannelHeartbeat(projectKey)
   }
 }
+
+// ─── Permission relay ───────────────────────────────────────────────────────
+
+interface PermissionRule {
+  tool: string
+  pattern?: string
+  behavior: "allow" | "deny"
+}
+
+const PermissionPolicySchema = z.object({
+  rules: z.array(
+    z.object({
+      tool: z.string(),
+      pattern: z.string().optional(),
+      behavior: z.enum(["allow", "deny"]),
+    })
+  ),
+})
+
+function loadPermissionPolicy(cwd: string): PermissionRule[] {
+  const path = `${cwd}/.swiz/permission-policy.json`
+  try {
+    const raw = readFileSync(path, "utf8")
+    const parsed = PermissionPolicySchema.safeParse(JSON.parse(raw))
+    if (!parsed.success) {
+      process.stderr.write(`swiz mcp: permission-policy.json invalid — ${parsed.error.message}\n`)
+      return []
+    }
+    return parsed.data.rules
+  } catch {
+    return []
+  }
+}
+
+function evaluatePermissionPolicy(
+  rules: PermissionRule[],
+  toolName: string,
+  inputPreview: string
+): "allow" | "deny" | null {
+  for (const rule of rules) {
+    if (rule.tool !== toolName && rule.tool !== "*") continue
+    if (rule.pattern) {
+      try {
+        const re = new RegExp(rule.pattern)
+        if (!re.test(inputPreview)) continue
+      } catch {
+        continue
+      }
+    }
+    return rule.behavior
+  }
+  return null
+}
+
+const PermissionRequestSchema = z.object({
+  method: z.literal("notifications/claude/channel/permission_request"),
+  params: z.object({
+    request_id: z.string(),
+    tool_name: z.string(),
+    description: z.string(),
+    input_preview: z.string(),
+  }),
+})
+
+type McpLowLevelServer = {
+  notification: (msg: { method: string; params: unknown }) => Promise<void>
+  setNotificationHandler: (
+    schema: unknown,
+    handler: (req: {
+      params: { request_id: string; tool_name: string; input_preview: string }
+    }) => Promise<void>
+  ) => void
+}
+
+function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void {
+  lowLevel.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
+    const rules = loadPermissionPolicy(cwd)
+    const verdict = evaluatePermissionPolicy(rules, params.tool_name, params.input_preview)
+    if (verdict === null) {
+      process.stderr.write(
+        `swiz mcp: permission ${params.request_id} ${params.tool_name} — no matching rule, deferring to local dialog\n`
+      )
+      return
+    }
+    process.stderr.write(
+      `swiz mcp: permission ${params.request_id} ${params.tool_name} → ${verdict}\n`
+    )
+    try {
+      await lowLevel.notification({
+        method: "notifications/claude/channel/permission",
+        params: { request_id: params.request_id, behavior: verdict },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`swiz mcp: failed to emit permission verdict: ${message}\n`)
+    }
+  })
+}
+
+// ─── Reply tool sink ────────────────────────────────────────────────────────
+
+function appendReplyToSink(cwd: string, payload: { content: string; kind: string }): void {
+  const home = getHomeDirWithFallback("/tmp")
+  const path = swizMcpRepliesLogPath(home)
+  mkdirSync(dirname(path), { recursive: true })
+  const row =
+    JSON.stringify({
+      ts: Date.now(),
+      project_key: projectKeyFromCwd(cwd),
+      cwd,
+      kind: payload.kind,
+      content: payload.content,
+    }) + "\n"
+  appendFileSync(path, row)
+}
+
+// ─── Server entry point ─────────────────────────────────────────────────────
 
 async function serve(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js")
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
 
+  const cwd = process.cwd()
+
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       capabilities: {
-        experimental: { "claude/channel": {} },
+        experimental: {
+          "claude/channel": {},
+          "claude/channel/permission": {},
+        },
         tools: {},
       },
       instructions: INSTRUCTIONS,
@@ -166,26 +346,47 @@ async function serve(): Promise<void> {
   )
 
   server.registerTool(
-    "noop",
+    "reply",
     {
-      title: "No-op",
+      title: "Reply through swiz",
       description:
-        "No-op tool. Returns a fixed acknowledgement — useful for verifying the swiz MCP server is reachable.",
-      inputSchema: {},
+        "Send a message back through the swiz channel. Appends to ~/.swiz/mcp-replies.jsonl. " +
+        'Use `kind` to mark the intent (e.g. "note", "status", "imessage").',
+      inputSchema: {
+        content: z.string().describe("Message body"),
+        kind: z.string().optional().describe('Reply kind, e.g. "note" or "status"'),
+      },
     },
-    async () => ({
-      content: [{ type: "text", text: "ok" }],
-    })
+    async ({ content, kind }) => {
+      try {
+        appendReplyToSink(cwd, { content, kind: kind ?? "note" })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          content: [{ type: "text" as const, text: `reply failed: ${message}` }],
+          isError: true,
+        }
+      }
+      return { content: [{ type: "text" as const, text: "ok" }] }
+    }
   )
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
   activeServer = server as unknown as typeof activeServer
+
+  const lowLevel = (server as unknown as { server: McpLowLevelServer }).server
+  try {
+    registerPermissionRelay(lowLevel, cwd)
+  } catch (err) {
+    process.stderr.write(`swiz mcp: failed to register permission relay: ${String(err)}\n`)
+  }
+
   process.stderr.write(
-    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — channel capability enabled\n`
+    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — channel + permission + reply enabled\n`
   )
 
-  const stopDrain = startAutoSteerDrainLoop(process.cwd())
+  const stopDrain = startAutoSteerDrainLoop(cwd)
   const cleanup = (): void => {
     stopDrain()
     activeServer = null
