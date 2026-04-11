@@ -2,6 +2,7 @@ import { resolveSpawnCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import type { IssueStore, MutationPayload, PendingMutation } from "./issue-store.ts"
 import { isGraphQLRateLimited, tryMutationRestFallback } from "./issue-store-rest-fallback.ts"
+import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
 // ─── Replay ─────────────────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
     const result = await replayPendingMutations(slug, dir, store)
     logReplayResult(result, pending, slug)
   } catch (err) {
-    debugLog(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
+    debugLog(`[swiz] REPLAY_INFRA_ERROR ${messageFromUnknownError(err)}`)
   }
 }
 

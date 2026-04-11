@@ -1,4 +1,5 @@
 import { normalizeAgentHookPayload } from "../../dispatch/payload-normalize.ts"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type {
   DispatchPayloadWorkerRequest,
   DispatchPayloadWorkerResponse,
@@ -45,7 +46,7 @@ self.onmessage = (event: MessageEvent<DispatchPayloadWorkerRequest>) => {
     response = {
       id: req.id,
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: messageFromUnknownError(error),
     }
   }
 

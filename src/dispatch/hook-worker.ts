@@ -5,6 +5,7 @@
 
 import { join } from "node:path"
 import { merge } from "lodash-es"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import type { HookExecution } from "./engine.ts"
 import {
   classifyHookOutput,
@@ -104,7 +105,7 @@ async function runHookInWorker(
     return {
       id,
       type: "hook-error",
-      error: err instanceof Error ? err.message : String(err),
+      error: messageFromUnknownError(err),
     }
   }
 }

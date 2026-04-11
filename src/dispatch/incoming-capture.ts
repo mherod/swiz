@@ -20,6 +20,7 @@ import { mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 /** Age threshold for deleting prior capture files (10 minutes). */
 export const SWIZ_INCOMING_RETENTION_MS = 10 * 60 * 1000
@@ -118,17 +119,13 @@ export async function pruneStaleIncomingCaptures(
       } catch (e) {
         const code = (e as NodeJS.ErrnoException).code
         if (code === "ENOENT") continue
-        debugLog(
-          "[incoming-capture] prune entry failed:",
-          full,
-          e instanceof Error ? e.message : String(e)
-        )
+        debugLog("[incoming-capture] prune entry failed:", full, messageFromUnknownError(e))
       }
     }
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code
     if (code === "ENOENT") return
-    debugLog("[incoming-capture] prune readdir failed:", e instanceof Error ? e.message : String(e))
+    debugLog("[incoming-capture] prune readdir failed:", messageFromUnknownError(e))
   }
 }
 
@@ -146,7 +143,7 @@ export interface IncomingDispatchCaptureArgs {
 /** Caller should invoke only when `shouldCaptureIncomingPayloads()` is true. */
 export function scheduleIncomingDispatchCapture(args: IncomingDispatchCaptureArgs): void {
   void writeIncomingDispatchCapture(args).catch((err) => {
-    debugLog("[incoming-capture] failed:", err instanceof Error ? err.message : String(err))
+    debugLog("[incoming-capture] failed:", messageFromUnknownError(err))
   })
 }
 

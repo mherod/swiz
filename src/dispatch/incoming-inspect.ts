@@ -12,6 +12,7 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 interface CaptureEnvelope {
   _swizIncomingCapture: {
@@ -276,7 +277,7 @@ Options:
       process.exit(1)
     }
   } catch (err) {
-    stderrLog("incoming-inspect-fatal", err instanceof Error ? err.message : String(err))
+    stderrLog("incoming-inspect-fatal", messageFromUnknownError(err))
     process.exit(1)
   }
 }

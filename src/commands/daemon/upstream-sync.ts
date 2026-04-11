@@ -8,6 +8,7 @@ import {
   syncUpstreamState,
   type UpstreamSyncResult,
 } from "../../issue-store.ts"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 
 const DEFAULT_SYNC_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
 const DEFAULT_SYNC_TIMEOUT_MS = 30 * 1000 // 30 seconds
@@ -171,9 +172,7 @@ export class UpstreamSyncRegistry {
       }
       return result
     } catch (err) {
-      debugLog(
-        `[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${err instanceof Error ? err.message : String(err)}`
-      )
+      debugLog(`[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${messageFromUnknownError(err)}`)
       const emptyBucket = () => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
       const emptyTracked = () => ({ upserted: 0, changes: [] })
       return (

@@ -65,6 +65,7 @@ const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 const HOME = getHomeDirWithFallback("")
 
@@ -269,7 +270,7 @@ async function fixMissingConfigScripts(paths: string[]): Promise<{
       await chmod(p, 0o755)
       registered.push({ path: p })
     } catch (err: unknown) {
-      failed.push({ path: p, error: err instanceof Error ? err.message : String(err) })
+      failed.push({ path: p, error: messageFromUnknownError(err) })
     }
   }
   return { registered, failed }
@@ -289,7 +290,7 @@ async function checkSwizSettings(): Promise<CheckResult> {
         .join(", "),
     }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = messageFromUnknownError(e)
     return {
       name: "Swiz settings",
       status: "fail",

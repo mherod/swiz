@@ -12,6 +12,7 @@ import {
   type SkillConflict,
   type SkillConflictEntry,
 } from "../../skill-utils.ts"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import { stripQuotes } from "../../utils/quoted-string.ts"
 import { convertSkillContent } from "../../utils/skill-conversion.ts"
 import type { CheckResult } from "./types.ts"
@@ -485,7 +486,7 @@ async function fixPluginCache(
         await cp(join(info.sourcePath, skill), join(info.cachePath, skill), { recursive: true })
         synced.push(skill)
       } catch (err: unknown) {
-        failed.push({ skill, error: err instanceof Error ? err.message : String(err) })
+        failed.push({ skill, error: messageFromUnknownError(err) })
       }
     }
     for (const skill of info.staleSkills) {
@@ -496,7 +497,7 @@ async function fixPluginCache(
         })
         updated.push(skill)
       } catch (err: unknown) {
-        failed.push({ skill, error: err instanceof Error ? err.message : String(err) })
+        failed.push({ skill, error: messageFromUnknownError(err) })
       }
     }
   }

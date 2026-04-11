@@ -23,6 +23,7 @@ import type { Session } from "../transcript-utils.ts"
 import { extractText } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { scheduleAutoSteer } from "../utils/auto-steer-helpers.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 // ─── Monitor-based mode runners ──────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ async function runAutoReplyMode(
           )
         }
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        const errorMsg = messageFromUnknownError(err)
         monitor.pushEvent(`[Auto-Steer] ✗ Failed to schedule reply: ${errorMsg}`)
         // Fail-open: continue processing remaining replies
       }

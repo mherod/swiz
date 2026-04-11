@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useOptimistic, useRef, useState, useTransition } from "react"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type {
   ProjectSessions,
   ProjectTask,
@@ -372,7 +373,7 @@ function useMutationActions(
             await postJson<{ ok: boolean; pid: number }>(url, { pid })
             setAgentProcessProviders((prev) => removePidFromProviders(prev, pid))
           } catch (err) {
-            setError(err instanceof Error ? err.message : String(err))
+            setError(messageFromUnknownError(err))
           }
         })()
       })

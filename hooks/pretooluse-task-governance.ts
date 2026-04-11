@@ -56,6 +56,7 @@ import {
   isTerminalTaskStatus,
   isWriteTool,
   mergeActionPlanIntoTasks,
+  messageFromUnknownError,
   preToolUseAllow,
   preToolUseAllowWithContext,
   preToolUseDeny,
@@ -754,7 +755,7 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
 }
 
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
-  const message = err instanceof Error ? err.message : String(err)
+  const message = messageFromUnknownError(err)
   return preToolUseDeny(
     `STOP. \u26a0\ufe0f pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
       `Error: ${message}\n\n` +

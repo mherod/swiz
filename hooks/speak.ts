@@ -8,6 +8,8 @@
  *   bun speak.ts --diagnose          # show platform, backend, fallback info
  */
 
+import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
+
 const platform = process.platform
 const diagnose = process.argv.includes("--diagnose")
 
@@ -72,7 +74,7 @@ async function safeSpawn(cmd: string[]): Promise<boolean> {
     }
     return true
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = messageFromUnknownError(e)
     process.stderr.write(`Failed to run ${cmd[0]}: ${msg}\n`)
     return false
   }

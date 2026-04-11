@@ -17,6 +17,7 @@ import {
   swizMcpRepliesLogPath,
 } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 // Run swiz as a Model Context Protocol (MCP) stdio server.
 //
@@ -102,7 +103,7 @@ async function drainAutoSteersOnce(projectKey: string): Promise<void> {
           },
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = messageFromUnknownError(err)
         process.stderr.write(`swiz mcp: failed to push auto-steer event: ${message}\n`)
         // Don't re-enqueue: the row is marked delivered. Move on.
         return
@@ -166,7 +167,7 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
       refreshChannelHeartbeat(projectKey)
       await drainAutoSteersOnce(projectKey)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = messageFromUnknownError(err)
       process.stderr.write(`swiz mcp: auto-steer drain error: ${message}\n`)
     } finally {
       draining = false
@@ -300,7 +301,7 @@ function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void
         params: { request_id: params.request_id, behavior: verdict },
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = messageFromUnknownError(err)
       process.stderr.write(`swiz mcp: failed to emit permission verdict: ${message}\n`)
     }
   })
@@ -312,14 +313,13 @@ function appendReplyToSink(cwd: string, payload: { content: string; kind: string
   const home = getHomeDirWithFallback("/tmp")
   const path = swizMcpRepliesLogPath(home)
   mkdirSync(dirname(path), { recursive: true })
-  const row =
-    JSON.stringify({
-      ts: Date.now(),
-      project_key: projectKeyFromCwd(cwd),
-      cwd,
-      kind: payload.kind,
-      content: payload.content,
-    }) + "\n"
+  const row = `${JSON.stringify({
+    ts: Date.now(),
+    project_key: projectKeyFromCwd(cwd),
+    cwd,
+    kind: payload.kind,
+    content: payload.content,
+  })}\n`
   appendFileSync(path, row)
 }
 
@@ -361,7 +361,7 @@ async function serve(): Promise<void> {
       try {
         appendReplyToSink(cwd, { content, kind: kind ?? "note" })
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = messageFromUnknownError(err)
         return {
           content: [{ type: "text" as const, text: `reply failed: ${message}` }],
           isError: true,

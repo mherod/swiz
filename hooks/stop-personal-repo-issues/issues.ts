@@ -6,13 +6,9 @@ import {
   getIssueStoreReader,
   replayPendingMutations,
 } from "../../src/issue-store.ts"
-import { getRepoSlug, ghJson } from "../../src/utils/hook-utils.ts"
+import { getRepoSlug, ghJson, messageFromUnknownError } from "../../src/utils/hook-utils.ts"
 import { REVIEWABLE_BLOCK_NORM, SCORE_NORM, SKIP_NORM, TWENTY_FOUR_HOURS_MS } from "./constants.ts"
 import type { Issue } from "./types.ts"
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
 
 function logHookEvent(event: string, details: string): void {
   console.error(`[swiz][stop-personal-repo-issues] ${event} ${details}`)
@@ -38,7 +34,7 @@ async function cacheIssuesAndReplayMutations(
       logHookEvent("REPLAY_SUMMARY", `repo=${repoSlug} pending=${pending} ${parts.join(", ")}`)
     }
   } catch (err) {
-    logHookEvent("REPLAY_INFRA_ERROR", getErrorMessage(err))
+    logHookEvent("REPLAY_INFRA_ERROR", messageFromUnknownError(err))
   }
 }
 

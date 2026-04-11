@@ -15,6 +15,7 @@ import { debugLog } from "../../debug.ts"
 import { git } from "../../git-helpers.ts"
 import type { IssueStore, UpstreamSyncResult } from "../../issue-store.ts"
 import { getIssueStore } from "../../issue-store.ts"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 
 const BRANCH_CACHE_TTL_MS = 15_000
@@ -109,7 +110,7 @@ export class PrReviewMonitor {
         `[swiz] PR_REVIEW_MONITOR branch=${branch} processed openPrs=${openPrs.length} comments=${allComments.length}`
       )
     } catch (err) {
-      debugLog(`[swiz] PR_REVIEW_MONITOR_ERROR ${err instanceof Error ? err.message : String(err)}`)
+      debugLog(`[swiz] PR_REVIEW_MONITOR_ERROR ${messageFromUnknownError(err)}`)
       // Fail silently — review monitoring shouldn't block sync
     }
   }

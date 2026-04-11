@@ -21,6 +21,7 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import {
   buildTaskCountsFromTasks,
   type TaskCounts,
@@ -469,9 +470,9 @@ async function updateParsedPayloadMetrics(
           )
         } catch (error) {
           debugLog(
-            `[daemon] failed to persist session tool call for ${parsed.sessionId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`
+            `[daemon] failed to persist session tool call for ${parsed.sessionId}: ${messageFromUnknownError(
+              error
+            )}`
           )
         }
       }

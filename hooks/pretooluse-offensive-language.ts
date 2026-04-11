@@ -22,7 +22,7 @@ import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { messageFromUnknownError, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -91,7 +91,7 @@ const STEER_SUFFIX = "Demonstrate corrected behavior through action, not words."
  * block tool calls. The error is logged to stderr for operator visibility.
  */
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
-  const message = err instanceof Error ? err.message : String(err)
+  const message = messageFromUnknownError(err)
   process.stderr.write(`pretooluse-offensive-language: unexpected error — ${message}\n`)
   return {}
 }

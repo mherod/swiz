@@ -723,6 +723,8 @@ export {
   parseTranscriptSummary,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
+// ─── Error helpers (re-exported from src/) ──────────────────────────────
+export { messageFromUnknownError } from "./hook-json-helpers.ts"
 
 // ─── Branch, git status, and source file utilities ─────────────────────
 // Implementations live in ./utils/git-utils.ts; re-exported here for

@@ -34,6 +34,7 @@ import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -183,7 +184,7 @@ async function tryDaemonDispatch(
     return json
   } catch (err) {
     recordDaemonFailure()
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = messageFromUnknownError(err)
     debugLog(`daemon dispatch: error (${msg}), falling back to local (backoff ${BACKOFF_MS}ms)`)
     return null
   }
@@ -594,7 +595,7 @@ export const dispatchCommand: Command = {
         : (args[0] ?? "(missing-event)")
       const hookEventName =
         !isReplay && canonicalEvent !== "(missing-event)" ? (args[1] ?? canonicalEvent) : undefined
-      const message = err instanceof Error ? err.message : String(err)
+      const message = messageFromUnknownError(err)
       const scope = isReplay
         ? `dispatch replay ${canonicalEvent}`
         : `dispatch ${canonicalEvent}${hookEventName && hookEventName !== canonicalEvent ? ` (${hookEventName})` : ""}`

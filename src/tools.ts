@@ -9,6 +9,7 @@ import {
   parseFrontmatterField,
   stripFrontmatter,
 } from "./skill-utils.ts"
+import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 import { expandInlineCommands, substituteArgs } from "./utils/skill-content.ts"
 import { convertSkillContent } from "./utils/skill-conversion.ts"
 
@@ -34,7 +35,7 @@ export const readTool = tool({
         shown: `${start + 1}-${Math.min(end, lines.length)}`,
       }
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
+      return { error: messageFromUnknownError(err) }
     }
   },
 })
@@ -76,7 +77,7 @@ export const grepTool = tool({
         return { error: stderr || `ripgrep failed with exit code ${proc.exitCode}` }
       }
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
+      return { error: messageFromUnknownError(err) }
     }
   },
 })
@@ -169,7 +170,7 @@ export const skillTool = tool({
         warnings: warnings.length > 0 ? warnings : undefined,
       }
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
+      return { error: messageFromUnknownError(err) }
     }
   },
 })

@@ -26,7 +26,7 @@ import {
   isTaskUpdateTool,
   isWriteTool,
 } from "../tool-matchers.ts"
-import { hasNonEmptyHookOutput } from "../utils/hook-json-helpers.ts"
+import { hasNonEmptyHookOutput, messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { INTERNAL_DISPATCH_RESPONSE_KEYS, stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
@@ -727,7 +727,7 @@ async function executeInlineHookWithErrorHandling(
         stderrSnippet: "",
       }
     }
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = messageFromUnknownError(err)
     log(`   ⚠ ${hook.name} [inline error: ${msg}]`)
     return { parsed: null, status: "error", stderrSnippet: msg.slice(0, 500) }
   }

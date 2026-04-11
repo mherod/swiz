@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
+import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
 /** Model alias applied when entering `planning` or `reviewing` project states. */
 export const CLAUDE_MODEL_FOR_PLANNING_AND_REVIEW = "opus" as const
@@ -50,8 +51,7 @@ export async function writeClaudeSettingsWithMutation(
       }
       obj = parsed as Record<string, any>
     } catch (e) {
-      const msg = e instanceof SyntaxError ? e.message : e instanceof Error ? e.message : String(e)
-      throw new Error(`Invalid JSON at ${path}: ${msg}`)
+      throw new Error(`Invalid JSON at ${path}: ${messageFromUnknownError(e)}`)
     }
   } else {
     obj = {}

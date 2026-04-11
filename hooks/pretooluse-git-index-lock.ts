@@ -15,7 +15,11 @@ import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../s
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GIT_ANY_CMD_RE } from "../src/utils/git-utils.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
+import {
+  messageFromUnknownError,
+  preToolUseAllow,
+  preToolUseDeny,
+} from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
@@ -282,7 +286,7 @@ const pretooluseGitIndexLock: SwizShellHook = {
       if (!validated) return {}
       return await handleLockResolution(validated.lockPath, validated.repoRoot)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = messageFromUnknownError(err)
       return preToolUseDeny(
         `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
           `Error: ${message}\n\n` +

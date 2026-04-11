@@ -16,6 +16,7 @@ import {
   stripFrontmatter,
 } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import {
   eliminatePositionalArgs,
   expandInlineCommands,
@@ -414,9 +415,7 @@ async function exportCommand(options: {
         exported++
       }
     } catch (e) {
-      console.log(
-        `  - failed to export ${skillName}: ${e instanceof Error ? e.message : String(e)}`
-      )
+      console.log(`  - failed to export ${skillName}: ${messageFromUnknownError(e)}`)
     }
   }
 

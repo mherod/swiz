@@ -16,6 +16,7 @@ import {
 } from "../settings.ts"
 import { evaluateTransition, STATE_METADATA } from "../state-machine.ts"
 import type { Command } from "../types.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 function computeStateTotals(history: StateHistoryEntry[]): Map<string, number> {
   const totals = new Map<string, number>()
@@ -115,7 +116,7 @@ async function tryApplyStateModel(state: ProjectState, cwd: string): Promise<voi
     })
     console.log(`  claude model: ${CLAUDE_MODEL_FOR_PLANNING_AND_REVIEW} (${path})`)
   } catch (err) {
-    stderrLog("state set — claude model", err instanceof Error ? err.message : String(err))
+    stderrLog("state set — claude model", messageFromUnknownError(err))
   }
 }
 

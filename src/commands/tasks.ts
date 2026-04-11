@@ -31,6 +31,7 @@ import {
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
 import type { Command } from "../types.ts"
+import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 export {
   compareTaskIds,
@@ -230,7 +231,7 @@ async function handleCompleteError(
     skipLastTaskGuard?: boolean
   }
 ): Promise<void> {
-  const msg = e instanceof Error ? e.message : String(e)
+  const msg = messageFromUnknownError(e)
   if (msg.includes("Invalid transition") && msg.includes("pending")) {
     console.log(`  ⚡ Auto-transitioning #${opts.taskId}: pending → in_progress → completed`)
     await completeTaskWithAutoTransition(opts.sessionId, opts.taskId, {
@@ -270,7 +271,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
       console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = messageFromUnknownError(e)
       console.log(`  ❌ #${taskId}: ${msg}`)
       process.exitCode = 1
     }
