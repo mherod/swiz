@@ -71,3 +71,16 @@ export function swizPseudoHookLogPath(): string {
 export function stopAutoContSuggestionsPath(safeSession: string): string {
   return `${TMP_ROOT}/swiz-stop-suggestions-${safeSession}.json`
 }
+
+/**
+ * Heartbeat sentinel refreshed by the `swiz mcp` drain loop while a channel
+ * consumer is connected for a given project. PostToolUse auto-steer checks
+ * the mtime to decide whether MCP is live for this project and should be
+ * allowed to drain `next_turn` requests instead of the AppleScript path.
+ */
+export function swizMcpChannelHeartbeatPath(projectKey: string): string {
+  return `${TMP_ROOT}/swiz-mcp-channel-${projectKey}.heartbeat`
+}
+
+/** MCP heartbeat freshness window. Must exceed the drain interval plus a margin. */
+export const SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS = 5_000

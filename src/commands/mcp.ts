@@ -1,4 +1,6 @@
+import { unlinkSync, utimesSync, writeFileSync } from "node:fs"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { swizMcpChannelHeartbeatPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 
 // Run swiz as a Model Context Protocol (MCP) stdio server.
@@ -97,11 +99,41 @@ async function drainAutoSteersOnce(projectKey: string): Promise<void> {
   }
 }
 
+/**
+ * Touch the heartbeat sentinel for this project so PostToolUse auto-steer
+ * knows the MCP channel is live and should own `next_turn` delivery.
+ * Creating the file on first call ensures the sentinel exists even when the
+ * drain loop runs before any other producer writes it.
+ */
+function refreshChannelHeartbeat(projectKey: string): void {
+  const path = swizMcpChannelHeartbeatPath(projectKey)
+  const now = new Date()
+  try {
+    utimesSync(path, now, now)
+  } catch {
+    try {
+      writeFileSync(path, "")
+    } catch {
+      // heartbeat is advisory; swallow to keep the drain loop alive
+    }
+  }
+}
+
+function clearChannelHeartbeat(projectKey: string): void {
+  try {
+    unlinkSync(swizMcpChannelHeartbeatPath(projectKey))
+  } catch {
+    // already gone; nothing to do
+  }
+}
+
 function startAutoSteerDrainLoop(cwd: string): () => void {
   const projectKey = projectKeyFromCwd(cwd)
   let stopped = false
+  refreshChannelHeartbeat(projectKey)
   const tick = async (): Promise<void> => {
     if (stopped) return
+    refreshChannelHeartbeat(projectKey)
     try {
       await drainAutoSteersOnce(projectKey)
     } catch (err) {
@@ -114,6 +146,7 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
   return () => {
     stopped = true
     clearInterval(timer)
+    clearChannelHeartbeat(projectKey)
   }
 }
 

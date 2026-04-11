@@ -17,18 +17,41 @@
  * Dual-mode: SwizHook + runSwizHookAsMain.
  */
 
+import { statSync } from "node:fs"
 import type { AutoSteerTrigger } from "../src/auto-steer-store.ts"
 import { getAutoSteerStore } from "../src/auto-steer-store.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import {
+  SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
+  swizMcpChannelHeartbeatPath,
+} from "../src/temp-paths.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
 import { sendAutoSteer } from "../src/utils/hook-utils.ts"
 import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
 import { detectTerminal } from "../src/utils/terminal-detection.ts"
+
+/**
+ * True when a `swiz mcp` drain loop is actively serving this project (heartbeat
+ * sentinel refreshed within the fresh window). PostToolUse then yields
+ * `next_turn` delivery to the MCP channel path so Claude receives auto-steers
+ * as `<channel source="swiz">` events instead of AppleScript keystrokes.
+ */
+function isMcpChannelLiveForCwd(cwd: string): boolean {
+  if (!cwd) return false
+  try {
+    const path = swizMcpChannelHeartbeatPath(projectKeyFromCwd(cwd))
+    const mtimeMs = statSync(path).mtimeMs
+    return Date.now() - mtimeMs < SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS
+  } catch {
+    return false
+  }
+}
 
 function hasCommitTrigger(
   store: ReturnType<typeof getAutoSteerStore>,
@@ -62,7 +85,13 @@ async function getTriggersToDeliver(
 ): Promise<AutoSteerTrigger[]> {
   const triggers: AutoSteerTrigger[] = []
 
-  if (store.hasPending(safeSession, "next_turn")) {
+  // When the MCP channel drain loop is live for this project, it owns
+  // `next_turn` delivery — skip the AppleScript path so both consumers don't
+  // race for the same queue row.
+  const cwd = (rec.cwd as string) ?? ""
+  const mcpLive = isMcpChannelLiveForCwd(cwd)
+
+  if (!mcpLive && store.hasPending(safeSession, "next_turn")) {
     triggers.push("next_turn")
   }
 
