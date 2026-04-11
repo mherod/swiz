@@ -10,7 +10,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { type HookResult, useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import { type HookResult, makeTempGitRepo, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -345,6 +345,8 @@ describe("posttooluse-git-context: status injection", () => {
 
   test("emits branch and uncommitted count in git repo", async () => {
     const repo = await createGitRepo()
+    // Write an uncommitted file so the hook reports "uncommitted file(s)".
+    await writeFile(join(repo, "pending.txt"), "work in progress")
     const r = await runHook(HOOK, { cwd: repo })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
@@ -903,6 +905,7 @@ describe("stop-completion-auditor: positive paths", () => {
 
   test("all tasks completed allows stop", async () => {
     const homeDir = await createTempDir()
+    const tmp = await createTempDir()
     const sessionId = "test-all-complete"
     await createTaskFile(homeDir, sessionId, {
       id: "1",
@@ -914,9 +917,11 @@ describe("stop-completion-auditor: positive paths", () => {
       subject: "Task B",
       status: "completed",
     })
+    // requireTaskListSync blocks when tasks exist but no TaskList appears in transcript.
+    const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: "" },
+      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -925,6 +930,7 @@ describe("stop-completion-auditor: positive paths", () => {
 
   test("incomplete tasks are delegated to stop-incomplete-tasks (auditor allows stop)", async () => {
     const homeDir = await createTempDir()
+    const tmp = await createTempDir()
     const sessionId = "test-incomplete"
     await createTaskFile(homeDir, sessionId, {
       id: "1",
@@ -936,9 +942,11 @@ describe("stop-completion-auditor: positive paths", () => {
       subject: "Write tests",
       status: "pending",
     })
+    // requireTaskListSync blocks when tasks exist but no TaskList appears in transcript.
+    const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: "" },
+      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -949,6 +957,7 @@ describe("stop-completion-auditor: positive paths", () => {
 
   test("mix of completed and incomplete delegates to stop-incomplete-tasks", async () => {
     const homeDir = await createTempDir()
+    const tmp = await createTempDir()
     const sessionId = "test-mixed"
     await createTaskFile(homeDir, sessionId, {
       id: "1",
@@ -960,9 +969,11 @@ describe("stop-completion-auditor: positive paths", () => {
       subject: "Still working",
       status: "in_progress",
     })
+    // requireTaskListSync blocks when tasks exist but no TaskList appears in transcript.
+    const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: "" },
+      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -997,7 +1008,7 @@ describe("stop-completion-auditor: positive paths", () => {
     expect(r.exitCode).toBe(0)
     expect(r.json?.decision).toBe("block")
     const reason = r.json?.reason as string
-    expect(reason).toContain("No tasks were created")
+    expect(reason).toContain("No completed tasks on record")
     expect(reason).toContain("12 tool calls")
   })
 })
@@ -1218,8 +1229,11 @@ describe("userpromptsubmit-git-context: positive paths", () => {
   const HOOK = "hooks/userpromptsubmit-git-context.ts"
 
   test("emits git branch info in git repo", async () => {
-    // This hook uses process.cwd() which is the swiz repo
-    const r = await runHook(HOOK, { session_id: "test" })
+    // Use a fixture repo so the test is independent of the swiz working tree state.
+    const repoDir = await makeTempGitRepo({ create: createTempDir }, { suffix: "-git-ctx" })
+    // Write an uncommitted file so the hook reports "uncommitted file(s)".
+    await writeFile(join(repoDir, "untracked.txt"), "pending")
+    const r = await runHook(HOOK, { session_id: "test", cwd: repoDir })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
     const hso = r.json?.hookSpecificOutput as Record<string, any>
