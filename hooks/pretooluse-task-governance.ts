@@ -45,7 +45,6 @@ import {
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
-  isCurrentAgent,
   isEditTool,
   isGitRepo,
   isRunningInAgent,
@@ -299,7 +298,20 @@ function checkTaskMinimums(
 ): SwizHookOutput | undefined {
   const { incompleteTasks, inProgressTasks, pendingTasks, allTasksDone, incompleteTaskList } =
     summary
-  if (allTasksDone) return undefined
+  if (allTasksDone) {
+    return preToolUseDeny(
+      `STOP. All session tasks are completed. ${toolName} is BLOCKED.\n\n` +
+        `You have finished all planned work, but new tool calls require active tasks.\n\n` +
+        formatActionPlan(
+          [
+            `Use TaskCreate to add at least ${thresholds.minIncomplete} task(s) ` +
+              `(including at least ${thresholds.minPending} pending) before continuing.`,
+            `Retry this ${toolName} call after the required tasks have been created.`,
+          ],
+          { translateToolNames: true }
+        )
+    )
+  }
   if (
     incompleteTasks.length >= thresholds.minIncomplete &&
     pendingTasks.length >= thresholds.minPending
@@ -568,7 +580,6 @@ function validateGuardConditions(
   input: Record<string, any>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
-  if (isCurrentAgent("gemini")) return false
   return !isExemptToolCall(input, toolName)
 }
 
@@ -1043,7 +1054,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
 
   // ── Global pending-task overflow guard ────────────────────────────────
   // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
-  if (!isTaskListTool(toolName) && !isCurrentAgent("gemini")) {
+  if (!isTaskListTool(toolName)) {
     const sessionIdForOverflow = resolveSafeSessionId(input.session_id as string | undefined)
     const cwdForOverflow: string = (input.cwd as string) ?? process.cwd()
     if (sessionIdForOverflow && (await isTaskEnforcementProject(cwdForOverflow))) {
@@ -1092,7 +1103,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
 
   // ── Edit / Write / Bash path (blocked tools) ──────────────────────────
   if (isBlockedTool(toolName)) {
-    // Guard conditions: only enforce in git repos with CLAUDE.md, not gemini
+    // Guard conditions: only enforce in git repos with CLAUDE.md
     const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
     const cwd: string = (input.cwd as string) ?? process.cwd()
 
