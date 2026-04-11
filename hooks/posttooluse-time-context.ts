@@ -10,6 +10,7 @@
 import { format } from "date-fns"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
+import { scheduleAutoSteerViaChannel } from "../src/utils/auto-steer-helpers.ts"
 
 function describeTimeOfDay(date: Date): string {
   const hour = date.getHours()
@@ -40,13 +41,40 @@ export function evaluatePosttooluseTimeContext(now = new Date()): SwizHookOutput
   return buildContextHookOutput("PostToolUse", buildCurrentTimeContext(now))
 }
 
-const posttooluseTimeContext: SwizHook = {
+/**
+ * Fire-and-forget auto-steer of the time message, in addition to emitting it
+ * as inline context. Uses `scheduleAutoSteerViaChannel` so the enqueue happens
+ * regardless of terminal support — the `swiz mcp` drain loop delivers the
+ * message as a `<channel source="swiz">` event on the next poll, giving a
+ * steady visible stream of channel traffic for operators verifying the MCP
+ * transport is live. Requires `cwd` (used as the project key for channel
+ * delivery); skipped when absent.
+ */
+async function scheduleTimeAutoSteer(
+  sessionId: string,
+  cwd: string | undefined,
+  message: string
+): Promise<void> {
+  if (!sessionId || !cwd) return
+  try {
+    await scheduleAutoSteerViaChannel(sessionId, message, cwd)
+  } catch {
+    // scheduling is cosmetic — never let it break the hook
+  }
+}
+
+const posttooluseTimeContext: SwizHook<Record<string, any>> = {
   name: "posttooluse-time-context",
   event: "postToolUse",
   timeout: 1,
 
-  run() {
-    return evaluatePosttooluseTimeContext()
+  async run(input) {
+    const rec = (input ?? {}) as Record<string, any>
+    const sessionId = typeof rec.session_id === "string" ? rec.session_id : ""
+    const cwd = typeof rec.cwd === "string" ? rec.cwd : undefined
+    const message = buildCurrentTimeContext()
+    await scheduleTimeAutoSteer(sessionId, cwd, message)
+    return buildContextHookOutput("PostToolUse", message)
   },
 }
 
