@@ -199,33 +199,46 @@ const RAW_MANIFEST: HookGroup[] = [
   {
     event: "stop",
     hooks: [
+      // Content & task completion (ordered: offensive → tasks → auditor → secrets → permissions)
       { hook: stopOffensiveLanguage },
       { hook: stopIncompleteTasks },
       { hook: stopCompletionAuditor },
       { hook: stopSecretScanner },
       { hook: stopWorkflowPermissions },
-      { hook: stopLargeFiles },
       { hook: stopSuppressionPatterns },
+
+      // Ship checklist & code quality
       { hook: stopShipChecklist },
-      { hook: stopLockfileDrift },
-      { hook: stopLintStaged },
       { hook: stopQualityChecks },
+      { hook: stopLintStaged },
+      { hook: stopLargeFiles },
+      { hook: stopTodoTracker },
+
+      // Git state & branch policy
+      { hook: stopGitStatus },
+      { hook: stopLockfileDrift },
       { hook: stopBranchConflicts },
+      { hook: stopNonDefaultBranch },
+      { hook: stopUpstreamBranchCount },
+
+      // PR
       { hook: stopPrDescription },
       { hook: stopPrChangesRequested },
       { hook: stopPrFeedback },
-      { hook: stopTodoTracker },
-      { hook: stopNonDefaultBranch },
-      { hook: stopUpstreamBranchCount },
+
+      // Memory & knowledge
       { hook: stopMemorySize },
-      { hook: stopDependabotPrs },
-      { hook: stopGdprDataModels },
-      { hook: stopReflectOnSessionMistakes },
       { hook: stopMemoryUpdateReminder },
+      { hook: stopGdprDataModels },
+
+      // External integrations
+      { hook: stopDependabotPrs },
       { hook: stopPersonalRepoIssues },
+
+      // Session wrap-up
+      { hook: stopReflectOnSessionMistakes },
       { hook: stopAutoContinue },
       { hook: posttooluseSpeakNarrator },
-      { hook: stopGitStatus },
     ],
   },
   {

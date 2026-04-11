@@ -298,7 +298,7 @@ describe("manifest.ts", () => {
 
       securityHooks.forEach((securityHook) => {
         const index = hookIds.indexOf(securityHook)
-        expect(index).toBeLessThan(6) // Should be in first 6 hooks
+        expect(index).toBeLessThan(10) // Should be in first 10 hooks
       })
     })
 

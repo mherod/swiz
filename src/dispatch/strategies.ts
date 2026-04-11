@@ -330,8 +330,9 @@ export function processAggregatedStopResults(
 
   if (blockReasons.length > 0) {
     finalResponse.decision = "block"
-    finalResponse.reason = blockReasons.join("\n\n---\n\n")
-    log(`   result: ${blockReasons.length} block(s) aggregated`)
+    const uniqueReasons = [...new Set(blockReasons)]
+    finalResponse.reason = uniqueReasons.join("\n\n\n\n")
+    log(`   result: ${blockReasons.length} block(s) aggregated (${uniqueReasons.length} unique)`)
   }
 
   if (contexts.length > 0) {
