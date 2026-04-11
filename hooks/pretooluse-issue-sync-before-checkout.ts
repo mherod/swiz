@@ -48,18 +48,21 @@ function buildSyncMessage(
     : `Issue sync completed before branch switch (${repo} already up to date).`
 }
 
-async function runSync(cwd: string): Promise<SwizHookOutput> {
+async function runSync(cwd: string, syncFn: typeof syncUpstreamState): Promise<SwizHookOutput> {
   const repo = await getRepoSlug(cwd)
   if (!repo) return {}
   try {
-    const result = await syncUpstreamState(repo, cwd)
+    const result = await syncFn(repo, cwd)
     return preToolUseAllowWithContext("", buildSyncMessage(result, repo))
   } catch {
     return {}
   }
 }
 
-export async function evaluateIssueSyncBeforeCheckout(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateIssueSyncBeforeCheckout(
+  input: unknown,
+  syncFn: typeof syncUpstreamState = syncUpstreamState
+): Promise<SwizHookOutput> {
   const hookInput = shellHookInputSchema.parse(input)
   const cwd: string = hookInput.cwd ?? process.cwd()
   const command = String(hookInput.tool_input?.command ?? "")
@@ -68,7 +71,7 @@ export async function evaluateIssueSyncBeforeCheckout(input: unknown): Promise<S
   if (!isBranchSwitchCommand(command)) return {}
   if (!(await isGitRepo(cwd))) return {}
 
-  return await runSync(cwd)
+  return await runSync(cwd, syncFn)
 }
 
 const pretooluseIssueSyncBeforeCheckout: SwizToolHook = {

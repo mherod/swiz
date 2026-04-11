@@ -1,158 +1,144 @@
-import { describe, expect, mock, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import type { SyncChange, UpstreamSyncResult } from "../src/issue-store-sync.ts"
+import { evaluateIssueSyncBeforeCheckout } from "./pretooluse-issue-sync-before-checkout.ts"
 
-type Change = { kind: string; key: string; reason: string }
-
-const mockSyncResult = {
-  issues: {
-    upserted: 0,
-    removed: 0,
-    skipped: 5,
-    changes: [] as Change[],
-  },
-  pullRequests: {
-    upserted: 0,
-    removed: 0,
-    skipped: 2,
-    changes: [] as Change[],
-  },
-  ciStatuses: { upserted: 0, changes: [] as Change[] },
-  comments: { upserted: 0 },
-  labels: {
-    upserted: 0,
-    removed: 0,
-    skipped: 3,
-    changes: [] as Change[],
-  },
-  milestones: {
+function makeSyncResult(issueChanges: SyncChange[] = []): UpstreamSyncResult {
+  const empty = (): {
+    upserted: number
+    removed: number
+    skipped: number
+    changes: SyncChange[]
+  } => ({
     upserted: 0,
     removed: 0,
     skipped: 0,
-    changes: [] as Change[],
-  },
-  branchCi: { upserted: 0, changes: [] as Change[] },
-  prBranchDetail: { upserted: 0, changes: [] as Change[] },
-  branchProtection: { upserted: 0, changes: [] as Change[] },
-}
-
-let syncCallCount = 0
-let syncShouldThrow = false
-
-await mock.module("../src/issue-store-sync.ts", () => ({
-  syncUpstreamState: () => {
-    syncCallCount++
-    if (syncShouldThrow) return Promise.reject(new Error("sync failed"))
-    return Promise.resolve(mockSyncResult)
-  },
-}))
-
-// Serialize tests against the shared mock counters — bun's --concurrent
-// flag otherwise races resets/reads across tests in this describe.
-let gate: Promise<unknown> = Promise.resolve()
-function serialize<T>(fn: () => Promise<T>): Promise<T> {
-  const next = gate.then(fn, fn)
-  gate = next.then(
-    () => undefined,
-    () => undefined
-  )
-  return next as Promise<T>
+    changes: [],
+  })
+  return {
+    issues: { ...empty(), skipped: 5, changes: issueChanges },
+    pullRequests: { ...empty(), skipped: 2 },
+    ciStatuses: { upserted: 0, changes: [] },
+    comments: { upserted: 0 },
+    labels: { ...empty(), skipped: 3 },
+    milestones: empty(),
+    branchCi: { upserted: 0, changes: [] },
+    prBranchDetail: { upserted: 0, changes: [] },
+    branchProtection: { upserted: 0, changes: [] },
+    events: { inserted: 0, cursor: null },
+  }
 }
 
 // The hook calls getRepoSlug which needs a git remote — run tests from the real repo root
 // so getRepoSlug resolves to the actual repo slug.
-
-const { evaluateIssueSyncBeforeCheckout } = await import(
-  "./pretooluse-issue-sync-before-checkout.ts"
-)
 
 function makeInput(command: string, toolName = "Bash") {
   return { tool_name: toolName, tool_input: { command }, cwd: process.cwd() }
 }
 
 describe("pretooluse-issue-sync-before-checkout", () => {
-  test("allows non-checkout commands without syncing", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const result = await evaluateIssueSyncBeforeCheckout(makeInput("git status"))
+  test("allows non-checkout commands without syncing", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(makeInput("git status"), syncFn)
+    expect(result).toEqual({})
+    expect(callCount).toBe(0)
+  })
+
+  test("allows non-shell tools without syncing", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git checkout feature", "Edit"),
+      syncFn
+    )
+    expect(result).toEqual({})
+    expect(callCount).toBe(0)
+  })
+
+  test("runs sync on git checkout <branch>", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git checkout feature-branch"),
+      syncFn
+    )
+    expect(callCount).toBe(1)
+    expect(result).toHaveProperty("systemMessage")
+  })
+
+  test("runs sync on git switch <branch>", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git switch feature-branch"),
+      syncFn
+    )
+    expect(callCount).toBe(1)
+    expect(result).toHaveProperty("systemMessage")
+  })
+
+  test("runs sync on git checkout -b <branch>", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git checkout -b new-branch"),
+      syncFn
+    )
+    expect(callCount).toBe(1)
+    expect(result).toHaveProperty("systemMessage")
+  })
+
+  test("does not block when sync fails", async () => {
+    let callCount = 0
+    const syncFn = (): Promise<UpstreamSyncResult> => {
+      callCount++
+      return Promise.reject(new Error("sync failed"))
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git checkout feature-branch"),
+      syncFn
+    )
+    expect(callCount).toBe(1)
+    expect(result).toEqual({})
+  })
+
+  test("skips non-checkout git commands", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult())
+    }
+    for (const cmd of ["git log --oneline", "git diff HEAD", "git commit -m 'test'", "git push"]) {
+      const result = await evaluateIssueSyncBeforeCheckout(makeInput(cmd), syncFn)
       expect(result).toEqual({})
-      expect(syncCallCount).toBe(0)
-    }))
+    }
+    expect(callCount).toBe(0)
+  })
 
-  test("allows non-shell tools without syncing", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const result = await evaluateIssueSyncBeforeCheckout(
-        makeInput("git checkout feature", "Edit")
-      )
-      expect(result).toEqual({})
-      expect(syncCallCount).toBe(0)
-    }))
-
-  test("runs sync on git checkout <branch>", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const result = await evaluateIssueSyncBeforeCheckout(makeInput("git checkout feature-branch"))
-      expect(syncCallCount).toBe(1)
-      expect(result).toHaveProperty("systemMessage")
-    }))
-
-  test("runs sync on git switch <branch>", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const result = await evaluateIssueSyncBeforeCheckout(makeInput("git switch feature-branch"))
-      expect(syncCallCount).toBe(1)
-      expect(result).toHaveProperty("systemMessage")
-    }))
-
-  test("runs sync on git checkout -b <branch>", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const result = await evaluateIssueSyncBeforeCheckout(makeInput("git checkout -b new-branch"))
-      expect(syncCallCount).toBe(1)
-      expect(result).toHaveProperty("systemMessage")
-    }))
-
-  test("does not block when sync fails", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      syncShouldThrow = true
-      try {
-        const result = await evaluateIssueSyncBeforeCheckout(
-          makeInput("git checkout feature-branch")
-        )
-        expect(syncCallCount).toBe(1)
-        expect(result).toEqual({})
-      } finally {
-        syncShouldThrow = false
-      }
-    }))
-
-  test("skips non-checkout git commands", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      for (const cmd of [
-        "git log --oneline",
-        "git diff HEAD",
-        "git commit -m 'test'",
-        "git push",
-      ]) {
-        const result = await evaluateIssueSyncBeforeCheckout(makeInput(cmd))
-        expect(result).toEqual({})
-      }
-      expect(syncCallCount).toBe(0)
-    }))
-
-  test("reports changes count when sync finds updates", () =>
-    serialize(async () => {
-      syncCallCount = 0
-      const savedChanges = mockSyncResult.issues.changes
-      mockSyncResult.issues.changes = [{ kind: "new", key: "#99", reason: "new issue" }]
-      try {
-        const result = await evaluateIssueSyncBeforeCheckout(makeInput("git checkout feature"))
-        expect(syncCallCount).toBe(1)
-        const ctx = (result as { systemMessage?: string }).systemMessage ?? ""
-        expect(ctx).toContain("1 change")
-      } finally {
-        mockSyncResult.issues.changes = savedChanges
-      }
-    }))
+  test("reports changes count when sync finds updates", async () => {
+    let callCount = 0
+    const syncFn = () => {
+      callCount++
+      return Promise.resolve(makeSyncResult([{ kind: "new", key: "#99", reason: "new issue" }]))
+    }
+    const result = await evaluateIssueSyncBeforeCheckout(makeInput("git checkout feature"), syncFn)
+    expect(callCount).toBe(1)
+    const ctx = (result as { systemMessage?: string }).systemMessage ?? ""
+    expect(ctx).toContain("1 change")
+  })
 })
