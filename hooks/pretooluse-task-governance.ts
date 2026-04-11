@@ -39,6 +39,7 @@ import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
   buildLastTaskStandingDenial,
+  detectCurrentAgent,
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
@@ -656,6 +657,28 @@ function checkTaskDeletion(
   })
 }
 
+const PENDING_TASK_OVERFLOW_LIMIT = 20
+
+function checkPendingOverflow(
+  toolName: string,
+  allTasks: Array<{ id: string; status: string; subject: string }>
+): SwizHookOutput | undefined {
+  if (isTaskListTool(toolName)) return undefined
+  const pendingCount = allTasks.filter((t) => t.status === "pending").length
+  if (pendingCount <= PENDING_TASK_OVERFLOW_LIMIT) return undefined
+
+  return preToolUseDeny(
+    `STOP. ${toolName} is BLOCKED.\n\n` +
+      formatActionPlan(
+        [
+          "Run TaskList now to refresh the canonical tasklist.",
+          `Retry this ${toolName} call after TaskList completes.`,
+        ],
+        { translateToolNames: true }
+      )
+  )
+}
+
 async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
 
@@ -685,6 +708,9 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
 
   const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId)
   if (taskListSyncOutcome) return taskListSyncOutcome
+
+  const pendingOverflowOutcome = checkPendingOverflow(toolName, allTasks)
+  if (pendingOverflowOutcome) return pendingOverflowOutcome
 
   const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)
   if (deletionOutcome) return deletionOutcome
@@ -1012,6 +1038,21 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const toolName = String(input.tool_name ?? "")
   const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
+  // ── Global pending-task overflow guard ────────────────────────────────
+  // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
+  if (!isTaskListTool(toolName) && !isCurrentAgent("gemini")) {
+    const sessionIdForOverflow = resolveSafeSessionId(input.session_id as string | undefined)
+    const cwdForOverflow: string = (input.cwd as string) ?? process.cwd()
+    if (sessionIdForOverflow && (await isTaskEnforcementProject(cwdForOverflow))) {
+      const allTasksForOverflow = overlayEventState(
+        await readSessionTasksFresh(sessionIdForOverflow),
+        sessionIdForOverflow
+      )
+      const overflowOutcome = checkPendingOverflow(toolName, allTasksForOverflow)
+      if (overflowOutcome) return overflowOutcome
+    }
+  }
+
   // ── TaskUpdate / update_plan path ──────────────────────────────────────
   if (isNativeTaskTool(toolName)) {
     // Schema validation (sync, cheap)
@@ -1086,6 +1127,43 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   return {}
 }
 
+function isDenyOutput(out: SwizHookOutput | null | undefined): boolean {
+  if (!out || typeof out !== "object") return false
+  const hso = (out as Record<string, any>).hookSpecificOutput as Record<string, any> | undefined
+  return hso?.permissionDecision === "deny"
+}
+
+async function buildTraceContext(rawInput: unknown): Promise<string> {
+  try {
+    const input = rawInput as Record<string, any>
+    const toolName = String(input?.tool_name ?? "<unknown>")
+    const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+    const cwd: string = (input?.cwd as string) ?? process.cwd()
+    const agent = detectCurrentAgent()?.id ?? "unknown"
+    const enforcement = await isTaskEnforcementProject(cwd).catch(() => false)
+
+    let pending = 0
+    let inProgress = 0
+    let total = 0
+    if (sessionId) {
+      const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+      total = allTasks.length
+      for (const t of allTasks) {
+        if (t.status === "pending") pending++
+        else if (t.status === "in_progress") inProgress++
+      }
+    }
+
+    return (
+      `[task-governance trace] tool=${toolName} agent=${agent} enforcement=${enforcement} ` +
+      `sessionId=${sessionId ? "yes" : "no"} tasks(total=${total} pending=${pending} ` +
+      `inProgress=${inProgress}) overflowLimit=${PENDING_TASK_OVERFLOW_LIMIT} verdict=allow`
+    )
+  } catch (err) {
+    return `[task-governance trace] error building context: ${(err as Error)?.message ?? err}`
+  }
+}
+
 const pretooluseTaskGovernance: SwizToolHook = {
   name: "pretooluse-task-governance",
   event: "preToolUse",
@@ -1093,7 +1171,10 @@ const pretooluseTaskGovernance: SwizToolHook = {
 
   async run(input) {
     try {
-      return await evaluatePretooluseTaskGovernance(input)
+      const result = await evaluatePretooluseTaskGovernance(input)
+      if (isDenyOutput(result)) return result
+      const trace = await buildTraceContext(input)
+      return preToolUseAllowWithContext(trace, trace)
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err)
     }
