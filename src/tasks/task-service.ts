@@ -378,21 +378,8 @@ export async function ensureFileBackedTask({
   return true
 }
 
-const VALID_TRANSITIONS: Record<string, Set<string>> = {
-  pending: new Set(["in_progress", "cancelled"]),
-  in_progress: new Set(["completed", "pending", "cancelled"]),
-  completed: new Set(["in_progress"]),
-  cancelled: new Set(["pending", "in_progress"]),
-}
-
-export function validateTransition(oldStatus: string, newStatus: string): string | null {
-  if (oldStatus === newStatus) return null
-  const allowed = VALID_TRANSITIONS[oldStatus]
-  if (!allowed || !allowed.has(newStatus)) {
-    return `Invalid transition: ${oldStatus} → ${newStatus}. Tasks must be in_progress before they can be completed.`
-  }
-  return null
-}
+import { validateTransition } from "./task-transitions.ts"
+export { validateTransition }
 
 /**
  * Check whether the git working tree is clean (no uncommitted or untracked files).

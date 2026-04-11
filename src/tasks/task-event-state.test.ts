@@ -7,15 +7,14 @@ import {
   applyTaskListEvent,
   applyTaskUpdateEvent,
   clearReconciliation,
-  computeTransitionPath,
   eventStateSessionCount,
   getSessionEventState,
   hasSessionEventState,
-  isValidTransition,
   needsReconciliation,
   pruneSession,
   seedSessionFromDisk,
 } from "./task-event-state.ts"
+import { computeTransitionPath, isValidTransition } from "./task-transitions.ts"
 
 /** Session IDs used by this test file — pruned after each test instead of
  *  calling clearAllEventState() which races with concurrent test files. */
@@ -246,13 +245,15 @@ describe("task-event-state", () => {
       expect(isValidTransition("pending", "in_progress")).toBe(true)
       expect(isValidTransition("pending", "cancelled")).toBe(true)
       expect(isValidTransition("in_progress", "completed")).toBe(true)
-      expect(isValidTransition("in_progress", "pending")).toBe(true)
-      expect(isValidTransition("completed", "in_progress")).toBe(true)
+      expect(isValidTransition("in_progress", "cancelled")).toBe(true)
       expect(isValidTransition("cancelled", "pending")).toBe(true)
+      expect(isValidTransition("cancelled", "in_progress")).toBe(true)
     })
 
     it("rejects invalid transitions", () => {
       expect(isValidTransition("pending", "completed")).toBe(false)
+      expect(isValidTransition("in_progress", "pending")).toBe(false)
+      expect(isValidTransition("completed", "in_progress")).toBe(false)
       expect(isValidTransition("completed", "pending")).toBe(false)
       expect(isValidTransition("completed", "cancelled")).toBe(false)
       expect(isValidTransition("cancelled", "completed")).toBe(false)
@@ -353,12 +354,12 @@ describe("task-event-state", () => {
       expect(computeTransitionPath("pending", "completed")).toEqual(["in_progress", "completed"])
     })
 
-    it("finds intermediate path for completed → cancelled", () => {
-      expect(computeTransitionPath("completed", "cancelled")).toEqual(["in_progress", "cancelled"])
+    it("returns null for completed → cancelled (completed is terminal)", () => {
+      expect(computeTransitionPath("completed", "cancelled")).toBeNull()
     })
 
-    it("finds intermediate path for completed → pending", () => {
-      expect(computeTransitionPath("completed", "pending")).toEqual(["in_progress", "pending"])
+    it("returns null for completed → pending (completed is terminal)", () => {
+      expect(computeTransitionPath("completed", "pending")).toBeNull()
     })
 
     it("returns null for unknown source status", () => {

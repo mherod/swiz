@@ -18,6 +18,7 @@
  */
 
 import { debugLog } from "../debug.ts"
+import { isValidTransition } from "./task-transitions.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,29 +29,6 @@ export interface EventTaskState {
 }
 
 // ─── Transition validation ─────────────────────────────────────────────────
-
-/**
- * Lightweight mirror of VALID_TRANSITIONS from task-service.ts.
- * Kept as a local constant to avoid circular imports — task-service.ts
- * imports from this module's sibling (task-recovery.ts → task-event-state.ts).
- */
-const VALID_TRANSITIONS: Record<string, Set<string>> = {
-  pending: new Set(["in_progress", "cancelled"]),
-  in_progress: new Set(["completed", "pending", "cancelled"]),
-  completed: new Set(["in_progress"]),
-  cancelled: new Set(["pending", "in_progress"]),
-}
-
-/**
- * Check whether a status transition is valid. Returns true when valid
- * (including same-status no-ops), false when the transition violates the
- * state machine.
- */
-export function isValidTransition(oldStatus: string, newStatus: string): boolean {
-  if (oldStatus === newStatus) return true
-  const allowed = VALID_TRANSITIONS[oldStatus]
-  return allowed?.has(newStatus) ?? false
-}
 
 /**
  * Log a warning when an invalid state transition is detected in an
@@ -69,43 +47,6 @@ export function warnInvalidTransition(
       `(session ${sessionId.slice(0, 8)}…). Reconciliation flag set.`
   )
   reconciliationNeeded.add(sessionId)
-}
-
-/**
- * Compute the shortest path of valid intermediate transitions from
- * `oldStatus` to `newStatus`. Returns the intermediate steps (excluding
- * `oldStatus`, including `newStatus`), or null if no valid path exists
- * (max depth 3 to avoid cycles in the small state graph).
- *
- * Examples:
- *   computeTransitionPath("pending", "completed") → ["in_progress", "completed"]
- *   computeTransitionPath("pending", "in_progress") → ["in_progress"]
- *   computeTransitionPath("completed", "cancelled") → ["in_progress", "cancelled"]
- */
-export function computeTransitionPath(oldStatus: string, newStatus: string): string[] | null {
-  if (oldStatus === newStatus) return []
-  if (isValidTransition(oldStatus, newStatus)) return [newStatus]
-
-  // BFS over valid transitions (max depth 3 — graph has 4 nodes)
-  const queue: Array<{ status: string; path: string[] }> = [{ status: oldStatus, path: [] }]
-  const visited = new Set<string>([oldStatus])
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (current.path.length >= 3) continue
-
-    const allowed = VALID_TRANSITIONS[current.status]
-    if (!allowed) continue
-
-    for (const next of allowed) {
-      if (visited.has(next)) continue
-      const newPath = [...current.path, next]
-      if (next === newStatus) return newPath
-      visited.add(next)
-      queue.push({ status: next, path: newPath })
-    }
-  }
-  return null
 }
 
 // ─── Module-level state ─────────────────────────────────────────────────────

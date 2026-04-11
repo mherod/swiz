@@ -22,15 +22,11 @@ import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { taskListSyncSentinelPath } from "../temp-paths.ts"
-import {
-  computeTransitionPath,
-  isValidTransition,
-  pruneSession,
-  warnInvalidTransition,
-} from "./task-event-state.ts"
+import { pruneSession, warnInvalidTransition } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
+import { computeTransitionPath, isValidTransition } from "./task-transitions.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
