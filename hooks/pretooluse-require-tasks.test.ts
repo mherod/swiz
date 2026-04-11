@@ -196,8 +196,9 @@ describe("pretooluse-require-tasks", () => {
     })
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
-    // All tasks completed — wrap-up work should be allowed; staleness check skipped
-    expect(result.decision).toBeUndefined()
+    // All tasks completed — must create new tasks before continuing (no bypass)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("All session tasks are completed")
   })
 
   test("allows Bash when all tasks completed even with stale transcript (wrap-up exemption)", async () => {
@@ -221,9 +222,10 @@ describe("pretooluse-require-tasks", () => {
     const transcriptPath = join(homeDir, "transcript-all-done.jsonl")
     await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
-    // Should allow — all tasks done, staleness check is bypassed
+    // Should deny — all tasks done, new tasks must be created before continuing
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("All session tasks are completed")
   })
 
   test("denies Edit when no tasks have ever been created", async () => {
@@ -680,7 +682,8 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBe("deny")
     })
 
-    test("allows Edit when running in Gemini CLI (GEMINI_CLI=1) even with no tasks", async () => {
+    test("denies Edit when running in Gemini CLI (GEMINI_CLI=1) with no tasks", async () => {
+      // Gemini is no longer exempt from task enforcement
       const homeDir = await createTempHome()
       const result = await runHook({
         homeDir,
@@ -688,7 +691,7 @@ describe("pretooluse-require-tasks", () => {
         filePath: "/Users/test/project/src/index.ts",
         envOverrides: { GEMINI_CLI: "1" },
       })
-      expect(result.decision).toBeUndefined()
+      expect(result.decision).toBe("deny")
     })
   })
 
