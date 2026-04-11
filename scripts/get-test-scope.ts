@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
+import { basename, dirname } from "node:path"
 
 /**
  * Script to determine which tests to run pre-push, mirroring CI logic.
@@ -27,21 +28,66 @@ const changedFiles = getGitOutput(["diff", "--name-only", base, "HEAD"]).split("
 
 const testFiles = new Set<string>()
 
+/**
+ * Locate test files associated with a sub-module entry by walking up to its
+ * parent directory and looking for a `<parent-dir>.test.ts` (and any siblings
+ * matching `<parent-dir>*.test.ts`). This is the convention for hook bundles
+ * like `hooks/stop-personal-repo-issues/issues.ts` whose tests live at
+ * `hooks/stop-personal-repo-issues.test.ts` and
+ * `hooks/stop-personal-repo-issues-e2e.test.ts`. Without this lookup the
+ * sibling-only check returns nothing and the lefthook test step falls back
+ * to its multi-thousand-file safe-subset path, which is the source of every
+ * concurrent-mode flake we have hit on push.
+ */
+function findParentBundleTests(file: string): string[] {
+  const parentDir = dirname(file) // hooks/stop-personal-repo-issues
+  const grandparent = dirname(parentDir) // hooks
+  const bundleName = basename(parentDir) // stop-personal-repo-issues
+  if (!bundleName || bundleName === "." || bundleName === "/") return []
+
+  const found: string[] = []
+  try {
+    for (const entry of readdirSync(grandparent)) {
+      if (
+        entry.startsWith(bundleName) &&
+        (entry.endsWith(".test.ts") || entry.endsWith(".test.tsx") || entry.endsWith(".spec.ts"))
+      ) {
+        found.push(`${grandparent}/${entry}`)
+      }
+    }
+  } catch {
+    // Non-fatal: missing grandparent directory just means no parent bundle tests.
+  }
+  return found
+}
+
 for (const file of changedFiles) {
   if (file.includes("node_modules/")) continue
 
   if (file.endsWith(".test.ts") || file.endsWith(".test.tsx") || file.endsWith(".spec.ts")) {
     testFiles.add(file)
-  } else if (file.endsWith(".ts") || file.endsWith(".tsx")) {
-    // Check for sibling test file
-    const baseName = file.replace(/\.tsx?$/, "")
-    for (const ext of [".test.ts", ".test.tsx", ".spec.ts"]) {
-      const testCandidate = baseName + ext
-      if (existsSync(testCandidate)) {
-        testFiles.add(testCandidate)
-        break
-      }
+    continue
+  }
+  if (!file.endsWith(".ts") && !file.endsWith(".tsx")) continue
+
+  // 1) Sibling test file: src/foo.ts → src/foo.test.ts
+  const baseName = file.replace(/\.tsx?$/, "")
+  let matched = false
+  for (const ext of [".test.ts", ".test.tsx", ".spec.ts"]) {
+    const testCandidate = baseName + ext
+    if (existsSync(testCandidate)) {
+      testFiles.add(testCandidate)
+      matched = true
+      break
     }
+  }
+  if (matched) continue
+
+  // 2) Parent-bundle test files: hooks/foo/bar.ts → hooks/foo.test.ts,
+  //    hooks/foo-e2e.test.ts, etc. The grandparent directory listing finds
+  //    every test file whose basename starts with the parent dir name.
+  for (const t of findParentBundleTests(file)) {
+    testFiles.add(t)
   }
 }
 
