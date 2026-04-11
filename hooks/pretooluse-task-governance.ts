@@ -40,6 +40,7 @@ import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
   buildLastTaskStandingDenial,
   detectCurrentAgent,
+  detectCurrentAgentFromEnv,
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
@@ -1139,7 +1140,8 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const toolName = String(input?.tool_name ?? "<unknown>")
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     const cwd: string = (input?.cwd as string) ?? process.cwd()
-    const agent = detectCurrentAgent()?.id ?? "unknown"
+    const payloadEnv = (input?._env as Record<string, string> | undefined) ?? undefined
+    const agent = detectCurrentAgentFromEnv(payloadEnv)?.id ?? detectCurrentAgent()?.id ?? "unknown"
     const enforcement = await isTaskEnforcementProject(cwd).catch(() => false)
 
     let pending = 0

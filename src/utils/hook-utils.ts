@@ -81,6 +81,7 @@ if (!Bun.which("bun")) {
 export { skillExists }
 export {
   detectCurrentAgent,
+  detectCurrentAgentFromEnv,
   isCurrentAgent,
   isRunningInAgent,
   toolNameForCurrentAgent,

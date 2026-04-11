@@ -66,6 +66,12 @@ function buildAllowlistedEnv(): Record<string, string> {
     /^ANTHROPIC_/,
     /^CURSOR_/,
     /^GEMINI_/,
+    // Agent-identifying env vars — required so in-process hooks running inside
+    // the daemon can resolve `detectCurrentAgent()` via payload._env instead of
+    // the daemon's own process.env (which is launchd's environment).
+    /^CLAUDECODE$/,
+    /^CLAUDE_PROJECT_DIR$/,
+    /^JUNIE_/,
   ]
 
   for (const [key, value] of Object.entries(process.env)) {

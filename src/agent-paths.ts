@@ -84,8 +84,10 @@ function getParentProcessCommand(): string {
  * This is the safest signal inside hook subprocesses because it avoids
  * parent-process heuristics.
  */
-export function detectCurrentAgentFromEnv(): AgentDef | null {
-  return AGENTS.find((a) => a.envVars?.some((v) => process.env[v])) ?? null
+export function detectCurrentAgentFromEnv(
+  env: Record<string, string | undefined> = process.env
+): AgentDef | null {
+  return AGENTS.find((a) => a.envVars?.some((v) => env[v])) ?? null
 }
 
 /**
