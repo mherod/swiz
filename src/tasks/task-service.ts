@@ -403,20 +403,46 @@ export function isGitWorkingTreeClean(cwd?: string): boolean {
 }
 
 /**
- * Attempt to promote a pending task from the ready-issue pool when the session
- * would otherwise be left with zero incomplete tasks. Mirrors the fetch path
- * used by `stop-personal-repo-issues`: reads the cached issue store, filters
- * out refinement-required issues, and picks the top-ranked ready issue.
+ * Promote a pending task when the session would otherwise be left with zero
+ * incomplete tasks. Fetch order:
  *
- * Returns `true` when a successor task was created, `false` when no candidate
- * could be found (no GitHub remote, empty cache, or every issue needs refinement).
+ *   1. Top-ranked ready GitHub issue from the `IssueStore` cache (same path
+ *      `stop-personal-repo-issues` uses).
+ *   2. Top-ranked refinement-required issue, retagged as a refinement task.
+ *   3. Deterministic fallback task (`Review backlog health`) when no issue
+ *      candidate is available.
+ *
+ * Returns `true` when any successor task was created. The only false path is
+ * when `createTaskInProcess` itself throws.
  */
 export async function promoteNextTaskFromIssues(sessionId: string, cwd?: string): Promise<boolean> {
+  const workingDir = cwd ?? process.cwd()
   try {
-    const workingDir = cwd ?? process.cwd()
+    const pick = await pickPromotionCandidate(workingDir)
+    const { subject, description } = pick ?? buildFallbackPromotion()
+    await createTaskInProcess({
+      sessionId,
+      subject,
+      description,
+      cwd: workingDir,
+      skipSubjectValidation: true,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+interface PromotionCandidate {
+  subject: string
+  description: string
+}
+
+async function pickPromotionCandidate(workingDir: string): Promise<PromotionCandidate | null> {
+  try {
     const { getRepoSlug } = await import("../git-helpers.ts")
     const slug = await getRepoSlug(workingDir)
-    if (!slug) return false
+    if (!slug) return null
 
     const { getIssueStore } = await import("../issue-store.ts")
     const store = getIssueStore()
@@ -426,32 +452,35 @@ export async function promoteNextTaskFromIssues(sessionId: string, cwd?: string)
       labels?: Array<{ name: string }>
       state?: string
     }>(slug, Number.MAX_SAFE_INTEGER)
-    if (issues.length === 0) return false
+    if (issues.length === 0) return null
 
     const { needsRefinement } = await import("../issue-refinement.ts")
-    const ready = issues.filter(
-      (i) =>
-        (i.state ?? "open").toLowerCase() === "open" &&
-        !needsRefinement({ ...i, labels: i.labels ?? [] })
-    )
-    if (ready.length === 0) return false
+    const open = issues.filter((i) => (i.state ?? "open").toLowerCase() === "open")
+    const ready = open.filter((i) => !needsRefinement({ ...i, labels: i.labels ?? [] }))
+    const refinement = open.filter((i) => needsRefinement({ ...i, labels: i.labels ?? [] }))
 
-    // Prefer lowest number (oldest) — a stable deterministic pick without score deps.
-    ready.sort((a, b) => a.number - b.number)
-    const pick = ready[0]
-    if (!pick) return false
-
-    const subject = `Work on #${pick.number}: ${pick.title}`.slice(0, 120)
-    await createTaskInProcess({
-      sessionId,
-      subject,
-      description: `Auto-promoted from ready issue #${pick.number} to preserve the last-task-standing invariant.`,
-      cwd: workingDir,
-      skipSubjectValidation: true,
-    })
-    return true
+    const pick = ready[0] ?? refinement[0]
+    if (!pick) return null
+    const isRefinement = ready.length === 0
+    const verb = isRefinement ? "Refine" : "Work on"
+    return {
+      subject: `${verb} #${pick.number}: ${pick.title}`.slice(0, 120),
+      description: `Auto-promoted from ${
+        isRefinement ? "refinement-required" : "ready"
+      } issue #${pick.number} to preserve the last-task-standing invariant.`,
+    }
   } catch {
-    return false
+    return null
+  }
+}
+
+function buildFallbackPromotion(): PromotionCandidate {
+  return {
+    subject: "Review backlog health and generate next work",
+    description:
+      "Auto-promoted fallback — no ready or refinement-required issues available. " +
+      "Triage the repository state: run /triage-issues, scan recent commits for TODOs, " +
+      "or close this task after confirming the session has genuinely no pending work.",
   }
 }
 
