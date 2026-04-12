@@ -403,22 +403,74 @@ export function isGitWorkingTreeClean(cwd?: string): boolean {
 }
 
 /**
+ * Attempt to promote a pending task from the ready-issue pool when the session
+ * would otherwise be left with zero incomplete tasks. Mirrors the fetch path
+ * used by `stop-personal-repo-issues`: reads the cached issue store, filters
+ * out refinement-required issues, and picks the top-ranked ready issue.
+ *
+ * Returns `true` when a successor task was created, `false` when no candidate
+ * could be found (no GitHub remote, empty cache, or every issue needs refinement).
+ */
+export async function promoteNextTaskFromIssues(sessionId: string, cwd?: string): Promise<boolean> {
+  try {
+    const workingDir = cwd ?? process.cwd()
+    const { getRepoSlug } = await import("../git-helpers.ts")
+    const slug = await getRepoSlug(workingDir)
+    if (!slug) return false
+
+    const { getIssueStore } = await import("../issue-store.ts")
+    const store = getIssueStore()
+    const issues = store.listIssues<{
+      number: number
+      title: string
+      labels?: Array<{ name: string }>
+      state?: string
+    }>(slug, Number.MAX_SAFE_INTEGER)
+    if (issues.length === 0) return false
+
+    const { needsRefinement } = await import("../issue-refinement.ts")
+    const ready = issues.filter(
+      (i) =>
+        (i.state ?? "open").toLowerCase() === "open" &&
+        !needsRefinement({ ...i, labels: i.labels ?? [] })
+    )
+    if (ready.length === 0) return false
+
+    // Prefer lowest number (oldest) — a stable deterministic pick without score deps.
+    ready.sort((a, b) => a.number - b.number)
+    const pick = ready[0]
+    if (!pick) return false
+
+    const subject = `Work on #${pick.number}: ${pick.title}`.slice(0, 120)
+    await createTaskInProcess({
+      sessionId,
+      subject,
+      description: `Auto-promoted from ready issue #${pick.number} to preserve the last-task-standing invariant.`,
+      cwd: workingDir,
+      skipSubjectValidation: true,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Validate that completing a task won't leave zero incomplete tasks in the session.
  * Returns an error string if blocked, null if allowed.
  *
- * When `repoClean` is true the guard is relaxed — the session is winding down
- * with nothing left to commit, so forcing another task is unnecessary churn.
+ * This invariant is unconditional: the empty task list is a reachable state only
+ * via bypasses. Callers that hit the error should invoke {@link promoteNextTaskFromIssues}
+ * before retrying the completion.
  */
 export function validateLastTaskStanding(
   taskId: string,
-  allTasks: Array<{ id: string; status: string }>,
-  options?: { repoClean?: boolean }
+  allTasks: Array<{ id: string; status: string }>
 ): string | null {
   const otherIncomplete = allTasks.filter(
     (t) => t.id !== taskId && isIncompleteTaskStatus(t.status)
   )
   if (otherIncomplete.length === 0) {
-    if (options?.repoClean) return null
     return `Completing task #${taskId} would leave zero incomplete tasks. Create a new task before completing this one.`
   }
   return null
@@ -483,14 +535,17 @@ export async function updateStatus(
 
   // Enforce last-task-standing invariant: completing a task must never leave
   // zero incomplete tasks. This is the canonical enforcement point — all code
-  // paths that complete tasks flow through updateStatus.
-  // Relaxed when the git working tree is clean — no uncommitted work means
-  // the session can wind down without forcing another task.
+  // paths that complete tasks flow through updateStatus. When the completion
+  // would empty the list, attempt to promote a successor task from the ready
+  // GitHub issues pool (same source as stop-personal-repo-issues); only if no
+  // successor can be created does the guard block.
   if (newStatus === "completed" && !options.skipLastTaskGuard) {
     const allTasks = await readTasks(effectiveSessionId)
-    const repoClean = isGitWorkingTreeClean(filterCwd)
-    const lastTaskError = validateLastTaskStanding(taskId, allTasks, { repoClean })
-    if (lastTaskError) throw new Error(lastTaskError)
+    const lastTaskError = validateLastTaskStanding(taskId, allTasks)
+    if (lastTaskError) {
+      const promoted = await promoteNextTaskFromIssues(effectiveSessionId, filterCwd)
+      if (!promoted) throw new Error(lastTaskError)
+    }
   }
 
   const oldStatus = task.status

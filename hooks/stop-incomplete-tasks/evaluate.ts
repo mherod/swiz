@@ -7,6 +7,7 @@
 import { isCurrentAgent } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
+import { promoteNextTaskFromIssues } from "../../src/tasks/task-service.ts"
 import {
   deduplicateStaleTasks,
   getIncompleteDetails,
@@ -38,7 +39,16 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
 
   // Re-filter after deduplication
   const remainingIncomplete = filterIncompleteStatus(ctx.allTasks)
-  if (remainingIncomplete.length === 0) return {}
+  if (remainingIncomplete.length === 0) {
+    // Empty task list invariant: attempt to promote a successor task from the
+    // ready GitHub issue pool before allowing the stop. Silent no-op when no
+    // candidate is available — the legitimate terminal state (empty backlog)
+    // still allows stop to proceed.
+    const cwdInput = (input as Record<string, unknown>).cwd
+    const cwd = typeof cwdInput === "string" ? cwdInput : undefined
+    await promoteNextTaskFromIssues(ctx.sessionId, cwd)
+    return {}
+  }
 
   // Build block output
   const taskDetails = getIncompleteDetails(ctx.allTasks)

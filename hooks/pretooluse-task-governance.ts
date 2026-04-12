@@ -33,7 +33,7 @@ import {
   readSessionTasks,
   readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
-import { isGitWorkingTreeClean, validateLastTaskStanding } from "../src/tasks/task-service.ts"
+import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
@@ -844,8 +844,7 @@ async function denyIfLastTaskStanding(
   cwd?: string
 ): Promise<SwizHookOutput | null> {
   const allTasks = await readSessionTasks(sessionId)
-  const repoClean = isGitWorkingTreeClean(cwd)
-  const error = validateLastTaskStanding(taskId, allTasks, { repoClean })
+  const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
     return preToolUseDeny(await buildLastTaskStandingDenial(taskId, cwd))
   }
