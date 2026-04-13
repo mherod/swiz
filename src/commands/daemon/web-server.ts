@@ -2,7 +2,7 @@ import { dirname, extname, join } from "node:path"
 import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
 import { ZodError } from "zod"
-import { debugLog } from "../../debug.ts"
+import { debugLog, stderrLog } from "../../debug.ts"
 import {
   DispatchPayloadValidationError,
   parseValidatedAgentDispatchWireJson,
@@ -1304,13 +1304,14 @@ async function resolveTaskCountsFromCache(
     const { createDefaultTaskStore } = await import("../../task-roots.ts")
     const { tasksDir } = createDefaultTaskStore()
     const state = await cache.getState(sessionId, join(tasksDir, sessionId))
-    console.error(
+    stderrLog(
+      "daemon task cache diagnostics",
       `[resolveTaskCountsFromCache] session=${sessionId.slice(0, 8)} tasks=${state.tasks.length} pending=${state.pendingCount} inProgress=${state.inProgressCount} ids=${state.tasks.map((t) => t.id).join(",")}`
     )
     if (state.tasks.length === 0) return null
     return buildTaskCountsFromTasks(state.tasks)
   } catch (err) {
-    console.error(`[resolveTaskCountsFromCache] error: ${err}`)
+    stderrLog("daemon task cache error", `[resolveTaskCountsFromCache] error: ${err}`)
     return null
   }
 }
