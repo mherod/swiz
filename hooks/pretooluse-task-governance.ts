@@ -29,6 +29,7 @@ import {
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
 import {
+  applyCacheTaskUpdate,
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
   formatTaskList,
@@ -37,7 +38,7 @@ import {
   readSessionTasks,
   readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
-import { validateLastTaskStanding } from "../src/tasks/task-service.ts"
+// validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
 import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
@@ -45,7 +46,6 @@ import {
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
-  buildLastTaskStandingDenial,
   detectCurrentAgent,
   detectCurrentAgentFromEnv,
   formatActionPlan,
@@ -842,26 +842,6 @@ function isBlockedSwizTasksCliCommand(command: string): boolean {
   return !SWIZ_TASKS_ADOPT_RE.test(stripped)
 }
 
-async function denyIfLastTaskStanding(
-  taskId: string,
-  sessionId: string,
-  cwd?: string
-): Promise<SwizHookOutput | null> {
-  // Overlay in-memory event state onto disk tasks so parallel completions
-  // in the same response see each other's in-flight status changes (TOCTOU fix).
-  const diskTasks = await readSessionTasks(sessionId)
-  const allTasks = overlayEventState(diskTasks, sessionId)
-  const error = validateLastTaskStanding(taskId, allTasks)
-  if (error) {
-    return preToolUseDeny(await buildLastTaskStandingDenial(taskId, cwd))
-  }
-  // Optimistically record the allowed completion in event state so that
-  // a parallel PreToolUse for another task in the same response will see
-  // this task as completed and correctly deny if it would be the last.
-  applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
-  return null
-}
-
 // ─── Sliding-window completion rate limiter ─────────────────────────────────
 
 const WINDOW_MS = 5_000
@@ -945,8 +925,10 @@ async function checkNativeTaskDeletionGovernance(
         )
       }
     }
-    // Optimistically record allowed deletion in event state (TOCTOU fix).
+    // Optimistically record allowed deletion in event state + cache (TOCTOU fix).
     applyTaskUpdateEvent(sessionId, taskId, { status: "deleted" })
+    if (taskBeingDeleted)
+      applyCacheTaskUpdate(sessionId, { ...taskBeingDeleted, status: "deleted" })
   } catch {
     return null
   }
@@ -968,7 +950,57 @@ async function handleTaskCompletion(
 ): Promise<SwizHookOutput | null> {
   const rateLimited = checkCompletionRateLimit(sessionId)
   if (rateLimited) return rateLimited
-  return await denyIfLastTaskStanding(taskId, sessionId, cwd)
+
+  // Check governance thresholds: completing this task must not drop
+  // incomplete or pending counts below the configured minimums.
+  const diskTasks = await readSessionTasks(sessionId)
+  const allTasks = overlayEventState(diskTasks, sessionId)
+  const taskBeingCompleted = allTasks.find((t) => t.id === taskId)
+
+  if (taskBeingCompleted && isIncompleteTaskStatus(taskBeingCompleted.status)) {
+    let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
+    try {
+      const [settings, projectSettings] = await Promise.all([
+        readSwizSettings(),
+        cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
+      ])
+      const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
+      thresholds = resolveGovernanceThresholds(effective.auditStrictness)
+    } catch {
+      // Fall through with strict defaults
+    }
+
+    const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
+    const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
+    const incompleteAfter = incompleteTasks.length - 1
+    const pendingAfter =
+      taskBeingCompleted.status === "pending" ? pendingTasks.length - 1 : pendingTasks.length
+
+    if (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending) {
+      const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteAfter)
+      const missingPending = Math.max(0, thresholds.minPending - pendingAfter)
+      return preToolUseDeny(
+        `STOP. Cannot complete task #${taskId} — it would violate governance thresholds.\n\n` +
+          `After completion:\n` +
+          `  • Incomplete tasks: ${incompleteAfter} (min: ${thresholds.minIncomplete})\n` +
+          `  • Pending tasks: ${pendingAfter} (min: ${thresholds.minPending})\n\n` +
+          formatActionPlan(
+            [
+              `Use TaskCreate to add ${missingIncomplete + missingPending} task(s) ` +
+                `(including ${missingPending} pending) before completing this task.`,
+              `Retry the completion after the required tasks have been created.`,
+            ],
+            { translateToolNames: true }
+          )
+      )
+    }
+
+    // Optimistically record in event state + cache for parallel TOCTOU safety.
+    applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
+    applyCacheTaskUpdate(sessionId, { ...taskBeingCompleted, status: "completed" })
+  }
+
+  return null
 }
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
