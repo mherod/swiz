@@ -23,7 +23,11 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { needsReconciliation, overlayEventState } from "../src/tasks/task-event-state.ts"
+import {
+  applyTaskUpdateEvent,
+  needsReconciliation,
+  overlayEventState,
+} from "../src/tasks/task-event-state.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
@@ -843,11 +847,18 @@ async function denyIfLastTaskStanding(
   sessionId: string,
   cwd?: string
 ): Promise<SwizHookOutput | null> {
-  const allTasks = await readSessionTasks(sessionId)
+  // Overlay in-memory event state onto disk tasks so parallel completions
+  // in the same response see each other's in-flight status changes (TOCTOU fix).
+  const diskTasks = await readSessionTasks(sessionId)
+  const allTasks = overlayEventState(diskTasks, sessionId)
   const error = validateLastTaskStanding(taskId, allTasks)
   if (error) {
     return preToolUseDeny(await buildLastTaskStandingDenial(taskId, cwd))
   }
+  // Optimistically record the allowed completion in event state so that
+  // a parallel PreToolUse for another task in the same response will see
+  // this task as completed and correctly deny if it would be the last.
+  applyTaskUpdateEvent(sessionId, taskId, { status: "completed" })
   return null
 }
 
@@ -899,7 +910,9 @@ async function checkNativeTaskDeletionGovernance(
       readSwizSettings(),
       cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
     ])
-    const allTasks = await readSessionTasks(sessionId)
+    // Overlay in-memory event state for TOCTOU safety on parallel deletions.
+    const diskTasks = await readSessionTasks(sessionId)
+    const allTasks = overlayEventState(diskTasks, sessionId)
     const effectiveSettings = getEffectiveSwizSettings(
       settings,
       sessionId,
@@ -932,6 +945,8 @@ async function checkNativeTaskDeletionGovernance(
         )
       }
     }
+    // Optimistically record allowed deletion in event state (TOCTOU fix).
+    applyTaskUpdateEvent(sessionId, taskId, { status: "deleted" })
   } catch {
     return null
   }
