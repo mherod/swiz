@@ -55,21 +55,25 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     const command: string = ((input.tool_input as Record<string, any>)?.command as string) ?? ""
 
-    // Strip quoted strings to avoid false negatives from complex arguments,
-    // e.g., `gh api "repos/$REPO/pulls/PR/reviews" --jq '[...]'` → `gh api  --jq `
-    // This helps catch commands with quoted arguments or newlines that split operations.
+    // Strip quoted strings for structural pattern matching (gh pr create,
+    // gh pr review --dismiss). Label-value patterns (triaged, backlog) must
+    // match against the raw command because the label name is typically quoted
+    // and would be removed by stripping.
     const cleanedCommand = stripQuotedShellStrings(command)
 
-    // Determine which skill is relevant for this command
+    // Determine which skill is relevant for this command.
+    // - Git commands: raw command (no complex quoted args)
+    // - Label operations: raw command (label value is inside quotes)
+    // - Structural gh commands: cleanedCommand (quotes hide flags/structure)
     let requiredSkill: string | null = null
     if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
     else if (GIT_PUSH_RE.test(command)) {
       // Branch deletion (--delete or :branch) is not a code push — skip gate
       if (GIT_PUSH_DELETE_RE.test(command)) return {}
       requiredSkill = "push"
-    } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(cleanedCommand)) {
+    } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
       requiredSkill = "triage-issues"
-    } else if (GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(cleanedCommand)) {
+    } else if (GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(command)) {
       requiredSkill = "refine-issue"
     } else if (GH_PR_CREATE_RE.test(cleanedCommand)) {
       requiredSkill = "pr-open"
