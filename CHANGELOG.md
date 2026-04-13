@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-04-13
+
+### Improvements
+
+- **Complex GitHub command pattern matching** — Enhanced regex patterns in
+  `pretooluse-skill-invocation-gate` hook to handle multi-line shell commands,
+  newlines, and complex quoted arguments. Patterns now use non-greedy matching
+  with `[\s\S]*?` to catch commands spread across statement boundaries, with
+  `stripQuotedShellStrings()` preprocessing to expose actual operations hidden
+  in quoted strings. Improves detection for `gh pr review --dismiss`,
+  `gh issue edit --add-label triaged`, and `gh issue edit --remove-label backlog`
+  when invoked with complex arguments or shell chaining. Added 10 new test cases
+  covering multi-line commands, newlines, and complex label operations.
+
 ## 2026-04-11
 
 ### New Features
