@@ -1248,6 +1248,8 @@ const pretooluseTaskGovernance: SwizToolHook = {
         systemMessage: trace,
         hookSpecificOutput: hookSpecificOutputSchema.parse({
           hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          permissionDecisionReason: trace,
           additionalContext: trace,
         }),
       }
