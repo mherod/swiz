@@ -229,6 +229,66 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
   throw new AutoContinueExit(blockStopObj(reason))
 }
 
+// ─── LLM fallback ───────────────────────────────────────────────────────────
+
+const LLM_FALLBACK_MODEL = "google/gemini-3-flash-preview"
+const LLM_FALLBACK_TRANSCRIPT_TAIL = 40 // lines of transcript context
+
+const LLM_FALLBACK_PROMPT = `You're the developer's session guard. They tried to stop their coding session but no obvious next step was found by the automated checks.
+
+Read the tail of their session transcript below and suggest ONE concrete, actionable next step. Be specific — name files, commands, or tasks. Talk like a sharp colleague: direct, no hedging, no "consider" or "you may want to." Just say what to do.
+
+Even if the session looks complete, suggest something useful — a follow-up improvement, a test to add, documentation to update, or a related issue to look at. There is always something.
+
+Transcript (last ${LLM_FALLBACK_TRANSCRIPT_TAIL} lines):
+`
+
+async function generateLlmFallbackSuggestion(_sessionId: string): Promise<string | null> {
+  try {
+    // Resolve transcript path from session
+    const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+    const { readTranscriptLines } = await import("../src/transcript-extract.ts")
+    const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+    const { generateText } = await import("ai")
+
+    if (!process.env.OPENROUTER_API_KEY) return null
+
+    // Find transcript — try enriched payload path first, fall back to session-based lookup
+    const cwd = process.cwd()
+    const projectKey = projectKeyFromCwd(cwd)
+    const homedir = getHomeDirOrNull()
+    if (!homedir || !projectKey) return null
+
+    const transcriptGlob = `${homedir}/.claude/projects/${projectKey}/.*.jsonl`
+    const { readdir } = await import("node:fs/promises")
+    const { join, dirname } = await import("node:path")
+
+    const projectDir = dirname(transcriptGlob)
+    const files = await readdir(projectDir).catch(() => [] as string[])
+    const jsonlFiles = files.filter((f) => f.endsWith(".jsonl") && f.startsWith("."))
+    if (jsonlFiles.length === 0) return null
+
+    // Pick the most recent transcript file
+    const sorted = jsonlFiles.sort()
+    const transcriptPath = join(projectDir, sorted[sorted.length - 1]!)
+
+    const lines = await readTranscriptLines(transcriptPath)
+    if (lines.length === 0) return null
+
+    const tail = lines.slice(-LLM_FALLBACK_TRANSCRIPT_TAIL).join("\n")
+    const prompt = LLM_FALLBACK_PROMPT + tail
+
+    const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+    const model = provider.languageModel(LLM_FALLBACK_MODEL)
+    const { text } = await generateText({ model, prompt })
+    const trimmed = text.trim()
+
+    return trimmed || null
+  } catch {
+    return null
+  }
+}
+
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
@@ -361,10 +421,16 @@ async function validateResponseAndChecks(
   sessionId: string
 ): Promise<void> {
   if (!response.next && !refinementStatus) {
-    terminate(
-      "block",
-      "Auto-continue could not identify a specific next step. Review your recent changes and ensure all tasks are complete before stopping."
-    )
+    const llmSuggestion = await generateLlmFallbackSuggestion(sessionId)
+    if (llmSuggestion) {
+      response.next = llmSuggestion
+    } else {
+      terminate(
+        "skip",
+        "NO_SUGGESTION",
+        "No deterministic or LLM suggestion available — allowing stop."
+      )
+    }
   }
 
   // Dedup: allow stop if the same suggestion repeats.
