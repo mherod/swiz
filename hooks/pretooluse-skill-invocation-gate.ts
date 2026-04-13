@@ -9,6 +9,7 @@
 //   git push                                  →  requires /push   skill to have been used this session
 //   gh issue edit … --add-label triaged       →  requires /triage-issues skill
 //   gh issue edit … --remove-label backlog    →  requires /refine-issue skill
+//   gh issue edit … --add-label/--remove-label →  requires /refine-issue skill (any label change)
 //   gh pr create                              →  requires /pr-open skill
 //   gh pr review … --dismiss                  →  requires /pr-comments-address skill
 //
@@ -32,6 +33,7 @@ import {
 } from "../src/transcript-summary.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
+  GH_ISSUE_LABEL_CHANGE_RE,
   GH_ISSUE_REMOVE_BACKLOG_LABEL_RE,
   GH_PR_CREATE_RE,
   GH_PR_REVIEW_DISMISS_RE,
@@ -79,6 +81,8 @@ const pretoolusSkillInvocationGate: SwizHook = {
     } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
       requiredSkill = "triage-issues"
     } else if (GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(command)) {
+      requiredSkill = "refine-issue"
+    } else if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
       requiredSkill = "refine-issue"
     } else if (GH_PR_CREATE_RE.test(cleanedCommand)) {
       requiredSkill = "pr-open"
@@ -136,15 +140,15 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     if (requiredSkill === "refine-issue") {
       return preToolUseDeny(
-        `BLOCKED: removing the "backlog" label requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+        `BLOCKED: changing issue labels requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
           `${reason}\n\n` +
           formatActionPlan(
-            [`Invoke the ${skillReferenceForAgent} skill before removing the backlog label.`],
+            [`Invoke the ${skillReferenceForAgent} skill before modifying issue labels.`],
             {
               header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
             }
           ) +
-          `\nWhy this matters: the ${skillReferenceForAgent} skill validates priority, scope, and readiness before transitioning out of backlog. Removing the label directly skips these safeguards.`
+          `\nWhy this matters: the ${skillReferenceForAgent} skill validates label changes against issue state. Modifying labels directly skips these safeguards.`
       )
     }
 

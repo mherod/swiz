@@ -590,6 +590,10 @@ export const GH_ISSUE_ADD_TRIAGED_LABEL_RE =
 export const GH_ISSUE_REMOVE_BACKLOG_LABEL_RE =
   /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--remove-label\b[\s\S]*?\bbacklog\b/
 
+/** Matches `gh issue edit` with ANY `--add-label` or `--remove-label` flag. */
+export const GH_ISSUE_LABEL_CHANGE_RE =
+  /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--(?:add|remove)-label\b/
+
 /** Matches CI verification commands. */
 export const CI_WAIT_RE = shellStatementCommandRe("(?:swiz|bun\\b[^|;]*)\\s+ci-wait\\b")
 
