@@ -66,7 +66,7 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).toContain("Unfinished work")
   })
 
-  test("allows stop when all tasks are completed", async () => {
+  test("blocks stop when all tasks are completed (zero-task governance)", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-completed"
     await writeTask(homeDir, sessionId, {
@@ -76,7 +76,8 @@ describe("stop-incomplete-tasks", () => {
     })
 
     const result = await runHook({ homeDir, sessionId })
-    expect(result.decision).toBeUndefined()
+    // Zero incomplete tasks triggers promotion + block — governance invariant
+    expect(result.decision).toBe("block")
   })
 
   test("allows stop when running in Gemini CLI (GEMINI_CLI=1) even with incomplete tasks", async () => {
@@ -127,10 +128,9 @@ describe("stop-incomplete-tasks", () => {
       status: "completed",
     })
 
-    // Phase 5: Hook allows stop after completion
+    // Phase 5: Hook blocks on zero-task governance — promotion creates successor
     const allowResult = await runHook({ homeDir, sessionId })
-    expect(allowResult.decision).toBeUndefined()
-    expect(allowResult.reason).toBeUndefined()
+    expect(allowResult.decision).toBe("block")
   })
 
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {

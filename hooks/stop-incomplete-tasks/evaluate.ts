@@ -40,13 +40,18 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   // Re-filter after deduplication
   const remainingIncomplete = filterIncompleteStatus(ctx.allTasks)
   if (remainingIncomplete.length === 0) {
-    // Empty task list invariant: attempt to promote a successor task from the
-    // ready GitHub issue pool before allowing the stop. Silent no-op when no
-    // candidate is available — the legitimate terminal state (empty backlog)
-    // still allows stop to proceed.
+    // Zero incomplete tasks is a governance violation — the task system enforces
+    // ≥2 incomplete at all times. Promote a successor and block the stop so the
+    // agent acts on the promoted task instead of exiting.
     const cwdInput = (input as Record<string, unknown>).cwd
     const cwd = typeof cwdInput === "string" ? cwdInput : undefined
-    await promoteNextTaskFromIssues(ctx.sessionId, cwd)
+    const promoted = await promoteNextTaskFromIssues(ctx.sessionId, cwd)
+    if (promoted) {
+      return buildIncompleteBlockOutput([
+        "Auto-promoted task created — zero incomplete tasks is a governance violation. Run TaskList to see the promoted task.",
+      ])
+    }
+    // Promotion failed (no issue candidates, no fallback) — allow stop as last resort
     return {}
   }
 
