@@ -1,14 +1,22 @@
 ---
-description: Configure swiz settings with presets or individual changes. Examples: "backlog worker", "creative mode", "quiet mode", "lockdown", "enable speak"
-allowed-tools: Bash
-argument-hint: "<preset | setting-change> [--global | --project | --session [id]]"
+name: swiz-configure
+description: "Configure swiz settings with presets or individual changes. Supports workflow presets (backlog, creative, quiet), collaboration modes (solo, team), and safety presets (lockdown, relaxed). Use when changing agent behavior, switching workflow modes, or adjusting safety gates."
+category: configuration
+metadata:
+  allowed-tools: Bash
+  argument-hint: "<preset | setting-change> [--global | --project | --session [id]]"
 ---
 
-Configure swiz settings using presets or individual changes.
+Configure swiz settings using presets or individual changes. Parses `$ARGUMENTS` to match a preset keyword or passes raw settings to `swiz settings`.
+
+## Usage
+
+- `/swiz-configure backlog` — autonomous backlog worker mode
+- `/swiz-configure quiet` — disable auto-continue and critiques
+- `/swiz-configure solo --global` — set solo collaboration globally
+- `/swiz-configure enable speak` — pass individual setting directly
 
 ## Presets
-
-Parse `$ARGUMENTS` for a preset keyword and run the corresponding commands:
 
 ### Workflow presets
 
@@ -38,18 +46,26 @@ Parse `$ARGUMENTS` for a preset keyword and run the corresponding commands:
 | `lockdown` | `enable sandboxed-edits` + `enable push-gate` + `enable git-status-gate` + `enable github-ci-gate` + `enable changes-requested-gate` + `enable non-default-branch-gate` | All safety gates enabled — maximum guardrails |
 | `relaxed` | `disable push-gate` + `disable non-default-branch-gate` + `disable changes-requested-gate` | Fewer gates — trust the developer |
 
-## Individual settings
+## Step 1: Parse Arguments
 
-If `$ARGUMENTS` does not match a preset, pass it directly to `swiz settings`:
-- `swiz settings $ARGUMENTS`
+Check if `$ARGUMENTS` matches a preset keyword from the tables above.
 
-## Scope flags
+## Step 2: Execute Commands
+
+**If preset matched:** Run all commands for that preset sequentially, each prefixed with `swiz settings`.
+
+**If no preset matched:** Pass `$ARGUMENTS` directly to `swiz settings $ARGUMENTS`.
+
+## Step 3: Apply Scope
 
 If `$ARGUMENTS` contains `--global`, `--project`, or `--session`, append that flag to every command.
 
-## Rules
+## Step 4: Confirm State
 
-1. Prefix each command with `swiz settings` (e.g., `swiz settings enable auto-continue`).
-2. Run the matching commands sequentially.
-3. After all commands, run `swiz settings` to show the resulting state.
-4. Summarize what changed in one sentence.
+Run `swiz settings` to show the resulting state and summarize what changed in one sentence.
+
+## Failure Handling
+
+**If preset keyword is ambiguous:** List matching presets and ask the user to clarify.
+
+**If `swiz settings` command fails:** Report the error and suggest checking `swiz settings --help` for valid options.
