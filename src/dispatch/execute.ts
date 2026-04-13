@@ -37,7 +37,7 @@ import {
   parseDispatchPayloadString,
   parseValidatedAgentDispatchWireJson,
 } from "./dispatch-zod-surfaces.ts"
-import { type HookExecution, writeResponse } from "./engine.ts"
+import { applyDispatchEnv, type HookExecution, writeResponse } from "./engine.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -652,6 +652,12 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   })
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
 
+  // Apply the caller's environment to process.env for in-process hooks.
+  // The daemon's own launchd environment lacks agent-identifying vars
+  // (CLAUDECODE, etc.), so without this, detectCurrentAgent() and
+  // createDefaultTaskStore() resolve incorrectly in the daemon process.
+  const restoreEnv = applyDispatchEnv(enrichedPayloadStr)
+
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
 
@@ -704,6 +710,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     )
     return { response }
   } finally {
+    restoreEnv()
     req.onDispatchLifecycle?.(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )

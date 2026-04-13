@@ -344,6 +344,34 @@ export interface PreParsedSpawnContext {
   spawnEnv: Record<string, string | undefined> | undefined
 }
 
+/**
+ * Apply the dispatch payload's `_env` to `process.env` so in-process (daemon)
+ * hooks see the same environment as subprocess hooks. The caller's environment
+ * is already allowlisted by `buildAllowlistedEnv` in dispatch.ts.
+ * Returns a cleanup function that restores the originals.
+ */
+export function applyDispatchEnv(payloadStr: string): () => void {
+  const saved: Array<[string, string | undefined]> = []
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, any>
+    const env = parsed._env
+    if (!env || typeof env !== "object" || Array.isArray(env)) return () => {}
+    for (const [key, value] of Object.entries(env as Record<string, string>)) {
+      if (typeof value !== "string") continue
+      saved.push([key, process.env[key]])
+      process.env[key] = value
+    }
+  } catch {
+    return () => {}
+  }
+  return () => {
+    for (const [key, original] of saved) {
+      if (original === undefined) delete process.env[key]
+      else process.env[key] = original
+    }
+  }
+}
+
 /** Parse spawn context from the enriched payload string ONCE per dispatch. */
 export function buildSpawnContext(payloadStr: string): PreParsedSpawnContext {
   let spawnCwd: string | undefined
