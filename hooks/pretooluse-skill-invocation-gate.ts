@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Block `git commit` and `git push` unless the corresponding
-// skill has been invoked in the current session — but only when that skill
-// is installed on this machine.
+// PreToolUse hook: Block `git commit`, `git push`, and `gh issue edit` label
+// operations unless the corresponding skill has been invoked in the current
+// session — but only when that skill is installed on this machine.
 //
 // Rules:
-//   git commit  →  requires /commit skill to have been used this session
-//   git push    →  requires /push   skill to have been used this session
+//   git commit                                →  requires /commit skill to have been used this session
+//   git push                                  →  requires /push   skill to have been used this session
+//   gh issue edit … --add-label triaged       →  requires /triage-issues skill
+//   gh issue edit … --remove-label backlog    →  requires /refine-issue skill
+//   gh pr create                              →  requires /pr-open skill
+//   gh pr review … --dismiss                  →  requires /pr-comments-address skill
 //
 // If the skill is not installed (checked via the same SKILL_DIRS lookup used
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
@@ -21,9 +25,18 @@ import {
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
 } from "../src/transcript-summary.ts"
-import { GIT_COMMIT_RE, GIT_PUSH_DELETE_RE, GIT_PUSH_RE } from "../src/utils/git-utils.ts"
+import {
+  GH_ISSUE_ADD_TRIAGED_LABEL_RE,
+  GH_ISSUE_REMOVE_BACKLOG_LABEL_RE,
+  GH_PR_CREATE_RE,
+  GH_PR_REVIEW_DISMISS_RE,
+  GIT_COMMIT_RE,
+  GIT_PUSH_DELETE_RE,
+  GIT_PUSH_RE,
+} from "../src/utils/git-utils.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
+import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
 function formatSessionSkillsForReason(skills: string[]): string {
@@ -42,6 +55,11 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     const command: string = ((input.tool_input as Record<string, any>)?.command as string) ?? ""
 
+    // Strip quoted strings to avoid false negatives from complex arguments,
+    // e.g., `gh api "repos/$REPO/pulls/PR/reviews" --jq '[...]'` → `gh api  --jq `
+    // This helps catch commands with quoted arguments or newlines that split operations.
+    const cleanedCommand = stripQuotedShellStrings(command)
+
     // Determine which skill is relevant for this command
     let requiredSkill: string | null = null
     if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
@@ -49,6 +67,14 @@ const pretoolusSkillInvocationGate: SwizHook = {
       // Branch deletion (--delete or :branch) is not a code push — skip gate
       if (GIT_PUSH_DELETE_RE.test(command)) return {}
       requiredSkill = "push"
+    } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(cleanedCommand)) {
+      requiredSkill = "triage-issues"
+    } else if (GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(cleanedCommand)) {
+      requiredSkill = "refine-issue"
+    } else if (GH_PR_CREATE_RE.test(cleanedCommand)) {
+      requiredSkill = "pr-open"
+    } else if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) {
+      requiredSkill = "pr-comments-address"
     }
 
     if (!requiredSkill) return {}
@@ -83,6 +109,63 @@ const pretoolusSkillInvocationGate: SwizHook = {
     }
 
     // ── Block with actionable instructions ────────────────────────────────────────
+
+    if (requiredSkill === "triage-issues") {
+      return preToolUseDeny(
+        `BLOCKED: adding the "triaged" label requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+          `${reason}\n\n` +
+          formatActionPlan(
+            [`Invoke the ${skillReferenceForAgent} skill before adding the triaged label.`],
+            {
+              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+            }
+          ) +
+          `\nWhy this matters: the ${skillReferenceForAgent} skill runs the full triage workflow ` +
+          `(repro, severity, owner assignment). Adding the label directly skips these safeguards.`
+      )
+    }
+
+    if (requiredSkill === "refine-issue") {
+      return preToolUseDeny(
+        `BLOCKED: removing the "backlog" label requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+          `${reason}\n\n` +
+          formatActionPlan(
+            [`Invoke the ${skillReferenceForAgent} skill before removing the backlog label.`],
+            {
+              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+            }
+          ) +
+          `\nWhy this matters: the ${skillReferenceForAgent} skill validates priority, scope, and readiness before transitioning out of backlog. Removing the label directly skips these safeguards.`
+      )
+    }
+
+    if (requiredSkill === "pr-open") {
+      return preToolUseDeny(
+        `BLOCKED: opening a new pull request requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+          `${reason}\n\n` +
+          formatActionPlan(
+            [`Invoke the ${skillReferenceForAgent} skill before running \`gh pr create\`.`],
+            {
+              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+            }
+          ) +
+          `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete PR workflow (branch checks, AC verification, linked issues). Running \`gh pr create\` directly skips these safeguards.`
+      )
+    }
+
+    if (requiredSkill === "pr-comments-address") {
+      return preToolUseDeny(
+        `BLOCKED: dismissing a pull request review requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+          `${reason}\n\n` +
+          formatActionPlan(
+            [`Invoke the ${skillReferenceForAgent} skill before dismissing a PR review.`],
+            {
+              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+            }
+          ) +
+          `\nWhy this matters: the ${skillReferenceForAgent} skill requires addressing every reviewer comment before dismissal. Dismissing a review directly skips this accountability.`
+      )
+    }
 
     const verb = requiredSkill === "commit" ? "commit" : "push"
 
