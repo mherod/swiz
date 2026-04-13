@@ -283,6 +283,35 @@ export class TaskStateCache {
     if (entry) entry.stale = true
   }
 
+  /**
+   * Cross-check the cached entry against the session directory's mtime.
+   * Marks stale when the directory has been modified since the last load —
+   * covers the common drift case where `fs.watch` misses a file deletion
+   * (macOS) or the daemon restarted and the watcher was never attached.
+   *
+   * Returns the updated staleness state so callers can short-circuit.
+   */
+  private async verifyFreshAgainstDisk(
+    sessionId: string,
+    tasksDir: string,
+    entry: SessionTaskState
+  ): Promise<void> {
+    try {
+      const stats = await stat(tasksDir)
+      const dirMtimeMs = stats.mtimeMs
+      if (dirMtimeMs > entry.loadedAtMs) {
+        debugLog(
+          `[task-state-cache] drift detected: session ${sessionId.slice(0, 8)}… ` +
+            `dir mtime ${dirMtimeMs} > loadedAtMs ${entry.loadedAtMs}`
+        )
+        entry.stale = true
+      }
+    } catch {
+      // Directory missing — the fullLoad branch will recreate state cleanly.
+      entry.stale = true
+    }
+  }
+
   // ─── Read API ───────────────────────────────────────────────────────────
 
   /**
@@ -300,6 +329,14 @@ export class TaskStateCache {
    */
   async getState(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const existing = this.entries.get(sessionId)
+
+    // Verify the cached entry against the session directory's mtime before
+    // trusting it. fs.watch on macOS is unreliable — file deletions can be
+    // missed, leaving phantom tasks in the cache. A stat comparison catches
+    // this drift for the same cost as any disk read.
+    if (existing && !existing.stale) {
+      await this.verifyFreshAgainstDisk(sessionId, tasksDir, existing)
+    }
 
     // Cache hit — fresh, but zero incomplete tasks is a logical gap: the task
     // governance system enforces ≥2 incomplete at all times, so an empty count
@@ -452,6 +489,9 @@ export class TaskStateCache {
     tasks: SessionTask[],
     canonicalTaskListSyncedAtMs: number | null = Date.now()
   ): void {
+    console.error(
+      `[task-cache] applyTaskListSnapshot session=${sessionId.slice(0, 8)} n=${tasks.length} ids=${tasks.map((t) => t.id).join(",")}`
+    )
     const sorted = [...tasks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const now = Date.now()
     const existing = this.entries.get(sessionId)
@@ -506,6 +546,9 @@ export class TaskStateCache {
     sessionId: string,
     entry: { taskId: string; action: string; newStatus?: string; subject?: string }
   ): void {
+    console.error(
+      `[task-cache] applyTaskAuditSnapshot session=${sessionId.slice(0, 8)} id=${entry.taskId} action=${entry.action} newStatus=${entry.newStatus}`
+    )
     const cached = this.entries.get(sessionId)
     if (!cached) return
 
@@ -640,6 +683,9 @@ export class TaskStateCache {
   /** Full disk reload — used on cold miss and freshness-guaranteed reads. */
   private async fullLoad(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const { tasks, maxMtimeMs } = await loadAllTasks(tasksDir)
+    console.error(
+      `[task-cache] fullLoad session=${sessionId.slice(0, 8)} dir=${tasksDir} n=${tasks.length} ids=${tasks.map((t) => t.id).join(",")}`
+    )
     const counts = computeCounts(tasks)
     const now = Date.now()
     const state: SessionTaskState = {
