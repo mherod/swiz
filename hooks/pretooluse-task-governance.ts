@@ -15,8 +15,11 @@ import { agentHasTaskTools } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { buildContextHookOutput } from "../src/SwizHook.ts"
-import { TASK_UPDATE_ALLOWED_FIELDS, toolHookInputSchema } from "../src/schemas.ts"
+import {
+  hookSpecificOutputSchema,
+  TASK_UPDATE_ALLOWED_FIELDS,
+  toolHookInputSchema,
+} from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -1238,7 +1241,16 @@ const pretooluseTaskGovernance: SwizToolHook = {
       const result = await evaluatePretooluseTaskGovernance(input)
       if (isDenyOutput(result)) return result
       const trace = await buildTraceContext(input)
-      return buildContextHookOutput("PreToolUse", trace)
+      // Always emit task governance context — never suppress.
+      // This ensures the agent always sees its task state and
+      // makes governance enforcement visible and auditable.
+      return {
+        systemMessage: trace,
+        hookSpecificOutput: hookSpecificOutputSchema.parse({
+          hookEventName: "PreToolUse",
+          additionalContext: trace,
+        }),
+      }
     } catch (err: unknown) {
       return unexpectedHookFailureOutput(err)
     }
