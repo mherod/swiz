@@ -362,10 +362,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return [join(this.getHomeDir(), "skills")]
     },
     getTaskRoots() {
-      return {
-        tasksDir: join(this.getHomeDir(), "sessions"),
-        projectsDir: join(this.getHomeDir(), "sessions"),
-      }
+      // Junie has tasksEnabled: false — no task roots. Returning null prevents
+      // the daemon from accidentally reading/writing task files to ~/.junie/sessions/
+      // when agent detection falls through to Junie's process pattern.
+      return null
     },
   },
 }
