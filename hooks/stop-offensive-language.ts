@@ -10,19 +10,29 @@
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
+import { extractSessionLines } from "../src/transcript-summary.ts"
 import { blockStopObj } from "../src/utils/hook-utils.ts"
 import {
   extractLastAssistantText,
   findAllLazyPatterns,
   formatAllDenialMessages,
-  readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 
 export async function evaluateStopOffensiveLanguage(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const transcriptPath = parsed.transcript_path ?? ""
 
-  const lines = await readTranscriptLines(transcriptPath)
+  // Use session-scoped lines from dispatch payload if available, else extract from file
+  let lines: string[] = []
+  const transcriptSummary = parsed._transcriptSummary as Record<string, any> | undefined
+  if (transcriptSummary?.sessionLines && Array.isArray(transcriptSummary.sessionLines)) {
+    lines = transcriptSummary.sessionLines
+  } else {
+    // Fallback: read full transcript and extract session-scoped lines
+    const fullText = await Bun.file(transcriptPath).text()
+    lines = extractSessionLines(fullText)
+  }
+
   if (lines.length === 0) return {}
 
   const assistantText = extractLastAssistantText(lines)
