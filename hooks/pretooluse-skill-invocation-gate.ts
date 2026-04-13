@@ -15,6 +15,11 @@
 // If the skill is not installed (checked via the same SKILL_DIRS lookup used
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
 //
+// Pattern matching uses two strategies:
+//   - Raw `command` for git ops and label-value patterns (label names are quoted)
+//   - `stripQuotedShellStrings(command)` for structural gh patterns where quoted
+//     args (--jq, --body) can hide flags like --dismiss
+//
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
