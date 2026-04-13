@@ -65,6 +65,10 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "state set — Claude model write failures when entering planning/reviewing",
   ],
   ["src/debug.ts", "The shared debug utility itself"],
+  [
+    "src/commands/daemon/web-server.ts",
+    "daemon dispatch error handling — resolveTaskCountsFromCache failures",
+  ],
 ])
 
 /** Files in src/ that legitimately use console.log/console.info for CLI output. */

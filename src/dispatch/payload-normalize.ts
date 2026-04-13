@@ -45,6 +45,8 @@ export function normalizeAgentHookPayload(payload: Record<string, any>): void {
     }
   } else if (cwdStr !== "" && isCursorGlobalUserDataCwd(cwdStr)) {
     unset(payload, "cwd")
+    // Flag that cwd was cleared so backfillPayloadDefaults() can warn if it falls back
+    payload._cwdCleared = true
   }
 
   normalizeCursorShellCommandShape(payload)

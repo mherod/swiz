@@ -155,11 +155,26 @@ export function getHookContext(
 
 function backfillPayloadDefaults(payload: Record<string, any>): void {
   if (!payload.cwd) {
-    payload.cwd =
+    const fallbackCwd =
       process.env.GEMINI_CWD ||
       process.env.GEMINI_PROJECT_DIR ||
       process.env.CLAUDE_PROJECT_DIR ||
       process.cwd()
+    payload.cwd = fallbackCwd
+    // Warn if cwd was cleared during normalization and we fell back to process.cwd()
+    if (
+      payload._cwdCleared &&
+      !process.env.GEMINI_CWD &&
+      !process.env.GEMINI_PROJECT_DIR &&
+      !process.env.CLAUDE_PROJECT_DIR
+    ) {
+      log(
+        `[warn] Dispatch: cwd was cleared during payload normalization (Cursor global dir detected) ` +
+          `and fell back to daemon process.cwd() (${fallbackCwd}). ` +
+          `Hooks will operate on the daemon's directory, not the user's project. ` +
+          `Ensure Cursor sends workspace_roots or the CLI layer injects cwd.`
+      )
+    }
   }
   if (!payload.session_id) {
     payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"

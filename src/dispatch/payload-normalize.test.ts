@@ -45,6 +45,14 @@ describe("normalizeAgentHookPayload", () => {
     expect(payload.cwd).toBeUndefined()
   })
 
+  it("sets _cwdCleared flag when clearing Cursor global cwd", () => {
+    const payload: Record<string, any> = {
+      cwd: "/Users/someone/.cursor",
+    }
+    normalizeAgentHookPayload(payload)
+    expect(payload._cwdCleared).toBe(true)
+  })
+
   it("maps Cursor beforeShellExecution shape to Bash + tool_input.command", () => {
     const payload: Record<string, any> = {
       conversation_id: "4ed177ce-8642-4533-a539-2746a66351bd",
