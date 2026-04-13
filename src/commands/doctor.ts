@@ -1,6 +1,6 @@
 import { chmod, mkdir, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
+import { type AgentSettingsId, getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { debugLog, stderrLog } from "../debug.ts"
 import { getHomeDirWithFallback } from "../home.ts"
@@ -394,7 +394,7 @@ async function extractPathsFromSettingsFile(
 async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   const paths: string[] = []
   for (const agent of CONFIGURABLE_AGENTS) {
-    const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex" | "junie"
+    const agentId = agent.id as AgentSettingsId
     for (const settingsPath of getAgentSettingsSearchPaths(agentId)) {
       paths.push(...(await extractPathsFromSettingsFile(settingsPath, agent)))
     }
