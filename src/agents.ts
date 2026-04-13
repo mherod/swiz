@@ -3,7 +3,7 @@ import { getHomeDir } from "./home.ts"
 
 const HOME = getHomeDir()
 
-export type AgentId = "claude" | "cursor" | "gemini" | "codex" | "junie"
+export type AgentId = "claude" | "cursor" | "gemini" | "codex"
 
 // ─── Agent definition ───────────────────────────────────────────────────────
 
@@ -80,7 +80,6 @@ const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
     "Notification",
   ]),
   codex: new Set(["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"]),
-  junie: new Set(["stop", "preToolUse"]),
 }
 
 export function validatePublicAgentHookMappings(agents: AgentDef[]): void {
@@ -258,35 +257,6 @@ export const AGENTS: AgentDef[] = registerAgents([
     },
     unsupportedEvents: [
       "sessionEnd",
-      "preCompact",
-      "notification",
-      "subagentStart",
-      "subagentStop",
-    ],
-  },
-  {
-    id: "junie",
-    name: "Junie",
-    settingsPath: getAgentSettingsPath("junie", HOME),
-    hooksKey: "hooks",
-    configStyle: "nested",
-    binary: "junie",
-    // Junie uses allowlist.json for execution permissions, not user-configurable hooks.
-    // No hook events fired at all — it's an external agent with its own session lifecycle.
-    tasksEnabled: false,
-    hooksConfigurable: false,
-    envVars: ["JUNIE_DATA"],
-    processPattern: /\/junie(\.app\/)?/,
-    toolAliases: {},
-    eventMap: {
-      stop: "stop",
-      preToolUse: "preToolUse",
-    },
-    unsupportedEvents: [
-      "postToolUse",
-      "sessionStart",
-      "sessionEnd",
-      "userPromptSubmit",
       "preCompact",
       "notification",
       "subagentStart",

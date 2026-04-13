@@ -49,7 +49,6 @@ import {
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
-  detectCurrentAgent,
   detectCurrentAgentFromEnv,
   formatActionPlan,
   getCurrentSessionTaskToolStats,
@@ -1205,8 +1204,10 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const toolName = String(input?.tool_name ?? "<unknown>")
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     const cwd: string = (input?.cwd as string) ?? process.cwd()
-    const payloadEnv = (input?._env as Record<string, string> | undefined) ?? undefined
-    const agent = detectCurrentAgentFromEnv(payloadEnv)?.id ?? detectCurrentAgent()?.id ?? "unknown"
+    const envAgent = detectCurrentAgentFromEnv()?.id
+    const payloadEnv = input?._env as Record<string, string> | undefined
+    const payloadAgent = payloadEnv ? detectCurrentAgentFromEnv(payloadEnv)?.id : undefined
+    const agent = envAgent ?? payloadAgent ?? "claude"
     const enforcement = await isTaskEnforcementProject(cwd).catch(() => false)
 
     let pending = 0
@@ -1222,9 +1223,9 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     }
 
     return (
-      `[task-governance trace] tool=${toolName} agent=${agent} enforcement=${enforcement} ` +
-      `sessionId=${sessionId ? "yes" : "no"} tasks(total=${total} pending=${pending} ` +
-      `inProgress=${inProgress}) overflowLimit=${PENDING_TASK_OVERFLOW_LIMIT} verdict=allow`
+      `[task-governance trace] tool=${toolName} agent=${agent} ` +
+      `enforcement=${enforcement} sessionId=${sessionId ? "yes" : "no"} ` +
+      `tasks(total=${total} pending=${pending} inProgress=${inProgress}) verdict=allow`
     )
   } catch (err) {
     return `[task-governance trace] error building context: ${(err as Error)?.message ?? err}`

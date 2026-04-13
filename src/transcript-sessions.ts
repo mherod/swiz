@@ -9,7 +9,6 @@ import {
   findCursorAgentTranscriptSessions,
   findCursorSessions,
   findGeminiSessions,
-  findJunieSessions,
   findSessions,
   sortSessionsDeterministic,
 } from "./transcript-sessions-discovery.ts"
@@ -52,7 +51,6 @@ export async function findAllProviderSessions(
     cursorAgentSessions,
     antigravitySessions,
     codexSessions,
-    junieSessions,
   ] = await Promise.all([
     findSessions(claudeProjectDir),
     findGeminiSessions(targetDir, effectiveHome),
@@ -60,7 +58,6 @@ export async function findAllProviderSessions(
     findCursorAgentTranscriptSessions(targetDir, effectiveHome),
     findAntigravitySessions(targetDir, effectiveHome),
     findCodexSessions(targetDir, effectiveHome),
-    findJunieSessions(targetDir, effectiveHome),
   ])
 
   // Merge all provider results, sort deterministically, then truncate to limit.
@@ -72,7 +69,6 @@ export async function findAllProviderSessions(
     cursorAgentSessions,
     antigravitySessions,
     codexSessions,
-    junieSessions,
   ]
 
   // Fast path for limit === 1: pick latest from each provider, sort only those candidates

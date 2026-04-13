@@ -336,10 +336,6 @@ async function exportCommand(options: {
   const { from, to, dryRun, overwrite, name } = options
   const { fromAgent, toAgent } = resolveAgentPair(from, to)
 
-  if (toAgent.id !== "junie") {
-    throw new Error(`Command export is currently only supported for the 'junie' agent.`)
-  }
-
   const fromSkillsDir = primarySkillDir(from)
   const commandsDir = join(HOME, `.${toAgent.id}`, "commands")
   const orderedSkillNames = name ? [name] : await discoverSkillNames(fromSkillsDir)
@@ -453,8 +449,7 @@ async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean
 async function handleToCommand(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
   const from = extractFlagValue(args, "--from")
   if (!from) throw new Error("--to-command requires --from <agent>.")
-  // Target agent is always junie for commands
-  const to = "junie"
+  const to = extractFlagValue(args, "--to") ?? from
 
   const flagsWithValue = new Set(["--from", "--to"])
   const positionals = args.filter(
