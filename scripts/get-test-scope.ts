@@ -74,6 +74,15 @@ function findParentBundleTests(file: string): string[] {
   return found
 }
 
+// Explicit source→test mappings for files whose test names don't match the
+// standard sibling convention (e.g. governance bundle → thin-wrapper tests).
+const TEST_ALIASES: Record<string, string[]> = {
+  "hooks/pretooluse-task-governance.ts": [
+    "hooks/pretooluse-enforce-taskupdate.test.ts",
+    "src/pretooluse-require-tasks.test.ts",
+  ],
+}
+
 for (const file of changedFiles) {
   if (file.includes("node_modules/")) continue
 
@@ -82,6 +91,15 @@ for (const file of changedFiles) {
     continue
   }
   if (!file.endsWith(".ts") && !file.endsWith(".tsx")) continue
+
+  // 0) Explicit alias mapping for non-standard source→test associations
+  const aliases = TEST_ALIASES[file]
+  if (aliases) {
+    for (const alias of aliases) {
+      if (existsSync(alias)) testFiles.add(alias)
+    }
+    continue
+  }
 
   // 1) Sibling test file: src/foo.ts → src/foo.test.ts
   const baseName = file.replace(/\.tsx?$/, "")
