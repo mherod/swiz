@@ -489,9 +489,6 @@ export class TaskStateCache {
     tasks: SessionTask[],
     canonicalTaskListSyncedAtMs: number | null = Date.now()
   ): void {
-    console.error(
-      `[task-cache] applyTaskListSnapshot session=${sessionId.slice(0, 8)} n=${tasks.length} ids=${tasks.map((t) => t.id).join(",")}`
-    )
     const sorted = [...tasks].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const now = Date.now()
     const existing = this.entries.get(sessionId)
@@ -546,9 +543,6 @@ export class TaskStateCache {
     sessionId: string,
     entry: { taskId: string; action: string; newStatus?: string; subject?: string }
   ): void {
-    console.error(
-      `[task-cache] applyTaskAuditSnapshot session=${sessionId.slice(0, 8)} id=${entry.taskId} action=${entry.action} newStatus=${entry.newStatus}`
-    )
     const cached = this.entries.get(sessionId)
     if (!cached) return
 
@@ -683,9 +677,6 @@ export class TaskStateCache {
   /** Full disk reload — used on cold miss and freshness-guaranteed reads. */
   private async fullLoad(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const { tasks, maxMtimeMs } = await loadAllTasks(tasksDir)
-    console.error(
-      `[task-cache] fullLoad session=${sessionId.slice(0, 8)} dir=${tasksDir} n=${tasks.length} ids=${tasks.map((t) => t.id).join(",")}`
-    )
     const counts = computeCounts(tasks)
     const now = Date.now()
     const state: SessionTaskState = {
