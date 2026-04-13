@@ -5,6 +5,7 @@
  */
 
 import { unset } from "lodash-es"
+import { z } from "zod"
 import { stopHookOutputSchema } from "../schemas.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { isBlock } from "./engine.ts"
@@ -138,6 +139,74 @@ export function normalizeStopDispatchResponseInPlace(
   }
 
   stopHookOutputSchema.parse(envelope)
+}
+
+// ─── LLM compilation ─────────────────────────────────────────────────────────
+
+const compiledStopReasonsSchema = z.object({
+  /** Prioritized, synthesized block reason for the agent. */
+  compiledReason: z.string().describe("The synthesized, prioritized block reason"),
+  /** Number of distinct blockers identified. */
+  blockerCount: z.number().int().describe("Number of distinct blockers found"),
+})
+
+export type CompiledStopReasons = z.infer<typeof compiledStopReasonsSchema>
+
+const COMPILE_STOP_PROMPT = `You're the voice of a developer's session guard — the thing that catches them before they walk away with loose ends.
+
+You receive raw block reasons from independent hooks that fired when a developer tried to stop. Synthesize them into ONE direct, human response.
+
+Voice:
+- Talk like a sharp colleague, not a system. "You've got uncommitted work in 3 files" not "Uncommitted changes detected."
+- Be prescriptive: tell them exactly what to do, in order. "Run /commit, then push" not "Changes should be committed."
+- Keep the urgency proportional — uncommitted code is urgent, a stale changelog is a nudge.
+- Never hedge. Never say "consider" or "you may want to." Say what to do.
+- Preserve specific commands, file paths, task IDs, and branch names verbatim.
+- No greetings, no sign-offs, no self-references. Just the message.
+
+Structure:
+- Lead with the most critical blocker.
+- Group related items; cut duplicates.
+- Use numbered steps when there's a clear sequence, bullet points when order doesn't matter.
+- One short paragraph max for context if needed, then the action items.
+
+Raw block reasons (separated by ====):
+`
+
+const STOP_COMPILE_MODEL = "google/gemini-3-flash-preview"
+
+/**
+ * Use an LLM (OpenRouter, google/gemini-3-flash-preview) to synthesize multiple
+ * raw stop-hook block reasons into a structured, prioritized response.
+ * Uses createOpenRouter() directly (same pattern as transcript auto-reply).
+ * Falls back to the raw concatenation on any failure.
+ */
+export async function compileStopReasons(rawReason: string): Promise<string> {
+  const parts = rawReason.split("\n\n\n\n").filter((s) => s.trim())
+  if (parts.length <= 1) return rawReason
+
+  try {
+    const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+    const { generateText, Output } = await import("ai")
+
+    const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+    const model = provider.languageModel(STOP_COMPILE_MODEL)
+    const prompt = COMPILE_STOP_PROMPT + parts.join("\n====\n")
+
+    const { text } = await generateText({
+      model,
+      output: Output.json(),
+      prompt,
+    })
+
+    const parsed = compiledStopReasonsSchema.safeParse(JSON.parse(text))
+    if (parsed.success && parsed.data.compiledReason) {
+      return parsed.data.compiledReason
+    }
+    return rawReason
+  } catch {
+    return rawReason
+  }
 }
 
 /** Parse-only check for tests and diagnostics. */

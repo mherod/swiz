@@ -23,7 +23,11 @@ import {
 } from "./engine.ts"
 import type { EnrichedDispatchPayload } from "./execute.ts"
 import { extractCwd } from "./filters.ts"
-import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import {
+  compileStopReasons,
+  isStopLikeDispatchEvent,
+  normalizeStopDispatchResponseInPlace,
+} from "./stop-response.ts"
 import type { DispatchStrategy } from "./types.ts"
 
 /** Context passed to each hook execution strategy. */
@@ -492,6 +496,10 @@ class BlockingStrategy implements HookExecutionStrategy {
     })
 
     if (isStop && isBlock(response)) {
+      const rawReason = (response as { reason?: string }).reason ?? ""
+      if (rawReason) {
+        response.reason = await compileStopReasons(rawReason)
+      }
       await tryAutoSteerStopBlock(response, enrichedPayloadStr)
     }
 
