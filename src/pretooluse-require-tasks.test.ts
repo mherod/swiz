@@ -217,7 +217,7 @@ describe("pretooluse-require-tasks hook", () => {
     expect(proc.exitCode).toBe(0)
   })
 
-  test("allows Bash when all tasks are completed (wrap-up exemption)", async () => {
+  test("denies Bash when all tasks are completed (no wrap-up exemption)", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-wrapup-"))
     const sessionId = `test-wrapup-${Date.now()}`
     // Write sync sentinel so the canonical staleness gate doesn't fire first
@@ -225,7 +225,7 @@ describe("pretooluse-require-tasks hook", () => {
     const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(tasksDir, { recursive: true })
-    // Create a completed task
+    // Create a completed task — governance blocks when allTasksDone is true
     await Bun.write(
       join(tasksDir, "1.json"),
       JSON.stringify({
@@ -246,9 +246,10 @@ describe("pretooluse-require-tasks hook", () => {
         },
         { HOME: tmpHome }
       )
-      // Hook allows when all tasks are completed (wrap-up exemption)
+      // Hook blocks when all tasks are completed — requires new tasks
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).toBeNull()
+      expect(result.parsed).not.toBeNull()
+      expect(result.parsed?.hookSpecificOutput?.permissionDecision).toBe("deny")
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
