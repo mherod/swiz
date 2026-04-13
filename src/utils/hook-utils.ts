@@ -919,6 +919,7 @@ export {
   isAutoSteerAvailable,
   type SendAutoSteerOptions,
   scheduleAutoSteer,
+  scheduleAutoSteerViaChannel,
   sendAutoSteer,
 } from "./auto-steer-helpers.ts"
 /**

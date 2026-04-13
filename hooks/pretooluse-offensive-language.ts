@@ -22,7 +22,11 @@ import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { messageFromUnknownError, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import {
+  messageFromUnknownError,
+  scheduleAutoSteer,
+  scheduleAutoSteerViaChannel,
+} from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -121,7 +125,23 @@ export async function evaluatePretooluseOffensiveLanguage(
     ? `${refined}\n\n${STEER_SUFFIX}`
     : formatAllDenialMessages(matches, STEER_SUFFIX)
 
-  await scheduleAutoSteer(sessionId, message, undefined, input.cwd)
+  const cwd = (input.cwd as string) ?? ""
+  // Prefer MCP channel delivery (works without terminal support).
+  // Fall back to terminal-based auto-steer if channel unavailable.
+  const delivered = cwd ? await scheduleAutoSteerViaChannel(sessionId, message, cwd) : false
+  if (!delivered) {
+    const terminalDelivered = await scheduleAutoSteer(
+      sessionId,
+      message,
+      undefined,
+      cwd || undefined
+    )
+    if (!terminalDelivered) {
+      process.stderr.write(
+        "pretooluse-offensive-language: auto-steer delivery failed (both channel and terminal)\n"
+      )
+    }
+  }
   return {}
 }
 
