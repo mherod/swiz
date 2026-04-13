@@ -259,6 +259,8 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
   if (summary) {
     payload._transcriptSummary = summary
     log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
+  } else if (disableTranscriptSummaryFallback) {
+    log(`   [warn] transcript summary unavailable (fallback disabled, no provider)`)
   }
 
   return JSON.stringify(assertEnrichedDispatchPayloadRecord(payload))
