@@ -444,10 +444,8 @@ export const GIT_SWITCH_RE = gitSubcommandRe("switch\\b")
 /** Matches `gh pr checkout` anywhere in a shell command string. */
 export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\b")
 
-/** Matches `gh pr review ... --dismiss` anywhere in a shell command string.
- * Handles newlines and complex whitespace by using [\s\S]* (match any char including newlines).
- * Excludes statement terminators (|, ;, &) that would break the command. */
-export const GH_PR_REVIEW_DISMISS_RE = /\bgh\s+pr\s+review\b[\s\S]*?--dismiss\b/
+/** Matches `gh pr review ... --dismiss` anywhere in a shell command string. */
+export const GH_PR_REVIEW_DISMISS_RE = /\bgh\s+pr\s+review\b[^|;&]*--dismiss\b/
 
 /** Matches `git [opts] checkout -b` or `git [opts] switch -c` — create new branch. */
 export const GIT_CHECKOUT_NEW_BRANCH_RE = gitSubcommandRe(
@@ -577,18 +575,6 @@ export const GH_CMD_RE = shellStatementCommandRe("gh\\b")
 
 /** Matches `swiz issue close` or `swiz issue comment`. */
 export const SWIZ_ISSUE_RE = shellStatementCommandRe("swiz\\s+issue\\s+(close|comment)\\b")
-
-/** Matches `gh issue edit ... --add-label ...triaged` — adding the triaged label.
- * Handles newlines and complex whitespace by using [\s\S]* (match any char including newlines).
- * Uses non-greedy matching [\s\S]*? to avoid excessive backtracking. */
-export const GH_ISSUE_ADD_TRIAGED_LABEL_RE =
-  /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--add-label\b[\s\S]*?\btriaged\b/
-
-/** Matches `gh issue edit ... --remove-label ...backlog` — removing the backlog label.
- * Handles newlines and complex whitespace by using [\s\S]* (match any char including newlines).
- * Uses non-greedy matching [\s\S]*? to avoid excessive backtracking. */
-export const GH_ISSUE_REMOVE_BACKLOG_LABEL_RE =
-  /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--remove-label\b[\s\S]*?\bbacklog\b/
 
 /** Matches CI verification commands. */
 export const CI_WAIT_RE = shellStatementCommandRe("(?:swiz|bun\\b[^|;]*)\\s+ci-wait\\b")

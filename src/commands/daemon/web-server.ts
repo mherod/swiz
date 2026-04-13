@@ -1304,13 +1304,9 @@ async function resolveTaskCountsFromCache(
     const { createDefaultTaskStore } = await import("../../task-roots.ts")
     const { tasksDir } = createDefaultTaskStore()
     const state = await cache.getState(sessionId, join(tasksDir, sessionId))
-    console.error(
-      `[resolveTaskCountsFromCache] session=${sessionId.slice(0, 8)} tasks=${state.tasks.length} pending=${state.pendingCount} inProgress=${state.inProgressCount} ids=${state.tasks.map((t) => t.id).join(",")}`
-    )
     if (state.tasks.length === 0) return null
     return buildTaskCountsFromTasks(state.tasks)
-  } catch (err) {
-    console.error(`[resolveTaskCountsFromCache] error: ${err}`)
+  } catch {
     return null
   }
 }

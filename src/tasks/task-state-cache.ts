@@ -283,35 +283,6 @@ export class TaskStateCache {
     if (entry) entry.stale = true
   }
 
-  /**
-   * Cross-check the cached entry against the session directory's mtime.
-   * Marks stale when the directory has been modified since the last load —
-   * covers the common drift case where `fs.watch` misses a file deletion
-   * (macOS) or the daemon restarted and the watcher was never attached.
-   *
-   * Returns the updated staleness state so callers can short-circuit.
-   */
-  private async verifyFreshAgainstDisk(
-    sessionId: string,
-    tasksDir: string,
-    entry: SessionTaskState
-  ): Promise<void> {
-    try {
-      const stats = await stat(tasksDir)
-      const dirMtimeMs = stats.mtimeMs
-      if (dirMtimeMs > entry.loadedAtMs) {
-        debugLog(
-          `[task-state-cache] drift detected: session ${sessionId.slice(0, 8)}… ` +
-            `dir mtime ${dirMtimeMs} > loadedAtMs ${entry.loadedAtMs}`
-        )
-        entry.stale = true
-      }
-    } catch {
-      // Directory missing — the fullLoad branch will recreate state cleanly.
-      entry.stale = true
-    }
-  }
-
   // ─── Read API ───────────────────────────────────────────────────────────
 
   /**
@@ -329,14 +300,6 @@ export class TaskStateCache {
    */
   async getState(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const existing = this.entries.get(sessionId)
-
-    // Verify the cached entry against the session directory's mtime before
-    // trusting it. fs.watch on macOS is unreliable — file deletions can be
-    // missed, leaving phantom tasks in the cache. A stat comparison catches
-    // this drift for the same cost as any disk read.
-    if (existing && !existing.stale) {
-      await this.verifyFreshAgainstDisk(sessionId, tasksDir, existing)
-    }
 
     // Cache hit — fresh, but zero incomplete tasks is a logical gap: the task
     // governance system enforces ≥2 incomplete at all times, so an empty count

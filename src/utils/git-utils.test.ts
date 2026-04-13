@@ -14,8 +14,6 @@ import {
   extractSwitchBranch,
   FORCE_PUSH_RE,
   GH_CMD_RE,
-  GH_ISSUE_ADD_TRIAGED_LABEL_RE,
-  GH_ISSUE_REMOVE_BACKLOG_LABEL_RE,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   GH_PR_MERGE_RE,
@@ -319,17 +317,6 @@ describe("GH_PR_REVIEW_DISMISS_RE", () => {
   test("does not match gh pr review without dismiss", () => {
     expect(GH_PR_REVIEW_DISMISS_RE.test("gh pr review 5 --approve")).toBe(false)
   })
-  test("matches gh pr review --dismiss with newlines and complex args", () => {
-    const multilineCmd = `REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner) && \
-gh pr review 1456 \
-  --body "Addressed all comments" \
-  --dismiss`
-    expect(GH_PR_REVIEW_DISMISS_RE.test(multilineCmd)).toBe(true)
-  })
-  test("matches gh pr review --dismiss in chained commands", () => {
-    const chainedCmd = "gh pr list && gh pr review 99 --dismiss && echo done"
-    expect(GH_PR_REVIEW_DISMISS_RE.test(chainedCmd)).toBe(true)
-  })
 })
 
 describe("GIT_CHECKOUT_NEW_BRANCH_RE", () => {
@@ -417,81 +404,6 @@ describe("SWIZ_ISSUE_RE", () => {
   })
   test("does not match swiz issue list", () => {
     expect(SWIZ_ISSUE_RE.test("swiz issue list")).toBe(false)
-  })
-})
-
-describe("GH_ISSUE_ADD_TRIAGED_LABEL_RE", () => {
-  test("matches gh issue edit --add-label triaged", () => {
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test('gh issue edit 42 --add-label "triaged"')).toBe(true)
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test("gh issue edit 42 --add-label triaged")).toBe(true)
-  })
-  test("does not match --remove-label triaged", () => {
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test('gh issue edit 42 --remove-label "triaged"')).toBe(
-      false
-    )
-  })
-  test("does not match adding other labels", () => {
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test('gh issue edit 42 --add-label "bug"')).toBe(false)
-  })
-  test("matches gh issue edit --add-label triaged with newlines", () => {
-    const multilineCmd = `gh issue edit 42 \
-  --add-label "triaged"`
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(multilineCmd)).toBe(true)
-  })
-  test("matches gh issue edit with other args before triaged label", () => {
-    const complexCmd = `gh issue edit 42 --title "Fixed" --body "Details" --add-label "triaged"`
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(complexCmd)).toBe(true)
-  })
-  test("matches gh issue edit adding triaged among multiple labels", () => {
-    const multiLabelCmd = `gh issue edit 42 --add-label "bug" --add-label "triaged" --add-label "p1"`
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(multiLabelCmd)).toBe(true)
-  })
-  test("matches gh issue edit with triaged label after other commands in chain", () => {
-    const chainedCmd = `gh issue view 42 && gh issue edit 42 --add-label "triaged" && gh comment create 42`
-    expect(GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(chainedCmd)).toBe(true)
-  })
-})
-
-describe("GH_ISSUE_REMOVE_BACKLOG_LABEL_RE", () => {
-  test("matches gh issue edit --remove-label backlog", () => {
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test('gh issue edit 42 --remove-label "backlog"')).toBe(
-      true
-    )
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test("gh issue edit 42 --remove-label backlog")).toBe(
-      true
-    )
-  })
-  test("does not match --add-label backlog", () => {
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test('gh issue edit 42 --add-label "backlog"')).toBe(
-      false
-    )
-  })
-  test("does not match removing other labels", () => {
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test('gh issue edit 42 --remove-label "bug"')).toBe(
-      false
-    )
-  })
-  test("matches gh issue edit --remove-label backlog with newlines", () => {
-    const multilineCmd = `gh issue edit 42 \
-  --remove-label "backlog"`
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(multilineCmd)).toBe(true)
-  })
-  test("matches gh issue edit with other args before backlog label", () => {
-    const complexCmd = `gh issue edit 42 --title "Ready" --body "Details" --remove-label "backlog"`
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(complexCmd)).toBe(true)
-  })
-  test("matches gh issue edit removing backlog among multiple label operations", () => {
-    const multiLabelCmd = `gh issue edit 42 --add-label "ready" --remove-label "backlog" --add-label "urgent"`
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(multiLabelCmd)).toBe(true)
-  })
-  test("matches gh issue edit with backlog removal after other commands in chain", () => {
-    const chainedCmd = `gh issue view 42 && gh issue edit 42 --remove-label "backlog" && gh issue close 42`
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(chainedCmd)).toBe(true)
-  })
-  test("does not match removing backlog in different issue", () => {
-    // Should still match as the pattern doesn't care about issue numbers
-    const cmd = `gh issue edit 99 --remove-label "backlog"`
-    expect(GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(cmd)).toBe(true)
   })
 })
 
