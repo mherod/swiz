@@ -8,6 +8,7 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import { ghJsonViaDaemon } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
@@ -24,6 +25,7 @@ import {
   forkPushCmd,
   GH_PR_MERGE_RE,
   getDefaultBranch,
+  getRepoSlug,
   git,
   isDefaultBranch,
   isShellTool,
@@ -137,6 +139,56 @@ async function resolveDiffRange(cwd: string, remoteRef: string): Promise<string>
   return ""
 }
 
+/** Production branches that require PR-based workflow (no direct gh pr merge). */
+const PRODUCTION_BRANCHES = new Set(["main", "master", "prod", "production"])
+
+/** Integration branches where direct merges are part of the promotion workflow. */
+const INTEGRATION_BRANCHES = new Set([
+  "dev",
+  "develop",
+  "staging",
+  "next",
+  "release",
+  "integration",
+])
+
+function isProductionBranch(branch: string): boolean {
+  return PRODUCTION_BRANCHES.has(branch.toLowerCase())
+}
+
+function isIntegrationBranch(branch: string): boolean {
+  return INTEGRATION_BRANCHES.has(branch.toLowerCase())
+}
+
+/** Returns the PR's base (target) branch, or empty string on failure. */
+async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string> {
+  // Try IssueStore cache first (synced via issue-store-sync, includes baseRefName)
+  try {
+    const { getIssueStore } = await import("../src/issue-store.ts")
+    const repoSlug = await getRepoSlug(cwd)
+    if (repoSlug) {
+      const store = getIssueStore()
+      const pr = store.getPullRequest<{ baseRefName?: string }>(repoSlug, parseInt(prNumber, 10))
+      if (pr?.baseRefName) return pr.baseRefName
+    }
+  } catch {
+    // IssueStore unavailable — fall through to API
+  }
+
+  // Fallback: query the GitHub API directly
+  const repoSlug = await getRepoSlug(cwd)
+  if (!repoSlug) return ""
+  try {
+    const result = await ghJsonViaDaemon<{ base?: { ref?: string } }>(
+      ["api", `repos/${repoSlug}/pulls/${prNumber}`],
+      cwd
+    )
+    return result?.base?.ref ?? ""
+  } catch {
+    return ""
+  }
+}
+
 async function handlePrMerge(
   command: string,
   cwd: string,
@@ -158,18 +210,34 @@ async function handlePrMerge(
   if (!isCollaborative && !strictMode) return null
 
   const prNumber = extractPrNumber(command)
+  if (!prNumber) return null
+
+  const baseBranch = await getPrBaseBranch(prNumber, cwd)
+
+  // Allow merges to integration branches — part of the dev→main promotion workflow
+  if (baseBranch && isIntegrationBranch(baseBranch)) {
+    return preToolUseAllow(
+      `Merge to integration branch '${baseBranch}' — allowed as part of the promotion workflow`
+    )
+  }
+
+  // Only block merges to production branches
+  if (baseBranch && !isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
+    return preToolUseAllow(`Merge to non-production branch '${baseBranch}' — allowed`)
+  }
+
   const prRef = prNumber ? `PR #${prNumber}` : "this PR"
   const repoContext = buildRepoContext(isCollaborative, collaboration.signals)
 
   return preToolUseDeny(`
 Merging ${prRef} via \`gh pr merge\` is blocked in ${repoContext}
 
-\`gh pr merge\` lands code directly on '${defaultBranch}', bypassing the intended review workflow.
+\`gh pr merge\` lands code directly on '${baseBranch || defaultBranch}', bypassing the intended review workflow.
 
 Allowed merge paths:
   1. Merge via the GitHub web UI after required reviews are approved
   2. Wait for an authorized human to merge the PR
-  3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber ?? "<number>"} --auto --squash
+  3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber} --auto --squash
 
 Repository: ${owner}/${repo}
 `)

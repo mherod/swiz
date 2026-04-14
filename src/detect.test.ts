@@ -81,7 +81,7 @@ describe("detect.ts", () => {
         // parent-process fallback can identify the agent even when no env var
         // matches. The assertion here is that FAKE_AGENT_VAR does not itself
         // trigger an env-var based match; the agent (if any) is from fallback.
-        expect(agent === null || ["cursor", "junie"].includes(agent.id)).toBe(true)
+        expect(agent === null || agent.id === "cursor").toBe(true)
       })
     })
 

@@ -297,8 +297,8 @@ function setupWatchers(
     }
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
       // depth: 0 — only watch the parent directory for new/removed session entries.
-      // depth: 1 was creating an FSWatcher per session subdirectory (~350+ for Junie
-      // sessions alone), causing massive FD and memory overhead. The TranscriptMonitor
+      // depth: 1 was creating an FSWatcher per session subdirectory, causing massive FD and
+      // memory overhead. The TranscriptMonitor
       // handles targeted reads of specific transcript files on change detection.
       watchers.register(transcriptWatch.path, transcriptWatch.label, transcriptWatchFlush, {
         depth: 0,
@@ -506,8 +506,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const hydratedSessions = await hydratePersistedSessionToolState(cwd, state)
   // Release file-cache entries accumulated during session discovery.
   // findAllProviderSessions reads prefixes of every session file across all
-  // providers (Codex ~2700 files, Junie ~400 files) to match by cwd. Without
-  // clearing, these prefix strings remain pinned in the module-level cache.
+  // providers to match by cwd. Without clearing, these prefix strings remain
+  // pinned in the module-level cache.
   clearFileCache()
   Bun.gc(true)
   if (hydratedSessions > 0) {

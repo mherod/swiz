@@ -201,7 +201,7 @@ function parseMemoryArgs(args: string[]): ParsedMemoryArgs {
     throw new Error("`--all` cannot be combined with an explicit agent flag.")
   }
   if (explicitAgents.length > 1) {
-    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, --codex, or --junie.")
+    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
   }
 
   return {
@@ -357,7 +357,7 @@ export const memoryCommand: Command = {
   name: "memory",
   description: "Show hierarchical rule/memory files for one or all agents",
   usage:
-    "swiz memory [--dir <path>] [--strict] [--view] [--all|--claude|--cursor|--gemini|--codex|--junie]",
+    "swiz memory [--dir <path>] [--strict] [--view] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
     { flags: "--strict", description: "Exit with error if any memory file exceeds its threshold" },
@@ -371,7 +371,6 @@ export const memoryCommand: Command = {
     { flags: "--cursor", description: "Force Cursor agent" },
     { flags: "--gemini", description: "Force Gemini CLI agent" },
     { flags: "--codex", description: "Force Codex CLI agent" },
-    { flags: "--junie", description: "Force Junie agent" },
   ],
   async run(args: string[]) {
     const { targetDir, strict, view, allAgents, explicitAgent } = parseMemoryArgs(args)

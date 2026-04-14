@@ -36,14 +36,12 @@ const SESSION_C = "cccc-cccc-cccc"
 
 // Clear environment variables that trigger agent detection so native tests use mocked HOME
 const _savedClaudeCode = process.env.CLAUDECODE
-const _savedJunieData = process.env.JUNIE_DATA
 const _savedGeminiCli = process.env.GEMINI_CLI
 const _savedGeminiProjectDir = process.env.GEMINI_PROJECT_DIR
 const _savedCodexManaged = process.env.CODEX_MANAGED_BY_NPM
 const _savedCodexThread = process.env.CODEX_THREAD_ID
 
 delete process.env.CLAUDECODE
-delete process.env.JUNIE_DATA
 delete process.env.GEMINI_CLI
 delete process.env.GEMINI_PROJECT_DIR
 delete process.env.CODEX_MANAGED_BY_NPM
@@ -51,7 +49,6 @@ delete process.env.CODEX_THREAD_ID
 
 afterAll(() => {
   if (_savedClaudeCode) process.env.CLAUDECODE = _savedClaudeCode
-  if (_savedJunieData) process.env.JUNIE_DATA = _savedJunieData
   if (_savedGeminiCli) process.env.GEMINI_CLI = _savedGeminiCli
   if (_savedGeminiProjectDir) process.env.GEMINI_PROJECT_DIR = _savedGeminiProjectDir
   if (_savedCodexManaged) process.env.CODEX_MANAGED_BY_NPM = _savedCodexManaged

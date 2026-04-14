@@ -121,7 +121,7 @@ alwaysApply: false
 
 **Deduplication:** `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 
-**Exemptions:** Agents where `AgentDef.tasksEnabled=false` (Codex, Junie) skip all task enforcement.
+**Exemptions:** Agents where `AgentDef.tasksEnabled=false` (Codex) skip all task enforcement.
 
 **Evidence prefixes:** `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
 

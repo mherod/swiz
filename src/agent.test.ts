@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { detectAgentCli, detectBestAgentCli, detectJunieCli } from "./agent.ts"
+import { detectAgentCli, detectBestAgentCli } from "./agent.ts"
 
 describe("agent.ts", () => {
   describe("detectAgentCli", () => {
     it("function is exported and callable", () => {
       expect(typeof detectAgentCli).toBe("function")
-    })
-  })
-
-  describe("detectJunieCli", () => {
-    it("function is exported and callable", () => {
-      expect(typeof detectJunieCli).toBe("function")
     })
   })
 
@@ -102,24 +96,6 @@ describe("agent.ts", () => {
       if (hasPromptOnly) {
         expect(hasWorkspace).toBe(true)
       }
-    })
-  })
-
-  describe("junie CLI invocation", () => {
-    it("junie command includes --output-format=json flag", () => {
-      const args = ["junie", "--task", "prompt", "--output-format=json"]
-      expect(args).toContain("--output-format=json")
-    })
-
-    it("junie JSON output result field is extracted correctly", () => {
-      const junieOutput = {
-        sessionId: "session-260401-130206-16cj",
-        taskName: "Test Task",
-        result: "### Summary\n- Done.",
-        changes: [],
-        llmUsage: [],
-      }
-      expect(junieOutput.result.trim()).toBe("### Summary\n- Done.")
     })
   })
 

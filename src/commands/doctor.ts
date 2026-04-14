@@ -892,7 +892,7 @@ export const doctorCommand: Command = {
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
     {
       flags: "clean",
-      description: "Remove old Claude Code/Junie session data and Gemini backup artifacts",
+      description: "Remove old Claude Code session data and Gemini backup artifacts",
     },
     { flags: "--older-than <time>", description: "Cleanup window (e.g. 30, 7d, 48h)" },
     { flags: "--task-older-than <time>", description: "Separate window for task files" },
@@ -902,7 +902,6 @@ export const doctorCommand: Command = {
       flags: "--skip-trash",
       description: "Hard delete instead of moving to Trash (skips .bak backups)",
     },
-    { flags: "--junie-only", description: "Only scan Junie sessions" },
   ],
   async run(args) {
     if (args[0] === "clean") {

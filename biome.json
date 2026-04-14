@@ -1,6 +1,6 @@
 {
   "files": {
-    "includes": ["**", "!.swiz", "!.junie", "!./.junie"]
+    "includes": ["**", "!.swiz", "!.junie"]
   },
   "linter": {
     "enabled": true,

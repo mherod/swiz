@@ -288,7 +288,7 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--since DATE] [--until DATE] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex|--junie]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--since DATE] [--until DATE] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -326,7 +326,6 @@ export const transcriptCommand: Command = {
     { flags: "--cursor", description: "Show Cursor sessions only (currently unsupported)" },
     { flags: "--gemini", description: "Show Gemini/Antigravity sessions only" },
     { flags: "--codex", description: "Show Codex sessions only" },
-    { flags: "--junie", description: "Show Junie sessions only" },
   ],
   async run(args: string[]) {
     const parsed = parseTranscriptArgs(args)

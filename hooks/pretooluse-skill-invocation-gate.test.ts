@@ -13,9 +13,7 @@ describe("pretooluse-skill-invocation-gate", () => {
     }
     Object.assign(process.env, originalEnv)
 
-    // Explicitly clear Junie indicators to avoid accidental detection as Junie
-    delete process.env.JUNIE_DATA
-    delete process.env.JUNIE_TOKEN
+    // Ensure env is clean for accurate agent detection
   })
 
   afterEach(() => {

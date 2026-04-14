@@ -120,7 +120,7 @@ async function resolveSession(targetDir: string, sessionQuery: string | null): P
 function ensureAiBackend(): void {
   if (!hasAiProvider() && !detectBestAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, install Junie, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
     )
   }
 }

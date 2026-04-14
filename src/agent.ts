@@ -8,14 +8,10 @@
 import { tmpdir } from "node:os"
 import type { PromptOptions } from "./ai-providers.ts"
 
-export type AgentBackend = "agent" | "junie"
+export type AgentBackend = "agent"
 
-/**
- * Return the best available agent backend, or null if none found.
- * Prefers "junie" over "agent" (Cursor).
- */
 export function detectBestAgentCli(): AgentBackend | null {
-  return detectJunieCli() || detectAgentCli()
+  return detectAgentCli()
 }
 
 /**
@@ -23,13 +19,6 @@ export function detectBestAgentCli(): AgentBackend | null {
  */
 export function detectAgentCli(): AgentBackend | null {
   return Bun.which("agent") ? "agent" : null
-}
-
-/**
- * Return "junie" if the Junie CLI is installed, null otherwise.
- */
-export function detectJunieCli(): AgentBackend | null {
-  return Bun.which("junie") ? "junie" : null
 }
 
 export interface PromptAgentOptions extends Pick<PromptOptions, "signal" | "timeout"> {
@@ -48,7 +37,7 @@ export async function promptBestAgent(
   options?: PromptAgentOptions
 ): Promise<string> {
   const backend = detectBestAgentCli()
-  if (backend === "junie") return promptJunie(prompt, options)
+  if (!backend) throw new Error("No agent backend available")
   return promptAgent(prompt, options)
 }
 
@@ -113,40 +102,4 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
   }
 
   return output.trim()
-}
-
-interface JunieJsonOutput {
-  sessionId: string
-  taskName: string
-  result: string
-  changes: unknown[]
-  llmUsage: unknown[]
-}
-
-/**
- * Send a prompt to the Junie CLI and return the trimmed output.
- * Throws if junie is not installed or the process exits non-zero.
- */
-export async function promptJunie(prompt: string, options?: PromptAgentOptions): Promise<string> {
-  if (!detectJunieCli()) {
-    throw new Error("Junie not found. Install it via the Junie installer.")
-  }
-
-  const args = ["junie", "--task", prompt, "--output-format=json"]
-
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
-  attachAbortSignal(proc, options)
-
-  const [output, err] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  if (proc.exitCode !== 0) {
-    throw new Error(`junie exited ${proc.exitCode}: ${err.trim()}`)
-  }
-
-  const parsed = JSON.parse(output.trim()) as JunieJsonOutput
-  return parsed.result.trim()
 }

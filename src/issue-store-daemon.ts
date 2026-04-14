@@ -71,7 +71,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       "--state",
       "open",
       "--json",
-      "number,title,url,reviewDecision,mergeable,requestedReviewers,createdAt,author",
+      "number,title,url,reviewDecision,mergeable,requestedReviewers,baseRefName,createdAt,author",
     ])
     return result ?? []
   }
@@ -97,7 +97,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       "--repo",
       repo,
       "--json",
-      "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt,body",
+      "number,title,state,headRefName,baseRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt,body",
     ])
     return unwrapGhViewJson(result) as T | null
   }

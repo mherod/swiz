@@ -245,16 +245,16 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when agent lacks task tools (Junie-like)", async () => {
+  it("allows stop when agent lacks task tools (Codex)", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
       { action: "status_change", taskId: "1", newStatus: "in_progress" },
     ])
     const result = await runAuditor(home, transcriptPath, {
-      JUNIE_DATA: "/tmp/junie-test",
+      CODEX_THREAD_ID: "test-thread",
     })
-    // Junie has no task tools → skip enforcement → allow
+    // Codex has tasksEnabled=false → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -282,9 +282,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
       { action: "status_change", taskId: "2", newStatus: "pending" },
     ])
     const result = await runAuditor(home, transcriptPath, {
-      JUNIE_DATA: "/tmp/junie-test",
+      CODEX_THREAD_ID: "test-thread",
     })
-    // Junie has no task tools → skip enforcement → allow
+    // Codex has tasksEnabled=false → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -304,9 +304,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   it("allows stop when audit log missing and agent lacks task tools", async () => {
     const { home, transcriptPath } = await createFixture()
     const result = await runAuditor(home, transcriptPath, {
-      JUNIE_DATA: "/tmp/junie-test",
+      CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Junie has no task tools → skip enforcement → allow
+    // Codex has tasksEnabled=false → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -316,9 +316,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
       { action: "status_change", taskId: "1", newStatus: "completed" },
     ])
     const result = await runAuditor(home, transcriptPath, {
-      JUNIE_DATA: "/tmp/junie-test",
+      CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Junie has no task tools → skip enforcement → allow
+    // Codex has tasksEnabled=false → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 
@@ -327,9 +327,9 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
       Array.from({ length: 12 }, () => "shell_command")
     )
     const result = await runAuditor(home, transcriptPath, {
-      JUNIE_DATA: "/tmp/junie-test",
+      CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Junie has no task tools → skip enforcement → allow
+    // Codex has tasksEnabled=false → skip enforcement → allow
     expect(result.blocked).toBe(false)
   })
 

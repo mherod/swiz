@@ -29,9 +29,6 @@ function cleanEnv(): Record<string, string> {
   ]) {
     delete base[key]
   }
-  for (const key of ["JUNIE"]) {
-    delete base[key]
-  }
   return base
 }
 
@@ -81,17 +78,6 @@ describe("getMemorySources", () => {
     const sources = await getMemorySources(getAgent("cursor"), "/tmp/myproject")
     expect(sources.length).toBeGreaterThanOrEqual(2)
     expect(sources[0]?.label).toContain(".cursorrules")
-  })
-
-  it("returns Junie sources in precedence order", async () => {
-    const sources = await getMemorySources(getAgent("junie"), "/tmp/myproject")
-    expect(sources.length).toBe(3)
-    expect(sources[0]?.label).toBe("Project rules")
-    expect(sources[0]?.path).toContain("AGENTS.md")
-    expect(sources[1]?.label).toBe("Global rules")
-    expect(sources[1]?.path).toContain(".junie/AGENTS.md")
-    expect(sources[2]?.label).toBe("Allowlist")
-    expect(sources[2]?.path).toContain("allowlist.json")
   })
 
   it("returns Gemini sources with project and global", async () => {
@@ -158,27 +144,6 @@ describe("swiz memory CLI", () => {
 
     const { stdout } = await runMemory([], { CLAUDECODE: "1", HOME: tmpHome })
     expect(stdout).toContain("Claude Code")
-    expect(stdout).toContain("Rule hierarchy")
-    expect(stdout).toContain("Project rules")
-    expect(stdout).toContain("Global rules")
-  }, 15_000)
-
-  it("shows Junie hierarchy when JUNIE=1", async () => {
-    const tmpRoot = join(tmpdir(), `swiz-memory-junie-${Date.now()}`)
-    const projectDir = join(tmpRoot, "project")
-    const homeDir = join(tmpRoot, "home")
-    const junieDir = join(homeDir, ".junie")
-    mkdirSync(junieDir, { recursive: true })
-    mkdirSync(projectDir, { recursive: true })
-    await Bun.write(join(projectDir, "AGENTS.md"), "# Project Junie rules\n")
-    await Bun.write(join(junieDir, "AGENTS.md"), "# Global Junie rules\n")
-    await Bun.write(join(junieDir, "allowlist.json"), JSON.stringify({ defaultBehavior: "ask" }))
-
-    const { stdout } = await runMemory(["--junie", "--dir", projectDir], {
-      HOME: homeDir,
-      JUNIE: "1",
-    })
-    expect(stdout).toContain("Junie")
     expect(stdout).toContain("Rule hierarchy")
     expect(stdout).toContain("Project rules")
     expect(stdout).toContain("Global rules")

@@ -95,7 +95,6 @@ describe("skillExists", () => {
         "CODEX_API_KEY",
         "CODEX_MANAGED_BY_NPM",
         "CODEX_THREAD_ID",
-        "JUNIE_DATA",
       ]
       for (const key of envKeys) {
         delete process.env[key]

@@ -3,7 +3,7 @@
  * This module owns cleanup discovery, reporting, and deletion so doctor.ts can
  * stay focused on diagnostics and command routing.
  */
-import type { Dirent, Stats } from "node:fs"
+import type { Stats } from "node:fs"
 import { cp, readdir, readFile, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { BOLD, DIM, GREEN, RESET, YELLOW } from "../../ansi.ts"
@@ -19,7 +19,6 @@ import { projectKeyFromCwd } from "../../project-key.ts"
 import { defaultTrashPath } from "../../session-data-delete.ts"
 import { createDefaultTaskStore } from "../../task-roots.ts"
 import { isSessionTaskJsonFile } from "../../tasks/task-file-utils.ts"
-import { readLines } from "../../utils/file-utils.ts"
 import { formatBytes } from "../../utils/format.ts"
 import { getDaemonStatus } from "../daemon/daemon-admin.ts"
 import {
@@ -36,7 +35,6 @@ const DAEMON_LABEL = SWIZ_DAEMON_LABEL
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ORPHAN_SESSION_ID_RE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|test-.*|unknown-.*)$/i
-const JUNIE_SESSION_ID_RE = /^(session-\d{6}-\d{6}-[0-9a-z]{4}|test-.*)$/i
 
 async function dirSize(dirPath: string): Promise<number> {
   let total = 0
@@ -528,64 +526,6 @@ async function resolveTaskDirInfo(
   return { taskDirPath: null, taskDirSizeBytes: 0 }
 }
 
-async function findJunieProjectSessions(
-  junieSessionsDir: string,
-  cutoffMs: number,
-  projectFilter: string | undefined
-): Promise<ProjectResult[]> {
-  const results: ProjectResult[] = []
-  let entries: Dirent[]
-  try {
-    entries = await readdir(junieSessionsDir, { withFileTypes: true })
-  } catch {
-    return results
-  }
-
-  const sessionDirs = entries
-    .filter((e) => e.isDirectory() && JUNIE_SESSION_ID_RE.test(e.name))
-    .map((e) => e.name)
-
-  for (const sessionId of sessionDirs) {
-    const sessionPath = join(junieSessionsDir, sessionId)
-    const eventsPath = join(sessionPath, "events.jsonl")
-    let s: Stats
-    try {
-      s = await stat(sessionPath)
-    } catch {
-      continue
-    }
-
-    if (projectFilter) {
-      const projectKey = projectKeyFromCwd(projectFilter)
-      const lines = await readLines(eventsPath, 20)
-      let matches = false
-      for (const line of lines) {
-        if (line.includes(`"currentDirectory":"${projectFilter}"`) || line.includes(projectKey)) {
-          matches = true
-          break
-        }
-      }
-      if (!matches) continue
-    }
-
-    const info: SessionInfo = {
-      sessionId,
-      paths: [sessionPath],
-      mtimeMs: s.mtimeMs,
-      sizeBytes: await dirSize(sessionPath),
-      taskDirPath: null,
-      taskDirSizeBytes: 0,
-    }
-
-    const { keep, old } = partitionByCutoff([info], cutoffMs)
-    if (keep.length > 0 || old.length > 0) {
-      results.push({ name: sessionId, keep, old, stale: false })
-    }
-  }
-
-  return results
-}
-
 async function findSessions(
   projectDir: string,
   cutoffMs: number,
@@ -816,13 +756,10 @@ interface ProjectTotals {
   totalOldTaskDirs: number
 }
 
-async function printProjectTable(
-  results: ProjectResult[],
-  junieOnly = false
-): Promise<ProjectTotals> {
+async function printProjectTable(results: ProjectResult[]): Promise<ProjectTotals> {
   const decodedNames = await Promise.all(
     results.map((r) =>
-      r.name.startsWith("(") || UUID_RE.test(r.name) || JUNIE_SESSION_ID_RE.test(r.name)
+      r.name.startsWith("(") || UUID_RE.test(r.name)
         ? Promise.resolve(r.name)
         : decodeProjectPath(r.name)
     )
@@ -830,11 +767,7 @@ async function printProjectTable(
   const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
   console.log()
-  if (junieOnly) {
-    console.log(`  ${BOLD}~/.junie/sessions/${RESET}`)
-  } else {
-    console.log(`  ${BOLD}Agent Sessions${RESET}`)
-  }
+  console.log(`  ${BOLD}Agent Sessions${RESET}`)
 
   let totalOldCount = 0
   let totalOldBytes = 0
@@ -918,7 +851,7 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
     cleanupArgs,
   } = opts
 
-  const totals = await printProjectTable(results, cleanupArgs.junieOnly)
+  const totals = await printProjectTable(results)
 
   console.log()
   printBackupSection("claude", claudeBackups)
@@ -1109,7 +1042,6 @@ export async function autoCleanup(): Promise<void> {
     taskOlderThanLabel: null,
     dryRun: false,
     projectFilter: undefined,
-    junieOnly: false,
   }
 
   const data = await gatherCleanupData(cleanupArgs)
@@ -1163,28 +1095,18 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs) {
   const claudeDir = join(homeDir, ".claude")
   const projectsDir = join(claudeDir, "projects")
   const tasksDir = join(claudeDir, "tasks")
-  const junieSessionsDir = join(homeDir, ".junie", "sessions")
 
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
   let results: ProjectResult[] = []
 
-  if (!cleanupArgs.junieOnly) {
-    const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
-    if (projectNames) {
-      const claudeResults = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
-      await markStaleProjects(claudeResults)
-      results = results.concat(claudeResults)
-    }
+  const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
+  if (projectNames) {
+    const claudeResults = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
+    await markStaleProjects(claudeResults)
+    results = results.concat(claudeResults)
   }
-
-  const junieResults = await findJunieProjectSessions(
-    junieSessionsDir,
-    cutoffMs,
-    cleanupArgs.projectFilter
-  )
-  results = results.concat(junieResults)
 
   const scopedSessionIds = collectSessionIds(results)
   const oldTaskFiles =
@@ -1197,7 +1119,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs) {
         )
   const oldTaskBytes = oldTaskFiles.reduce((sum, task) => sum + task.sizeBytes, 0)
 
-  if (!cleanupArgs.projectFilter && !cleanupArgs.junieOnly) {
+  if (!cleanupArgs.projectFilter) {
     await appendOrphanTasks(results, tasksDir, cutoffMs)
   }
 

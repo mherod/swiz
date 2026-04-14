@@ -520,16 +520,16 @@ export const skillCommand: Command = {
     },
     {
       flags: "--to-command",
-      description: "Transform skills from --from <agent> to Junie commands",
+      description: "Transform skills from --from <agent> to command files",
     },
     {
       flags: "--from <agent>",
       description:
-        "Source agent ID for --sync, --convert, or --to-command (claude|cursor|gemini|codex|junie)",
+        "Source agent ID for --sync, --convert, or --to-command (claude|cursor|gemini|codex)",
     },
     {
       flags: "--to <agent>",
-      description: "Target agent ID for --sync or --convert (claude|cursor|gemini|codex|junie)",
+      description: "Target agent ID for --sync or --convert (claude|cursor|gemini|codex)",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },

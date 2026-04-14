@@ -83,7 +83,6 @@ export interface CleanupArgs {
   taskOlderThanLabel: string | null
   dryRun: boolean
   projectFilter: string | undefined
-  junieOnly?: boolean
   skipTrash?: boolean
 }
 
@@ -110,7 +109,6 @@ interface CleanupFlagState {
   taskOlderThan: { ms: number; label: string } | null
   dryRun: boolean
   projectFilter: string | undefined
-  junieOnly: boolean
   skipTrash: boolean
 }
 
@@ -121,10 +119,6 @@ function consumeCleanupFlag(
 ): boolean {
   if (arg === "--dry-run") {
     state.dryRun = true
-    return false
-  }
-  if (arg === "--junie-only") {
-    state.junieOnly = true
     return false
   }
   if (arg === "--skip-trash") {
@@ -152,7 +146,6 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     taskOlderThan: null as { ms: number; label: string } | null,
     dryRun: false,
     projectFilter: undefined as string | undefined,
-    junieOnly: false,
     skipTrash: false,
   }
 
@@ -169,7 +162,6 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     taskOlderThanLabel: state.taskOlderThan?.label ?? null,
     dryRun: state.dryRun,
     projectFilter: state.projectFilter,
-    junieOnly: state.junieOnly,
     skipTrash: state.skipTrash,
   }
 }
