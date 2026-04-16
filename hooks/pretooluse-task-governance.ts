@@ -1015,6 +1015,48 @@ async function handleTaskCompletion(
   return null
 }
 
+async function checkInProgressTransitionCap(
+  taskId: string,
+  sessionId: string
+): Promise<SwizHookOutput | null> {
+  const allTasks = await readSessionTasks(sessionId)
+  const inProgressCount = allTasks.filter((t) => t.status === "in_progress").length
+  const currentTask = allTasks.find((t) => t.id === taskId)
+
+  // Allow transition to in_progress if:
+  // 1. The task is already in_progress (no-op), or
+  // 2. There are fewer than 2 in_progress tasks (room to add one more)
+  if (!currentTask || currentTask.status === "in_progress") {
+    return null
+  }
+  if (inProgressCount < 2) {
+    return null
+  }
+
+  // Block: 2+ tasks already in_progress
+  const inProgressTasks = allTasks
+    .filter((t) => t.status === "in_progress")
+    .map((t) => `  • #${t.id}: ${t.subject}`)
+    .join("\n")
+
+  return preToolUseDeny(
+    `STOP. Cannot transition task #${taskId} to in_progress — too many active tasks.\n\n` +
+      `Currently in progress (${inProgressCount}/${IN_PROGRESS_CAP}):\n${inProgressTasks}\n\n` +
+      `Maintaining focus requires keeping active work to a manageable level.\n\n` +
+      formatActionPlan(
+        [
+          "Complete or move back to pending the in_progress tasks that are no longer active:",
+          [
+            "Use TaskUpdate to mark completed work done (status: completed).",
+            "Use TaskUpdate to move non-active tasks back to pending (status: pending).",
+          ],
+          `Retry transitioning task #${taskId} to in_progress once count is below the cap.`,
+        ],
+        { translateToolNames: true }
+      )
+  )
+}
+
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
 async function checkNativeTaskUpdateCompletion(
@@ -1032,6 +1074,19 @@ async function checkNativeTaskUpdateCompletion(
   if (toolInput.status === "deleted") {
     const deletionDenied = await handleTaskDeletionCompletion(taskId, sessionId, cwd)
     if (deletionDenied) return deletionDenied
+    return "continue"
+  }
+
+  if (toolInput.status === "in_progress") {
+    const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId)
+    if (transitionDenied) return transitionDenied
+    // Optimistically record in event state + cache for parallel TOCTOU safety.
+    const allTasks = await readSessionTasks(sessionId)
+    const currentTask = allTasks.find((t) => t.id === taskId)
+    if (currentTask && currentTask.status !== "in_progress") {
+      applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
+      applyCacheTaskUpdate(sessionId, { ...currentTask, status: "in_progress" })
+    }
     return "continue"
   }
 
