@@ -912,10 +912,13 @@ async function checkNativeTaskDeletionGovernance(
       const pendingAfterDelete = isPendingTask ? pendingTasks.length - 1 : pendingTasks.length
       const inProgressAfterDelete = incompleteAfterDelete - pendingAfterDelete
 
-      if (
+      // Allow early deletion if thresholds are still met after deletion.
+      // This allows deleting incomplete tasks as long as governance minimums are maintained.
+      const violatesThresholds =
         incompleteAfterDelete < thresholds.minIncomplete ||
         pendingAfterDelete < thresholds.minPending
-      ) {
+
+      if (violatesThresholds) {
         return preToolUseDeny(
           `STOP. Cannot delete task #${taskId} — it would violate governance thresholds.\n\n` +
             `After deletion:\n` +
@@ -954,7 +957,7 @@ async function handleTaskCompletion(
   if (rateLimited) return rateLimited
 
   // Check governance thresholds: completing this task must not drop
-  // incomplete or pending counts below the configured minimums.
+  // pending count below 2, even if it drops incomplete below the minimum.
   const diskTasks = await readSessionTasks(sessionId)
   const allTasks = overlayEventState(diskTasks, sessionId)
   const taskBeingCompleted = allTasks.find((t) => t.id === taskId)
@@ -978,7 +981,14 @@ async function handleTaskCompletion(
     const pendingAfter =
       taskBeingCompleted.status === "pending" ? pendingTasks.length - 1 : pendingTasks.length
 
-    if (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending) {
+    // Allow early completion if at least 2 pending tasks remain (sufficient planning buffer).
+    // This relaxes the strict minIncomplete requirement while maintaining minPending threshold.
+    const allowEarlyCompletion = pendingAfter >= 2
+    const violatesThresholds =
+      !allowEarlyCompletion &&
+      (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
+
+    if (violatesThresholds) {
       const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteAfter)
       const missingPending = Math.max(0, thresholds.minPending - pendingAfter)
       return preToolUseDeny(

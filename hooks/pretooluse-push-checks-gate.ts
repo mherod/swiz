@@ -41,7 +41,6 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
   if (!isShellTool(hookInput.tool_name ?? "")) return {}
 
   const command: string = (hookInput.tool_input?.command as string) ?? ""
-
   if (!GIT_PUSH_RE.test(command) || GIT_PUSH_DELETE_RE.test(command)) return {}
 
   const transcriptPath: string = hookInput.transcript_path ?? ""
@@ -49,62 +48,23 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
 
   const cwd: string = (hookInput.tool_input?.cwd as string) ?? hookInput.cwd ?? process.cwd()
 
-  const behindResult = await spawnWithTimeout(["git", "rev-list", "--count", "HEAD..@{upstream}"], {
-    cwd,
-    timeoutMs: 5000,
-  })
-  const behindCount = parseInt(behindResult.stdout.trim(), 10)
+  const behindBlock = await checkLocalBehind(cwd)
+  if (behindBlock) return behindBlock
 
-  if (!Number.isNaN(behindCount) && behindCount > 0) {
-    const conflictAdvice = skillAdvice(
-      "resolve-conflicts",
-      "If rebase produces merge conflicts, use the /resolve-conflicts skill to resolve them before pushing.",
-      "If rebase produces merge conflicts, resolve them with `git add <file>` and `git rebase --continue`, or abort with `git rebase --abort`."
-    )
-
-    return preToolUseDeny(
-      `Remote is ahead by ${behindCount} commit${behindCount === 1 ? "" : "s"} — pull before pushing.\n\n` +
-        `Run: \`git pull --rebase --autostash\`\n\n` +
-        conflictAdvice
-    )
-  }
-
-  const forkTopology = await detectForkTopology(cwd)
-
-  if (forkTopology && !forkTopology.hasUpstreamRemote) {
+  const forkInfo = await detectForkTopology(cwd)
+  if (forkInfo && !forkInfo.hasUpstreamRemote) {
     return preToolUseAllow(
-      `Fork detected — \`origin\` is a fork of \`${forkTopology.upstreamSlug}\`.\n\n` +
+      `Fork detected — \`origin\` is a fork of \`${forkInfo.upstreamSlug}\`.\n\n` +
         `Set up the upstream remote for sync:\n` +
-        `  git remote add upstream https://github.com/${forkTopology.upstreamSlug}.git\n` +
+        `  git remote add upstream https://github.com/${forkInfo.upstreamSlug}.git\n` +
         `  git fetch upstream\n\n` +
         `After pushing, open a PR against upstream:\n` +
-        `  gh pr create --repo ${forkTopology.upstreamSlug}`
+        `  gh pr create --repo ${forkInfo.upstreamSlug}`
     )
   }
 
-  const WIP_SUBJECT_RE = /^(wip[:\s]|fixup!|squash!)/i
-
-  const subjectsResult = await spawnWithTimeout(
-    ["git", "log", "@{upstream}..HEAD", "--format=%s"],
-    {
-      cwd,
-      timeoutMs: 5000,
-    }
-  )
-
-  if (subjectsResult.exitCode === 0 && subjectsResult.stdout.trim()) {
-    const subjects = subjectsResult.stdout.trim().split("\n")
-    const offending = subjects.filter((s) => WIP_SUBJECT_RE.test(s))
-
-    if (offending.length > 0) {
-      return preToolUseDeny(
-        `Push blocked — outgoing commits contain temporary subjects that must be squashed first.\n\n` +
-          `Offending commits:\n` +
-          offending.map((s) => `  • ${s}`).join("\n") +
-          `\n\nRun: \`git rebase -i --autosquash @{upstream}\` to clean up before pushing.`
-      )
-    }
-  }
+  const wipBlock = await checkWipCommits(cwd)
+  if (wipBlock) return wipBlock
 
   const [diffResult, fileNamesResult, priorCommandsResult, globalSettings, projectSettings] =
     await Promise.all([
@@ -118,103 +78,168 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
       readProjectSettings(cwd),
     ])
 
-  const effectiveSettingsEarly = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  const eff = getEffectiveSwizSettings(globalSettings, null, projectSettings)
 
-  if (!effectiveSettingsEarly.skipSecretScan && diffResult.exitCode === 0 && diffResult.stdout) {
-    const addedLines = diffResult.stdout
-      .split("\n")
-      .filter((l) => !l.startsWith("-") || l.startsWith("---"))
+  const secretBlock = checkSecretsInDiff(diffResult, eff.skipSecretScan)
+  if (secretBlock) return secretBlock
 
-    const PEM_HEADER = /-----BEGIN\s+(?:RSA |EC |DSA |OPENSSH |)PRIVATE KEY-----/
-    const API_KEY_PREFIXES = new RegExp(
-      [
-        "sk-live-[A-Za-z0-9]{20,}",
-        "sk-proj-[A-Za-z0-9]{20,}",
-        "ghp_[A-Za-z0-9]{36,}",
-        "gho_[A-Za-z0-9]{36,}",
-        "ghs_[A-Za-z0-9]{36,}",
-        "AKIA[0-9A-Z]{16}",
-      ].join("|")
+  const largeFileResult = await checkLargeFiles(
+    fileNamesResult,
+    eff.largeFileSizeKb,
+    eff.largeFileSizeBlockKb,
+    projectSettings?.largeFileAllowPatterns ?? [],
+    cwd
+  )
+  if (largeFileResult.block) return largeFileResult.block
+
+  return checkMissingPriorChecks(priorCommandsResult, eff, largeFileResult.warn)
+}
+
+async function checkLocalBehind(cwd: string): Promise<SwizHookOutput | null> {
+  const result = await spawnWithTimeout(["git", "rev-list", "--count", "HEAD..@{upstream}"], {
+    cwd,
+    timeoutMs: 5000,
+  })
+  const behindCount = parseInt(result.stdout.trim(), 10)
+  if (!Number.isNaN(behindCount) && behindCount > 0) {
+    const conflictAdvice = skillAdvice(
+      "resolve-conflicts",
+      "If rebase produces merge conflicts, use the /resolve-conflicts skill to resolve them before pushing.",
+      "If rebase produces merge conflicts, resolve them with `git add <file>` and `git rebase --continue`, or abort with `git rebase --abort`."
     )
+    return preToolUseDeny(
+      `Remote is ahead by ${behindCount} commit${behindCount === 1 ? "" : "s"} — pull before pushing.\n\n` +
+        `Run: \`git pull --rebase --autostash\`\n\n` +
+        conflictAdvice
+    )
+  }
+  return null
+}
 
-    const secretMatches: string[] = []
-    for (const line of addedLines) {
-      if (PEM_HEADER.test(line) || API_KEY_PREFIXES.test(line)) {
-        secretMatches.push(line.slice(0, 80) + (line.length > 80 ? "…" : ""))
-      }
-    }
-
-    if (secretMatches.length > 0) {
+async function checkWipCommits(cwd: string): Promise<SwizHookOutput | null> {
+  const WIP_SUBJECT_RE = /^(wip[:\s]|fixup!|squash!)/i
+  const subjectsResult = await spawnWithTimeout(
+    ["git", "log", "@{upstream}..HEAD", "--format=%s"],
+    { cwd, timeoutMs: 5000 }
+  )
+  if (subjectsResult.exitCode === 0 && subjectsResult.stdout.trim()) {
+    const offending = subjectsResult.stdout
+      .trim()
+      .split("\n")
+      .filter((s) => WIP_SUBJECT_RE.test(s))
+    if (offending.length > 0) {
       return preToolUseDeny(
-        `Potential secret or credential detected in outgoing diff — push blocked.\n\n` +
-          `Matching lines (truncated):\n` +
-          secretMatches.map((l) => `  ${l}`).join("\n") +
-          `\n\nInspect with \`git diff @{upstream}..HEAD\`, then:\n` +
-          `  1. Remove the secret from the file\n` +
-          `  2. Soft-reset to amend: \`git reset --soft HEAD~1\`\n` +
-          `  3. Rotate the credential immediately — treat it as compromised\n\n` +
-          `To disable this check: \`swiz settings enable skip-secret-scan\``
+        `Push blocked — outgoing commits contain temporary subjects that must be squashed first.\n\n` +
+          `Offending commits:\n` +
+          offending.map((s) => `  • ${s}`).join("\n") +
+          `\n\nRun: \`git rebase -i --autosquash @{upstream}\` to clean up before pushing.`
       )
     }
   }
+  return null
+}
 
-  const largeFileWarnItems: string[] = []
+function checkSecretsInDiff(
+  diffResult: { exitCode: number | null; stdout: string },
+  skipSecretScan: boolean
+): SwizHookOutput | null {
+  if (skipSecretScan || diffResult.exitCode !== 0 || !diffResult.stdout) return null
 
-  if (fileNamesResult.exitCode === 0 && fileNamesResult.stdout) {
-    const warnThresholdKb = effectiveSettingsEarly.largeFileSizeKb
-    const blockThresholdKb = effectiveSettingsEarly.largeFileSizeBlockKb
-    const allowPatterns: string[] = projectSettings?.largeFileAllowPatterns ?? []
+  const addedLines = diffResult.stdout
+    .split("\n")
+    .filter((l) => !l.startsWith("-") || l.startsWith("---"))
 
-    function globToRegex(pattern: string): RegExp {
-      return new RegExp(
-        `^${pattern
-          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-          .replace(/\*\*/g, "\u2B1B")
-          .replace(/\*/g, "[^/]*")
-          .replace(/\u2B1B/g, ".*")
-          .replace(/\?/g, "[^/]")}$`
-      )
+  const PEM_HEADER = /-----BEGIN\s+(?:RSA |EC |DSA |OPENSSH |)PRIVATE KEY-----/
+  const API_KEY_PREFIXES = new RegExp(
+    [
+      "sk-live-[A-Za-z0-9]{20,}",
+      "sk-proj-[A-Za-z0-9]{20,}",
+      "ghp_[A-Za-z0-9]{36,}",
+      "gho_[A-Za-z0-9]{36,}",
+      "ghs_[A-Za-z0-9]{36,}",
+      "AKIA[0-9A-Z]{16}",
+    ].join("|")
+  )
+
+  const secretMatches: string[] = []
+  for (const line of addedLines) {
+    if (PEM_HEADER.test(line) || API_KEY_PREFIXES.test(line)) {
+      secretMatches.push(line.slice(0, 80) + (line.length > 80 ? "…" : ""))
     }
+  }
 
-    function formatSize(bytes: number): string {
-      if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-      return `${Math.floor(bytes / 1024)} KB`
-    }
-
-    const changedFiles = fileNamesResult.stdout
-      .split("\n")
-      .map((f) => f.trim())
-      .filter(Boolean)
-
-    const blockFiles: string[] = []
-
-    await Promise.all(
-      changedFiles.map(async (filePath) => {
-        if (allowPatterns.some((p) => globToRegex(p).test(filePath))) return
-
-        const treeEntry = await git(["ls-tree", "HEAD", "--", filePath], cwd)
-        if (!treeEntry) return
-
-        const blobHash = treeEntry.split(/\s+/)[2]
-        if (!blobHash || blobHash === "0000000000000000000000000000000000000000") return
-
-        const sizeStr = await git(["cat-file", "-s", blobHash], cwd)
-        const sizeBytes = parseInt(sizeStr ?? "0", 10)
-        if (Number.isNaN(sizeBytes) || sizeBytes === 0) return
-
-        const sizeKb = sizeBytes / 1024
-        const label = `${formatSize(sizeBytes)} — ${filePath}`
-
-        if (sizeKb >= blockThresholdKb) {
-          blockFiles.push(label)
-        } else if (sizeKb >= warnThresholdKb) {
-          largeFileWarnItems.push(`Large file advisory (>${warnThresholdKb} KB): ${label}`)
-        }
-      })
+  if (secretMatches.length > 0) {
+    return preToolUseDeny(
+      `Potential secret or credential detected in outgoing diff — push blocked.\n\n` +
+        `Matching lines (truncated):\n` +
+        secretMatches.map((l) => `  ${l}`).join("\n") +
+        `\n\nInspect with \`git diff @{upstream}..HEAD\`, then:\n` +
+        `  1. Remove the secret from the file\n` +
+        `  2. Soft-reset to amend: \`git reset --soft HEAD~1\`\n` +
+        `  3. Rotate the credential immediately — treat it as compromised\n\n` +
+        `To disable this check: \`swiz settings enable skip-secret-scan\``
     )
+  }
+  return null
+}
 
-    if (blockFiles.length > 0) {
-      return preToolUseDeny(
+function globToRegex(pattern: string): RegExp {
+  return new RegExp(
+    `^${pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*/g, "\u2B1B")
+      .replace(/\*/g, "[^/]*")
+      .replace(/\u2B1B/g, ".*")
+      .replace(/\?/g, "[^/]")}$`
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.floor(bytes / 1024)} KB`
+}
+
+async function checkLargeFiles(
+  fileNamesResult: { exitCode: number | null; stdout: string },
+  warnThresholdKb: number,
+  blockThresholdKb: number,
+  allowPatterns: string[],
+  cwd: string
+): Promise<{ block: SwizHookOutput | null; warn: string[] }> {
+  if (fileNamesResult.exitCode !== 0 || !fileNamesResult.stdout) return { block: null, warn: [] }
+
+  const changedFiles = fileNamesResult.stdout
+    .split("\n")
+    .map((f) => f.trim())
+    .filter(Boolean)
+
+  const warnItems: string[] = []
+  const blockFiles: string[] = []
+
+  await Promise.all(
+    changedFiles.map(async (filePath) => {
+      if (allowPatterns.some((p) => globToRegex(p).test(filePath))) return
+      const treeEntry = await git(["ls-tree", "HEAD", "--", filePath], cwd)
+      if (!treeEntry) return
+      const blobHash = treeEntry.split(/\s+/)[2]
+      if (!blobHash || blobHash === "0000000000000000000000000000000000000000") return
+      const sizeStr = await git(["cat-file", "-s", blobHash], cwd)
+      const sizeBytes = parseInt(sizeStr ?? "0", 10)
+      if (Number.isNaN(sizeBytes) || sizeBytes === 0) return
+
+      const sizeKb = sizeBytes / 1024
+      const label = `${formatSize(sizeBytes)} — ${filePath}`
+      if (sizeKb >= blockThresholdKb) {
+        blockFiles.push(label)
+      } else if (sizeKb >= warnThresholdKb) {
+        warnItems.push(`Large file advisory (>${warnThresholdKb} KB): ${label}`)
+      }
+    })
+  )
+
+  if (blockFiles.length > 0) {
+    return {
+      block: preToolUseDeny(
         `Large file(s) in outgoing batch exceed the ${blockThresholdKb} KB block threshold — push blocked.\n\n` +
           blockFiles.map((f) => `  ${f}`).join("\n") +
           `\n\nTo resolve:\n` +
@@ -222,29 +247,32 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
           `  2. Soft-reset to remove it from history: \`git reset --soft HEAD~1\`\n` +
           `  3. Re-commit without the large file\n\n` +
           `To change the threshold: \`swiz settings set large-file-size-block-kb <N>\``
-      )
+      ),
+      warn: warnItems,
     }
   }
+  return { block: null, warn: warnItems }
+}
 
-  const priorCommands = priorCommandsResult
-  const effectiveSettings = effectiveSettingsEarly
-  const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMode)
-
+function checkMissingPriorChecks(
+  priorCommands: string[],
+  eff: { collaborationMode: string; ignoreCi?: boolean },
+  largeFileWarnItems: string[]
+): SwizHookOutput {
+  const modePolicy = getCollaborationModePolicy(
+    eff.collaborationMode as "solo" | "team" | "auto" | "relaxed-collab"
+  )
   const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
   const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
   const hasCICheck =
-    effectiveSettings.ignoreCi || !modePolicy.prHooksActive
-      ? true
-      : priorCommands.some((c) => CI_WAIT_RE.test(c))
+    eff.ignoreCi || !modePolicy.prHooksActive ? true : priorCommands.some((c) => CI_WAIT_RE.test(c))
 
   if (hasBranchCheck && hasPRCheck && hasCICheck && largeFileWarnItems.length === 0) {
     return preToolUseAllow("All pre-push checks found in transcript (branch, PR, CI)")
   }
 
   const missing: string[] = [...largeFileWarnItems]
-  if (!hasBranchCheck) {
-    missing.push("Branch check (not run yet): `git branch --show-current`")
-  }
+  if (!hasBranchCheck) missing.push("Branch check (not run yet): `git branch --show-current`")
   if (!hasPRCheck) {
     missing.push(
       "Open-PR check (not run yet): " +
@@ -253,7 +281,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
   }
   if (!hasCICheck) {
     missing.push(
-      `CI check (not run yet, required for ${effectiveSettings.collaborationMode} mode): ` +
+      `CI check (not run yet, required for ${eff.collaborationMode} mode): ` +
         "`swiz ci-wait $(git rev-parse HEAD) --timeout 300`"
     )
   }
