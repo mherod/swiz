@@ -33,10 +33,6 @@ function anyTaskHasCiEvidence(tasks: SessionTask[]): boolean {
   return tasks.filter((t) => t.status === "completed").some(taskHasCiEvidence)
 }
 
-/**
- * Search sibling sessions (by transcript) for CI evidence.
- * Reads all sibling task files in parallel via {@link Promise.all}.
- */
 async function findCiEvidenceInSiblings(
   transcript: string,
   sessionId: string,
@@ -52,7 +48,6 @@ async function findCiEvidenceInSiblings(
 
     if (siblingIds.length === 0) return false
 
-    // Parallel read of sibling task files
     const results = await Promise.all(
       siblingIds.map(async (sibId) => {
         try {
@@ -78,71 +73,65 @@ async function findCiEvidenceInSiblings(
   }
 }
 
+async function gatherCiEvidence(
+  ctx: CompletionAuditContext,
+  effectiveSummary: { bashCommands?: string[] }
+): Promise<boolean> {
+  if (anyTaskHasCiEvidence(ctx.allTasks)) return true
+  if (ctx.allTasks.length === 0) {
+    const bashCmds = effectiveSummary.bashCommands ?? []
+    if (bashCmds.some((cmd) => CI_CMD_RE.test(cmd))) return true
+  }
+  if (ctx.transcript) {
+    return await findCiEvidenceInSiblings(ctx.transcript, ctx.sessionId, ctx.home)
+  }
+  return false
+}
+
+function buildCiEvidenceBlockPlan(): ActionPlanItem[] {
+  return [
+    { description: 'Create a "Push and verify CI" task and mark it in_progress.', priority: 1 },
+    {
+      description: "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
+      priority: 2,
+    },
+    {
+      description:
+        "Mark the task completed via TaskUpdate (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>",
+      priority: 3,
+    },
+  ]
+}
+
 export async function validateCiEvidence(ctx: CompletionAuditContext): Promise<ValidationResult> {
-  // Skip validation if gate is disabled
   if (!ctx.gates.ciEvidence) return { kind: "ok" }
 
-  // Determine if push occurred by checking transcript summary
   const effectiveSummary = ctx.summary ?? (await computeTranscriptSummary(ctx.transcript))
   if (!(effectiveSummary?.hasGitPush ?? false)) return { kind: "ok" }
 
-  // Check for CI evidence in current session tasks
-  let hasCiEvidence = anyTaskHasCiEvidence(ctx.allTasks)
+  const hasCiEvidence = await gatherCiEvidence(ctx, effectiveSummary ?? {})
+  if (hasCiEvidence) return { kind: "ok" }
 
-  // When task files are absent (cleaned up after completion), fall back to
-  // scanning transcript bash commands for explicit CI verification calls.
-  // Native task tools delete JSON files on completion, so allTasks=[] is
-  // normal for a clean session — the transcript is the authoritative record.
-  if (!hasCiEvidence && ctx.allTasks.length === 0) {
-    const bashCmds = effectiveSummary?.bashCommands ?? []
-    hasCiEvidence = bashCmds.some((cmd) => CI_CMD_RE.test(cmd))
+  const planSteps = buildCiEvidenceBlockPlan()
+  await mergeActionPlanIntoTasks(
+    planSteps.map((s) => s.description),
+    ctx.sessionId,
+    ctx.cwd
+  )
+
+  return {
+    kind: "ci-evidence",
+    reason:
+      "All tasks are completed but none have CI verification evidence.\n\n" +
+      "The push+CI lifecycle rule requires a completed task with evidence " +
+      "confirming CI passed (e.g. 'CI green', 'conclusion: success').\n\n" +
+      formatActionPlan(
+        planSteps.map((s) => s.description),
+        {
+          translateToolNames: true,
+          observedToolNames: ctx.observedToolNames,
+        }
+      ),
+    planSteps,
   }
-
-  // If not found locally, search sibling sessions
-  if (!hasCiEvidence && ctx.transcript) {
-    hasCiEvidence = await findCiEvidenceInSiblings(ctx.transcript, ctx.sessionId, ctx.home)
-  }
-
-  // If still not found, block with guidance
-  if (!hasCiEvidence) {
-    const planSteps: ActionPlanItem[] = [
-      {
-        description: 'Create a "Push and verify CI" task and mark it in_progress.',
-        priority: 1,
-      },
-      {
-        description: "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
-        priority: 2,
-      },
-      {
-        description:
-          "Mark the task completed via TaskUpdate (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>",
-        priority: 3,
-      },
-    ]
-
-    await mergeActionPlanIntoTasks(
-      planSteps.map((s) => s.description),
-      ctx.sessionId,
-      ctx.cwd
-    )
-
-    return {
-      kind: "ci-evidence",
-      reason:
-        "All tasks are completed but none have CI verification evidence.\n\n" +
-        "The push+CI lifecycle rule requires a completed task with evidence " +
-        "confirming CI passed (e.g. 'CI green', 'conclusion: success').\n\n" +
-        formatActionPlan(
-          planSteps.map((s) => s.description),
-          {
-            translateToolNames: true,
-            observedToolNames: ctx.observedToolNames,
-          }
-        ),
-      planSteps,
-    }
-  }
-
-  return { kind: "ok" }
 }

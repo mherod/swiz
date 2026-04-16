@@ -33,56 +33,48 @@ const pretoolusWorkflowPermissionsGate: SwizHook = {
     const toolInput = input.tool_input as Record<string, string | undefined> | undefined
     const filePath: string = (toolInput?.file_path ?? "").normalize("NFKC")
     if (!filePath) return {}
+    if (!/\.github\/workflows\/[^/]+\.ya?ml$/.test(filePath)) return {}
 
-    // Only check .github/workflows/ YAML files
-    const workflowPathRe = /\.github\/workflows\/[^/]+\.ya?ml$/
-    if (!workflowPathRe.test(filePath)) return {}
-
-    // Get the new content being written — Edit uses new_string, Write uses content
     const newContent: string = (toolInput?.new_string ?? toolInput?.content ?? "").normalize("NFKC")
+    if (!/^\s*permissions\s*:/m.test(newContent)) return {}
 
-    // Check if the new content contains a permissions: keyword
-    const permissionsRe = /^\s*permissions\s*:/m
-    if (!permissionsRe.test(newContent)) return {}
-
-    // Determine current and default branches
     const cwd = (input.cwd as string | undefined) ?? process.cwd()
     const currentBranch = await git(["branch", "--show-current"], cwd)
-    if (!currentBranch) return {} // Detached HEAD or not a git repo — allow
+    if (!currentBranch) return {}
 
     const defaultBranch = await getDefaultBranch(cwd)
-
-    // On default branch — allow (direct pushes to main are gated by other hooks)
     if (currentBranch === defaultBranch) {
       return preToolUseAllow(
         `Workflow permissions edit on default branch '${defaultBranch}' — allowed`
       )
     }
 
-    return preToolUseDeny(
-      [
-        "Workflow permission change blocked on non-default branch.",
-        "",
-        `  File: ${filePath}`,
-        `  Current branch: ${currentBranch}`,
-        `  Default branch: ${defaultBranch}`,
-        "",
-        "GitHub Actions security model: workflow `permissions:` changes made in a",
-        "PR branch do NOT take effect until merged to the default branch. This",
-        "creates a dangerous blind spot:",
-        "",
-        "  1. The elevated permissions appear inert during PR CI (runs with",
-        "     existing default-branch permissions)",
-        "  2. Reviewers may not scrutinize the change since 'it didn't break anything'",
-        "  3. Upon merge, the elevated permissions silently activate",
-        "",
-        "Instead of modifying workflow permissions:",
-        "  - Use repository Settings → Actions → General → Workflow permissions",
-        "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on the default branch only",
-        `  - If this change is intentional, make it directly on '${defaultBranch}'`,
-      ].join("\n")
-    )
+    return preToolUseDeny(buildPermissionsBlockMsg(filePath, currentBranch, defaultBranch))
   },
+}
+
+function buildPermissionsBlockMsg(file: string, branch: string, defaultBranch: string): string {
+  return [
+    "Workflow permission change blocked on non-default branch.",
+    "",
+    `  File: ${file}`,
+    `  Current branch: ${branch}`,
+    `  Default branch: ${defaultBranch}`,
+    "",
+    "GitHub Actions security model: workflow `permissions:` changes made in a",
+    "PR branch do NOT take effect until merged to the default branch. This",
+    "creates a dangerous blind spot:",
+    "",
+    "  1. The elevated permissions appear inert during PR CI (runs with",
+    "     existing default-branch permissions)",
+    "  2. Reviewers may not scrutinize the change since 'it didn't break anything'",
+    "  3. Upon merge, the elevated permissions silently activate",
+    "",
+    "Instead of modifying workflow permissions:",
+    "  - Use repository Settings → Actions → General → Workflow permissions",
+    "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on the default branch only",
+    `  - If this change is intentional, make it directly on '${defaultBranch}'`,
+  ].join("\n")
 }
 
 export default pretoolusWorkflowPermissionsGate

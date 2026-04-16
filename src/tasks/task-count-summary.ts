@@ -19,9 +19,19 @@ export function buildCountSummary(counts: {
   issueHints?: string[]
 }): string {
   const parts: string[] = [`Tasks: ${counts.inProgress} in_progress, ${counts.pending} pending.`]
+  appendPlanningFeedback(parts, counts)
+  appendHygieneFeedback(parts, counts)
+  return parts.join(" ")
+}
 
-  const needsPlanning = counts.pending === 0 || (counts.pending === 1 && counts.incomplete <= 2)
-
+function appendPlanningFeedback(
+  parts: string[],
+  counts: {
+    pending: number
+    incomplete: number
+    issueHints?: string[]
+  }
+): void {
   if (counts.pending === 0) {
     parts.push(
       "URGENT: Zero pending tasks. Task governance requires ≥2 pending tasks at all times. Use TaskCreate to add two pending tasks now: (1) a verification task for the current step (e.g. run tests, check output), and (2) a broader next-step task for the natural follow-on work (e.g. hardening, integration, cleanup)."
@@ -32,10 +42,23 @@ export function buildCountSummary(counts: {
     )
   }
 
-  if (needsPlanning && counts.issueHints && counts.issueHints.length > 0) {
+  if (
+    (counts.pending === 0 || (counts.pending === 1 && counts.incomplete <= 2)) &&
+    counts.issueHints &&
+    counts.issueHints.length > 0
+  ) {
     parts.push(`Open issues you could plan for: ${counts.issueHints.join("; ")}.`)
   }
+}
 
+function appendHygieneFeedback(
+  parts: string[],
+  counts: {
+    pending: number
+    inProgress: number
+    incomplete: number
+  }
+): void {
   if (counts.inProgress === 0 && counts.incomplete > 0) {
     parts.push(
       "No in_progress task. Transition a pending task to in_progress before starting implementation."
@@ -45,8 +68,6 @@ export function buildCountSummary(counts: {
       "Good task hygiene: you have a planning buffer (multiple pending tasks) and a single clear in_progress focus. That matches workflow expectations—keep updating status as you complete work and add pending tasks before the queue runs low."
     )
   }
-
-  return parts.join(" ")
 }
 
 export function buildCountSummaryFromTasks(

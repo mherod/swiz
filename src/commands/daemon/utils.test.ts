@@ -58,7 +58,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 describe("transcriptWatchPathsForProject", () => {
   test("returns correct number of watch paths", () => {
     const paths = transcriptWatchPathsForProject("/home/user/project")
-    expect(paths).toHaveLength(6)
+    expect(paths).toHaveLength(5)
   })
 
   test("each path has both path and label", () => {

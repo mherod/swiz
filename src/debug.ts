@@ -1,4 +1,19 @@
 /**
+ * Arguments accepted by the debug logger — mirrors `console.error` semantics.
+ * Includes `unknown` for catch-block errors (TS spec); this file is excluded
+ * from the `@typescript-eslint/no-restricted-types` ESLint rule.
+ */
+type LogArg =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | unknown
+  | readonly LogArg[]
+  | { [key: string]: LogArg }
+
+/**
  * Debug logger gated on SWIZ_DEBUG env var.
  * Silent by default — enable with SWIZ_DEBUG=1 for diagnostic output.
  *
@@ -6,7 +21,7 @@
  * cross-session resolution notices). Reserve stderrLog for user-facing
  * CLI output and hard failures only.
  */
-export const debugLog: (...args: unknown[]) => void = process.env.SWIZ_DEBUG
+export const debugLog: (...args: LogArg[]) => void = process.env.SWIZ_DEBUG
   ? console.error.bind(console)
   : () => {}
 
@@ -22,7 +37,7 @@ export const debugLog: (...args: unknown[]) => void = process.env.SWIZ_DEBUG
  * @param justification - Non-empty string explaining why stderr output is appropriate here.
  * @param args - Arguments forwarded to console.error.
  */
-export function stderrLog(justification: string, ...args: unknown[]): void {
+export function stderrLog(justification: string, ...args: LogArg[]): void {
   debugLog(`[stderrLog] ${justification}`)
   console.error(...args)
 }

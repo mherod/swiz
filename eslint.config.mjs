@@ -206,6 +206,9 @@ export default tseslint.config(
       "src/swiz-hook-commands.ts",
       "src/tools.ts",
       "src/transcript-schemas.ts",
+      "src/ai-providers.ts",
+      "src/debug.ts",
+      "src/git-helpers.ts",
       "**/*.test.ts",
     ],
     rules: {

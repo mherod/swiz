@@ -19,23 +19,11 @@ interface AuditEntry {
   timestamp?: string
 }
 
-export async function validateAuditLog(ctx: CompletionAuditContext): Promise<ValidationResult> {
-  // Skip validation if gate is disabled
-  if (!ctx.gates.auditLog) return { kind: "ok" }
-
-  // Skip if we have live task files
-  if (ctx.allTasks.length > 0) return { kind: "ok" }
-
-  // Skip if task tools were already used
-  if (ctx.taskToolUsed) return { kind: "ok" }
-
-  // Skip if agent doesn't have task tools
-  if (!agentHasTaskTools()) return { kind: "ok" }
-
-  // Try to read and parse audit log
-  const auditLog = join(ctx.tasksDir, ".audit-log.jsonl")
+async function parseAuditLogEntries(
+  auditLogPath: string
+): Promise<{ created: number; incomplete: number } | null> {
   try {
-    const auditText = await Bun.file(auditLog).text()
+    const auditText = await Bun.file(auditLogPath).text()
     const entries: AuditEntry[] = auditText
       .trim()
       .split("\n")
@@ -59,48 +47,60 @@ export async function validateAuditLog(ctx: CompletionAuditContext): Promise<Val
     const incomplete = Array.from(latestStatus.values()).filter((s) =>
       isIncompleteTaskStatus(s)
     ).length
-
-    // If tasks were created and none are incomplete, allow stop
-    if (created > 0 && incomplete === 0) return { kind: "ok" }
+    return { created, incomplete }
   } catch {
-    // Audit log doesn't exist or can't be parsed; check tool call threshold
+    return null
   }
+}
+
+export async function validateAuditLog(ctx: CompletionAuditContext): Promise<ValidationResult> {
+  // Skip validation if gate is disabled
+  if (!ctx.gates.auditLog) return { kind: "ok" }
+  // Skip if we have live task files
+  if (ctx.allTasks.length > 0) return { kind: "ok" }
+  // Skip if task tools were already used
+  if (ctx.taskToolUsed) return { kind: "ok" }
+  // Skip if agent doesn't have task tools
+  if (!agentHasTaskTools()) return { kind: "ok" }
+
+  // Try to read and parse audit log
+  const auditLog = join(ctx.tasksDir, ".audit-log.jsonl")
+  const stats = await parseAuditLogEntries(auditLog)
+  if (stats && stats.created > 0 && stats.incomplete === 0) return { kind: "ok" }
 
   // Check tool call threshold
-  if (ctx.toolCallCount >= TOOL_CALL_THRESHOLD) {
-    const planSteps: ActionPlanItem[] = [
-      {
-        description: "Use TaskCreate to create one task for each significant piece of work",
-        priority: 1,
-      },
-      {
-        description: "Use TaskUpdate to mark each task completed after recording the work",
-        priority: 2,
-      },
-    ]
+  if (ctx.toolCallCount < TOOL_CALL_THRESHOLD) return { kind: "ok" }
 
-    await mergeActionPlanIntoTasks(
-      planSteps.map((s) => s.description),
-      ctx.sessionId,
-      ctx.cwd
-    )
+  const planSteps: ActionPlanItem[] = [
+    {
+      description: "Use TaskCreate to create one task for each significant piece of work",
+      priority: 1,
+    },
+    {
+      description: "Use TaskUpdate to mark each task completed after recording the work",
+      priority: 2,
+    },
+  ]
 
-    return {
-      kind: "audit-log",
-      reason:
-        `No completed tasks on record (${ctx.toolCallCount} tool calls made).\n\n` +
-        formatActionPlan(
-          planSteps.map((s) => s.description),
-          {
-            translateToolNames: true,
-            observedToolNames: ctx.observedToolNames,
-          }
-        ),
-      planSteps,
-    }
+  await mergeActionPlanIntoTasks(
+    planSteps.map((s) => s.description),
+    ctx.sessionId,
+    ctx.cwd
+  )
+
+  return {
+    kind: "audit-log",
+    reason:
+      `No completed tasks on record (${ctx.toolCallCount} tool calls made).\n\n` +
+      formatActionPlan(
+        planSteps.map((s) => s.description),
+        {
+          translateToolNames: true,
+          observedToolNames: ctx.observedToolNames,
+        }
+      ),
+    planSteps,
   }
-
-  return { kind: "ok" }
 }
 
 const TOOL_CALL_THRESHOLD = 10
