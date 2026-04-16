@@ -371,6 +371,10 @@ function describeSyncState(ahead: number, behind: number): string {
   return ""
 }
 
+/** Critical warning displayed when the repository is in a detached HEAD state. */
+export const DETACHED_HEAD_WARNING =
+  "CRITICAL: You are in a DETACHED HEAD state (not on any branch). Any commits you make will be orphaned and potentially lost. To save your work, create a new branch using 'git switch -c <name>' or 'git checkout -b <name>'."
+
 /**
  * Single-line git summary for agent context (PostToolUse / status line style).
  * Produces coherent prose so the consuming model can parse it naturally.
@@ -380,10 +384,14 @@ function describeSyncState(ahead: number, behind: number): string {
 export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {
   const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
 
-  let line = `[git] On branch ${branch}`
+  let line = branch === "(detached)" ? "[git] HEAD is detached" : `[git] On branch ${branch}`
   line += describeUpstream(upstream, upstreamGone)
   line += describeWorkingTree(uncommitted)
   line += describeSyncState(ahead, behind)
+
+  if (branch === "(detached)") {
+    line += ` ${DETACHED_HEAD_WARNING}`
+  }
 
   if (collabMode !== "auto") {
     line += ` Collaboration mode: ${collabMode}.`

@@ -16,7 +16,11 @@ import {
   appendBranchProtectionFromStore,
   buildGitRelevantSettingLines,
 } from "../src/utils/git-post-tool-directives.ts"
-import { buildGitContextLine, type GitStatusV2 } from "../src/utils/git-utils.ts"
+import {
+  buildGitContextLine,
+  DETACHED_HEAD_WARNING,
+  type GitStatusV2,
+} from "../src/utils/git-utils.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
 
@@ -116,6 +120,10 @@ const posttoolusGitContext: SwizHook = {
     let directives: string[] = []
     if (shouldLoadDirectives(tool_name, input, gitStatus, isShellTool, GIT_ANY_CMD_RE)) {
       directives = await loadGitDirectives(cwd, effective, gitStatus!, getRepoSlug)
+    }
+
+    if (gitStatus?.branch === "(detached)") {
+      directives.push(DETACHED_HEAD_WARNING)
     }
 
     const finalContext = [statusLine, ...directives].filter(Boolean).join("\n")

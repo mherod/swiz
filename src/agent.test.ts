@@ -98,7 +98,6 @@ describe("agent.ts", () => {
       }
     })
   })
-
   describe("timeout and signal handling", () => {
     it("timeout creates internal AbortController if signal not provided", () => {
       const timeout = 5000

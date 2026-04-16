@@ -84,6 +84,7 @@ import pretooluseTaskGovernance, {
 import pretooluseTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.ts"
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import pretooluseTrunkModeBranchGate from "../hooks/pretooluse-trunk-mode-branch-gate.ts"
+import pretooluseTrunkModeWorktree from "../hooks/pretooluse-trunk-mode-worktree.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory-enforcement.ts"
@@ -337,6 +338,11 @@ const RAW_MANIFEST: HookGroup[] = [
       { hook: pretooluseNoReadyToBacklog },
       { hook: pretooluseNoIssueClose },
     ],
+  },
+  {
+    event: "preToolUse",
+    matcher: "EnterWorktree",
+    hooks: [{ hook: pretooluseTrunkModeWorktree }],
   },
   {
     event: "preToolUse",

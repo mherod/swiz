@@ -51,8 +51,7 @@ async function resolveEffectiveSettings(
  * Determine if git status warrants stop hook evaluation.
  */
 function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
-  const { branch, total, ahead, behind } = gitStatus
-  if (!branch || branch === "(detached)") return false
+  const { total, ahead, behind } = gitStatus
   if (total > 0) return true
   return ahead > 0 || behind > 0
 }

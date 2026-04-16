@@ -152,7 +152,12 @@ async function buildQualityBlockReason(
     })}`
   }
 
-  return `${reason}\n\n${formatActionPlan(["Fix all issues", "Commit and push before stopping"])}`
+  return `${reason}\n\n${formatActionPlan([
+    "Fix all issues",
+    "Commit your fixes",
+    "If in detached HEAD, save work to a new branch: `git switch -c <name>`",
+    "Push changes before stopping",
+  ])}`
 }
 
 async function collectFailures(

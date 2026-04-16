@@ -47,6 +47,14 @@ function pushSubStepsForPolicy(
   trunkMode: boolean,
   defaultBranch: string
 ): ActionPlanItem[] {
+  if (branch === "(detached)") {
+    return [
+      "You are in a detached HEAD state. Create a branch to save your work:",
+      "git switch -c <name>",
+      "git push origin <name>",
+    ]
+  }
+
   const onDefault = isDefaultBranch(branch, defaultBranch)
 
   if (trunkMode && onDefault) {
@@ -126,11 +134,14 @@ function buildPushSteps(p: PushStepParams): [string, ActionPlanItem[]] {
     onDefault &&
     !allowsDirectMainCollaborationWorkflow(collabMode)
 
-  const pushHeader = mainBlocked
-    ? `Move commits off '${branch}' to a feature branch:`
-    : ahead > 0
-      ? `Push ${ahead} commit(s) to '${upstream}':`
-      : `Push your committed changes to '${upstream}':`
+  const pushHeader =
+    branch === "(detached)"
+      ? "Save your work to a new branch:"
+      : mainBlocked
+        ? `Move commits off '${branch}' to a feature branch:`
+        : ahead > 0
+          ? `Push ${ahead} commit(s) to '${upstream}':`
+          : `Push your committed changes to '${upstream}':`
   const subSteps: ActionPlanItem[] = []
   if (skillExists("push")) {
     subSteps.push("/push — Push to remote with collaboration guard")

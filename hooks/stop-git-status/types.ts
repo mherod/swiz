@@ -7,18 +7,9 @@
  * - GitWorkflowCollectResult: Result union for composition with stop-ship-checklist
  */
 
-export interface GitStatus {
-  branch: string
-  total: number
-  modified: number
-  added: number
-  deleted: number
-  untracked: number
-  lines: string[]
-  upstream: string | null
-  ahead: number
-  behind: number
-}
+import type { GitStatusV2 } from "../../src/utils/git-utils.ts"
+
+export type GitStatus = GitStatusV2
 
 export interface GitContext {
   cwd: string

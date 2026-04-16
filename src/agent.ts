@@ -20,7 +20,6 @@ export function detectBestAgentCli(): AgentBackend | null {
 export function detectAgentCli(): AgentBackend | null {
   return Bun.which("agent") ? "agent" : null
 }
-
 export interface PromptAgentOptions extends Pick<PromptOptions, "signal" | "timeout"> {
   /**
    * When true, runs agent with --workspace <tmpdir> so it has no access
@@ -100,6 +99,5 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
   if (proc.exitCode !== 0) {
     throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`)
   }
-
   return output.trim()
 }
