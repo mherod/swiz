@@ -98,6 +98,7 @@ import stopAutoContinue from "../hooks/stop-auto-continue.ts"
 import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
 import stopDependabotPrs from "../hooks/stop-dependabot-prs.ts"
+import stopFarmOutIssues from "../hooks/stop-farm-out-issues.ts"
 import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
 import stopGitStatus from "../hooks/stop-git-status.ts"
 import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
@@ -234,6 +235,7 @@ const RAW_MANIFEST: HookGroup[] = [
 
       // External integrations
       { hook: stopDependabotPrs },
+      { hook: stopFarmOutIssues },
       { hook: stopPersonalRepoIssues },
 
       // Session wrap-up
