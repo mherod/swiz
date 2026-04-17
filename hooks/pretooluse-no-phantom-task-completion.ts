@@ -19,6 +19,8 @@
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { createDefaultTaskStore } from "../src/task-roots.ts"
+import { readTasks } from "../src/tasks/task-repository.ts"
 import {
   extractToolBlocksFromEntry,
   formatActionPlan,
@@ -50,6 +52,7 @@ interface RawInputFields {
   cwd: string
   transcriptPath: string
   sessionId: string | undefined
+  safeSessionId: string | undefined
 }
 
 /** True when block is a TaskUpdate/update_plan setting this task to in_progress. */
@@ -75,14 +78,16 @@ function extractRawFields(raw: {
   tool_input?: unknown
   cwd?: string
   transcript_path?: string
+  transcriptPath?: string
   session_id?: string
 }): RawInputFields {
   return {
     toolName: raw.tool_name ?? "",
     toolInput: (raw.tool_input ?? {}) as Record<string, any>,
     cwd: raw.cwd ?? process.cwd(),
-    transcriptPath: raw.transcript_path ?? "",
-    sessionId: resolveSafeSessionId(raw.session_id) ?? undefined,
+    transcriptPath: raw.transcript_path ?? raw.transcriptPath ?? "",
+    sessionId: raw.session_id,
+    safeSessionId: resolveSafeSessionId(raw.session_id) ?? undefined,
   }
 }
 
@@ -162,27 +167,43 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   input: unknown
 ): Promise<SwizHookOutput> {
   const raw = toolHookInputSchema.parse(input)
-  const { toolName, toolInput, cwd, transcriptPath, sessionId } = extractRawFields(raw)
+  const { toolName, toolInput, cwd, transcriptPath, sessionId, safeSessionId } =
+    extractRawFields(raw)
 
   if (!isCompletionCall(toolName, toolInput)) return {}
 
   const { taskId, description } = extractTaskFields(toolInput)
   if (!taskId) return {}
 
-  if (!(await isGitRepo(cwd))) return {}
+  // ALLOWANCE: If completing this task leaves at least 2 other tasks in_progress,
+  // we assume the session is sufficiently "busy" with real work to allow a
+  // potentially phantom/cleanup task without strict transcript evidence.
+  if (sessionId) {
+    const { tasksDir } = createDefaultTaskStore()
+    const tasks = await readTasks(sessionId, tasksDir)
+    const otherInProgress = tasks.filter((t) => t.id !== taskId && t.status === "in_progress")
+    if (otherInProgress.length >= 2) {
+      return preToolUseAllow(
+        `Task #${taskId}: ${otherInProgress.length} other tasks are in_progress — completion allowed (busy session).`
+      )
+    }
+  }
+
+  if (!(await isGitRepo(cwd))) return preToolUseAllow("Not a git repository.")
 
   if (hasTrackedEvidence(description)) {
     return preToolUseAllow(`Task #${taskId} completion includes traceable evidence.`)
   }
 
-  if (!transcriptPath) return {}
+  if (!transcriptPath) return preToolUseAllow("No transcript path available.")
 
   const lines = (await readSessionLines(transcriptPath)).filter((l) => l.trim())
-  if (lines.length === 0) return {}
+  if (lines.length === 0) return preToolUseAllow("Empty session transcript.")
 
   const { workCallCount, anchorFound } = scanTranscript(lines, taskId)
 
-  if (!anchorFound) return {}
+  if (!anchorFound)
+    return preToolUseAllow(`No in_progress transition for #${taskId} in transcript.`)
 
   if (workCallCount >= 1) {
     return preToolUseAllow(
@@ -190,7 +211,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  return preToolUseDeny(buildDenialMessage(taskId, sessionId))
+  return preToolUseDeny(buildDenialMessage(taskId, safeSessionId))
 }
 
 const pretooluseNoPhantomTaskCompletion: SwizToolHook = {
