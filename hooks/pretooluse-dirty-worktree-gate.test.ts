@@ -3,30 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_DIRTY_WORKTREE_THRESHOLD } from "../src/settings.ts"
-
-async function initGitRepo(dir: string): Promise<void> {
-  const init = Bun.spawn(["git", "init", dir], { stdout: "pipe", stderr: "pipe" })
-  await init.exited
-  const cfg = Bun.spawn(["git", "-C", dir, "config", "user.email", "test@test.com"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await cfg.exited
-  const cfg2 = Bun.spawn(["git", "-C", dir, "config", "user.name", "Test"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await cfg2.exited
-  // Create an initial commit so HEAD exists
-  await writeFile(join(dir, ".gitkeep"), "")
-  const add = Bun.spawn(["git", "-C", dir, "add", "."], { stdout: "pipe", stderr: "pipe" })
-  await add.exited
-  const commit = Bun.spawn(["git", "-C", dir, "commit", "-m", "init", "--no-verify"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await commit.exited
-}
+import { initGitRepo } from "./_test-git-init.ts"
 
 async function createDirtyFiles(dir: string, count: number): Promise<void> {
   for (let i = 0; i < count; i++) {
