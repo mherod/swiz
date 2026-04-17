@@ -10,7 +10,10 @@ async function writeTask(
   taskId: string,
   status: string
 ): Promise<void> {
-  const tasksDir = join(home, ".gemini", "tasks", sessionId)
+  // Match createDefaultTaskStore()'s resolution for the test subprocess,
+  // which inherits CLAUDECODE=1 from the parent session and so reads from
+  // ~/.claude/tasks, not ~/.gemini/tasks.
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
   await mkdir(tasksDir, { recursive: true })
   const task = {
     id: taskId,
