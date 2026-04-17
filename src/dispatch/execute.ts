@@ -47,6 +47,7 @@ import {
   logHeader,
   withLogBuffer,
 } from "./index.ts"
+import { backfillPayloadDefaults } from "./payload-backfill.ts"
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
@@ -151,34 +152,6 @@ export function getHookContext(
       ? ((payload.trigger ?? payload.hook_event_name) as string | undefined)
       : undefined
   return { toolName, trigger }
-}
-
-function backfillPayloadDefaults(payload: Record<string, any>): void {
-  if (!payload.cwd) {
-    const fallbackCwd =
-      process.env.GEMINI_CWD ||
-      process.env.GEMINI_PROJECT_DIR ||
-      process.env.CLAUDE_PROJECT_DIR ||
-      process.cwd()
-    payload.cwd = fallbackCwd
-    // Warn if cwd was cleared during normalization and we fell back to process.cwd()
-    if (
-      payload._cwdCleared &&
-      !process.env.GEMINI_CWD &&
-      !process.env.GEMINI_PROJECT_DIR &&
-      !process.env.CLAUDE_PROJECT_DIR
-    ) {
-      log(
-        `[warn] Dispatch: cwd was cleared during payload normalization (Cursor global dir detected) ` +
-          `and fell back to daemon process.cwd() (${fallbackCwd}). ` +
-          `Hooks will operate on the daemon's directory, not the user's project. ` +
-          `Ensure Cursor sends workspace_roots or the CLI layer injects cwd.`
-      )
-    }
-  }
-  if (!payload.session_id) {
-    payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-  }
 }
 
 interface CombinedManifestResult {
@@ -342,6 +315,10 @@ function logPayloadDiagnostics(
   if (!TOOL_NAME_OPTIONAL_EVENTS.has(canonicalEvent) && !payload.tool_name && !payload.toolName) {
     log(`   ⚠ missing tool_name`)
   }
+  const inferred = payload._inferredFields
+  if (Array.isArray(inferred) && inferred.length > 0) {
+    log(`   ⚠ inferred fields: ${inferred.join(", ")} — upstream agent sent incomplete payload`)
+  }
 }
 
 /**
@@ -365,7 +342,7 @@ interface DispatchContext {
   trigger: string | undefined
 }
 
-function buildDispatchContext(req: DispatchRequest): DispatchContext {
+async function buildDispatchContext(req: DispatchRequest): Promise<DispatchContext> {
   const { canonicalEvent, hookEventName, payloadStr, preParsedPayload } = req
 
   let payload: Record<string, any>
@@ -377,7 +354,7 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
     payload = parsed.payload
     normalizeAgentHookPayload(payload)
   }
-  backfillPayloadDefaults(payload)
+  await backfillPayloadDefaults(payload)
   const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
   for (const k of Object.keys(payload)) unset(payload, k)
   merge(payload, validated)
@@ -518,7 +495,7 @@ async function executeStrategyWithTimeout(
 /** Build hook log entries from executions and dispatch summary. */
 function buildDispatchLogEntries(
   executions: HookExecution[],
-  ctx: ReturnType<typeof buildDispatchContext>,
+  ctx: DispatchContext,
   dispatchDurationMs: number
 ): HookLogEntry[] {
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
@@ -560,7 +537,7 @@ function buildDispatchLogEntries(
 }
 
 async function injectEffectiveSettings(
-  ctx: ReturnType<typeof buildDispatchContext>,
+  ctx: DispatchContext,
   projectSettings: ProjectSwizSettings | null
 ): Promise<void> {
   const [globalSettings, projectState] = await Promise.all([
@@ -575,7 +552,7 @@ async function injectEffectiveSettings(
 }
 
 async function prepareDispatchGroups(
-  ctx: ReturnType<typeof buildDispatchContext>,
+  ctx: DispatchContext,
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>
 ) {
   const tReplay = performance.now()
@@ -607,7 +584,7 @@ function assertDispatchResponseMatchesWire(
 
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
-  const ctx = buildDispatchContext(req)
+  const ctx = await buildDispatchContext(req)
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {

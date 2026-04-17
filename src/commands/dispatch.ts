@@ -12,6 +12,7 @@ import {
   applyHookSettingFilters,
   assertDispatchInboundNotParseError,
   assertNormalizedDispatchPayload,
+  backfillPayloadDefaults,
   DISPATCH_ROUTES,
   didWriteDispatchResponse,
   formatTrace,
@@ -404,18 +405,13 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
   const incomingBeforeNormalize = structuredClone(payload)
   normalizeAgentHookPayload(payload)
+  // Recover/infer missing required fields from env vars, the dispatch route,
+  // and camelCase→snake_case aliases. The CLI runs in the project directory
+  // (Cursor/Claude launch it there), so `process.cwd()` is the correct project
+  // path. The daemon's own `process.cwd()` is the swiz installation root —
+  // without this step, hooks would operate on the wrong repository.
+  await backfillPayloadDefaults(payload)
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-  // Inject CLI process cwd into payload when agent didn't provide it.
-  // The CLI runs in the project directory (Cursor/Claude launches it there),
-  // so process.cwd() is the correct project path. The daemon's process.cwd()
-  // is the swiz installation root — without this injection, hooks would
-  // operate on the wrong repository.
-  if (!payload.cwd) {
-    payload.cwd = process.cwd()
-  }
-  if (!payload.session_id) {
-    payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-  }
   const cwd = payload.cwd as string
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
   const normalizedPayloadForCapture = structuredClone(payload)
@@ -545,16 +541,7 @@ export const dispatchCommand: Command = {
           throw new Error("Replay requires valid JSON object stdin payload")
         }
         normalizeAgentHookPayload(payload)
-        if (!payload.cwd) {
-          payload.cwd =
-            process.env.GEMINI_CWD ||
-            process.env.GEMINI_PROJECT_DIR ||
-            process.env.CLAUDE_PROJECT_DIR ||
-            process.cwd()
-        }
-        if (!payload.session_id) {
-          payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-        }
+        await backfillPayloadDefaults(payload)
         const validated = assertNormalizedDispatchPayload(canonicalEvent, payload)
         for (const k of Object.keys(payload)) delete payload[k]
         Object.assign(payload, validated)

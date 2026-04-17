@@ -69,8 +69,7 @@ alwaysApply: false
 - Output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`, etc. — call `process.exit(0)`. **DON'T** write raw `console.log(JSON.stringify(...))`.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })`. DON'T use `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
-- **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload.
-- **Cursor cwd**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside. Captures in `/tmp/swiz-incoming/` (~10m retention); `SWIZ_CAPTURE_INCOMING=0` disables.
+- **Dispatch enrichment**: `performDispatch` injects `_effectiveSettings` + `_terminal`. Cursor cwd: `normalizeAgentHookPayload` uses `workspace_roots` when empty/outside. Captures in `/tmp/swiz-incoming/` (~10m); `SWIZ_CAPTURE_INCOMING=0` disables.
 - **File-path guard**: Use `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
 - **Git utilities**: `src/utils/hook-utils.ts` (regexes, extractors, helpers), `src/git-helpers.ts` (classifiers, queries). DO NOT define locally; import canonical source.
 - **GitHub API throttle**: `await acquireGhSlot()` before `gh` calls (4500 req/hr limit). Exempt: `gh auth status`, `gh run watch`.
@@ -115,7 +114,7 @@ alwaysApply: false
 **Enforcement (3-gate system):**
 1. **Stop gate** (`hooks/stop-incomplete-tasks/evaluate.ts`): Blocks stop if incomplete tasks remain. Allow only when all tasks `completed` or `deleted`.
 2. **Transition gate** (`pretooluse-task-transition-validator.ts`): Block `TaskUpdate` from `pending` to `completed`. Require `pending` → `in_progress` → `completed`.
-3. **Phantom gate** (`pretooluse-phantom-task-detector.ts`): Block `TaskUpdate` to `completed` without substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep). Require evidence in description.
+3. **Phantom gate** (`pretooluse-no-phantom-task-completion.ts`): Block `TaskUpdate` to `completed` without substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep). Require evidence in description.
 
 **Rate limit:** `pretooluse-task-completion-rate-limit.ts` — max 2 completions per 5 seconds. Requires `TaskList` before each completion.
 
@@ -267,3 +266,6 @@ alwaysApply: false
 - **DON'T**: Call `detectTerminal()` in daemon — read `_terminal` from payload. DON'T `JSON.parse(enrichedPayloadStr)` per hook — use `buildSpawnContext()` once.
 - **DON'T**: `merge({}, payload, ...)` — mutate directly. Deep clones duplicate `_env` (~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only.
 - **DO**: Cap AI prompt context size in hooks. Trace actual code path (daemon vs CLI) when diagnosing dispatch failures.
+
+### Payload Backfill
+- **DO**: `backfillPayloadDefaults()` (`src/dispatch/payload-backfill.ts`): cwd payload→`$GEMINI_CWD`/`$GEMINI_PROJECT_DIR`/`$CLAUDE_PROJECT_DIR`→`process.cwd()`; session_id payload→`$GEMINI_SESSION_ID`→latest `~/.claude/projects/<projectKey>/*.jsonl` mtime→`"unknown-session"`. CLI injects cwd pre-forward. Disk scan skipped when cwd=`process`. Records `payload._inferredFields`.

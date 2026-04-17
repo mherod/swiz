@@ -93,6 +93,7 @@ export {
   scheduleIncomingDispatchCapture,
   shouldCaptureIncomingPayloads,
 } from "./incoming-capture.ts"
+export { backfillPayloadDefaults } from "./payload-backfill.ts"
 export { normalizeAgentHookPayload } from "./payload-normalize.ts"
 export {
   formatTrace,
