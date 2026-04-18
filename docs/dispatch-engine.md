@@ -30,7 +30,6 @@ Defined in `src/dispatch/index.ts`. Maps canonical event names to dispatch strat
 | `subagentStart` | `context` |
 | `subagentStop` | `blocking` |
 | `sessionEnd` | `blocking` |
-| `prPoll` | `blocking` |
 
 ---
 
@@ -140,7 +139,7 @@ Used for `preToolUse` events (before a tool call executes).
 
 ### `runBlocking` — Block forwarding for stop/postToolUse
 
-Used for `stop`, `postToolUse`, `subagentStop`, `sessionEnd`, `prPoll`.
+Used for `stop`, `postToolUse`, `subagentStop`, `sessionEnd`.
 
 **Key difference between `stop` and `postToolUse`:**
 - **`stop`**: runs ALL hooks even after the first block (`runAllHooks = true`). This collects all violations. Only the first block response is forwarded to the agent, but every hook runs.

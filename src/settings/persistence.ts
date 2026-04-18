@@ -498,11 +498,6 @@ export function getSwizSettingsPath(home = getHomeDirOrNull()): string | null {
   return join(home, ".swiz", "settings.json")
 }
 
-export function getPrPollStatePath(home = getHomeDirOrNull()): string | null {
-  if (!home) return null
-  return join(home, ".swiz", "pr-poll-state.json")
-}
-
 // ─── Settings TTL cache ──────────────────────────────────────────────────────
 
 const SETTINGS_TTL_MS = 5_000

@@ -5,7 +5,6 @@
 export {
   DEFAULT_SETTINGS,
   getProjectSettingsPath,
-  getPrPollStatePath,
   getStatePath,
   getSwizSettingsPath,
   invalidateSettingsCache,

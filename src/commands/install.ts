@@ -1,5 +1,5 @@
 import { AGENTS, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
-import { DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
@@ -7,6 +7,10 @@ import { readProjectSettings, writeProjectSettings } from "../settings.ts"
 import { HOOKS_DIR } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { DAEMON_PORT } from "./daemon/daemon-admin.ts"
+import { agentConfigSyncCheck } from "./doctor/checks/agent-config-sync.ts"
+import { configScriptsCheck } from "./doctor/checks/config-scripts.ts"
+import { scriptPermissionsCheck } from "./doctor/checks/script-permissions.ts"
+import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "./doctor/types.ts"
 import { installAgent } from "./install/agent-helpers.ts"
 import {
   installDaemonForCli,
@@ -46,8 +50,7 @@ function parseInstallRunOptions(args: string[]): InstallRunOptions {
   const daemon = args.includes("--daemon")
   const portIdx = args.indexOf("--port")
   const rawPort = portIdx !== -1 ? Number(args[portIdx + 1]) : Number.NaN
-  const daemonPort =
-    daemon && Number.isFinite(rawPort) ? rawPort : daemon ? DAEMON_PORT : DAEMON_PORT
+  const daemonPort = daemon && Number.isFinite(rawPort) ? rawPort : DAEMON_PORT
 
   return {
     jsonOutput,
@@ -117,9 +120,10 @@ async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOption
 
 async function runOptionalUninstallSteps(opts: InstallRunOptions): Promise<void> {
   const all = isFullUninstall(opts)
+  // Tear down daemon first — it holds hot-reloaded hook modules in memory.
+  if (all || opts.daemon) await uninstallDaemonForCli(opts.dryRun)
   if (all || opts.mergeTool) await uninstallMergeTool(opts.dryRun)
   if (all || opts.statusLine) await uninstallStatusLine(opts.dryRun)
-  if (all || opts.daemon) await uninstallDaemonForCli(opts.dryRun)
 }
 
 function logPluginResults(
@@ -215,6 +219,72 @@ async function installProjectHooks(dryRun: boolean): Promise<void> {
   )
 }
 
+const VERIFY_CHECKS: DiagnosticCheck[] = [
+  agentConfigSyncCheck,
+  configScriptsCheck,
+  scriptPermissionsCheck,
+]
+
+function printVerifyResult(result: CheckResult): void {
+  const icon =
+    result.status === "pass"
+      ? `${GREEN}✓${RESET}`
+      : result.status === "warn"
+        ? `${YELLOW}!${RESET}`
+        : `${RED}✗${RESET}`
+  const detailColor = result.status === "fail" ? RED : result.status === "warn" ? YELLOW : DIM
+  console.log(`    ${icon} ${BOLD}${result.name}${RESET}  ${detailColor}${result.detail}${RESET}`)
+}
+
+async function verifyInstallation(dryRun: boolean): Promise<void> {
+  if (dryRun) return
+  console.log(`  ${BOLD}Post-install verification:${RESET}`)
+  const ctx: DiagnosticContext = { fix: false, store: {} }
+  const results: CheckResult[] = []
+  for (const check of VERIFY_CHECKS) {
+    const r = await check.run(ctx)
+    if (Array.isArray(r)) results.push(...r)
+    else results.push(r)
+  }
+  for (const r of results) printVerifyResult(r)
+  const failures = results.filter((r) => r.status === "fail").length
+  const warnings = results.filter((r) => r.status === "warn").length
+  const passes = results.filter((r) => r.status === "pass").length
+  const summary =
+    `${GREEN}${passes} passed${RESET}` +
+    (warnings > 0 ? `, ${YELLOW}${warnings} warning(s)${RESET}` : "") +
+    (failures > 0 ? `, ${RED}${failures} failure(s) — run: swiz doctor${RESET}` : "")
+  console.log(`    ${summary}\n`)
+}
+
+async function uninstallProjectHooks(dryRun: boolean): Promise<void> {
+  const settings = await readProjectSettings(process.cwd())
+  if (!settings?.hooks?.length) return
+
+  const managedEvents = new Set(["commitMsg", "preCommit", "prePush"])
+  const pruned = settings.hooks.filter(
+    (g) => !(managedEvents.has(g.event) && (!g.hooks || g.hooks.length === 0))
+  )
+  const removedCount = settings.hooks.length - pruned.length
+
+  if (removedCount === 0) {
+    console.log(`  ${DIM}Project hooks: no managed empty groups to remove${RESET}\n`)
+    return
+  }
+
+  if (dryRun) {
+    console.log(
+      `  ${YELLOW}- Project hooks: remove ${removedCount} empty managed group(s) from .swiz/config.json${RESET}\n`
+    )
+    return
+  }
+
+  await writeProjectSettings(process.cwd(), { hooks: pruned })
+  console.log(
+    `  ${YELLOW}✗${RESET} Project hooks: removed ${removedCount} managed group(s) from .swiz/config.json\n`
+  )
+}
+
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
 export const installCommand: Command = {
@@ -227,14 +297,10 @@ export const installCommand: Command = {
     {
       flags: "--uninstall",
       description:
-        "Remove all swiz integration (hooks, mergetool, status-line, pr-poll, daemon); add flags below to limit scope",
+        "Remove all swiz integration (hooks, mergetool, status-line, daemon); add flags below to limit scope",
     },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },
-    {
-      flags: "--pr-poll",
-      description: "Install LaunchAgent that polls PR reviews/comments every 5min",
-    },
     { flags: "--daemon", description: "Install swiz daemon as a LaunchAgent (default port 7943)" },
     { flags: "--port <port>", description: "Port for daemon when using --daemon (default: 7943)" },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
@@ -256,6 +322,7 @@ export const installCommand: Command = {
       await runOptionalUninstallSteps(opts)
       await uninstallSwizMcpServerStep(args, opts)
       await uninstallHooksForTargets(args, opts)
+      if (isFullUninstall(opts)) await uninstallProjectHooks(opts.dryRun)
       if (!opts.dryRun && isFullUninstall(opts)) await pauseSessionstartSelfHeal()
       if (opts.dryRun) {
         console.log("  No changes written.\n")
@@ -270,6 +337,8 @@ export const installCommand: Command = {
     if (await installHooksForTargets(args, opts)) return
     if (opts.dryRun) {
       console.log("  No changes written.\n")
+    } else if (shouldInstallHooks(args, opts)) {
+      await verifyInstallation(opts.dryRun)
     }
   },
 }

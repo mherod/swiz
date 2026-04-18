@@ -33,7 +33,7 @@ alwaysApply: false
   3. If new event: update `DISPATCH_ROUTES` in `src/dispatch/index.ts` and each agent `eventMap` in `src/agents.ts`.
   4. Run `swiz install --dry-run`.
   5. Run `swiz install` to write dispatch entries.
-- Add hook flow (non-agent/scheduled events like `preCommit`, `prPoll`):
+- Add hook flow (non-agent/scheduled events like `preCommit`, `prePush`):
   1. Add `hooks/<name>.ts`.
   2. Add entry to `manifest` with `scheduled: true` — skips agent eventMap validation and `swiz install`.
   3. Add `DISPATCH_ROUTES` entry in `src/dispatch/index.ts`.
@@ -232,7 +232,6 @@ alwaysApply: false
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
 - **DO**: Create workflow tasks for multi-commit sessions. Mark complete as steps finish.
-- **DO**: Route LaunchAgent `prPoll` via daemon first, fallback to `bun index.ts dispatch`.
 - **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` (they call `process.exit(0)`).
 ## Agent Behavior
 - **DON'T**: Ask permission — invocation is authorization. No "Shall I?", no capability announcements.
