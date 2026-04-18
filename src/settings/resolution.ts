@@ -134,6 +134,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "speak",
   "autoSteerTranscriptWatching",
   "transcriptMonitorMaxConcurrentDispatches",
+  "actionPlanMerge",
 ] as const satisfies ReadonlyArray<keyof ProjectSwizSettings & keyof SwizSettings>
 
 /** Resolve fields that support project-level overrides. */

@@ -634,6 +634,22 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         ? null
         : `Invalid value "${v}" for audit-strictness. Must be: ${auditStrictnessSchema.options.join(" | ")}`,
   },
+  {
+    key: "actionPlanMerge",
+    aliases: ["action-plan-merge", "actionplanmerge", "action_plan_merge"],
+    kind: "boolean",
+    scopes: ["global", "project"],
+    default: true,
+    docs: {
+      description:
+        "Allow stop/governance hooks to auto-create tasks from action plan steps via mergeActionPlanIntoTasks()",
+      effectExplanation:
+        "When enabled, hooks that block with an action plan (e.g. stop-ship-checklist, task governance) automatically create pending tasks for each plan step. When disabled, the action plan is shown in the block message but no tasks are created.",
+      enableDescription: "Auto-create tasks from hook action plan steps",
+      disableDescription:
+        "Show action plan steps in block messages only — do not auto-create tasks",
+    },
+  },
 ]
 
 /**

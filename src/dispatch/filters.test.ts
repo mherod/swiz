@@ -34,6 +34,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     strictNoDirectMain: false,
     trunkMode: false,
     autoTransition: true,
+    actionPlanMerge: true,
     auditStrictness: "strict",
     taskDurationWarningMinutes: 10,
     memoryLineThreshold: 1400,

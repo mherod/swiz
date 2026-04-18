@@ -7,6 +7,7 @@
 import { join } from "node:path"
 import { resolveTranslationAgent } from "./agent-paths.ts"
 import { type AgentDef, translateMatcher } from "./agents.ts"
+import { readSwizSettings } from "./settings/persistence.ts"
 import {
   extractStepsFromSkill,
   filterQualitySteps,
@@ -184,6 +185,8 @@ export async function mergeActionPlanIntoTasks(
   cwd?: string,
   mergeOptions?: MergeIntoTasksOptions
 ): Promise<number> {
+  const settings = await readSwizSettings()
+  if (!settings.actionPlanMerge) return 0
   const mergeSteps: MergeStep[] = filterQualitySteps(flattenToSteps(steps))
   if (mergeSteps.length === 0) return 0
   const created = await mergeIntoTasks(sessionId, mergeSteps, cwd, mergeOptions)

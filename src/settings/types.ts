@@ -144,6 +144,8 @@ export interface ProjectSwizSettings {
   allowedSkillCategories?: string[]
   /** Glob patterns for files exempt from large-file checks (e.g. "test-fixtures/**") */
   largeFileAllowPatterns?: string[]
+  /** When true, mergeActionPlanIntoTasks() auto-creates tasks from action plan steps in stop/governance hooks. */
+  actionPlanMerge?: boolean
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -230,6 +232,8 @@ export interface SwizSettings {
   largeFileSizeBlockKb: number
   /** Dirty-file count threshold for the worktree gate hook. */
   dirtyWorktreeThreshold: number
+  /** When true, mergeActionPlanIntoTasks() auto-creates tasks from action plan steps in stop/governance hooks. */
+  actionPlanMerge: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>
@@ -293,4 +297,5 @@ export const projectSettingsSchema = z.object({
   plugins: z.array(z.string().min(1)).optional(),
   allowedSkillCategories: z.array(z.string().min(1)).optional(),
   largeFileAllowPatterns: z.array(z.string().min(1)).optional(),
+  actionPlanMerge: z.boolean().optional(),
 })
