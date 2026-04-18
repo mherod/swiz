@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { hookIdentifier, manifest } from "./manifest.ts"
+import { bundledHookManifest, hookIdentifier } from "./manifest.ts"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const README_PATH = join(ROOT, "README.md")
@@ -97,7 +97,7 @@ function manifestCountsByEvent(): Record<string, number> {
     userPromptSubmit: "UserPromptSubmit",
   }
   const filesBySection: Record<string, Set<string>> = {}
-  for (const group of manifest) {
+  for (const group of bundledHookManifest) {
     const section = EVENT_TO_SECTION[group.event]
     if (!section) continue
     if (!filesBySection[section]) filesBySection[section] = new Set()
@@ -112,7 +112,7 @@ function manifestCountsByEvent(): Record<string, number> {
 
 function manifestHookFiles(): Set<string> {
   const files = new Set<string>()
-  for (const group of manifest) {
+  for (const group of bundledHookManifest) {
     for (const hook of group.hooks) {
       files.add(hookIdentifier(hook))
     }

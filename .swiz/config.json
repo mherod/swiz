@@ -23,5 +23,6 @@
       "hooks": []
     }
   ],
-  "autoSteerTranscriptWatching": true
+  "autoSteerTranscriptWatching": true,
+  "actionPlanMerge": false
 }

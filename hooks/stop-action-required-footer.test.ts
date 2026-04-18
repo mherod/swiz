@@ -160,7 +160,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     expect(result.reason).toContain(FOOTER_MARKER)
   })
 
-  test("stop-reflect-on-session-mistakes: missing skill invocation block includes footer", async () => {
+  test("stop-required-skills: missing skill invocation block includes footer", async () => {
     const dir = await tmp.create("swiz-stop-reflect-")
     await mkdir(join(dir, ".skills", "reflect-on-session-mistakes"), { recursive: true })
     await writeFile(join(dir, ".skills", "reflect-on-session-mistakes", "SKILL.md"), "# Reflect\n")
@@ -181,7 +181,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
       })}\n`
     )
     const result = await runStopHook(
-      "stop-reflect-on-session-mistakes.ts",
+      "stop-required-skills.ts",
       { cwd: dir, session_id: "test-reflect", transcript_path: transcriptPath },
       { cwd: dir, env: { CLAUDECODE: "1" } }
     )

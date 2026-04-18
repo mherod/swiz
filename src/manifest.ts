@@ -98,7 +98,6 @@ import stopAutoContinue from "../hooks/stop-auto-continue.ts"
 import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
 import stopDependabotPrs from "../hooks/stop-dependabot-prs.ts"
-import stopFarmOutIssues from "../hooks/stop-farm-out-issues.ts"
 import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
 import stopGitStatus from "../hooks/stop-git-status.ts"
 import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
@@ -114,7 +113,7 @@ import stopPrChangesRequested from "../hooks/stop-pr-changes-requested.ts"
 import stopPrDescription from "../hooks/stop-pr-description.ts"
 import stopPrFeedback from "../hooks/stop-pr-feedback.ts"
 import stopQualityChecks from "../hooks/stop-quality-checks.ts"
-import stopReflectOnSessionMistakes from "../hooks/stop-reflect-on-session-mistakes.ts"
+import stopRequiredSkills from "../hooks/stop-required-skills.ts"
 import stopSecretScanner from "../hooks/stop-secret-scanner.ts"
 import stopShipChecklist from "../hooks/stop-ship-checklist.ts"
 import stopSuppressionPatterns from "../hooks/stop-suppression-patterns.ts"
@@ -197,7 +196,7 @@ import { agentHasTaskTools } from "./agent-paths.ts"
 // Local import for types used in this file (re-exports don't create local bindings).
 import { type HookGroup, hookIdentifier } from "./hook-types.ts"
 
-const RAW_MANIFEST: HookGroup[] = [
+export const bundledHookManifest: HookGroup[] = [
   {
     event: "stop",
     hooks: [
@@ -235,11 +234,10 @@ const RAW_MANIFEST: HookGroup[] = [
 
       // External integrations
       { hook: stopDependabotPrs },
-      { hook: stopFarmOutIssues },
       { hook: stopPersonalRepoIssues },
 
       // Session wrap-up
-      { hook: stopReflectOnSessionMistakes },
+      { hook: stopRequiredSkills },
       { hook: stopAutoContinue },
       { hook: posttooluseSpeakNarrator },
     ],
@@ -498,9 +496,9 @@ const TASK_HOOK_IDENTIFIERS = new Set([
 
 const buildManifest = () => {
   const tasksEnabled = agentHasTaskTools()
-  if (tasksEnabled) return RAW_MANIFEST
+  if (tasksEnabled) return bundledHookManifest
 
-  return RAW_MANIFEST.map((group) => {
+  return bundledHookManifest.map((group) => {
     // Drop groups matched exclusively for task tools
     if (group.matcher && /Task|TodoWrite|update_plan/.test(group.matcher)) {
       return { ...group, hooks: [] }
