@@ -856,12 +856,29 @@ function pruneWindow(timestamps: number[], now: number): number[] {
   return timestamps.filter((t) => t > cutoff)
 }
 
-function checkCompletionRateLimit(sessionId: string): SwizHookOutput | null {
+interface TaskCounts {
+  pending: number
+  inProgress: number
+}
+
+function checkCompletionRateLimit(
+  sessionId: string,
+  taskCounts?: TaskCounts
+): SwizHookOutput | null {
   const now = Date.now()
   const existing = completionTimestamps.get(sessionId) ?? []
   const recent = pruneWindow(existing, now)
 
   if (recent.length >= MAX_COMPLETIONS_IN_WINDOW) {
+    // Bypass rate limit when the planning buffer is healthy: the agent has
+    // enough pending tasks queued that rapid completions are intentional
+    // progress, not governance-bypassing shortcuts.
+    if (taskCounts && taskCounts.pending >= 2 && taskCounts.inProgress >= 1) {
+      recent.push(now)
+      completionTimestamps.set(sessionId, recent)
+      return null
+    }
+
     completionTimestamps.set(sessionId, recent)
     const oldestInWindow = recent[0] ?? now
     const waitSec = Math.ceil((oldestInWindow + WINDOW_MS - now) / 1000)
@@ -953,13 +970,21 @@ async function handleTaskCompletion(
   sessionId: string,
   cwd: string | undefined
 ): Promise<SwizHookOutput | null> {
-  const rateLimited = checkCompletionRateLimit(sessionId)
+  // Read tasks first so counts are available for the rate-limit bypass check.
+  const diskTasks = await readSessionTasks(sessionId)
+  const allTasks = overlayEventState(diskTasks, sessionId)
+
+  const incompleteBefore = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
+  const pendingBefore = incompleteBefore.filter((t) => t.status === "pending")
+  const inProgressBefore = incompleteBefore.filter((t) => t.status === "in_progress")
+  const rateLimited = checkCompletionRateLimit(sessionId, {
+    pending: pendingBefore.length,
+    inProgress: inProgressBefore.length,
+  })
   if (rateLimited) return rateLimited
 
   // Check governance thresholds: completing this task must not drop
   // pending count below 2, even if it drops incomplete below the minimum.
-  const diskTasks = await readSessionTasks(sessionId)
-  const allTasks = overlayEventState(diskTasks, sessionId)
   const taskBeingCompleted = allTasks.find((t) => t.id === taskId)
 
   if (taskBeingCompleted && isIncompleteTaskStatus(taskBeingCompleted.status)) {
