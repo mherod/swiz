@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   appendFileSync,
   mkdirSync,
@@ -56,9 +57,8 @@ interface ChannelEvent {
  * Includes server identity to prove this is from the official swiz server.
  */
 function generateChannelAuthToken(projectKey: string, timestamp: number): string {
-  const crypto = require("crypto")
   const material = `${SERVER_NAME}:${SERVER_VERSION}:${projectKey}:${timestamp}`
-  return crypto.createHash("sha256").update(material).digest("hex")
+  return createHash("sha256").update(material).digest("hex")
 }
 
 // Typed loosely because the SDK is only loaded at runtime via dynamic import
