@@ -161,7 +161,7 @@ function isIntegrationBranch(branch: string): boolean {
 }
 
 /** Returns the PR's base (target) branch, or empty string on failure. */
-async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string> {
+async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string | null> {
   // Try IssueStore cache first (synced via issue-store-sync, includes baseRefName)
   try {
     const { getIssueStore } = await import("../src/issue-store.ts")
@@ -177,15 +177,15 @@ async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string> {
 
   // Fallback: query the GitHub API directly
   const repoSlug = await getRepoSlug(cwd)
-  if (!repoSlug) return ""
+  if (!repoSlug) return null
   try {
     const result = await ghJsonViaDaemon<{ base?: { ref?: string } }>(
       ["api", `repos/${repoSlug}/pulls/${prNumber}`],
       cwd
     )
-    return result?.base?.ref ?? ""
+    return result?.base?.ref ?? null
   } catch {
-    return ""
+    return null
   }
 }
 
@@ -248,15 +248,24 @@ async function handlePrMerge(
 
   const baseBranch = await getPrBaseBranch(prNumber, cwd)
 
+  if (baseBranch === null) {
+    return preToolUseDeny(`
+Pull Request verification failed.
+
+Could not determine the target branch for PR #${prNumber} (GitHub API request failed).
+Please verify the PR number and your network connection, then try again.
+`)
+  }
+
   // Allow merges to integration branches — part of the dev→main promotion workflow
-  if (baseBranch && isIntegrationBranch(baseBranch)) {
+  if (isIntegrationBranch(baseBranch)) {
     return preToolUseAllow(
       `Merge to integration branch '${baseBranch}' — allowed as part of the promotion workflow`
     )
   }
 
   // Only block merges to production branches
-  if (baseBranch && !isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
+  if (!isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
     return preToolUseAllow(`Merge to non-production branch '${baseBranch}' — allowed`)
   }
 
@@ -276,7 +285,7 @@ async function handlePrMerge(
 Merging ${prRef} via \`gh pr merge\` is currently blocked in ${repoContext}
 
 The PR is not in a fully approved, mergeable state (${prStatus.statusContext}).
-\`gh pr merge\` directly to '${baseBranch || defaultBranch}' is restricted to approved PRs.
+\`gh pr merge\` directly to '${baseBranch}' is restricted to approved PRs.
 
 Allowed merge paths:
   1. Wait for required CI checks and reviews to finish, then rerun \`gh pr merge\`
