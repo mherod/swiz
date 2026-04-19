@@ -18,13 +18,11 @@ import {
   fixStalePluginCache,
   type InvalidSkillEntry,
   type PluginCacheInfo,
-  SKILL_PLACEHOLDER_CATEGORY,
   type SkillConflict,
 } from "./doctor/fix.ts"
 import type { CheckResult } from "./doctor/types.ts"
 
 export { checkAgentConfigSync } from "./doctor/checks/agent-config-sync.ts"
-export { DEFAULT_ALLOWED_SKILL_CATEGORIES } from "./doctor/checks/invalid-skill-entries.ts"
 export { truncateJsonlFile } from "./doctor/cleanup.ts"
 export {
   type CleanupArgs,
@@ -121,17 +119,12 @@ async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
       `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
     )
   }
-  for (const item of r.categoryFixed) {
-    console.log(
-      `  ${GREEN}✓${RESET} ${item.name}: added category "${SKILL_PLACEHOLDER_CATEGORY}" to ${displayPath(item.skillPath)}`
-    )
-  }
   for (const item of r.failed) {
     console.log(
       `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
     )
   }
-  if (r.generated.length > 0 || r.nameFixed.length > 0 || r.categoryFixed.length > 0) {
+  if (r.generated.length > 0 || r.nameFixed.length > 0) {
     console.log()
   }
 }

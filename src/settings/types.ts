@@ -136,12 +136,6 @@ export interface ProjectSwizSettings {
   plugins?: string[]
   /** Project-local hook groups — merged after built-in and plugin hooks */
   hooks?: HookGroup[]
-  /**
-   * Allowed values for the `category:` frontmatter field in SKILL.md files.
-   * When set, `swiz doctor` flags any skill whose category is not in this list.
-   * When absent, the built-in default list in `DEFAULT_ALLOWED_SKILL_CATEGORIES` applies.
-   */
-  allowedSkillCategories?: string[]
   /** Glob patterns for files exempt from large-file checks (e.g. "test-fixtures/**") */
   largeFileAllowPatterns?: string[]
   /** When true, mergeActionPlanIntoTasks() auto-creates tasks from action plan steps in stop/governance hooks. */
@@ -295,7 +289,6 @@ export const projectSettingsSchema = z.object({
   taskDurationWarningMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
-  allowedSkillCategories: z.array(z.string().min(1)).optional(),
   largeFileAllowPatterns: z.array(z.string().min(1)).optional(),
   actionPlanMerge: z.boolean().optional(),
 })

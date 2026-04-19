@@ -247,8 +247,6 @@ function applyHooksAndCategories(obj: Record<string, any>, result: ProjectSwizSe
     const validated = normalizeProjectHooks(obj.hooks as unknown[])
     if (validated.length > 0) result.hooks = validated
   }
-  const categories = parseStringArray(obj.allowedSkillCategories)
-  if (categories.length > 0) result.allowedSkillCategories = categories
 }
 
 function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
@@ -300,14 +298,6 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)
   return result
-}
-
-function parseStringArray(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0) return []
-  const items = (value as unknown[]).filter(
-    (c): c is string => typeof c === "string" && c.trim().length > 0
-  )
-  return items.length === value.length ? items.map((c) => c.trim()) : []
 }
 
 /** Validate and normalize project-local hook groups from config JSON */

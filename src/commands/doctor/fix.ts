@@ -1,7 +1,6 @@
 import { cp, readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, getAgent } from "../../agents.ts"
-import { suggest } from "../../fuzzy.ts"
 import { getHomeDirWithFallback } from "../../home.ts"
 import { listProviderAdapters } from "../../provider-adapters.ts"
 import { defaultTrashPath } from "../../session-data-delete.ts"
@@ -26,8 +25,6 @@ const HOME = getHomeDirWithFallback("")
 
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
-/** Default category used by swiz doctor --fix when no category field is present or it is invalid. */
-export const SKILL_PLACEHOLDER_CATEGORY = "uncategorized"
 
 export function displayPath(path: string): string {
   return HOME && path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
@@ -66,8 +63,6 @@ type InvalidSkillKind =
   | "missing_frontmatter_fields"
   | "name_mismatch"
   | "placeholder_description"
-  | "missing_category"
-  | "invalid_category"
 
 export interface InvalidSkillEntry {
   name: string
@@ -122,37 +117,17 @@ function validateSkillContent(
   content: string,
   dirName: string,
   skillDir: string,
-  entryDir: string,
-  allowedCategories: ReadonlySet<string>
+  entryDir: string
 ): InvalidSkillEntry[] {
   const base = { name: dirName, skillDir, entryDir }
   const frontmatterIssues = validateSkillFrontmatter(content, dirName, base)
   if (frontmatterIssues.length > 0) return frontmatterIssues
-
-  const issues: InvalidSkillEntry[] = []
-  const rawCategory = parseFrontmatterField(content, "category")
-  if (!rawCategory) {
-    issues.push({ ...base, kind: "missing_category", reason: "missing category field" })
-    return issues
-  }
-  const cat = rawCategory.trim()
-  if (!allowedCategories.has(cat)) {
-    const suggestion = suggest(cat, allowedCategories)
-    const hint = suggestion ? ` (did you mean: "${suggestion}"?)` : ""
-    const allowed = [...allowedCategories].sort().join(", ")
-    issues.push({
-      ...base,
-      kind: "invalid_category",
-      reason: `unknown category "${cat}"${hint} — allowed: ${allowed}`,
-    })
-  }
-  return issues
+  return []
 }
 
 async function validateSkillEntry(
   entry: import("node:fs").Dirent,
-  skillDir: string,
-  allowedCategories: ReadonlySet<string>
+  skillDir: string
 ): Promise<InvalidSkillEntry[]> {
   if (!entry.isDirectory() || entry.name.startsWith(".")) return []
   const entryDir = join(skillDir, entry.name)
@@ -173,12 +148,10 @@ async function validateSkillEntry(
       },
     ]
   }
-  return validateSkillContent(content, entry.name, skillDir, entryDir, allowedCategories)
+  return validateSkillContent(content, entry.name, skillDir, entryDir)
 }
 
-export async function findInvalidSkillEntries(
-  allowedCategories: ReadonlySet<string>
-): Promise<InvalidSkillEntry[]> {
+export async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
   const invalid: InvalidSkillEntry[] = []
   for (const skillDir of SKILL_PRECEDENCE) {
     let entries: import("node:fs").Dirent[]
@@ -188,7 +161,7 @@ export async function findInvalidSkillEntries(
       continue
     }
     for (const entry of entries) {
-      invalid.push(...(await validateSkillEntry(entry, skillDir, allowedCategories)))
+      invalid.push(...(await validateSkillEntry(entry, skillDir)))
     }
   }
   invalid.sort((a, b) => a.name.localeCompare(b.name))
@@ -221,10 +194,6 @@ interface InvalidSkillGenerateSuccess {
   name: string
   skillPath: string
 }
-interface InvalidSkillCategoryFixSuccess {
-  name: string
-  skillPath: string
-}
 interface InvalidSkillFixFailure {
   name: string
   originalDir: string
@@ -248,40 +217,8 @@ async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName
 async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
   const skillPath = join(entry.entryDir, "SKILL.md")
   try {
-    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\ncategory: ${SKILL_PLACEHOLDER_CATEGORY}\n---\n`
+    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\n---\n`
     await Bun.write(skillPath, stub)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function fixMissingCategory(entry: InvalidSkillEntry): Promise<boolean> {
-  const skillPath = join(entry.entryDir, "SKILL.md")
-  try {
-    const content = await Bun.file(skillPath).text()
-    const updated = content.replace(
-      /^(description:\s*.+)$/m,
-      `$1\ncategory: ${SKILL_PLACEHOLDER_CATEGORY}`
-    )
-    if (updated === content) return false
-    await Bun.write(skillPath, updated)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
-  const skillPath = join(entry.entryDir, "SKILL.md")
-  try {
-    const content = await Bun.file(skillPath).text()
-    const updated = content.replace(
-      /^(category:\s*)["']?[^"'\n]+["']?/m,
-      `$1${SKILL_PLACEHOLDER_CATEGORY}`
-    )
-    if (updated === content) return false
-    await Bun.write(skillPath, updated)
     return true
   } catch {
     return false
@@ -291,12 +228,10 @@ async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
 export async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   nameFixed: InvalidSkillNameFixSuccess[]
   generated: InvalidSkillGenerateSuccess[]
-  categoryFixed: InvalidSkillCategoryFixSuccess[]
   failed: InvalidSkillFixFailure[]
 }> {
   const nameFixed: InvalidSkillNameFixSuccess[] = []
   const generated: InvalidSkillGenerateSuccess[] = []
-  const categoryFixed: InvalidSkillCategoryFixSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
   for (const entry of entries) {
     const skillPath = join(entry.entryDir, "SKILL.md")
@@ -324,31 +259,11 @@ export async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Prom
         }
         break
       }
-      case "missing_category":
-        if (await fixMissingCategory(entry)) categoryFixed.push({ name: entry.name, skillPath })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not insert category field into SKILL.md",
-          })
-        }
-        break
-      case "invalid_category":
-        if (await fixCategoryValue(entry)) categoryFixed.push({ name: entry.name, skillPath })
-        else {
-          failed.push({
-            name: entry.name,
-            originalDir: entry.entryDir,
-            error: "could not update category field in SKILL.md",
-          })
-        }
-        break
       default:
         failed.push({ name: entry.name, originalDir: entry.entryDir, error: entry.reason })
     }
   }
-  return { nameFixed, generated, categoryFixed, failed }
+  return { nameFixed, generated, failed }
 }
 
 export interface PluginCacheInfo {

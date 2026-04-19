@@ -37,7 +37,7 @@ async function createSkill(home: string, relativeRoot: string, skillName: string
   await mkdir(skillDir, { recursive: true })
   await writeFile(
     join(skillDir, "SKILL.md"),
-    `---\nname: ${skillName}\ndescription: test skill\ncategory: testing\n---\n`
+    `---\nname: ${skillName}\ndescription: test skill\n---\n`
   )
 }
 
@@ -381,7 +381,7 @@ describe("swiz doctor", () => {
   }, 60_000)
 
   // ── Skill validation: concurrent batch of read-only checks ──────────
-  test("detects invalid skill entries (frontmatter/category issues)", async () => {
+  test("detects invalid skill entries (frontmatter issues)", async () => {
     type SkillCase = {
       skillName: string
       skillPath: string
@@ -439,38 +439,6 @@ describe("swiz doctor", () => {
           "description is the generated placeholder",
         ],
       },
-      {
-        skillName: "no-category-skill",
-        skillPath: ".claude/skills/no-category-skill",
-        content: "---\nname: no-category-skill\ndescription: Does something useful.\n---\n",
-        expectContains: ["Invalid skill: no-category-skill", "missing category field"],
-      },
-      {
-        skillName: "bad-cat-skill",
-        skillPath: ".claude/skills/bad-cat-skill",
-        content:
-          "---\nname: bad-cat-skill\ndescription: Does something useful.\ncategory: not-a-real-category\n---\n",
-        expectContains: ["Invalid skill: bad-cat-skill", 'unknown category "not-a-real-category"'],
-      },
-      {
-        skillName: "typo-cat-skill",
-        skillPath: ".claude/skills/typo-cat-skill",
-        content:
-          "---\nname: typo-cat-skill\ndescription: Does something useful.\ncategory: tesing\n---\n",
-        expectContains: [
-          "Invalid skill: typo-cat-skill",
-          'unknown category "tesing"',
-          'did you mean: "testing"',
-        ],
-      },
-      {
-        skillName: "far-cat-skill",
-        skillPath: ".claude/skills/far-cat-skill",
-        content:
-          "---\nname: far-cat-skill\ndescription: Does something useful.\ncategory: zzzzzzzzzzzz\n---\n",
-        expectContains: ["Invalid skill: far-cat-skill"],
-        expectNotContains: ["did you mean"],
-      },
     ]
 
     await Promise.all(
@@ -511,7 +479,7 @@ describe("swiz doctor", () => {
         await mkdir(d, { recursive: true })
         await writeFile(
           join(d, "SKILL.md"),
-          "---\nname: real-skill\ndescription: Does something useful.\ncategory: productivity\n---\n"
+          "---\nname: real-skill\ndescription: Does something useful.\n---\n"
         )
       })(),
       (async () => {
@@ -535,7 +503,7 @@ describe("swiz doctor", () => {
         await mkdir(d, { recursive: true })
         await writeFile(
           join(d, "SKILL.md"),
-          '---\nname: "quoted-skill"\ndescription: test skill\ncategory: testing\n---\n'
+          '---\nname: "quoted-skill"\ndescription: test skill\n---\n'
         )
       })(),
       (async () => {
@@ -574,25 +542,6 @@ describe("swiz doctor", () => {
     // Dotdirectory ignored
     expect(dotdir.stdout).not.toContain("Invalid skill: .unison")
     expect(dotdir.stdout).toContain("no invalid skill entries found")
-  }, 60_000)
-
-  test("project allowedSkillCategories overrides default allowed list", async () => {
-    const home = await createTempHome()
-    const projectRoot = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "custom-cat-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: custom-cat-skill\ndescription: Does something useful.\ncategory: my-custom-category\n---\n"
-    )
-    const swizDir = join(projectRoot, ".swiz")
-    await mkdir(swizDir, { recursive: true })
-    await writeFile(
-      join(swizDir, "config.json"),
-      JSON.stringify({ allowedSkillCategories: ["my-custom-category"] })
-    )
-    const result = await runDoctor(home, [], projectRoot)
-    expect(result.stdout).not.toContain("Invalid skill: custom-cat-skill")
   }, 60_000)
 
   // ── Skill --fix tests ─────────────────────────────────────────────────
@@ -662,10 +611,7 @@ describe("swiz doctor", () => {
     const skillDir = join(home, ".claude", "skills", "my-skill")
     await mkdir(skillDir, { recursive: true })
     const skillMdPath = join(skillDir, "SKILL.md")
-    await writeFile(
-      skillMdPath,
-      "---\nname: wrong-name\ndescription: test skill\ncategory: testing\n---\n"
-    )
+    await writeFile(skillMdPath, "---\nname: wrong-name\ndescription: test skill\n---\n")
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
@@ -704,60 +650,5 @@ describe("swiz doctor", () => {
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).toContain("Invalid skill: stub-skill")
     expect(afterFix.stdout).toContain("description is the generated placeholder")
-  }, 60_000)
-
-  test("doctor --fix replaces unknown category value with default", async () => {
-    const home = await createTempHome()
-    const skillsDir = join(home, ".claude", "skills")
-    const skillDir = join(skillsDir, "bad-cat-fix-skill")
-    const skillMdPath = join(skillDir, "SKILL.md")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      skillMdPath,
-      "---\nname: bad-cat-fix-skill\ndescription: Does something useful.\ncategory: totally-invalid\n---\n"
-    )
-
-    const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
-    expect(fixRun.stdout).toContain("bad-cat-fix-skill")
-    expect(fixRun.stdout).toContain('added category "uncategorized"')
-
-    const { stat: statFn } = await import("node:fs/promises")
-    const dirStat = await statFn(skillDir)
-    expect(dirStat.isDirectory()).toBe(true)
-
-    const content = await Bun.file(skillMdPath).text()
-    expect(content).toContain("category: uncategorized")
-    expect(content).not.toContain("totally-invalid")
-
-    const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).not.toContain("Invalid skill: bad-cat-fix-skill")
-  }, 60_000)
-
-  test("doctor --fix adds default category to skill missing one", async () => {
-    const home = await createTempHome()
-    const skillsDir = join(home, ".claude", "skills")
-    const skillDir = join(skillsDir, "no-cat-skill")
-    const skillMdPath = join(skillDir, "SKILL.md")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      skillMdPath,
-      "---\nname: no-cat-skill\ndescription: Does something useful.\n---\n"
-    )
-
-    const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
-    expect(fixRun.stdout).toContain("no-cat-skill")
-    expect(fixRun.stdout).toContain('added category "uncategorized"')
-
-    const { stat: statFn } = await import("node:fs/promises")
-    const dirStat = await statFn(skillDir)
-    expect(dirStat.isDirectory()).toBe(true)
-
-    const content = await Bun.file(skillMdPath).text()
-    expect(content).toContain("category: uncategorized")
-
-    const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).not.toContain("Invalid skill: no-cat-skill")
   }, 60_000)
 })
