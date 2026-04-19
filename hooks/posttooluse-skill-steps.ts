@@ -32,6 +32,11 @@ const posttoolusSkillSteps: SwizHook<SkillToolInput> = {
   async: true,
 
   async run(input: SkillToolInput): Promise<SwizHookOutput> {
+    const settings = (input as Record<string, unknown>)._effectiveSettings as
+      | Record<string, unknown>
+      | undefined
+    if (!settings?.actionPlanMerge) return {}
+
     const params = extractSkillParams(input)
     if (!params) return {}
 

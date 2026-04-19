@@ -639,13 +639,13 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["action-plan-merge", "actionplanmerge", "action_plan_merge"],
     kind: "boolean",
     scopes: ["global", "project"],
-    default: true,
+    default: false,
     docs: {
       description:
-        "Allow stop/governance hooks to auto-create tasks from action plan steps via mergeActionPlanIntoTasks()",
+        "Allow hooks to auto-create tasks from action plan steps and skill steps (opt-in)",
       effectExplanation:
-        "When enabled, hooks that block with an action plan (e.g. stop-ship-checklist, task governance) automatically create pending tasks for each plan step. When disabled, the action plan is shown in the block message but no tasks are created.",
-      enableDescription: "Auto-create tasks from hook action plan steps",
+        "When enabled, hooks auto-create pending tasks from action plan steps (e.g. stop-ship-checklist, task governance) and from skill steps (posttooluse-skill-steps). Disabled by default — opt in to enable automatic task creation.",
+      enableDescription: "Auto-create tasks from hook action plan steps and skill steps",
       disableDescription:
         "Show action plan steps in block messages only — do not auto-create tasks",
     },
