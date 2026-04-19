@@ -1,7 +1,6 @@
 ---
 name: git-graph
 description: Visualize git branch history as an ASCII graph. Shows branch topology, merge points, tags, and recent commit messages. Use when orienting to branch structure, reviewing merge history, or understanding divergence points.
-category: git
 metadata:
   argument-hint: "[limit=30] [branch=--all]"
 ---

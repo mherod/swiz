@@ -18,6 +18,7 @@ import {
   fixStalePluginCache,
   type InvalidSkillEntry,
   type PluginCacheInfo,
+  removeInvalidCategoryFields,
   type SkillConflict,
 } from "./doctor/fix.ts"
 import type { CheckResult } from "./doctor/types.ts"
@@ -147,6 +148,17 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
       console.log()
     }
     await fixInvalidSkills(invalidSkillEntries)
+    const categoryCleanup = await removeInvalidCategoryFields()
+    if (categoryCleanup.cleaned.length > 0) {
+      console.log(`  ${BOLD}Removing invalid category fields from skills...${RESET}\n`)
+      for (const skillName of categoryCleanup.cleaned) {
+        console.log(`  ${GREEN}✓${RESET} ${skillName}: removed category field`)
+      }
+      for (const item of categoryCleanup.failed) {
+        console.log(`  ${RED}✗${RESET} ${item.skill}: could not clean (${item.error})`)
+      }
+      if (categoryCleanup.cleaned.length > 0) console.log()
+    }
     const pluginCacheMessages = await fixStalePluginCache(pluginCacheInfos)
     if (pluginCacheMessages.length > 0) {
       console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)

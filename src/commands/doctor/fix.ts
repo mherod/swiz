@@ -420,6 +420,45 @@ async function fixPluginCache(
   return { synced, updated, failed }
 }
 
+export async function removeInvalidCategoryFields(): Promise<{
+  cleaned: string[]
+  failed: { skill: string; error: string }[]
+}> {
+  const cleaned: string[] = []
+  const failed: { skill: string; error: string }[] = []
+
+  for (const skillDir of SKILL_PRECEDENCE) {
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(skillDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue
+      const skillPath = join(skillDir, entry.name, "SKILL.md")
+      try {
+        const file = Bun.file(skillPath)
+        if (!(await file.exists())) continue
+
+        const content = await file.text()
+        // Remove category field from frontmatter
+        const updated = content.replace(/^category:\s*[^\n]*\n/m, "")
+
+        if (updated !== content) {
+          await Bun.write(skillPath, updated)
+          cleaned.push(entry.name)
+        }
+      } catch (err: unknown) {
+        failed.push({ skill: entry.name, error: messageFromUnknownError(err) })
+      }
+    }
+  }
+
+  return { cleaned, failed }
+}
+
 function getAgentIdForDir(dir: string): string | null {
   const home = getHomeDirWithFallback("")
   const expandedDir = dir.startsWith("~/") ? join(home, dir.slice(2)) : dir
