@@ -17,7 +17,7 @@
  */
 
 import { type FSWatcher, watch } from "node:fs"
-import { readdir, stat } from "node:fs/promises"
+import { readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
@@ -173,6 +173,31 @@ async function listTaskFiles(dir: string): Promise<FileWithMtime[]> {
   return result
 }
 
+/** Completed tasks older than this are pruned from cache and disk on full reload. */
+const COMPLETED_TASK_PRUNE_AGE_MS = 15 * 60_000
+
+/**
+ * Remove completed tasks that have been done for more than COMPLETED_TASK_PRUNE_AGE_MS.
+ * Deletes their .json files from disk and returns only the surviving tasks.
+ * Fail-open: file deletion errors are silently ignored.
+ */
+async function pruneStaleCompleted(dir: string, tasks: SessionTask[]): Promise<SessionTask[]> {
+  const cutoff = Date.now() - COMPLETED_TASK_PRUNE_AGE_MS
+  const surviving: SessionTask[] = []
+  for (const task of tasks) {
+    if (task.status === "completed" && task.completedAt != null && task.completedAt < cutoff) {
+      try {
+        await unlink(join(dir, `${task.id}.json`))
+      } catch {
+        // already gone or locked — treat as pruned
+      }
+      continue
+    }
+    surviving.push(task)
+  }
+  return surviving
+}
+
 async function loadAllTasks(dir: string): Promise<{ tasks: SessionTask[]; maxMtimeMs: number }> {
   const fileEntries = await listTaskFiles(dir)
   let maxMtimeMs = 0
@@ -182,8 +207,9 @@ async function loadAllTasks(dir: string): Promise<{ tasks: SessionTask[]; maxMti
     const task = await readTaskFile(join(dir, entry.name))
     if (task) tasks.push(task)
   }
-  tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-  return { tasks, maxMtimeMs }
+  const pruned = await pruneStaleCompleted(dir, tasks)
+  pruned.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return { tasks: pruned, maxMtimeMs }
 }
 
 /**

@@ -518,6 +518,78 @@ describe("TaskStateCache", () => {
     })
   })
 
+  describe("stale completed task pruning", () => {
+    it("prunes completed tasks older than 15 minutes on full load", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-prune-old")
+
+      const staleTask: SessionTask = {
+        ...makeTask("1", "completed"),
+        completedAt: Date.now() - 16 * 60_000,
+      }
+      const keepTask = makeTask("2", "pending")
+      await writeTaskFile(sessionDir, staleTask)
+      await writeTaskFile(sessionDir, keepTask)
+
+      const state = await cache.getState("session-prune-old", sessionDir)
+      expect(state.tasks).toHaveLength(1)
+      expect(state.tasks[0]!.id).toBe("2")
+      expect(state.completedCount).toBe(0)
+
+      const pruned = Bun.file(join(sessionDir, "1.json"))
+      expect(await pruned.exists()).toBe(false)
+      cache.close()
+    })
+
+    it("keeps completed tasks younger than 15 minutes", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-prune-recent")
+
+      const recentTask: SessionTask = {
+        ...makeTask("1", "completed"),
+        completedAt: Date.now() - 5 * 60_000,
+      }
+      await writeTaskFile(sessionDir, recentTask)
+      await writeTaskFile(sessionDir, makeTask("2", "pending"))
+
+      const state = await cache.getState("session-prune-recent", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      expect(state.completedCount).toBe(1)
+
+      expect(await Bun.file(join(sessionDir, "1.json")).exists()).toBe(true)
+      cache.close()
+    })
+
+    it("never prunes non-completed tasks regardless of age", async () => {
+      const cache = new TaskStateCache({ maxEntries: 10 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-prune-open")
+
+      const oldPending: SessionTask = {
+        ...makeTask("1", "pending"),
+        completedAt: null,
+        statusChangedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      }
+      const oldInProgress: SessionTask = {
+        ...makeTask("2", "in_progress"),
+        completedAt: null,
+        statusChangedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      }
+      await writeTaskFile(sessionDir, oldPending)
+      await writeTaskFile(sessionDir, oldInProgress)
+
+      const state = await cache.getState("session-prune-open", sessionDir)
+      expect(state.tasks).toHaveLength(2)
+      expect(state.openCount).toBe(2)
+
+      expect(await Bun.file(join(sessionDir, "1.json")).exists()).toBe(true)
+      expect(await Bun.file(join(sessionDir, "2.json")).exists()).toBe(true)
+      cache.close()
+    })
+  })
+
   describe("event state pruning", () => {
     it("unwatchSession prunes event state for that session", async () => {
       const cache = new TaskStateCache({ maxEntries: 10 })
