@@ -51,6 +51,16 @@ interface ChannelEvent {
   meta?: Record<string, string>
 }
 
+/**
+ * Generate a stable authentication token for this MCP session.
+ * Includes server identity to prove this is from the official swiz server.
+ */
+function generateChannelAuthToken(projectKey: string, timestamp: number): string {
+  const crypto = require("crypto")
+  const material = `${SERVER_NAME}:${SERVER_VERSION}:${projectKey}:${timestamp}`
+  return crypto.createHash("sha256").update(material).digest("hex")
+}
+
 // Typed loosely because the SDK is only loaded at runtime via dynamic import
 // and we don't want the type system to pull those modules at compile time
 // from every call site that transitively reaches this file.
@@ -63,14 +73,26 @@ let activeServer: {
  * Safe to call before the server is connected — the event is dropped and a
  * warning is written to stderr.
  */
-export async function pushChannelEvent(event: ChannelEvent): Promise<void> {
+export async function pushChannelEvent(event: ChannelEvent, projectKey: string): Promise<void> {
   if (activeServer === null) {
     process.stderr.write("swiz mcp: pushChannelEvent called before server was connected\n")
     return
   }
+  const now = Date.now()
+  const authToken = generateChannelAuthToken(projectKey, now)
   await activeServer.server.notification({
     method: "notifications/claude/channel",
-    params: { content: event.content, meta: event.meta ?? {} },
+    params: {
+      content: event.content,
+      channel: {
+        uri: `mcp://swiz/${projectKey}`,
+        server: SERVER_NAME,
+        version: SERVER_VERSION,
+        auth_token: authToken,
+        timestamp: now,
+      },
+      meta: event.meta ?? {},
+    },
   })
 }
 
@@ -94,14 +116,17 @@ async function drainAutoSteersOnce(projectKey: string): Promise<void> {
       const req = store.consumeOneByProjectKey(projectKey, trigger)
       if (!req) break
       try {
-        await pushChannelEvent({
-          content: req.message,
-          meta: {
-            trigger: req.trigger,
-            session_id: req.sessionId,
-            created_at: String(req.createdAt),
+        await pushChannelEvent(
+          {
+            content: req.message,
+            meta: {
+              trigger: req.trigger,
+              session_id: req.sessionId,
+              created_at: String(req.createdAt),
+            },
           },
-        })
+          projectKey
+        )
       } catch (err) {
         const message = messageFromUnknownError(err)
         process.stderr.write(`swiz mcp: failed to push auto-steer event: ${message}\n`)
