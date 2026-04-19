@@ -99,6 +99,27 @@ describe("pretooluse-no-phantom-task-completion", () => {
     expect(result.reason).toContain("busy session")
   })
 
+  test("allows completion if 2 other tasks are pending", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-planned-"))
+    const home = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-planned-home-"))
+    await initGitRepo(dir)
+    const sessionId = "session-planned"
+    const transcriptPath = join(dir, "transcript.jsonl")
+    await writeFile(transcriptPath, "")
+
+    // Target task to complete
+    await writeTask(home, sessionId, "1", "in_progress")
+    // Two other pending tasks form the planning buffer
+    await writeTask(home, sessionId, "2", "pending")
+    await writeTask(home, sessionId, "3", "pending")
+
+    const toolInput = { taskId: "1", status: "completed", description: "done" }
+    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
+
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("planned session")
+  })
+
   test("blocks completion if only 1 other task is in_progress and no transcript evidence", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-lonely-"))
     const home = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-lonely-home-"))

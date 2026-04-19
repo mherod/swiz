@@ -176,8 +176,9 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   if (!taskId) return {}
 
   // ALLOWANCE: If completing this task leaves at least 2 other tasks in_progress,
-  // we assume the session is sufficiently "busy" with real work to allow a
-  // potentially phantom/cleanup task without strict transcript evidence.
+  // OR the session has at least 2 pending tasks queued, we assume the session
+  // has enough real work in flight or planned to allow a potentially
+  // phantom/cleanup task without strict transcript evidence.
   if (sessionId) {
     const { tasksDir } = createDefaultTaskStore()
     const tasks = await readTasks(sessionId, tasksDir)
@@ -185,6 +186,12 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     if (otherInProgress.length >= 2) {
       return preToolUseAllow(
         `Task #${taskId}: ${otherInProgress.length} other tasks are in_progress — completion allowed (busy session).`
+      )
+    }
+    const otherPending = tasks.filter((t) => t.id !== taskId && t.status === "pending")
+    if (otherPending.length >= 2) {
+      return preToolUseAllow(
+        `Task #${taskId}: ${otherPending.length} pending tasks queued — completion allowed (planned session).`
       )
     }
   }
