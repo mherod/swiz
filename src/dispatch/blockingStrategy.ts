@@ -3,14 +3,100 @@ import type { HookOutput } from "../schemas.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import { extractContext, type HookExecution, isBlock, log, writeResponse } from "./engine.ts"
+import type { EnrichedDispatchPayload } from "./execute.ts"
 import { compileStopReasons, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import {
   type HookExecutionStrategy,
   type HookStrategyContext,
   runStrategyPipeline,
-  tryAutoSteerStopBlock,
-  tryOnSessionStopDelivery,
-} from "./strategies.ts"
+} from "./strategy-base.ts"
+
+/** Resolved auto-steer context from an enriched payload. */
+interface StopAutoSteerContext {
+  sessionId: string
+  safeSession: string
+  terminalApp: string
+}
+
+async function resolveAutoSteerEnabled(
+  payload: EnrichedDispatchPayload,
+  sessionId: string
+): Promise<boolean> {
+  const injected = payload._effectiveSettings
+  if (injected && typeof injected.autoSteer === "boolean") return injected.autoSteer
+  const { isAutoSteerAvailable } = await import("../utils/hook-utils.ts")
+  return (await isAutoSteerAvailable(sessionId)) !== null
+}
+
+async function resolveStopAutoSteerContext(
+  enrichedPayloadStr: string
+): Promise<StopAutoSteerContext | null> {
+  const payload = JSON.parse(enrichedPayloadStr) as Record<string, any>
+  const sessionId = (payload.session_id as string) ?? ""
+  if (!sessionId) return null
+
+  const autoSteerEnabled = await resolveAutoSteerEnabled(payload, sessionId)
+  if (!autoSteerEnabled) return null
+
+  const { sanitizeSessionId } = await import("../../src/session-id.ts")
+  const safeSession = sanitizeSessionId(sessionId)
+  if (!safeSession) return null
+
+  const terminalApp = (payload._terminal as { app: string } | undefined)?.app ?? null
+  if (!terminalApp) return null
+
+  return { sessionId, safeSession, terminalApp }
+}
+
+async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boolean> {
+  const ctx = await resolveStopAutoSteerContext(enrichedPayloadStr)
+  if (!ctx) return false
+
+  const { getAutoSteerStore } = await import("../../src/auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  if (!store.hasPending(ctx.safeSession, "on_session_stop")) return false
+
+  const { sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const sent = new Set<string>()
+  let deliveredCount = 0
+  let batch = store.consumeOne(ctx.safeSession, "on_session_stop")
+  while (batch.length > 0) {
+    const req = batch[0]!
+    deliveredCount++
+    if (!sent.has(req.message)) {
+      const ok = await sendAutoSteer(req.message, ctx.terminalApp)
+      if (ok) {
+        log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
+      }
+      sent.add(req.message)
+    }
+    batch = store.consumeOne(ctx.safeSession, "on_session_stop")
+  }
+  log(`   on_session_stop: short-circuited ${deliveredCount} message(s) — skipping stop hooks`)
+  return true
+}
+
+async function tryAutoSteerStopBlock(
+  finalResponse: Record<string, any>,
+  enrichedPayloadStr: string
+): Promise<void> {
+  const blockReason = (finalResponse as { reason?: string }).reason ?? ""
+  if (!blockReason) return
+
+  const ctx = await resolveStopAutoSteerContext(enrichedPayloadStr)
+  if (!ctx) return
+
+  const { getAutoSteerStore: getStore } = await import("../../src/auto-steer-store.ts")
+  if (getStore().wasRecentlyDelivered(ctx.safeSession, blockReason, "on_session_stop")) return
+
+  const { sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const sent = await sendAutoSteer(blockReason, ctx.terminalApp)
+  if (!sent) return
+  log(
+    `   auto-steer: sent stop block reason to terminal (${ctx.terminalApp}) — converting to allow`
+  )
+  merge(finalResponse, { decision: "allow" })
+}
 
 /** Minimum time (ms) to collect stop hook responses before processing.
  * Slower hooks (e.g. `stop-personal-repo-issues` which queries the GitHub API)

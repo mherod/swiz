@@ -6,7 +6,7 @@ import {
   type HookExecutionStrategy,
   type HookStrategyContext,
   runStrategyPipeline,
-} from "./strategies.ts"
+} from "./strategy-base.ts"
 
 /**
  * PreToolUse strategy: short-circuits on first deny; collects and merges

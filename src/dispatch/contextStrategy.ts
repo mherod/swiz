@@ -4,7 +4,7 @@ import {
   type HookExecutionStrategy,
   type HookStrategyContext,
   runStrategyPipeline,
-} from "./strategies.ts"
+} from "./strategy-base.ts"
 
 /**
  * Context strategy: runs all hooks, merges additionalContext for

@@ -317,7 +317,8 @@ describe("BlockingStrategy stop aggregation", () => {
     //
     // The onResult for stop events must be undefined (no early abort).
     // Non-stop events still abort on first block.
-    const source = readFileSync(join(import.meta.dir, "strategies.ts"), "utf-8")
+    // BlockingStrategy was extracted to blockingStrategy.ts — read that file.
+    const source = readFileSync(join(import.meta.dir, "blockingStrategy.ts"), "utf-8")
 
     // The BlockingStrategy must use processAggregatedStopResults for stop events
     expect(source).toContain("processAggregatedStopResults")
