@@ -10,7 +10,12 @@
 
 import { z } from "zod"
 import { promptObject } from "../src/ai-providers.ts"
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  buildSplitContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
 import {
   appendBranchProtectionFromStore,
@@ -83,6 +88,48 @@ async function loadGitDirectives(
   return []
 }
 
+function buildBranchStateSystemMessage(
+  gitStatus: GitStatusV2,
+  effective: { trunkMode: boolean; strictNoDirectMain: boolean; collaborationMode: string }
+): string {
+  const { branch, total: uncommitted, ahead, behind } = gitStatus
+  const parts: string[] = []
+
+  if (uncommitted > 0) {
+    if (effective.trunkMode) {
+      parts.push(
+        `Working tree has ${uncommitted} uncommitted file(s). Trunk mode is active — commit directly to ${branch} using /commit.`
+      )
+    } else if (effective.strictNoDirectMain && (branch === "main" || branch === "master")) {
+      parts.push(
+        `Working tree has ${uncommitted} uncommitted file(s) on ${branch}. strictNoDirectMain is enabled — create a feature branch and open a PR instead of committing directly.`
+      )
+    } else {
+      parts.push(
+        `Working tree has ${uncommitted} uncommitted file(s) — use /commit before switching branches or stopping.`
+      )
+    }
+  }
+
+  if (ahead > 0) {
+    if (effective.collaborationMode === "team") {
+      parts.push(
+        `Branch is ${ahead} commit(s) ahead of upstream. Team collaboration mode — open a PR for review rather than pushing directly.`
+      )
+    } else if (effective.trunkMode) {
+      parts.push(`${ahead} commit(s) ahead of upstream — use /push to push ${branch} to remote.`)
+    } else {
+      parts.push(`${ahead} commit(s) ahead of upstream — use /push when ready.`)
+    }
+  }
+
+  if (behind > 0) {
+    parts.push(`Branch is ${behind} commit(s) behind upstream — pull to sync before pushing.`)
+  }
+
+  return parts.join(" ")
+}
+
 const posttoolusGitContext: SwizHook = {
   name: "posttooluse-git-context",
   event: "postToolUse",
@@ -95,7 +142,6 @@ const posttoolusGitContext: SwizHook = {
     if (!cwd) return {}
 
     const {
-      buildContextHookOutput,
       isShellTool,
       getRepoSlug,
       isGitRepo,
@@ -126,8 +172,10 @@ const posttoolusGitContext: SwizHook = {
       directives.push(DETACHED_HEAD_WARNING)
     }
 
-    const finalContext = [statusLine, ...directives].filter(Boolean).join("\n")
-    return finalContext ? buildContextHookOutput("PostToolUse", finalContext) : {}
+    const additionalContext = [statusLine, ...directives].filter(Boolean).join("\n")
+    if (!additionalContext) return {}
+    const systemMsg = gitStatus ? buildBranchStateSystemMessage(gitStatus, effective) : undefined
+    return buildSplitContextHookOutput("PostToolUse", additionalContext, systemMsg)
   },
 }
 

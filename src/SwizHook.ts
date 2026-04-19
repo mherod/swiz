@@ -177,6 +177,27 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
   })
 }
 
+/**
+ * Like `buildContextHookOutput` but with separate system-level directive and
+ * informational context. Use when the hook has a concise actionable message
+ * (systemMessage) that differs from the full status detail (additionalContext).
+ * If systemMessage is empty/whitespace, it is omitted from the output.
+ */
+export function buildSplitContextHookOutput(
+  eventName: string,
+  additionalContext: string,
+  systemMessage?: string
+): SwizHookOutput {
+  return hookOutputSchema.parse({
+    ...(systemMessage?.trim() ? { systemMessage } : {}),
+    suppressOutput: true,
+    hookSpecificOutput: hookSpecificOutputSchema.parse({
+      hookEventName: eventName,
+      additionalContext,
+    }),
+  })
+}
+
 // ─── PreToolUse output builders ─────────────────────────────────────────────
 // Inline equivalents of the process.exit-based helpers in hook-utils.ts.
 // These return output objects instead of terminating the process, making them
