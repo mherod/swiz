@@ -390,18 +390,15 @@ async function resolveFilteredGroups(
     preloadedProjectSettings = result.projectSettings
   }
 
-  const matchingGroups = combinedManifest.filter(
-    (g) => g.event === ctx.canonicalEvent && groupMatches(g, ctx.toolName, ctx.trigger)
-  )
+  const eventGroups = combinedManifest.filter((g) => g.event === ctx.canonicalEvent)
+  const matchingGroups = eventGroups.filter((g) => groupMatches(g, ctx.toolName, ctx.trigger))
   const filteredGroups = await applyHookSettingFilters(
     matchingGroups,
     ctx.payload,
     preloadedProjectSettings
   )
 
-  log(
-    `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === ctx.canonicalEvent).length} total`
-  )
+  log(`   matched ${matchingGroups.length} group(s) from ${eventGroups.length} total`)
   const skippedHooks = countHooks(matchingGroups) - countHooks(filteredGroups)
   if (skippedHooks > 0) {
     log(`   skipped ${skippedHooks} PR-merge hook(s) (pr-merge-mode disabled)`)
@@ -582,6 +579,20 @@ function assertDispatchResponseMatchesWire(
   parseValidatedAgentDispatchWireJson(response, canonicalEvent, hookEventName)
 }
 
+/**
+ * Build the minimal response for dispatch paths that run no hooks (non-git dir,
+ * no matching groups). Stop-like events still need a normalized allow envelope.
+ */
+function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
+  const response: Record<string, any> = {}
+  if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
+    normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
+    coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
+    if (!daemonContext) writeResponse(response)
+  }
+  return response
+}
+
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = await buildDispatchContext(req)
@@ -589,24 +600,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    const response: Record<string, any> = {}
-    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
-      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
-      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
-      if (!req.daemonContext) writeResponse(response)
-    }
+    const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
     return { response }
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
   if (filteredGroups.length === 0) {
-    const response: Record<string, any> = {}
-    if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
-      normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
-      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
-      if (!req.daemonContext) writeResponse(response)
-    }
+    const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
     return { response }
   }
@@ -673,7 +674,8 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
       void appendHookLogs(logEntries)
     }
 
-    if (!(typeof response.error === "string" && response.error.length > 0)) {
+    const hasDispatchError = typeof response.error === "string" && response.error.length > 0
+    if (!hasDispatchError) {
       if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
         normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       }

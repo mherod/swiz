@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { processBlockingResults } from "./blockingStrategy.ts"
 import type { HookExecution } from "./engine.ts"
-import { processBlockingResults } from "./strategies.ts"
 
 function makeHookExecution(file: string, status: HookExecution["status"] = "ok"): HookExecution {
   return {
