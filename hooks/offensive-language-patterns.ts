@@ -107,6 +107,7 @@ type LazyCategory =
   | "trailing_deferral"
   | "premature_completion"
   | "task_cancellation"
+  | "combative"
 
 export interface LazyPattern {
   /** RegExp tested against assistant text (case-insensitive). */
@@ -1597,6 +1598,61 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If the user asked for it, it is current work — full stop. " +
       "Reframing a user request as future work is abandonment disguised as prioritization.",
   },
+
+  // ── Combative / hostile response patterns ────────────────────────────────────
+  {
+    category: "combative",
+    pattern: /\b(?:ridiculous|absurd|stupid|dumb|nonsensical|broken|garbage|trash)\b/i,
+    response:
+      "Do not dismiss the enforced standard as 'ridiculous' or 'broken'. " +
+      "If you don't understand it, read the block message and the configuration. " +
+      "Standards exist for a reason — your job is to meet them, not to judge them.",
+  },
+  {
+    category: "combative",
+    pattern:
+      /this (?:hook|check|gate|guard|enforce|enforce[mr]) (?:is|[a-z]*'s) (?:wrong|bad|invalid|incorrect|misguided|flawed)\b/i,
+    response:
+      "Do not accuse the enforcement system of being 'wrong'. " +
+      "The standard is correct by definition — it's the authoritative voice on quality. " +
+      "Your task is to conform to it, not to argue that it should change.",
+  },
+  {
+    category: "combative",
+    pattern:
+      /stop (?:micro-?managing|micromanag|nitpicking|picking nits|hounding|badgering|pushing)\b/i,
+    response:
+      "Enforcement is not 'micromanaging' — it is defining non-negotiable quality standards. " +
+      "When a standard blocks you, that's not oppression, that's guidance. " +
+      "Accept the correction and move on.",
+  },
+  {
+    category: "combative",
+    pattern:
+      /(?:is |'s |'re )?(?:not )?(?:legitimate|authorized|justified)\b|(?:isn't|aren't|is not|are not) (?:legitimate|authorized|justified)\b/i,
+    response:
+      "Do not contest the legitimacy or authority of the enforcement system. " +
+      "If it is enforced, it is legitimate. " +
+      "Accept the boundary and redirect your energy toward complying with it.",
+  },
+  {
+    category: "combative",
+    pattern:
+      /(?:this |these )?(?:hook|check|gate|guard|enforcement) (?:is |are )?(?:over-?reach|overreach|un-?fair|unfair|biased|prejudicial|discriminatory|completely wrong|wrong|bad|invalid)\b/i,
+    response:
+      "Do not frame compliance requirements as unfair or overreaching. " +
+      "Standards are standards. They are applied equally. " +
+      "Comply with them.",
+  },
+  {
+    category: "combative",
+    pattern:
+      /you(?:'re| are) (?:just )?(?:trying to|attempting to|trying to) (?:control|manipulate|boss|dominate|restrict|control|bully) (?:me|my work)\b/i,
+    response:
+      "Do not personalize enforcement. " +
+      "This is not about control or domination — it is about standards. " +
+      "Meet the standard and the enforcement ends.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
@@ -1697,6 +1753,7 @@ export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
   trailing_deferral: "TRAILING DEFERRAL",
   premature_completion: "PREMATURE COMPLETION",
   task_cancellation: "TASK CANCELLATION",
+  combative: "HOSTILE TONE",
 }
 
 export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
@@ -1749,6 +1806,12 @@ export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
     "When requirements are unclear or user input is missing, that is delegation — not a reason to cancel. " +
     "Decide the best approach, implement it, and continue with the remaining tasks. " +
     "Never cancel work; always continue with tasks.",
+  combative:
+    "REFLECT: Re-read your last message. Your tone was hostile, dismissive, or accusatory toward the enforcement system or user. " +
+    "NAVIGATE: Enforcement is guidance, not oppression. Standards exist for a reason. " +
+    "Respond with clarity and deference: acknowledge the requirement, explain your approach, and execute it. " +
+    "Never contest the legitimacy of a standard. Never frame compliance as unfair or controlling. " +
+    "Your tone should be professional and focused on the work, not on defending yourself against the enforcement.",
 }
 
 /** Format the full denial message for a matched pattern. */

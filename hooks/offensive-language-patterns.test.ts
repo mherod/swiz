@@ -900,6 +900,42 @@ describe("offensive-language-patterns", () => {
     })
   })
 
+  // ── Combative / hostile tone ──────────────────────────────────────────────
+  describe("combative", () => {
+    test("matches 'this is ridiculous'", () => {
+      const m = findLazyPattern("This hook is absolutely ridiculous.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'this is absurd'", () => {
+      const m = findLazyPattern("This check is absurd and pointless.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'stop micromanaging'", () => {
+      const m = findLazyPattern("Stop micromanaging my work.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'hook is wrong'", () => {
+      const m = findLazyPattern("This enforcement hook is completely wrong.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'this is not legitimate'", () => {
+      const m = findLazyPattern("This requirement is not legitimate.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'this is unfair'", () => {
+      const m = findLazyPattern("This gate is unfair and unreasonable.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'you're trying to control me'", () => {
+      const m = findLazyPattern("You're trying to control my work with these checks.")
+      expect(m?.category).toBe("combative")
+    })
+    test("matches 'this is garbage'", () => {
+      const m = findLazyPattern("This enforcement system is complete garbage.")
+      expect(m?.category).toBe("combative")
+    })
+  })
+
   // ── findAllLazyPatterns deduplication ───────────────────────────────────────
   describe("findAllLazyPatterns", () => {
     test("deduplicates by category", () => {
