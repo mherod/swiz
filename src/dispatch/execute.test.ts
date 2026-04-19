@@ -115,35 +115,48 @@ describe("dispatch execute integration", () => {
       // stop hooks run, so this test never reads ~/.claude/tasks/ regardless of
       // the developer's real session state. Use a random session id to ensure no
       // collision with a real tasks directory under concurrent execution.
-      const req: DispatchRequest = {
-        canonicalEvent: "stop",
-        hookEventName: "Stop",
-        payloadStr: JSON.stringify({
-          cwd: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
-          session_id: crypto.randomUUID(),
-        }),
-        daemonContext: true,
+      // We also isolate process.env.HOME to prevent fallback behavior.
+      const originalHome = process.env.HOME
+      process.env.HOME = `/tmp/swiz-dispatch-no-git-${Date.now()}`
+      try {
+        const req: DispatchRequest = {
+          canonicalEvent: "stop",
+          hookEventName: "Stop",
+          payloadStr: JSON.stringify({
+            cwd: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
+            session_id: crypto.randomUUID(),
+          }),
+          daemonContext: true,
+        }
+        const result = await executeDispatch(req)
+        expect(result.response.continue).toBe(true)
+        expect(result.response.hookSpecificOutput).toBeUndefined()
+        expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+        expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+      } finally {
+        process.env.HOME = originalHome
       }
-      const result = await executeDispatch(req)
-      expect(result.response.continue).toBe(true)
-      expect(result.response.hookSpecificOutput).toBeUndefined()
-      expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
-      expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     })
 
     it("normalizes stop dispatch when manifest yields zero matching hook groups", async () => {
-      const req: DispatchRequest = {
-        canonicalEvent: "stop",
-        hookEventName: "Stop",
-        payloadStr: JSON.stringify({ cwd: process.cwd(), session_id: "stop-empty-manifest" }),
-        manifestProvider: async () => [],
-        daemonContext: true,
+      const originalHome = process.env.HOME
+      process.env.HOME = `/tmp/swiz-dispatch-empty-manifest-${Date.now()}`
+      try {
+        const req: DispatchRequest = {
+          canonicalEvent: "stop",
+          hookEventName: "Stop",
+          payloadStr: JSON.stringify({ cwd: process.cwd(), session_id: "stop-empty-manifest" }),
+          manifestProvider: async () => [],
+          daemonContext: true,
+        }
+        const result = await executeDispatch(req)
+        expect(result.response.continue).toBe(true)
+        expect(result.response.hookSpecificOutput).toBeUndefined()
+        expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+        expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
+      } finally {
+        process.env.HOME = originalHome
       }
-      const result = await executeDispatch(req)
-      expect(result.response.continue).toBe(true)
-      expect(result.response.hookSpecificOutput).toBeUndefined()
-      expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
-      expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     })
 
     it("rejects stop dispatch with invalid JSON stdin", async () => {
