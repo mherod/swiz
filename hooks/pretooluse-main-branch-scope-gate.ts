@@ -189,6 +189,40 @@ async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string> {
   }
 }
 
+/** Returns the PR's mergeable status and required review state. */
+async function getPrMergeability(
+  prNumber: string,
+  cwd: string
+): Promise<{ mergeable: boolean; statusContext: string }> {
+  const repoSlug = await getRepoSlug(cwd)
+  if (!repoSlug) return { mergeable: false, statusContext: "Could not determine repository" }
+
+  try {
+    const result = await ghJsonViaDaemon<{
+      mergeStateStatus?: string
+      mergeable?: boolean | null
+      reviewDecision?: string
+      statusCheckRollup?: Array<{ conclusion?: string }>
+    }>(["api", `repos/${repoSlug}/pulls/${prNumber}`], cwd)
+
+    const mergeStateStatus = result?.mergeStateStatus ?? "UNKNOWN"
+    const mergeable = result?.mergeable !== false
+    const reviewDecision = result?.reviewDecision ?? "PENDING"
+
+    // Check common merge-blocking states
+    const canMerge =
+      mergeable !== false &&
+      mergeStateStatus === "MERGEABLE" &&
+      (reviewDecision === "APPROVED" || reviewDecision === "REVIEW_REQUIRED")
+
+    const statusContext = [mergeStateStatus, `review: ${reviewDecision}`].filter(Boolean).join(", ")
+
+    return { mergeable: canMerge, statusContext }
+  } catch {
+    return { mergeable: false, statusContext: "Could not fetch PR status from GitHub" }
+  }
+}
+
 async function handlePrMerge(
   command: string,
   cwd: string,
@@ -226,17 +260,27 @@ async function handlePrMerge(
     return preToolUseAllow(`Merge to non-production branch '${baseBranch}' — allowed`)
   }
 
+  // If we are merging into a production branch, check if the PR is approved/ready.
+  const prStatus = await getPrMergeability(prNumber, cwd)
+
+  if (prStatus.mergeable) {
+    return preToolUseAllow(
+      `PR #${prNumber} is approved and mergeable (${prStatus.statusContext}) — allowed`
+    )
+  }
+
   const prRef = prNumber ? `PR #${prNumber}` : "this PR"
   const repoContext = buildRepoContext(isCollaborative, collaboration.signals)
 
   return preToolUseDeny(`
-Merging ${prRef} via \`gh pr merge\` is blocked in ${repoContext}
+Merging ${prRef} via \`gh pr merge\` is currently blocked in ${repoContext}
 
-\`gh pr merge\` lands code directly on '${baseBranch || defaultBranch}', bypassing the intended review workflow.
+The PR is not in a fully approved, mergeable state (${prStatus.statusContext}).
+\`gh pr merge\` directly to '${baseBranch || defaultBranch}' is restricted to approved PRs.
 
 Allowed merge paths:
-  1. Merge via the GitHub web UI after required reviews are approved
-  2. Wait for an authorized human to merge the PR
+  1. Wait for required CI checks and reviews to finish, then rerun \`gh pr merge\`
+  2. Merge via the GitHub web UI after required reviews are approved
   3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber} --auto --squash
 
 Repository: ${owner}/${repo}
