@@ -12,6 +12,13 @@ import { dirname } from "node:path"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { readTasks } from "../tasks/task-repository.ts"
+import {
+  completeTaskWithAutoTransition,
+  createTaskInProcess,
+  updateStatus,
+  writeTaskUpdate,
+} from "../tasks/task-service.ts"
 import {
   swizMcpChannelHeartbeatPath,
   swizMcpChannelNotifyPath,
@@ -396,6 +403,210 @@ async function serve(): Promise<void> {
     }
   )
 
+  server.registerTool(
+    "TaskCreate",
+    {
+      title: "Create a task",
+      description:
+        "Create a new task in the current session. Returns the created task with its ID. " +
+        "Tasks must have a non-compound subject (one verb/action per task). " +
+        "Description should briefly explain what the task entails.",
+      inputSchema: {
+        subject: z.string().describe("Task subject in imperative form (e.g., 'Fix login bug')"),
+        description: z.string().describe("Detailed description of what the task requires"),
+        activeForm: z
+          .string()
+          .optional()
+          .describe("Present continuous form for spinner display (e.g., 'Fixing login bug')"),
+      },
+    },
+    async ({ subject, description, activeForm }) => {
+      try {
+        const projectKey = projectKeyFromCwd(cwd)
+        const task = await createTaskInProcess({
+          sessionId: projectKey,
+          subject,
+          description,
+          cwd,
+        })
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                task: {
+                  id: task.id,
+                  subject: task.subject,
+                  description: task.description,
+                  activeForm: activeForm || undefined,
+                  status: task.status,
+                },
+              }),
+            },
+          ],
+        }
+      } catch (err) {
+        const message = messageFromUnknownError(err)
+        return {
+          content: [{ type: "text" as const, text: `TaskCreate failed: ${message}` }],
+          isError: true,
+        }
+      }
+    }
+  )
+
+  server.registerTool(
+    "TaskUpdate",
+    {
+      title: "Update a task",
+      description:
+        "Update an existing task's status, subject, description, or dependencies. " +
+        "Status transitions: pending → in_progress → completed. " +
+        "Can also add/remove task blocking relationships.",
+      inputSchema: {
+        taskId: z.string().describe("Task ID to update (e.g., 'S1234-1')"),
+        status: z
+          .enum(["pending", "in_progress", "completed", "cancelled"])
+          .optional()
+          .describe("New task status"),
+        subject: z.string().optional().describe("Updated task subject"),
+        description: z.string().optional().describe("Updated task description"),
+        addBlocks: z
+          .array(z.string())
+          .optional()
+          .describe("List of task IDs this task should block"),
+        addBlockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("List of task IDs that should block this task"),
+      },
+    },
+    async ({ taskId, status, subject, description, addBlocks, addBlockedBy }) => {
+      try {
+        const projectKey = projectKeyFromCwd(cwd)
+        const allTasks = await readTasks(projectKey)
+        const task = allTasks.find((t) => t.id === taskId)
+        if (!task) {
+          return {
+            content: [
+              { type: "text" as const, text: `TaskUpdate failed: task ${taskId} not found` },
+            ],
+            isError: true,
+          }
+        }
+
+        // Update field values
+        if (subject !== undefined) task.subject = subject
+        if (description !== undefined) task.description = description
+        if (addBlocks) {
+          task.blocks = [...new Set([...task.blocks, ...addBlocks])]
+        }
+        if (addBlockedBy) {
+          task.blockedBy = [...new Set([...task.blockedBy, ...addBlockedBy])]
+        }
+
+        // Update status
+        if (status !== undefined && status !== task.status) {
+          if (status === "completed") {
+            await completeTaskWithAutoTransition(projectKey, taskId, { filterCwd: cwd })
+          } else {
+            await updateStatus(projectKey, taskId, status, { filterCwd: cwd })
+          }
+        } else if (
+          subject !== undefined ||
+          description !== undefined ||
+          addBlocks ||
+          addBlockedBy
+        ) {
+          // Field update without status change
+          await writeTaskUpdate(projectKey, taskId, task)
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                task: {
+                  id: task.id,
+                  subject: task.subject,
+                  description: task.description,
+                  status: task.status,
+                  blocks: task.blocks,
+                  blockedBy: task.blockedBy,
+                },
+              }),
+            },
+          ],
+        }
+      } catch (err) {
+        const message = messageFromUnknownError(err)
+        return {
+          content: [{ type: "text" as const, text: `TaskUpdate failed: ${message}` }],
+          isError: true,
+        }
+      }
+    }
+  )
+
+  server.registerTool(
+    "TaskList",
+    {
+      title: "List all tasks",
+      description:
+        "Retrieve all tasks in the current session. Returns task metadata including " +
+        "IDs, subjects, statuses, and blocking relationships. Useful for understanding " +
+        "the current task state without native tool support.",
+      inputSchema: {
+        // No required input parameters
+      },
+    },
+    async () => {
+      try {
+        const projectKey = projectKeyFromCwd(cwd)
+        const allTasks = await readTasks(projectKey)
+
+        const tasks = allTasks.map((t) => ({
+          id: t.id,
+          subject: t.subject,
+          description: t.description,
+          status: t.status,
+          blocks: t.blocks,
+          blockedBy: t.blockedBy,
+          startedAt: t.startedAt,
+          completedAt: t.completedAt,
+          elapsedMs: t.elapsedMs,
+        }))
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                tasks,
+                summary: {
+                  total: allTasks.length,
+                  pending: allTasks.filter((t) => t.status === "pending").length,
+                  inProgress: allTasks.filter((t) => t.status === "in_progress").length,
+                  completed: allTasks.filter((t) => t.status === "completed").length,
+                },
+              }),
+            },
+          ],
+        }
+      } catch (err) {
+        const message = messageFromUnknownError(err)
+        return {
+          content: [{ type: "text" as const, text: `TaskList failed: ${message}` }],
+          isError: true,
+        }
+      }
+    }
+  )
+
   const transport = new StdioServerTransport()
   await server.connect(transport)
   activeServer = server as unknown as typeof activeServer
@@ -408,7 +619,7 @@ async function serve(): Promise<void> {
   }
 
   process.stderr.write(
-    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — channel + permission + reply enabled\n`
+    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — channel + permission + reply + task-tools enabled\n`
   )
 
   const stopDrain = startAutoSteerDrainLoop(cwd)
