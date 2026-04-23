@@ -67,6 +67,7 @@ function buildAllowlistedEnv(): Record<string, string> {
     /^SWIZ_/,
     /^ANTHROPIC_/,
     /^CURSOR_/,
+    /^CODEX_/,
     /^GEMINI_/,
     // Agent-identifying env vars — required so in-process hooks running inside
     // the daemon can resolve `detectCurrentAgent()` via payload._env instead of

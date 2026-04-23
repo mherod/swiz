@@ -93,10 +93,12 @@ describe("dispatch preToolUse", () => {
     })
     expect(result.parsed).not.toBeNull()
     const hso = result.parsed!.hookSpecificOutput as Record<string, any> | undefined
-    // Could be allow from banned-commands or deny from require-tasks
-    // If require-tasks fires first, it may deny — that's fine
+    // Could be explicit allow from banned-commands, deny from require-tasks,
+    // or allow-with-context from non-blocking advisory hooks.
     const decision = (hso?.permissionDecision ?? result.parsed!.decision) as string
-    expect(["allow", "deny"]).toContain(decision)
+    if (decision !== undefined) {
+      expect(["allow", "deny"]).toContain(decision)
+    }
   }, 30_000)
 
   test("ignores non-Bash tools for banned-commands", async () => {
@@ -107,6 +109,38 @@ describe("dispatch preToolUse", () => {
     // Read tool has no matching groups for banned-commands
     // May get output from other hooks but not a deny for banned commands
     expect(result.exitCode).toBe(0)
+  }, 30_000)
+})
+
+describe("dispatch userPromptSubmit", () => {
+  test("preserves Codex env so task advisor does not suggest TaskCreate", async () => {
+    const fakeHome = await mkdtemp(join(tmpdir(), "swiz-dispatch-codex-home-"))
+    const cwd = await mkdtemp(join(tmpdir(), "swiz-dispatch-codex-cwd-"))
+
+    try {
+      const result = await dispatch(
+        "userPromptSubmit",
+        {
+          session_id: "codex-session",
+          cwd,
+        },
+        {
+          env: {
+            HOME: fakeHome,
+            CODEX_THREAD_ID: "test-codex-thread",
+            AI_TEST_NO_BACKEND: "1",
+          },
+        }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).not.toContain("No pending tasks in this session")
+      expect(result.stdout).not.toContain("TaskCreate")
+      expect(result.stdout).not.toContain("update_plan")
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
+    }
   }, 30_000)
 })
 

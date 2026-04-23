@@ -25,6 +25,10 @@ export const GIT_INDEX_LOCK = "index.lock"
 const spawnOriginal = Bun.spawn.bind(Bun)
 const spawnSyncOriginal = Bun.spawnSync.bind(Bun)
 
+function getRealSpawnSync(): typeof Bun.spawnSync {
+  return spawnSyncOriginal
+}
+
 /** Join a path under `<repoRoot>/.git/...`. */
 export function joinGitPath(repoRoot: string, ...segments: string[]): string {
   return join(repoRoot, GIT_DIR_NAME, ...segments)
@@ -574,7 +578,7 @@ function parseStatusV2Lines(out: string): StatusCounts {
 
 function gitSpawnSyncLines(args: string[], workTree: string): string {
   try {
-    const proc = spawnSyncOriginal(["git", ...args], {
+    const proc = getRealSpawnSync()(["git", ...args], {
       cwd: workTree,
       stdout: "pipe",
       stderr: "ignore",
