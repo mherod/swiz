@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-23
+
+### New Features
+
+- **MCP task tools for non-native agents** — Added `TaskCreate`,
+  `TaskUpdate`, and `TaskList` support through `swiz mcp` so agents
+  without built-in task tools can manage Swiz tasks through the same
+  task system.
+
+### Fixes
+
+- **Codex task session detection** — Fixed Codex sessions so direct
+  `swiz tasks` usage and related task/stop behaviour no longer trip
+  Claude-only task enforcement or lose Codex session context. (#557)
+
 ## 2026-04-13
 
 ### Improvements

@@ -55,7 +55,6 @@ import {
   hasFileInTree,
   isEditTool,
   isGitRepo,
-  isRunningInAgent,
   isShellTool,
   isTaskCreateTool,
   isTaskListTool,
@@ -820,8 +819,6 @@ export const requireTasksRunAsMainOptions: RunSwizHookAsMainOptions = {
 // § 4. TaskUpdate Completion Governance (CLI enforcement + rate limiting)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const isClaudeCode = isRunningInAgent() || process.env.CLAUDECODE === "1"
-
 const SWIZ_TASKS_CLI_RE = shellTokenCommandRe(String.raw`swiz\s+tasks(?:\s|$)`)
 const SWIZ_TASKS_ADOPT_RE = shellTokenCommandRe(String.raw`swiz\s+tasks\s+adopt(?:\s|$)`)
 
@@ -835,7 +832,7 @@ const SWIZ_TASKS_CLI_DENY_MESSAGE =
   "The only `swiz tasks` subcommand still allowed here is `adopt` (orphan recovery after compaction)."
 
 function shouldInspectShellInput(input: { tool_name?: string }): boolean {
-  return isClaudeCode && isShellTool(input?.tool_name ?? "")
+  return detectCurrentAgentFromEnv()?.id === "claude" && isShellTool(input?.tool_name ?? "")
 }
 
 function isBlockedSwizTasksCliCommand(command: string): boolean {
