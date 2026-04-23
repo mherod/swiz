@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { AGENTS } from "./agents.ts"
 import { taskListSyncSentinelPath } from "./temp-paths.ts"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-require-tasks.ts")
@@ -16,14 +17,31 @@ interface HookResult {
 
 async function runHook(
   payload: Record<string, any>,
-  env?: Record<string, string>
+  env?: Record<string, string | undefined>
 ): Promise<HookResult> {
+  const mergedEnv: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) mergedEnv[key] = value
+  }
+  for (const agent of AGENTS) {
+    for (const envVar of agent.envVars ?? []) {
+      delete mergedEnv[envVar]
+    }
+  }
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (value === undefined) {
+      delete mergedEnv[key]
+    } else {
+      mergedEnv[key] = value
+    }
+  }
+
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     cwd: process.cwd(),
-    env: { ...process.env, ...env },
+    env: mergedEnv,
   })
   await proc.stdin.write(JSON.stringify(payload))
   await proc.stdin.end()

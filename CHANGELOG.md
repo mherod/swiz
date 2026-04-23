@@ -12,7 +12,7 @@
 ### Fixes
 
 - **Codex task session detection** — Fixed Codex sessions so direct
-  `swiz tasks` usage and related task/stop behaviour no longer trip
+  `swiz tasks` usage and hook-based task governance no longer trip
   Claude-only task enforcement or lose Codex session context. (#557)
 
 ## 2026-04-13
