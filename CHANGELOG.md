@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-04-24
+
+### Improvements
+
+- **Gemini CLI hook payloads accepted by canonical dispatch router** —
+  `DISPATCH_CANONICAL_INBOUND_SCHEMAS` now unions the Gemini CLI hook input
+  schemas (`before/after tool`, `session start/end`, `before agent`,
+  `pre-compress`, `notification`) alongside Claude and Codex variants, so
+  Gemini agent payloads round-trip through `swiz dispatch` without falling
+  back to the unknown-event object schema.
+
 ## 2026-04-23
 
 ### New Features
