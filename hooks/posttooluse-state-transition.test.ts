@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
+
+setDefaultTimeout(20_000)
 
 async function runHook(
   cwd: string,

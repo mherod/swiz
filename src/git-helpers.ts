@@ -43,17 +43,13 @@ export async function git(args: string[], cwd: string): Promise<string> {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))
     )
-    const proc = spawnOriginal(["git", ...args], {
+    const proc = spawnSyncOriginal(["git", ...args], {
       cwd: effectiveCwd,
       stdout: "pipe",
       stderr: "pipe",
       env,
     })
-    const [output] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
+    const output = new TextDecoder().decode(proc.stdout)
     return proc.exitCode === 0 ? output.trim() : ""
   } catch {
     return ""
@@ -270,7 +266,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   return (await git(["rev-parse", "--git-dir"], cwd)) !== ""
 }
 
-const _repoSlugCache = new Map<string, string | null>()
+const _repoSlugCache = new Map<string, string>()
 
 /** Get the owner/repo slug from a git remote URL (e.g., "mherod/swiz"). */
 export function slugFromRemoteUrl(url: string): string | null {
@@ -290,7 +286,9 @@ export async function getRepoSlug(cwd: string): Promise<string | null> {
   if (cached !== undefined) return cached
   const url = await git(["remote", "get-url", "origin"], cwd)
   const slug = slugFromRemoteUrl(url)
-  _repoSlugCache.set(cwd, slug)
+  if (slug !== null) {
+    _repoSlugCache.set(cwd, slug)
+  }
   return slug
 }
 

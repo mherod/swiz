@@ -17,14 +17,8 @@
  *   P7 ASSISTANT_NEVER_SELF_APPROVES — approval phrases in assistant text are ignored
  */
 
-import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
-
-// Fuzz tests spawn many subprocess variants; need generous timeout under full-suite load
-setDefaultTimeout(60_000)
-
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, test } from "bun:test"
+import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
 import { makeTranscript, type SimpleHookResult } from "../src/utils/test-utils.ts"
 
 // ─── Shared transcript builder & runner ──────────────────────────────────────
@@ -33,52 +27,11 @@ function entry(role: "user" | "assistant", text: string): string {
   return JSON.stringify({ type: role, message: { content: [{ type: "text", text }] } })
 }
 
-let tmpDir: string
-let fakeHome: string // HOME with pushGate:true settings file — enables the hook in tests
-
-beforeAll(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "no-push-fuzz-"))
-  fakeHome = join(tmpDir, "home")
-  await mkdir(join(fakeHome, ".swiz"), { recursive: true })
-  await Bun.write(
-    join(fakeHome, ".swiz", "settings.json"),
-    JSON.stringify({ pushGate: true }, null, 2)
-  )
-})
-
-afterAll(async () => {
-  await rm(tmpDir, { recursive: true })
-})
-
-async function runHook(transcriptContent: string): Promise<SimpleHookResult> {
-  const tPath = join(tmpDir, `f-${Math.random().toString(36).slice(2)}.jsonl`)
-  await Bun.write(tPath, transcriptContent)
-
-  const payload = JSON.stringify({
-    tool_name: "Bash",
-    tool_input: { command: "git push origin main" },
-    transcript_path: tPath,
-    session_id: "fuzz",
-    cwd: "/tmp",
-  })
-
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-push-when-instructed.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome, SWIZ_DAEMON_PORT: "19999" },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return { blocked: false, reason: "" }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
+function runHook(transcriptContent: string): SimpleHookResult {
+  const state = scanPushGateFromJsonlLines(transcriptContent.split("\n"))
   return {
-    blocked: (hso?.permissionDecision ?? parsed?.decision) === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    blocked: Boolean(state.blockingLine && !state.approvedAfter),
+    reason: state.blockingLine,
   }
 }
 

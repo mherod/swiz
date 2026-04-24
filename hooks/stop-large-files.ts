@@ -10,12 +10,41 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_LARGE_FILE_SIZE_KB,
-  getEffectiveSwizSettings,
-  readProjectSettings,
-  readSwizSettings,
-  resolveNumericSetting,
+  getEffectiveSwizSettings as defaultGetEffectiveSwizSettings,
+  readProjectSettings as defaultReadProjectSettings,
+  readSwizSettings as defaultReadSwizSettings,
+  resolveNumericSetting as defaultResolveNumericSetting,
 } from "../src/settings.ts"
-import { blockStopObj, git, isGitRepo, recentHeadRange } from "../src/utils/hook-utils.ts"
+import {
+  blockStopObj as defaultBlockStopObj,
+  git as defaultGit,
+  isGitRepo as defaultIsGitRepo,
+  recentHeadRange as defaultRecentHeadRange,
+} from "../src/utils/hook-utils.ts"
+
+interface StopLargeFilesDeps {
+  blockStopObj: typeof defaultBlockStopObj
+  getEffectiveSwizSettings: typeof defaultGetEffectiveSwizSettings
+  git: typeof defaultGit
+  isGitRepo: typeof defaultIsGitRepo
+  readProjectSettings: typeof defaultReadProjectSettings
+  readSwizSettings: typeof defaultReadSwizSettings
+  recentHeadRange: typeof defaultRecentHeadRange
+  resolveNumericSetting: typeof defaultResolveNumericSetting
+  spawn: typeof Bun.spawn
+}
+
+const defaultDeps: StopLargeFilesDeps = {
+  blockStopObj: defaultBlockStopObj,
+  getEffectiveSwizSettings: defaultGetEffectiveSwizSettings,
+  git: defaultGit,
+  isGitRepo: defaultIsGitRepo,
+  readProjectSettings: defaultReadProjectSettings,
+  readSwizSettings: defaultReadSwizSettings,
+  recentHeadRange: defaultRecentHeadRange,
+  resolveNumericSetting: defaultResolveNumericSetting,
+  spawn: Bun.spawn.bind(Bun),
+}
 
 /** Parse one line of `git ls-tree` output into [name, blobHash]. */
 function parseLsTreeLine(line: string): [string, string] | null {
@@ -60,12 +89,13 @@ async function checkFileSizes(
   fileCandidates: string[],
   cwd: string,
   sizeLimitKb: number,
-  gitattributes: string | null
+  gitattributes: string | null,
+  deps: StopLargeFilesDeps
 ): Promise<string[]> {
   if (fileCandidates.length === 0) return []
 
   // Batch git ls-tree for all files
-  const treeRaw = await git(["ls-tree", "HEAD", "--", ...fileCandidates], cwd)
+  const treeRaw = await deps.git(["ls-tree", "HEAD", "--", ...fileCandidates], cwd)
   if (!treeRaw) return []
 
   const entries = treeRaw
@@ -77,7 +107,7 @@ async function checkFileSizes(
 
   // Batch git cat-file --batch for all blob sizes
   const batchInput = `${validEntries.map(([, h]) => h).join("\n")}\n`
-  const catProc = Bun.spawn(["git", "cat-file", "--batch"], {
+  const catProc = deps.spawn(["git", "cat-file", "--batch"], {
     cwd,
     stdin: "pipe",
     stdout: "pipe",
@@ -122,10 +152,14 @@ async function findLargeFiles(
   cwd: string,
   sizeLimitKb: number,
   allowPatterns: string[],
-  gitattributes: string | null
+  gitattributes: string | null,
+  deps: StopLargeFilesDeps
 ): Promise<string[]> {
-  const range = await recentHeadRange(cwd, 10)
-  const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd)
+  const range = await deps.recentHeadRange(cwd, 10)
+  const addedRaw = await deps.git(
+    ["log", "--diff-filter=A", "--name-only", "--format=", range],
+    cwd
+  )
   if (!addedRaw) return []
 
   const addedFiles = addedRaw.split("\n").filter((l) => l.trim())
@@ -135,7 +169,7 @@ async function findLargeFiles(
   const candidates =
     allowPatterns.length > 0 ? addedFiles.filter((f) => !isAllowed(f, allowPatterns)) : addedFiles
 
-  return await checkFileSizes(candidates, cwd, sizeLimitKb, gitattributes)
+  return await checkFileSizes(candidates, cwd, sizeLimitKb, gitattributes, deps)
 }
 
 function formatLargeFilesReason(largeFiles: string[], sizeLimitKb: number): string {
@@ -147,37 +181,40 @@ function formatLargeFilesReason(largeFiles: string[], sizeLimitKb: number): stri
   return reason
 }
 
-export async function evaluateStopLargeFiles(input: StopHookInput): Promise<SwizHookOutput> {
+export async function evaluateStopLargeFiles(
+  input: StopHookInput,
+  deps: StopLargeFilesDeps = defaultDeps
+): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await deps.isGitRepo(cwd))) return {}
 
   const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
+    deps.readSwizSettings(),
+    deps.readProjectSettings(cwd),
   ])
-  const effective = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  const effective = deps.getEffectiveSwizSettings(globalSettings, null, projectSettings)
 
   // Read .gitattributes once and reuse for both the team-mode gate and the
   // per-file LFS classification in findLargeFiles. Eliminates a duplicate
   // `git show HEAD:.gitattributes` subprocess per invocation (AC1).
-  const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
+  const gitattributes = await deps.git(["show", "HEAD:.gitattributes"], cwd)
 
   if (effective.collaborationMode === "team") {
     if (!gitattributes?.includes("filter=lfs")) return {}
   }
 
-  const sizeLimitKb = await resolveNumericSetting(
+  const sizeLimitKb = await deps.resolveNumericSetting(
     cwd,
     "largeFileSizeKb",
     DEFAULT_LARGE_FILE_SIZE_KB
   )
   const allowPatterns = projectSettings?.largeFileAllowPatterns ?? []
-  const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns, gitattributes)
+  const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns, gitattributes, deps)
   if (largeFiles.length === 0) return {}
 
-  return blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb))
+  return deps.blockStopObj(formatLargeFilesReason(largeFiles, sizeLimitKb))
 }
 
 const stopLargeFiles: SwizStopHook = {

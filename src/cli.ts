@@ -30,6 +30,7 @@ export function collectUnknownOptionWarnings(
   const warnings: string[] = []
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!
+    if (/^-\d/.test(arg)) continue
     if (!arg.startsWith("-") || knownFlags.has(arg)) continue
     // Skip if the preceding token was a known flag — this arg is its value, not a flag itself
     if (i > 0 && knownFlags.has(rest[i - 1]!)) continue

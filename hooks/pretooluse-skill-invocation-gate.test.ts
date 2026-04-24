@@ -1,27 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
-import { clearSkillCache } from "../src/skill-utils.ts"
+import { clearSkillCache, formatSkillReferenceForAgent } from "../src/skill-utils.ts"
 import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
 
 describe("pretooluse-skill-invocation-gate", () => {
-  const originalEnv = { ...process.env }
+  const agentEnvKeys = [
+    "CLAUDECODE",
+    "CURSOR_TRACE_ID",
+    "CURSOR_SANDBOX_ENV_RESTORE",
+    "GEMINI_CLI",
+    "GEMINI_PROJECT_DIR",
+    "CODEX_MANAGED_BY_NPM",
+    "CODEX_THREAD_ID",
+  ] as const
+  const originalEnv = new Map(agentEnvKeys.map((key) => [key, process.env[key]]))
+
+  function restoreAgentEnv(): void {
+    for (const [key, value] of originalEnv) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 
   beforeEach(() => {
     clearSkillCache()
-    // Reset env for each test
-    for (const key in process.env) {
-      delete process.env[key]
-    }
-    Object.assign(process.env, originalEnv)
+    restoreAgentEnv()
 
     // Ensure env is clean for accurate agent detection
+    for (const key of agentEnvKeys) delete process.env[key]
   })
 
   afterEach(() => {
     // Restore env
-    for (const key in process.env) {
-      delete process.env[key]
-    }
-    Object.assign(process.env, originalEnv)
+    restoreAgentEnv()
   })
 
   it("blocks git commit when running in Claude (supports Skill tool) and skill exists", async () => {
@@ -48,7 +58,7 @@ describe("pretooluse-skill-invocation-gate", () => {
     // In the actual project, 'commit' skill exists.
     if (result && Object.keys(result).length > 0) {
       expect((result as { systemMessage?: string }).systemMessage).toContain(
-        "BLOCKED: git commit requires the `/commit` skill"
+        `BLOCKED: git commit requires the ${formatSkillReferenceForAgent("commit")} skill`
       )
     } else {
       // If it didn't block, it means skillExists('commit') returned false.

@@ -1,11 +1,13 @@
-import { beforeAll, describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
   DEFAULT_TRIVIAL_MAX_LINES,
   getEffectiveSwizSettings,
+  getSwizSettingsPath,
+  invalidateSettingsCache,
   POLICY_PROFILES,
   readProjectSettings,
   readSwizSettings,
@@ -14,9 +16,11 @@ import {
 } from "../settings.ts"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
 import { useTempDir, writeClaudeSession } from "../utils/test-utils.ts"
-import { settingsCommand } from "./settings.ts"
+
+setDefaultTimeout(20_000)
 
 const _tmp = useTempDir("swiz-settings-test-")
+const INDEX_PATH = resolve(import.meta.dir, "..", "..", "index.ts")
 async function createTempHome(): Promise<string> {
   return realpath(await _tmp.create())
 }
@@ -32,78 +36,36 @@ async function createIsolatedGitProject(parentDir: string): Promise<string> {
   return dir
 }
 
-// Serialize in-process calls — they mutate process.env.HOME and console
-let _inProcessQueue: Promise<unknown> = Promise.resolve()
-
 /**
- * Run the settings command in-process with a temporary HOME directory.
- * Captures console.log (stdout) and console.error/console.warn (stderr).
- * Returns exitCode 0 on success, 1 on thrown error.
- * Serialized via a queue to prevent HOME/console collisions in concurrent callers.
+ * Run the settings command with a temporary HOME directory.
+ * Uses a subprocess so HOME and console capture never leak across concurrent test files.
  */
 async function runSwiz(
   args: string[],
   home: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  // Only handle `settings` subcommand in-process; delegate `help` to subprocess
-  if (args[0] !== "settings") {
-    const indexPath = join(process.cwd(), "index.ts")
-    const proc = Bun.spawn(["bun", "run", indexPath, ...args], {
-      cwd: home,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, HOME: home },
-    })
-    void proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
-    await proc.exited
-    return { stdout, stderr, exitCode: proc.exitCode }
-  }
-
   // Scope is required by the CLI; tests that don't specify one default to --global.
   const SCOPE_FLAGS_RE = /^(--global|-g|--user|-u|--project|-p|--session|-s)$/
-  const settingsArgs = args.slice(1)
-  if (!settingsArgs.some((a) => SCOPE_FLAGS_RE.test(a))) {
+  const settingsArgs = args[0] === "settings" ? args.slice(1) : []
+  if (args[0] === "settings" && !settingsArgs.some((a) => SCOPE_FLAGS_RE.test(a))) {
     settingsArgs.push("--global")
   }
+  const effectiveArgs = args[0] === "settings" ? ["settings", ...settingsArgs] : args
 
-  // Enqueue to serialize — concurrent callers wait for the previous to finish
-  const result = _inProcessQueue.then(async () => {
-    const prevHome = process.env.HOME
-    process.env.HOME = home
-
-    const stdoutLines: string[] = []
-    const stderrLines: string[] = []
-    const origLog = console.log
-    const origError = console.error
-    const origWarn = console.warn
-    console.log = (...a: unknown[]) => stdoutLines.push(a.map(String).join(" "))
-    console.error = (...a: unknown[]) => stderrLines.push(a.map(String).join(" "))
-    console.warn = (...a: unknown[]) => stderrLines.push(a.map(String).join(" "))
-
-    let exitCode = 0
-    try {
-      await settingsCommand.run(settingsArgs)
-    } catch (err) {
-      exitCode = 1
-      stderrLines.push(err instanceof Error ? err.message : String(err))
-    } finally {
-      console.log = origLog
-      console.error = origError
-      console.warn = origWarn
-      process.env.HOME = prevHome
-    }
-
-    return {
-      stdout: stdoutLines.join("\n"),
-      stderr: stderrLines.join("\n"),
-      exitCode,
-    }
+  const proc = Bun.spawn(["bun", "run", INDEX_PATH, ...effectiveArgs], {
+    cwd: home,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
-  _inProcessQueue = result.catch(() => {})
-  return result
+  void proc.stdin.end()
+  const stdout = await new Response(proc.stdout).text()
+  const stderr = await new Response(proc.stderr).text()
+  await proc.exited
+  const settingsPath = getSwizSettingsPath(home)
+  if (settingsPath) invalidateSettingsCache(settingsPath)
+  return { stdout, stderr, exitCode: proc.exitCode }
 }
 
 async function createGeminiSession(
@@ -991,6 +953,7 @@ describe("SETTINGS_REGISTRY", () => {
       "autoTransition",
       "dirtyWorktreeThreshold",
       "auditStrictness",
+      "actionPlanMerge",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {

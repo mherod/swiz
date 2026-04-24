@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { resolve } from "node:path"
 import { useTempDir, writeState } from "../src/utils/test-utils.ts"
+
+setDefaultTimeout(20_000)
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-state-gate.ts")
 

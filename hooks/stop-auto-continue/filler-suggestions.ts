@@ -32,11 +32,14 @@ async function getGitState(cwd: string): Promise<GitState | null> {
     git(["branch", "--show-current"], cwd).catch(() => "main"),
     git(["rev-list", "--count", "@{upstream}..HEAD"], cwd).catch(() => "0"),
   ])
+  const statusText = typeof status === "string" ? status : ""
+  const branchText = typeof branch === "string" && branch.trim() ? branch : "main"
+  const unpushedText = typeof unpushed === "string" ? unpushed : "0"
 
   return {
-    dirtyCount: status.split("\n").filter(Boolean).length,
-    unpushedCount: Number.parseInt(unpushed.trim(), 10) || 0,
-    branch: branch.trim(),
+    dirtyCount: statusText.split("\n").filter(Boolean).length,
+    unpushedCount: Number.parseInt(unpushedText.trim(), 10) || 0,
+    branch: branchText.trim(),
   }
 }
 

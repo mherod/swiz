@@ -19,7 +19,6 @@ import {
 import {
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
-  isGitRepo,
   isShellTool,
   preToolUseAllowWithContext,
 } from "../src/utils/hook-utils.ts"
@@ -48,8 +47,14 @@ function buildSyncMessage(
     : `Issue sync completed before branch switch (${repo} already up to date).`
 }
 
-async function runSync(cwd: string, syncFn: typeof syncUpstreamState): Promise<SwizHookOutput> {
-  const repo = await getRepoSlug(cwd)
+type RepoSlugResolver = (cwd: string) => Promise<string | null>
+
+async function runSync(
+  cwd: string,
+  syncFn: typeof syncUpstreamState,
+  repoSlugResolver: RepoSlugResolver
+): Promise<SwizHookOutput> {
+  const repo = await repoSlugResolver(cwd)
   if (!repo) return {}
   try {
     const result = await syncFn(repo, cwd)
@@ -61,7 +66,8 @@ async function runSync(cwd: string, syncFn: typeof syncUpstreamState): Promise<S
 
 export async function evaluateIssueSyncBeforeCheckout(
   input: unknown,
-  syncFn: typeof syncUpstreamState = syncUpstreamState
+  syncFn: typeof syncUpstreamState = syncUpstreamState,
+  repoSlugResolver: RepoSlugResolver = getRepoSlug
 ): Promise<SwizHookOutput> {
   const hookInput = shellHookInputSchema.parse(input)
   const cwd: string = hookInput.cwd ?? process.cwd()
@@ -69,9 +75,8 @@ export async function evaluateIssueSyncBeforeCheckout(
 
   if (!isShellTool(hookInput.tool_name ?? "")) return {}
   if (!isBranchSwitchCommand(command)) return {}
-  if (!(await isGitRepo(cwd))) return {}
 
-  return await runSync(cwd, syncFn)
+  return await runSync(cwd, syncFn, repoSlugResolver)
 }
 
 const pretooluseIssueSyncBeforeCheckout: SwizToolHook = {

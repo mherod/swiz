@@ -11,12 +11,10 @@
  *   AC4: Total git subprocess spawns per invocation is bounded by 4
  *        (log + show + ls-tree + cat-file-batch), independent of file count
  *
- * The tests mock `../src/utils/hook-utils.ts` and `../src/settings.ts` so the
- * evaluator runs in-process without touching the real filesystem or real git.
- * `Bun.spawn` is also stubbed for the single `git cat-file --batch` call that
- * the hook issues directly (the batching path for blob sizes).
+ * The tests inject hook dependencies so the evaluator runs in-process without
+ * touching the real filesystem or real git.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 
 // ─── Mock state ─────────────────────────────────────────────────────────────
 
@@ -37,44 +35,43 @@ function gitResponseKey(args: string[]): string {
   return args.join(" ")
 }
 
-// ─── Module mocks ────────────────────────────────────────────────────────────
-
-await mock.module("../src/utils/hook-utils.ts", () => ({
-  git: (args: string[], cwd: string): Promise<string | null> => {
+const testDeps = {
+  git: (args: string[], cwd: string): Promise<string> => {
     gitCalls.push({ args, cwd })
     const key = gitResponseKey(args)
     // Match on exact key first, then fall back to prefix matches so tests can
     // set one response for all "ls-tree HEAD -- *" calls regardless of files.
-    if (key in gitResponses) return Promise.resolve(gitResponses[key] ?? null)
+    if (key in gitResponses) return Promise.resolve(gitResponses[key] ?? "")
     for (const prefix of Object.keys(gitResponses)) {
-      if (key.startsWith(prefix)) return Promise.resolve(gitResponses[prefix] ?? null)
+      if (key.startsWith(prefix)) return Promise.resolve(gitResponses[prefix] ?? "")
     }
-    return Promise.resolve(null)
+    return Promise.resolve("")
   },
   isGitRepo: (_cwd: string): Promise<boolean> => Promise.resolve(true),
   recentHeadRange: (_cwd: string, _n: number): Promise<string> => Promise.resolve("HEAD~10..HEAD"),
   blockStopObj: (reason: string) => ({ decision: "block", reason }),
-}))
-
-await mock.module("../src/settings.ts", () => ({
-  DEFAULT_LARGE_FILE_SIZE_KB: 500,
   readSwizSettings: () => Promise.resolve({}),
   readProjectSettings: () => Promise.resolve({ largeFileAllowPatterns: allowPatterns }),
   getEffectiveSwizSettings: () => ({ collaborationMode }),
   resolveNumericSetting: (_cwd: string, _key: string, _fallback: number) =>
     Promise.resolve(largeFileSizeKb),
-}))
-
-// `Bun.spawn` is called directly by findLargeFiles for `git cat-file --batch`.
-// We stub it to return a canned blob-size map without running any real git.
-// A narrow typed alias lets us replace the method without an `any` cast or a
-// lint suppression — the override only needs to satisfy the shape the hook
-// actually consumes (stdin.write/end, stdout readable, exited).
-interface SpawnSlot {
-  spawn: (cmd: string[], opts: unknown) => unknown
+  spawn: (cmd: string[], _opts: unknown): unknown => {
+    if (cmd[0] !== "git" || cmd[1] !== "cat-file" || cmd[2] !== "--batch") {
+      throw new Error(`Unexpected spawn: ${cmd.join(" ")}`)
+    }
+    catFileSpawnCount++
+    const output = catFileBatchStub
+    return {
+      stdin: {
+        write: () => Promise.resolve(),
+        end: () => undefined,
+      },
+      stdout: new Response(output).body,
+      exited: Promise.resolve(0),
+      exitCode: 0,
+    }
+  },
 }
-const spawnSlot = Bun as unknown as SpawnSlot
-const originalSpawn = spawnSlot.spawn
 
 let catFileBatchStub: string = ""
 let catFileSpawnCount = 0
@@ -87,30 +84,13 @@ beforeEach(() => {
   allowPatterns = []
   catFileBatchStub = ""
   catFileSpawnCount = 0
-  spawnSlot.spawn = (cmd: string[], opts: unknown) => {
-    if (cmd[0] === "git" && cmd[1] === "cat-file" && cmd[2] === "--batch") {
-      catFileSpawnCount++
-      const output = catFileBatchStub
-      return {
-        stdin: {
-          write: () => Promise.resolve(),
-          end: () => undefined,
-        },
-        stdout: new Response(output).body,
-        exited: Promise.resolve(0),
-        exitCode: 0,
-      }
-    }
-    return originalSpawn(cmd, opts)
-  }
-})
-afterEach(() => {
-  spawnSlot.spawn = originalSpawn
 })
 
-// Import the evaluator AFTER the mocks are installed so module resolution
-// picks up the stubs instead of the real implementations.
 const { evaluateStopLargeFiles } = await import("./stop-large-files.ts")
+
+function evaluate(input: Parameters<typeof evaluateStopLargeFiles>[0]) {
+  return evaluateStopLargeFiles(input, testDeps as any)
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -145,7 +125,7 @@ describe("evaluateStopLargeFiles", () => {
       { hash: bigHash, sizeBytes: 600 * 1024 }, // 600 KB > 500 KB limit
     ])
 
-    const result = (await evaluateStopLargeFiles({ cwd: "/repo" })) as {
+    const result = (await evaluate({ cwd: "/repo" })) as {
       decision?: string
       reason?: string
     }
@@ -164,7 +144,7 @@ describe("evaluateStopLargeFiles", () => {
       { hash: smallHash, sizeBytes: 10 * 1024 }, // 10 KB under 500 KB
     ])
 
-    const result = await evaluateStopLargeFiles({ cwd: "/repo" })
+    const result = await evaluate({ cwd: "/repo" })
 
     expect(result).toEqual({})
   })
@@ -182,7 +162,7 @@ describe("evaluateStopLargeFiles", () => {
       { hash: lfsHash, sizeBytes: 5 * 1024 * 1024 }, // 5 MB, but LFS-tracked
     ])
 
-    const result = await evaluateStopLargeFiles({ cwd: "/repo" })
+    const result = await evaluate({ cwd: "/repo" })
 
     expect(result).toEqual({})
   })
@@ -197,7 +177,7 @@ describe("evaluateStopLargeFiles", () => {
     ])
     catFileBatchStub = buildCatFileBatchOutput([{ hash: ignoredHash, sizeBytes: 5 * 1024 * 1024 }])
 
-    const result = await evaluateStopLargeFiles({ cwd: "/repo" })
+    const result = await evaluate({ cwd: "/repo" })
 
     expect(result).toEqual({})
   })
@@ -206,7 +186,7 @@ describe("evaluateStopLargeFiles", () => {
     gitResponses["log --diff-filter=A --name-only --format= HEAD~10..HEAD"] = null
     gitResponses["show HEAD:.gitattributes"] = ""
 
-    const result = await evaluateStopLargeFiles({ cwd: "/repo" })
+    const result = await evaluate({ cwd: "/repo" })
 
     expect(result).toEqual({})
   })
@@ -216,7 +196,7 @@ describe("evaluateStopLargeFiles", () => {
     gitResponses["show HEAD:.gitattributes"] = "# no lfs here\n"
     gitResponses["log --diff-filter=A --name-only --format= HEAD~10..HEAD"] = "big.bin\n"
 
-    const result = await evaluateStopLargeFiles({ cwd: "/repo" })
+    const result = await evaluate({ cwd: "/repo" })
 
     expect(result).toEqual({})
     // Team mode still read .gitattributes — but only once.
@@ -238,7 +218,7 @@ describe("evaluateStopLargeFiles", () => {
       { hash: makeBlobHash(12), sizeBytes: 800 * 1024 },
     ])
 
-    await evaluateStopLargeFiles({ cwd: "/repo" })
+    await evaluate({ cwd: "/repo" })
 
     const showCalls = countCalls((c) => c.args[0] === "show" && c.args[1] === "HEAD:.gitattributes")
     expect(showCalls).toBe(1)
@@ -253,7 +233,7 @@ describe("evaluateStopLargeFiles", () => {
     ])
     catFileBatchStub = buildCatFileBatchOutput([{ hash: makeBlobHash(20), sizeBytes: 600 * 1024 }])
 
-    await evaluateStopLargeFiles({ cwd: "/repo" })
+    await evaluate({ cwd: "/repo" })
 
     const showCalls = countCalls((c) => c.args[0] === "show" && c.args[1] === "HEAD:.gitattributes")
     expect(showCalls).toBe(1)
@@ -273,7 +253,7 @@ describe("evaluateStopLargeFiles", () => {
       hashes.map((hash) => ({ hash, sizeBytes: 10 * 1024 })) // under limit
     )
 
-    await evaluateStopLargeFiles({ cwd: "/repo" })
+    await evaluate({ cwd: "/repo" })
 
     const lsTreeCalls = gitCalls.filter((c) => c.args[0] === "ls-tree")
     expect(lsTreeCalls.length).toBe(1)
@@ -297,7 +277,7 @@ describe("evaluateStopLargeFiles", () => {
       hashes.map((hash) => ({ hash, sizeBytes: 10 * 1024 }))
     )
 
-    await evaluateStopLargeFiles({ cwd: "/repo" })
+    await evaluate({ cwd: "/repo" })
 
     // Budget: 1 show + 1 log + 1 ls-tree = 3 git() helper calls,
     // plus 1 direct Bun.spawn for `git cat-file --batch` = 4 subprocesses total.
@@ -323,7 +303,7 @@ describe("evaluateStopLargeFiles", () => {
       hashes.map((hash) => ({ hash, sizeBytes: 600 * 1024 }))
     )
 
-    const result = (await evaluateStopLargeFiles({ cwd: "/repo" })) as {
+    const result = (await evaluate({ cwd: "/repo" })) as {
       decision?: string
       reason?: string
     }

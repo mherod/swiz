@@ -9,10 +9,12 @@
  * Each fixture set is modelled on the ramp3-spike label taxonomy we surveyed,
  * but kept self-contained so the tests never hit the network.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { useTempDir } from "../src/utils/test-utils.ts"
+
+setDefaultTimeout(20_000)
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 

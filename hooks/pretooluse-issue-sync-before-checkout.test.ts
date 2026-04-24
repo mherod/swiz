@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { resolve } from "node:path"
 import type { SyncChange, UpstreamSyncResult } from "../src/issue-store-sync.ts"
 import { evaluateIssueSyncBeforeCheckout } from "./pretooluse-issue-sync-before-checkout.ts"
+
+const REPO_ROOT = resolve(import.meta.dir, "..")
+const resolveRepoSlug = () => Promise.resolve("mherod/swiz")
 
 function makeSyncResult(issueChanges: SyncChange[] = []): UpstreamSyncResult {
   const empty = (): {
@@ -32,7 +36,7 @@ function makeSyncResult(issueChanges: SyncChange[] = []): UpstreamSyncResult {
 // so getRepoSlug resolves to the actual repo slug.
 
 function makeInput(command: string, toolName = "Bash") {
-  return { tool_name: toolName, tool_input: { command }, cwd: process.cwd() }
+  return { tool_name: toolName, tool_input: { command }, cwd: REPO_ROOT }
 }
 
 describe("pretooluse-issue-sync-before-checkout", () => {
@@ -69,7 +73,8 @@ describe("pretooluse-issue-sync-before-checkout", () => {
     }
     const result = await evaluateIssueSyncBeforeCheckout(
       makeInput("git checkout feature-branch"),
-      syncFn
+      syncFn,
+      resolveRepoSlug
     )
     expect(callCount).toBe(1)
     expect(result).toHaveProperty("systemMessage")
@@ -83,7 +88,8 @@ describe("pretooluse-issue-sync-before-checkout", () => {
     }
     const result = await evaluateIssueSyncBeforeCheckout(
       makeInput("git switch feature-branch"),
-      syncFn
+      syncFn,
+      resolveRepoSlug
     )
     expect(callCount).toBe(1)
     expect(result).toHaveProperty("systemMessage")
@@ -97,7 +103,8 @@ describe("pretooluse-issue-sync-before-checkout", () => {
     }
     const result = await evaluateIssueSyncBeforeCheckout(
       makeInput("git checkout -b new-branch"),
-      syncFn
+      syncFn,
+      resolveRepoSlug
     )
     expect(callCount).toBe(1)
     expect(result).toHaveProperty("systemMessage")
@@ -111,7 +118,8 @@ describe("pretooluse-issue-sync-before-checkout", () => {
     }
     const result = await evaluateIssueSyncBeforeCheckout(
       makeInput("git checkout feature-branch"),
-      syncFn
+      syncFn,
+      resolveRepoSlug
     )
     expect(callCount).toBe(1)
     expect(result).toEqual({})
@@ -136,7 +144,11 @@ describe("pretooluse-issue-sync-before-checkout", () => {
       callCount++
       return Promise.resolve(makeSyncResult([{ kind: "new", key: "#99", reason: "new issue" }]))
     }
-    const result = await evaluateIssueSyncBeforeCheckout(makeInput("git checkout feature"), syncFn)
+    const result = await evaluateIssueSyncBeforeCheckout(
+      makeInput("git checkout feature"),
+      syncFn,
+      resolveRepoSlug
+    )
     expect(callCount).toBe(1)
     const ctx = (result as { systemMessage?: string }).systemMessage ?? ""
     expect(ctx).toContain("1 change")

@@ -161,7 +161,7 @@ const VALID_FRAMEWORKS = new Set<string>([
   "php",
 ])
 
-export async function evalCondition(condition: string | undefined): Promise<boolean> {
+export async function evalCondition(condition: string | undefined, cwd?: string): Promise<boolean> {
   if (!condition) return true
 
   // Framework detection: framework:<name>
@@ -171,7 +171,7 @@ export async function evalCondition(condition: string | undefined): Promise<bool
       debugLog(`[swiz] Unknown framework in condition: "${name}" — running hook anyway`)
       return true
     }
-    const frameworks = await detectFrameworks()
+    const frameworks = await detectFrameworks(cwd)
     return frameworks.has(name as Framework)
   }
 

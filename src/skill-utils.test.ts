@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getAgent } from "./agents.ts"
@@ -9,6 +9,7 @@ import {
   extractReferencedToolsFromSkillText,
   extractStepsFromSkill,
   filterQualitySteps,
+  formatSkillReferenceForAgent,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   SKILL_DIRS,
@@ -17,6 +18,9 @@ import {
   stripFrontmatter,
 } from "./skill-utils.ts"
 import { useTempDir } from "./utils/test-utils.ts"
+
+// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
+setDefaultTimeout(20_000)
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -82,20 +86,21 @@ describe("skillExists", () => {
   test("returns false if the current agent does not support the Skill tool", () => {
     // commit skill exists in the test environment, but if we pretend to be Cursor
     // (which doesn't support Skill), skillExists should return false.
-    const originalEnv = { ...process.env }
+    const envKeys = [
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_PROJECT_ID",
+      "CLAUDECODE",
+      "GEMINI_API_KEY",
+      "GEMINI_CLI",
+      "GEMINI_PROJECT_DIR",
+      "CODEX_API_KEY",
+      "CODEX_MANAGED_BY_NPM",
+      "CODEX_THREAD_ID",
+      "CURSOR",
+    ]
+    const originalValues = new Map(envKeys.map((key) => [key, process.env[key]]))
     try {
       // Clear ALL agent-identifying env vars
-      const envKeys = [
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_PROJECT_ID",
-        "CLAUDECODE",
-        "GEMINI_API_KEY",
-        "GEMINI_CLI",
-        "GEMINI_PROJECT_DIR",
-        "CODEX_API_KEY",
-        "CODEX_MANAGED_BY_NPM",
-        "CODEX_THREAD_ID",
-      ]
       for (const key of envKeys) {
         delete process.env[key]
       }
@@ -105,11 +110,10 @@ describe("skillExists", () => {
       clearSkillCache()
       expect(skillExists("commit")).toBe(false)
     } finally {
-      // Restore ALL original env vars
-      for (const key of Object.keys(process.env)) {
-        delete process.env[key]
+      for (const [key, value] of originalValues) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
       }
-      Object.assign(process.env, originalEnv)
       clearSkillCache()
     }
   })
@@ -239,7 +243,7 @@ describe("getSkillToolAvailabilityWarning", () => {
     const warning = getSkillToolAvailabilityWarning("example", content, ["Bash", "Read", "Edit"])
     expect(warning).not.toBeNull()
     expect(warning?.missingTools).toEqual(["ImaginaryTool"])
-    expect(warning?.message).toContain("/example")
+    expect(warning?.message).toContain(formatSkillReferenceForAgent("example"))
     expect(warning?.message).toContain("ImaginaryTool")
   })
 

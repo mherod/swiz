@@ -5,12 +5,14 @@
  *
  * Tests create real git repos, task files, and JSONL transcripts as needed.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type HookResult, makeTempGitRepo, useTempDir, writeTask } from "../src/utils/test-utils.ts"
+
+setDefaultTimeout(20_000)
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 

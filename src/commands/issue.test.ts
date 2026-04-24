@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { chmod, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { useTempDir } from "../utils/test-utils.ts"
 
 interface RunResult {
@@ -18,6 +18,7 @@ interface RunResult {
 }
 
 const { create: createTempDir } = useTempDir("swiz-issue-")
+const INDEX_PATH = resolve(import.meta.dir, "..", "..", "index.ts")
 
 /**
  * Write a fake `gh` binary to `binDir` that:
@@ -48,7 +49,8 @@ async function writeFakeGh(
 }
 
 async function runCli(args: string[], binDir: string): Promise<RunResult> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
+  const proc = Bun.spawn(["bun", "run", INDEX_PATH, ...args], {
+    cwd: binDir,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
@@ -66,7 +68,7 @@ async function ghCallsMatching(logFile: string, keyword: string): Promise<string
     return content
       .split("\n")
       .filter((l) => l.trim())
-      .filter((l) => l.includes(keyword))
+      .filter((l) => l.split(/\s+/).includes(keyword))
   } catch {
     return []
   }

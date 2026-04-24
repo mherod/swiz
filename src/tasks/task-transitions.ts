@@ -6,12 +6,12 @@
 
 /**
  * Valid outgoing transitions for each task status.
- * completed is terminal — no outgoing transitions allowed.
+ * completed can be reopened when follow-up work is discovered.
  */
 export const VALID_TRANSITIONS: Record<string, Set<string>> = {
   pending: new Set(["in_progress", "cancelled"]),
   in_progress: new Set(["completed", "cancelled"]),
-  completed: new Set([]),
+  completed: new Set(["in_progress"]),
   cancelled: new Set(["pending", "in_progress"]),
 }
 
@@ -44,7 +44,7 @@ export function validateTransition(oldStatus: string, newStatus: string): string
  * Examples:
  *   computeTransitionPath("pending", "completed")  → ["in_progress", "completed"]
  *   computeTransitionPath("pending", "in_progress") → ["in_progress"]
- *   computeTransitionPath("completed", "cancelled") → null  (completed is terminal)
+ *   computeTransitionPath("completed", "in_progress") → ["in_progress"]
  */
 export function computeTransitionPath(oldStatus: string, newStatus: string): string[] | null {
   if (oldStatus === newStatus) return []

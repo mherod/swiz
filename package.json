@@ -60,5 +60,23 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "overrides": {
+    "protobufjs": ">=7.5.5",
+    "undici": ">=7.24.0",
+    "fast-xml-parser": ">=5.5.6",
+    "flatted": ">=3.4.2",
+    "path-to-regexp": ">=8.4.0",
+    "picomatch": ">=4.0.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "protobufjs": ">=7.5.5",
+      "undici": ">=7.24.0",
+      "fast-xml-parser": ">=5.5.6",
+      "flatted": ">=3.4.2",
+      "path-to-regexp": ">=8.4.0",
+      "picomatch": ">=4.0.4"
+    }
   }
 }

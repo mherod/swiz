@@ -131,12 +131,9 @@ describe("evalCondition", () => {
       const dir = await mkdir(join(tmpDir, "plain"), { recursive: true }).then(() =>
         join(tmpDir, "plain")
       )
-      const origCwd = process.cwd()
-      process.chdir(dir)
       try {
-        expect(await evalCondition("framework:nextjs")).toBe(false)
+        expect(await evalCondition("framework:nextjs", dir)).toBe(false)
       } finally {
-        process.chdir(origCwd)
         clearFrameworkCache()
       }
     })
@@ -145,12 +142,9 @@ describe("evalCondition", () => {
       const dir = join(tmpDir, "nextjs-project")
       await mkdir(dir, { recursive: true })
       await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
-      const origCwd = process.cwd()
-      process.chdir(dir)
       try {
-        expect(await evalCondition("framework:nextjs")).toBe(true)
+        expect(await evalCondition("framework:nextjs", dir)).toBe(true)
       } finally {
-        process.chdir(origCwd)
         clearFrameworkCache()
       }
     })
@@ -159,12 +153,9 @@ describe("evalCondition", () => {
       const dir = join(tmpDir, "go-project")
       await mkdir(dir, { recursive: true })
       await Bun.write(join(dir, "go.mod"), "module example.com/app\n\ngo 1.21\n")
-      const origCwd = process.cwd()
-      process.chdir(dir)
       try {
-        expect(await evalCondition("framework:go")).toBe(true)
+        expect(await evalCondition("framework:go", dir)).toBe(true)
       } finally {
-        process.chdir(origCwd)
         clearFrameworkCache()
       }
     })

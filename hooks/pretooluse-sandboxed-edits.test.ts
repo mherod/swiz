@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type HookResult, useTempDir } from "../src/utils/test-utils.ts"
 
@@ -9,8 +8,27 @@ const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 const tmp = useTempDir("swiz-sandboxed-")
 const createTempDir = () => tmp.create()
 
-/** Capture HOME at module-load time before concurrent tests mutate process.env.HOME. */
-const ORIGINAL_HOME = process.env.HOME ?? tmpdir()
+const OUTSIDE_BASE = join("/var/tmp", "swiz-sandboxed-outside")
+const AGENT_ENV_KEYS = [
+  "CLAUDECODE",
+  "GEMINI_CLI",
+  "GEMINI_PROJECT_DIR",
+  "CURSOR_TRACE_ID",
+  "CODEX_MANAGED_BY_NPM",
+  "CODEX_THREAD_ID",
+]
+
+function neutralAgentEnv(overrides: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string") env[key] = value
+  }
+  Object.assign(env, overrides)
+  for (const key of AGENT_ENV_KEYS) {
+    delete env[key]
+  }
+  return env
+}
 
 /** HOME-based dirs cannot use useTempDir (it always uses tmpdir()). */
 const outsideDirs: string[] = []
@@ -30,8 +48,8 @@ afterAll(async () => {
  * on either macOS or Linux.
  */
 async function createOutsideDir(): Promise<string> {
-  const realHome = ORIGINAL_HOME
-  const dir = await mkdtemp(join(realHome, ".swiz-sandboxed-outside-"))
+  await mkdir(OUTSIDE_BASE, { recursive: true })
+  const dir = await mkdtemp(join(OUTSIDE_BASE, "case-"))
   outsideDirs.push(dir)
   return dir
 }
@@ -89,7 +107,7 @@ async function runHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome, TMPDIR: fakeTmpDir },
+    env: neutralAgentEnv({ HOME: fakeHome, TMPDIR: fakeTmpDir }),
     // No cwd override — run from project root so the relative HOOK path resolves.
     // The agent's session cwd is passed via the stdin JSON payload instead.
   })
@@ -371,7 +389,11 @@ describe("pretooluse-sandboxed-edits", () => {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, HOME: fakeHome, TMPDIR: fakeTmpDir, SWIZ_DAEMON_PORT: "19999" },
+        env: neutralAgentEnv({
+          HOME: fakeHome,
+          TMPDIR: fakeTmpDir,
+          SWIZ_DAEMON_PORT: "19999",
+        }),
       })
       await proc.stdin.write(payload)
       await proc.stdin.end()

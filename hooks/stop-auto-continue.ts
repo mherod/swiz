@@ -425,11 +425,8 @@ async function validateResponseAndChecks(
     if (llmSuggestion) {
       response.next = llmSuggestion
     } else {
-      terminate(
-        "skip",
-        "NO_SUGGESTION",
-        "No deterministic or LLM suggestion available — allowing stop."
-      )
+      response.next =
+        "could not identify a specific next step. Review the session transcript and continue with the smallest unfinished task."
     }
   }
 
