@@ -12,6 +12,13 @@ import {
   codexSessionStartInputSchema,
   codexStopInputSchema,
   codexUserPromptSubmitInputSchema,
+  geminiAfterToolInputSchema,
+  geminiBeforeAgentInputSchema,
+  geminiBeforeToolInputSchema,
+  geminiNotificationInputSchema,
+  geminiPreCompressInputSchema,
+  geminiSessionEndInputSchema,
+  geminiSessionStartInputSchema,
   hookOutputSchema,
   notificationHookInputSchema,
   postToolUseFailureHookInputSchema,
@@ -42,27 +49,39 @@ const fallbackInboundSchema = dispatchInboundObjectSchema
  * Unknown events use a plain object record schema.
  */
 export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record<string, any>>> = {
-  preToolUse: z.union([toolHookInputSchema, codexPreToolUseInputSchema]) as z.ZodType<
-    Record<string, any>
-  >,
+  preToolUse: z.union([
+    toolHookInputSchema,
+    codexPreToolUseInputSchema,
+    geminiBeforeToolInputSchema,
+  ]) as z.ZodType<Record<string, any>>,
   postToolUse: z.union([
     postToolUseHookInputSchema,
     postToolUseFailureHookInputSchema,
     codexPostToolUseInputSchema,
+    geminiAfterToolInputSchema,
   ]) as z.ZodType<Record<string, any>>,
   stop: z.union([stopHookInputSchema, codexStopInputSchema]) as z.ZodType<Record<string, any>>,
   subagentStop: stopHookExtendedInputSchema as z.ZodType<Record<string, any>>,
-  sessionStart: z.union([sessionStartHookInputSchema, codexSessionStartInputSchema]) as z.ZodType<
-    Record<string, any>
-  >,
+  sessionStart: z.union([
+    sessionStartHookInputSchema,
+    codexSessionStartInputSchema,
+    geminiSessionStartInputSchema,
+  ]) as z.ZodType<Record<string, any>>,
   userPromptSubmit: z.union([
     userPromptSubmitHookInputSchema,
     codexUserPromptSubmitInputSchema,
+    geminiBeforeAgentInputSchema,
   ]) as z.ZodType<Record<string, any>>,
-  preCompact: preCompactHookInputSchema as z.ZodType<Record<string, any>>,
-  notification: notificationHookInputSchema as z.ZodType<Record<string, any>>,
+  preCompact: z.union([preCompactHookInputSchema, geminiPreCompressInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
+  notification: z.union([notificationHookInputSchema, geminiNotificationInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
   subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, any>>,
-  sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, any>>,
+  sessionEnd: z.union([sessionEndHookInputSchema, geminiSessionEndInputSchema]) as z.ZodType<
+    Record<string, any>
+  >,
   preCommit: preCommitHookInputSchema as z.ZodType<Record<string, any>>,
   prePush: prePushHookInputSchema as z.ZodType<Record<string, any>>,
 }
