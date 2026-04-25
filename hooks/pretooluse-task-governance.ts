@@ -831,8 +831,18 @@ const SWIZ_TASKS_CLI_DENY_MESSAGE =
   "Work must stay in the tracked tool channel (auditing, hooks, and task sync depend on it).\n\n" +
   "The only `swiz tasks` subcommand still allowed here is `adopt` (orphan recovery after compaction)."
 
-function shouldInspectShellInput(input: { tool_name?: string }): boolean {
-  return detectCurrentAgentFromEnv()?.id === "claude" && isShellTool(input?.tool_name ?? "")
+function shouldInspectShellInput(input: {
+  tool_name?: string
+  _env?: Record<string, string>
+}): boolean {
+  if (!isShellTool(input?.tool_name ?? "")) return false
+  const payloadAgent = input?._env ? detectCurrentAgentFromEnv(input._env)?.id : undefined
+  const envAgent = detectCurrentAgentFromEnv()?.id
+  // Prefer the dispatching agent's env (payload._env) over the daemon's
+  // process.env, which may be polluted with CODEX_* vars from launchctl.
+  // Default to "claude" when neither source identifies an agent.
+  const agent = payloadAgent ?? envAgent ?? "claude"
+  return agent === "claude"
 }
 
 function isBlockedSwizTasksCliCommand(command: string): boolean {
@@ -1291,10 +1301,12 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const toolName = String(input?.tool_name ?? "<unknown>")
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     const cwd: string = (input?.cwd as string) ?? process.cwd()
-    const envAgent = detectCurrentAgentFromEnv()?.id
     const payloadEnv = input?._env as Record<string, string> | undefined
     const payloadAgent = payloadEnv ? detectCurrentAgentFromEnv(payloadEnv)?.id : undefined
-    const agent = envAgent ?? payloadAgent ?? "claude"
+    const envAgent = detectCurrentAgentFromEnv()?.id
+    // Prefer payload _env (dispatching agent's true context) over the daemon's
+    // process.env, which lacks CLAUDECODE and may be polluted with CODEX_* vars.
+    const agent = payloadAgent ?? envAgent ?? "claude"
     const enforcement = await isTaskEnforcementProject(cwd).catch(() => false)
 
     let pending = 0
