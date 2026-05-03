@@ -14,7 +14,11 @@ import {
 } from "../../src/utils/stop-incomplete-tasks-core.ts"
 import { buildIncompleteBlockOutput } from "./action-plan.ts"
 import { resolveTaskCheckContext } from "./context.ts"
-import { filterIncompleteStatus } from "./incomplete-check-validator.ts"
+import {
+  filterBlockingIncomplete,
+  filterIncompleteStatus,
+  isDeferredSubject,
+} from "./incomplete-check-validator.ts"
 
 /**
  * Evaluate incomplete tasks and return blocking output or empty object.
@@ -55,7 +59,19 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     return {}
   }
 
-  // Build block output
-  const taskDetails = getIncompleteDetails(ctx.allTasks)
+  // Deferred-subject pending tasks ("Consider ", "Future:", "Follow-up:") are
+  // forward-looking notes that carry over to the next session — they satisfy
+  // the planning buffer for hygiene but should not block stop. See issue #563.
+  const blockingIncomplete = filterBlockingIncomplete(ctx.allTasks)
+  if (blockingIncomplete.length === 0) return {}
+
+  // Build block output — only list non-deferred tasks so the agent isn't told
+  // to act on tasks that the hook has already decided to carry over.
+  const taskDetails = getIncompleteDetails(ctx.allTasks).filter((line) => {
+    // Lines are formatted as `${subject} (task #${id})` — strip the suffix
+    // before classification so deferred subjects ending in `:` still match.
+    const subject = line.replace(/\s*\(task #[^)]*\)\s*$/, "")
+    return !isDeferredSubject(subject)
+  })
   return buildIncompleteBlockOutput(taskDetails)
 }

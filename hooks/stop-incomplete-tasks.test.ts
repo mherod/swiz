@@ -133,6 +133,59 @@ describe("stop-incomplete-tasks", () => {
     expect(allowResult.decision).toBe("block")
   })
 
+  test("allows stop when only deferred-subject pending tasks remain (issue #563)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-deferred-only"
+
+    // A real-work task that is completed
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Ship the feature",
+      status: "completed",
+    })
+    // Forward-looking notes that should NOT block stop
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Consider promoting fragmentation thresholds to swiz settings",
+      status: "pending",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "3",
+      subject: "Future: revisit cache TTL",
+      status: "pending",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "4",
+      subject: "Follow-up: docs for new flag",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, sessionId })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("blocks when real pending task sits alongside deferred subjects", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-deferred-mixed"
+
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Wire up the migration",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Consider extracting helper",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, sessionId })
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Wire up the migration")
+    // Deferred subject must not appear in blocking list
+    expect(result.reason).not.toContain("Consider extracting helper")
+  })
+
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-task-ordering"
