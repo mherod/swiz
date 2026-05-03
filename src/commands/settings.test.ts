@@ -954,6 +954,7 @@ describe("SETTINGS_REGISTRY", () => {
       "dirtyWorktreeThreshold",
       "auditStrictness",
       "actionPlanMerge",
+      "enforceEndOfDay",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -1161,6 +1162,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1208,6 +1210,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1256,6 +1259,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ignoreCi: true })
@@ -1304,6 +1308,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: false })
@@ -1352,6 +1357,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
@@ -1400,6 +1406,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1453,6 +1460,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1504,6 +1512,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ambitionMode: "creative" })
@@ -1551,6 +1560,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { collaborationMode: "team" })
@@ -1598,6 +1608,7 @@ describe("collaborationMode settings", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1887,6 +1898,7 @@ describe("strictNoDirectMain setting", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1934,6 +1946,7 @@ describe("strictNoDirectMain setting", () => {
       largeFileSizeBlockKb: 5120,
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      enforceEndOfDay: true,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })

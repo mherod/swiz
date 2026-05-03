@@ -52,6 +52,29 @@ function buildMissingSkillReason(
 // Add future stop-gated skills here in the exact order they should block.
 const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   {
+    skill: "end-of-day",
+    applies: async ({ cwd, input }) => {
+      const es = (input as Record<string, any>)._effectiveSettings
+      if (es?.enforceEndOfDay === false) return false
+      if (!(await isGitRepo(cwd))) return false
+      const proc = Bun.spawnSync(["git", "-C", cwd, "rev-list", "--count", "@{upstream}..HEAD"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      if (proc.exitCode !== 0) return false
+      const count = parseInt(new TextDecoder().decode(proc.stdout).trim(), 10)
+      return !Number.isNaN(count) && count > 0
+    },
+    blockedLine: (skillReference) =>
+      `BLOCKED: unpushed commits exist and ${skillReference} has not been run this session.`,
+    actionHeader: (skillReference) => `Run ${skillReference} to complete the session handoff:`,
+    actionPlan: (skillReference) => [
+      `Invoke ${skillReference} to push commits, post resolution evidence, and file follow-up issues before stopping.`,
+    ],
+    why: (skillReference) =>
+      `${skillReference} ensures commits reach the remote (so Closes #N auto-closes issues on GitHub), evidence is posted, and follow-up work is captured — preventing work from being lost when the session ends.`,
+  },
+  {
     skill: "farm-out-issues",
     applies: ({ cwd }) => isGitRepo(cwd),
     blockedLine: (skillReference) =>

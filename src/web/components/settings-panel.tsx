@@ -34,6 +34,7 @@ interface GlobalSettingsForm {
   largeFileSizeKb: number
   largeFileSizeBlockKb: number
   transcriptMonitorMaxConcurrentDispatches: number
+  enforceEndOfDay: boolean
 }
 
 const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
@@ -68,6 +69,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   largeFileSizeKb: 200,
   largeFileSizeBlockKb: 5120,
   transcriptMonitorMaxConcurrentDispatches: 0,
+  enforceEndOfDay: true,
 }
 
 interface CachedProjectSettingsResponse {
@@ -163,6 +165,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     largeFileSizeBlockKb: Number(settings.largeFileSizeBlockKb) || 5120,
     transcriptMonitorMaxConcurrentDispatches:
       Number(settings.transcriptMonitorMaxConcurrentDispatches) || 0,
+    enforceEndOfDay: settings.enforceEndOfDay !== false,
   }
 }
 
@@ -403,6 +406,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "autoTransition",
     label: "Auto-transition status",
     desc: "Allow multi-step task status transitions (e.g. completing a pending task auto-transitions through in_progress).",
+  },
+  {
+    key: "enforceEndOfDay",
+    label: "Enforce end-of-day",
+    desc: "Block session stop when unpushed commits exist until /end-of-day has been run.",
   },
 ]
 

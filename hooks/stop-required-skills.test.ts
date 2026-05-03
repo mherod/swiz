@@ -16,7 +16,11 @@ interface HookResult {
   reason?: string
 }
 
-async function runHook(cwd: string, transcriptPath: string): Promise<HookResult> {
+async function runHookWithInput(
+  cwd: string,
+  transcriptPath: string,
+  extraInput: Record<string, unknown> = {}
+): Promise<HookResult> {
   const env: Record<string, string | undefined> = { ...process.env }
   for (const agent of AGENTS) {
     for (const v of agent.envVars ?? []) env[v] = ""
@@ -35,6 +39,7 @@ async function runHook(cwd: string, transcriptPath: string): Promise<HookResult>
       cwd,
       session_id: "test-session",
       transcript_path: transcriptPath,
+      ...extraInput,
     })
   )
   await proc.stdin.end()
@@ -57,6 +62,10 @@ async function runHook(cwd: string, transcriptPath: string): Promise<HookResult>
   }
 
   return { exitCode: proc.exitCode, stdout: trimmed, stderr, decision, reason }
+}
+
+async function runHook(cwd: string, transcriptPath: string): Promise<HookResult> {
+  return await runHookWithInput(cwd, transcriptPath)
 }
 
 async function initGitRepo(dir: string): Promise<void> {
@@ -162,6 +171,99 @@ describe("stop-required-skills", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
     expect(result.decision).toBeUndefined()
+  })
+
+  async function runGitCmd(cwd: string, args: string[]): Promise<void> {
+    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+    await proc.exited
+  }
+
+  async function initGitRepoWithUnpushedCommit(dir: string): Promise<void> {
+    const remoteDir = join(dir, ".bare-remote")
+    await mkdir(remoteDir, { recursive: true })
+    await runGitCmd(remoteDir, ["init", "--bare"])
+    await initGitRepo(dir)
+    await runGitCmd(dir, ["config", "user.email", "test@test.com"])
+    await runGitCmd(dir, ["config", "user.name", "Test"])
+    await runGitCmd(dir, ["remote", "add", "origin", remoteDir])
+    await writeFile(join(dir, "README.md"), "init")
+    await runGitCmd(dir, ["add", "README.md"])
+    await runGitCmd(dir, ["commit", "-m", "init"])
+    await runGitCmd(dir, ["push", "-u", "origin", "HEAD:main"])
+    await writeFile(join(dir, "work.txt"), "work")
+    await runGitCmd(dir, ["add", "work.txt"])
+    await runGitCmd(dir, ["commit", "-m", "unpushed work"])
+  }
+
+  describe("end-of-day rule", () => {
+    const ALL_REQUIRED_SKILLS = [
+      "end-of-day",
+      "farm-out-issues",
+      "continue-with-tasks",
+      "reflect-on-session-mistakes",
+    ] as const
+
+    test("skips when repo has no upstream — falls through to next rule", async () => {
+      const dir = await tmp.create()
+      await initGitRepo(dir) // no remote, no upstream
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      const transcriptPath = await createTranscript(dir)
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      // end-of-day skips (no upstream) → farm-out-issues blocks first
+      expect(result.decision).toBe("block")
+      expect(result.reason).toContain("farm-out-issues")
+      expect(result.reason).not.toContain("end-of-day")
+    })
+
+    test("blocks when unpushed commits exist and end-of-day was not used", async () => {
+      const dir = await tmp.create()
+      await initGitRepoWithUnpushedCommit(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      // transcript includes all OTHER required skills but not end-of-day
+      const transcriptPath = await createTranscript(dir, [
+        "farm-out-issues",
+        "continue-with-tasks",
+        "reflect-on-session-mistakes",
+      ])
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBe("block")
+      expect(result.reason).toContain("end-of-day")
+      expect(result.reason).toContain("unpushed commits")
+    })
+
+    test("allows stop when all required skills were used including end-of-day", async () => {
+      const dir = await tmp.create()
+      await initGitRepoWithUnpushedCommit(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      const transcriptPath = await createTranscript(dir, [...ALL_REQUIRED_SKILLS])
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("skips when enforceEndOfDay is false in effective settings", async () => {
+      const dir = await tmp.create()
+      await initGitRepoWithUnpushedCommit(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      // transcript has all required skills EXCEPT end-of-day; enforceEndOfDay:false causes that rule to skip
+      const transcriptPath = await createTranscript(dir, [
+        "farm-out-issues",
+        "continue-with-tasks",
+        "reflect-on-session-mistakes",
+      ])
+
+      const result = await runHookWithInput(dir, transcriptPath, {
+        _effectiveSettings: { enforceEndOfDay: false },
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBeUndefined()
+    })
   })
 
   test("fails open when the active agent does not support the Skill tool", async () => {

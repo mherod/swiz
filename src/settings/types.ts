@@ -235,6 +235,8 @@ export interface SwizSettings {
   dirtyWorktreeThreshold: number
   /** When true, mergeActionPlanIntoTasks() auto-creates tasks from action plan steps in stop/governance hooks. */
   actionPlanMerge: boolean
+  /** When true, the stop hook suggests /end-of-day when unpushed commits exist. */
+  enforceEndOfDay: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>

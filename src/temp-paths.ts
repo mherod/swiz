@@ -102,3 +102,15 @@ export function swizMcpChannelNotifyPath(projectKey: string): string {
 export function swizMcpRepliesLogPath(home: string): string {
   return `${home}/.swiz/mcp-replies.jsonl`
 }
+
+/**
+ * Sentinel touched when a ceremony skill (e.g. /end-of-day) completes for a
+ * given date. The stop hook reads the mtime to decide whether the ceremony has
+ * run today before blocking the session.
+ *
+ * @param skill - short skill name, e.g. "end-of-day"
+ * @param date  - ISO date string, e.g. "2026-05-03"
+ */
+export function swizCeremonyDayFlagPath(skill: string, date: string): string {
+  return `${TMP_ROOT}/swiz-ceremony-${skill}-${date}.flag`
+}

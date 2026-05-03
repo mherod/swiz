@@ -181,6 +181,7 @@ function buildBaseSettings(
     memoryWordThreshold: settings.memoryWordThreshold,
     largeFileSizeBlockKb: settings.largeFileSizeBlockKb,
     statusLineSegments: settings.statusLineSegments,
+    enforceEndOfDay: settings.enforceEndOfDay,
     ...overrides,
     githubCiGate,
   }

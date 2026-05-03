@@ -650,6 +650,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         "Show action plan steps in block messages only — do not auto-create tasks",
     },
   },
+  {
+    key: "enforceEndOfDay",
+    aliases: ["enforce-end-of-day", "enforceendofday", "enforce_end_of_day"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description: "Block session stop when unpushed commits exist and /end-of-day hasn't run",
+      effectExplanation:
+        "When enabled, the stop hook checks for unpushed commits and blocks until /end-of-day is invoked. Ensures each session ends with a proper handoff — commits pushed, evidence posted, follow-ups filed.",
+      enableDescription: "Enforce /end-of-day ceremony before stopping with outstanding work",
+      disableDescription: "Allow session stop without enforcing /end-of-day ceremony",
+    },
+  },
 ]
 
 /**

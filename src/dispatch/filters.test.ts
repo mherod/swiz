@@ -44,6 +44,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     dirtyWorktreeThreshold: 15,
     autoSteerTranscriptWatching: false,
     transcriptMonitorMaxConcurrentDispatches: 0,
+    enforceEndOfDay: true,
     statusLineSegments: [],
     source: "global",
     ...overrides,
