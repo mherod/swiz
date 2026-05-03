@@ -237,6 +237,8 @@ export interface SwizSettings {
   actionPlanMerge: boolean
   /** When true, the stop hook suggests /end-of-day when unpushed commits exist. */
   enforceEndOfDay: boolean
+  /** When true, the PostToolUse hook suggests /mid-session-checkin when drift signals fire (opt-in, experimental). */
+  enforceMidSessionCheckin: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>

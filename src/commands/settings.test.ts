@@ -955,6 +955,7 @@ describe("SETTINGS_REGISTRY", () => {
       "auditStrictness",
       "actionPlanMerge",
       "enforceEndOfDay",
+      "enforceMidSessionCheckin",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -1163,6 +1164,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1211,6 +1213,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1260,6 +1263,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ignoreCi: true })
@@ -1309,6 +1313,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: false })
@@ -1358,6 +1363,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
@@ -1407,6 +1413,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1461,6 +1468,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1513,6 +1521,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ambitionMode: "creative" })
@@ -1561,6 +1570,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { collaborationMode: "team" })
@@ -1609,6 +1619,7 @@ describe("collaborationMode settings", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1899,6 +1910,7 @@ describe("strictNoDirectMain setting", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1947,6 +1959,7 @@ describe("strictNoDirectMain setting", () => {
       dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
+      enforceMidSessionCheckin: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })

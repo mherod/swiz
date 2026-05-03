@@ -182,6 +182,7 @@ function buildBaseSettings(
     largeFileSizeBlockKb: settings.largeFileSizeBlockKb,
     statusLineSegments: settings.statusLineSegments,
     enforceEndOfDay: settings.enforceEndOfDay,
+    enforceMidSessionCheckin: settings.enforceMidSessionCheckin,
     ...overrides,
     githubCiGate,
   }

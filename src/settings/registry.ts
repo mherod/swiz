@@ -664,6 +664,25 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
       disableDescription: "Allow session stop without enforcing /end-of-day ceremony",
     },
   },
+  {
+    key: "enforceMidSessionCheckin",
+    aliases: [
+      "enforce-mid-session-checkin",
+      "enforcemidsessioncheckin",
+      "enforce_mid_session_checkin",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description:
+        "Suggest /mid-session-checkin when drift signals fire during long sessions (opt-in)",
+      effectExplanation:
+        "When enabled, a PostToolUse hook fires on Edit/Write after 3+ hours and suggests /mid-session-checkin when drift signals are detected (many uncommitted files, stale last commit, new review-requested PRs).",
+      enableDescription: "Suggest /mid-session-checkin when the session drifts (experimental)",
+      disableDescription: "Do not suggest /mid-session-checkin based on activity signals",
+    },
+  },
 ]
 
 /**

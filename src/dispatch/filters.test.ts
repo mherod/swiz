@@ -45,6 +45,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     autoSteerTranscriptWatching: false,
     transcriptMonitorMaxConcurrentDispatches: 0,
     enforceEndOfDay: true,
+    enforceMidSessionCheckin: false,
     statusLineSegments: [],
     source: "global",
     ...overrides,

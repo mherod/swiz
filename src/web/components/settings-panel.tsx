@@ -35,6 +35,7 @@ interface GlobalSettingsForm {
   largeFileSizeBlockKb: number
   transcriptMonitorMaxConcurrentDispatches: number
   enforceEndOfDay: boolean
+  enforceMidSessionCheckin: boolean
 }
 
 const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
@@ -70,6 +71,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   largeFileSizeBlockKb: 5120,
   transcriptMonitorMaxConcurrentDispatches: 0,
   enforceEndOfDay: true,
+  enforceMidSessionCheckin: false,
 }
 
 interface CachedProjectSettingsResponse {
@@ -166,6 +168,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     transcriptMonitorMaxConcurrentDispatches:
       Number(settings.transcriptMonitorMaxConcurrentDispatches) || 0,
     enforceEndOfDay: settings.enforceEndOfDay !== false,
+    enforceMidSessionCheckin: !!settings.enforceMidSessionCheckin,
   }
 }
 
@@ -411,6 +414,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "enforceEndOfDay",
     label: "Enforce end-of-day",
     desc: "Block session stop when unpushed commits exist until /end-of-day has been run.",
+  },
+  {
+    key: "enforceMidSessionCheckin",
+    label: "Enforce mid-session check-in (experimental)",
+    desc: "Suggest /mid-session-checkin after 3+ hours when drift signals fire (uncommitted files, stale commit, new review requests).",
   },
 ]
 

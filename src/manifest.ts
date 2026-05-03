@@ -11,6 +11,7 @@ import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
 import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
+import posttoolusMidSessionPrompt from "../hooks/posttooluse-mid-session-prompt.ts"
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
 import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
@@ -405,6 +406,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseTaskAdvisor },
       { hook: posttooluseMemorySize },
       { hook: posttoolusePrettierTs },
+      { hook: posttoolusMidSessionPrompt },
     ],
   },
   {

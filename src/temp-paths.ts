@@ -104,6 +104,14 @@ export function swizMcpRepliesLogPath(home: string): string {
 }
 
 /**
+ * Cached PR baseline for mid-session drift detection.
+ * Written on first check per session; compared on subsequent checks.
+ */
+export function midSessionPrBaselinePath(safeSession: string): string {
+  return `${TMP_ROOT}/swiz-mid-session-pr-baseline-${safeSession}.json`
+}
+
+/**
  * Sentinel touched when a ceremony skill (e.g. /end-of-day) completes for a
  * given date. The stop hook reads the mtime to decide whether the ceremony has
  * run today before blocking the session.
