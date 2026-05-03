@@ -1215,6 +1215,150 @@ describe("collaborationMode settings", () => {
     expect(effective.githubCiGate).toBe(false)
   })
 
+  test("project ignoreCi overrides global ignoreCi=false and forces githubCiGate off", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      autoSteer: false,
+      autoSteerTranscriptWatching: false,
+      transcriptMonitorMaxConcurrentDispatches: 0,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      ignoreCi: false,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      issueCloseGate: false,
+      memoryUpdateReminder: false,
+      qualityChecksGate: true,
+      skipSecretScan: false,
+      strictNoDirectMain: false,
+      trunkMode: false,
+      autoTransition: true,
+      actionPlanMerge: true,
+      auditStrictness: "strict" as const,
+      taskDurationWarningMinutes: 10,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      largeFileSizeBlockKb: 5120,
+      dirtyWorktreeThreshold: 15,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { ignoreCi: true })
+    expect(effective.ignoreCi).toBe(true)
+    expect(effective.githubCiGate).toBe(false)
+  })
+
+  test("project githubCiGate=false overrides global githubCiGate=true when ignoreCi is off", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      autoSteer: false,
+      autoSteerTranscriptWatching: false,
+      transcriptMonitorMaxConcurrentDispatches: 0,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      ignoreCi: false,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      issueCloseGate: false,
+      memoryUpdateReminder: false,
+      qualityChecksGate: true,
+      skipSecretScan: false,
+      strictNoDirectMain: false,
+      trunkMode: false,
+      autoTransition: true,
+      actionPlanMerge: true,
+      auditStrictness: "strict" as const,
+      taskDurationWarningMinutes: 10,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      largeFileSizeBlockKb: 5120,
+      dirtyWorktreeThreshold: 15,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: false })
+    expect(effective.ignoreCi).toBe(false)
+    expect(effective.githubCiGate).toBe(false)
+  })
+
+  test("global ignoreCi=true still forces githubCiGate off even when project sets githubCiGate=true", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      autoSteer: false,
+      autoSteerTranscriptWatching: false,
+      transcriptMonitorMaxConcurrentDispatches: 0,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      ignoreCi: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      issueCloseGate: false,
+      memoryUpdateReminder: false,
+      qualityChecksGate: true,
+      skipSecretScan: false,
+      strictNoDirectMain: false,
+      trunkMode: false,
+      autoTransition: true,
+      actionPlanMerge: true,
+      auditStrictness: "strict" as const,
+      taskDurationWarningMinutes: 10,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      largeFileSizeBlockKb: 5120,
+      dirtyWorktreeThreshold: 15,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
+    expect(effective.ignoreCi).toBe(true)
+    expect(effective.githubCiGate).toBe(false)
+  })
+
   test("session collaborationMode overrides global", () => {
     const settings = {
       autoContinue: true,

@@ -231,7 +231,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "githubCiGate",
     aliases: ["github-ci-gate", "githubcigate", "github_ci_gate", "ci-gate"],
     kind: "boolean",
-    scopes: ["global"],
+    scopes: ["global", "project"],
     default: true,
     docs: {
       description: "Block session stop when the latest GitHub Actions CI run is failing",
@@ -243,7 +243,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "ignoreCi",
     aliases: ["ignore-ci", "ignoreci", "ignore_ci", "no-ci"],
     kind: "boolean",
-    scopes: ["global"],
+    scopes: ["global", "project"],
     default: false,
     docs: {
       description: "Completely suppress all GitHub Actions CI integration",

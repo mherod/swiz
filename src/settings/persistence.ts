@@ -294,6 +294,8 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "autoSteerTranscriptWatching",
     "strictNoDirectMain",
     "trunkMode",
+    "ignoreCi",
+    "githubCiGate",
   ])
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)

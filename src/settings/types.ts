@@ -111,6 +111,13 @@ export interface ProjectSwizSettings {
   collaborationMode?: CollaborationMode
   /** Run lint and typecheck quality checks before allowing session stop. */
   qualityChecksGate?: boolean
+  /**
+   * Suppress all GitHub Actions CI integration for this project (no `gh run` polling,
+   * no CI hooks, no CI status-line fetches; advisory gates treat CI pre-checks as satisfied).
+   */
+  ignoreCi?: boolean
+  /** Block session stop when the latest GitHub Actions CI run is failing. */
+  githubCiGate?: boolean
   /** Block git push unless the user has explicitly approved it. */
   pushGate?: boolean
   /** Read agent output aloud using text-to-speech. */
@@ -283,6 +290,8 @@ export const projectSettingsSchema = z.object({
   transcriptMonitorMaxConcurrentDispatches: z.number().int().min(0).max(64).optional(),
   pushGate: z.boolean().optional(),
   qualityChecksGate: z.boolean().optional(),
+  ignoreCi: z.boolean().optional(),
+  githubCiGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
   trunkMode: z.boolean().optional(),
   auditStrictness: auditStrictnessSchema.optional(),
