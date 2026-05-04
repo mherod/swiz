@@ -1100,6 +1100,53 @@ describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
   })
 })
 
+describe("native task tool guard", () => {
+  it("blocks list invocation inside Claude Code", async () => {
+    const prevClaudeCode = process.env.CLAUDECODE
+    const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
+    const prevCodexThread = process.env.CODEX_THREAD_ID
+    process.env.CLAUDECODE = "1"
+    delete process.env.CODEX_MANAGED_BY_NPM
+    delete process.env.CODEX_THREAD_ID
+
+    try {
+      await expect(tasksCommand.run([])).rejects.toThrow(
+        '"swiz tasks" (list) is not available inside Claude Code.'
+      )
+    } finally {
+      if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+      else process.env.CLAUDECODE = prevClaudeCode
+      if (prevCodexManaged === undefined) delete process.env.CODEX_MANAGED_BY_NPM
+      else process.env.CODEX_MANAGED_BY_NPM = prevCodexManaged
+      if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
+      else process.env.CODEX_THREAD_ID = prevCodexThread
+    }
+  })
+
+  it("blocks list invocation inside Codex CLI", async () => {
+    const prevClaudeCode = process.env.CLAUDECODE
+    const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
+    const prevCodexThread = process.env.CODEX_THREAD_ID
+    delete process.env.CLAUDECODE
+    process.env.CODEX_MANAGED_BY_NPM = "1"
+    process.env.CODEX_THREAD_ID = "test-thread"
+
+    try {
+      await expect(tasksCommand.run([])).rejects.toThrow(
+        '"swiz tasks" (list) is not available inside Codex CLI.'
+      )
+      await expect(tasksCommand.run([])).rejects.toThrow("Use the native update_plan tool instead.")
+    } finally {
+      if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+      else process.env.CLAUDECODE = prevClaudeCode
+      if (prevCodexManaged === undefined) delete process.env.CODEX_MANAGED_BY_NPM
+      else process.env.CODEX_MANAGED_BY_NPM = prevCodexManaged
+      if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
+      else process.env.CODEX_THREAD_ID = prevCodexThread
+    }
+  })
+})
+
 describe("task transition validator (#302)", () => {
   const { validateTransition } = require("../../src/tasks/task-service.ts") as {
     validateTransition: (old: string, next: string) => string | null

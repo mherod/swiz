@@ -660,25 +660,33 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   repair: (rest) => runRepairTasks(rest),
 }
 
-// ─── Claude Code native-tool guard ───────────────────────────────────────────
+// ─── Native-tool guard (Claude/Codex) ────────────────────────────────────────
 
-/** Subcommands with no native equivalent — only these may run via CLI inside Claude Code. */
-const CLAUDE_CODE_EXEMPT_SUBCOMMANDS = new Set(["adopt", "repair", "TaskCreate", "TaskUpdate"])
+/** Subcommands with no native equivalent — only these may run via CLI inside Claude/Codex. */
+const NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS = new Set(["adopt", "repair", "TaskCreate", "TaskUpdate"])
 
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()
-  if (agent?.id !== "claude") return
+  if (!agent) return
+  const mustUseNativeTaskTools = agent.id === "claude" || !agent.tasksEnabled
+  if (!mustUseNativeTaskTools) return
 
-  if (subcommand && CLAUDE_CODE_EXEMPT_SUBCOMMANDS.has(subcommand)) return
+  if (subcommand && NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS.has(subcommand)) return
 
-  const nativeTools = "TaskCreate, TaskUpdate, TaskList, TaskGet"
+  const agentName = agent.name
+  const nativeTaskToolName =
+    agent.toolAliases.TaskCreate ?? agent.toolAliases.TaskUpdate ?? agent.toolAliases.Task
+  const nativeGuidance =
+    !agent.tasksEnabled && nativeTaskToolName
+      ? `Use the native ${nativeTaskToolName} tool instead.`
+      : "Use native task tools instead: TaskCreate, TaskUpdate, TaskList, TaskGet."
   const hint = subcommand
-    ? `"swiz tasks ${subcommand}" is not available inside Claude Code.`
-    : `"swiz tasks" (list) is not available inside Claude Code.`
+    ? `"swiz tasks ${subcommand}" is not available inside ${agentName}.`
+    : `"swiz tasks" (list) is not available inside ${agentName}.`
 
   throw new Error(
     `${hint}\n` +
-      `Use native task tools instead: ${nativeTools}.\n` +
+      `${nativeGuidance}\n` +
       `Only "swiz tasks adopt" is allowed via CLI (orphan recovery after compaction).`
   )
 }
