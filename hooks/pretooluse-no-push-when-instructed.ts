@@ -71,7 +71,11 @@ const pretoolusNoPushWhenInstructed: SwizHook = {
     const { readSessionLines } = await import("../src/utils/hook-utils.ts")
     const state = scanPushGateFromJsonlLines(await readSessionLines(transcriptPath))
 
-    if (!state.blockingLine) return preToolUseAllow("No 'do not push' instruction found")
+    if (!state.blockingLine) {
+      return preToolUseAllow(
+        "Continue in user-approved push mode: push only after explicit user approval."
+      )
+    }
     if (state.approvedAfter) return preToolUseAllow("Push approved by user after instruction")
 
     return preToolUseDeny(

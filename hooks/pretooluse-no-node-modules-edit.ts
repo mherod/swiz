@@ -31,7 +31,9 @@ const NODE_MODULES_REASON = [
 function evaluate(input: FileEditHookInput) {
   const filePath = input.tool_input?.file_path ?? ""
   if (isNodeModulesPath(filePath)) return preToolUseDeny(NODE_MODULES_REASON)
-  return preToolUseAllow(`File is not in node_modules: ${filePath.split("/").pop()}`)
+  return preToolUseAllow(
+    `Continue in dependency-source protection mode: ${filePath.split("/").pop()} is outside node_modules/.`
+  )
 }
 
 const pretoolusNoNodeModulesEdit: SwizFileEditHook = {

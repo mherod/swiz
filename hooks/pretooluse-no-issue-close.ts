@@ -45,7 +45,7 @@ function evaluate(input: ShellHookInput) {
     )
   }
 
-  return preToolUseAllow("No issue-closing command detected")
+  return preToolUseAllow("Continue in commit-backed issue-closure mode.")
 }
 
 const pretoolusNoIssueClose: SwizShellHook = {

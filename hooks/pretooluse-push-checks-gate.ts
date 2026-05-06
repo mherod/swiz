@@ -268,7 +268,9 @@ function checkMissingPriorChecks(
     eff.ignoreCi || !modePolicy.prHooksActive ? true : priorCommands.some((c) => CI_WAIT_RE.test(c))
 
   if (hasBranchCheck && hasPRCheck && hasCICheck && largeFileWarnItems.length === 0) {
-    return preToolUseAllow("All pre-push checks found in transcript (branch, PR, CI)")
+    return preToolUseAllow(
+      "Continue in pre-push verified mode: All pre-push checks found in transcript (branch, PR, CI)."
+    )
   }
 
   const missing: string[] = [...largeFileWarnItems]
@@ -287,7 +289,7 @@ function checkMissingPriorChecks(
   }
 
   return preToolUseAllow(
-    `Advisory: some pre-push checks are missing.\n\n` +
+    `Pre-push advisory mode: branch/PR/CI verification is incomplete.\n\n` +
       formatActionPlan(missing, {
         header: "The following checks have not been run in this session:",
       }) +

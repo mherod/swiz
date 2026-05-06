@@ -25,6 +25,7 @@ import {
   buildGitContextLine,
   DETACHED_HEAD_WARNING,
   type GitStatusV2,
+  getUnpushedCommitSummaries,
 } from "../src/utils/git-utils.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
@@ -161,7 +162,11 @@ const posttoolusGitContext: SwizHook = {
       payload: input as Record<string, any>,
     })
     const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
-    const statusLine = gitStatus ? buildGitContextLine(gitStatus, effective.collaborationMode) : ""
+    const unpushedCommitSummaries =
+      gitStatus && gitStatus.ahead > 0 ? await getUnpushedCommitSummaries(cwd) : []
+    const statusLine = gitStatus
+      ? buildGitContextLine(gitStatus, effective.collaborationMode, unpushedCommitSummaries)
+      : ""
 
     let directives: string[] = []
     if (shouldLoadDirectives(tool_name, input, gitStatus, isShellTool, GIT_ANY_CMD_RE)) {

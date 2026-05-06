@@ -73,7 +73,9 @@ function evaluate(input: ShellHookInput) {
   const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
   const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
 
-  if (!match?.groups?.tool) return preToolUseAllow("No mixed tool call detected")
+  if (!match?.groups?.tool) {
+    return preToolUseAllow("Continue in direct-tool-invocation mode.")
+  }
 
   const toolName = match.groups.tool
   const commandPreview = rawCommand.replace(/\s+/g, " ").trim().slice(0, 140) || toolName

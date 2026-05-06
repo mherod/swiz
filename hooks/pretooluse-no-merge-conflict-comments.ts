@@ -90,10 +90,16 @@ function evaluate(input: ShellHookInput) {
   const bodyNormalized = body.normalize("NFKC").toLowerCase()
 
   const hasMergeConflictSignal = NOISE_PHRASES.some((re) => re.test(bodyNormalized))
-  if (!hasMergeConflictSignal) return preToolUseAllow("Comment has no merge-conflict signals")
+  if (!hasMergeConflictSignal) {
+    return preToolUseAllow(
+      "Continue in substantive-PR-comment mode: no merge-conflict-only signal found."
+    )
+  }
 
   if (!isPureNoise(bodyNormalized))
-    return preToolUseAllow("Comment contains substantive content beyond conflict notice")
+    return preToolUseAllow(
+      "Continue in substantive-PR-comment mode: body includes content beyond rebase/conflict status."
+    )
 
   const rebaseAdvice = skillAdvice(
     "rebase-onto-main",

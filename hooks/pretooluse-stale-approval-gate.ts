@@ -132,11 +132,15 @@ export async function evaluatePretooluseStaleApprovalGate(input: unknown): Promi
   if (!branch) return {}
 
   const result = await findApprovedPr(branch, cwd)
-  if (!result) return preToolUseAllow(`No approved PR on branch '${branch}'`)
+  if (!result) {
+    return preToolUseAllow(
+      `Continue in stale-review-safe commit mode: branch '${branch}' has no approved PR to invalidate.`
+    )
+  }
 
   if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) {
     return preToolUseAllow(
-      `PR #${result.pr.number} approved but branch protection does not dismiss stale reviews`
+      `Continue in stale-review-safe commit mode: PR #${result.pr.number} approval is preserved because branch protection does not dismiss stale reviews.`
     )
   }
 

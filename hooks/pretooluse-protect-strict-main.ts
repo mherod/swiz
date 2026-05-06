@@ -57,7 +57,7 @@ const pretoolusePprotectStrictMain: SwizHook = {
       )
     }
 
-    return preToolUseAllow("Command does not disable strict-no-direct-main")
+    return preToolUseAllow("Continue with strict-no-direct-main protection enabled.")
   },
 }
 

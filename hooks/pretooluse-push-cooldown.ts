@@ -74,7 +74,9 @@ async function evaluate(input: ShellHookInput) {
   const result = await checkCooldown(sentinelPath, cooldownMs)
   if (result.blocked) return preToolUseDeny(result.message!)
 
-  return preToolUseAllow("Push cooldown clear")
+  return preToolUseAllow(
+    "Continue in push-cooldown mode: cooldown window is clear for this repository."
+  )
 }
 
 const pretoolusePushCooldown: SwizShellHook = {

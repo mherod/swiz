@@ -187,36 +187,52 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     const otherInProgress = tasks.filter((t) => t.id !== taskId && t.status === "in_progress")
     if (otherInProgress.length >= 2) {
       return preToolUseAllow(
-        `Task #${taskId}: ${otherInProgress.length} other tasks are in_progress — completion allowed (busy session).`
+        `Continue in active-task-buffer mode: Task #${taskId} can complete while ${otherInProgress.length} other tasks remain in_progress.`
       )
     }
     const otherPending = tasks.filter((t) => t.id !== taskId && t.status === "pending")
     if (otherPending.length >= 2) {
       return preToolUseAllow(
-        `Task #${taskId}: ${otherPending.length} pending tasks queued — completion allowed (planned session).`
+        `Continue in planned-task-buffer mode: Task #${taskId} can complete while ${otherPending.length} pending tasks stay queued.`
       )
     }
   }
 
-  if (!(await isGitRepo(cwd))) return preToolUseAllow("Not a git repository.")
-
-  if (hasTrackedEvidence(description)) {
-    return preToolUseAllow(`Task #${taskId} completion includes traceable evidence.`)
+  if (!(await isGitRepo(cwd))) {
+    return preToolUseAllow(
+      "Continue in non-git task mode: phantom completion checks are skipped outside repositories."
+    )
   }
 
-  if (!transcriptPath) return preToolUseAllow("No transcript path available.")
+  if (hasTrackedEvidence(description)) {
+    return preToolUseAllow(
+      `Continue in evidence-backed task-completion mode: Task #${taskId} includes traceable evidence.`
+    )
+  }
+
+  if (!transcriptPath) {
+    return preToolUseAllow(
+      "Continue in transcript-unavailable task mode: completion cannot be mechanically audited."
+    )
+  }
 
   const lines = (await readSessionLines(transcriptPath)).filter((l) => l.trim())
-  if (lines.length === 0) return preToolUseAllow("Empty session transcript.")
+  if (lines.length === 0) {
+    return preToolUseAllow(
+      "Continue in empty-transcript task mode: completion cannot be mechanically audited."
+    )
+  }
 
   const { workCallCount, anchorFound } = scanTranscript(lines, taskId)
 
   if (!anchorFound)
-    return preToolUseAllow(`No in_progress transition for #${taskId} in transcript.`)
+    return preToolUseAllow(
+      `Continue in prior-session task mode: no in_progress transition for #${taskId} appears in this transcript.`
+    )
 
   if (workCallCount >= 1) {
     return preToolUseAllow(
-      `Task #${taskId}: ${workCallCount} work tool call(s) after in_progress — completion allowed.`
+      `Continue in tool-backed task-completion mode: Task #${taskId} has ${workCallCount} work tool call(s) after in_progress.`
     )
   }
 

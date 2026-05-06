@@ -42,7 +42,9 @@ async function checkCollaborationAndDeny(
   try {
     const collaboration = await detectProjectCollaborationPolicy(cwd)
     if (!collaboration.isCollaborative) {
-      return preToolUseAllow(`Solo repo — direct commit to '${currentBranch}' allowed`)
+      return preToolUseAllow(
+        `Continue in solo-repo direct-commit mode: '${currentBranch}' permits direct commits.`
+      )
     }
 
     const signals = collaboration.signals.map((s) => `  - ${s}`).join("\n")
@@ -92,7 +94,9 @@ export async function evaluatePretooluseBlockCommitToMain(input: unknown): Promi
 
   const projectSettings = await readProjectSettings(cwd)
   if (projectSettings?.trunkMode) {
-    return preToolUseAllow("Trunk mode enabled — direct commit to default branch allowed")
+    return preToolUseAllow(
+      "Continue in trunk-mode commit policy: direct commits to the default branch are allowed."
+    )
   }
 
   const branchInfo = await getBranchInfo(cwd)
@@ -101,7 +105,9 @@ export async function evaluatePretooluseBlockCommitToMain(input: unknown): Promi
   const { current: currentBranch, defaultBranch } = branchInfo
 
   if (!isDefaultBranch(currentBranch, defaultBranch)) {
-    return preToolUseAllow(`On feature branch '${currentBranch}', not default '${defaultBranch}'`)
+    return preToolUseAllow(
+      `Continue in feature-branch commit mode: '${currentBranch}' is not the default branch '${defaultBranch}'.`
+    )
   }
 
   return await checkCollaborationAndDeny(cwd, currentBranch, defaultBranch)

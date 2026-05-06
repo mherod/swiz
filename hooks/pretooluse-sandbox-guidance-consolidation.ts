@@ -100,7 +100,7 @@ const pretooluseSandboxGuidanceConsolidation: SwizHook<FileEditHookInput> = {
       }
     }
 
-    return preToolUseAllow("No inline issue-guidance patterns detected")
+    return preToolUseAllow("Continue in canonical issue-guidance mode.")
   },
 }
 

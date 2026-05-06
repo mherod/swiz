@@ -128,7 +128,9 @@ export async function evaluatePretoolusePrChangesBranchGuard(
   const changesRequested = await getChangesRequestedReviews(pr, cwd)
   if (changesRequested === null) return {}
   if (changesRequested.length === 0) {
-    return preToolUseAllow(`PR #${pr.number} has no changes requested — branch switch allowed`)
+    return preToolUseAllow(
+      `Continue in review-clear branch-switch mode: PR #${pr.number} has no changes-requested reviews.`
+    )
   }
 
   const fork = await detectForkTopology(cwd)

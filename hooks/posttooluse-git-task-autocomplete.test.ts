@@ -8,6 +8,7 @@ import { AGENTS } from "../src/agents.ts"
 
 interface HookResult {
   additionalContext?: string
+  systemMessage?: string
   rawOutput: string
   exitedCleanly: boolean
 }
@@ -67,6 +68,7 @@ async function runHook(
     const parsed = JSON.parse(rawOutput.trim())
     return {
       additionalContext: parsed.hookSpecificOutput?.additionalContext,
+      systemMessage: parsed.systemMessage,
       rawOutput,
       exitedCleanly,
     }
@@ -113,12 +115,13 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
     expect(result.additionalContext).toContain("Wait for CI")
   })
 
-  test("git push uses the current agent's create-task alias", async () => {
+  test("git push uses the current agent's create-task alias in Codex systemMessage", async () => {
     const result = await runHook("git push origin main", "Bash", "test-session-id", {
       CODEX_THREAD_ID: "test-codex",
     })
     expect(result.exitedCleanly).toBe(true)
-    expect(result.additionalContext).toContain("update_plan")
+    expect(result.additionalContext).toBeUndefined()
+    expect(result.systemMessage).toContain("update_plan")
   })
 
   test("git push emits PR creation context when pr-merge-mode is disabled", async () => {

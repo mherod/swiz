@@ -32,7 +32,7 @@ async function evaluate(input: FileEditHookInput) {
       "Current settings.json contains invalid JSON. Fix the syntax errors first before making further edits.\n\nTip: Run `bun run -i validate-stop-hooks.ts` to see what's broken."
     )
   }
-  return preToolUseAllow(`settings.json at ${filePath} contains valid JSON`)
+  return preToolUseAllow(`Continue in valid-settings-json mode: ${filePath} parses before edit.`)
 }
 
 const pretoolusJsonValidation: SwizFileEditHook = {

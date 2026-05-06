@@ -132,7 +132,9 @@ async function checkAllowedRoots(target: string, cwd: string): Promise<SwizHookO
   const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
   if (allowedRoots.some((root) => isWithin(root, target))) {
-    return preToolUseAllow(`File is within sandbox: ${target.split("/").slice(-2).join("/")}`)
+    return preToolUseAllow(
+      `Continue in sandboxed-edit mode: ${target.split("/").slice(-2).join("/")} is within the session sandbox.`
+    )
   }
 
   return null
@@ -167,7 +169,9 @@ async function checkWellKnownConfig(target: string): Promise<SwizHookOutput | nu
   for (const configPath of WELL_KNOWN_CONFIG_FILES) {
     const canonical = await resolveCanonical(join(homeDir, configPath))
     if (target === canonical) {
-      return preToolUseAllow(`Well-known config file: ~/${configPath}`)
+      return preToolUseAllow(
+        `Continue in scoped-home-config mode: ~/${configPath} is an approved config file.`
+      )
     }
   }
 
@@ -260,7 +264,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
         `  Attempted: ${target}`,
         `  Session cwd: ${cwd}`,
         "",
-        "Only edits within the current project directory or temporary directories are allowed.",
+        "Sandboxed-edits mode is enabled: only edits within the current project directory or temporary directories are allowed.",
         buildIssueGuidance(null),
         crossRepoHint,
       ]

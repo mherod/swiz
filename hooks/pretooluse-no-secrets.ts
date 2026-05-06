@@ -88,7 +88,9 @@ function evaluate(input: FileEditHookInput) {
 
   const findings = scanContentForSecrets(content, filePath)
   if (findings.length === 0) {
-    return preToolUseAllow(`No secrets detected in ${filePath.split("/").pop()}`)
+    return preToolUseAllow(
+      `Continue in no-secrets-in-source mode for ${filePath.split("/").pop()}.`
+    )
   }
 
   const lines = findings.map((f) => `  [${f.kind}] ${f.line}`).join("\n")

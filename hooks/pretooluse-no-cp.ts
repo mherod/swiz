@@ -27,7 +27,7 @@ function evaluate(input: ShellHookInput) {
   const command: string = input.tool_input?.command ?? ""
 
   if (!shellSegmentCommandRe("cp(?:\\s|$)").test(command))
-    return preToolUseAllow("No cp invocation detected")
+    return preToolUseAllow("Continue in ditto-preferred copy mode.")
 
   return preToolUseDeny(DENY_REASON)
 }

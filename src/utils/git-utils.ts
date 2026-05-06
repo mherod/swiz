@@ -371,6 +371,25 @@ function describeSyncState(ahead: number, behind: number): string {
   return ""
 }
 
+function normalizeCommitSummary(line: string): string {
+  return line.replace(/\s+/g, " ").trim()
+}
+
+function describeUnpushedCommitSummaries(ahead: number, summaries: string[] = []): string {
+  if (ahead <= 0 || summaries.length === 0) return ""
+  const visible = summaries.map(normalizeCommitSummary).filter(Boolean).slice(0, 3)
+  if (visible.length === 0) return ""
+  const remaining = Math.max(0, ahead - visible.length)
+  const suffix = remaining > 0 ? `; +${remaining} more` : ""
+  return ` Unpushed commits: ${visible.join("; ")}${suffix}.`
+}
+
+export async function getUnpushedCommitSummaries(cwd: string, limit = 3): Promise<string[]> {
+  const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)))
+  const out = await git(["log", `--max-count=${safeLimit}`, "--oneline", "@{upstream}..HEAD"], cwd)
+  return out.split("\n").map(normalizeCommitSummary).filter(Boolean)
+}
+
 /** Critical warning displayed when the repository is in a detached HEAD state. */
 export const DETACHED_HEAD_WARNING =
   "CRITICAL: You are in a DETACHED HEAD state (not on any branch). Any commits you make will be orphaned and potentially lost. To save your work, create a new branch using 'git switch -c <name>' or 'git checkout -b <name>'."
@@ -381,13 +400,18 @@ export const DETACHED_HEAD_WARNING =
  * @param gitStatus
  * @param collabMode - When `"auto"`, the collaboration suffix is omitted.
  */
-export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {
+export function buildGitContextLine(
+  gitStatus: GitStatusV2,
+  collabMode: string = "auto",
+  unpushedCommitSummaries: string[] = []
+): string {
   const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
 
   let line = branch === "(detached)" ? "[git] HEAD is detached" : `[git] On branch ${branch}`
   line += describeUpstream(upstream, upstreamGone)
   line += describeWorkingTree(uncommitted)
   line += describeSyncState(ahead, behind)
+  line += describeUnpushedCommitSummaries(ahead, unpushedCommitSummaries)
 
   if (branch === "(detached)") {
     line += ` ${DETACHED_HEAD_WARNING}`

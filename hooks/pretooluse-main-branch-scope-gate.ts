@@ -98,13 +98,13 @@ interface ScopePolicyArgs {
 function checkScopeAndPolicy(args: ScopePolicyArgs): SwizHookOutput | null {
   if (!args.isCollaborative && !args.strictMode) {
     return preToolUseAllow(
-      `Solo repo without strict mode — push to '${args.defaultBranch}' allowed (${args.scopeDescription})`
+      `Continue in solo-repo push policy: strict-no-direct-main is disabled and '${args.defaultBranch}' accepts ${args.scopeDescription}.`
     )
   }
 
   if (args.isDocsOnly || args.isTrivial) {
     return preToolUseAllow(
-      `Scope is ${args.scopeDescription} (${args.fileCount} files, ${args.totalLinesChanged} lines) — allowed on '${args.defaultBranch}'`
+      `Continue in scoped default-branch push mode: ${args.scopeDescription} (${args.fileCount} files, ${args.totalLinesChanged} lines) is within policy for '${args.defaultBranch}'.`
     )
   }
 
@@ -260,13 +260,15 @@ Please verify the PR number and your network connection, then try again.
   // Allow merges to integration branches — part of the dev→main promotion workflow
   if (isIntegrationBranch(baseBranch)) {
     return preToolUseAllow(
-      `Merge to integration branch '${baseBranch}' — allowed as part of the promotion workflow`
+      `Continue in promotion-merge mode: integration branch '${baseBranch}' is approved for direct promotion workflow merges.`
     )
   }
 
   // Only block merges to production branches
   if (!isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
-    return preToolUseAllow(`Merge to non-production branch '${baseBranch}' — allowed`)
+    return preToolUseAllow(
+      `Continue in non-production merge mode: '${baseBranch}' is outside production branch policy.`
+    )
   }
 
   // If we are merging into a production branch, check if the PR is approved/ready.
@@ -274,7 +276,7 @@ Please verify the PR number and your network connection, then try again.
 
   if (prStatus.mergeable) {
     return preToolUseAllow(
-      `PR #${prNumber} is approved and mergeable (${prStatus.statusContext}) — allowed`
+      `Continue in approved-production-merge mode: PR #${prNumber} is approved and mergeable (${prStatus.statusContext}).`
     )
   }
 
@@ -410,7 +412,9 @@ export async function evaluatePretooluseMainBranchScopeGate(
 
   const trunkModeSettings = await readProjectSettings(cwd)
   if (trunkModeSettings?.trunkMode) {
-    return preToolUseAllow("Trunk mode enabled — direct push to default branch allowed")
+    return preToolUseAllow(
+      "Continue in trunk-mode push policy: direct pushes to the default branch are allowed."
+    )
   }
 
   const defaultBranch = await getDefaultBranch(cwd)

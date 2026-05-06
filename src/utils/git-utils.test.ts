@@ -831,6 +831,23 @@ describe("buildGitContextLine", () => {
     expect(result).toContain("2 commits not yet pushed")
   })
 
+  test("includes bounded unpushed commit summaries when supplied", () => {
+    const result = buildGitContextLine(makeStatus({ ahead: 4 }), "auto", [
+      "abc1234 fix: omit additionalContext for Codex",
+      "def5678 test: cover Codex context output",
+      "987abcd chore: update docs",
+    ])
+    expect(result).toContain(
+      "Unpushed commits: abc1234 fix: omit additionalContext for Codex; def5678 test: cover Codex context output; 987abcd chore: update docs; +1 more."
+    )
+  })
+
+  test("omits unpushed commit summaries when branch is not ahead", () => {
+    const result = buildGitContextLine(makeStatus({ ahead: 0 }), "auto", ["abc1234 hidden"])
+    expect(result).not.toContain("Unpushed commits")
+    expect(result).not.toContain("abc1234")
+  })
+
   test("shows behind count", () => {
     const result = buildGitContextLine(makeStatus({ behind: 5 }))
     expect(result).toContain("5 commits behind remote")

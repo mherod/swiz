@@ -78,7 +78,9 @@ function evaluate(input: ShellHookInput) {
         `Use this instead:\n  ${correctedInvocation}`
     )
   }
-  return preToolUseAllow("All bun test invocations use --concurrent correctly")
+  return preToolUseAllow(
+    "Continue in concurrent Bun test mode: multi-file runs include --concurrent and single-file runs stay focused."
+  )
 }
 
 const pretooluseBunTestConcurrent: SwizShellHook = {

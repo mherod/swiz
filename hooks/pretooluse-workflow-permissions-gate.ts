@@ -45,7 +45,7 @@ const pretoolusWorkflowPermissionsGate: SwizHook = {
     const defaultBranch = await getDefaultBranch(cwd)
     if (currentBranch === defaultBranch) {
       return preToolUseAllow(
-        `Workflow permissions edit on default branch '${defaultBranch}' — allowed`
+        `Continue in default-branch workflow-permissions mode: permissions edits are approved only on '${defaultBranch}'.`
       )
     }
 

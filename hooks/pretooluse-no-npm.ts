@@ -174,7 +174,9 @@ async function evaluate(input: ShellHookInput) {
   const parsed = parseInvocation(command)
   if (!parsed) return {}
   if (!isImplausibleInvocation(parsed.invoked, pm)) {
-    return preToolUseAllow(`Package manager invocation '${parsed.invoked}' is plausible for ${pm}`)
+    return preToolUseAllow(
+      `Continue in ${pm}-preferred package-command mode: '${parsed.invoked}' is accepted here.`
+    )
   }
 
   return buildImplausibleDeny(parsed, pm)

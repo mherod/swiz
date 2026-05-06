@@ -267,8 +267,12 @@ function buildBlockMessage(state: ScanState): string {
 
 function resolveAllowReason(state: ScanState): string | null {
   if (state.cleared) return "Pre-existing dismissal cleared via evidence"
-  if (!state.dismissalText) return "No pre-existing dismissal detected"
-  if (!state.hasDiagnosticIssues) return "No diagnostic issues in recent output"
+  if (!state.dismissalText) {
+    return "Continue in diagnostic-ownership mode: fix or prove diagnostic claims."
+  }
+  if (!state.hasDiagnosticIssues) {
+    return "Continue in clean-diagnostic verification mode."
+  }
   return null
 }
 

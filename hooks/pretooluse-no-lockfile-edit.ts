@@ -33,7 +33,9 @@ const LOCKFILE_REASON = [
 function evaluate(input: FileEditHookInput) {
   const filePath = input.tool_input?.file_path ?? ""
   if (LOCKFILE_RE.test(filePath)) return preToolUseDeny(LOCKFILE_REASON)
-  return preToolUseAllow(`File is not a lockfile: ${filePath.split("/").pop()}`)
+  return preToolUseAllow(
+    `Continue in package-manager-generated lockfile mode: ${filePath.split("/").pop()} is outside the lockfile set.`
+  )
 }
 
 const pretoolusNoLockfileEdit: SwizFileEditHook = {

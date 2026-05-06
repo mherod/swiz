@@ -161,7 +161,7 @@ const pretoolUseNoDirectDeps: SwizToolHook = {
       return preToolUseAllow("")
     }
 
-    return preToolUseAllow(`No direct dependency edits detected in package.json`)
+    return preToolUseAllow("Continue in package-manager-managed dependency mode.")
   },
 }
 
