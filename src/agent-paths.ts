@@ -1,5 +1,11 @@
 import { join } from "node:path"
-import { AGENTS, type AgentDef, inferAgentFromToolNames, translateMatcher } from "./agents.ts"
+import {
+  AGENTS,
+  type AgentDef,
+  getAgent,
+  inferAgentFromToolNames,
+  translateMatcher,
+} from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 
 export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex"
@@ -88,6 +94,66 @@ export function detectCurrentAgentFromEnv(
  */
 export function agentHasTaskTools(): boolean {
   const agent = detectCurrentAgentFromEnv()
+  if (!agent) return true
+  return agent.tasksEnabled
+}
+
+type HookPayload = Record<string, unknown>
+
+function getStringField(input: HookPayload | undefined, key: string): string {
+  const value = input?.[key]
+  return typeof value === "string" ? value : ""
+}
+
+function payloadEnv(
+  input: HookPayload | undefined
+): Record<string, string | undefined> | undefined {
+  const env = input?._env
+  if (!env || typeof env !== "object" || Array.isArray(env)) return undefined
+
+  const result: Record<string, string | undefined> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+function detectCodexPayload(input: HookPayload | undefined): AgentDef | null {
+  const transcriptPath = getStringField(input, "transcript_path")
+  if (transcriptPath.includes("/.codex/sessions/")) return getAgent("codex") ?? null
+
+  const observedToolNames = [
+    getStringField(input, "tool_name"),
+    getStringField(input, "toolName"),
+  ].filter(Boolean)
+  const inferred = inferAgentFromToolNames(observedToolNames)
+  return inferred?.id === "codex" ? inferred : null
+}
+
+/**
+ * Detect the originating agent from a hook payload. Prefer payload `_env`
+ * because daemon workers may not share the caller's environment. Fall back to
+ * Codex transcript/tool-shape fingerprints for direct Codex hook payloads,
+ * which do not always include CODEX_* env vars. Do not fall back to
+ * process.env here: test runners and daemons can have ambient agent variables
+ * that are not the hook caller.
+ */
+export function detectCurrentAgentFromHookPayload(input: HookPayload | undefined): AgentDef | null {
+  const env = payloadEnv(input)
+  const byPayloadEnv = env ? detectCurrentAgentFromEnv(env) : null
+  if (byPayloadEnv) return byPayloadEnv
+  return detectCodexPayload(input)
+}
+
+/**
+ * Check whether the hook payload's originating agent has native task tools.
+ * Codex must always return false here: `update_plan` is planning UI, not the
+ * TaskCreate/TaskUpdate governance surface.
+ */
+export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined): boolean {
+  const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent) return true
   return agent.tasksEnabled
 }

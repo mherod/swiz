@@ -5,6 +5,7 @@
  * Entry point for the modular stop-completion-auditor hook.
  */
 
+import { agentHasTaskToolsForHookPayload } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-utils.ts"
@@ -26,6 +27,7 @@ import type { CompletionAuditContext, ValidationResult } from "./types.ts"
  */
 export async function evaluateStopCompletionAuditor(input: StopHookInput): Promise<SwizHookOutput> {
   const raw = input as Record<string, any>
+  if (!agentHasTaskToolsForHookPayload(raw)) return {}
 
   // Resolve all prerequisites and load context
   const baseCtx = await resolveCompletionAuditContext(input, raw)

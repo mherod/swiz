@@ -13,6 +13,7 @@
 import { appendFile, mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
@@ -170,6 +171,8 @@ async function updateEventState(
 }
 
 export async function evaluatePosttooluseTaskAuditSync(input: unknown): Promise<SwizHookOutput> {
+  const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(raw)) return {}
   const hookInput = toolHookInputSchema.parse(input)
   const resolved = resolveTaskInput(hookInput)
   if (resolved) {
@@ -246,6 +249,7 @@ function formatSyncSummary(
 
 export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
+  if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
 
   // Always write the sentinel when we see a TaskList response, even if zero
   // tasks were returned. This resets the 5-minute freshness mandate so the
@@ -312,6 +316,7 @@ const posttooluseTaskSync: SwizHook<Record<string, any>> = {
 
   async run(input) {
     const rec = input as Record<string, any>
+    if (!agentHasTaskToolsForHookPayload(rec)) return {}
     const toolName = String(rec.tool_name ?? "")
 
     if (toolName === "TaskList") {

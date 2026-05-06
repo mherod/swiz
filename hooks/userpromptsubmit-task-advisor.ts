@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Inject task-creation context on every prompt.
 
-import { agentHasTaskTools, toolNameForCurrentAgent } from "../src/agent-paths.ts"
+import { agentHasTaskToolsForHookPayload, toolNameForCurrentAgent } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import {
   buildContextHookOutput,
@@ -13,11 +13,11 @@ import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from 
 import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
 
 export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
+  const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(raw)) return {}
   const hookInput: UserPromptSubmitHookInput = userPromptSubmitHookInputSchema.parse(input)
   const sessionId = hookInput.session_id
   if (!sessionId) return {}
-
-  if (!agentHasTaskTools()) return {}
 
   const home = getHomeDirOrNull()
   if (!home) return {}

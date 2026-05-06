@@ -8,6 +8,7 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
@@ -798,6 +799,7 @@ async function evaluateResponse(
 export async function evaluatePosttooluseTaskOutput(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
   const hookInput = input as PostToolHookInput
+  if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
 
   if (hookInput.tool_name !== "TaskOutput") return {}
 

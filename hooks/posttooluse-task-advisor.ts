@@ -3,6 +3,7 @@
 // PostToolUse hook: Remind agents to create/update tasks regularly
 // Dual-mode: SwizHook + runSwizHookAsMain.
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -94,6 +95,7 @@ function stalenessWarningMessage(
 
 export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
   const hookRaw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(hookRaw)) return {}
   const parsed = toolHookInputSchema.parse(hookRaw)
 
   advisorSessionId = parsed.session_id ?? ""

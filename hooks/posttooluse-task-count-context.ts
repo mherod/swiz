@@ -11,6 +11,7 @@
  * feedback so the model sees both correct and negligent patterns.
  */
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import { getRepoSlug } from "../src/git-helpers.ts"
 import { getIssueStore } from "../src/issue-store.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
@@ -98,6 +99,8 @@ export function applyMutationOverlay(
 }
 
 export async function evaluatePosttooluseTaskCountContext(input: unknown): Promise<SwizHookOutput> {
+  const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(raw)) return {}
   const parsed = toolHookInputSchema.parse(input)
   const sessionId = resolveSafeSessionId(parsed.session_id)
   if (!sessionId) return {}

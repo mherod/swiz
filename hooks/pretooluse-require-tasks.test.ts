@@ -24,6 +24,7 @@ async function runHook({
   content,
   seedFreshTaskListSync = true,
   envOverrides = {},
+  payloadEnv,
 }: {
   homeDir: string
   cwd?: string
@@ -36,6 +37,7 @@ async function runHook({
   content?: string
   seedFreshTaskListSync?: boolean
   envOverrides?: Record<string, string | undefined>
+  payloadEnv?: Record<string, string | undefined>
 }): Promise<HookResult> {
   const toolInput: Record<string, string> = {}
   if (command !== undefined) toolInput.command = command
@@ -47,6 +49,7 @@ async function runHook({
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
     tool_input: toolInput,
+    ...(payloadEnv !== undefined ? { _env: payloadEnv } : {}),
     // cwd defaults to the swiz project root (a git repo with CLAUDE.md) when omitted
     ...(cwd !== undefined ? { cwd } : {}),
   })
@@ -689,7 +692,7 @@ describe("pretooluse-require-tasks", () => {
         homeDir,
         toolName: "Edit",
         filePath: "/Users/test/project/src/index.ts",
-        envOverrides: { CODEX_THREAD_ID: "thread-123" },
+        payloadEnv: { CODEX_THREAD_ID: "thread-123" },
       })
       expect(result.decision).toBeUndefined()
     })

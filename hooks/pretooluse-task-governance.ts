@@ -11,7 +11,7 @@
 // Each hook is exported as a named export for manifest registration.
 // Original files are thin wrappers for standalone subprocess execution.
 
-import { agentHasTaskTools } from "../src/agent-paths.ts"
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
@@ -101,6 +101,7 @@ export const taskupdateSchemaHook: SwizToolHook = {
 
   run(rawInput) {
     const input = rawInput as Record<string, any>
+    if (!agentHasTaskToolsForHookPayload(input)) return {}
     const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
     const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
@@ -128,6 +129,7 @@ export const taskSubjectValidationHook: SwizToolHook = {
 
   run(rawInput) {
     const input = rawInput as Record<string, any>
+    if (!agentHasTaskToolsForHookPayload(input)) return {}
     const toolInput = input.tool_input as Record<string, any> | undefined
     const subject: string = (toolInput?.subject as string) ?? ""
 
@@ -587,7 +589,7 @@ function validateGuardConditions(
   input: Record<string, any>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
-  if (!agentHasTaskTools()) return false
+  if (!agentHasTaskToolsForHookPayload(input)) return false
   return !isExemptToolCall(input, toolName)
 }
 
@@ -791,6 +793,7 @@ function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
 export async function evaluatePretooluseRequireTasks(
   input: Record<string, any>
 ): Promise<SwizHookOutput> {
+  if (!agentHasTaskToolsForHookPayload(input)) return {}
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
   return await runRequireTasksChecks(parsed)
@@ -1167,6 +1170,7 @@ function isNativeTaskTool(toolName: string): boolean {
 export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
   const rec = parsed as unknown as Record<string, any>
+  if (!agentHasTaskToolsForHookPayload(rec)) return {}
   const toolName = String(rec.tool_name ?? "")
 
   if (isNativeTaskTool(toolName)) {
@@ -1197,12 +1201,13 @@ export const enforceTaskupdateHook: SwizToolHook = {
 async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(rawInput)
   const input = parsed as unknown as Record<string, any>
+  if (!agentHasTaskToolsForHookPayload(input)) return {}
   const toolName = String(input.tool_name ?? "")
   const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
   // ── Global pending-task overflow guard ────────────────────────────────
   // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
-  if (!isTaskListTool(toolName) && agentHasTaskTools()) {
+  if (!isTaskListTool(toolName) && agentHasTaskToolsForHookPayload(input)) {
     const sessionIdForOverflow = resolveSafeSessionId(input.session_id as string | undefined)
     const cwdForOverflow: string = (input.cwd as string) ?? process.cwd()
     if (sessionIdForOverflow && (await isTaskEnforcementProject(cwdForOverflow))) {

@@ -7,6 +7,7 @@
 //
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -24,6 +25,7 @@ const delegationPatterns = [
 
 export function evaluatePretooluseNoTaskDelegation(input: unknown): SwizHookOutput {
   const parsed = toolHookInputSchema.parse(input)
+  if (!agentHasTaskToolsForHookPayload(parsed as Record<string, any>)) return {}
   const toolInput = parsed.tool_input
   if (!toolInput) return {}
   const prompt: string = toolInput.prompt as string

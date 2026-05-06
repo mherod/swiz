@@ -16,6 +16,7 @@
 //      transcript — task may have been set in_progress in a prior session.
 //      Fail-open; we can only verify what the transcript contains.
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -167,6 +168,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   input: unknown
 ): Promise<SwizHookOutput> {
   const raw = toolHookInputSchema.parse(input)
+  if (!agentHasTaskToolsForHookPayload(raw as Record<string, any>)) return {}
   const { toolName, toolInput, cwd, transcriptPath, sessionId, safeSessionId } =
     extractRawFields(raw)
 

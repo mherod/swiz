@@ -4,7 +4,7 @@
  * Resolves context, runs validators, and returns blocking output or empty object.
  */
 
-import { isCurrentAgent } from "../../src/agent-paths.ts"
+import { agentHasTaskToolsForHookPayload, isCurrentAgent } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { promoteNextTaskFromIssues } from "../../src/tasks/task-service.ts"
@@ -30,6 +30,7 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   const ctx = await resolveTaskCheckContext(input)
   if (!ctx) return {}
 
+  if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   // Gemini agent exemption
   if (isCurrentAgent("gemini")) return {}
 

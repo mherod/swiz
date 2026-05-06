@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import { neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
 
 // Use absolute path so the script is found regardless of spawn CWD.
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
@@ -25,6 +25,7 @@ async function npmDecisionInDir(
     stdout: "pipe",
     stderr: "pipe",
     cwd: dir,
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -47,6 +48,7 @@ async function pnpmDecisionInDir(dir: string): Promise<string | undefined> {
     stdout: "pipe",
     stderr: "pipe",
     cwd: dir,
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()

@@ -14,6 +14,7 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -114,6 +115,8 @@ function resolveGitOp(
 export async function evaluatePosttooluseGitTaskAutocomplete(
   input: unknown
 ): Promise<SwizHookOutput> {
+  const raw = typeof input === "object" && input !== null ? (input as Record<string, any>) : {}
+  if (!agentHasTaskToolsForHookPayload(raw)) return {}
   const hookInput = toolHookInputSchema.parse(input)
   const op = resolveGitOp(hookInput)
   if (!op) return {}

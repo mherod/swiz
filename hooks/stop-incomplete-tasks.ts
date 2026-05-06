@@ -9,6 +9,7 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { StopHookInput } from "../src/schemas.ts"
@@ -20,6 +21,7 @@ import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts
 export async function evaluateStopIncompleteTasksHook(
   input: StopHookInput
 ): Promise<SwizHookOutput> {
+  if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   const parsed = stopHookInputSchema.parse(input)
 
   // Require TaskList before stop when the session has used task tools.

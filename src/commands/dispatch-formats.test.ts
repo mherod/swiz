@@ -3,7 +3,7 @@ import { mkdir, unlink, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { hookCooldownPath } from "../dispatch/filters.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { neutralAgentEnv, useTempDir } from "../utils/test-utils.ts"
 
 interface DispatchResult {
   stdout: string
@@ -51,8 +51,7 @@ async function dispatch({
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: {
-      ...process.env,
+    env: neutralAgentEnv({
       HOME: homeDir,
       // Prevent stop-auto-continue from waiting on live AI backends in format tests.
       AI_TEST_NO_BACKEND: "1",
@@ -60,7 +59,7 @@ async function dispatch({
       SWIZ_TEST_HOOK_TIMEOUT_SEC: "20",
       // Skip daemon routing — these are format contract tests, not daemon integration tests.
       SWIZ_NO_DAEMON: "1",
-    },
+    }),
   })
 
   await proc.stdin.write(JSON.stringify(payload))
