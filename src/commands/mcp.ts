@@ -427,6 +427,7 @@ async function serve(): Promise<void> {
           sessionId: projectKey,
           subject,
           description,
+          activeForm,
           cwd,
         })
         return {
@@ -435,13 +436,7 @@ async function serve(): Promise<void> {
               type: "text" as const,
               text: JSON.stringify({
                 ok: true,
-                task: {
-                  id: task.id,
-                  subject: task.subject,
-                  description: task.description,
-                  activeForm: activeForm || undefined,
-                  status: task.status,
-                },
+                task,
               }),
             },
           ],
@@ -476,13 +471,30 @@ async function serve(): Promise<void> {
           .array(z.string())
           .optional()
           .describe("List of task IDs this task should block"),
+        removeBlocks: z
+          .array(z.string())
+          .optional()
+          .describe("List of task IDs to remove from blocks"),
         addBlockedBy: z
           .array(z.string())
           .optional()
           .describe("List of task IDs that should block this task"),
+        removeBlockedBy: z
+          .array(z.string())
+          .optional()
+          .describe("List of task IDs to remove from blockedBy"),
       },
     },
-    async ({ taskId, status, subject, description, addBlocks, addBlockedBy }) => {
+    async ({
+      taskId,
+      status,
+      subject,
+      description,
+      addBlocks,
+      removeBlocks,
+      addBlockedBy,
+      removeBlockedBy,
+    }) => {
       try {
         const projectKey = projectKeyFromCwd(cwd)
         const allTasks = await readTasks(projectKey)
@@ -502,26 +514,44 @@ async function serve(): Promise<void> {
         if (addBlocks) {
           task.blocks = [...new Set([...task.blocks, ...addBlocks])]
         }
+        if (removeBlocks) {
+          task.blocks = task.blocks.filter((b) => !removeBlocks.includes(b))
+        }
         if (addBlockedBy) {
           task.blockedBy = [...new Set([...task.blockedBy, ...addBlockedBy])]
         }
+        if (removeBlockedBy) {
+          task.blockedBy = task.blockedBy.filter((b) => !removeBlockedBy.includes(b))
+        }
+
+        const fieldsUpdated =
+          subject !== undefined ||
+          description !== undefined ||
+          addBlocks ||
+          removeBlocks ||
+          addBlockedBy ||
+          removeBlockedBy
 
         // Update status
         if (status !== undefined && status !== task.status) {
+          // If fields were also updated, persist them first so status update (which re-reads) sees them.
+          if (fieldsUpdated) {
+            await writeTaskUpdate(projectKey, taskId, task)
+          }
+
           if (status === "completed") {
             await completeTaskWithAutoTransition(projectKey, taskId, { filterCwd: cwd })
           } else {
             await updateStatus(projectKey, taskId, status, { filterCwd: cwd })
           }
-        } else if (
-          subject !== undefined ||
-          description !== undefined ||
-          addBlocks ||
-          addBlockedBy
-        ) {
+        } else if (fieldsUpdated) {
           // Field update without status change
           await writeTaskUpdate(projectKey, taskId, task)
         }
+
+        // Re-read to get the final state after all service side-effects (e.g. auto-transitions, timestamps)
+        const finalTasks = await readTasks(projectKey)
+        const finalTask = finalTasks.find((t) => t.id === taskId)
 
         return {
           content: [
@@ -529,14 +559,7 @@ async function serve(): Promise<void> {
               type: "text" as const,
               text: JSON.stringify({
                 ok: true,
-                task: {
-                  id: task.id,
-                  subject: task.subject,
-                  description: task.description,
-                  status: task.status,
-                  blocks: task.blocks,
-                  blockedBy: task.blockedBy,
-                },
+                task: finalTask,
               }),
             },
           ],
@@ -568,25 +591,13 @@ async function serve(): Promise<void> {
         const projectKey = projectKeyFromCwd(cwd)
         const allTasks = await readTasks(projectKey)
 
-        const tasks = allTasks.map((t) => ({
-          id: t.id,
-          subject: t.subject,
-          description: t.description,
-          status: t.status,
-          blocks: t.blocks,
-          blockedBy: t.blockedBy,
-          startedAt: t.startedAt,
-          completedAt: t.completedAt,
-          elapsedMs: t.elapsedMs,
-        }))
-
         return {
           content: [
             {
               type: "text" as const,
               text: JSON.stringify({
                 ok: true,
-                tasks,
+                tasks: allTasks,
                 summary: {
                   total: allTasks.length,
                   pending: allTasks.filter((t) => t.status === "pending").length,

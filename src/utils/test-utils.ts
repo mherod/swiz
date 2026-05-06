@@ -135,6 +135,16 @@ export interface HookResult {
   reason?: string
 }
 
+export const AGENT_ENV_KEYS = [
+  "CLAUDECODE",
+  "CURSOR_TRACE_ID",
+  "CURSOR_SANDBOX_ENV_RESTORE",
+  "GEMINI_CLI",
+  "GEMINI_PROJECT_DIR",
+  "CODEX_MANAGED_BY_NPM",
+  "CODEX_THREAD_ID",
+] as const
+
 /**
  * Merge `process.env` with overrides. Keys set to `undefined` are removed.
  * `HOME: undefined` becomes `HOME: ""` because Bun.spawn re-injects the real
@@ -154,6 +164,21 @@ function mergeHookEnv(overrides: Record<string, string | undefined>): Record<str
   }
   if (Object.hasOwn(overrides, "HOME") && overrides.HOME === undefined) {
     env.HOME = ""
+  }
+  return env
+}
+
+/**
+ * Build a subprocess env for hook tests without inheriting the agent that is
+ * running the test suite. Individual tests can still opt into an agent signal
+ * by passing that key in `overrides`.
+ */
+export function neutralAgentEnv(
+  overrides: Record<string, string | undefined> = {}
+): Record<string, string> {
+  const env = mergeHookEnv(overrides)
+  for (const key of AGENT_ENV_KEYS) {
+    if (!Object.hasOwn(overrides, key)) delete env[key]
   }
   return env
 }
@@ -223,7 +248,7 @@ export async function runHook(
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
-  const env = mergeHookEnv(envOverrides)
+  const env = neutralAgentEnv(envOverrides)
 
   const proc = Bun.spawn(["bun", script], {
     stdin: "pipe",
@@ -327,7 +352,7 @@ export async function runBashHook(
     stdout: "pipe",
     stderr: "pipe",
     cwd: opts.cwd,
-    env: { ...process.env, SWIZ_DAEMON_PORT: "19999" },
+    env: neutralAgentEnv({ SWIZ_DAEMON_PORT: "19999" }),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -374,6 +399,7 @@ export async function runFileEditHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()

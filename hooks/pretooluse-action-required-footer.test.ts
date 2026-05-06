@@ -10,7 +10,11 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { createEnforcementProjectDir, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  createEnforcementProjectDir,
+  neutralAgentEnv,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "You must act on this now."
@@ -37,7 +41,7 @@ async function runHook(
     stdout: "pipe",
     stderr: "pipe",
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...opts.env },
+    env: neutralAgentEnv(opts.env),
   })
   await proc.stdin.write(JSON.stringify(payload))
   await proc.stdin.end()

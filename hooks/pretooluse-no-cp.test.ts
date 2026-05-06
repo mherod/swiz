@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 
 async function runHook(
   command: string,
@@ -12,6 +13,7 @@ async function runHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()

@@ -59,6 +59,8 @@ export interface CreateTaskOptions {
   sessionId: string
   subject: string
   description: string
+  /** Present continuous form for spinner display (e.g., 'Fixing login bug') */
+  activeForm?: string
   /** Working directory to associate with the task. Defaults to `process.cwd()`. */
   cwd?: string
   /** Skip compound-subject validation. Used by internal callers (e.g. mergeActionPlanIntoTasks). */
@@ -101,6 +103,7 @@ export async function createTaskInProcess(opts: CreateTaskOptions): Promise<Task
     id,
     subject,
     description,
+    activeForm: opts.activeForm,
     status: "pending",
     startedAt: null,
     completedAt: null,

@@ -1,30 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { runBashHook } from "../src/utils/test-utils.ts"
 
 async function runHook(
   command: string,
   opts: { toolName?: string } = {}
 ): Promise<{ decision?: string; reason?: string }> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Bash",
-    tool_input: { command },
-  })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-bun-test-concurrent.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-  }
+  return await runBashHook("hooks/pretooluse-bun-test-concurrent.ts", command, opts)
 }
 
 describe("pretooluse-bun-test-concurrent", () => {

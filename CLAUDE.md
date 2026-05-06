@@ -20,6 +20,23 @@ alwaysApply: false
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` instead.
 - **Complexity**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
 - **Consolidate utilities**: Multiple functions → single canonical module (e.g., `agent-paths.ts`). Re-export from originals.
+## Agent Detection
+- `src/agents.ts` is the source of truth for agent metadata: `AgentDef.envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, and `additionalDispatchEntries`. Add new detection signals there first.
+- Runtime current-agent detection lives in `src/agent-paths.ts` and is re-exported from `src/detect.ts`. `detectCurrentAgentFromEnv(env)` checks truthy `AgentDef.envVars` in `AGENTS` order; this order is the env-var precedence when multiple agents match.
+- `detectCurrentAgent()` first uses `detectCurrentAgentFromEnv()`, then falls back to the parent process command matched against `AgentDef.processPattern`. Keep parent-process fallback conservative; today it is mainly Cursor shell detection.
+- `isRunningInAgent()` is only a boolean shell/shim check: non-TTY stdin, `CURSOR_TRACE_ID`, or `CLAUDECODE`. It does not identify the agent and should not be used for provider-specific decisions.
+- Agent task support comes from `AgentDef.tasksEnabled`. `agentHasTaskTools()` intentionally defaults to `true` when env detection is absent, so non-agent/local execution preserves Claude-compatible task behavior.
+- Tool/event translation is metadata-driven. Use `translateMatcher()`, `translateEvent()`, `toolNameForCurrentAgent()`, or `resolveTranslationAgent()`; do not hard-code agent-specific tool/event names in hooks. `resolveTranslationAgent()` precedence is explicit agent, env agent with aliases, unique observed tool-name inference, then `detectCurrentAgent()`.
+- Daemon dispatch must preserve the originating agent env. `swiz dispatch` allowlists agent-identifying vars into payload `_env`; `applyDispatchEnv()` applies that env around in-process hooks. Daemon hooks that need the originating agent should use payload `_env` with `detectCurrentAgentFromEnv()` or rely on dispatch env application, not launchd's process env.
+- Installed-agent detection is separate from current-agent detection. `detectInstalledAgents()` returns agents whose binary is on `PATH` or whose settings file exists; this is for install/status style flows, not "which agent is running this hook".
+- Agent backend CLI detection is separate again. `src/agent.ts` `detectAgentCli()`/`detectBestAgentCli()` only detect the Cursor Agent CLI binary named `agent` via `Bun.which("agent")` for fallback prompting. Do not use it to detect the current Swiz hook agent, and do not add Claude CLI spawning there.
+## Agent Detection and Task Governance
+- `AgentDef.tasksEnabled` is the first governance switch. `src/manifest.ts` `buildManifest()` calls `agentHasTaskTools()`; when false, it strips task-only matcher groups and hooks in `TASK_HOOK_IDENTIFIERS` from the runtime manifest.
+- Runtime governance still checks the agent. `pretooluse-task-governance.ts` uses `agentHasTaskTools()` before pending-overflow checks and inside `validateGuardConditions()`, so Edit/Write/Bash task requirements skip agents without task tools.
+- Cross-agent task tool names come from `src/tool-matchers.ts` and `AgentDef.toolAliases`. `update_plan` is a task create/update equivalent for matching and translation, but Codex has `tasksEnabled=false`, so Codex sessions should not get Claude-style task enforcement or task-advisor prompts.
+- Shell command governance uses agent detection to avoid applying Claude-only rules globally. `shouldInspectShellInput()` prefers payload `_env` via `detectCurrentAgentFromEnv(input._env)`, falls back to process env, then defaults to `claude`; the `swiz tasks` CLI denial only applies when that resolved agent is Claude.
+- Stop-time task checks are also agent-aware. `stop-completion-auditor` validators skip task-creation and audit-log enforcement when `agentHasTaskTools()` is false, while `stop-incomplete-tasks` has a Gemini exemption via `isCurrentAgent("gemini")`.
+- Task storage follows the detected agent. `createDefaultTaskStore()` uses `detectCurrentAgent()` to choose provider task roots, falling back to Claude; daemon dispatch must apply `_env` or it can read/write the wrong provider's task files.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.

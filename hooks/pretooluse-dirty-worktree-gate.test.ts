@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_DIRTY_WORKTREE_THRESHOLD } from "../src/settings.ts"
+import { runHook as runHookScript } from "../src/utils/test-utils.ts"
 import { initGitRepo } from "./_test-git-init.ts"
 
 async function createDirtyFiles(dir: string, count: number): Promise<void> {
@@ -15,29 +16,15 @@ async function runHook(cwd: string): Promise<{ decision?: string; reason?: strin
   // Use a separate temp dir for HOME to avoid bun/node cache files
   // polluting the git worktree (causes +1 untracked file on CI)
   const fakeHome = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-home-"))
-  const payload = JSON.stringify({
-    tool_name: "TaskUpdate",
-    tool_input: { taskId: "1", status: "in_progress" },
-    cwd,
-  })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-dirty-worktree-gate.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-  }
+  return await runHookScript(
+    "hooks/pretooluse-dirty-worktree-gate.ts",
+    {
+      tool_name: "TaskUpdate",
+      tool_input: { taskId: "1", status: "in_progress" },
+      cwd,
+    },
+    { HOME: fakeHome }
+  )
 }
 
 describe("pretooluse-dirty-worktree-gate", () => {

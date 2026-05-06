@@ -3,6 +3,7 @@
  * Tests all supported file formats to prevent regressions on the regex.
  */
 import { describe, expect, test } from "bun:test"
+import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 import { countEnforcements, isEslintConfigFile } from "./pretooluse-eslint-config-strength.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -220,6 +221,7 @@ async function invokeHook(input: {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(JSON.stringify(input))
   await proc.stdin.end()
@@ -459,6 +461,7 @@ describe("pretooluse-eslint-config-strength: hook handler logic", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: neutralAgentEnv(),
     })
     await proc.stdin.write("NOT VALID JSON")
     await proc.stdin.end()

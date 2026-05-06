@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 import { initGitRepo } from "./_test-git-init.ts"
 
 async function writeTask(
@@ -44,7 +45,7 @@ async function runHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: home },
+    env: neutralAgentEnv({ HOME: home }),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()

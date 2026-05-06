@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 import { stripNonCode } from "./pretooluse-ts-quality.ts"
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -182,6 +183,7 @@ describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () 
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: neutralAgentEnv(),
     })
     await proc.stdin.write(JSON.stringify(payload))
     await proc.stdin.end()
@@ -273,6 +275,7 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: neutralAgentEnv(),
     })
     await proc.stdin.write(input)
     await proc.stdin.end()

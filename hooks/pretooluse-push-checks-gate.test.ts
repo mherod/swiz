@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { AdvisoryHookResult } from "../src/utils/test-utils.ts"
+import { type AdvisoryHookResult, neutralAgentEnv } from "../src/utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,7 @@ async function runHook(opts: {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -372,7 +373,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, HOME: fakeHome },
+      env: neutralAgentEnv({ HOME: fakeHome }),
     })
     await proc.stdin.write(payload)
     await proc.stdin.end()
@@ -455,7 +456,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, HOME: home },
+      env: neutralAgentEnv({ HOME: home }),
     })
     await proc.stdin.write(payload)
     await proc.stdin.end()
@@ -636,7 +637,7 @@ async function runHookInRepo(opts: {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome },
+    env: neutralAgentEnv({ HOME: fakeHome }),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()

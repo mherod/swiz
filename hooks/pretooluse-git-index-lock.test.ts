@@ -3,6 +3,7 @@ import { mkdirSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
+import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-git-index-lock.ts"
 
@@ -62,6 +63,7 @@ async function runHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: neutralAgentEnv(),
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -221,6 +223,7 @@ describe("pretooluse-git-index-lock", () => {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        env: neutralAgentEnv(),
       })
       await proc.stdin.write(payload)
       await proc.stdin.end()
