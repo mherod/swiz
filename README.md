@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**118 hooks. 12 event types. Every agent. Zero compromises.**
+**119 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -216,7 +216,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-auto-steer.ts` | Types "Continue" into the active terminal session after every tool call using AppleScript automation. Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
 
-### SessionStart (6)
+### SessionStart (7)
 
 | Hook | What it does |
 |------|-------------|
@@ -224,6 +224,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `sessionstart-environment-detects.ts` | Injects a structured snapshot of swiz detections at session start: process-level agent guess, SessionStart payload fields (`agent_type`, `model`, `source`, …), project stacks, frameworks/ecosystems, CI config signals, terminal/shell, and `isRunningInAgent()`. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
 | `sessionstart-state-context.ts` | Injects the current project state (e.g., `in-development`, `awaiting-feedback`) and allowed transitions into the session context so the agent always knows its lifecycle position. |
+| `sessionstart-websearch-suggester.ts` | Reminds the agent that WebSearch is available for unfamiliar errors, framework version-specific behaviours, and security/best-practice validation. Claude-only — no-ops for agents without a WebSearch surface. |
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
 | `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |
 

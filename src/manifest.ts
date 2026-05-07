@@ -95,6 +95,7 @@ import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-de
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
 import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
 import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
+import sessionstartWebsearchSuggester from "../hooks/sessionstart-websearch-suggester.ts"
 import stopAutoContinue from "../hooks/stop-auto-continue.ts"
 import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
@@ -417,6 +418,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: sessionstartEnvironmentDetects },
       { hook: sessionstartHealthSnapshot },
       { hook: sessionstartStateContext },
+      { hook: sessionstartWebsearchSuggester },
       { hook: posttooluseSpeakNarrator },
     ],
   },
