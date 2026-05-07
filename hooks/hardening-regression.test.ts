@@ -405,3 +405,41 @@ describe("lefthook.yml hook-order and invariant guards", () => {
     expect(config["pre-commit"]?.commands?.lint?.run).toContain("lint-staged")
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category: codex prompt-advisor exemption (#572)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("userpromptsubmit-task-advisor — codex exemption (#572)", () => {
+  test("codex transcript_path produces no advisor context (no ambient codex env)", async () => {
+    const homeDir = await createTempHome()
+    // Pre-seed a 'no pending tasks' state so the advisor would normally fire.
+    const result = await runHook(
+      "hooks/userpromptsubmit-task-advisor.ts",
+      {
+        session_id: "codex-prompt-advisor-session",
+        transcript_path: `${homeDir}/.codex/sessions/abc123.jsonl`,
+      },
+      // No CODEX_THREAD_ID / CODEX_MANAGED_BY_NPM in env — the exemption
+      // must rely on the transcript path fingerprint alone.
+      { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+    // Empty stdout (or empty hookSpecificOutput) indicates no advisor context emitted.
+    expect((result.stdout ?? "").trim()).toBe("")
+  })
+
+  test("codex payload _env produces no advisor context", async () => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      "hooks/userpromptsubmit-task-advisor.ts",
+      {
+        session_id: "codex-prompt-advisor-env",
+        _env: { CODEX_THREAD_ID: "via-payload" },
+      },
+      { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+    expect((result.stdout ?? "").trim()).toBe("")
+  })
+})
