@@ -12,16 +12,19 @@ async function runHook({
   cwd,
   sessionId = "session-123",
   envOverrides = {},
+  transcriptPath,
 }: {
   homeDir: string
   cwd?: string
   sessionId?: string
   envOverrides?: Record<string, string | undefined>
+  transcriptPath?: string
 }): Promise<HookResult> {
   const payload = JSON.stringify({
     session_id: sessionId,
     cwd: cwd ?? process.cwd(),
     hook_event_name: "Stop",
+    ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   for (const agent of AGENTS) {
@@ -184,6 +187,24 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).toContain("Wire up the migration")
     // Deferred subject must not appear in blocking list
     expect(result.reason).not.toContain("Consider extracting helper")
+  })
+
+  test("allows stop for Codex transcript path even with incomplete tasks (issue #573)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-codex-transcript"
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Codex work",
+      status: "in_progress",
+    })
+
+    const result = await runHook({
+      homeDir,
+      sessionId,
+      transcriptPath: `${homeDir}/.codex/sessions/abc123.jsonl`,
+    })
+    // Codex transcript path → agentHasTaskToolsForHookPayload returns false → exempt
+    expect(result.decision).toBeUndefined()
   })
 
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {
