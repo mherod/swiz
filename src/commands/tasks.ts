@@ -668,25 +668,23 @@ const NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS = new Set(["adopt", "repair", "TaskCre
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()
   if (!agent) return
-  const mustUseNativeTaskTools = agent.id === "claude" || !agent.tasksEnabled
-  if (!mustUseNativeTaskTools) return
+  // Only enforce for agents that actually have a native task surface.
+  // Codex (tasksEnabled=false) has no TaskCreate/TaskUpdate equivalent —
+  // after #570 it does not even alias Task* — so redirecting it here would
+  // suggest a tool that does not exist. See #575.
+  if (!agent.tasksEnabled) return
+  if (agent.id !== "claude") return
 
   if (subcommand && NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS.has(subcommand)) return
 
   const agentName = agent.name
-  const nativeTaskToolName =
-    agent.toolAliases.TaskCreate ?? agent.toolAliases.TaskUpdate ?? agent.toolAliases.Task
-  const nativeGuidance =
-    !agent.tasksEnabled && nativeTaskToolName
-      ? `Use the native ${nativeTaskToolName} tool instead.`
-      : "Use native task tools instead: TaskCreate, TaskUpdate, TaskList, TaskGet."
   const hint = subcommand
     ? `"swiz tasks ${subcommand}" is not available inside ${agentName}.`
     : `"swiz tasks" (list) is not available inside ${agentName}.`
 
   throw new Error(
     `${hint}\n` +
-      `${nativeGuidance}\n` +
+      "Use native task tools instead: TaskCreate, TaskUpdate, TaskList, TaskGet.\n" +
       `Only "swiz tasks adopt" is allowed via CLI (orphan recovery after compaction).`
   )
 }

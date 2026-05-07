@@ -1123,7 +1123,7 @@ describe("native task tool guard", () => {
     }
   })
 
-  it("blocks list invocation inside Codex CLI", async () => {
+  it("allows list invocation inside Codex CLI (#575 — no native task surface to redirect to)", async () => {
     const prevClaudeCode = process.env.CLAUDECODE
     const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
     const prevCodexThread = process.env.CODEX_THREAD_ID
@@ -1132,10 +1132,10 @@ describe("native task tool guard", () => {
     process.env.CODEX_THREAD_ID = "test-thread"
 
     try {
-      await expect(tasksCommand.run([])).rejects.toThrow(
-        '"swiz tasks" (list) is not available inside Codex CLI.'
-      )
-      await expect(tasksCommand.run([])).rejects.toThrow("Use the native update_plan tool instead.")
+      // Codex has tasksEnabled=false and (after #570) no Task* aliases —
+      // redirecting it to a native tool would suggest something that does
+      // not exist. The guard must no-op for Codex, so list invocation runs.
+      await expect(tasksCommand.run([])).resolves.toBeUndefined()
     } finally {
       if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
       else process.env.CLAUDECODE = prevClaudeCode
