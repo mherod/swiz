@@ -638,16 +638,18 @@ describe("tool classification with edge-case inputs", () => {
 })
 
 // ─── update_plan / TaskList / TaskGet mapping regressions ───────────────────
-// These guard the Codex task-tool alias mapping introduced in
-// feat(agents): map Codex task tools to update_plan, replace spawn_agent
+// After #570: Codex tasksEnabled=false has no Task* aliases and update_plan
+// is not a member of TASK_TOOLS / TASK_CREATE_TOOLS. update_plan stays in
+// codex.toolAliases as a self-alias only so inferAgentFromToolNames still
+// fingerprints it as a Codex tool.
 
-describe("isTaskTool — update_plan recognition (Codex alias)", () => {
-  it("recognises update_plan as a task tool", () => {
-    expect(isTaskTool("update_plan")).toBe(true)
+describe("isTaskTool — update_plan exclusion (post-#570)", () => {
+  it("does not recognise update_plan as a task tool (Codex planning UI is not a task surface)", () => {
+    expect(isTaskTool("update_plan")).toBe(false)
   })
 
-  it("recognises update_plan as a task-create tool", () => {
-    expect(isTaskCreateTool("update_plan")).toBe(true)
+  it("does not recognise update_plan as a task-create tool", () => {
+    expect(isTaskCreateTool("update_plan")).toBe(false)
   })
 
   it("does not recognise spawn_agent as a task tool (removed)", () => {
@@ -700,16 +702,16 @@ describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => 
     expect(translateMatcher("TaskGet", codex)).toBe("TaskGet")
   })
 
-  it("translateMatcher still maps TaskCreate to update_plan for Codex", async () => {
+  it("translateMatcher passes TaskCreate through for Codex (no alias post-#570)", async () => {
     const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
-    expect(translateMatcher("TaskCreate", codex)).toBe("update_plan")
+    expect(translateMatcher("TaskCreate", codex)).toBe("TaskCreate")
   })
 
-  it("translateMatcher still maps TaskUpdate to update_plan for Codex", async () => {
+  it("translateMatcher passes TaskUpdate through for Codex (no alias post-#570)", async () => {
     const { translateMatcher, getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
-    expect(translateMatcher("TaskUpdate", codex)).toBe("update_plan")
+    expect(translateMatcher("TaskUpdate", codex)).toBe("TaskUpdate")
   })
 })
 
@@ -718,37 +720,30 @@ describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => 
 // answer, then asserts the live implementation gives the right answer.
 // If anyone reverts the alias change, these fail — that's the point.
 
-describe("mutation guards — TASK_TOOLS set membership", () => {
-  it("TASK_TOOLS contains update_plan (removing it would break isTaskTool)", () => {
-    // Mutation: set without update_plan → isTaskTool("update_plan") would be false
-    const broken = new Set([...TASK_TOOLS].filter((v) => v !== "update_plan"))
-    expect(broken.has("update_plan")).toBe(false) // broken impl gives wrong answer
-    expect(TASK_TOOLS.has("update_plan")).toBe(true) // real impl gives right answer
+describe("mutation guards — TASK_TOOLS set membership (post-#570)", () => {
+  it("TASK_TOOLS does not contain update_plan (Codex planning UI is not a task tool)", () => {
+    expect(TASK_TOOLS.has("update_plan")).toBe(false)
   })
 
-  it("TASK_TOOLS does not contain spawn_agent (re-adding it should not restore task recognition)", () => {
-    // Mutation: set with spawn_agent re-added → would wrongly re-recognise it
-    const broken = new Set([...TASK_TOOLS, "spawn_agent"])
-    expect(broken.has("spawn_agent")).toBe(true) // broken impl is permissive
-    expect(TASK_TOOLS.has("spawn_agent")).toBe(false) // real impl correctly excludes it
+  it("TASK_TOOLS does not contain spawn_agent", () => {
+    expect(TASK_TOOLS.has("spawn_agent")).toBe(false)
   })
 
-  it("TASK_CREATE_TOOLS contains update_plan (removing it would break isTaskCreateTool)", () => {
-    const broken = new Set([...TASK_CREATE_TOOLS].filter((v) => v !== "update_plan"))
-    expect(broken.has("update_plan")).toBe(false) // broken
-    expect(TASK_CREATE_TOOLS.has("update_plan")).toBe(true) // correct
+  it("TASK_CREATE_TOOLS does not contain update_plan", () => {
+    expect(TASK_CREATE_TOOLS.has("update_plan")).toBe(false)
   })
 
-  it("TASK_CREATE_TOOLS does not contain spawn_agent (reverting would be wrong)", () => {
-    const broken = new Set([...TASK_CREATE_TOOLS, "spawn_agent"])
-    expect(broken.has("spawn_agent")).toBe(true) // broken
-    expect(TASK_CREATE_TOOLS.has("spawn_agent")).toBe(false) // correct
+  it("TASK_CREATE_TOOLS does not contain spawn_agent", () => {
+    expect(TASK_CREATE_TOOLS.has("spawn_agent")).toBe(false)
   })
 })
 
 describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   // Authoritative record of every Codex alias. Any addition, removal, or
   // value change breaks this test intentionally — that's the point.
+  // update_plan is a self-alias only — kept so inferAgentFromToolNames still
+  // fingerprints Codex sessions that emit it. No Task* canonical translates
+  // to it any more (#570).
   const EXPECTED_CODEX_ALIASES: Record<string, string> = {
     Bash: "shell_command",
     Edit: "apply_patch",
@@ -756,10 +751,8 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     Read: "read_file",
     Grep: "grep_files",
     Glob: "list_dir",
-    Task: "update_plan",
-    TaskCreate: "update_plan",
-    TaskUpdate: "update_plan",
     NotebookEdit: "apply_patch",
+    update_plan: "update_plan",
   }
 
   it("toolAliases object matches expected table exactly (shape + values)", async () => {
@@ -782,14 +775,14 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     expect(Object.values(codex.toolAliases)).not.toContain("spawn_agent")
   })
 
-  it("only Task/TaskCreate/TaskUpdate map to update_plan — no other key maps there", async () => {
+  it("only update_plan self-aliases to update_plan; no Task* canonical maps to it (post-#570)", async () => {
     const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     const mappedToUpdatePlan = Object.entries(codex.toolAliases)
       .filter(([, v]) => v === "update_plan")
       .map(([k]) => k)
       .sort()
-    expect(mappedToUpdatePlan).toEqual(["Task", "TaskCreate", "TaskUpdate"])
+    expect(mappedToUpdatePlan).toEqual(["update_plan"])
   })
 
   it("TaskList and TaskGet are absent from Codex aliases (pass-through)", async () => {
@@ -801,17 +794,17 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
 })
 
 describe("mutation guards — Codex toolAliases translateMatcher", () => {
-  it("broken alias (spawn_agent) gives wrong translation; real alias (update_plan) gives right one", async () => {
+  it("TaskCreate passes through for Codex; injecting any Task* alias would change output (post-#570)", async () => {
     const { translateMatcher, getAgent } = await import("../agents.ts")
     const realCodex = getAgent("codex")!
 
-    // Simulate the pre-fix broken state: TaskCreate aliased to spawn_agent
+    // Simulate a regression that re-adds a Task* alias.
     const brokenCodex = {
       ...realCodex,
       toolAliases: { ...realCodex.toolAliases, TaskCreate: "spawn_agent" },
     }
-    expect(translateMatcher("TaskCreate", brokenCodex)).toBe("spawn_agent") // wrong
-    expect(translateMatcher("TaskCreate", realCodex)).toBe("update_plan") // correct
+    expect(translateMatcher("TaskCreate", brokenCodex)).toBe("spawn_agent") // regression
+    expect(translateMatcher("TaskCreate", realCodex)).toBe("TaskCreate") // correct pass-through
   })
 
   it("absent TaskList alias passes through; adding a wrong alias would change the output", async () => {

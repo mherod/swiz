@@ -414,15 +414,15 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskUpdate")
   })
 
-  test("rewrites TaskList and TaskGet to codex equivalent via conversion supplement", () => {
+  test("leaves TaskList and TaskGet as canonical names when converting to codex (post-#570)", () => {
     const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    // Conversion supplement maps TaskList/TaskGet → update_plan (same as TaskCreate)
-    expect(result).toContain("update_plan")
-    expect(result).not.toContain("TaskList")
-    expect(result).not.toContain("TaskGet")
+    // Codex has tasksEnabled=false and no Task* aliases (#570) — there is no
+    // native target to rewrite to, so canonical names pass through.
+    expect(result).toContain("TaskList")
+    expect(result).toContain("TaskGet")
   })
 
   test("rewrites TaskList and TaskGet to gemini equivalent via conversion supplement", () => {
@@ -435,19 +435,17 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskGet")
   })
 
-  test("rewrites YAML-list allowed-tools entries including TaskList/TaskGet during conversion", () => {
+  test("leaves YAML-list allowed-tools Task* entries unchanged when converting to codex (post-#570)", () => {
     const content =
       '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    expect(result).toContain('  - "update_plan"')
-    expect(result).not.toContain('"TaskList"')
-    expect(result).not.toContain('"TaskGet"')
-    expect(result).not.toContain("TaskCreate")
-    expect(result).not.toContain("TaskUpdate")
-    expect(result).not.toContain("TaskList")
-    expect(result).not.toContain("TaskGet")
+    // Codex has no Task* aliases (#570) — Task* canonical names pass through.
+    expect(result).toContain('"TaskCreate"')
+    expect(result).toContain('"TaskList"')
+    expect(result).toContain('"TaskGet"')
+    expect(result).toContain('"TaskUpdate"')
   })
 
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {
