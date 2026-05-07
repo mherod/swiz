@@ -98,6 +98,35 @@ describe("dispatch execute integration", () => {
       expect(result.response).toBeDefined()
     })
 
+    it("does not mutate global process.env in daemon mode (issue #576)", async () => {
+      const prevClaudeCode = process.env.CLAUDECODE
+      const prevCodexThread = process.env.CODEX_THREAD_ID
+      delete process.env.CLAUDECODE
+      delete process.env.CODEX_THREAD_ID
+      try {
+        const req: DispatchRequest = {
+          canonicalEvent: "nonexistentEvent",
+          hookEventName: "NonexistentEvent",
+          payloadStr: JSON.stringify({
+            cwd: "/tmp/test-daemon-env-iso",
+            session_id: "daemon-env-iso",
+            _env: { CLAUDECODE: "1", CODEX_THREAD_ID: "should-not-leak" },
+          }),
+          daemonContext: true,
+        }
+        await executeDispatch(req)
+        // Daemon mode must not leak caller _env into shared process.env;
+        // overlapping requests would otherwise race on agent detection.
+        expect(process.env.CLAUDECODE).toBeUndefined()
+        expect(process.env.CODEX_THREAD_ID).toBeUndefined()
+      } finally {
+        if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaudeCode
+        if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
+        else process.env.CODEX_THREAD_ID = prevCodexThread
+      }
+    })
+
     it("accepts daemonContext flag without error", async () => {
       const req: DispatchRequest = {
         canonicalEvent: "nonexistentEvent",

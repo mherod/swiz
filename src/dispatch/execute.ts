@@ -634,7 +634,11 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // The daemon's own launchd environment lacks agent-identifying vars
   // (CLAUDECODE, etc.), so without this, detectCurrentAgent() and
   // createDefaultTaskStore() resolve incorrectly in the daemon process.
-  const restoreEnv = applyDispatchEnv(enrichedPayloadStr)
+  //
+  // In daemon mode, skip the global mutation: overlapping /dispatch requests
+  // from different agents would race on shared process.env. Inline hooks must
+  // use detectCurrentAgentFromHookPayload(input) / payload._env instead.
+  const restoreEnv = req.daemonContext ? () => {} : applyDispatchEnv(enrichedPayloadStr)
 
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
