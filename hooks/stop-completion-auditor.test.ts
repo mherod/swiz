@@ -108,7 +108,8 @@ describe("formatActionPlan", () => {
           translateToolNames: true,
         })
       ).toBe(
-        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+        // Codex no longer aliases TaskCreate/TaskUpdate to update_plan (#570)
+        "Action plan:\n  1. Use TaskCreate to create tasks\n  2. Use TaskUpdate to complete them\n"
       )
     } finally {
       process.env = originalEnv
@@ -131,7 +132,8 @@ describe("formatActionPlan", () => {
           observedToolNames: ["shell_command", "apply_patch", "read_file"],
         })
       ).toBe(
-        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+        // Codex no longer aliases TaskCreate/TaskUpdate to update_plan (#570)
+        "Action plan:\n  1. Use TaskCreate to create tasks\n  2. Use TaskUpdate to complete them\n"
       )
     } finally {
       process.env = originalEnv

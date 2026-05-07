@@ -236,6 +236,11 @@ export const AGENTS: AgentDef[] = registerAgents([
     tasksEnabled: false,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
+    // Codex deliberately has no Task/TaskCreate/TaskUpdate aliases —
+    // tasksEnabled=false and update_plan is planning UI, not a task surface
+    // (see #570). The self-alias for update_plan keeps it in the emitted-tool
+    // set for inferAgentFromToolNames without translating any canonical
+    // task tool to it.
     toolAliases: {
       Bash: "shell_command",
       Edit: "apply_patch",
@@ -243,10 +248,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       Read: "read_file",
       Grep: "grep_files",
       Glob: "list_dir",
-      Task: "update_plan",
-      TaskCreate: "update_plan",
-      TaskUpdate: "update_plan",
       NotebookEdit: "apply_patch",
+      update_plan: "update_plan",
     },
     eventMap: {
       stop: "Stop",

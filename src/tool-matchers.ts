@@ -27,6 +27,8 @@ export const EDIT_TOOLS = new Set(["Edit", "StrReplace", "replace", "apply_patch
 export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch"])
 export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files"])
 export const NOTEBOOK_TOOLS = new Set(["NotebookEdit", "EditNotebook", "apply_patch"])
+// Codex `update_plan` is intentionally excluded: Codex has tasksEnabled=false
+// and its planning UI is not the TaskCreate/TaskUpdate governance surface.
 export const TASK_TOOLS = new Set([
   "Task",
   "TaskCreate",
@@ -35,10 +37,9 @@ export const TASK_TOOLS = new Set([
   "TaskGet",
   "TodoWrite",
   "write_todos",
-  "update_plan",
 ])
-export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos", "update_plan"])
-export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate", "update_plan"])
+export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos"])
+export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate"])
 export const TASK_LIST_TOOLS = new Set(["TaskList"])
 export const TASK_GET_TOOLS = new Set(["TaskGet"])
 export const SEARCH_TOOLS = new Set([

@@ -416,19 +416,19 @@ describe("agents.ts", () => {
       expect(codex.toolAliases.Bash).toBe("shell_command")
     })
 
-    it("codex maps TaskCreate to update_plan", () => {
+    it("codex does not alias TaskCreate (tasksEnabled=false; update_plan is planning UI, not task surface)", () => {
       const codex = getAgent("codex")!
-      expect(codex.toolAliases.TaskCreate).toBe("update_plan")
+      expect(codex.toolAliases.TaskCreate).toBeUndefined()
     })
 
-    it("codex maps TaskUpdate to update_plan", () => {
+    it("codex does not alias TaskUpdate", () => {
       const codex = getAgent("codex")!
-      expect(codex.toolAliases.TaskUpdate).toBe("update_plan")
+      expect(codex.toolAliases.TaskUpdate).toBeUndefined()
     })
 
-    it("codex maps Task to update_plan", () => {
+    it("codex does not alias Task", () => {
       const codex = getAgent("codex")!
-      expect(codex.toolAliases.Task).toBe("update_plan")
+      expect(codex.toolAliases.Task).toBeUndefined()
     })
 
     it("claude has Skill tool alias", () => {

@@ -436,7 +436,9 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("blocked")
   })
 
-  test("uses the current agent's create-task alias in countdown messaging", async () => {
+  test("falls back to canonical TaskCreate name when current agent has no alias (codex)", async () => {
+    // Codex tasksEnabled=false and has no Task* aliases (#570).
+    // toolNameForCurrentAgent("TaskCreate") falls through to the canonical name.
     const tmp = await createTempDir()
     const transcript = await createTranscript(tmp, ["Read", "Glob", "Read"])
     const r = await runHook(
@@ -446,7 +448,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     )
     expect(r.exitCode).toBe(0)
     const sysMsg = (r.json?.systemMessage as string) ?? ""
-    expect(sysMsg).toContain("update_plan required")
+    expect(sysMsg).toContain("TaskCreate required")
   })
 
   test("no output for small transcript (below threshold)", async () => {
@@ -470,7 +472,11 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("Task update required")
   })
 
-  test("treats update_plan as a task tool for staleness countdown", async () => {
+  test("does not treat codex update_plan as a task tool (#570)", async () => {
+    // update_plan is Codex planning UI, not a task-governance tool.
+    // The advisor should treat all 9 calls as non-task — emitting a
+    // creation countdown for the canonical TaskCreate, not a staleness
+    // warning rooted in update_plan.
     const tmp = await createTempDir()
     const tools = ["update_plan", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
     const transcript = await createTranscript(tmp, tools)
@@ -481,7 +487,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     )
     expect(r.exitCode).toBe(0)
     const sysMsg = (r.json?.systemMessage as string) ?? ""
-    expect(sysMsg).toContain("Task update required")
+    expect(sysMsg).not.toContain("Task update required")
   })
 
   test("no staleness warning when task tools used recently", async () => {

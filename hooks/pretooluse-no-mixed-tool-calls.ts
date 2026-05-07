@@ -26,7 +26,16 @@ import {
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
-const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
+// `update_plan` is Codex's planning UI — not in TASK_TOOLS (#570) but still
+// a reserved tool name that must not appear as a shell command.
+const EXTRA_TOOL_NAMES = [
+  "AskUserQuestion",
+  "LS",
+  "MultiEdit",
+  "WebFetch",
+  "WebSearch",
+  "update_plan",
+]
 
 const TOOL_NAMES = [
   ...new Set([
