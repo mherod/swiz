@@ -97,7 +97,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
 
     expect(result.decision).toBe("allow")
-    expect(result.reason).toContain("busy session")
+    expect(result.reason).toContain("active-task-buffer")
   })
 
   test("allows completion if 2 other tasks are pending", async () => {
@@ -118,7 +118,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
 
     expect(result.decision).toBe("allow")
-    expect(result.reason).toContain("planned session")
+    expect(result.reason).toContain("planned-task-buffer")
   })
 
   test("blocks completion if only 1 other task is in_progress and no transcript evidence", async () => {

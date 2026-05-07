@@ -255,7 +255,7 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
-      expect(result.reason).toContain("Advisory")
+      expect(result.reason).toContain("advisory")
       expect(result.reason).toContain("gh pr list --state open --head")
       // The advisory lists only the PR check as missing — no "Branch check" line
       expect(result.reason).not.toContain("Branch check (not run yet)")

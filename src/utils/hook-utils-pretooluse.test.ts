@@ -291,7 +291,8 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
     const hso = parsed.hookSpecificOutput as JsonObject
     expect(hso).not.toHaveProperty("permissionDecision")
     expect(hso).not.toHaveProperty("permissionDecisionReason")
-    expect(hso.additionalContext).toBe("Sanitized path")
+    expect(hso).not.toHaveProperty("additionalContext")
+    expect(parsed.systemMessage).toContain("Sanitized path")
     expect(hso.updatedInput).toEqual({ command: "echo safe" })
   })
 })

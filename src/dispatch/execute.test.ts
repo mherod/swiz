@@ -231,7 +231,8 @@ describe("dispatch execute integration", () => {
         expect(r).not.toHaveProperty("suppressOutput")
         expect(r.hookSpecificOutput.permissionDecision).toBeUndefined()
         expect(r.hookSpecificOutput.permissionDecisionReason).toBeUndefined()
-        expect(r.hookSpecificOutput.additionalContext).toBe("Heads up")
+        expect(r.hookSpecificOutput.additionalContext).toBeUndefined()
+        expect(r.systemMessage).toContain("Heads up")
         expect(r.hookSpecificOutput.updatedInput).toEqual({ command: "echo safe" })
       } finally {
         if (prevCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID

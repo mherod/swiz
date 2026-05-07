@@ -445,9 +445,8 @@ describe("posttooluse-task-advisor: positive paths", () => {
       { CODEX_THREAD_ID: "test-codex" }
     )
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("update_plan required")
+    const sysMsg = (r.json?.systemMessage as string) ?? ""
+    expect(sysMsg).toContain("update_plan required")
   })
 
   test("no output for small transcript (below threshold)", async () => {
@@ -481,9 +480,8 @@ describe("posttooluse-task-advisor: positive paths", () => {
       { CODEX_THREAD_ID: "test-codex" }
     )
     expect(r.exitCode).toBe(0)
-    const hso = r.json?.hookSpecificOutput as Record<string, any>
-    const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("Task update required")
+    const sysMsg = (r.json?.systemMessage as string) ?? ""
+    expect(sysMsg).toContain("Task update required")
   })
 
   test("no staleness warning when task tools used recently", async () => {
