@@ -1,5 +1,5 @@
 import { type AgentDef, translateEvent } from "../../agents.ts"
-import { DISPATCH_TIMEOUTS, manifest } from "../../manifest.ts"
+import { buildManifestForAgent, DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { isManagedSwizCommand } from "../../swiz-hook-commands.ts"
 
 /**
@@ -69,8 +69,12 @@ export function addDispatchEntries(
   wrapEntry: (cmd: string, timeout: number) => unknown
 ): void {
   const seenEvents = new Set<string>()
-  for (const group of manifest) {
+  // Build the manifest for the *target* agent so a Claude shell installing
+  // Codex hooks (or vice versa) emits the right shape. See #571.
+  const agentManifest = buildManifestForAgent(agent)
+  for (const group of agentManifest) {
     if (group.scheduled || seenEvents.has(group.event)) continue
+    if (group.hooks.length === 0) continue
     seenEvents.add(group.event)
     if (!supportsAgentEvent(agent, group.event)) continue
     const { eventName, timeout, cmd } = buildDispatchEntry(agent, group.event)

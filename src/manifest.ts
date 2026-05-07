@@ -496,21 +496,37 @@ const TASK_HOOK_IDENTIFIERS = new Set([
   "userpromptsubmit-task-advisor.ts",
 ])
 
-const buildManifest = () => {
-  const tasksEnabled = agentHasTaskTools()
-  if (tasksEnabled) return bundledHookManifest
-
-  return bundledHookManifest.map((group) => {
-    // Drop groups matched exclusively for task tools
+/**
+ * Filter the bundled manifest for a target with `tasksEnabled=false` (e.g. Codex).
+ * Drops every entry in TASK_HOOK_IDENTIFIERS plus any group whose matcher is
+ * exclusively for task tool names.
+ */
+function stripTaskHooks(groups: HookGroup[]): HookGroup[] {
+  return groups.map((group) => {
     if (group.matcher && /Task|TodoWrite|update_plan/.test(group.matcher)) {
       return { ...group, hooks: [] }
     }
-
     return {
       ...group,
       hooks: group.hooks.filter((h) => !TASK_HOOK_IDENTIFIERS.has(hookIdentifier(h))),
     }
   })
+}
+
+/**
+ * Build a manifest tailored to a target agent. Use this at install time so a
+ * Claude shell installing Codex hooks (or vice versa) emits the right shape
+ * regardless of the calling process's environment. See #571.
+ */
+export function buildManifestForAgent(agent: { tasksEnabled: boolean }): HookGroup[] {
+  if (agent.tasksEnabled) return bundledHookManifest
+  return stripTaskHooks(bundledHookManifest)
+}
+
+const buildManifest = () => {
+  const tasksEnabled = agentHasTaskTools()
+  if (tasksEnabled) return bundledHookManifest
+  return stripTaskHooks(bundledHookManifest)
 }
 export const manifest: HookGroup[] = buildManifest()
 

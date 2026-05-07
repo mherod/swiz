@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { agentHasTaskTools } from "./agent-paths.ts"
 import { isAsyncFireAndForgetHook } from "./dispatch/engine.ts"
 import {
+  buildManifestForAgent,
   type HookDef,
   type HookGroup,
   hookIdentifier,
@@ -369,6 +370,70 @@ describe("manifest.ts", () => {
           : hook.requiredSettings
         : undefined
       expect(rs).toEqual(["qualityChecksGate"])
+    })
+  })
+
+  describe("buildManifestForAgent — target-aware manifest (#571)", () => {
+    // Subset of TASK_HOOK_IDENTIFIERS — hooks that should be stripped for
+    // agents with tasksEnabled=false (Codex).
+    const TASK_HOOK_PATTERNS = [
+      "stop-incomplete-tasks",
+      "pretooluse-require-tasks",
+      "pretooluse-task-governance",
+      "userpromptsubmit-task-advisor",
+      "posttooluse-task-advisor",
+    ]
+
+    it("agent.tasksEnabled=true returns the bundled manifest unchanged", () => {
+      const claudeManifest = buildManifestForAgent({ tasksEnabled: true })
+      expect(claudeManifest).toBe(
+        // bundledHookManifest is the exact same array reference when tasksEnabled
+        buildManifestForAgent({ tasksEnabled: true })
+      )
+      // Sanity: at least one task hook should be present
+      const hasTaskHook = claudeManifest.some((g) =>
+        g.hooks.some((h) => TASK_HOOK_PATTERNS.some((p) => hookIdentifier(h).includes(p)))
+      )
+      expect(hasTaskHook).toBe(true)
+    })
+
+    it("agent.tasksEnabled=false (Codex) strips every TASK_HOOK_IDENTIFIERS entry", () => {
+      const codexManifest = buildManifestForAgent({ tasksEnabled: false })
+      const remainingTaskHooks = codexManifest.flatMap((g) =>
+        g.hooks.filter((h) => TASK_HOOK_PATTERNS.some((p) => hookIdentifier(h).includes(p)))
+      )
+      expect(remainingTaskHooks).toEqual([])
+    })
+
+    it("agent.tasksEnabled=false strips groups whose matcher is task-tool-only", () => {
+      const codexManifest = buildManifestForAgent({ tasksEnabled: false })
+      // The TaskCreate|TaskUpdate matcher group should have no hooks
+      const taskMatcherGroups = codexManifest.filter(
+        (g) => g.matcher && /Task|TodoWrite|update_plan/.test(g.matcher)
+      )
+      for (const g of taskMatcherGroups) {
+        expect(g.hooks).toEqual([])
+      }
+    })
+
+    it("does not depend on ambient CLAUDECODE / CODEX_THREAD_ID env vars", () => {
+      // Same call returns same shape regardless of process.env
+      const prevClaude = process.env.CLAUDECODE
+      const prevCodex = process.env.CODEX_THREAD_ID
+      try {
+        process.env.CODEX_THREAD_ID = "ambient"
+        delete process.env.CLAUDECODE
+        const a = buildManifestForAgent({ tasksEnabled: true })
+        delete process.env.CODEX_THREAD_ID
+        process.env.CLAUDECODE = "1"
+        const b = buildManifestForAgent({ tasksEnabled: true })
+        expect(a.length).toBe(b.length)
+      } finally {
+        if (prevClaude === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaude
+        if (prevCodex === undefined) delete process.env.CODEX_THREAD_ID
+        else process.env.CODEX_THREAD_ID = prevCodex
+      }
     })
   })
 })
