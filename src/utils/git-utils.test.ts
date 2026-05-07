@@ -794,7 +794,8 @@ import { buildGitContextLine, type GitStatusV2 } from "./git-utils.ts"
 describe("buildGitContextLine", () => {
   test("includes branch name", () => {
     const result = buildGitContextLine(makeStatus({ branch: "feat/foo" }))
-    expect(result).toContain("[git] On branch feat/foo")
+    expect(result).toContain("On branch feat/foo")
+    expect(result).not.toContain("[git]")
   })
 
   test("includes upstream ref when available", () => {
@@ -823,7 +824,7 @@ describe("buildGitContextLine", () => {
 
   test("shows clean state with zero uncommitted", () => {
     const result = buildGitContextLine(makeStatus({ total: 0 }))
-    expect(result).toContain("Working tree is clean")
+    expect(result).toContain("working tree is clean")
   })
 
   test("shows ahead count as unpushed commits", () => {
@@ -855,7 +856,8 @@ describe("buildGitContextLine", () => {
 
   test("shows diverged when both ahead and behind", () => {
     const result = buildGitContextLine(makeStatus({ ahead: 3, behind: 2 }))
-    expect(result).toContain("diverged: 3 ahead, 2 behind remote")
+    expect(result).toContain("diverged: 3 local commits not pushed and 2 remote commits not pulled")
+    expect(result).toContain("We should pull or rebase")
   })
 
   test("omits ahead/behind when both zero", () => {
@@ -873,6 +875,27 @@ describe("buildGitContextLine", () => {
   test("includes collab mode when not auto", () => {
     const result = buildGitContextLine(makeStatus(), "solo")
     expect(result).toContain("Collaboration mode: solo")
+  })
+
+  test("includes trunk mode as a git context detail", () => {
+    const result = buildGitContextLine(makeStatus(), {
+      collaborationMode: "solo",
+      trunkMode: true,
+      defaultBranch: "main",
+    })
+    expect(result).toContain("Trunk mode is active")
+    expect(result).toContain("keep work on main")
+    expect(result).toContain("Collaboration mode: solo")
+  })
+
+  test("calls out conflicting direct-main settings", () => {
+    const result = buildGitContextLine(makeStatus(), {
+      trunkMode: true,
+      strictNoDirectMain: true,
+      defaultBranch: "main",
+    })
+    expect(result).toContain("Trunk mode and strict no-direct-main are both enabled")
+    expect(result).toContain("resolve that workflow conflict before pushing")
   })
 
   test("singular forms for single file and single commit", () => {
@@ -894,7 +917,7 @@ describe("buildGitContextLine", () => {
       "team"
     )
     expect(result).toBe(
-      "[git] On branch feat/issue-42 tracking origin/feat/issue-42. 2 uncommitted files. 1 commit not yet pushed. Collaboration mode: team."
+      "On branch feat/issue-42 tracking origin/feat/issue-42. 2 uncommitted files. We should commit these uncommitted changes before switching context or stopping. 1 commit not yet pushed. We should push this commit. Collaboration mode: team."
     )
   })
 })

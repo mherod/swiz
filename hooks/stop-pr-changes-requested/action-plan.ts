@@ -92,7 +92,7 @@ export async function buildChangesRequestedOutput(
   }
 
   const fork = await detectForkTopology(cwd)
-  let reason = `PR #${pr.number} has changes requested from reviewers.\n\n`
+  let reason = `We should address this PR review: PR #${pr.number} has changes requested from reviewers.\n\n`
   reason += `Reviewers: ${reviewers}\n\n`
   reason += `Requested changes:\n${details}\n\n`
   if (subsequentLines.length > 0) {

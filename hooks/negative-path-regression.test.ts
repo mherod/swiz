@@ -325,6 +325,56 @@ describe("pretooluse-task-subject-validation", () => {
     expect(r.stdout).toContain("deny")
   })
 
+  test("compound subject is allowed when session has 2+ pending tasks", async () => {
+    const home = await createTempDir()
+    const sessionId = "compound-relax-pending"
+    const sessionDir = join(home, ".claude", "tasks", sessionId)
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    await mkdir(sessionDir, { recursive: true })
+    for (const id of ["1", "2"]) {
+      await writeFile(
+        join(sessionDir, `${id}.json`),
+        JSON.stringify({ id, subject: `Existing task ${id}`, status: "pending" })
+      )
+    }
+
+    const r = await runHook(
+      HOOK,
+      {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        tool_input: { subject: "Fix authentication and update tests" },
+      },
+      { HOME: home, CLAUDECODE: "1" }
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).not.toContain('"deny"')
+  })
+
+  test("compound subject is allowed when session has 1+ in_progress task", async () => {
+    const home = await createTempDir()
+    const sessionId = "compound-relax-inprogress"
+    const sessionDir = join(home, ".claude", "tasks", sessionId)
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(
+      join(sessionDir, "1.json"),
+      JSON.stringify({ id: "1", subject: "Active work", status: "in_progress" })
+    )
+
+    const r = await runHook(
+      HOOK,
+      {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        tool_input: { subject: "Fix authentication and update tests" },
+      },
+      { HOME: home, CLAUDECODE: "1" }
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).not.toContain('"deny"')
+  })
+
   test("empty subject exits cleanly", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",

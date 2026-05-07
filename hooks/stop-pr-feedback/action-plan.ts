@@ -32,7 +32,7 @@ function buildConflictSteps(ctx: StopContext): ActionPlanItem[] {
     "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
   )
   return [
-    `Rebase ${ctx.conflictingPRs.length} open PR(s) with merge conflicts: ${prListParts.join("; ")}`,
+    `We should resolve merge conflicts on ${ctx.conflictingPRs.length} open PR(s): ${prListParts.join("; ")}`,
     [rebaseAdvice, resolveAdvice],
   ]
 }
@@ -60,7 +60,7 @@ function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
     `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`
   )
   return [
-    `Address ${feedbackPRs.length} open PR(s) with ${label}: ${prListLines.join("; ")}`,
+    `We should address this PR review feedback on ${feedbackPRs.length} open PR(s) with ${label}: ${prListLines.join("; ")}`,
     subSteps,
   ]
 }
@@ -87,7 +87,7 @@ export function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
 
 export function formatStopReason(planSteps: ActionPlanItem[]): string {
   const headerParts = [
-    "There are open pull requests with feedback or merge conflicts that need your attention before we can finish the session.",
+    "We should address the open pull request feedback or merge conflicts before finishing the session.",
   ]
 
   return formatActionPlan(planSteps, {

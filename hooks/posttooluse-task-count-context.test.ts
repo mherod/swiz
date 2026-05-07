@@ -127,7 +127,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: ["#42 Fix auth timeout", "#57 Add retry logic"],
     })
-    expect(s).toContain("Open issues you could plan for")
+    expect(s).toContain("Open issues we could plan for")
     expect(s).toContain("#42 Fix auth timeout")
     expect(s).toContain("#57 Add retry logic")
   })
@@ -140,7 +140,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: ["#42 Fix auth timeout"],
     })
-    expect(s).not.toContain("Open issues you could plan for")
+    expect(s).not.toContain("Open issues we could plan for")
   })
 
   it("does not append issue hints when hints array is empty", () => {
@@ -151,7 +151,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: [],
     })
-    expect(s).not.toContain("Open issues you could plan for")
+    expect(s).not.toContain("Open issues we could plan for")
     expect(s).toContain("URGENT")
   })
 
@@ -164,7 +164,7 @@ describe("buildCountSummary", () => {
       issueHints: ["#100 Critical bug in login"],
     })
     expect(s).toContain("URGENT")
-    expect(s).toContain("Open issues you could plan for")
+    expect(s).toContain("Open issues we could plan for")
     expect(s).toContain("#100 Critical bug in login")
   })
 })

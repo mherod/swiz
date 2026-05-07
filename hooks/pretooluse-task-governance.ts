@@ -32,6 +32,11 @@ import {
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
 import {
+  buildPendingCompletionTransitionMessage,
+  buildStaleTaskBlockReason,
+  SWIZ_TASKS_CLI_DENY_MESSAGE,
+} from "../src/tasks/task-governance-messages.ts"
+import {
   applyCacheTaskUpdate,
   findPriorSessionTasks,
   formatNativeTaskCompleteCommands,
@@ -127,19 +132,46 @@ export const taskSubjectValidationHook: SwizToolHook = {
   matcher: "TaskCreate|TodoWrite",
   timeout: 5,
 
-  run(rawInput) {
+  async run(rawInput) {
     const input = rawInput as Record<string, any>
     if (!agentHasTaskToolsForHookPayload(input)) return {}
     const toolInput = input.tool_input as Record<string, any> | undefined
     const subject: string = (toolInput?.subject as string) ?? ""
 
     const result = detect(subject)
-    if (result.matched) {
-      return preToolUseDeny(formatMessage(result))
+    if (!result.matched) return preToolUseAllow()
+
+    if (await sessionHasHealthyTaskBuffer(input)) {
+      const note =
+        "Compound subject allowed: session task health is good (≥2 pending or ≥1 in_progress). " +
+        "Consider splitting follow-up work into focused tasks anyway."
+      return preToolUseAllowWithContext(note, note)
     }
 
-    return preToolUseAllow()
+    return preToolUseDeny(formatMessage(result))
   },
+}
+
+/**
+ * Returns true when the session already has enough task buffer to absorb a
+ * compound subject without losing planning fidelity: at least 2 pending tasks
+ * OR at least 1 in_progress task.
+ */
+async function sessionHasHealthyTaskBuffer(input: Record<string, any>): Promise<boolean> {
+  try {
+    const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+    if (!sessionId) return false
+    const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+    let pending = 0
+    let inProgress = 0
+    for (const t of allTasks) {
+      if (t.status === "pending") pending++
+      else if (t.status === "in_progress") inProgress++
+    }
+    return pending >= 2 || inProgress >= 1
+  } catch {
+    return false
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -490,15 +522,12 @@ async function checkTaskStaleness(
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
-    `STOP. Tasks have gone stale. ${callsSinceLastTaskTool} tool calls since last task update. ` +
-      `${toolName} is BLOCKED.\n\n` +
-      `We currently have these tasks in progress:\n${taskList}\n\n` +
-      `However, it's been a while since we've updated the task list. Good task hygiene means the list should stay fully reflective of what we're currently doing.\n\n` +
-      `Tasks are not suggestions - they are our execution plan. Stale tasks mean we are operating without clear accountability.\n\n` +
-      `Our current work has clearly grown in scope beyond the original task definition. We should update the in-progress task with current status, and create a new task that represents the work now underway.\n\n` +
-      formatActionPlan(stalePlanSteps, { translateToolNames: true }) +
-      `\n` +
-      `After updating tasks, ${toolName} will be unblocked automatically.`
+    buildStaleTaskBlockReason({
+      callsSinceLastTaskTool,
+      toolName,
+      taskList,
+      actionPlan: formatActionPlan(stalePlanSteps, { translateToolNames: true }),
+    })
   )
 }
 
@@ -825,15 +854,6 @@ export const requireTasksRunAsMainOptions: RunSwizHookAsMainOptions = {
 const SWIZ_TASKS_CLI_RE = shellTokenCommandRe(String.raw`swiz\s+tasks(?:\s|$)`)
 const SWIZ_TASKS_ADOPT_RE = shellTokenCommandRe(String.raw`swiz\s+tasks\s+adopt(?:\s|$)`)
 
-const SWIZ_TASKS_CLI_DENY_MESSAGE =
-  "Do not use the `swiz tasks` CLI inside Claude Code.\n\n" +
-  "Use native task tools only:\n" +
-  "  • TaskCreate — new tasks\n" +
-  "  • TaskUpdate — status, subject, description, and marking completed\n" +
-  "  • TaskList / TaskGet — query tasks\n\n" +
-  "Work must stay in the tracked tool channel (auditing, hooks, and task sync depend on it).\n\n" +
-  "The only `swiz tasks` subcommand still allowed here is `adopt` (orphan recovery after compaction)."
-
 function shouldInspectShellInput(input: {
   tool_name?: string
   _env?: Record<string, string>
@@ -1133,11 +1153,7 @@ async function checkNativeTaskUpdateCompletion(
   const allTasks = await readSessionTasks(sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
-    return preToolUseDeny(
-      `Cannot complete task #${taskId} directly from pending.\n\n` +
-        `Required transition: pending → in_progress → completed.\n\n` +
-        `Use TaskUpdate to set task #${taskId} to in_progress first, then complete it.`
-    )
+    return preToolUseDeny(buildPendingCompletionTransitionMessage(taskId))
   }
 
   const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)

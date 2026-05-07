@@ -18,15 +18,15 @@ import {
 } from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
 import {
+  buildBranchStateSystemMessage,
+  buildGitContextLine,
+  DETACHED_HEAD_WARNING,
+} from "../src/utils/git-context-messages.ts"
+import {
   appendBranchProtectionFromStore,
   buildGitRelevantSettingLines,
 } from "../src/utils/git-post-tool-directives.ts"
-import {
-  buildGitContextLine,
-  DETACHED_HEAD_WARNING,
-  type GitStatusV2,
-  getUnpushedCommitSummaries,
-} from "../src/utils/git-utils.ts"
+import { type GitStatusV2, getUnpushedCommitSummaries } from "../src/utils/git-utils.ts"
 
 /** @deprecated Import from `src/utils/git-utils.ts` or `hook-utils` re-exports. */
 
@@ -89,46 +89,22 @@ async function loadGitDirectives(
   return []
 }
 
-function buildBranchStateSystemMessage(
-  gitStatus: GitStatusV2,
-  effective: { trunkMode: boolean; strictNoDirectMain: boolean; collaborationMode: string }
-): string {
-  const { branch, total: uncommitted, ahead, behind } = gitStatus
-  const parts: string[] = []
-
-  if (uncommitted > 0) {
-    if (effective.trunkMode) {
-      parts.push(
-        `Working tree has ${uncommitted} uncommitted file(s). Trunk mode is active — commit directly to ${branch} using /commit.`
-      )
-    } else if (effective.strictNoDirectMain && (branch === "main" || branch === "master")) {
-      parts.push(
-        `Working tree has ${uncommitted} uncommitted file(s) on ${branch}. strictNoDirectMain is enabled — create a feature branch and open a PR instead of committing directly.`
-      )
-    } else {
-      parts.push(
-        `Working tree has ${uncommitted} uncommitted file(s) — use /commit before switching branches or stopping.`
-      )
-    }
-  }
-
-  if (ahead > 0) {
-    if (effective.collaborationMode === "team") {
-      parts.push(
-        `Branch is ${ahead} commit(s) ahead of upstream. Team collaboration mode — open a PR for review rather than pushing directly.`
-      )
-    } else if (effective.trunkMode) {
-      parts.push(`${ahead} commit(s) ahead of upstream — use /push to push ${branch} to remote.`)
-    } else {
-      parts.push(`${ahead} commit(s) ahead of upstream — use /push when ready.`)
-    }
-  }
-
-  if (behind > 0) {
-    parts.push(`Branch is ${behind} commit(s) behind upstream — pull to sync before pushing.`)
-  }
-
-  return parts.join(" ")
+async function buildPostToolGitStatusLine(
+  cwd: string,
+  effective: any,
+  gitStatus: GitStatusV2 | null
+): Promise<string> {
+  if (!gitStatus) return ""
+  const unpushedCommitSummaries = gitStatus.ahead > 0 ? await getUnpushedCommitSummaries(cwd) : []
+  return buildGitContextLine(
+    gitStatus,
+    {
+      collaborationMode: effective.collaborationMode,
+      trunkMode: effective.trunkMode,
+      strictNoDirectMain: effective.strictNoDirectMain,
+    },
+    unpushedCommitSummaries
+  )
 }
 
 const posttoolusGitContext: SwizHook = {
@@ -162,11 +138,7 @@ const posttoolusGitContext: SwizHook = {
       payload: input as Record<string, any>,
     })
     const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
-    const unpushedCommitSummaries =
-      gitStatus && gitStatus.ahead > 0 ? await getUnpushedCommitSummaries(cwd) : []
-    const statusLine = gitStatus
-      ? buildGitContextLine(gitStatus, effective.collaborationMode, unpushedCommitSummaries)
-      : ""
+    const statusLine = await buildPostToolGitStatusLine(cwd, effective, gitStatus)
 
     let directives: string[] = []
     if (shouldLoadDirectives(tool_name, input, gitStatus, isShellTool, GIT_ANY_CMD_RE)) {

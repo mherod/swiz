@@ -291,9 +291,9 @@ describe("processBlockingResults", () => {
         parsed: {
           hookSpecificOutput: {
             hookEventName: "PostToolUse",
-            additionalContext: "[git] On branch main tracking origin/main. Working tree is clean.",
+            additionalContext: "On branch main tracking origin/main. The working tree is clean.",
           },
-          systemMessage: "[git] On branch main tracking origin/main. Working tree is clean.",
+          systemMessage: "On branch main tracking origin/main. The working tree is clean.",
           suppressOutput: true,
         },
       },
@@ -303,7 +303,7 @@ describe("processBlockingResults", () => {
     const hso = finalResponse.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PostToolUse")
     expect(hso?.additionalContext).toBe(
-      "[git] On branch main tracking origin/main. Working tree is clean."
+      "On branch main tracking origin/main. The working tree is clean."
     )
     expect(finalResponse.systemMessage).toContain("On branch main")
   })

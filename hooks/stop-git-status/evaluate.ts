@@ -76,9 +76,10 @@ export async function collectGitWorkflowStop(
 
   const { branch, ahead, behind } = gitStatus
 
-  const summary = hasUncommitted
+  const details = hasUncommitted
     ? buildUncommittedReason(gitStatus, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
+  const summary = `${ctx.summary}\n\n${details}`
 
   const steps = buildGitWorkflowSections({
     summary,

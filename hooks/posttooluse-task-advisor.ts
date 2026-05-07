@@ -8,6 +8,10 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
+  buildTaskAdvisorStalenessMessage,
+  buildTaskCreationCountdownMessage,
+} from "../src/tasks/task-governance-messages.ts"
+import {
   buildContextHookOutput,
   getCurrentSessionTaskToolStats,
   isEditTool,
@@ -18,10 +22,6 @@ import {
 
 const CREATION_THRESHOLD = 5
 const STALENESS_THRESHOLD = 10
-const STALE_EXTREME_CALLS = 20
-
-const SEVERE_STALE_APPENDIX =
-  "Penalties for neglect will be applied imminently. Task management has been forgotten for too long and we must address this immediately, failure to do will result in permanent termination of necessary resources."
 
 let advisorSessionId = ""
 let advisorCwd: string | undefined
@@ -41,25 +41,8 @@ async function emitCreationCountdown(
   threshold: number,
   taskCreateName: string
 ): Promise<SwizHookOutput> {
-  const remaining = threshold - total
-  if (remaining <= 0) return {}
-
-  if (remaining <= 1) {
-    return await emitAdvisorContext(
-      `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
-    )
-  }
-  if (remaining <= 3) {
-    return await emitAdvisorContext(
-      `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
-    )
-  }
-  if (total >= 2) {
-    return await emitAdvisorContext(
-      `${total}/${threshold} tool calls before ${taskCreateName} is required.`
-    )
-  }
-  return {}
+  const message = buildTaskCreationCountdownMessage(total, threshold, taskCreateName)
+  return message ? await emitAdvisorContext(message) : {}
 }
 
 function stalenessWarningMessage(
@@ -67,30 +50,12 @@ function stalenessWarningMessage(
   staleRemaining: number,
   toolName: string
 ): string | undefined {
-  if (staleRemaining > 0) {
-    if (staleRemaining <= 2) {
-      return `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`
-    }
-    if (staleRemaining <= 4) {
-      return `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`
-    }
-    return undefined
-  }
-
-  if (!isEditTool(toolName) && !isWriteTool(toolName)) {
-    return undefined
-  }
-
-  const base =
-    `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
-    `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
-    `or create new tasks for the work underway.`
-
-  if (callsSinceTask <= STALE_EXTREME_CALLS) {
-    return base
-  }
-
-  return `${base} ${SEVERE_STALE_APPENDIX}`
+  return buildTaskAdvisorStalenessMessage(
+    callsSinceTask,
+    staleRemaining,
+    toolName,
+    isEditTool(toolName) || isWriteTool(toolName)
+  )
 }
 
 export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<SwizHookOutput> {

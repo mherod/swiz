@@ -1,6 +1,12 @@
 // Barrel file — re-exports everything for backward compatibility.
 // External consumers continue importing from "./settings" or "../settings" unchanged.
 
+// Context builders
+export {
+  BEHAVIOR_STEERING_SETTING_GROUPS,
+  type BehaviorSteeringContextOptions,
+  buildBehaviorSteeringContext,
+} from "./behavior-context"
 // Persistence (file I/O)
 export {
   DEFAULT_SETTINGS,
@@ -20,7 +26,6 @@ export {
   writeProjectState,
   writeSwizSettings,
 } from "./persistence"
-
 // Registry
 export { deriveDefaultsFromRegistry, deriveSchemaShape, SETTINGS_REGISTRY } from "./registry"
 

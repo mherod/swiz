@@ -14,6 +14,7 @@ import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { StopHookInput } from "../src/schemas.ts"
 import { stopHookInputSchema } from "../src/schemas.ts"
+import { buildTaskListBeforeStopMessage } from "../src/tasks/task-governance-messages.ts"
 import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
 import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
@@ -32,11 +33,7 @@ export async function evaluateStopIncompleteTasksHook(
     const hasTaskActivity = toolNames.some((n) => isTaskTool(n))
     const hasTaskList = toolNames.some((n) => isTaskListTool(n))
     if (hasTaskActivity && !hasTaskList) {
-      return blockStopObj(
-        "Call TaskList before stopping to sync task state.\n\n" +
-          "The session used task tools but never called TaskList. " +
-          "Run TaskList now, then retry stop."
-      )
+      return blockStopObj(buildTaskListBeforeStopMessage())
     }
   }
 

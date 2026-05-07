@@ -15,7 +15,7 @@ export function buildConflictReason(
 ): string {
   const fetchRemote = defaultRemoteRef.startsWith("upstream/") ? "upstream" : "origin"
   const rebaseSteps = [
-    `Rebase and resolve conflicts before stopping:`,
+    "We should resolve these conflicts before stopping:",
     `  git fetch ${fetchRemote} ${defaultBranch}`,
     `  git rebase ${defaultRemoteRef}`,
     "  # resolve any conflicts, then: git rebase --continue",
@@ -34,7 +34,7 @@ export function buildConflictReason(
 }
 
 export function buildPRConflictOutput(ctx: BranchCheckContext, pr: GitHubPRState): SwizHookOutput {
-  const header = `PR #${pr.number} for branch '${ctx.branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n${pr.url}\n\n`
+  const header = `We should resolve these conflicts: PR #${pr.number} for branch '${ctx.branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n${pr.url}\n\n`
   return blockStopObj(buildConflictReason(header, ctx.defaultBranch, ctx.defaultRemoteRef))
 }
 
@@ -42,7 +42,7 @@ export function buildTextualConflictOutput(
   ctx: BranchCheckContext,
   merge: GitMergeState
 ): SwizHookOutput {
-  const header = `Branch '${ctx.branch}' has conflicts with ${ctx.defaultRemoteRef}.\n\n${merge.conflictCount} conflict(s) detected — ${merge.behindCount} commit(s) on ${ctx.defaultRemoteRef} not yet in this branch.\n\n`
+  const header = `We should resolve these conflicts: branch '${ctx.branch}' conflicts with ${ctx.defaultRemoteRef}.\n\n${merge.conflictCount} conflict(s) detected — ${merge.behindCount} commit(s) on ${ctx.defaultRemoteRef} not yet in this branch.\n\n`
   return blockStopObj(buildConflictReason(header, ctx.defaultBranch, ctx.defaultRemoteRef))
 }
 

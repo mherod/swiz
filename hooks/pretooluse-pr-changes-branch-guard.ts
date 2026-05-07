@@ -90,7 +90,7 @@ function buildBlockReason(
     .join("\n")
 
   return (
-    `PR #${pr.number} ("${pr.title}") has changes requested by ${reviewers}.\n\n` +
+    `We should address this PR review before changing branches: PR #${pr.number} ("${pr.title}") has changes requested by ${reviewers}.\n\n` +
     `You cannot switch away from this branch until the requested changes are addressed.\n\n` +
     `Requested changes:\n${details}\n\n` +
     skillAdvice(

@@ -10,6 +10,7 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
+import { buildUserPromptTaskContext } from "../src/tasks/task-governance-messages.ts"
 import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
 
 export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
@@ -26,13 +27,7 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-  let additionalContext: string
-
-  if (pendingCount === 0) {
-    additionalContext = `No pending tasks in this session. Use ${taskCreateName} to create a task for this prompt before starting work.`
-  } else {
-    additionalContext = `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
-  }
+  const additionalContext = buildUserPromptTaskContext(pendingCount, taskCreateName)
 
   return buildContextHookOutput("UserPromptSubmit", additionalContext)
 }

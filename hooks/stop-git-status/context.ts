@@ -12,6 +12,7 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
+import { buildConstructiveGitSummary } from "../../src/utils/git-context-messages.ts"
 import { getDefaultBranch, getGitStatusV2, git, isGitRepo } from "../../src/utils/hook-utils.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
@@ -77,14 +78,16 @@ export async function resolveGitContext(input: StopHookInput): Promise<GitContex
   const hasUncommitted = gitStatus.total > 0
   const defaultBranch = await getDefaultBranch(cwd)
   const trunkMode = effective.projectSettings?.trunkMode === true
+  const upstream = gitStatus.upstream ?? `origin/${branch}`
 
   return {
     cwd,
     sessionId: input.session_id,
     gitStatus: gitStatus as GitStatus,
+    summary: buildConstructiveGitSummary(gitStatus as GitStatus, upstream),
     hasUncommitted,
     hasRemote: !!remoteUrl,
-    upstream: gitStatus.upstream ?? `origin/${branch}`,
+    upstream,
     collabMode: effective.collaborationMode,
     pushCooldownMinutes: effective.pushCooldownMinutes,
     defaultBranch,

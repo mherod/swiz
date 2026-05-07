@@ -15,6 +15,7 @@ export interface GitContext {
   cwd: string
   sessionId: string | undefined
   gitStatus: GitStatus
+  summary: string
   hasUncommitted: boolean
   hasRemote: boolean
   upstream: string

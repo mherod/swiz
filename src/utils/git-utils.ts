@@ -9,6 +9,16 @@ import {
   shellTokenCommandRe,
 } from "./shell-patterns.ts"
 
+export {
+  buildGitContextLine,
+  DETACHED_HEAD_WARNING,
+  type GitContextLineOptions,
+  type GitContextMessageStatus,
+  normalizeCommitSummary,
+} from "./git-context-messages.ts"
+
+import { normalizeCommitSummary } from "./git-context-messages.ts"
+
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
 export { isDefaultBranch } from "../git-helpers.ts"
@@ -352,76 +362,10 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   return parseGitStatusV2Output(out)
 }
 
-function describeUpstream(upstream: string | null, upstreamGone: boolean): string {
-  if (upstreamGone) return `, upstream ${upstream} is gone.`
-  if (upstream) return ` tracking ${upstream}.`
-  return ` with no upstream.`
-}
-
-function describeWorkingTree(uncommitted: number): string {
-  if (uncommitted === 0) return ` Working tree is clean.`
-  return ` ${uncommitted} uncommitted file${uncommitted !== 1 ? "s" : ""}.`
-}
-
-function describeSyncState(ahead: number, behind: number): string {
-  if (ahead > 0 && behind > 0)
-    return ` Branch has diverged: ${ahead} ahead, ${behind} behind remote.`
-  if (ahead > 0) return ` ${ahead} commit${ahead !== 1 ? "s" : ""} not yet pushed.`
-  if (behind > 0) return ` ${behind} commit${behind !== 1 ? "s" : ""} behind remote.`
-  return ""
-}
-
-function normalizeCommitSummary(line: string): string {
-  return line.replace(/\s+/g, " ").trim()
-}
-
-function describeUnpushedCommitSummaries(ahead: number, summaries: string[] = []): string {
-  if (ahead <= 0 || summaries.length === 0) return ""
-  const visible = summaries.map(normalizeCommitSummary).filter(Boolean).slice(0, 3)
-  if (visible.length === 0) return ""
-  const remaining = Math.max(0, ahead - visible.length)
-  const suffix = remaining > 0 ? `; +${remaining} more` : ""
-  return ` Unpushed commits: ${visible.join("; ")}${suffix}.`
-}
-
 export async function getUnpushedCommitSummaries(cwd: string, limit = 3): Promise<string[]> {
   const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)))
   const out = await git(["log", `--max-count=${safeLimit}`, "--oneline", "@{upstream}..HEAD"], cwd)
   return out.split("\n").map(normalizeCommitSummary).filter(Boolean)
-}
-
-/** Critical warning displayed when the repository is in a detached HEAD state. */
-export const DETACHED_HEAD_WARNING =
-  "CRITICAL: You are in a DETACHED HEAD state (not on any branch). Any commits you make will be orphaned and potentially lost. To save your work, create a new branch using 'git switch -c <name>' or 'git checkout -b <name>'."
-
-/**
- * Single-line git summary for agent context (PostToolUse / status line style).
- * Produces coherent prose so the consuming model can parse it naturally.
- * @param gitStatus
- * @param collabMode - When `"auto"`, the collaboration suffix is omitted.
- */
-export function buildGitContextLine(
-  gitStatus: GitStatusV2,
-  collabMode: string = "auto",
-  unpushedCommitSummaries: string[] = []
-): string {
-  const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
-
-  let line = branch === "(detached)" ? "[git] HEAD is detached" : `[git] On branch ${branch}`
-  line += describeUpstream(upstream, upstreamGone)
-  line += describeWorkingTree(uncommitted)
-  line += describeSyncState(ahead, behind)
-  line += describeUnpushedCommitSummaries(ahead, unpushedCommitSummaries)
-
-  if (branch === "(detached)") {
-    line += ` ${DETACHED_HEAD_WARNING}`
-  }
-
-  if (collabMode !== "auto") {
-    line += ` Collaboration mode: ${collabMode}.`
-  }
-
-  return line
 }
 
 /** Canonical empty-tree hash used when repos have fewer than N commits. */

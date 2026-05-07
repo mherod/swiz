@@ -55,7 +55,7 @@ Before stop ──────► Chain of stop gates (tier 4)
 |------|---------|
 | `userpromptsubmit-task-advisor` | `No pending tasks in this session. Use TaskCreate to create a task for this prompt before starting work.` |
 | `sessionstart-health-snapshot` | `Daemon status: running on port 7943. 3 active sessions.` |
-| `userpromptsubmit-git-context` | `[git] On branch main tracking origin/main. Working tree is clean. 1 commit not yet pushed.` |
+| `userpromptsubmit-git-context` | `On branch main tracking origin/main. The working tree is clean. 1 commit not yet pushed. We should push these commits.` |
 
 **Hooks in this tier:**
 - `sessionstart-compact-context.ts`
