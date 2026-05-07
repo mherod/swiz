@@ -1165,6 +1165,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1214,6 +1216,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1264,6 +1268,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ignoreCi: true })
@@ -1314,6 +1320,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: false })
@@ -1364,6 +1372,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
@@ -1414,6 +1424,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1469,6 +1481,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1522,6 +1536,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { ambitionMode: "creative" })
@@ -1571,6 +1587,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { collaborationMode: "team" })
@@ -1620,6 +1638,8 @@ describe("collaborationMode settings", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1911,6 +1931,8 @@ describe("strictNoDirectMain setting", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -1960,6 +1982,8 @@ describe("strictNoDirectMain setting", () => {
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       enforceEndOfDay: true,
       enforceMidSessionCheckin: false,
+      enforceMorningStandup: false,
+      enforceWeeklyRetro: false,
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })

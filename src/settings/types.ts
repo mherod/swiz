@@ -239,6 +239,10 @@ export interface SwizSettings {
   enforceEndOfDay: boolean
   /** When true, the PostToolUse hook suggests /mid-session-checkin when drift signals fire (opt-in, experimental). */
   enforceMidSessionCheckin: boolean
+  /** When true, the SessionStart hook suggests /morning-standup once per calendar day (opt-in). */
+  enforceMorningStandup: boolean
+  /** When true, the SessionStart hook suggests /weekly-retro on the first session of each ISO week (opt-in). */
+  enforceWeeklyRetro: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>

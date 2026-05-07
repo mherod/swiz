@@ -183,6 +183,8 @@ function buildBaseSettings(
     statusLineSegments: settings.statusLineSegments,
     enforceEndOfDay: settings.enforceEndOfDay,
     enforceMidSessionCheckin: settings.enforceMidSessionCheckin,
+    enforceMorningStandup: settings.enforceMorningStandup,
+    enforceWeeklyRetro: settings.enforceWeeklyRetro,
     ...overrides,
     githubCiGate,
   }

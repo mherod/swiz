@@ -93,9 +93,11 @@ import pretooluseWorkflowPermissionsGate from "../hooks/pretooluse-workflow-perm
 import sessionstartCompactContext from "../hooks/sessionstart-compact-context.ts"
 import sessionstartEnvironmentDetects from "../hooks/sessionstart-environment-detects.ts"
 import sessionstartHealthSnapshot from "../hooks/sessionstart-health-snapshot.ts"
+import sessionstartMorningStandupPrompt from "../hooks/sessionstart-morning-standup-prompt.ts"
 import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
 import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
 import sessionstartWebsearchSuggester from "../hooks/sessionstart-websearch-suggester.ts"
+import sessionstartWeeklyRetroPrompt from "../hooks/sessionstart-weekly-retro-prompt.ts"
 import stopAutoContinue from "../hooks/stop-auto-continue.ts"
 import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
@@ -419,6 +421,8 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: sessionstartHealthSnapshot },
       { hook: sessionstartStateContext },
       { hook: sessionstartWebsearchSuggester },
+      { hook: sessionstartMorningStandupPrompt },
+      { hook: sessionstartWeeklyRetroPrompt },
       { hook: posttooluseSpeakNarrator },
     ],
   },

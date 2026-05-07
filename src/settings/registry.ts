@@ -683,6 +683,34 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
       disableDescription: "Do not suggest /mid-session-checkin based on activity signals",
     },
   },
+  {
+    key: "enforceMorningStandup",
+    aliases: ["enforce-morning-standup", "enforcemorningstandup", "enforce_morning_standup"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description: "Suggest /morning-standup at session start once per calendar day (opt-in)",
+      effectExplanation:
+        "When enabled, a SessionStart hook fires once per cwd per calendar day and softly suggests /morning-standup before picking work. Uses a calendar-day sentinel so a session that restarts later in the day does not re-fire.",
+      enableDescription: "Suggest /morning-standup once per day at session start",
+      disableDescription: "Do not suggest /morning-standup at session start",
+    },
+  },
+  {
+    key: "enforceWeeklyRetro",
+    aliases: ["enforce-weekly-retro", "enforceweeklyretro", "enforce_weekly_retro"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description: "Suggest /weekly-retro on the first session of each ISO week (opt-in)",
+      effectExplanation:
+        "When enabled, a SessionStart hook fires on the first session of each ISO week (provided the last 7 days have ≥3 merged PRs) and softly suggests /weekly-retro. Uses an ISO-week sentinel to fire at most once per week.",
+      enableDescription: "Suggest /weekly-retro once per ISO week at session start",
+      disableDescription: "Do not suggest /weekly-retro at session start",
+    },
+  },
 ]
 
 /**
