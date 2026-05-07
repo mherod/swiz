@@ -410,6 +410,33 @@ describe("lefthook.yml hook-order and invariant guards", () => {
 // Category: codex prompt-advisor exemption (#572)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+describe("PostToolUse task hooks — codex exemption (#574)", () => {
+  test.each([
+    "hooks/posttooluse-task-sync.ts",
+    "hooks/posttooluse-task-count-context.ts",
+    "hooks/posttooluse-task-output.ts",
+    "hooks/posttooluse-task-advisor.ts",
+    "hooks/posttooluse-git-task-autocomplete.ts",
+  ])("%s emits no output for codex transcript_path payload", async (hookPath) => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      hookPath,
+      {
+        session_id: "codex-posttool-session",
+        cwd: process.cwd(),
+        transcript_path: `${homeDir}/.codex/sessions/abc.jsonl`,
+        tool_name: "Bash",
+        tool_input: { command: "echo hi" },
+        tool_response: { stdout: "hi" },
+      },
+      { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+    // Each task posttool hook returns {} (empty stdout) for codex payloads.
+    expect((result.stdout ?? "").trim()).toBe("")
+  })
+})
+
 describe("userpromptsubmit-task-advisor — codex exemption (#572)", () => {
   test("codex transcript_path produces no advisor context (no ambient codex env)", async () => {
     const homeDir = await createTempHome()
