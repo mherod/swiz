@@ -643,8 +643,9 @@ describe("posttooluse-task-output: tool error handling", () => {
     expect(result.exitCode).toBe(0)
     // Should emit hookSpecificOutput with additionalContext, not a block decision
     const parsed = JSON.parse(result.stdout)
-    expect(parsed.hookSpecificOutput?.additionalContext).toContain("recovered from file")
-    expect(parsed.hookSpecificOutput?.additionalContext).toContain(taskId)
+    const context = parsed.hookSpecificOutput?.additionalContext ?? parsed.systemMessage
+    expect(context).toContain("recovered from file")
+    expect(context).toContain(taskId)
   })
 
   test("'No task found' with failing output file (exit status pattern) blocks", async () => {

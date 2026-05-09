@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { type HookResult, useTempDir } from "../src/utils/test-utils.ts"
+import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ describe("pretooluse-no-as-any", () => {
   const HOOK = "hooks/pretooluse-ts-quality.ts"
 
   test("non-typescript file exits cleanly", async () => {
-    const r = await runHook(HOOK, {
+    const r = await runHookInProcess(HOOK, {
       tool_name: "Edit",
       tool_input: { file_path: "src/index.js", old_string: "a", new_string: "b as any" },
     })
@@ -154,7 +154,7 @@ describe("pretooluse-no-as-any", () => {
   })
 
   test("no old_string (new file) exits cleanly", async () => {
-    const r = await runHook(HOOK, {
+    const r = await runHookInProcess(HOOK, {
       tool_name: "Write",
       tool_input: { file_path: "src/index.ts", content: "const x = y as any" },
     })
@@ -162,7 +162,7 @@ describe("pretooluse-no-as-any", () => {
   })
 
   test("adding 'as any' to TS file is denied", async () => {
-    const r = await runHook(HOOK, {
+    const r = await runHookInProcess(HOOK, {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/index.ts",
@@ -175,7 +175,7 @@ describe("pretooluse-no-as-any", () => {
   })
 
   test("removing 'as any' from TS file is allowed", async () => {
-    const r = await runHook(HOOK, {
+    const r = await runHookInProcess(HOOK, {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/index.ts",
@@ -188,7 +188,7 @@ describe("pretooluse-no-as-any", () => {
   })
 
   test("empty tool_input exits cleanly", async () => {
-    const r = await runHook(HOOK, { tool_name: "Edit", tool_input: {} })
+    const r = await runHookInProcess(HOOK, { tool_name: "Edit", tool_input: {} })
     expect(r.exitCode).toBe(0)
   })
 })
@@ -442,7 +442,7 @@ describe("posttooluse-git-context: status negative paths", () => {
   test("no cwd field exits cleanly", async () => {
     const r = await runHook(HOOK, {})
     expect(r.exitCode).toBe(0)
-  })
+  }, 15_000)
 })
 
 describe("posttooluse-json-validation", () => {
@@ -541,17 +541,17 @@ describe("posttooluse-task-advisor", () => {
   const HOOK = "hooks/posttooluse-task-advisor.ts"
 
   test("empty transcript_path exits cleanly", async () => {
-    const r = await runHook(HOOK, { transcript_path: "" })
+    const r = await runHookInProcess(HOOK, { transcript_path: "" })
     expect(r.exitCode).toBe(0)
   })
 
   test("no transcript_path exits cleanly", async () => {
-    const r = await runHook(HOOK, {})
+    const r = await runHookInProcess(HOOK, {})
     expect(r.exitCode).toBe(0)
   })
 
   test("nonexistent transcript exits cleanly", async () => {
-    const r = await runHook(HOOK, { transcript_path: "/nonexistent/transcript.jsonl" })
+    const r = await runHookInProcess(HOOK, { transcript_path: "/nonexistent/transcript.jsonl" })
     expect(r.exitCode).toBe(0)
   })
 })

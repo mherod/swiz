@@ -182,6 +182,7 @@ function buildBaseSettings(
     largeFileSizeBlockKb: settings.largeFileSizeBlockKb,
     statusLineSegments: settings.statusLineSegments,
     enforceEndOfDay: settings.enforceEndOfDay,
+    enforceUnblockMyself: settings.enforceUnblockMyself,
     enforceMidSessionCheckin: settings.enforceMidSessionCheckin,
     enforceMorningStandup: settings.enforceMorningStandup,
     enforceWeeklyRetro: settings.enforceWeeklyRetro,

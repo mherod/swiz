@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**121 hooks. 12 event types. Every agent. Zero compromises.**
+**122 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,7 +84,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-117 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+118 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
@@ -122,7 +122,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (57)
+### PreToolUse (58)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -170,6 +170,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-ready-to-backlog.ts`            | Blocks `gh issue edit` commands that demote issues from `ready` to `backlog`. Prevents agents from gaming readiness hooks by downgrading triaged work they want to avoid.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `pretooluse-no-issue-close.ts`                 | Blocks closing issues via CLI (`gh issue close`, `swiz issue close`, `swiz issue resolve`, `gh api ... state=closed`). Issues must only be closed by pushing commits with `Fixes #N` in the message, ensuring every closure is backed by a code change.                                                                                                                                                                                                                                                                                                                                                            |
 | `pretooluse-repeated-lint-test.ts`             | Blocks consecutive same-kind `bun test` / `bun run lint` / `bun run build` calls when no file edit (Edit, Write, or NotebookEdit) occurred between them. Also handles parallel tool-call dispatch correctly by tracking the JSONL source line. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output. When blocking, the denial message includes a concrete transcript file reference (path and source line index) so agents can locate the prior output directly; if the output could not be extracted, guidance is softened accordingly. |
+| `pretooluse-stuck-state.ts`                    | Blocks Edit, Write, and Bash when the transcript shows a silent retry loop: the same file edited too many times without a commit, the same Bash command failing repeatedly, or more than 20 minutes without forward progress. Requires `/unblock-myself` before continuing the same approach.                                                                                                                                                                                                                                                                   |
 | `pretooluse-block-preexisting-dismissals.ts`   | Blocks follow-up work when the assistant dismisses lint/test/typecheck/build warnings as "pre-existing" or "unrelated" without proving the claim. Scans the transcript for dismissal language after diagnostic-bearing output, and blocks unless the agent has fixed the issues, run a scoped verification, or provided baseline evidence (e.g. git diff) that the diagnostics predate the current changes.                                                                                                                                                                                                        |
 | `pretooluse-no-secrets.ts`                     | Blocks Edit/Write/NotebookEdit operations when the proposed content contains likely secret material — private keys, API tokens (AWS, GitHub, Slack, OpenAI, Stripe), or generic credential assignments. Eager counterpart to `stop-secret-scanner.ts`: prevents secrets from landing on disk rather than catching them at commit time. Test files are excluded to allow fixture credentials.                                                                                                                                                                                                                       |
 | `pretooluse-bun-api-enforce.ts`                | Blocks Node.js sync file operations (`readFileSync`, `writeFileSync`, `appendFileSync`, `unlinkSync`, `rmSync`) and sync child_process operations (`execSync`, `spawnSync`, `execFileSync`) when the file already uses Bun APIs or has a bun shebang. Enforces Bun-native replacements (`Bun.file()`, `Bun.write()`, `Bun.spawn()`, `Bun.$\`\``). Directory operations (`mkdir`,`readdir`,`stat`) and async spawn/exec remain allowed.                                                                                                                                                                             |
@@ -278,7 +279,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 112 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 122 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

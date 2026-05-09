@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { runFileEditHook } from "../src/utils/test-utils.ts"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 
 const KW_IGNORE = ["ts", "ignore"].join("-")
 const KW_EXPECT = ["ts", "expect", "error"].join("-")
@@ -36,7 +36,13 @@ const KW_NOCHECK = ["ts", "nocheck"].join("-")
 const HOOK = "hooks/pretooluse-ts-quality.ts"
 
 function runHook(opts: { filePath?: string; newString?: string }) {
-  return runFileEditHook(HOOK, opts)
+  return runHookInProcess(HOOK, {
+    tool_name: "Edit",
+    tool_input: {
+      file_path: opts.filePath ?? "src/app.ts",
+      new_string: opts.newString,
+    },
+  })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -665,6 +665,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "enforceUnblockMyself",
+    aliases: ["enforce-unblock-myself", "enforceunblockmyself", "enforce_unblock_myself"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description: "Block silent retry loops until /unblock-myself has been run",
+      effectExplanation:
+        "When enabled, a PreToolUse hook watches for repeated file edits, repeated failing Bash commands, and long idle periods without forward progress. It blocks the next Edit/Write/Bash call until /unblock-myself runs.",
+      enableDescription: "Enforce /unblock-myself before continuing stuck retry loops",
+      disableDescription: "Do not block silent retry loops with /unblock-myself enforcement",
+    },
+  },
+  {
     key: "enforceMidSessionCheckin",
     aliases: [
       "enforce-mid-session-checkin",

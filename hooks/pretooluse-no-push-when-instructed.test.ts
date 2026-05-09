@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { SimpleHookResult } from "../src/utils/test-utils.ts"
+import { runHookInProcess, type SimpleHookResult } from "../src/utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -41,19 +41,32 @@ async function runHook(opts: {
     await Bun.write(tPath, opts.transcriptContent)
   }
 
-  const payload = JSON.stringify({
+  const input = {
     tool_name: "Bash",
     tool_input: { command: opts.command },
     transcript_path: tPath,
     session_id: "test",
     cwd: "/tmp",
-  })
+  }
+
+  if (opts.home === undefined) {
+    const result = await runHookInProcess("hooks/pretooluse-no-push-when-instructed.ts", {
+      ...input,
+      _effectiveSettings: { pushGate: true },
+    })
+    return {
+      blocked: result.decision === "deny",
+      reason: result.reason ?? "",
+    }
+  }
+
+  const payload = JSON.stringify(input)
 
   const proc = Bun.spawn(["bun", "hooks/pretooluse-no-push-when-instructed.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: opts.home ?? fakeHome },
+    env: { ...process.env, HOME: opts.home },
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -73,16 +86,9 @@ async function runHook(opts: {
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
 
 let tmpDir: string
-let fakeHome: string // HOME with pushGate:true settings file — enables the hook in tests
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "no-push-instructed-test-"))
-  fakeHome = join(tmpDir, "home")
-  await mkdir(join(fakeHome, ".swiz"), { recursive: true })
-  await Bun.write(
-    join(fakeHome, ".swiz", "settings.json"),
-    JSON.stringify({ pushGate: true }, null, 2)
-  )
 })
 
 afterAll(async () => {

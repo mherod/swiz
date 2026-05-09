@@ -76,6 +76,7 @@ import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretooluseSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
 import pretooluseStaleApprovalGate from "../hooks/pretooluse-stale-approval-gate.ts"
 import pretooluseStateGate from "../hooks/pretooluse-state-gate.ts"
+import pretooluseStuckState from "../hooks/pretooluse-stuck-state.ts"
 import pretooluseTaskGovernance, {
   enforceTaskupdateHook as pretooluseEnforceTaskupdate,
   requireTasksHook as pretooluseRequireTasks,
@@ -286,6 +287,7 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [
       { hook: pretooluseRequireTasks },
       { hook: pretooluseStateGate },
+      { hook: pretooluseStuckState },
       { hook: pretooluseBlockPreexistingDismissals },
     ],
   },

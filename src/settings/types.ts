@@ -237,6 +237,8 @@ export interface SwizSettings {
   actionPlanMerge: boolean
   /** When true, the stop hook suggests /end-of-day when unpushed commits exist. */
   enforceEndOfDay: boolean
+  /** When true, a PreToolUse hook blocks silent retry loops until /unblock-myself runs. */
+  enforceUnblockMyself: boolean
   /** When true, the PostToolUse hook suggests /mid-session-checkin when drift signals fire (opt-in, experimental). */
   enforceMidSessionCheckin: boolean
   /** When true, the SessionStart hook suggests /morning-standup once per calendar day (opt-in). */

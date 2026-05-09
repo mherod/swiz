@@ -35,6 +35,7 @@ interface GlobalSettingsForm {
   largeFileSizeBlockKb: number
   transcriptMonitorMaxConcurrentDispatches: number
   enforceEndOfDay: boolean
+  enforceUnblockMyself: boolean
   enforceMidSessionCheckin: boolean
 }
 
@@ -71,6 +72,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   largeFileSizeBlockKb: 5120,
   transcriptMonitorMaxConcurrentDispatches: 0,
   enforceEndOfDay: true,
+  enforceUnblockMyself: true,
   enforceMidSessionCheckin: false,
 }
 
@@ -168,6 +170,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     transcriptMonitorMaxConcurrentDispatches:
       Number(settings.transcriptMonitorMaxConcurrentDispatches) || 0,
     enforceEndOfDay: settings.enforceEndOfDay !== false,
+    enforceUnblockMyself: settings.enforceUnblockMyself !== false,
     enforceMidSessionCheckin: !!settings.enforceMidSessionCheckin,
   }
 }
@@ -414,6 +417,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "enforceEndOfDay",
     label: "Enforce end-of-day",
     desc: "Block session stop when unpushed commits exist until /end-of-day has been run.",
+  },
+  {
+    key: "enforceUnblockMyself",
+    label: "Enforce unblock-myself",
+    desc: "Block repeated no-progress Edit, Write, or Bash loops until /unblock-myself has been run.",
   },
   {
     key: "enforceMidSessionCheckin",

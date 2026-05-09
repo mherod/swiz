@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { runBashHook } from "../src/utils/test-utils.ts"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-no-merge-conflict-comments.ts"
 
 function runHook(command: string) {
-  return runBashHook(HOOK, command)
+  return runHookInProcess(HOOK, {
+    tool_name: "Bash",
+    tool_input: { command },
+  })
 }
 
 // ─── gh pr comment path ──────────────────────────────────────────────────────

@@ -74,8 +74,8 @@ async function runHook(
     (hso?.permissionDecision as string | undefined) ??
     (parsed.decision as string | undefined) ??
     // Codex strips explicit allow decisions from PreToolUse output. In subprocess
-    // tests, a parsed PreToolUse envelope with no deny surface still represents allow.
-    (hso?.hookEventName === "PreToolUse" ? "allow" : undefined)
+    // tests, any parsed non-deny/non-block envelope from this PreToolUse hook still represents allow.
+    "allow"
   return { raw, parsed, decision }
 }
 

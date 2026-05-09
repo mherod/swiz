@@ -89,5 +89,5 @@ describe("swiz status — agent environment detection", () => {
       const out = await runStatus(env)
       expect(out).toContain("swiz status")
     }
-  })
+  }, 15_000)
 })

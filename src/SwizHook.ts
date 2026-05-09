@@ -38,10 +38,12 @@ import {
 } from "./schemas.ts"
 import type { EffectiveSwizSettings } from "./settings"
 import {
+  extractHookSystemMessagePreview,
   hasNonEmptyHookOutput,
   isJsonLikeRecord,
   messageFromUnknownError,
 } from "./utils/hook-json-helpers.ts"
+import { hsoPreToolUseDeny } from "./utils/hook-specific-output.ts"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -202,6 +204,19 @@ export function buildSplitContextHookOutput(
 // Inline equivalents of the process.exit-based helpers in hook-utils.ts.
 // These return output objects instead of terminating the process, making them
 // safe for use in SwizHook.run() implementations.
+
+/** Build a PreToolUse deny response for inline hooks. */
+export function preToolUseDeny(reason: string): SwizHookOutput {
+  const fullReason = `${reason}
+
+You must act on this now. Do not try to stop again without completing the required action.`
+
+  return hookOutputSchema.parse({
+    suppressOutput: true,
+    systemMessage: extractHookSystemMessagePreview(reason) || "Denied without reason",
+    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
+  })
+}
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
 

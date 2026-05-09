@@ -25,6 +25,7 @@ export const BEHAVIOR_STEERING_SETTING_GROUPS = {
     "auditStrictness",
     "autoTransition",
     "actionPlanMerge",
+    "enforceUnblockMyself",
     "taskDurationWarningMinutes",
   ],
   safeguards: [
@@ -155,10 +156,14 @@ function buildTaskGovernanceContext(settings: EffectiveSwizSettings): string {
   const actionPlans = settings.actionPlanMerge
     ? "action plans may create tasks automatically"
     : "action plans remain advisory until tasks are created"
+  const unblock = settings.enforceUnblockMyself
+    ? "stuck retry loops require /unblock-myself"
+    : "stuck retry loop enforcement is off"
   return `${[
     `Task governance: ${settings.auditStrictness} audit strictness`,
     transitions,
     actionPlans,
+    unblock,
     `warn after ${settings.taskDurationWarningMinutes} minutes in progress`,
   ].join("; ")}.`
 }

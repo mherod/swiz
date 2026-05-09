@@ -20,6 +20,7 @@ const TMP = join(tmpdir(), `swiz-tasks-test-${process.pid}-${Date.now()}`)
 const TASKS = join(TMP, "tasks")
 const PROJECTS = join(TMP, "projects")
 const FILTER_CWD = "/Users/test/Development/myproject"
+const INDEX_PATH = join(process.cwd(), "index.ts")
 
 // Serialize tests that modify process.env.HOME or process.chdir
 let _queue: Promise<unknown> = Promise.resolve()
@@ -27,6 +28,37 @@ async function serial<T>(fn: () => Promise<T>): Promise<T> {
   const result = _queue.then(fn)
   _queue = result.catch(() => {})
   return result
+}
+
+async function runTasksCli(
+  envOverrides: Record<string, string | undefined>,
+  setup?: (cwd: string) => Promise<void>
+) {
+  const cwd = join(TMP, `tasks-cli-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+  await mkdir(cwd, { recursive: true })
+  await setup?.(cwd)
+
+  const env: Record<string, string> = { ...process.env, AI_TEST_NO_BACKEND: "1" }
+  for (const [key, value] of Object.entries(envOverrides)) {
+    if (value === undefined) {
+      delete env[key]
+    } else {
+      env[key] = value
+    }
+  }
+
+  const proc = Bun.spawn([process.execPath, INDEX_PATH, "tasks"], {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
+  return { exitCode, stdout, stderr }
 }
 
 // Session IDs
@@ -1102,48 +1134,56 @@ describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
 
 describe("native task tool guard", () => {
   it("blocks list invocation inside Claude Code", async () => {
-    const prevClaudeCode = process.env.CLAUDECODE
-    const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
-    const prevCodexThread = process.env.CODEX_THREAD_ID
-    process.env.CLAUDECODE = "1"
-    delete process.env.CODEX_MANAGED_BY_NPM
-    delete process.env.CODEX_THREAD_ID
-
-    try {
-      await expect(tasksCommand.run([])).rejects.toThrow(
-        '"swiz tasks" (list) is not available inside Claude Code.'
-      )
-    } finally {
-      if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
-      else process.env.CLAUDECODE = prevClaudeCode
-      if (prevCodexManaged === undefined) delete process.env.CODEX_MANAGED_BY_NPM
-      else process.env.CODEX_MANAGED_BY_NPM = prevCodexManaged
-      if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
-      else process.env.CODEX_THREAD_ID = prevCodexThread
-    }
+    await serial(async () => {
+      const home = join(TMP, "native-task-guard-claude-home")
+      const result = await runTasksCli({
+        HOME: home,
+        CLAUDECODE: "1",
+        CODEX_MANAGED_BY_NPM: undefined,
+        CODEX_THREAD_ID: undefined,
+      })
+      expect(result.exitCode).toBe(1)
+      expect(result.stderr).toContain('"swiz tasks" (list) is not available inside Claude Code.')
+    })
   })
 
   it("allows list invocation inside Codex CLI (#575 — no native task surface to redirect to)", async () => {
-    const prevClaudeCode = process.env.CLAUDECODE
-    const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
-    const prevCodexThread = process.env.CODEX_THREAD_ID
-    delete process.env.CLAUDECODE
-    process.env.CODEX_MANAGED_BY_NPM = "1"
-    process.env.CODEX_THREAD_ID = "test-thread"
-
-    try {
+    await serial(async () => {
+      const home = join(TMP, "native-task-guard-codex-home")
       // Codex has tasksEnabled=false and (after #570) no Task* aliases —
       // redirecting it to a native tool would suggest something that does
       // not exist. The guard must no-op for Codex, so list invocation runs.
-      await expect(tasksCommand.run([])).resolves.toBeUndefined()
-    } finally {
-      if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
-      else process.env.CLAUDECODE = prevClaudeCode
-      if (prevCodexManaged === undefined) delete process.env.CODEX_MANAGED_BY_NPM
-      else process.env.CODEX_MANAGED_BY_NPM = prevCodexManaged
-      if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
-      else process.env.CODEX_THREAD_ID = prevCodexThread
-    }
+      const result = await runTasksCli(
+        {
+          HOME: home,
+          CLAUDECODE: undefined,
+          CODEX_MANAGED_BY_NPM: "1",
+          CODEX_THREAD_ID: "test-thread",
+        },
+        async (cwd) => {
+          const sessionId = "codex-native-task-session"
+          const projectKey = projectKeyFromCwd(cwd)
+          await mkdir(join(home, ".codex", "tasks", sessionId), { recursive: true })
+          await mkdir(join(home, ".codex", "projects", projectKey), { recursive: true })
+          await writeFile(
+            join(home, ".codex", "tasks", sessionId, "1.json"),
+            JSON.stringify({
+              id: "1",
+              subject: "Codex list task",
+              description: "desc",
+              status: "pending",
+              blocks: [],
+              blockedBy: [],
+            })
+          )
+          await writeFile(
+            join(home, ".codex", "projects", projectKey, `${sessionId}.jsonl`),
+            `${JSON.stringify({ type: "user", cwd })}\n`
+          )
+        }
+      )
+      expect(result.exitCode).toBe(0)
+    })
   })
 })
 
