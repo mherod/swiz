@@ -36,6 +36,7 @@ import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
 import { detectTerminal } from "../utils/terminal-detection.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -467,8 +468,9 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
 
   if (daemonResponse !== null) {
     // Mirror engine `writeResponse`: always emit one JSON line (even `{}`).
+    const agentResponse = sanitizeHookOutputForCurrentAgent(daemonResponse)
     markDispatchResponseWritten()
-    process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
+    process.stdout.write(`${JSON.stringify(agentResponse)}\n`)
     const totalMs = Math.round(performance.now() - t0)
     log(`   ⏱ cli:total: ${totalMs}ms`)
     void appendCliTimingLog({ ...timing, totalMs, daemonMs, route: "daemon" })

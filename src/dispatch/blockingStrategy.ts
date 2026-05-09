@@ -240,7 +240,12 @@ export class BlockingStrategy implements HookExecutionStrategy {
       if (shortCircuited) {
         const response: Record<string, any> = {}
         normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
-        coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
+        coerceDispatchAgentEnvelopeInPlace(
+          response,
+          ctx.canonicalEvent,
+          ctx.hookEventName,
+          ctx.agentId
+        )
         writeResponse(response)
         return response
       }

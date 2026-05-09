@@ -35,7 +35,10 @@ import {
   toolHookInputSchema,
   userPromptSubmitHookInputSchema,
 } from "../schemas.ts"
-import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
+import {
+  sanitizeHookOutputForAgent,
+  sanitizeHookOutputForCurrentAgent,
+} from "../utils/hook-output-agent-compat.ts"
 import { stripInternalDispatchFields } from "./dispatch-wire.ts"
 import { isStopLikeDispatchEvent } from "./stop-response.ts"
 
@@ -175,14 +178,17 @@ function replaceAgentKeysWithParsed(
 export function coerceDispatchAgentEnvelopeInPlace(
   response: Record<string, any>,
   canonicalEvent: string,
-  _hookEventName: string
+  _hookEventName: string,
+  agentId?: string | null
 ): void {
   if (typeof response.error === "string" && response.error.length > 0) {
     return
   }
 
   const agent = omit(response, ["hookExecutions"]) as Record<string, any>
-  const compatibleAgent = sanitizeHookOutputForCurrentAgent(agent)
+  const compatibleAgent = agentId
+    ? sanitizeHookOutputForAgent(agent, agentId)
+    : sanitizeHookOutputForCurrentAgent(agent)
 
   if (isStopLikeDispatchEvent(canonicalEvent)) {
     const parsed = stopHookOutputSchema.parse(compatibleAgent) as Record<string, any>
@@ -197,12 +203,16 @@ export function coerceDispatchAgentEnvelopeInPlace(
 export function parseValidatedAgentDispatchWireJson(
   response: Record<string, any>,
   canonicalEvent: string,
-  _hookEventName: string
+  _hookEventName: string,
+  agentId?: string | null
 ): Record<string, any> {
   if (typeof response.error === "string" && response.error.length > 0) {
     return z.object({ error: z.string().min(1) }).parse(stripInternalDispatchFields(response))
   }
-  const agent = sanitizeHookOutputForCurrentAgent(stripInternalDispatchFields(response))
+  const stripped = stripInternalDispatchFields(response)
+  const agent = agentId
+    ? sanitizeHookOutputForAgent(stripped, agentId)
+    : sanitizeHookOutputForCurrentAgent(stripped)
   const schema = isStopLikeDispatchEvent(canonicalEvent) ? stopHookOutputSchema : hookOutputSchema
   return schema.parse(agent) as Record<string, any>
 }

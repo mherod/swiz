@@ -18,6 +18,10 @@
  */
 
 import { debugLog } from "../debug.ts"
+import {
+  type DuplicateSubjectGroup,
+  findDuplicateSubjectGroups,
+} from "./task-subject-duplicates.ts"
 import { isValidTransition } from "./task-transitions.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -61,6 +65,24 @@ const sessionTasks = new Map<string, EventTaskState[]>()
  * Cleared when a TaskList event replaces the session's state (full resync).
  */
 const reconciliationNeeded = new Set<string>()
+const duplicateSubjectGroupsBySession = new Map<string, DuplicateSubjectGroup[]>()
+
+function refreshDuplicateSubjectReconciliation(
+  sessionId: string,
+  tasks: ReadonlyArray<EventTaskState>
+): void {
+  const groups = findDuplicateSubjectGroups(tasks)
+  if (groups.length === 0) {
+    duplicateSubjectGroupsBySession.delete(sessionId)
+    return
+  }
+
+  duplicateSubjectGroupsBySession.set(sessionId, groups)
+  debugLog(
+    `[task-transition] duplicate task subjects detected for session ` +
+      `${sessionId.slice(0, 8)}…. Task state must be resolved before continuing.`
+  )
+}
 
 // ─── Write API ──────────────────────────────────────────────────────────────
 
@@ -79,6 +101,7 @@ export function applyTaskCreateEvent(sessionId: string, taskId: string, subject:
     tasks.push({ id: taskId, status: "pending", subject })
   }
   sessionTasks.set(sessionId, tasks)
+  refreshDuplicateSubjectReconciliation(sessionId, tasks)
 
   // Post-condition: after creating a task, there must be at least one
   // incomplete (pending/in_progress) task. If not, the event state is
@@ -125,6 +148,7 @@ export function applyTaskUpdateEvent(
     })
   }
   sessionTasks.set(sessionId, tasks)
+  refreshDuplicateSubjectReconciliation(sessionId, tasks)
 }
 
 /**
@@ -135,6 +159,7 @@ export function applyTaskUpdateEvent(
 export function applyTaskListEvent(sessionId: string, tasks: EventTaskState[]): void {
   sessionTasks.set(sessionId, [...tasks])
   reconciliationNeeded.delete(sessionId)
+  refreshDuplicateSubjectReconciliation(sessionId, tasks)
 }
 
 // ─── Read API ───────────────────────────────────────────────────────────────
@@ -161,15 +186,23 @@ export function hasSessionEventState(sessionId: string): boolean {
  * PreToolUse hooks should call this and force a TaskList when true.
  */
 export function needsReconciliation(sessionId: string): boolean {
-  return reconciliationNeeded.has(sessionId)
+  return reconciliationNeeded.has(sessionId) || duplicateSubjectGroupsBySession.has(sessionId)
 }
 
 /**
- * Clear the reconciliation flag for a session. Called after a TaskList
- * resync has been performed.
+ * Return duplicate subject groups that keep the session in reconciliation.
+ */
+export function getDuplicateSubjectGroups(sessionId: string): DuplicateSubjectGroup[] {
+  return duplicateSubjectGroupsBySession.get(sessionId) ?? []
+}
+
+/**
+ * Clear reconciliation flags for a session. Called after a TaskList resync has
+ * been performed or by tests that need a clean session.
  */
 export function clearReconciliation(sessionId: string): void {
   reconciliationNeeded.delete(sessionId)
+  duplicateSubjectGroupsBySession.delete(sessionId)
 }
 
 /**
@@ -256,6 +289,7 @@ export async function seedSessionFromDisk(sessionId: string, tasksDir: string): 
   const tasks = await readTaskEventStatesFromDir(tasksDir)
   if (tasks.length > 0) {
     sessionTasks.set(sessionId, tasks)
+    refreshDuplicateSubjectReconciliation(sessionId, tasks)
   }
 }
 
@@ -267,6 +301,7 @@ export async function seedSessionFromDisk(sessionId: string, tasksDir: string): 
 export function pruneSession(sessionId: string): void {
   sessionTasks.delete(sessionId)
   reconciliationNeeded.delete(sessionId)
+  duplicateSubjectGroupsBySession.delete(sessionId)
 }
 
 /**
@@ -275,6 +310,7 @@ export function pruneSession(sessionId: string): void {
 export function clearAllEventState(): void {
   sessionTasks.clear()
   reconciliationNeeded.clear()
+  duplicateSubjectGroupsBySession.clear()
 }
 
 /**

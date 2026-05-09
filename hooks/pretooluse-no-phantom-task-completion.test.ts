@@ -142,6 +142,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
 
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("PHANTOM TASK BLOCK")
+    expect(result.reason).toContain("Run TaskList now")
   })
 
   test("allows completion if only 1 other task is in_progress but transcript HAS work", async () => {

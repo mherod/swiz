@@ -21,10 +21,10 @@ import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { createDefaultTaskStore } from "../src/task-roots.ts"
+import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
 import {
   extractToolBlocksFromEntry,
-  formatActionPlan,
   isGitRepo,
   isTaskTool,
   preToolUseAllow,
@@ -147,21 +147,7 @@ function scanTranscript(lines: string[], taskId: string): ScanResult {
 }
 
 function buildDenialMessage(taskId: string, sessionId: string | undefined): string {
-  const sessionNote = sessionId ? ` (session ${sessionId})` : ""
-  return (
-    `PHANTOM TASK BLOCK: Task #${taskId}${sessionNote} cannot be marked completed.\n\n` +
-    `No substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep…) were\n` +
-    `recorded after this task was set to in_progress. This is the mechanical signature\n` +
-    `of phantom task completion — creating tasks to satisfy enforcement gates without\n` +
-    `performing the stated work.\n\n` +
-    formatActionPlan(
-      [
-        "Use Edit, Write, Bash, or Skill to actually perform the work described in the task subject.",
-        "Include traceable evidence in description: commit:<sha>, file:<path>, test:<result>, pr:<url>.",
-      ],
-      { header: "To resolve:" }
-    )
-  )
+  return buildTaskGovernanceMessage({ kind: "phantom-completion", taskId, sessionId })
 }
 
 export async function evaluatePretooluseNoPhantomTaskCompletion(
@@ -227,7 +213,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
 
   if (!anchorFound)
     return preToolUseAllow(
-      `Continue in prior-session task mode: no in_progress transition for #${taskId} appears in this transcript.`
+      `Continue in prior-session task mode: no active-work adoption event for #${taskId} appears in this transcript.`
     )
 
   if (workCallCount >= 1) {

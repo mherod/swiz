@@ -16,7 +16,8 @@ describe("buildBehaviorSteeringContext", () => {
   test("summarizes behavior-affecting settings by concern", () => {
     const context = buildBehaviorSteeringContext(makeEffective(), { defaultBranch: "main" })
 
-    expect(context).toContain("Swiz behavior settings:")
+    expect(context).toContain("Operating instructions:")
+    expect(context).not.toContain("Swiz behavior settings:")
     expect(context).toContain("Workflow policy:")
     expect(context).toContain("Stop gates expect")
     expect(context).toContain("Task governance: strict audit strictness")

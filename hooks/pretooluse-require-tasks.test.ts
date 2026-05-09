@@ -277,6 +277,27 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
+  test("denies Bash with direct repair guidance when active task subjects are duplicated", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-duplicate-subjects"
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Resolve task state",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Resolve task state",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("duplicate task subjects are resolved")
+    expect(result.reason).toContain("Pick the duplicate entry")
+    expect(result.reason).toContain("Run TaskList")
+  })
+
   test("allows with a non-blocking warning when an in-progress task exceeds the default duration threshold", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-slow-warning-default"
@@ -457,8 +478,11 @@ describe("pretooluse-require-tasks", () => {
       seedFreshTaskListSync: false,
     })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Canonical task state is stale")
+    expect(result.reason).toContain("Run TaskList before Bash")
     expect(result.reason).toContain("Run TaskList now")
+    expect(result.reason).not.toContain("Swiz")
+    expect(result.reason).not.toContain("drift")
+    expect(result.reason).not.toContain("recent context")
   })
 
   test("denies when canonical TaskList sync is older than 5 minutes", async () => {
@@ -484,7 +508,10 @@ describe("pretooluse-require-tasks", () => {
       seedFreshTaskListSync: false,
     })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Last TaskList sync was")
+    expect(result.reason).toContain("Run TaskList before Edit")
+    expect(result.reason).not.toContain("Swiz")
+    expect(result.reason).not.toContain("drift")
+    expect(result.reason).not.toContain("recent context")
   })
 
   test("allows when canonical TaskList sync is within 5 minutes", async () => {

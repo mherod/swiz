@@ -157,8 +157,10 @@ describe("pretooluse-require-tasks hook", () => {
         | Record<string, any>
         | undefined
       expect(hookOutput?.permissionDecision).toBe("deny")
-      // Hook now blocks on missing pending tasks before checking cap
-      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain("BLOCKED")
+      // Hook now blocks on stale task sync before checking cap.
+      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
+        "Run TaskList before Bash"
+      )
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }

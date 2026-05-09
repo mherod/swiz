@@ -27,6 +27,8 @@ export interface HookStrategyContext {
   daemonContext?: boolean
   /** Working directory already resolved by executeDispatch — avoids re-parsing enrichedPayloadStr. */
   cwd: string
+  /** Originating agent id resolved from the hook payload, not ambient daemon env. */
+  agentId?: string | null
   /** Dispatch-level abort signal — when fired, all running hook processes should be killed. */
   signal?: AbortSignal
 }
@@ -107,7 +109,12 @@ export async function runStrategyPipeline(
     normalizeStopDispatchResponseInPlace(finalResponse, ctx.hookEventName)
   }
 
-  coerceDispatchAgentEnvelopeInPlace(finalResponse, ctx.canonicalEvent, ctx.hookEventName)
+  coerceDispatchAgentEnvelopeInPlace(
+    finalResponse,
+    ctx.canonicalEvent,
+    ctx.hookEventName,
+    ctx.agentId
+  )
 
   writeResponse(finalResponse)
   return finalResponse

@@ -33,8 +33,10 @@ import {
 } from "../src/tasks/task-event-state.ts"
 import {
   buildPendingCompletionTransitionMessage,
-  buildStaleTaskBlockReason,
+  buildTaskGovernanceMessage,
   SWIZ_TASKS_CLI_DENY_MESSAGE,
+  TASKLIST_CONFIRM_STEP,
+  TASKLIST_STABILITY_STEP,
 } from "../src/tasks/task-governance-messages.ts"
 import {
   applyCacheTaskUpdate,
@@ -51,6 +53,14 @@ import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
 } from "../src/tasks/task-state-cache.ts"
+import {
+  applyTaskUpdatePreview,
+  duplicateSubjectSeverity,
+  findDuplicateSubjectCollision,
+  findDuplicateSubjectGroups,
+  type TaskSubjectEntry,
+  taskIdIsInDuplicateGroups,
+} from "../src/tasks/task-subject-duplicates.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
@@ -137,6 +147,9 @@ export const taskSubjectValidationHook: SwizToolHook = {
     if (!agentHasTaskToolsForHookPayload(input)) return {}
     const toolInput = input.tool_input as Record<string, any> | undefined
     const subject: string = (toolInput?.subject as string) ?? ""
+
+    const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
+    if (duplicateOutcome) return duplicateOutcome
 
     const result = detect(subject)
     if (!result.matched) return preToolUseAllow()
@@ -300,35 +313,18 @@ function checkNoTasks(
         { indent: "  " }
       )
       return preToolUseDeny(
-        `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
-          taskLines +
-          `\n\n` +
-          formatActionPlan(
-            [
-              `If the work is already done, mark the prior tasks complete:\n${completeExamples}`,
-              "If the work is still needed, use TaskCreate to re-create these tasks and mark the current one in_progress.",
-              `Retry this ${toolName} call — it will succeed once an in_progress task exists.`,
-            ],
-            { translateToolNames: true }
-          )
+        buildTaskGovernanceMessage({
+          kind: "prior-session-tasks",
+          toolName,
+          priorSessionId,
+          priorTaskCount: priorTasks.length,
+          taskLines,
+          completeExamples,
+        })
       )
     }
 
-    return preToolUseDeny(
-      `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
-        `Required:\n` +
-        `  • At least ${thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
-        `  • At least ${thresholds.minPending} pending task for the next intended step\n\n` +
-        formatActionPlan(
-          [
-            `Use TaskCreate to add at least ${thresholds.minIncomplete} tasks — one in_progress for current work and at least one pending for the next step.`,
-            "Include a concrete description of the current work and next step.",
-          ],
-          { translateToolNames: true }
-        ) +
-        `\n` +
-        `After task minimums are met, ${toolName} will be unblocked automatically.`
-    )
+    return preToolUseDeny(buildTaskGovernanceMessage({ kind: "no-tasks", toolName, thresholds }))
   }
 }
 
@@ -337,20 +333,10 @@ function checkTaskMinimums(
   summary: ReturnType<typeof buildIncompleteTaskSummary>,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | undefined {
-  const { incompleteTasks, inProgressTasks, pendingTasks, allTasksDone, incompleteTaskList } =
-    summary
+  const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
   if (allTasksDone) {
     return preToolUseDeny(
-      `STOP. All session tasks are completed. ${toolName} is BLOCKED.\n\n` +
-        `You have finished all planned work, but new tool calls require active tasks.\n\n` +
-        formatActionPlan(
-          [
-            `Use TaskCreate to add at least ${thresholds.minIncomplete} task(s) ` +
-              `(including at least ${thresholds.minPending} pending) before continuing.`,
-            `Retry this ${toolName} call after the required tasks have been created.`,
-          ],
-          { translateToolNames: true }
-        )
+      buildTaskGovernanceMessage({ kind: "all-tasks-completed", toolName, thresholds })
     )
   }
   if (
@@ -359,32 +345,12 @@ function checkTaskMinimums(
   )
     return undefined
 
-  const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteTasks.length)
-  const missingPending = Math.max(0, thresholds.minPending - pendingTasks.length)
-  const actions: string[] = []
-
-  if (missingIncomplete > 0 && missingPending > 0) {
-    actions.push(
-      `Use TaskCreate to add ${missingIncomplete} incomplete task(s) (including at least ${missingPending} pending task(s)).`
-    )
-  } else if (missingPending > 0) {
-    actions.push(
-      `Use TaskCreate to add ${missingPending} pending task(s) for the next intended step.`
-    )
-  } else if (missingIncomplete > 0) {
-    actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
-  }
-
   return preToolUseDeny(
-    `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
-      `Current:\n` +
-      `  • In progress tasks: ${inProgressTasks.length}\n` +
-      `  • Pending tasks: ${pendingTasks.length}\n` +
-      `${incompleteTaskList ? `\nCurrent incomplete tasks:\n${incompleteTaskList}\n` : "\n"}` +
-      formatActionPlan(
-        [...actions, `Retry this ${toolName} call after the missing task(s) have been created.`],
-        { translateToolNames: true }
-      )
+    buildTaskGovernanceMessage({
+      kind: "missing-task-minimums",
+      toolName,
+      incompleteTaskList,
+    })
   )
 }
 
@@ -400,22 +366,13 @@ async function checkInProgressCap(
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
-    `STOP. Too many in-progress tasks (${inProgressTasks.length}/${IN_PROGRESS_CAP} max). ${toolName} is BLOCKED.\n\n` +
-      `Currently in progress:\n${taskList}\n\n` +
-      `Having more than ${IN_PROGRESS_CAP} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
-      formatActionPlan(
-        [
-          `Reduce in_progress count to ${IN_PROGRESS_CAP} or fewer:`,
-          [
-            "Use TaskUpdate to mark completed tasks done (status: completed).",
-            "Use TaskUpdate to move non-active tasks back to pending.",
-          ],
-          `Retry ${toolName} — it will succeed once in_progress count is within the cap.`,
-        ],
-        { translateToolNames: true }
-      ) +
-      `\n` +
-      `After reducing active tasks, ${toolName} will be unblocked automatically.`
+    buildTaskGovernanceMessage({
+      kind: "too-many-in-progress",
+      toolName,
+      inProgressCount: inProgressTasks.length,
+      cap: IN_PROGRESS_CAP,
+      taskList,
+    })
   )
 }
 
@@ -434,17 +391,7 @@ async function checkDirectMergeIntent(
     return await denyAutoSteerOrBlock(
       sessionId,
       cwd,
-      `STOP. ${toolName} is BLOCKED because strict-no-direct-main is enabled but the task plan includes "Merge PR" tasks.\n\n` +
-        `Conflicting tasks:\n${taskList}\n\n` +
-        `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — ` +
-        `direct merges are not permitted.\n\n` +
-        formatActionPlan(
-          [
-            'Use TaskUpdate to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").',
-            `Retry this ${toolName} call after the task plan no longer contains merge-to-main intent.`,
-          ],
-          { translateToolNames: true }
-        )
+      buildTaskGovernanceMessage({ kind: "direct-merge-intent", toolName, taskList })
     )
   } catch {
     return undefined
@@ -507,26 +454,32 @@ async function checkTaskStaleness(
   const stateStep = projectState
     ? `Check project state (\`swiz state show\`): currently \`${projectState}\`. Run \`swiz state set <state>\` if the work phase has changed.`
     : `Set a project state to reflect the current phase: \`swiz state set <state>\` (\`swiz state list\` for options).`
-  const stalePlanSteps: (string | string[])[] = [
+  const staleTaskSteps: (string | string[])[] = [
     "Update existing tasks to reflect current reality:",
     [
       "Use TaskUpdate to update in-progress tasks with the latest progress.",
-      "Mark completed work done.",
+      "Record completed work only when there is concrete evidence.",
       "Ensure the current work has an in_progress task with a clear description.",
     ],
     "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
     stateStep,
   ]
+  const stalePlanSteps: (string | string[])[] = [
+    TASKLIST_STABILITY_STEP,
+    ...staleTaskSteps,
+    TASKLIST_CONFIRM_STEP,
+  ]
   const sid = (input as Record<string, any>).session_id as string | undefined
-  if (sid) await mergeActionPlanIntoTasks(stalePlanSteps, sid, cwd)
+  if (sid) await mergeActionPlanIntoTasks(staleTaskSteps, sid, cwd)
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
-    buildStaleTaskBlockReason({
+    buildTaskGovernanceMessage({
+      kind: "stale-tasks",
       callsSinceLastTaskTool,
       toolName,
       taskList,
-      actionPlan: formatActionPlan(stalePlanSteps, { translateToolNames: true }),
+      planSteps: stalePlanSteps,
     })
   )
 }
@@ -543,22 +496,11 @@ async function checkCanonicalTaskListSync(
     return undefined
   }
 
-  const freshnessLine =
-    ageMs === null
-      ? "No TaskList sync has been recorded for this session yet."
-      : `Last TaskList sync was ${formatDuration(ageMs)} ago.`
-
   return preToolUseDeny(
-    `STOP. Canonical task state is stale. ${toolName} is BLOCKED.\n\n` +
-      `${freshnessLine}\n` +
-      `Swiz requires a fresh TaskList sync at least every ${formatDuration(CANONICAL_TASKLIST_SYNC_MAX_AGE_MS)}.\n\n` +
-      formatActionPlan(
-        [
-          "Run TaskList now to refresh the canonical tasklist.",
-          `Retry this ${toolName} call after TaskList completes.`,
-        ],
-        { translateToolNames: true }
-      )
+    buildTaskGovernanceMessage({
+      kind: "canonical-tasklist-stale",
+      toolName,
+    })
   )
 }
 
@@ -657,7 +599,6 @@ function checkTaskDeletionGovernance(ctx: TaskDeletionContext): SwizHookOutput |
   const incompleteAfterDelete = ctx.incompleteTasks.length - 1
   const isPendingTask = ctx.taskBeingDeleted.status === "pending"
   const pendingAfterDelete = isPendingTask ? ctx.pendingTasks.length - 1 : ctx.pendingTasks.length
-  const inProgressAfterDelete = incompleteAfterDelete - pendingAfterDelete
 
   if (
     incompleteAfterDelete >= ctx.thresholds.minIncomplete &&
@@ -667,19 +608,11 @@ function checkTaskDeletionGovernance(ctx: TaskDeletionContext): SwizHookOutput |
   }
 
   return preToolUseDeny(
-    `STOP. Cannot delete task #${ctx.taskId} — it would violate governance thresholds.\n\n` +
-      `After deletion:\n` +
-      `  • In progress tasks: ${inProgressAfterDelete}\n` +
-      `  • Pending tasks: ${pendingAfterDelete}\n\n` +
-      `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
-      formatActionPlan(
-        [
-          `Use TaskCreate to add ${Math.max(0, ctx.thresholds.minIncomplete - incompleteAfterDelete)} incomplete task(s) ` +
-            `(including ${Math.max(0, ctx.thresholds.minPending - pendingAfterDelete)} pending).`,
-          `Retry this ${ctx.toolName} call after the required tasks have been created.`,
-        ],
-        { translateToolNames: true }
-      )
+    buildTaskGovernanceMessage({
+      kind: "task-deletion-threshold",
+      taskId: ctx.taskId,
+      toolName: ctx.toolName,
+    })
   )
 }
 
@@ -720,16 +653,110 @@ function checkPendingOverflow(
   const pendingCount = allTasks.filter((t) => t.status === "pending").length
   if (pendingCount <= PENDING_TASK_OVERFLOW_LIMIT) return undefined
 
+  return preToolUseDeny(buildTaskGovernanceMessage({ kind: "pending-overflow", toolName }))
+}
+
+function buildDuplicateSubjectStateBlock(
+  toolName: string,
+  groups: ReturnType<typeof findDuplicateSubjectGroups>
+): SwizHookOutput {
   return preToolUseDeny(
-    `STOP. ${toolName} is BLOCKED.\n\n` +
-      formatActionPlan(
-        [
-          "Run TaskList now to refresh the canonical tasklist.",
-          `Retry this ${toolName} call after TaskList completes.`,
-        ],
-        { translateToolNames: true }
-      )
+    buildTaskGovernanceMessage({ kind: "duplicate-subject-state", toolName, groups })
   )
+}
+
+function buildTaskCreateDuplicateSubjectBlock(
+  subject: string,
+  collision: TaskSubjectEntry
+): SwizHookOutput {
+  return preToolUseDeny(
+    buildTaskGovernanceMessage({
+      kind: "duplicate-subject-create",
+      subject,
+      collisionId: collision.id,
+    })
+  )
+}
+
+function buildTaskUpdateDuplicateSubjectBlock(
+  taskId: string,
+  groups: ReturnType<typeof findDuplicateSubjectGroups>
+): SwizHookOutput {
+  return preToolUseDeny(
+    buildTaskGovernanceMessage({ kind: "duplicate-subject-update", taskId, groups })
+  )
+}
+
+function checkDuplicateSubjectResolution(
+  toolName: string,
+  input: Record<string, any>,
+  allTasks: ReadonlyArray<TaskSubjectEntry>
+): SwizHookOutput | undefined {
+  const groups = findDuplicateSubjectGroups(allTasks)
+  if (groups.length === 0 || isTaskListTool(toolName)) return undefined
+
+  if (toolName === "TaskUpdate") {
+    const toolInput = (input.tool_input ?? {}) as Record<string, any>
+    const taskId = String(toolInput.taskId ?? "")
+    const beforeSeverity = duplicateSubjectSeverity(groups)
+    const preview = applyTaskUpdatePreview(allTasks, taskId, {
+      status: toolInput.status ? String(toolInput.status) : undefined,
+      subject: typeof toolInput.subject === "string" ? toolInput.subject : undefined,
+    })
+    const afterGroups = findDuplicateSubjectGroups(preview)
+    const afterSeverity = duplicateSubjectSeverity(afterGroups)
+    const touchesDuplicate = taskIdIsInDuplicateGroups(taskId, groups)
+    if (afterGroups.length === 0) return undefined
+    if (touchesDuplicate && afterSeverity < beforeSeverity) return undefined
+  }
+
+  return buildDuplicateSubjectStateBlock(toolName, groups)
+}
+
+async function readTaskSubjectEntries(sessionId: string): Promise<TaskSubjectEntry[]> {
+  return overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+}
+
+async function checkTaskCreateSubjectGovernance(
+  input: Record<string, any>,
+  subject: string
+): Promise<SwizHookOutput | undefined> {
+  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
+  if (!sessionId) return undefined
+
+  const allTasks = await readTaskSubjectEntries(sessionId)
+  const duplicateState = checkDuplicateSubjectResolution(
+    String(input.tool_name ?? "TaskCreate"),
+    input,
+    allTasks
+  )
+  if (duplicateState) return duplicateState
+
+  const collision = findDuplicateSubjectCollision(subject, allTasks)
+  if (!collision) return undefined
+  return buildTaskCreateDuplicateSubjectBlock(subject, collision)
+}
+
+async function checkTaskUpdateSubjectGovernance(
+  input: Record<string, any>,
+  sessionId: string
+): Promise<SwizHookOutput | undefined> {
+  const allTasks = await readTaskSubjectEntries(sessionId)
+  const duplicateState = checkDuplicateSubjectResolution("TaskUpdate", input, allTasks)
+  if (duplicateState) return duplicateState
+
+  const toolInput = (input.tool_input ?? {}) as Record<string, any>
+  if (typeof toolInput.subject !== "string") return undefined
+  const taskId = String(toolInput.taskId ?? "")
+  if (!taskId) return undefined
+
+  const preview = applyTaskUpdatePreview(allTasks, taskId, {
+    status: toolInput.status ? String(toolInput.status) : undefined,
+    subject: toolInput.subject,
+  })
+  const groups = findDuplicateSubjectGroups(preview)
+  if (groups.length === 0) return undefined
+  return buildTaskUpdateDuplicateSubjectBlock(taskId, groups)
 }
 
 async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
@@ -752,11 +779,11 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
+  const duplicateSubjectOutcome = checkDuplicateSubjectResolution(toolName, input, allTasks)
+  if (duplicateSubjectOutcome) return duplicateSubjectOutcome
+
   if (needsReconciliation(sessionId) && isBlockedTool(toolName) && !isTaskListTool(toolName)) {
-    return preToolUseDeny(
-      "An invalid task state transition was detected (e.g. pending → completed). " +
-        "Call TaskList now to reconcile task state before continuing."
-    )
+    return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
 
   const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId)
@@ -913,14 +940,12 @@ function checkCompletionRateLimit(
     const oldestInWindow = recent[0] ?? now
     const waitSec = Math.ceil((oldestInWindow + WINDOW_MS - now) / 1000)
     return preToolUseDeny(
-      `Task completion rate limit: ${recent.length} completions in the last 5 seconds exceeds the threshold (max ${MAX_COMPLETIONS_IN_WINDOW}).\n\n` +
-        `Wait ${waitSec}s before completing another task.\n\n` +
-        "Before retrying, you MUST:\n" +
-        "1. Run TaskList to review the current task state\n" +
-        "2. Verify each task you intend to complete has concrete evidence (commit SHA, test output, file path)\n" +
-        "3. Confirm the work described in the task subject has actually been done — not assumed, not deferred\n" +
-        "4. Complete ONE task at a time, waiting for this hook to clear between each\n\n" +
-        "Rapid-fire completions bypass governance checks and risk leaving work unfinished."
+      buildTaskGovernanceMessage({
+        kind: "completion-rate-limit",
+        recentCompletionCount: recent.length,
+        maxCompletions: MAX_COMPLETIONS_IN_WINDOW,
+        waitSeconds: waitSec,
+      })
     )
   }
 
@@ -957,7 +982,6 @@ async function checkNativeTaskDeletionGovernance(
       const incompleteAfterDelete = incompleteTasks.length - 1
       const isPendingTask = taskBeingDeleted.status === "pending"
       const pendingAfterDelete = isPendingTask ? pendingTasks.length - 1 : pendingTasks.length
-      const inProgressAfterDelete = incompleteAfterDelete - pendingAfterDelete
 
       // Allow early deletion if thresholds are still met after deletion.
       // This allows deleting incomplete tasks as long as governance minimums are maintained.
@@ -967,13 +991,10 @@ async function checkNativeTaskDeletionGovernance(
 
       if (violatesThresholds) {
         return preToolUseDeny(
-          `STOP. Cannot delete task #${taskId} — it would violate governance thresholds.\n\n` +
-            `After deletion:\n` +
-            `  • In progress tasks: ${inProgressAfterDelete}\n` +
-            `  • Pending tasks: ${pendingAfterDelete}\n\n` +
-            `Tasks enforce planning discipline. Before deleting a task, create replacement tasks to maintain the required planning buffer.\n\n` +
-            `Use TaskCreate to add ${Math.max(0, thresholds.minIncomplete - incompleteAfterDelete)} incomplete task(s) ` +
-            `(including ${Math.max(0, thresholds.minPending - pendingAfterDelete)} pending), then retry the deletion.`
+          buildTaskGovernanceMessage({
+            kind: "native-deletion-threshold",
+            taskId,
+          })
         )
       }
     }
@@ -1044,21 +1065,11 @@ async function handleTaskCompletion(
       (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
 
     if (violatesThresholds) {
-      const missingIncomplete = Math.max(0, thresholds.minIncomplete - incompleteAfter)
-      const missingPending = Math.max(0, thresholds.minPending - pendingAfter)
       return preToolUseDeny(
-        `STOP. Cannot complete task #${taskId} — it would violate governance thresholds.\n\n` +
-          `After completion:\n` +
-          `  • Incomplete tasks: ${incompleteAfter} (min: ${thresholds.minIncomplete})\n` +
-          `  • Pending tasks: ${pendingAfter} (min: ${thresholds.minPending})\n\n` +
-          formatActionPlan(
-            [
-              `Use TaskCreate to add ${missingIncomplete + missingPending} task(s) ` +
-                `(including ${missingPending} pending) before completing this task.`,
-              `Retry the completion after the required tasks have been created.`,
-            ],
-            { translateToolNames: true }
-          )
+        buildTaskGovernanceMessage({
+          kind: "completion-threshold",
+          taskId,
+        })
       )
     }
 
@@ -1095,20 +1106,13 @@ async function checkInProgressTransitionCap(
     .join("\n")
 
   return preToolUseDeny(
-    `STOP. Cannot transition task #${taskId} to in_progress — too many active tasks.\n\n` +
-      `Currently in progress (${inProgressCount}/${IN_PROGRESS_CAP}):\n${inProgressTasks}\n\n` +
-      `Maintaining focus requires keeping active work to a manageable level.\n\n` +
-      formatActionPlan(
-        [
-          "Complete or move back to pending the in_progress tasks that are no longer active:",
-          [
-            "Use TaskUpdate to mark completed work done (status: completed).",
-            "Use TaskUpdate to move non-active tasks back to pending (status: pending).",
-          ],
-          `Retry transitioning task #${taskId} to in_progress once count is below the cap.`,
-        ],
-        { translateToolNames: true }
-      )
+    buildTaskGovernanceMessage({
+      kind: "in-progress-transition-cap",
+      taskId,
+      inProgressCount,
+      cap: IN_PROGRESS_CAP,
+      taskList: inProgressTasks,
+    })
   )
 }
 
@@ -1125,6 +1129,8 @@ async function checkNativeTaskUpdateCompletion(
   if (!sessionId) return "early_exit"
 
   const cwd = (input.cwd as string) ?? undefined
+  const duplicateSubjectDenied = await checkTaskUpdateSubjectGovernance(input, sessionId)
+  if (duplicateSubjectDenied) return duplicateSubjectDenied
 
   if (toolInput.status === "deleted") {
     const deletionDenied = await handleTaskDeletionCompletion(taskId, sessionId, cwd)
@@ -1147,9 +1153,9 @@ async function checkNativeTaskUpdateCompletion(
 
   if (toolInput.status !== "completed") return "early_exit"
 
-  // Reject pending → completed: must transition through in_progress first.
-  // This prevents the "validation lag" gap where an illegal state is written
-  // but subsequent tools are blocked by the reconciliation gate.
+  // Reject shortcut completion from a merely planned task. The user-facing
+  // message deliberately describes the behavior being prevented rather than
+  // handing over a mechanical transition recipe.
   const allTasks = await readSessionTasks(sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
@@ -1261,8 +1267,11 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   }
 
   // ── TaskCreate / TodoWrite path ────────────────────────────────────────
-  if (toolName === "TaskCreate" || toolName === "TodoWrite") {
+  if (isTaskCreateTool(toolName)) {
     const subject: string = (toolInput?.subject as string) ?? ""
+    const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
+    if (duplicateOutcome) return duplicateOutcome
+
     const result = detect(subject)
     if (result.matched) {
       return preToolUseDeny(formatMessage(result))

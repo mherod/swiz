@@ -8,6 +8,7 @@ import {
   applyTaskUpdateEvent,
   clearReconciliation,
   eventStateSessionCount,
+  getDuplicateSubjectGroups,
   getSessionEventState,
   hasSessionEventState,
   needsReconciliation,
@@ -29,6 +30,8 @@ const TEST_SESSIONS = [
   "recon2",
   "recon3",
   "recon4",
+  "dupe1",
+  "dupe2",
 ]
 
 describe("task-event-state", () => {
@@ -311,6 +314,34 @@ describe("task-event-state", () => {
       expect(needsReconciliation("recon1")).toBe(true)
       pruneSession("recon1")
       expect(needsReconciliation("recon1")).toBe(false)
+    })
+
+    it("is set when TaskList contains duplicate active subjects", () => {
+      applyTaskListEvent("dupe1", [
+        { id: "1", status: "pending", subject: "Resolve task state" },
+        { id: "2", status: "in_progress", subject: "Resolve  task state" },
+      ])
+
+      expect(needsReconciliation("dupe1")).toBe(true)
+      const groups = getDuplicateSubjectGroups("dupe1")
+      expect(groups).toHaveLength(1)
+      expect(groups[0]!.tasks.map((task) => task.id)).toEqual(["1", "2"])
+    })
+
+    it("is cleared when duplicate active subjects are resolved", () => {
+      applyTaskListEvent("dupe2", [
+        { id: "1", status: "pending", subject: "Resolve task state" },
+        { id: "2", status: "in_progress", subject: "Resolve task state" },
+      ])
+      expect(needsReconciliation("dupe2")).toBe(true)
+
+      applyTaskListEvent("dupe2", [
+        { id: "1", status: "pending", subject: "Resolve task state" },
+        { id: "2", status: "cancelled", subject: "Resolve task state" },
+      ])
+
+      expect(needsReconciliation("dupe2")).toBe(false)
+      expect(getDuplicateSubjectGroups("dupe2")).toHaveLength(0)
     })
 
     it("is set when task creation yields zero incomplete tasks", () => {

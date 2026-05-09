@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { runHook } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-enforce-taskupdate.ts"
@@ -27,6 +30,27 @@ function runCodexHook(command: string) {
     GEMINI_CLI: undefined,
     GEMINI_PROJECT_DIR: undefined,
   })
+}
+
+async function withTaskHome(
+  sessionId: string,
+  tasks: Array<{ id: string; subject: string; status: string }>,
+  fn: (home: string) => Promise<void>
+): Promise<void> {
+  const home = join(
+    tmpdir(),
+    `swiz-taskupdate-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  )
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
+  await mkdir(tasksDir, { recursive: true })
+  for (const task of tasks) {
+    await writeFile(join(tasksDir, `${task.id}.json`), JSON.stringify(task))
+  }
+  try {
+    await fn(home)
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
 }
 
 describe("pretooluse-enforce-taskupdate", () => {
@@ -107,5 +131,121 @@ describe("pretooluse-enforce-taskupdate", () => {
     const result = await runCodexHook("swiz tasks")
     expect(result.decision).not.toBe("deny")
     expect(result.reason ?? "").not.toContain("Claude Code")
+  })
+
+  test("blocks TaskUpdate when it would create a duplicate active subject", async () => {
+    const sessionId = "duplicate-taskupdate-block"
+    await withTaskHome(
+      sessionId,
+      [
+        { id: "1", subject: "Resolve task state", status: "pending" },
+        { id: "2", subject: "Write regression tests", status: "pending" },
+      ],
+      async (home) => {
+        const result = await runHook(
+          HOOK,
+          {
+            tool_name: "TaskUpdate",
+            session_id: sessionId,
+            tool_input: { taskId: "2", subject: "Resolve task state" },
+          },
+          { HOME: home, CLAUDECODE: "1" }
+        )
+
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("would leave task #2 with a duplicate active subject")
+        expect(result.reason).toContain("Run TaskList")
+      }
+    )
+  })
+
+  test("blocks pending task completion without spelling out the transition recipe", async () => {
+    const sessionId = "pending-completion-shortcut"
+    await withTaskHome(
+      sessionId,
+      [
+        { id: "1", subject: "Implement checkout fix", status: "pending" },
+        { id: "2", subject: "Verify checkout fix", status: "pending" },
+        { id: "3", subject: "Document checkout fix", status: "pending" },
+      ],
+      async (home) => {
+        const result = await runHook(
+          HOOK,
+          {
+            tool_name: "TaskUpdate",
+            session_id: sessionId,
+            tool_input: { taskId: "1", status: "completed" },
+          },
+          { HOME: home, CLAUDECODE: "1" }
+        )
+
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("shortcut completion")
+        expect(result.reason).toContain("work needs to be taken on")
+        expect(result.reason).toContain("Run TaskList now")
+        expect(result.reason).not.toContain("drift")
+        expect(result.reason).not.toContain("recent context")
+        expect(result.reason).not.toContain("Required transition")
+        expect(result.reason).not.toContain("pending -> in_progress -> completed")
+      }
+    )
+  })
+
+  test("blocks task deletion with humanized repair guidance instead of projected counts", async () => {
+    const sessionId = "delete-planning-buffer"
+    await withTaskHome(
+      sessionId,
+      [
+        { id: "1", subject: "Implement checkout fix", status: "in_progress" },
+        { id: "2", subject: "Verify checkout fix", status: "pending" },
+      ],
+      async (home) => {
+        const result = await runHook(
+          HOOK,
+          {
+            tool_name: "TaskUpdate",
+            session_id: sessionId,
+            tool_input: { taskId: "1", status: "deleted" },
+          },
+          { HOME: home, CLAUDECODE: "1" }
+        )
+
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("Do not delete task #1 yet")
+        expect(result.reason).toContain("Run TaskList now")
+        expect(result.reason).toContain("Keep current work and follow-up work visible")
+        expect(result.reason).not.toContain("Swiz")
+        expect(result.reason).not.toContain("drift")
+        expect(result.reason).not.toContain("recent context")
+        expect(result.reason).not.toContain("After deletion")
+        expect(result.reason).not.toContain("In progress tasks:")
+        expect(result.reason).not.toContain("Pending tasks:")
+        expect(result.reason).not.toContain("governance thresholds")
+      }
+    )
+  })
+
+  test("allows TaskUpdate when it resolves an existing duplicate active subject", async () => {
+    const sessionId = "duplicate-taskupdate-resolve"
+    await withTaskHome(
+      sessionId,
+      [
+        { id: "1", subject: "Resolve task state", status: "pending" },
+        { id: "2", subject: "Resolve task state", status: "pending" },
+      ],
+      async (home) => {
+        const result = await runHook(
+          HOOK,
+          {
+            tool_name: "TaskUpdate",
+            session_id: sessionId,
+            tool_input: { taskId: "2", subject: "Write regression tests" },
+          },
+          { HOME: home, CLAUDECODE: "1" }
+        )
+
+        expect(result.decision).not.toBe("deny")
+      }
+    )
   })
 })

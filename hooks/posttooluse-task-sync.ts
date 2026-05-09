@@ -23,6 +23,7 @@ import {
   applyTaskListEvent,
   applyTaskUpdateEvent,
 } from "../src/tasks/task-event-state.ts"
+import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
 import {
   type NormalizedTask,
   parseToolResponse,
@@ -35,6 +36,7 @@ import {
   getSessionTasksDir,
 } from "../src/tasks/task-recovery.ts"
 import { writeCanonicalTaskListSyncSentinel } from "../src/tasks/task-state-cache.ts"
+import { findDuplicateSubjectGroups } from "../src/tasks/task-subject-duplicates.ts"
 import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -247,6 +249,13 @@ function formatSyncSummary(
   return `TaskList sync: ${parts.join(", ")} (${total} task(s) in response).`
 }
 
+function formatDuplicateSubjectNotice(tasks: NormalizedTask[]): string | null {
+  const groups = findDuplicateSubjectGroups(tasks)
+  if (groups.length === 0) return null
+
+  return buildTaskGovernanceMessage({ kind: "tasklist-duplicate-subject-notice", groups })
+}
+
 export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
   if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
@@ -289,7 +298,8 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   const countContext = buildCountSummaryFromTasks(resolved.tasks)
 
   const syncSummary = formatSyncSummary(syncResult, resolved.tasks.length)
-  const combinedContext = [syncSummary, countContext].filter(Boolean).join("\n\n")
+  const duplicateContext = formatDuplicateSubjectNotice(resolved.tasks)
+  const combinedContext = [syncSummary, duplicateContext, countContext].filter(Boolean).join("\n\n")
   if (!combinedContext) return {}
 
   return buildContextHookOutput("PostToolUse", combinedContext)

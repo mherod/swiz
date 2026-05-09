@@ -269,6 +269,47 @@ describe("dispatch routing", () => {
     }
   })
 
+  test("sanitizes Codex-unsupported preToolUse allow fields returned by daemon", async () => {
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url)
+        if (url.pathname === "/dispatch" && req.method === "POST") {
+          return Response.json({
+            suppressOutput: true,
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "daemon hint",
+            },
+          })
+        }
+        return new Response("Not Found", { status: 404 })
+      },
+    })
+
+    try {
+      const result = await dispatch(
+        "preToolUse",
+        { tool_name: "Bash", tool_input: { command: "echo ok" } },
+        {
+          env: {
+            CODEX_THREAD_ID: "test-codex-thread",
+            SWIZ_NO_DAEMON: undefined,
+            SWIZ_DAEMON_PORT: String(server.port),
+          },
+        }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed?.systemMessage).toContain("daemon hint")
+      expect(result.stdout).not.toContain("permissionDecision")
+      expect(result.stdout).not.toContain("suppressOutput")
+    } finally {
+      void server.stop()
+    }
+  })
+
   test("falls back to local mode when the daemon returns an error", async () => {
     let dispatchHits = 0
 

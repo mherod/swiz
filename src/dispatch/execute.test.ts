@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { ZodError } from "zod"
+import type { SwizHook } from "../SwizHook.ts"
 import {
   coerceDispatchAgentEnvelopeInPlace,
   DispatchPayloadValidationError,
@@ -234,6 +235,56 @@ describe("dispatch execute integration", () => {
         expect(r.hookSpecificOutput.additionalContext).toBeUndefined()
         expect(r.systemMessage).toContain("Heads up")
         expect(r.hookSpecificOutput.updatedInput).toEqual({ command: "echo safe" })
+      } finally {
+        if (prevCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID
+        else process.env.CODEX_THREAD_ID = prevCodexThreadId
+        if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaudeCode
+      }
+    })
+
+    it("sanitizes Codex preToolUse allow fields in daemon mode from payload env", async () => {
+      const prevCodexThreadId = process.env.CODEX_THREAD_ID
+      const prevClaudeCode = process.env.CLAUDECODE
+      delete process.env.CODEX_THREAD_ID
+      delete process.env.CLAUDECODE
+      try {
+        const allowHook: SwizHook = {
+          name: "test-codex-allow",
+          event: "preToolUse",
+          matcher: "Bash",
+          run: () => ({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "daemon hint",
+            },
+          }),
+        }
+        const req: DispatchRequest = {
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: "codex-daemon-session",
+            tool_name: "Bash",
+            tool_input: { command: "echo ok" },
+            _env: { CODEX_THREAD_ID: "codex-from-payload" },
+          }),
+          manifestProvider: async () => [
+            {
+              event: "preToolUse",
+              matcher: "Bash",
+              hooks: [{ hook: allowHook }],
+            },
+          ],
+          daemonContext: true,
+        }
+
+        const result = await executeDispatch(req)
+        expect(result.response.systemMessage).toContain("daemon hint")
+        expect(result.response.hookSpecificOutput?.permissionDecision).toBeUndefined()
+        expect(result.response.hookSpecificOutput?.permissionDecisionReason).toBeUndefined()
       } finally {
         if (prevCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID
         else process.env.CODEX_THREAD_ID = prevCodexThreadId

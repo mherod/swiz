@@ -375,6 +375,32 @@ describe("pretooluse-task-subject-validation", () => {
     expect(r.stdout).not.toContain('"deny"')
   })
 
+  test("duplicate active subject is denied with direct repair guidance", async () => {
+    const home = await createTempDir()
+    const sessionId = "duplicate-create-block"
+    const sessionDir = join(home, ".claude", "tasks", sessionId)
+    const { mkdir, writeFile } = await import("node:fs/promises")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(
+      join(sessionDir, "1.json"),
+      JSON.stringify({ id: "1", subject: "Resolve task state", status: "pending" })
+    )
+
+    const r = await runHook(
+      HOOK,
+      {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        tool_input: { subject: "Resolve task state" },
+      },
+      { HOME: home, CLAUDECODE: "1" }
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain("deny")
+    expect(r.stdout).toContain("Do not create another task named")
+    expect(r.stdout).toContain("TaskUpdate")
+  })
+
   test("empty subject exits cleanly", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",

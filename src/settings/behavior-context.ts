@@ -225,5 +225,5 @@ export function buildBehaviorSteeringContext(
     options.includeAutomation ? buildAutomationContext(settings) : "",
   ].filter(Boolean)
 
-  return lines.length > 0 ? `Swiz behavior settings:\n${lines.join("\n")}` : ""
+  return lines.length > 0 ? `Operating instructions:\n${lines.join("\n")}` : ""
 }

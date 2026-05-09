@@ -301,6 +301,29 @@ describe("posttooluse-task-list-sync", () => {
     expect(ctx).toMatch(/3 task\(s\) in response/)
   })
 
+  test("emits direct repair guidance when TaskList contains duplicate active subjects", async () => {
+    const { exitCode, stdout } = await runHook(
+      HOOK,
+      {
+        cwd: "/tmp",
+        session_id: SESSION_ID,
+        tool_name: "TaskList",
+        tool_response: makeTaskListResponse([
+          { id: "60", subject: "Resolve task state", status: "pending" },
+          { id: "61", subject: "Resolve task state", status: "in_progress" },
+        ]),
+      },
+      { HOME: TMP_HOME }
+    )
+
+    expect(exitCode).toBe(0)
+    const parsed = JSON.parse(stdout)
+    const ctx: string = parsed.hookSpecificOutput.additionalContext
+    expect(ctx).toContain("Resolve the task list before continuing")
+    expect(ctx).toContain("Pick the duplicate entry")
+    expect(ctx).toContain('"Resolve task state" is on #60 (pending), #61 (in_progress)')
+  })
+
   test("skips tasks with missing id or subject", async () => {
     const { exitCode, stdout } = await runHook(
       HOOK,

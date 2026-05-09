@@ -8,6 +8,7 @@
 
 import { randomUUID } from "node:crypto"
 import { merge, orderBy, unset } from "lodash-es"
+import { detectCurrentAgentFromHookPayload } from "../agent-paths.ts"
 import { isGitRepo } from "../git-helpers.ts"
 import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
@@ -340,6 +341,7 @@ interface DispatchContext {
   cwd: string
   toolName: string | undefined
   trigger: string | undefined
+  agentId: string | null
 }
 
 async function buildDispatchContext(req: DispatchRequest): Promise<DispatchContext> {
@@ -359,6 +361,7 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
   for (const k of Object.keys(payload)) unset(payload, k)
   merge(payload, validated)
   const { toolName, trigger } = getHookContext(canonicalEvent, payload)
+  const agentId = detectCurrentAgentFromHookPayload(payload)?.id ?? null
 
   logHeader(canonicalEvent, hookEventName, toolName, trigger)
   log(`   payload: ${payloadStr.length} bytes`)
@@ -366,7 +369,7 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
 
   const cwd = (payload.cwd as string) ?? process.cwd()
 
-  return { canonicalEvent, hookEventName, payload, payloadStr, cwd, toolName, trigger }
+  return { canonicalEvent, hookEventName, payload, payloadStr, cwd, toolName, trigger, agentId }
 }
 
 interface ResolvedGroups {
@@ -574,9 +577,10 @@ export function resolveLifecycleRequestId(payload: Record<string, any>): string 
 function assertDispatchResponseMatchesWire(
   response: Record<string, any>,
   canonicalEvent: string,
-  hookEventName: string
+  hookEventName: string,
+  agentId?: string | null
 ): void {
-  parseValidatedAgentDispatchWireJson(response, canonicalEvent, hookEventName)
+  parseValidatedAgentDispatchWireJson(response, canonicalEvent, hookEventName, agentId)
 }
 
 /**
@@ -587,7 +591,7 @@ function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Recor
   const response: Record<string, any> = {}
   if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
     normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
-    coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
+    coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     if (!daemonContext) writeResponse(response)
   }
   return response
@@ -601,14 +605,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response = buildSkipResponse(ctx, req.daemonContext)
-    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return { response }
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
   if (filteredGroups.length === 0) {
     const response = buildSkipResponse(ctx, req.daemonContext)
-    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return { response }
   }
 
@@ -664,6 +668,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
         hookEventName: ctx.hookEventName,
         daemonContext: req.daemonContext,
         cwd: ctx.cwd,
+        agentId: ctx.agentId,
         signal: dispatchAbort.signal,
       },
       { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: ctx.canonicalEvent }
@@ -683,10 +688,15 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
       if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
         normalizeStopDispatchResponseInPlace(response, ctx.hookEventName)
       }
-      coerceDispatchAgentEnvelopeInPlace(response, ctx.canonicalEvent, ctx.hookEventName)
+      coerceDispatchAgentEnvelopeInPlace(
+        response,
+        ctx.canonicalEvent,
+        ctx.hookEventName,
+        ctx.agentId
+      )
     }
 
-    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
 
     log(
       `   ⏱ total: ${Math.round(performance.now() - t0)}ms (hooks: ${Math.round(performance.now() - dispatchStart)}ms)`

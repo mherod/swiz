@@ -48,8 +48,8 @@ export async function evaluateSessionstartEnvironmentDetects(
   const shellLine = `${env.shell.name}${env.shell.path ? ` — ${env.shell.path}` : ""}`
 
   const lines: string[] = [
-    "Swiz environment detects (from hook process and project tree):",
-    `- Swiz-detected agent: ${processAgent ? `${processAgent.name} (id=${processAgent.id})` : "none (no env/parent match)"}`,
+    "Environment detected for this session:",
+    `- Detected agent: ${processAgent ? `${processAgent.name} (id=${processAgent.id})` : "none (no env/parent match)"}`,
     `- Payload: agent_type=${hookInput.agent_type ?? "—"}, model=${hookInput.model ?? "—"}, source=${hookInput.source ?? "—"}, matcher=${hookInput.matcher ?? "—"}, trigger=${hookInput.trigger ?? "—"}`,
     `- Session: session_id=${hookInput.session_id ?? "—"}`,
     `- Working directory: ${cwd}`,

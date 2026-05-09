@@ -8,7 +8,7 @@ alwaysApply: false
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
-- Prefer `swiz <command>` for normal CLI usage.
+- Prefer `swiz <command>` for CLI usage.
 - Use `bun run index.ts <command>` to force checkout execution.
 - Use `Bun.file()` and `Bun.write()` for file I/O.
 - Use `node:fs/promises` only for directory operations (`readdir`, `mkdir`, `stat`).
@@ -20,37 +20,25 @@ alwaysApply: false
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude; **DON'T** spawn `claude` CLI.
 - Extract helpers for complexity/max-lines. Consolidate duplicate utilities into a canonical module (e.g., `agent-paths.ts`) and re-export.
 ## Agent Detection
-- `src/agents.ts` is the metadata source: `envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`. Add new signals there first.
-- Runtime detection: `src/agent-paths.ts` (`src/detect.ts` re-export). `detectCurrentAgentFromEnv(env)` checks truthy `envVars` in `AGENTS` order; `detectCurrentAgent()` falls back to parent `processPattern`.
-- `isRunningInAgent()` is boolean shell/shim detection only: non-TTY stdin, `CURSOR_TRACE_ID`, or `CLAUDECODE`; not provider-specific.
+- `src/agents.ts` owns agent metadata: `envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`. Add signals there first.
+- Runtime detection: `src/agent-paths.ts` (`src/detect.ts` re-export). `detectCurrentAgentFromEnv(env)` checks truthy `envVars` in `AGENTS` order; `detectCurrentAgent()` falls back to parent `processPattern`; `isRunningInAgent()` is shell/shim-only (non-TTY stdin, `CURSOR_TRACE_ID`, `CLAUDECODE`).
 - Translation is metadata-driven: `translateMatcher()`, `translateEvent()`, `toolNameForCurrentAgent()`, `resolveTranslationAgent()`. Never hard-code agent tool/event names. Precedence: explicit → env+aliases → unique observed tools → `detectCurrentAgent()`.
 - Daemon dispatch preserves origin env: `swiz dispatch` stores agent vars in `_env`; `applyDispatchEnv()` wraps in-process hooks. Daemon hooks use `_env` + `detectCurrentAgentFromEnv()`, not launchd env.
-- Installed/current/backend detection are distinct: `detectInstalledAgents()` checks `PATH`/settings; `detectAgentCli()`/`detectBestAgentCli()` find Cursor's `agent` binary for fallback prompting. Do not use either for current hook-agent detection.
-- Task governance pivots on `AgentDef.tasksEnabled`. `agentHasTaskTools()` defaults `true` without env detection; `buildManifest()` strips task-only groups/hooks in `TASK_HOOK_IDENTIFIERS` when false. `pretooluse-task-governance.ts` skips Edit/Write/Bash task requirements for agents without task tools.
-- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `update_plan` matches task create/update, but Codex has `tasksEnabled=false`, so no Claude-style task enforcement/advisors. `shouldInspectShellInput()` prefers `_env`, then process env, then Claude; `swiz tasks` CLI denial only applies to resolved Claude. Stop validators skip task-creation/audit checks when task tools are unavailable; `stop-incomplete-tasks` has `isCurrentAgent("gemini")` exemption.
-- Task storage follows detection: `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots, falling back to Claude. Apply `_env` in daemon dispatch or tasks may read/write the wrong provider root.
+- Keep installed/current/backend detection separate: `detectInstalledAgents()` checks `PATH`/settings; `detectAgentCli()`/`detectBestAgentCli()` find Cursor's `agent` binary for fallback prompting. Do not use either for hook-agent detection.
+- Task governance pivots on `AgentDef.tasksEnabled`. `agentHasTaskTools()` defaults `true`; `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false. `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements without task tools. Codex has `tasksEnabled=false`; `update_plan` is not Claude-style task enforcement/advisory.
+- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env`, then process env, then Claude; `swiz tasks` CLI denial only applies to resolved Claude. Stop validators skip task creation/audit checks when task tools are unavailable; `stop-incomplete-tasks` exempts `isCurrentAgent("gemini")`.
+- Task storage follows detection: `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots, falling back to Claude. Apply `_env` in daemon dispatch or tasks may use the wrong provider root.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
 ## Hook System
 - Hooks live in `hooks/`; canonical manifest is `manifest` in `src/manifest.ts`.
 - Canonical events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
-- Translation: `EVENT_MAP` (canonical→agent events), `TOOL_ALIASES` (per-agent tool names). Claude uses nested matchers in `settings.json`; Cursor uses flat list in `hooks.json`.
-- Add hook flow (agent events):
-  1. Add `hooks/<name>.ts`.
-  2. Add entry to `manifest` in `src/manifest.ts`.
-  3. If new event: update `DISPATCH_ROUTES` in `src/dispatch/index.ts` and each agent `eventMap` in `src/agents.ts`.
-  4. Run `swiz install --dry-run`.
-  5. Run `swiz install` to write dispatch entries.
-- Add hook flow (non-agent/scheduled events like `preCommit`, `prePush`):
-  1. Add `hooks/<name>.ts`.
-  2. Add entry to `manifest` with `scheduled: true` — skips agent eventMap validation and `swiz install`.
-  3. Add `DISPATCH_ROUTES` entry in `src/dispatch/index.ts`.
-  4. Add event to `TOOL_NAME_OPTIONAL_EVENTS` in `src/dispatch/execute.ts`.
-  5. Add `DISPATCH_TIMEOUTS` entry in `src/manifest.ts`.
-  6. Wire into `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
+- Translation: `EVENT_MAP` (canonical→agent events), `TOOL_ALIASES` (per-agent tool names). Claude uses nested matchers; Cursor uses flat list.
+- Agent hook flow: add `hooks/<name>.ts`; add `manifest` entry; for new events update `DISPATCH_ROUTES` in `src/dispatch/index.ts` and agent `eventMap` in `src/agents.ts`; run `swiz install --dry-run`; run `swiz install`.
+- Scheduled hook flow (`preCommit`, `prePush`): add hook; add `manifest` entry with `scheduled: true`; add `DISPATCH_ROUTES`, `TOOL_NAME_OPTIONAL_EVENTS`, `DISPATCH_TIMEOUTS`; wire `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
 - Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` synchronized.
-- `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
+- `validateDispatchRoutes()` in `src/manifest.ts` must pass from `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
 - DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
@@ -76,6 +64,9 @@ alwaysApply: false
 - Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript. Use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
 - Output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`, etc. — call `process.exit(0)`. **DON'T** write raw `console.log(JSON.stringify(...))`.
+- **Hook message tone**: User-facing hook output must sound human. State next action first. **DON'T** mention Swiz, hook mechanics, audit/sync/cache/drift/recent-context rationale, internal limits, raw counts, or projected thresholds unless needed for a choice.
+- **Task-governance hook messages**: Keep shared text in `src/tasks/task-governance-messages.ts`. Block shortcut task behavior without bypass recipes: no exact completion chains, projected count math, or raw state dumps. Give next steps: `TaskList`, task update/create, evidence, retry.
+- **TaskList hook copy**: Say run `TaskList` now and when to retry. **DON'T** explain stabilization, refresh, drift, or dependencies.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })`. DON'T use `Bun.spawn()` with manual timers.
 - **Dispatch abort**: Strategies with `AbortController` must listen on `ctx.signal` (from `DispatchRequest.signal` or `HookStrategyContext.signal`).
 - **Dispatch enrichment**: `performDispatch` injects `_effectiveSettings` + `_terminal`. Cursor cwd: `normalizeAgentHookPayload` uses `workspace_roots` when empty/outside. Captures in `/tmp/swiz-incoming/` (~10m); `SWIZ_CAPTURE_INCOMING=0` disables.
@@ -117,18 +108,17 @@ alwaysApply: false
 - **CI evidence transcript fallback**: When `allTasks = []`, `ci-evidence-validator` scans `TranscriptSummary.bashCommands` for CI verification commands. Regex: `CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/`.
 
 ## Task Lifecycle & Enforcement
-
 - State machine: `pending` → `in_progress` → `completed` or `deleted`.
-- Gates: stop (`hooks/stop-incomplete-tasks/evaluate.ts`) blocks incomplete tasks; transition (`pretooluse-task-transition-validator.ts`) blocks `pending`→`completed`; phantom (`pretooluse-no-phantom-task-completion.ts`) blocks completion without substantive tool calls (`Edit`, `Write`, `Bash`, `Read`, `Skill`, `Glob`, `Grep`) and evidence.
+- Gates: stop (`hooks/stop-incomplete-tasks/evaluate.ts`) blocks incomplete tasks; transition (`pretooluse-task-transition-validator.ts`) blocks `pending`→`completed`; phantom (`pretooluse-no-phantom-task-completion.ts`) requires substantive tool calls (`Edit`, `Write`, `Bash`, `Read`, `Skill`, `Glob`, `Grep`) and evidence.
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s and requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`. `find` is not exempt.
-- Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools, not `swiz tasks` CLI except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Do not complete the last `in_progress` while shell work remains.
+- Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
+- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks using `git log --oneline -3`. Call task tools every 10 calls; staleness gate at 20.
-- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Before issue labeling run `gh label list`; after `gh issue create`, run `/refine-issue <number>`. Use issue body files, not `$(cat <<'EOF')`.
+- After each `CLAUDE.md` edit run `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Before issue labeling run `gh label list`; after `gh issue create`, run `/refine-issue <number>`. Use issue body files, not shell heredoc bodies.
 - Verify CI jobs with `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before committing untracked `.lock` or local state.
 ## Standard Work Sequence
 - Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
@@ -140,7 +130,7 @@ alwaysApply: false
 - **DO**: Treat `.swiz/config.json` as authoritative for collaboration/trunk policy.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
-- Pre-push: `/push` collab guard; `git log origin/main..HEAD`; branch+PR check; capture SHA; `git push`; `gh run list --commit "$SHA" --limit 15`; `gh run watch`; `gh run view --json conclusion,status,jobs`.
+- Pre-push: `/push`; `git log origin/main..HEAD`; branch+PR check; capture SHA; `git push`; `gh run list --commit "$SHA" --limit 15`; `gh run watch`; `gh run view --json conclusion,status,jobs`.
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
@@ -149,7 +139,7 @@ alwaysApply: false
 - **DO**: Before stop after push: verify CI status + update tasks.
 - DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
-- DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't skip pre-push log review; don't run branch/collab/PR checks after push.
+- DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't skip pre-push log review or run branch/collab/PR checks after push.
 - DON'T add `Co-Authored-By` trailers. DON'T use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
