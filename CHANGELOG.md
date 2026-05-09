@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-05-09
+
+### New Features
+
+- **Ceremony-aware session prompts and gates** — Added end-of-day,
+  mid-session check-in, morning stand-up, weekly retro, and
+  unblock-myself enforcement so long-running sessions get clearer
+  recovery prompts before drift turns into repeated failed actions.
+  (#565, #566, #567, #568)
+- **Claude search-tool SessionStart suggestion** — Added a startup
+  prompt that reminds Claude sessions to use the search tool for
+  unfamiliar errors, version-specific behaviour, advisories, and
+  public API checks. (#577)
+- **Behaviour settings in hook guidance** — Surfaced effective
+  workflow and automation settings in hook context so users can see
+  why Swiz is steering towards direct push, PR flow, CI waiting, or
+  ceremony prompts.
+
+### Improvements
+
+- **Codex hook and task compatibility** — Stopped translating Codex
+  planning into TaskCreate/TaskUpdate, stripped task-only hooks from
+  Codex installs, kept `swiz tasks` usable in Codex, and made prompt
+  and post-tool task advisors self-exempt from Codex sessions. (#570,
+  #571, #572, #573, #574, #575)
+- **Codex-safe hook output** — Normalised Codex hook responses so
+  advisory PreToolUse output no longer includes unsupported allow
+  fields while preserving the useful guidance text.
+- **Project-scoped CI controls** — Allowed `ignore-ci` and
+  `github-ci-gate` to be configured at project scope, making local
+  repository policy override global defaults where needed. (#562)
+- **Less noisy task stop blockers** — Deferred follow-up tasks with
+  `Future:`, `Consider`, or `Follow-up:` prefixes no longer block
+  session stop as if they were current-session deliverables. (#563,
+  #580)
+
+### Fixes
+
+- **Daemon dispatch agent isolation** — Hook dispatch now uses the
+  caller payload environment instead of daemon process globals, so
+  concurrent Claude and Codex requests do not inherit each other's
+  agent identity. (#576)
+- **Task governance wording and state handling** — Improved task gate
+  messages and state transitions so recovery guidance is clearer when
+  task subjects are duplicated, stale, or completed through Codex.
+
+### Security
+
+- **Dependency vulnerability updates** — Updated vulnerable Hono,
+  Hono node-server, Vite, protobufjs, brace-expansion, and ip-address
+  dependency paths to clear the recent Dependabot security alerts.
+  (#538, #539, #540, #560, #561, #578)
+
 ## 2026-04-24
 
 ### Improvements
