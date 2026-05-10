@@ -784,6 +784,10 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   if (isBlockedTaskFilesEdit(input, toolName)) {
     return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
   }
+  const command = String(input.tool_input?.command ?? "")
+  if (isBlockedSwizTaskFilesCommand(command)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
