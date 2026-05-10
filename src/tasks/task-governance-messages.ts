@@ -573,13 +573,13 @@ export function formatIncompleteReason(taskDetails: string[]): string {
 }
 
 export const SWIZ_TASKS_CLI_DENY_MESSAGE =
-  "Do not use the `swiz tasks` CLI inside Claude Code.\n\n" +
+  "Do not use the task management CLI from this session.\n\n" +
   "We should use native task tools only:\n" +
   "  - TaskCreate - new tasks\n" +
   "  - TaskUpdate - status, subject, description, and marking completed\n" +
   "  - TaskList / TaskGet - query tasks\n\n" +
   "Keep task work in the native task tools so the next step stays visible.\n\n" +
-  "The only `swiz tasks` subcommand still allowed here is `adopt` (orphan recovery after compaction)."
+  "The only task management CLI subcommand still allowed here is `adopt` (orphan recovery after compaction)."
 
 export function buildPendingCompletionTransitionMessage(taskId: string): string {
   return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId })
