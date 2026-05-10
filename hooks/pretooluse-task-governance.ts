@@ -781,6 +781,9 @@ async function checkTaskUpdateSubjectGovernance(
 
 async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
+  if (isBlockedTaskFilesEdit(input, toolName)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
@@ -870,6 +873,12 @@ export async function evaluatePretooluseRequireTasks(
   input: Record<string, any>
 ): Promise<SwizHookOutput> {
   if (!agentHasTaskToolsForHookPayload(input)) return {}
+
+  const toolName = String(input.tool_name ?? "")
+  if (isBlockedTool(toolName) && isBlockedTaskFilesEdit(input, toolName)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
+
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
   return await runRequireTasksChecks(parsed)
