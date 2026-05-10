@@ -156,17 +156,17 @@ export function applyTaskUpdateEvent(
     // slipped through (native TaskUpdate races, daemon dispatch, external write).
     // Hold the prior status and flag for reconciliation rather than letting
     // the bad state propagate to downstream hooks in this dispatch.
-    const newStatus =
-      updates.status && !isValidTransition(existing.status, requestedStatus)
-        ? (warnRevertedInvalidTransition(
-            "event-state",
-            sessionId,
-            taskId,
-            requestedStatus,
-            existing.status
-          ),
-          existing.status)
-        : requestedStatus
+    let newStatus = requestedStatus
+    if (updates.status && !isValidTransition(existing.status, requestedStatus)) {
+      warnRevertedInvalidTransition(
+        "event-state",
+        sessionId,
+        taskId,
+        requestedStatus,
+        existing.status
+      )
+      newStatus = existing.status
+    }
     tasks[idx] = {
       id: taskId,
       status: newStatus,
