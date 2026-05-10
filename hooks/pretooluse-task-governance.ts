@@ -221,6 +221,12 @@ async function denyAutoSteerOrBlock(
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
+function canStartInProgress(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {
+  return inProgressCount < cap
+}
+export function getInProgressCap(): number {
+  return IN_PROGRESS_CAP
+}
 
 const MEMORY_MARKDOWN_RE = /\.(md|json)$/i
 
@@ -381,7 +387,7 @@ async function checkInProgressCap(
   allTasks: Array<{ id: string; status: string; subject: string }>
 ): Promise<SwizHookOutput | undefined> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
-  if (inProgressTasks.length <= IN_PROGRESS_CAP) return undefined
+  if (canStartInProgress(inProgressTasks.length)) return undefined
   const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
   return await denyAutoSteerOrBlock(
     sessionId,
@@ -390,7 +396,7 @@ async function checkInProgressCap(
       kind: "too-many-in-progress",
       toolName,
       inProgressCount: inProgressTasks.length,
-      cap: IN_PROGRESS_CAP,
+      cap: getInProgressCap(),
       taskList,
     })
   )
@@ -1115,11 +1121,11 @@ async function checkInProgressTransitionCap(
 
   // Allow transition to in_progress if:
   // 1. The task is already in_progress (no-op), or
-  // 2. There are fewer than 2 in_progress tasks (room to add one more)
+  // 2. There is room under the configured in-progress cap.
   if (!currentTask || currentTask.status === "in_progress") {
     return null
   }
-  if (inProgressCount < 2) {
+  if (canStartInProgress(inProgressCount)) {
     return null
   }
 
@@ -1134,7 +1140,7 @@ async function checkInProgressTransitionCap(
       kind: "in-progress-transition-cap",
       taskId,
       inProgressCount,
-      cap: IN_PROGRESS_CAP,
+      cap: getInProgressCap(),
       taskList: inProgressTasks,
     })
   )

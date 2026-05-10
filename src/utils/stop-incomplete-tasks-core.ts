@@ -24,6 +24,7 @@ import {
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { validateTransition } from "../tasks/task-service.ts"
+import { stopIncompleteTasksLogPath } from "../temp-paths.ts"
 import {
   autoTransitionForComplete,
   blockStopObj,
@@ -133,7 +134,7 @@ async function logStopDiagnostic(message: string): Promise<void> {
   try {
     const { appendFile } = await import("node:fs/promises")
     const line = `[${new Date().toISOString()}] stop-incomplete-tasks: ${message}\n`
-    await appendFile("/tmp/swiz-logging.log", line)
+    await appendFile(stopIncompleteTasksLogPath(), line)
   } catch {
     // best-effort logging
   }

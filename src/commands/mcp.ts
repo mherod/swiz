@@ -1,13 +1,6 @@
 import { createHash } from "node:crypto"
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  utimesSync,
-  watch,
-  writeFileSync,
-} from "node:fs"
+import { mkdirSync, readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
+import { appendFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "../home.ts"
@@ -383,9 +376,21 @@ function loadPermissionPolicy(cwd: string): CompiledPermissionRule[] {
   const path = `${cwd}/.swiz/permission-policy.json`
   try {
     const raw = readFileSync(path, "utf8")
-    const parsed = PermissionPolicySchema.safeParse(JSON.parse(raw))
+    let rawRules: unknown
+    try {
+      rawRules = JSON.parse(raw)
+    } catch (err) {
+      const message = messageFromUnknownError(err)
+      process.stderr.write(
+        `swiz mcp: failed to parse permission-policy.json at ${path}: ${message}\n`
+      )
+      return []
+    }
+    const parsed = PermissionPolicySchema.safeParse(rawRules)
     if (!parsed.success) {
-      process.stderr.write(`swiz mcp: permission-policy.json invalid — ${parsed.error.message}\n`)
+      process.stderr.write(
+        `swiz mcp: permission-policy.json schema invalid at ${path}: ${parsed.error.message}\n`
+      )
       return []
     }
 
@@ -406,14 +411,17 @@ function loadPermissionPolicy(cwd: string): CompiledPermissionRule[] {
           ...rule,
           patternRegex: new RegExp(rule.pattern),
         })
-      } catch {
+      } catch (err) {
         process.stderr.write(
-          `swiz mcp: permission-policy.json skipped unsafe pattern — ${INVALID_PATTERN_HINT}\n`
+          `swiz mcp: permission-policy.json skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}: ${messageFromUnknownError(err)}\n`
         )
       }
     }
     return compiled
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `swiz mcp: permission-policy.json unavailable at ${path}: ${messageFromUnknownError(err)}\n`
+    )
     return []
   }
 }
@@ -485,7 +493,12 @@ function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void
 
 // ─── Reply tool sink ────────────────────────────────────────────────────────
 
-function appendReplyToSink(cwd: string, payload: { content: string; kind: string }): void {
+let replyWriteChain = Promise.resolve()
+
+async function appendReplyToSink(
+  cwd: string,
+  payload: { content: string; kind: string }
+): Promise<void> {
   const home = getHomeDirWithFallback("/tmp")
   const path = swizMcpRepliesLogPath(home)
   mkdirSync(dirname(path), { recursive: true })
@@ -496,7 +509,10 @@ function appendReplyToSink(cwd: string, payload: { content: string; kind: string
     kind: payload.kind,
     content: payload.content,
   })}\n`
-  appendFileSync(path, row)
+  const write = appendFile(path, row)
+  const queued = replyWriteChain.then(() => write)
+  replyWriteChain = queued.catch(() => {})
+  await queued
 }
 
 // ─── Server entry point ─────────────────────────────────────────────────────
@@ -535,7 +551,7 @@ async function serve(): Promise<void> {
     },
     async ({ content, kind }) => {
       try {
-        appendReplyToSink(cwd, { content, kind: kind ?? "note" })
+        await appendReplyToSink(cwd, { content, kind: kind ?? "note" })
       } catch (err) {
         const message = messageFromUnknownError(err)
         return {

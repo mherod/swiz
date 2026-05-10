@@ -3,6 +3,9 @@
  * Keep all filenames centralized so hooks/commands stay consistent.
  */
 
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 export const TMP_ROOT = "/tmp"
 
 /** Incoming dispatch payload dumps (on by default; disable with `SWIZ_CAPTURE_INCOMING=0`). See `incoming-capture.ts`. */
@@ -66,6 +69,10 @@ export function swizEmergencyBypassPath(repoKey: string): string {
 
 export function swizPseudoHookLogPath(): string {
   return `${TMP_ROOT}/swiz-pseudohooks.log`
+}
+
+export function stopIncompleteTasksLogPath(): string {
+  return join(tmpdir(), "swiz-logging.log")
 }
 
 export function stopAutoContSuggestionsPath(safeSession: string): string {

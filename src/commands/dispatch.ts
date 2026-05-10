@@ -373,7 +373,7 @@ function maybeForceDispatchFailureForTesting(): void {
 /** In-process incomplete-tasks check — skips daemon round-trip when tasks block. */
 async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
   const { canonicalEvent, sessionId } = timing
-  if (canonicalEvent !== "stop" || !sessionId) return false
+  if (!isStopLikeEvent(canonicalEvent) || !sessionId) return false
 
   const home = getHomeDirOrNull()
   if (!home) return false
@@ -483,7 +483,7 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   // ── Fast path: in-process incomplete-tasks check for stop events ──
   if (await tryStopFastPath(timing)) return
   // Signal to hooks that the fast path already scanned tasks (no blockers found)
-  if (canonicalEvent === "stop" && sessionId) {
+  if (isStopLikeEvent(canonicalEvent) && sessionId) {
     payload._fastPathTaskScanComplete = true
   }
   // ── Fast path: skip hook execution in non-git directories ──

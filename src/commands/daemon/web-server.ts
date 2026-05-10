@@ -7,7 +7,9 @@ import {
   DispatchPayloadValidationError,
   parseValidatedAgentDispatchWireJson,
 } from "../../dispatch/dispatch-zod-surfaces.ts"
+import { isBlock } from "../../dispatch/engine.ts"
 import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
+import { isStopLikeDispatchEvent } from "../../dispatch/stop-response.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
 import { readHookLogs } from "../../hook-log.ts"
@@ -246,6 +248,7 @@ export interface DaemonWebServerContext {
   workerRuntime: DaemonWorkerRuntime
   prReviewMonitor: PrReviewMonitor
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
+  recentHookAllowMessages: CappedMap<string, string>
 }
 
 /** Hard request-level timeout for daemon dispatch (ms).
@@ -287,6 +290,7 @@ export interface DispatchRoutesContext {
   upstreamSyncRegistry: UpstreamSyncRegistry
   transcriptIndex: TranscriptIndexCache
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
+  recentHookAllowMessages: CappedMap<string, string>
 }
 
 export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): DispatchRoutesContext {
@@ -307,7 +311,105 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
     taskStateCache: ctx.taskStateCache,
+    recentHookAllowMessages: ctx.recentHookAllowMessages,
   }
+}
+
+function trimHookText(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function extractHookAllowMessage(response: Record<string, any>): string | null {
+  const hookSpecificOutput = response.hookSpecificOutput
+  const output =
+    hookSpecificOutput &&
+    typeof hookSpecificOutput === "object" &&
+    !Array.isArray(hookSpecificOutput)
+      ? (hookSpecificOutput as Record<string, unknown>)
+      : undefined
+
+  const additionalContext = trimHookText(output?.additionalContext)
+  const systemMessage = trimHookText(response.systemMessage)
+  const reason = trimHookText(response.reason)
+  const stopReason = trimHookText(response.stopReason)
+  const permissionDecisionReason = trimHookText(output?.permissionDecisionReason)
+  if (
+    additionalContext === null &&
+    systemMessage === null &&
+    reason === null &&
+    stopReason === null &&
+    permissionDecisionReason === null
+  ) {
+    return null
+  }
+  return JSON.stringify({
+    additionalContext,
+    systemMessage,
+    reason,
+    stopReason,
+    permissionDecisionReason,
+  })
+}
+
+function stripDuplicateAllowMessage(response: Record<string, any>): void {
+  delete response.systemMessage
+  delete response.reason
+  delete response.stopReason
+
+  const hookSpecificOutput = response.hookSpecificOutput
+  if (
+    hookSpecificOutput &&
+    typeof hookSpecificOutput === "object" &&
+    !Array.isArray(hookSpecificOutput)
+  ) {
+    const output = hookSpecificOutput as Record<string, unknown>
+    delete output.additionalContext
+    delete output.permissionDecisionReason
+    if (Object.keys(output).length === 0) {
+      delete response.hookSpecificOutput
+    }
+  }
+}
+
+function dedupeHookAllowMessageKey(
+  payload: Record<string, unknown> | null,
+  canonicalEvent: string,
+  hookEventName: string
+): string {
+  const sessionId = typeof payload?.session_id === "string" ? payload.session_id : "none"
+  const cwd = typeof payload?.cwd === "string" ? payload.cwd : "none"
+  const toolName =
+    typeof payload?.tool_name === "string"
+      ? payload.tool_name
+      : typeof payload?.toolName === "string"
+        ? payload.toolName
+        : "none"
+  return `${canonicalEvent}|${hookEventName}|${cwd}|${sessionId}|${toolName}`
+}
+
+function maybeSuppressDuplicateAllowMessage(
+  ctx: DispatchRoutesContext,
+  payload: Record<string, unknown> | null,
+  canonicalEvent: string,
+  hookEventName: string,
+  response: Record<string, any>
+): void {
+  if (isStopLikeDispatchEvent(canonicalEvent)) return
+  if (isBlock(response)) return
+
+  const message = extractHookAllowMessage(response)
+  if (message === null) return
+
+  const key = dedupeHookAllowMessageKey(payload, canonicalEvent, hookEventName)
+  const last = ctx.recentHookAllowMessages.get(key)
+  if (last === message) {
+    stripDuplicateAllowMessage(response)
+    return
+  }
+
+  ctx.recentHookAllowMessages.set(key, message)
 }
 
 /**
@@ -538,13 +640,14 @@ async function handleDispatchRoute(
   }
   const payloadStr = await req.text()
   const start = performance.now()
+  let parsedPayload: Record<string, unknown> | null = null
 
   // Register fs.watch and seed in-memory event state for this session's task
   // directory so both TaskStateCache and task-count-context have accurate data
   // from the very first tool call in the session.
   try {
-    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
-    const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : null
+    parsedPayload = JSON.parse(payloadStr) as Record<string, unknown>
+    const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
     if (sessionId && ctx.taskStateCache) {
       const { createDefaultTaskStore } = await import("../../task-roots.ts")
       const { tasksDir } = createDefaultTaskStore()
@@ -616,9 +719,13 @@ async function handleDispatchRoute(
   await updateParsedPayloadMetrics(ctx, payloadStr, canonicalEvent, durationMs)
 
   try {
-    return Response.json(
-      parseValidatedAgentDispatchWireJson(raceResult.response, canonicalEvent, hookEventName)
+    const response = parseValidatedAgentDispatchWireJson(
+      raceResult.response,
+      canonicalEvent,
+      hookEventName
     )
+    maybeSuppressDuplicateAllowMessage(ctx, parsedPayload, canonicalEvent, hookEventName, response)
+    return Response.json(response)
   } catch (e) {
     const schemaResp = daemonDispatchSchemaFailureResponse(e)
     if (schemaResp) return schemaResp
