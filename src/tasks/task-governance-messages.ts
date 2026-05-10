@@ -392,12 +392,13 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
     case "pending-completion-shortcut":
       return (
         `STOP. Task #${request.taskId} cannot be marked completed yet.\n\n` +
-        "This looks like shortcut completion: the task is still only planned, and the work needs to be taken on before it is closed.\n\n" +
-        "Do the work first. Completion needs concrete evidence.\n\n" +
+        "This looks like shortcut completion: the task is still only planned, and it appears to be closed before being actively started.\n\n" +
+        "Move it to active status first, do the stated work, then close it with concrete evidence.\n\n" +
         formatTranslatedActionPlan(
           [
             TASKLIST_STABILITY_STEP,
             "Use the task tool to reflect the task you are genuinely working on now.",
+            "Move this task to active status before making implementation or verification changes.",
             "Perform the implementation or verification work described by the task.",
             "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
             TASKLIST_CONFIRM_STEP,
@@ -411,7 +412,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
       return (
         `PHANTOM TASK BLOCK: Task #${request.taskId}${sessionNote} cannot be marked completed.\n\n` +
         `No substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep…) were\n` +
-        `recorded after this task was adopted as active work. Do the stated work before closing it.\n\n` +
+        `recorded after this task was adopted as active work. This looks like closure without work execution in progress.\n\n` +
         formatTranslatedActionPlan(
           [
             TASKLIST_STABILITY_STEP,

@@ -181,7 +181,7 @@ describe("pretooluse-enforce-taskupdate", () => {
 
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("shortcut completion")
-        expect(result.reason).toContain("work needs to be taken on")
+        expect(result.reason).toContain("closed before being actively started")
         expect(result.reason).toContain("Run TaskList now")
         expect(result.reason).not.toContain("drift")
         expect(result.reason).not.toContain("recent context")
