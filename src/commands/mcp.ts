@@ -250,17 +250,136 @@ interface PermissionRule {
   behavior: "allow" | "deny"
 }
 
-const PermissionPolicySchema = z.object({
-  rules: z.array(
-    z.object({
-      tool: z.string(),
-      pattern: z.string().optional(),
-      behavior: z.enum(["allow", "deny"]),
-    })
-  ),
+interface CompiledPermissionRule extends PermissionRule {
+  patternRegex?: RegExp
+}
+
+const MAX_PERMISSION_PATTERN_LENGTH = 200
+
+const INVALID_PATTERN_HINT =
+  "permission-policy.json contains potentially unsafe regex patterns — unsupported constructs were rejected"
+
+function isEscaped(text: string, index: number): boolean {
+  let slashCount = 0
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (text[cursor] !== "\\") break
+    slashCount += 1
+  }
+  return slashCount % 2 === 1
+}
+
+function skipCharClass(text: string, start: number): number {
+  let index = start
+  while (index < text.length) {
+    const char = text[index]
+    if (char === "]" && !isEscaped(text, index)) {
+      return index
+    }
+    if (char === "\\" && index + 1 < text.length) {
+      index += 1
+    }
+    index += 1
+  }
+  return index
+}
+
+function hasQuantifier(text: string): boolean {
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === "[" && !isEscaped(text, index)) {
+      index = skipCharClass(text, index + 1)
+      continue
+    }
+    if ((char === "*" || char === "+" || char === "?" || char === "{") && !isEscaped(text, index)) {
+      return true
+    }
+    if (char === "\\" && index + 1 < text.length) {
+      index += 1
+    }
+    index += 1
+  }
+  return false
+}
+
+function hasUnsafeNestedQuantifier(pattern: string): boolean {
+  const stack: number[] = []
+  let index = 0
+
+  while (index < pattern.length) {
+    const char = pattern[index]
+
+    if (char === "\\" && index + 1 < pattern.length) {
+      index += 2
+      continue
+    }
+
+    if (char === "[" && !isEscaped(pattern, index)) {
+      index = skipCharClass(pattern, index + 1) + 1
+      continue
+    }
+
+    if (char === "(" && !isEscaped(pattern, index)) {
+      stack.push(index)
+      index += 1
+      continue
+    }
+
+    if (char === ")" && stack.length > 0) {
+      const start = stack.pop()
+      if (start === undefined) {
+        index += 1
+        continue
+      }
+
+      let lookahead = index + 1
+      while (lookahead < pattern.length) {
+        const lookaheadChar = pattern[lookahead]
+        if (lookaheadChar === undefined || !/\s/.test(lookaheadChar)) {
+          break
+        }
+        lookahead += 1
+      }
+      if (
+        lookahead < pattern.length &&
+        (pattern[lookahead] === "*" ||
+          pattern[lookahead] === "+" ||
+          pattern[lookahead] === "?" ||
+          pattern[lookahead] === "{")
+      ) {
+        const body = pattern.slice(start + 1, index)
+        if (hasQuantifier(body)) {
+          return true
+        }
+      }
+      index += 1
+      continue
+    }
+
+    index += 1
+  }
+
+  return false
+}
+
+function validatePermissionPattern(pattern: string): boolean {
+  if (pattern.length === 0) return false
+  if (pattern.length > MAX_PERMISSION_PATTERN_LENGTH) return false
+  if (hasUnsafeNestedQuantifier(pattern)) return false
+  return true
+}
+
+const PermissionRuleSchema = z.object({
+  tool: z.string(),
+  pattern: z.string().max(MAX_PERMISSION_PATTERN_LENGTH).optional(),
+  behavior: z.enum(["allow", "deny"]),
 })
 
-function loadPermissionPolicy(cwd: string): PermissionRule[] {
+const PermissionPolicySchema = z.object({
+  rules: z.array(PermissionRuleSchema),
+})
+
+function loadPermissionPolicy(cwd: string): CompiledPermissionRule[] {
   const path = `${cwd}/.swiz/permission-policy.json`
   try {
     const raw = readFileSync(path, "utf8")
@@ -269,31 +388,55 @@ function loadPermissionPolicy(cwd: string): PermissionRule[] {
       process.stderr.write(`swiz mcp: permission-policy.json invalid — ${parsed.error.message}\n`)
       return []
     }
-    return parsed.data.rules
+
+    const compiled: CompiledPermissionRule[] = []
+    for (const rule of parsed.data.rules) {
+      if (!rule.pattern) {
+        compiled.push(rule)
+        continue
+      }
+      if (!validatePermissionPattern(rule.pattern)) {
+        process.stderr.write(
+          `swiz mcp: permission-policy.json skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}\n`
+        )
+        continue
+      }
+      try {
+        compiled.push({
+          ...rule,
+          patternRegex: new RegExp(rule.pattern),
+        })
+      } catch {
+        process.stderr.write(
+          `swiz mcp: permission-policy.json skipped unsafe pattern — ${INVALID_PATTERN_HINT}\n`
+        )
+      }
+    }
+    return compiled
   } catch {
     return []
   }
 }
 
 function evaluatePermissionPolicy(
-  rules: PermissionRule[],
+  rules: CompiledPermissionRule[],
   toolName: string,
   inputPreview: string
 ): "allow" | "deny" | null {
   for (const rule of rules) {
     if (rule.tool !== toolName && rule.tool !== "*") continue
     if (rule.pattern) {
-      try {
-        const re = new RegExp(rule.pattern)
-        if (!re.test(inputPreview)) continue
-      } catch {
+      if (!rule.patternRegex) {
         continue
       }
+      if (!rule.patternRegex.test(inputPreview)) continue
     }
     return rule.behavior
   }
   return null
 }
+
+export { evaluatePermissionPolicy, loadPermissionPolicy }
 
 const PermissionRequestSchema = z.object({
   method: z.literal("notifications/claude/channel/permission_request"),
