@@ -53,6 +53,26 @@ export function warnInvalidTransition(
   reconciliationNeeded.add(sessionId)
 }
 
+/**
+ * Log that an invalid transition was reverted to the last valid known status.
+ * Called from observation paths (cache write-through, event-state, overlay)
+ * when a mutation slipped past the PreToolUse gate. Sets the reconciliation
+ * flag so the next PreToolUse forces a TaskList resync to re-confirm state.
+ */
+export function warnRevertedInvalidTransition(
+  layer: string,
+  sessionId: string,
+  taskId: string,
+  attemptedStatus: string,
+  revertedTo: string
+): void {
+  debugLog(
+    `[task-transition] REVERTED ${layer}: task #${taskId} attempted → ${attemptedStatus}, ` +
+      `held at ${revertedTo} (session ${sessionId.slice(0, 8)}…). Reconciliation flag set.`
+  )
+  reconciliationNeeded.add(sessionId)
+}
+
 // ─── Module-level state ─────────────────────────────────────────────────────
 
 const sessionTasks = new Map<string, EventTaskState[]>()
@@ -130,10 +150,23 @@ export function applyTaskUpdateEvent(
   const idx = tasks.findIndex((t) => t.id === taskId)
   if (idx >= 0) {
     const existing = tasks[idx]!
-    const newStatus = updates.status ?? existing.status
-    if (updates.status && !isValidTransition(existing.status, newStatus)) {
-      warnInvalidTransition("event-state", sessionId, taskId, existing.status, newStatus)
-    }
+    const requestedStatus = updates.status ?? existing.status
+    // Revert invalid transitions to the last valid known status. The PreToolUse
+    // gate normally blocks these, so reaching this branch means a mutation
+    // slipped through (native TaskUpdate races, daemon dispatch, external write).
+    // Hold the prior status and flag for reconciliation rather than letting
+    // the bad state propagate to downstream hooks in this dispatch.
+    const newStatus =
+      updates.status && !isValidTransition(existing.status, requestedStatus)
+        ? (warnRevertedInvalidTransition(
+            "event-state",
+            sessionId,
+            taskId,
+            requestedStatus,
+            existing.status
+          ),
+          existing.status)
+        : requestedStatus
     tasks[idx] = {
       id: taskId,
       status: newStatus,
@@ -239,7 +272,10 @@ export function overlayEventState<T extends { id: string; status: string }>(
     const freshStatus = statusById.get(t.id)
     if (freshStatus && freshStatus !== t.status) {
       if (!isValidTransition(t.status, freshStatus)) {
-        warnInvalidTransition("overlay", sessionId, t.id, t.status, freshStatus)
+        // Skip overlay — keep disk's last-valid status rather than projecting
+        // a bad in-memory mutation onto the read result.
+        warnRevertedInvalidTransition("overlay", sessionId, t.id, freshStatus, t.status)
+        continue
       }
       t.status = freshStatus
     }

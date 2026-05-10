@@ -351,6 +351,63 @@ export async function writeTask(
   }
 }
 
+/**
+ * Revert a task's on-disk status to a known-valid prior status, bypassing
+ * the state-machine validation in `applyStatusTransition`. Used by drift
+ * reconciliation when an invalid transition (e.g. pending → completed)
+ * has slipped past the PreToolUse gate and landed on disk: callers want
+ * to mutate the task back to the last valid state, but the reverse step
+ * itself violates the forward-only state machine.
+ *
+ * Writes the file directly (skipping `writeTask`) so the cache write-through
+ * does not re-trigger the same drift detection, and appends an audit entry
+ * marking the action as a revert. fs.watch on the daemon will reload via
+ * the normal path; the new disk state matches the already-reverted cache,
+ * so the reload is a no-op.
+ */
+export async function revertTaskStatusOnDisk(
+  sessionId: string,
+  taskId: string,
+  targetStatus: TaskStatus,
+  attemptedStatus: TaskStatus,
+  tasksDir = createDefaultTaskStore().tasksDir
+): Promise<boolean> {
+  const dir = join(tasksDir, sessionId)
+  const filePath = join(dir, `${taskId}.json`)
+  let task: Task
+  try {
+    const text = await readFile(filePath, "utf-8")
+    task = JSON.parse(text) as Task
+  } catch (e) {
+    debugLog(`revertTaskStatusOnDisk: cannot read ${filePath}:`, e)
+    return false
+  }
+  if (task.status === targetStatus) return true
+  task.status = targetStatus
+  task.statusChangedAt = new Date().toISOString()
+  try {
+    await writeFile(filePath, JSON.stringify(task, null, 2))
+  } catch (e) {
+    debugLog(`revertTaskStatusOnDisk: cannot write ${filePath}:`, e)
+    return false
+  }
+  sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
+  try {
+    await appendJsonlEntry(join(dir, AUDIT_LOG_FILENAME), {
+      timestamp: new Date().toISOString(),
+      taskId,
+      action: "status_change",
+      oldStatus: attemptedStatus,
+      newStatus: targetStatus,
+      evidence: `auto-revert: invalid transition held at ${targetStatus}`,
+      subject: task.subject,
+    })
+  } catch (e) {
+    debugLog(`revertTaskStatusOnDisk: cannot append audit entry:`, e)
+  }
+  return true
+}
+
 export async function writeAudit(
   sessionId: string,
   entry: AuditEntry,

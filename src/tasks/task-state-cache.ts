@@ -22,7 +22,7 @@ import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { taskListSyncSentinelPath } from "../temp-paths.ts"
-import { pruneSession, warnInvalidTransition } from "./task-event-state.ts"
+import { pruneSession, warnRevertedInvalidTransition } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
@@ -48,6 +48,36 @@ export interface SessionTaskState {
 
 /** Number of most-recent task files to re-read on incremental refresh. */
 const INCREMENTAL_FILE_LIMIT = 3
+
+/**
+ * Fire-and-forget disk revert for an invalid transition that landed on disk.
+ * Lazy-imports task-repository to avoid a circular import (task-repository
+ * already write-throughs into this cache via getGlobalTaskStateCache).
+ */
+function queueDiskRevert(
+  sessionId: string,
+  taskId: string,
+  targetStatus: string,
+  attemptedStatus: string
+): void {
+  void (async () => {
+    try {
+      const { revertTaskStatusOnDisk } = await import("./task-repository.ts")
+      await revertTaskStatusOnDisk(
+        sessionId,
+        taskId,
+        targetStatus as never,
+        attemptedStatus as never
+      )
+    } catch (e) {
+      debugLog(
+        `[task-transition] queueDiskRevert: failed to revert task #${taskId} ` +
+          `to ${targetStatus} for session ${sessionId.slice(0, 8)}…:`,
+        e
+      )
+    }
+  })()
+}
 
 /** Default max age (ms) for freshness-guaranteed reads. */
 const DEFAULT_MAX_STALE_MS = 60_000
@@ -420,6 +450,7 @@ export class TaskStateCache {
     const idx = entry.tasks.findIndex((t) => t.id === task.id)
     if (idx >= 0) {
       const existing = entry.tasks[idx]!
+      let reverted = false
       if (existing.status !== task.status) {
         if (!isValidTransition(existing.status, task.status)) {
           // Auto-transition through intermediate states for timing effects
@@ -434,21 +465,47 @@ export class TaskStateCache {
               existing.status = step
             }
           } else {
-            warnInvalidTransition("cache-update", sessionId, task.id, existing.status, task.status)
+            // No valid path back through the state machine — the transition
+            // slipped past the PreToolUse gate (native TaskUpdate race, daemon
+            // dispatch, or external write). Hold the prior status, queue a
+            // disk revert, and flag for reconciliation rather than letting
+            // the bad state propagate.
+            warnRevertedInvalidTransition(
+              "cache-update",
+              sessionId,
+              task.id,
+              task.status,
+              existing.status
+            )
+            queueDiskRevert(sessionId, task.id, existing.status, task.status)
+            reverted = true
           }
         }
-        // Apply timing for the final target status before replacing
-        applyTimingEffects(existing, task.status)
+        if (!reverted) {
+          // Apply timing for the final target status before replacing
+          applyTimingEffects(existing, task.status)
+        }
       }
-      // Replace with the incoming task but preserve timing from intermediate steps
-      const merged = { ...task }
-      if (existing.status !== task.status) {
-        // Incoming task has the final status; keep accumulated timing from intermediates
-        merged.elapsedMs = existing.elapsedMs
-        merged.startedAt = existing.startedAt
-        merged.statusChangedAt = existing.statusChangedAt
+      if (reverted) {
+        // Keep existing in place; do not adopt the incoming bad status.
+        // Only non-status fields from incoming are accepted.
+        const held: SessionTask = { ...task, status: existing.status }
+        held.elapsedMs = existing.elapsedMs
+        held.startedAt = existing.startedAt
+        held.statusChangedAt = existing.statusChangedAt
+        held.completedAt = existing.completedAt
+        entry.tasks[idx] = held
+      } else {
+        // Replace with the incoming task but preserve timing from intermediate steps
+        const merged = { ...task }
+        if (existing.status !== task.status) {
+          // Incoming task has the final status; keep accumulated timing from intermediates
+          merged.elapsedMs = existing.elapsedMs
+          merged.startedAt = existing.startedAt
+          merged.statusChangedAt = existing.statusChangedAt
+        }
+        entry.tasks[idx] = merged
       }
-      entry.tasks[idx] = merged
     } else {
       entry.tasks.push(task)
       entry.tasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -488,6 +545,7 @@ export class TaskStateCache {
       for (const incoming of sorted) {
         const old = oldById.get(incoming.id)
         if (!old || old.status === incoming.status) continue
+        let reverted = false
         if (!isValidTransition(old.status, incoming.status)) {
           const path = computeTransitionPath(old.status, incoming.status)
           if (path && path.length > 1) {
@@ -499,10 +557,25 @@ export class TaskStateCache {
               applyTimingEffects(old, step)
               old.status = step
             }
+          } else {
+            warnRevertedInvalidTransition(
+              "cache-snapshot",
+              sessionId,
+              incoming.id,
+              incoming.status,
+              old.status
+            )
+            queueDiskRevert(sessionId, incoming.id, old.status, incoming.status)
+            // Hold the prior status on the incoming object so the snapshot
+            // reflects last-valid known state until the disk revert lands.
+            incoming.status = old.status
+            reverted = true
           }
         }
-        // Apply final timing and carry forward accumulated values
-        applyTimingEffects(old, incoming.status)
+        if (!reverted) {
+          // Apply final timing and carry forward accumulated values
+          applyTimingEffects(old, incoming.status)
+        }
         incoming.elapsedMs = old.elapsedMs
         incoming.startedAt = old.startedAt
         incoming.statusChangedAt = old.statusChangedAt
@@ -567,15 +640,16 @@ export class TaskStateCache {
               task.status = step
             }
           } else {
-            warnInvalidTransition(
+            warnRevertedInvalidTransition(
               "cache-audit",
               sessionId,
               entry.taskId,
-              task.status,
-              entry.newStatus
+              entry.newStatus,
+              task.status
             )
-            applyTimingEffects(task, entry.newStatus)
-            task.status = entry.newStatus
+            queueDiskRevert(sessionId, entry.taskId, task.status, entry.newStatus)
+            // Hold the prior status — do not apply the bad transition or
+            // its timing effects.
           }
         } else {
           applyTimingEffects(task, entry.newStatus)

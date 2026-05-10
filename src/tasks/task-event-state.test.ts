@@ -95,10 +95,20 @@ describe("task-event-state", () => {
 
     it("updates both status and subject", () => {
       applyTaskCreateEvent("s1", "1", "Original")
+      applyTaskUpdateEvent("s1", "1", { status: "in_progress" })
       applyTaskUpdateEvent("s1", "1", { status: "completed", subject: "Done" })
       const state = getSessionEventState("s1")!
       expect(state[0]!.status).toBe("completed")
       expect(state[0]!.subject).toBe("Done")
+    })
+
+    it("reverts invalid transition and keeps prior status while still updating subject", () => {
+      applyTaskCreateEvent("s1", "1", "Original")
+      // pending → completed skips the in_progress step and is rejected.
+      applyTaskUpdateEvent("s1", "1", { status: "completed", subject: "Bypassed" })
+      const state = getSessionEventState("s1")!
+      expect(state[0]!.status).toBe("pending")
+      expect(state[0]!.subject).toBe("Bypassed")
     })
 
     it("adds task when ID not yet tracked", () => {
