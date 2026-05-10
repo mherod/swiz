@@ -57,7 +57,7 @@ describe("pretooluse-enforce-taskupdate", () => {
   test("blocks `swiz tasks update` with denial", async () => {
     const result = await runClaudeHook("swiz tasks update 1 --status in_progress")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("native task tools")
+    expect(result.reason).toContain("Allowed approaches")
     expect(result.reason).toContain("TaskUpdate")
   })
 

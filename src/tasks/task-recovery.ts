@@ -3,6 +3,7 @@ import { orderBy } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { getTaskToolName } from "./task-governance-messages.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
@@ -351,8 +352,9 @@ export function formatNativeTaskCompleteCommand(
   options: { indent?: string } = {}
 ): string {
   const indent = options.indent ?? ""
+  const taskUpdateName = getTaskToolName("TaskUpdate")
   return (
-    `${indent}TaskUpdate with taskId "${taskId}", status "completed", and description including ` +
+    `${indent}${taskUpdateName} with taskId "${taskId}", status "completed", and description including ` +
     `"${evidence}" (task lived under prior session ${sessionId})`
   )
 }

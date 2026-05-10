@@ -1,4 +1,5 @@
 import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
+import { detectCurrentAgentFromEnv, toolNameForCurrentAgent } from "../agent-paths.ts"
 import {
   type DuplicateSubjectGroup,
   formatDuplicateSubjectGroups,
@@ -9,6 +10,37 @@ const PLENTY_PENDING_THRESHOLD = 2
 export const TASKLIST_STABILITY_STEP = "Run TaskList now."
 
 export const TASKLIST_CONFIRM_STEP = "Run TaskList again after updating tasks."
+
+function resolveCodexTaskAlias(canonicalName: string): string {
+  const agent = detectCurrentAgentFromEnv()
+  if (agent?.id === "codex" && (canonicalName === "TaskCreate" || canonicalName === "TaskUpdate")) {
+    return "update_plan"
+  }
+  return toolNameForCurrentAgent(canonicalName)
+}
+
+export function getTaskToolName(canonicalName: string): string {
+  return resolveCodexTaskAlias(canonicalName)
+}
+
+function taskCreateToolName(): string {
+  return resolveCodexTaskAlias("TaskCreate")
+}
+
+function taskUpdateToolName(): string {
+  return resolveCodexTaskAlias("TaskUpdate")
+}
+
+function taskApproachMessage(): string {
+  const taskCreateName = taskCreateToolName()
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    "Allowed approaches:\n" +
+    `  - ${taskCreateName} - add new tasks\n` +
+    `  - ${taskUpdateName} - status, subject, description, and marking completed\n` +
+    `  - ${toolNameForCurrentAgent("TaskList")} / ${toolNameForCurrentAgent("TaskGet")} - query tasks`
+  )
+}
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : pluralForm}`
@@ -40,13 +72,15 @@ function formatTranslatedActionPlan(
 }
 
 function buildDeletionGovernanceMessage(opts: { taskId: string; retryStep: string }): string {
+  const taskCreateName = taskCreateToolName()
+  const taskUpdateName = taskUpdateToolName()
   return (
     `STOP. Do not delete task #${opts.taskId} yet.\n\n` +
     "Keep current work and follow-up work visible before removing this task.\n\n" +
     formatTranslatedActionPlan(
       [
         `Decide whether task #${opts.taskId} still represents real work. If it does, keep it and update it instead of deleting it.`,
-        "If the task is stale or duplicate, use TaskCreate or TaskUpdate to make the real current work and next follow-up work visible before retrying deletion.",
+        `If the task is stale or duplicate, use ${taskCreateName} or ${taskUpdateName} to make the real current work and next follow-up work visible before retrying deletion.`,
         opts.retryStep,
       ],
       { taskListFirst: true }
@@ -170,6 +204,8 @@ export type TaskGovernanceMessageRequest =
     }
 
 export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest): string {
+  const taskCreateName = taskCreateToolName()
+  const taskUpdateName = taskUpdateToolName()
   switch (request.kind) {
     case "prior-session-tasks":
       return (
@@ -179,7 +215,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         formatTranslatedActionPlan(
           [
             `If the work is already done, mark the prior tasks complete:\n${request.completeExamples}`,
-            "If the work is still needed, use TaskCreate to re-create these tasks and mark the current one in_progress.",
+            `If the work is still needed, use ${taskCreateName} to re-create these tasks and mark the current one in_progress.`,
             retryAfterTaskList(request.toolName),
           ],
           { taskListFirst: true }
@@ -194,7 +230,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         `  • At least ${request.thresholds.minPending} pending task for the next intended step\n\n` +
         formatTranslatedActionPlan(
           [
-            `If TaskList still shows no incomplete work, use TaskCreate to add at least ${request.thresholds.minIncomplete} tasks — one current-work task and at least one pending next step.`,
+            `If TaskList still shows no incomplete work, use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} tasks — one current-work task and at least one pending next step.`,
             "Include a concrete description of the current work and next step.",
             retryAfterTaskList(request.toolName),
           ],
@@ -209,7 +245,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         `You have finished all planned work, but new tool calls require active tasks.\n\n` +
         formatTranslatedActionPlan(
           [
-            `Use TaskCreate to add at least ${request.thresholds.minIncomplete} task(s) ` +
+            `Use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} task(s) ` +
               `(including at least ${request.thresholds.minPending} pending) before continuing.`,
             retryAfterTaskList(request.toolName),
           ],
@@ -224,7 +260,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         `${request.incompleteTaskList ? `Current incomplete tasks:\n${request.incompleteTaskList}\n\n` : ""}` +
         formatTranslatedActionPlan(
           [
-            "Use TaskCreate or TaskUpdate to make the real current work and the next follow-up work visible.",
+            `Use ${taskCreateName} or ${taskUpdateName} to make the real current work and the next follow-up work visible.`,
             retryAfterTaskList(request.toolName),
           ],
           { taskListFirst: true }
@@ -241,7 +277,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
             `Reduce in_progress count to ${request.cap} or fewer:`,
             [
               "Record completed tasks only when the work has evidence.",
-              "Use TaskUpdate to move non-active tasks back to pending.",
+              `Use ${taskUpdateName} to move non-active tasks back to pending.`,
             ],
             retryAfterTaskList(request.toolName),
           ],
@@ -257,7 +293,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — direct merges are not permitted.\n\n` +
         formatTranslatedActionPlan(
           [
-            'Use TaskUpdate to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").',
+            `Use ${taskUpdateName} to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").`,
             retryAfterTaskList(request.toolName),
           ],
           { taskListFirst: true }
@@ -298,7 +334,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         formatTranslatedActionPlan(
           [
             "Pick the duplicate entry that represents the real current work.",
-            "Use TaskUpdate to rename the other duplicate, or cancel it if it is not real work.",
+            `Use ${taskUpdateName} to rename the other duplicate, or cancel it if it is not real work.`,
             retryAfterTaskList(request.toolName),
           ],
           { taskListFirst: true }
@@ -312,8 +348,8 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         `Task #${request.collisionId} already covers that work.\n\n` +
         formatTranslatedActionPlan(
           [
-            `Use TaskUpdate on #${request.collisionId} if that task needs a different status, subject, or description.`,
-            "Use a different TaskCreate subject only if this is genuinely separate work.",
+            `Use ${taskUpdateName} on #${request.collisionId} if that task needs a different status, subject, or description.`,
+            `Use a different ${taskCreateName} subject only if this is genuinely separate work.`,
           ],
           { taskListFirst: true }
         )
@@ -321,7 +357,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "duplicate-subject-update":
       return (
-        `STOP. That TaskUpdate would leave task #${request.taskId} with a duplicate active subject.\n\n` +
+        `STOP. That ${taskUpdateName} would leave task #${request.taskId} with a duplicate active subject.\n\n` +
         formatTranslatedActionPlan(
           [
             "Give one duplicate a unique subject that names distinct work.",
@@ -364,7 +400,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         "Keep current and follow-up work visible before closing this task.\n\n" +
         formatTranslatedActionPlan(
           [
-            "Use TaskCreate or TaskUpdate to make the real current work and next follow-up work visible before completing this task.",
+            `Use ${taskCreateName} or ${taskUpdateName} to make the real current work and next follow-up work visible before completing this task.`,
             "Retry completion only after TaskList shows the planning buffer is healthy and the task has concrete evidence.",
           ],
           { taskListFirst: true }
@@ -381,7 +417,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
             "Resolve or park the in_progress tasks that are no longer active:",
             [
               "Record completed work only when it has evidence.",
-              "Use TaskUpdate to move non-active tasks back to pending.",
+              `Use ${taskUpdateName} to move non-active tasks back to pending.`,
             ],
             `Retry adopting task #${request.taskId} as active work only after TaskList shows focus has been restored.`,
           ],
@@ -397,7 +433,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         formatTranslatedActionPlan(
           [
             TASKLIST_STABILITY_STEP,
-            "Use the task tool to reflect the task you are genuinely working on now.",
+            `Use ${taskUpdateName} to reflect the task you are genuinely working on now.`,
             "Move this task to active status before making implementation or verification changes.",
             "Perform the implementation or verification work described by the task.",
             "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
@@ -431,7 +467,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         formatTranslatedActionPlan(
           [
             "Pick the duplicate entry that represents the real current work.",
-            "Use TaskUpdate to give the other duplicate a unique subject, or cancel it if it is not real work.",
+            `Use ${taskUpdateName} to give the other duplicate a unique subject, or cancel it if it is not real work.`,
             `${TASKLIST_CONFIRM_STEP} Continue after each active subject appears once.`,
           ],
           { confirm: false }
@@ -503,6 +539,14 @@ export function buildTaskListBeforeStopMessage(): string {
   )
 }
 
+const TASK_APPROACH_MESSAGE = taskApproachMessage()
+
+export const SWIZ_TASKS_FILES_DENY_MESSAGE =
+  "STOP. Do not edit `.claude/tasks` files directly.\n\n" +
+  `${TASK_APPROACH_MESSAGE}\n\n` +
+  "Banned approach: `Edit`, `Write`, or `Bash` on `.claude/tasks/**` files.\n" +
+  "Use the native task tools instead of touching task state storage files."
+
 export function buildCountSummary(counts: {
   total: number
   incomplete: number
@@ -573,13 +617,10 @@ export function formatIncompleteReason(taskDetails: string[]): string {
 }
 
 export const SWIZ_TASKS_CLI_DENY_MESSAGE =
-  "Do not use the task management CLI from this session.\n\n" +
-  "We should use native task tools only:\n" +
-  "  - TaskCreate - new tasks\n" +
-  "  - TaskUpdate - status, subject, description, and marking completed\n" +
-  "  - TaskList / TaskGet - query tasks\n\n" +
-  "Keep task work in the native task tools so the next step stays visible.\n\n" +
-  "The only task management CLI subcommand still allowed here is `adopt` (orphan recovery after compaction)."
+  "STOP. Do not use direct task-management CLI calls from this session.\n\n" +
+  `${TASK_APPROACH_MESSAGE}\n\n` +
+  "Banned approach: `swiz tasks <subcommand>` for all subcommands except `swiz tasks adopt` (including `--recovered`).\n\n" +
+  "Keep task state in the native task flow so planning stays accurate and auditable."
 
 export function buildPendingCompletionTransitionMessage(taskId: string): string {
   return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId })

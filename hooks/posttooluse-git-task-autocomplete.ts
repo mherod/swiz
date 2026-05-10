@@ -20,6 +20,7 @@ import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { applyTaskUpdateEvent, warnInvalidTransition } from "../src/tasks/task-event-state.ts"
+import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
 import {
   applyCacheTaskUpdate,
   getSessionTasksDir,
@@ -36,7 +37,6 @@ import {
   isTerminalTaskStatus,
   resolveSafeSessionId,
   stripHeredocs,
-  toolNameForCurrentAgent,
 } from "../src/utils/hook-utils.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
@@ -84,7 +84,7 @@ async function completeTasks(
 }
 
 async function buildPushContext(sessionId: string, cwd: string): Promise<string> {
-  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskCreateName = getTaskToolName("TaskCreate")
   const settings = await readSwizSettings()
   const projectSettings = await readProjectSettings(cwd)
   const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)

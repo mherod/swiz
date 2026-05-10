@@ -33,6 +33,7 @@ import {
   type ToolHookInput,
 } from "../schemas.ts"
 import { skillAdvice, skillExists } from "../skill-utils.ts"
+import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
   GH_CMD_RE,
@@ -52,6 +53,7 @@ import {
   hsoPreToolUseDeny,
 } from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
+export { getTaskToolName }
 
 // Re-export skillAdvice for backward compatibility with existing hooks.
 // New code should import directly from skill-utils.ts.
@@ -579,6 +581,7 @@ async function suggestNextStep(cwd?: string): Promise<string> {
 }
 
 export async function buildLastTaskStandingDenial(taskId: string, cwd?: string): Promise<string> {
+  const taskCreateName = getTaskToolName("TaskCreate")
   const suggestion = await suggestNextStep(cwd)
   return (
     `STOP. Completing task #${taskId} would leave zero incomplete tasks.\n\n` +
@@ -586,7 +589,7 @@ export async function buildLastTaskStandingDenial(taskId: string, cwd?: string):
     `Before completing this task, plan your next steps:\n\n` +
     formatActionPlan(
       [
-        `Use TaskCreate to add at least one pending task for the next logical step (e.g. "${suggestion}").`,
+        `Use ${taskCreateName} to add at least one pending task for the next logical step (e.g. "${suggestion}").`,
         "Then retry this completion — it will succeed once a pending task exists.",
       ],
       { translateToolNames: true }

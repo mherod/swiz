@@ -27,6 +27,12 @@ import {
   readSwizSettings,
 } from "../src/settings.ts"
 import {
+  isBlockedSwizTaskFilesCommand,
+  isBlockedSwizTasksCliCommand,
+  isBlockedTaskFilePath,
+  SWIZ_TASKS_CLI_DENY_MESSAGE,
+} from "../src/tasks/task-cli-governance.ts"
+import {
   applyTaskUpdateEvent,
   needsReconciliation,
   overlayEventState,
@@ -34,7 +40,8 @@ import {
 import {
   buildPendingCompletionTransitionMessage,
   buildTaskGovernanceMessage,
-  SWIZ_TASKS_CLI_DENY_MESSAGE,
+  getTaskToolName,
+  SWIZ_TASKS_FILES_DENY_MESSAGE,
   TASKLIST_CONFIRM_STEP,
   TASKLIST_STABILITY_STEP,
 } from "../src/tasks/task-governance-messages.ts"
@@ -84,7 +91,6 @@ import {
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
-import { shellTokenCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
 
@@ -98,6 +104,14 @@ const GOVERNANCE_THRESHOLDS = {
   relaxed: { minIncomplete: 1, minPending: 0 },
   "local-dev": { minIncomplete: 1, minPending: 0 },
 } as const
+
+function taskUpdateToolName(): string {
+  return getTaskToolName("TaskUpdate")
+}
+
+function taskCreateToolName(): string {
+  return getTaskToolName("TaskCreate")
+}
 
 function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresholds {
   const mode = auditStrictness as keyof typeof GOVERNANCE_THRESHOLDS
@@ -123,7 +137,7 @@ export const taskupdateSchemaHook: SwizToolHook = {
     if (unsupported.length > 0) {
       const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
       const reason =
-        `TaskUpdate received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
+        `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
         `Allowed fields: ${allowed}.`
       return preToolUseDeny(reason)
     }
@@ -241,6 +255,12 @@ function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boo
   if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
   const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
   return MEMORY_MARKDOWN_RE.test(filePath)
+}
+
+function isBlockedTaskFilesEdit(input: Record<string, any>, toolName: string): boolean {
+  if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
+  const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+  return isBlockedTaskFilePath(filePath)
 }
 
 function buildIncompleteTaskSummary(
@@ -457,11 +477,11 @@ async function checkTaskStaleness(
   const staleTaskSteps: (string | string[])[] = [
     "Update existing tasks to reflect current reality:",
     [
-      "Use TaskUpdate to update in-progress tasks with the latest progress.",
+      `Use ${taskUpdateToolName()} to update in-progress tasks with the latest progress.`,
       "Record completed work only when there is concrete evidence.",
       "Ensure the current work has an in_progress task with a clear description.",
     ],
-    "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
+    `Use ${taskCreateToolName()} to create at least one further task for the next concrete step based on the work underway.`,
     stateStep,
   ]
   const stalePlanSteps: (string | string[])[] = [
@@ -878,9 +898,6 @@ export const requireTasksRunAsMainOptions: RunSwizHookAsMainOptions = {
 // § 4. TaskUpdate Completion Governance (CLI enforcement + rate limiting)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SWIZ_TASKS_CLI_RE = shellTokenCommandRe(String.raw`swiz\s+tasks(?:\s|$)`)
-const SWIZ_TASKS_ADOPT_RE = shellTokenCommandRe(String.raw`swiz\s+tasks\s+adopt(?:\s|$)`)
-
 function shouldInspectShellInput(input: {
   tool_name?: string
   _env?: Record<string, string>
@@ -893,12 +910,6 @@ function shouldInspectShellInput(input: {
   // Default to "claude" when neither source identifies an agent.
   const agent = payloadAgent ?? envAgent ?? "claude"
   return agent === "claude"
-}
-
-function isBlockedSwizTasksCliCommand(command: string): boolean {
-  const stripped = stripQuotedShellStrings(command)
-  if (!SWIZ_TASKS_CLI_RE.test(stripped)) return false
-  return !SWIZ_TASKS_ADOPT_RE.test(stripped)
 }
 
 // ─── Sliding-window completion rate limiter ─────────────────────────────────
@@ -1172,6 +1183,10 @@ async function runSwizTasksEnforcement(input: Record<string, any>): Promise<Swiz
   const sessionId = String(input.session_id ?? "")
   const cwd = (input.cwd as string) ?? undefined
 
+  if (isBlockedSwizTaskFilesCommand(command)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
+
   if (!isBlockedSwizTasksCliCommand(command)) {
     return preToolUseAllow("")
   }
@@ -1249,7 +1264,7 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
     if (unsupported.length > 0) {
       const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
       return preToolUseDeny(
-        `TaskUpdate received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
+        `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
           `Allowed fields: ${allowed}.`
       )
     }
@@ -1289,6 +1304,10 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
     if (!(await isTaskEnforcementProject(cwd))) return {}
 
     const transcriptPath: string = (input.transcript_path as string) ?? ""
+
+    if (isBlockedTaskFilesEdit(input, toolName)) {
+      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    }
 
     // CLI enforcement runs first for shell tools (catches `swiz tasks` misuse)
     if (shouldInspectShellInput(parsed)) {

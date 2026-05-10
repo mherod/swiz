@@ -8,6 +8,7 @@ import { getHomeDirWithFallback } from "../src/home.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
+import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
 import {
   findPriorSessionTasks,
   formatNativeTaskCompleteCommand,
@@ -164,6 +165,7 @@ async function reconcileSnapshotTasks(
 }
 
 function buildIncompleteTaskSection(tasks: SessionTask[]): string {
+  const taskUpdateName = getTaskToolName("TaskUpdate")
   return (
     `This session has ${tasks.length} incomplete task(s) that survived compaction:\n` +
     formatTaskList(tasks, {
@@ -171,7 +173,7 @@ function buildIncompleteTaskSection(tasks: SessionTask[]): string {
       overflowLabel: "incomplete task(s)",
       subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
     }) +
-    `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
+    `\n\nIMPORTANT: Complete or update these tasks using ${taskUpdateName} — do NOT create new tasks ` +
     `for the same work. Every task in this session must be completed before stopping. ` +
     `If the work described by a task is already done, mark it completed immediately.`
   )

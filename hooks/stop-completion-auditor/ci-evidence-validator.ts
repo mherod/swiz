@@ -8,6 +8,7 @@
 
 import { readdir } from "node:fs/promises"
 import { dirname } from "node:path"
+import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import type { SessionTask } from "../../src/tasks/task-recovery.ts"
 import {
   computeTranscriptSummary,
@@ -96,8 +97,7 @@ function buildCiEvidenceBlockPlan(): ActionPlanItem[] {
       priority: 2,
     },
     {
-      description:
-        "Mark the task completed via TaskUpdate (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>",
+      description: `Mark the task completed via ${getTaskToolName("TaskUpdate")} (status completed), recording evidence such as: note:CI green — conclusion: success, run <run-id>`,
       priority: 3,
     },
   ]

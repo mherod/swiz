@@ -4,6 +4,11 @@ import { DIM, RESET } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { PROJECT_STATES } from "../settings.ts"
 import { readAuditLog } from "../tasks/task-audit-verification.ts"
+import {
+  isBlockedSwizTasksSubcommand,
+  SWIZ_TASKS_CLI_DENY_MESSAGE,
+} from "../tasks/task-cli-governance.ts"
+import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
 import {
@@ -625,13 +630,15 @@ async function runRepairTasks(rest: string[]): Promise<void> {
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   TaskCreate: (rest) => {
+    const taskCreateName = getTaskToolName("TaskCreate")
     console.log(
-      `  ${DIM}Note: "TaskCreate" is a native tool. Use "swiz tasks create" for CLI usage.${RESET}\n`
+      `  ${DIM}Note: "${taskCreateName}" is a native tool. Use "swiz tasks create" for CLI usage.${RESET}\n`
     )
     return runCreateTask(rest)
   },
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
   TaskUpdate: (rest, filterCwd) => {
+    const taskUpdateName = getTaskToolName("TaskUpdate")
     // Determine if it's a completion (TaskUpdate status: completed) or general update
     const statusFlag = extractFlag(rest, "--status")
     const filteredRest = rest.filter((arg, i) => {
@@ -641,12 +648,12 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
     })
     if (statusFlag === "completed") {
       console.log(
-        `  ${DIM}Note: "TaskUpdate --status completed" is a native tool call. Use "swiz tasks complete" for CLI usage.${RESET}\n`
+        `  ${DIM}Note: "${taskUpdateName} --status completed" is a native tool call. Use "swiz tasks complete" for CLI usage.${RESET}\n`
       )
       return runCompleteTask(filteredRest, filterCwd)
     }
     console.log(
-      `  ${DIM}Note: "TaskUpdate" is a native tool. Use "swiz tasks update" for CLI usage.${RESET}\n`
+      `  ${DIM}Note: "${taskUpdateName}" is a native tool. Use "swiz tasks update" for CLI usage.${RESET}\n`
     )
     return runUpdateTask(filteredRest, filterCwd)
   },
@@ -662,9 +669,6 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
 
 // ─── Native-tool guard (Claude/Codex) ────────────────────────────────────────
 
-/** Subcommands with no native equivalent — only these may run via CLI inside Claude/Codex. */
-const NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS = new Set(["adopt", "repair", "TaskCreate", "TaskUpdate"])
-
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()
   if (!agent) return
@@ -675,18 +679,14 @@ function enforceNativeTaskTools(subcommand: string | undefined): void {
   if (!agent.tasksEnabled) return
   if (agent.id !== "claude") return
 
-  if (subcommand && NATIVE_TASK_TOOL_EXEMPT_SUBCOMMANDS.has(subcommand)) return
+  if (!isBlockedSwizTasksSubcommand(subcommand)) return
 
   const agentName = agent.name
   const hint = subcommand
     ? `"swiz tasks ${subcommand}" is not available inside ${agentName}.`
     : `"swiz tasks" (list) is not available inside ${agentName}.`
 
-  throw new Error(
-    `${hint}\n` +
-      "Use native task tools instead: TaskCreate, TaskUpdate, TaskList, TaskGet.\n" +
-      `Only "swiz tasks adopt" is allowed via CLI (orphan recovery after compaction).`
-  )
+  throw new Error(`${hint}\n${SWIZ_TASKS_CLI_DENY_MESSAGE}`)
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────

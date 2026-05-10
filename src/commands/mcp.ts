@@ -12,6 +12,7 @@ import { dirname } from "node:path"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { readTasks } from "../tasks/task-repository.ts"
 import {
   completeTaskWithAutoTransition,
@@ -443,8 +444,9 @@ async function serve(): Promise<void> {
         }
       } catch (err) {
         const message = messageFromUnknownError(err)
+        const taskCreateName = getTaskToolName("TaskCreate")
         return {
-          content: [{ type: "text" as const, text: `TaskCreate failed: ${message}` }],
+          content: [{ type: "text" as const, text: `${taskCreateName} failed: ${message}` }],
           isError: true,
         }
       }
@@ -499,10 +501,11 @@ async function serve(): Promise<void> {
         const projectKey = projectKeyFromCwd(cwd)
         const allTasks = await readTasks(projectKey)
         const task = allTasks.find((t) => t.id === taskId)
+        const taskUpdateName = getTaskToolName("TaskUpdate")
         if (!task) {
           return {
             content: [
-              { type: "text" as const, text: `TaskUpdate failed: task ${taskId} not found` },
+              { type: "text" as const, text: `${taskUpdateName} failed: task ${taskId} not found` },
             ],
             isError: true,
           }
@@ -566,8 +569,9 @@ async function serve(): Promise<void> {
         }
       } catch (err) {
         const message = messageFromUnknownError(err)
+        const taskUpdateName = getTaskToolName("TaskUpdate")
         return {
-          content: [{ type: "text" as const, text: `TaskUpdate failed: ${message}` }],
+          content: [{ type: "text" as const, text: `${taskUpdateName} failed: ${message}` }],
           isError: true,
         }
       }

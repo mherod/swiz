@@ -11,7 +11,8 @@ import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { preToolUseDeny, toolNameForCurrentAgent } from "../src/utils/hook-utils.ts"
+import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
+import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const delegationPatterns = [
   /\bTaskCreate\b/,
@@ -34,7 +35,7 @@ export function evaluatePretooluseNoTaskDelegation(input: unknown): SwizHookOutp
     return {}
   }
 
-  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskCreateName = getTaskToolName("TaskCreate")
   // language=Markdown
   return preToolUseDeny(
     `NEVER delegate task creation to a subagent.

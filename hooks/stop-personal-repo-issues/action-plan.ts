@@ -3,6 +3,7 @@ import {
   NEEDS_REFINEMENT_NORM,
   normaliseLabel,
 } from "../../src/issue-refinement.ts"
+import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import { type ActionPlanItem, formatActionPlan, skillExists } from "../../src/utils/hook-utils.ts"
 import { MAX_SHOWN_ISSUES, REVIEWABLE_BLOCK_NORM } from "./constants.ts"
 import { planSectionOrderForProjectState, statePriorityHint } from "./project-state.ts"
@@ -61,7 +62,7 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   subSteps.push(
     `Claim ownership: gh issue edit ${issueNum} --add-assignee @me`,
     "Verify branch starting point: git branch --show-current (must be main), git pull --rebase --autostash",
-    `Plan with TaskCreate before touching any code for issue #${issueNum}`,
+    `Plan with ${getTaskToolName("TaskCreate")} before touching any code for issue #${issueNum}`,
     `Check for blockers on #${issueNum}: inspect labels and body for blocked/depends-on references`,
     "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --concurrent",
     `Resolve: swiz issue resolve ${issueNum} --body "<evidence>"`

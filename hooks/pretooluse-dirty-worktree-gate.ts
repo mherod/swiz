@@ -17,6 +17,7 @@ import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   expandSkillReferences,
   getGitStatusV2,
+  getTaskToolName,
   git,
   isGitRepo,
   mergeActionPlanIntoTasks,
@@ -93,7 +94,7 @@ export async function evaluatePretooluseDirtyWorktreeGate(
       "Use /commit skill to commit current changes",
       'Run: git add . && git commit -m "wip: checkpoint"'
     ),
-    "Retry this TaskUpdate after commit",
+    `Retry this ${getTaskToolName("TaskUpdate")} after commit`,
   ])
 
   if (input.session_id) {

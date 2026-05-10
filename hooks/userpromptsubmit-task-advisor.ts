@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Inject task-creation context on every prompt.
 
-import { agentHasTaskToolsForHookPayload, toolNameForCurrentAgent } from "../src/agent-paths.ts"
+import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import {
   buildContextHookOutput,
@@ -10,7 +10,10 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
-import { buildUserPromptTaskContext } from "../src/tasks/task-governance-messages.ts"
+import {
+  buildUserPromptTaskContext,
+  getTaskToolName,
+} from "../src/tasks/task-governance-messages.ts"
 import { isIncompleteTaskStatus, readSessionTasks } from "../src/tasks/task-recovery.ts"
 
 export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promise<SwizHookOutput> {
@@ -26,7 +29,7 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
   const tasks = await readSessionTasks(sessionId, home)
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
-  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskCreateName = getTaskToolName("TaskCreate")
   const additionalContext = buildUserPromptTaskContext(pendingCount, taskCreateName)
 
   return buildContextHookOutput("UserPromptSubmit", additionalContext)

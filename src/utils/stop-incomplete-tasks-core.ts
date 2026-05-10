@@ -15,6 +15,7 @@ import { formatActionPlan } from "../action-plan.ts"
 import type { HookOutput } from "../schemas.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { warnInvalidTransition } from "../tasks/task-event-state.ts"
+import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import {
   getSessionTasksDir,
   hasSessionTasksDir,
@@ -199,7 +200,7 @@ export async function checkIncompleteTasks(
     formatActionPlan(
       [
         ...incompleteDetails,
-        "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
+        `If the work is already done, use ${getTaskToolName("TaskUpdate")} to mark each current-session task as completed.`,
         "If the work is still needed, complete it before stopping.",
       ],
       {

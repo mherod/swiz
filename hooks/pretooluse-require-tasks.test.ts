@@ -725,6 +725,58 @@ describe("pretooluse-require-tasks", () => {
     })
   })
 
+  test("denies Edit when targeting .claude/tasks even when tasks exist", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-task-directory-edit"
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active work",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Follow-up",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: join(homeDir, ".claude", "tasks", sessionId, "1.json"),
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason ?? "").toContain(".claude/tasks")
+    expect(result.reason ?? "").toContain("Allowed approaches")
+    expect(result.reason ?? "").toContain("Banned approach")
+  })
+
+  test("denies Bash when command targets .claude/tasks", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-task-directory-bash"
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active work",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Follow-up",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+      command: "printf 'ok' > ~/.claude/tasks/session-task-directory-bash/1.json",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason ?? "").toContain(".claude/tasks")
+    expect(result.reason ?? "").toContain("Allowed approaches")
+    expect(result.reason ?? "").toContain("Banned approach")
+  })
+
   describe("git repo + CLAUDE.md guard", () => {
     test("allows Bash when cwd is not a git repo (no tasks required)", async () => {
       const homeDir = await createTempHome()

@@ -437,9 +437,8 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("blocked")
   })
 
-  test("falls back to canonical TaskCreate name when current agent has no alias (codex)", async () => {
-    // Codex tasksEnabled=false and has no Task* aliases (#570).
-    // toolNameForCurrentAgent("TaskCreate") falls through to the canonical name.
+  test("uses translated task tool name when current agent is Codex", async () => {
+    // Codex uses update_plan for task planning in this workflow.
     const tmp = await createTempDir()
     const transcript = await createTranscript(tmp, ["Read", "Glob", "Read"])
     const r = await runHook(
@@ -449,7 +448,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     )
     expect(r.exitCode).toBe(0)
     const sysMsg = (r.json?.systemMessage as string) ?? ""
-    expect(sysMsg).toContain("TaskCreate required")
+    expect(sysMsg).toContain("update_plan required")
   })
 
   test("no output for small transcript (below threshold)", async () => {

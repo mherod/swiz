@@ -6,6 +6,7 @@
  */
 
 import { agentHasTaskTools } from "../../src/agent-paths.ts"
+import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
@@ -26,11 +27,11 @@ export async function validateTaskCreation(ctx: CompletionAuditContext): Promise
   if (ctx.toolCallCount < TOOL_CALL_THRESHOLD) {
     const planSteps: ActionPlanItem[] = [
       {
-        description: "Use TaskCreate to create one task for each significant piece of work",
+        description: `Use ${getTaskToolName("TaskCreate")} to create one task for each significant piece of work`,
         priority: 1,
       },
       {
-        description: "Use TaskUpdate to mark each task completed after recording the work",
+        description: `Use ${getTaskToolName("TaskUpdate")} to mark each task completed after recording the work`,
         priority: 2,
       },
     ]

@@ -10,6 +10,7 @@ import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   buildTaskAdvisorStalenessMessage,
   buildTaskCreationCountdownMessage,
+  getTaskToolName,
 } from "../src/tasks/task-governance-messages.ts"
 import {
   buildContextHookOutput,
@@ -17,7 +18,6 @@ import {
   isEditTool,
   isWriteTool,
   scheduleAutoSteer,
-  toolNameForCurrentAgent,
 } from "../src/utils/hook-utils.ts"
 
 const CREATION_THRESHOLD = 5
@@ -67,7 +67,7 @@ export async function evaluatePosttooluseTaskAdvisor(input: unknown): Promise<Sw
   advisorCwd = parsed.cwd
 
   const { totalToolCalls, callsSinceLastTaskTool } = await getCurrentSessionTaskToolStats(hookRaw)
-  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskCreateName = getTaskToolName("TaskCreate")
 
   if (callsSinceLastTaskTool >= totalToolCalls) {
     return await emitCreationCountdown(totalToolCalls, CREATION_THRESHOLD, taskCreateName)
