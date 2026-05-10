@@ -13,6 +13,7 @@ import {
   assertDispatchInboundNotParseError,
   assertNormalizedDispatchPayload,
   backfillPayloadDefaults,
+  coerceDispatchAgentEnvelopeInPlace,
   DISPATCH_ROUTES,
   didWriteDispatchResponse,
   formatTrace,
@@ -30,6 +31,8 @@ import {
   withLogBuffer,
 } from "../dispatch"
 import { writeIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
+import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
+import { isGitRepo } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
@@ -394,6 +397,31 @@ async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
   return true
 }
 
+/** Non-git directories shouldn't run hooks (not a project target); return allow quickly. */
+async function tryNonGitFastPath(timing: DispatchTiming, hookEventName: string): Promise<boolean> {
+  if (await isGitRepo(timing.cwd)) return false
+
+  log(`   ⏱ cli:fastpath-non-git: skip hooks (no .git in cwd)`)
+
+  if (isStopLikeEvent(timing.canonicalEvent)) {
+    const response: Record<string, any> = {}
+    normalizeStopDispatchResponseInPlace(response, hookEventName)
+    coerceDispatchAgentEnvelopeInPlace(response, timing.canonicalEvent, hookEventName)
+    process.stdout.write(`${JSON.stringify(response)}\n`)
+    markDispatchResponseWritten()
+  }
+
+  const totalMs = Math.round(performance.now() - timing.t0)
+  log(`   ⏱ cli:total: ${totalMs}ms (fastpath non-git)`)
+  void appendCliTimingLog({
+    ...timing,
+    totalMs,
+    daemonMs: 0,
+    route: "local",
+  })
+  return true
+}
+
 // ─── Dispatch callback ─────────────────────────────────────────────────────
 
 async function runDispatch(canonicalEvent: string, hookEventName: string): Promise<void> {
@@ -458,6 +486,8 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   if (canonicalEvent === "stop" && sessionId) {
     payload._fastPathTaskScanComplete = true
   }
+  // ── Fast path: skip hook execution in non-git directories ──
+  if (await tryNonGitFastPath(timing, hookEventName)) return
 
   // ── Try daemon first, fall back to local execution ──
   const tDaemon = performance.now()
