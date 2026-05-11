@@ -5,7 +5,7 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains executable as a subprocess.
 
 import { stat } from "node:fs/promises"
-import { basename, dirname } from "node:path"
+import { basename, dirname, join } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
@@ -15,8 +15,10 @@ import {
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
 
-const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs)$/
-const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__/
+const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/
+const TEST_FILE_RE =
+  /(?:^|[\\/])(?:__tests__|tests?)(?:[\\/]|$)|\.(?:test|spec)\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/
+const TEST_DIRECTORIES = ["__tests__", "test", "tests"] as const
 const COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
 async function findSiblingTest(file: string): Promise<string | undefined> {
@@ -28,12 +30,17 @@ async function findSiblingTest(file: string): Promise<string | undefined> {
   const candidates = [
     `${base}.test.${ext}`,
     `${base}.spec.${ext}`,
-    `${dir}/__tests__/${name}.test.${ext}`,
-    `${dir}/__tests__/${name}.spec.${ext}`,
+    ...TEST_DIRECTORIES.flatMap((testDir) => [
+      join(dir, testDir, `${name}.test.${ext}`),
+      join(dir, testDir, `${name}.spec.${ext}`),
+      join(dir, testDir, `${name}.${ext}`),
+    ]),
   ]
 
   for (const candidate of candidates) {
-    if (await Bun.file(candidate).exists()) return candidate
+    if ((await Bun.file(candidate).exists()) && (await isTestFileStale(candidate))) {
+      return candidate
+    }
   }
   return undefined
 }
@@ -65,7 +72,6 @@ export async function evaluatePosttooluseTestPairing(
 
   const foundTest = await findSiblingTest(file)
   if (!foundTest) return {}
-  if (!(await isTestFileStale(foundTest))) return {}
 
   const message = `Test file exists for this source file: ${foundTest} _ check if it needs updating to reflect your changes.`
   const sessionId = (parsed.session_id as string) ?? ""
