@@ -145,10 +145,22 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(hso?.permissionDecision).toBe("allow")
   })
 
-  test("allows edits within ~/.claude/projects/ (auto-memory)", async () => {
+  test("blocks edits within hidden home-directory paths", async () => {
     const cwd = await createTempDir()
     // Use a known fakeHome so we can construct the expected allowed path.
     const fakeHome = await createTempDir()
+    const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
+    const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+    const msg = String(hso?.permissionDecisionReason)
+    expect(msg).toContain("Hidden home-directory edits are blocked")
+  })
+
+  test("allows hidden home-directory edits when dispatch is inside that hidden root", async () => {
+    const fakeHome = await createTempDir()
+    const cwd = join(fakeHome, ".claude")
     const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
     const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
     expect(result.exitCode).toBe(0)

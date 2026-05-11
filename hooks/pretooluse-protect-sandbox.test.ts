@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { runBashHook, runFileEditHook } from "../src/utils/test-utils.ts"
 import { isSandboxDisableCommand, isTrunkModeDisableCommand } from "./pretooluse-protect-sandbox.ts"
 
@@ -63,6 +65,16 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
   test("allows unrelated shell commands", async () => {
     const result = await runBashHook(HOOK, "git status")
     expect(result.decision).toBeUndefined()
+  })
+
+  test("blocks shell commands that reference hidden home paths with absolute paths", async () => {
+    const result = await runBashHook(HOOK, `cat ${join(homedir(), ".swiz", "settings.json")}`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks shell commands that reference hidden home paths with relative paths", async () => {
+    const result = await runBashHook(HOOK, "cat .swiz/settings.json", { cwd: homedir() })
+    expect(result.decision).toBe("deny")
   })
 })
 

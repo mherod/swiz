@@ -6,9 +6,8 @@
 // Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, dirname, join, resolve } from "node:path"
+import { dirname } from "node:path"
 import { git, isGitHubHost, isGitRepo, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
@@ -18,47 +17,13 @@ import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
-
-/**
- * Resolve the canonical (real) path for any path, whether or not it exists.
- *
- * Algorithm:
- *   1. Attempt fs.realpath() on the full path — succeeds for existing paths,
- *      following every symlink in the chain recursively (handles chained symlinks).
- *   2. If the path doesn't exist, walk up to the nearest existing ancestor,
- *      realpath() that ancestor, then re-append the remaining segments.
- *
- * This ensures ALL path comparisons operate in a consistent canonical namespace,
- * preventing bypass via:
- *   - Chained symlinks  (link1→link2→/outside): realpath() follows every hop
- *   - Symlinks in allowed roots (tmpdir→/private/tmp on macOS): all roots use
- *     the same resolution so isWithin() comparisons are always apples-to-apples
- *   - New-file creation through a symlink dir (cwd/link/new.ts where link→/etc):
- *     realpath(cwd/link) resolves to /etc before the non-existent file segment
- */
-async function resolveCanonical(p: string): Promise<string> {
-  const absolute = resolve(p)
-  try {
-    return await realpath(absolute)
-  } catch {
-    let dir = dirname(absolute)
-    let rest = basename(absolute)
-    while (dir !== dirname(dir)) {
-      try {
-        const realDir = await realpath(dir)
-        return join(realDir, rest)
-      } catch {
-        rest = join(basename(dir), rest)
-        dir = dirname(dir)
-      }
-    }
-    return absolute
-  }
-}
+import { isHiddenTopLevelHomePath, resolveCanonical } from "./sandbox-path-utils.ts"
 
 function isWithin(parent: string, child: string): boolean {
-  const prefix = parent.endsWith("/") ? parent : `${parent}/`
-  return child === parent || child.startsWith(prefix)
+  const normalizedParent = parent.replace(/\\/g, "/")
+  const normalizedChild = child.replace(/\\/g, "/")
+  const prefix = normalizedParent.endsWith("/") ? normalizedParent : `${normalizedParent}/`
+  return normalizedChild === normalizedParent || normalizedChild.startsWith(prefix)
 }
 
 /**
@@ -120,16 +85,7 @@ async function checkAllowedRoots(target: string, cwd: string): Promise<SwizHookO
   const tmp = await resolveCanonical(tmpdir())
   const tmpLiteral = await resolveCanonical("/tmp")
 
-  // ~/.claude/projects/ is always allowed: Claude Code stores per-project
-  // auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
-  // deadlock with the memory-enforcement hook.
-  // resolveCanonical walks up to HOME (which exists) when .claude/projects
-  // hasn't been created yet, ensuring the prefix always matches the target's
-  // canonical form.
-  const homeDir = getHomeDirOrNull()
-  const claudeProjectsDir = homeDir ? await resolveCanonical(`${homeDir}/.claude/projects`) : null
-
-  const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
+  const allowedRoots = [cwd, tmp, tmpLiteral]
 
   if (allowedRoots.some((root) => isWithin(root, target))) {
     return preToolUseAllow(
@@ -141,41 +97,32 @@ async function checkAllowedRoots(target: string, cwd: string): Promise<SwizHookO
 }
 
 /**
- * Checks if the target path is a well-known home-directory config file.
+ * Checks if the target path is a hidden top-level home-directory path.
+ * Hidden paths are blocked unless the dispatch was launched from that same
+ * hidden root (or a child of it).
  */
-async function checkWellKnownConfig(target: string): Promise<SwizHookOutput | null> {
+async function checkHiddenHomePath(target: string, cwd: string): Promise<SwizHookOutput | null> {
   const homeDir = getHomeDirOrNull()
   if (!homeDir) return null
+  const canonicalHome = await resolveCanonical(homeDir)
+  if (!isHiddenTopLevelHomePath(target, canonicalHome)) return null
 
-  // Well-known home-dir config files that workflows legitimately need to modify
-  // (e.g. `~/.npmrc` for npm auth). These are allowed individually to keep the
-  // sandbox tight — full home-dir access is NOT granted.
-  // See: https://github.com/mherod/swiz/issues/421
-  const WELL_KNOWN_CONFIG_FILES = [
-    ".npmrc",
-    ".yarnrc",
-    ".yarnrc.yml",
-    ".gitconfig",
-    ".gemrc",
-    ".curlrc",
-    ".wgetrc",
-    ".netrc",
-    ".docker/config.json",
-    ".config/gh/config.yml",
-    ".ssh/config",
-    ".ssh/known_hosts",
-  ]
+  const normalizedTarget = target.replace(/\\/g, "/")
+  const normalizedHome = canonicalHome.replace(/\\/g, "/").replace(/\/$/, "")
+  const hiddenRoot = `${normalizedHome}/${normalizedTarget.slice(normalizedHome.length + 1).split("/")[0]}`
+  if (isWithin(hiddenRoot, cwd)) return null
 
-  for (const configPath of WELL_KNOWN_CONFIG_FILES) {
-    const canonical = await resolveCanonical(join(homeDir, configPath))
-    if (target === canonical) {
-      return preToolUseAllow(
-        `Continue in scoped-home-config mode: ~/${configPath} is an approved config file.`
-      )
-    }
-  }
-
-  return null
+  return preToolUseDeny(
+    [
+      "Hidden home-directory edits are blocked in sandbox mode.",
+      "",
+      `  Attempted: ${target}`,
+      `  Session cwd: ${cwd}`,
+      "",
+      "You can only edit hidden home-directory paths when the sandbox dispatcher",
+      "is running inside that same hidden root.",
+    ].join("\n")
+  )
 }
 
 /**
@@ -246,13 +193,13 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     const cwd = await resolveCanonical(hookCwd)
     const target = await resolveCanonical(filePath)
 
-    // 3. Check allowed sandbox roots (CWD, tmp, claude projects)
+    // 3. Check for blocked hidden home-directory paths before broad sandbox roots.
+    const hiddenHomePathResult = await checkHiddenHomePath(target, cwd)
+    if (hiddenHomePathResult) return hiddenHomePathResult
+
+    // 4. Check allowed sandbox roots (CWD, tmp)
     const rootsResult = await checkAllowedRoots(target, cwd)
     if (rootsResult) return rootsResult
-
-    // 4. Check well-known home-dir config files
-    const configFilesResult = await checkWellKnownConfig(target)
-    if (configFilesResult) return configFilesResult
 
     // 5. Provide guidance for blocked paths
     const crossRepoHint = await getCrossRepoHint(target, cwd)

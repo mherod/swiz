@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block agent Bash commands that disable sandboxed-edits.
 //
 // The sandbox prevents agents from editing files outside the session project.
@@ -9,10 +10,14 @@
 // Dual-mode: exports a SwizToolHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { homedir } from "node:os"
+import { isAbsolute, join, resolve } from "node:path"
+import { getHomeDirOrNull } from "../src/home.ts"
 import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
+import { isHiddenTopLevelHomePath, resolveCanonical } from "./sandbox-path-utils.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
@@ -33,6 +38,89 @@ const PERSONAL_ISSUES_ALIASES = [
 // and can be used to disable sandbox protections — so we block them unconditionally,
 // exactly as we block `swiz settings disable sandboxed-edits` shell commands.
 const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
+
+function isWithin(parent: string, child: string): boolean {
+  const normalizedParent = parent.replace(/\\/g, "/")
+  const normalizedChild = child.replace(/\\/g, "/")
+  const normalizedPrefix = normalizedParent.endsWith("/")
+    ? normalizedParent
+    : `${normalizedParent}/`
+  return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedPrefix)
+}
+
+async function normalizeShellPath(
+  rawPath: string,
+  cwd: string,
+  homeDir: string
+): Promise<string | null> {
+  if (!rawPath) return null
+
+  let value = rawPath.trim().replace(/^[`"']+|[`"'[]+$/g, "")
+  if (!value) return null
+
+  value = value
+    .replace(/^\$HOME\//, `${homeDir}/`)
+    .replace(/^\$\{HOME\}\//, `${homeDir}/`)
+    .replace(/^\$\(HOME\)\//, `${homeDir}/`)
+
+  if (isAbsolute(value) || value.startsWith("/")) return await resolveCanonical(value)
+  if (value.startsWith("~")) return await resolveCanonical(join(homeDir, value.slice(2)))
+  if (value.startsWith(".") || value === "") return await resolveCanonical(resolve(cwd, value))
+
+  // Relative paths without dot prefix (e.g. `package.json`) stay relative
+  // to the current command cwd, but they cannot point at top-level hidden home
+  // entries, so they are irrelevant for this check.
+  return null
+}
+
+async function isHiddenHomePathInCommand(
+  rawPath: string,
+  cwd: string,
+  homeDir: string
+): Promise<boolean> {
+  const resolved = await normalizeShellPath(rawPath, cwd, homeDir)
+  if (!resolved) return false
+  if (!isHiddenTopLevelHomePath(resolved, homeDir)) return false
+
+  const normalizedCwd = cwd.replace(/\\/g, "/")
+  const normalizedHome = homeDir.replace(/\\/g, "/").replace(/\/$/, "")
+  const normalizedResolved = resolved.replace(/\\/g, "/")
+  const hiddenRoot = `${normalizedHome}/${normalizedResolved.slice(normalizedHome.length + 1).split("/")[0]}`
+
+  return !isWithin(hiddenRoot, normalizedCwd)
+}
+
+async function shouldBlockShellCommand(command: string, cwd: string): Promise<string | null> {
+  const homeDir = getHomeDirOrNull() || homedir()
+  if (!homeDir || !command) return null
+  const canonicalHomeDir = await resolveCanonical(homeDir)
+  const canonicalCwd = await resolveCanonical(cwd)
+
+  const tokens = command.match(/[^\s]+/g) ?? []
+  const seen = new Set<string>()
+
+  for (const rawToken of tokens) {
+    const token = rawToken.replace(/^[[\]{}()]+|[;|&(){};]+$/g, "")
+    if (!token) continue
+    if (token.startsWith("-")) continue
+
+    const assignmentSplit = token.split("=")
+    const candidates = assignmentSplit.length === 2 ? [assignmentSplit[1]!] : [token]
+
+    for (const candidate of candidates) {
+      if (seen.has(candidate)) continue
+      seen.add(candidate)
+      if (!candidate.includes("/") && !candidate.startsWith("~") && !candidate.startsWith("."))
+        continue
+
+      if (await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir)) {
+        return candidate
+      }
+    }
+  }
+
+  return null
+}
 
 /**
  * Returns true when the command attempts to disable the sandboxed-edits setting.
@@ -64,7 +152,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
   matcher: "Bash|Edit|Write|NotebookEdit",
   timeout: 5,
 
-  run(rawInput) {
+  async run(rawInput) {
     const input = rawInput as Record<string, any>
     const toolName: string = (input.tool_name as string) ?? ""
     const toolInput = input.tool_input as Record<string, string> | undefined
@@ -90,6 +178,20 @@ const pretoolUseProtectSandbox: SwizToolHook = {
           "Disabling personalRepoIssuesGate is not permitted from agent Bash commands.\n\n" +
             "This gate can only be disabled by the user directly at the terminal.\n" +
             buildIssueGuidance(null)
+        )
+      }
+
+      const blockedPath = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
+      if (blockedPath) {
+        return preToolUseDeny(
+          [
+            "Hidden home-directory path references in shell commands are blocked under sandbox mode.",
+            "",
+            `  Attempted: ${blockedPath}`,
+            "",
+            "Use shell commands only on paths inside the current dispatch cwd unless that cwd is",
+            "itself that hidden home path.",
+          ].join("\n")
         )
       }
     }

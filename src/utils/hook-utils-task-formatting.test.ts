@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
+import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import {
   formatNativeTaskCompleteCommand,
   formatNativeTaskCompleteCommands,
@@ -72,7 +73,7 @@ describe("task formatting helpers", () => {
 
   test("formatNativeTaskCompleteCommand renders TaskUpdate hint", () => {
     expect(formatNativeTaskCompleteCommand("<id>", "session-123", "note:done")).toBe(
-      'TaskUpdate with taskId "<id>", status "completed", and description including "note:done" ' +
+      `${getTaskToolName("TaskUpdate")} with taskId "<id>", status "completed", and description including "note:done" ` +
         "(task lived under prior session session-123)"
     )
   })
@@ -86,9 +87,9 @@ describe("task formatting helpers", () => {
     )
 
     expect(text).toBe(
-      '  TaskUpdate with taskId "1", status "completed", and description including "note:completed" ' +
+      `  ${getTaskToolName("TaskUpdate")} with taskId "1", status "completed", and description including "note:completed" ` +
         "(task lived under prior session session-123)\n" +
-        '  TaskUpdate with taskId "2", status "completed", and description including "note:completed" ' +
+        `  ${getTaskToolName("TaskUpdate")} with taskId "2", status "completed", and description including "note:completed" ` +
         "(task lived under prior session session-123)"
     )
   })
