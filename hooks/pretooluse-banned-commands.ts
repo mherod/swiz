@@ -47,6 +47,9 @@ const FIND_CMD_RE = shellSegmentCommandRe("find\\s")
 // Read-only awk (stdout extraction, --help, pipelines) is permitted.
 const AWK_REDIRECT_RE = shellSegmentCommandRe("awk\\s[^|;&]*>\\s*\\S")
 const AWK_TEE_INPLACE_RE = /awk\b.*\|\s*tee\s+-i\b/
+const PERL_FILE_READ_RE = shellSegmentCommandRe(
+  "perl\\s+(?:-[^|;&\\s]*[np][^|;&\\s]*\\s+)+[^|;&]*\\S"
+)
 // Only block sed when it writes files in-place (-i flag) or redirects output to a file.
 // Read-only sed (e.g. sed -n '...' file, sed '...' file | ...) is permitted.
 const SED_INPLACE_RE = shellSegmentCommandRe("sed\\s+(?:[^-]|-[^-])*-[a-zA-Z]*i")
@@ -204,6 +207,11 @@ function buildShellToolRules(): Rule[] {
       match: (c) => AWK_REDIRECT_RE.test(c) || AWK_TEE_INPLACE_RE.test(c),
       message:
         "Do not use `awk` to write files. It produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • For data extraction, `awk '{print $1}' file` and `awk --help` are allowed.",
+    },
+    {
+      match: (c) => PERL_FILE_READ_RE.test(c),
+      message:
+        "Do not use `perl` to read files from the shell. Use the Read tool or Glob tool instead.\n\nIf you need a specific slice of a file, use Read with line ranges or read the file and filter it in a later step.",
     },
     {
       match: (c) => SED_INPLACE_RE.test(c) || SED_REDIRECT_RE.test(c),

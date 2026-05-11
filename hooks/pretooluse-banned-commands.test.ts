@@ -49,6 +49,14 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("deny")
     })
 
+    test("perl file reads are blocked", async () => {
+      const result = await runHook(
+        "perl -ne 'print if $.>=1 && $.<=260' apps/main-web/components/age-verification/AgeVerificationFlow.tsx"
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Read tool")
+    })
+
     test("rm is blocked", async () => {
       const result = await runHook("rm -rf node_modules")
       expect(result.decision).toBe("deny")
