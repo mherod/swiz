@@ -12,7 +12,6 @@
 
 import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
-import { getHomeDirOrNull } from "../src/home.ts"
 import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseDeny } from "../src/utils/hook-utils.ts"
@@ -39,6 +38,9 @@ const PERSONAL_ISSUES_ALIASES = [
 // exactly as we block `swiz settings disable sandboxed-edits` shell commands.
 const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
 
+const COMMAND_SUBST_SWIZ_RE = /\$\((?:[^()]+|[\s\S]*?)\)\s*\/\.swiz\/[^\s"'`;|&]*/g
+const BACKTICK_SUBST_SWIZ_RE = /`[^`]*`\s*\/\.swiz\/[^\s"'`;|&]*/g
+
 function isWithin(parent: string, child: string): boolean {
   const normalizedParent = parent.replace(/\\/g, "/")
   const normalizedChild = child.replace(/\\/g, "/")
@@ -55,8 +57,20 @@ async function normalizeShellPath(
 ): Promise<string | null> {
   if (!rawPath) return null
 
-  let value = rawPath.trim().replace(/^[`"']+|[`"'[]+$/g, "")
+  let value = rawPath.trim()
   if (!value) return null
+
+  const commandSubstitutionMatch = value.match(/^\$\(([\s\S]*?)\)(.*)$/)
+  if (commandSubstitutionMatch && /(?:\$\{?HOME\}?|~)/.test(commandSubstitutionMatch[1] ?? "")) {
+    value = `${homeDir}${commandSubstitutionMatch[2] ?? ""}`
+  }
+
+  const backtickSubstitutionMatch = value.match(/^`([\s\S]*?)`(.*)$/)
+  if (backtickSubstitutionMatch && /(?:\$\{?HOME\}?|~)/.test(backtickSubstitutionMatch[1] ?? "")) {
+    value = `${homeDir}${backtickSubstitutionMatch[2] ?? ""}`
+  }
+
+  value = value.replace(/^[`"']+|[`"'`]+$/g, "")
 
   value = value
     .replace(/^\$HOME\//, `${homeDir}/`)
@@ -91,16 +105,21 @@ async function isHiddenHomePathInCommand(
 }
 
 async function shouldBlockShellCommand(command: string, cwd: string): Promise<string | null> {
-  const homeDir = getHomeDirOrNull() || homedir()
+  const homeDir = homedir()
   if (!homeDir || !command) return null
   const canonicalHomeDir = await resolveCanonical(homeDir)
   const canonicalCwd = await resolveCanonical(cwd)
 
   const tokens = command.match(/[^\s]+/g) ?? []
+  const candidates = new Set<string>([
+    ...tokens,
+    ...Array.from(command.matchAll(COMMAND_SUBST_SWIZ_RE)).map((m) => m[0]!),
+    ...Array.from(command.matchAll(BACKTICK_SUBST_SWIZ_RE)).map((m) => m[0]!),
+  ])
   const seen = new Set<string>()
 
-  for (const rawToken of tokens) {
-    const token = rawToken.replace(/^[[\]{}()]+|[;|&(){};]+$/g, "")
+  for (const rawToken of candidates) {
+    const token = rawToken.replace(/^[{}()]+|[;|&(){};]+$/g, "")
     if (!token) continue
     if (token.startsWith("-")) continue
 

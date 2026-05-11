@@ -76,6 +76,16 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     const result = await runBashHook(HOOK, "cat .swiz/settings.json", { cwd: homedir() })
     expect(result.decision).toBe("deny")
   })
+
+  test("blocks shell commands that reference hidden home paths with command substitution", async () => {
+    const result = await runBashHook(HOOK, 'cat $(printf "%s" "$HOME")/.swiz/settings.json')
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks shell commands that reference hidden home paths with backtick substitution", async () => {
+    const result = await runBashHook(HOOK, 'cat `printf "%s" "$HOME"`/.swiz/settings.json')
+    expect(result.decision).toBe("deny")
+  })
 })
 
 describe("pretooluse-protect-sandbox (file edits)", () => {
