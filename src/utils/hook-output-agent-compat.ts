@@ -62,6 +62,16 @@ function sanitizeCodexHookOutput(output: HookOutputLike): HookOutputLike {
 
     delete hookSpecificOutput.permissionDecision
     delete hookSpecificOutput.permissionDecisionReason
+  } else if (hookSpecificOutput.permissionDecision === "deny") {
+    const reason =
+      nonEmptyString(hookSpecificOutput.permissionDecisionReason) ??
+      nonEmptyString(cloned.reason) ??
+      nonEmptyString(cloned.systemMessage) ??
+      "Blocked by Swiz hook."
+
+    hookSpecificOutput.permissionDecisionReason = reason
+    cloned.decision = "block"
+    cloned.reason = reason
   }
 
   delete hookSpecificOutput.additionalContext

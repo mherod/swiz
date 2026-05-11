@@ -83,6 +83,30 @@ describe("sanitizeHookOutputForAgent", () => {
     })
   })
 
+  test("mirrors PreToolUse deny reason into Codex top-level block fields", () => {
+    const output = sanitizeHookOutputForAgent<Record<string, unknown>>(
+      {
+        suppressOutput: true,
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "blocked for testing",
+        },
+      },
+      "codex"
+    )
+
+    expect(output).toEqual({
+      decision: "block",
+      reason: "blocked for testing",
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "blocked for testing",
+      },
+    })
+  })
+
   test("removes Codex additionalContext without duplicating an existing systemMessage", () => {
     const output = sanitizeHookOutputForAgent<Record<string, unknown>>(
       {
