@@ -15,7 +15,7 @@
  *   - Not a git repo
  *
  * Success: additionalContext confirming push landed (immediate or after retry).
- * Failure after ~15s retry: PostToolUse block via deny payload.
+ * Failure after ~7s retry: PostToolUse block via deny payload.
  *
  * Background push detection (multi-signal, first match wins):
  *   1. tool_input.run_in_background === true
@@ -36,7 +36,7 @@ import {
   isShellTool,
 } from "../src/utils/hook-utils.ts"
 
-const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
+const RETRY_DELAYS_MS = [1000, 2000, 4000] // 1s, 2s, 4s → 7s total
 
 function isBackgroundPush(input: PostToolHookInput, command: string): boolean {
   if (input.tool_input?.run_in_background === true) return true
@@ -79,7 +79,7 @@ async function verifyWithRetries(localHead: string, cwd: string): Promise<SwizHo
   const finalRemote = await getRemoteHead()
   return buildDenyPostToolUseOutput(
     `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
-      `Checked after retrying for ~15 seconds. Possible causes:\n` +
+      `Checked after retrying for ~7 seconds. Possible causes:\n` +
       `  • The push was rejected (non-fast-forward, branch protection, hook failure)\n` +
       `  • A different branch/ref was pushed than HEAD\n\n` +
       `Run \`git log origin/$(git branch --show-current)..HEAD --oneline\` to see unpushed commits, then push again.`

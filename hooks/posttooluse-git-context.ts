@@ -38,7 +38,8 @@ async function refineDirectives(lines: string[]): Promise<{
       `Refine the following into more digestible directives: ${lines.join("\n")}`,
       z.object({
         directives: z.array(z.string()).min(8).max(10),
-      })
+      }),
+      { timeout: 2_000 }
     )
   } catch {
     return {
