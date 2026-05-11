@@ -1,10 +1,53 @@
 import { describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { runBashHook, runFileEditHook } from "../src/utils/test-utils.ts"
+import { join, resolve } from "node:path"
+import {
+  extractPreToolSurfaceDecision,
+  getHookSpecificOutput,
+} from "../src/utils/hook-specific-output.ts"
+import { neutralAgentEnv, runFileEditHook } from "../src/utils/test-utils.ts"
 import { isSandboxDisableCommand, isTrunkModeDisableCommand } from "./pretooluse-protect-sandbox.ts"
 
 const HOOK = "hooks/pretooluse-protect-sandbox.ts"
+const TEST_HOME = homedir()
+
+async function runPinnedHomeBashHook(
+  command: string,
+  opts: { cwd?: string } = {}
+): Promise<{ decision?: string; stdout: string }> {
+  const proc = Bun.spawn(["bun", resolve(process.cwd(), HOOK)], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: opts.cwd,
+    env: neutralAgentEnv({ HOME: TEST_HOME, SWIZ_DAEMON_PORT: "19999" }),
+  })
+  await proc.stdin.write(
+    JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command },
+    })
+  )
+  await proc.stdin.end()
+
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+
+  const stdout = out.trim()
+  if (!stdout) return { stdout }
+
+  try {
+    const parsed = JSON.parse(stdout) as Record<string, any>
+    const surface = extractPreToolSurfaceDecision(parsed)
+    if (surface.decision || surface.reason) {
+      return { ...surface, stdout }
+    }
+    const hso = getHookSpecificOutput(parsed)
+    return hso?.hookEventName === "PreToolUse" ? { decision: "allow", stdout } : { stdout }
+  } catch {
+    return { stdout }
+  }
+}
 
 describe("isSandboxDisableCommand", () => {
   test("matches swiz settings disable sandboxed-edits", () => {
@@ -48,42 +91,56 @@ describe("isTrunkModeDisableCommand", () => {
 
 describe("pretooluse-protect-sandbox (shell commands)", () => {
   test("blocks swiz settings disable sandboxed-edits", async () => {
-    const result = await runBashHook(HOOK, "swiz settings disable sandboxed-edits")
+    const result = await runPinnedHomeBashHook("swiz settings disable sandboxed-edits")
     expect(result.decision).toBe("deny")
   })
 
   test("blocks swiz settings disable trunk-mode", async () => {
-    const result = await runBashHook(HOOK, "swiz settings disable trunk-mode")
+    const result = await runPinnedHomeBashHook("swiz settings disable trunk-mode")
     expect(result.decision).toBe("deny")
   })
 
   test("blocks swiz settings set trunkMode false", async () => {
-    const result = await runBashHook(HOOK, "swiz settings set trunkMode false")
+    const result = await runPinnedHomeBashHook("swiz settings set trunkMode false")
     expect(result.decision).toBe("deny")
   })
 
   test("allows unrelated shell commands", async () => {
-    const result = await runBashHook(HOOK, "git status")
+    const result = await runPinnedHomeBashHook("git status")
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows node -e scripts that only inspect homedir()", async () => {
+    const result = await runPinnedHomeBashHook(
+      `node -e "const {homedir}=require('os'); console.log(homedir())"`
+    )
     expect(result.decision).toBeUndefined()
   })
 
   test("blocks shell commands that reference hidden home paths with absolute paths", async () => {
-    const result = await runBashHook(HOOK, `cat ${join(homedir(), ".swiz", "settings.json")}`)
+    const result = await runPinnedHomeBashHook(`cat ${join(TEST_HOME, ".swiz", "settings.json")}`)
     expect(result.decision).toBe("deny")
   })
 
   test("blocks shell commands that reference hidden home paths with relative paths", async () => {
-    const result = await runBashHook(HOOK, "cat .swiz/settings.json", { cwd: homedir() })
+    const result = await runPinnedHomeBashHook("cat .swiz/settings.json", { cwd: TEST_HOME })
     expect(result.decision).toBe("deny")
   })
 
   test("blocks shell commands that reference hidden home paths with command substitution", async () => {
-    const result = await runBashHook(HOOK, 'cat $(printf "%s" "$HOME")/.swiz/settings.json')
+    const result = await runPinnedHomeBashHook('cat $(printf "%s" "$HOME")/.swiz/settings.json')
     expect(result.decision).toBe("deny")
   })
 
   test("blocks shell commands that reference hidden home paths with backtick substitution", async () => {
-    const result = await runBashHook(HOOK, 'cat `printf "%s" "$HOME"`/.swiz/settings.json')
+    const result = await runPinnedHomeBashHook('cat `printf "%s" "$HOME"`/.swiz/settings.json')
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks node -e scripts that build hidden home paths", async () => {
+    const result = await runPinnedHomeBashHook(
+      `node -e "const fs=require('fs'),path=require('path'),os=require('os');const dir=path.join(os.homedir(),'.Codex','tasks');console.log(fs.readdirSync(dir));"`
+    )
     expect(result.decision).toBe("deny")
   })
 })

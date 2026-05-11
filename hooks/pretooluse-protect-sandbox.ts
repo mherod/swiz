@@ -40,6 +40,10 @@ const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
 
 const COMMAND_SUBST_SWIZ_RE = /\$\((?:[^()]+|[\s\S]*?)\)\s*\/\.swiz\/[^\s"'`;|&]*/g
 const BACKTICK_SUBST_SWIZ_RE = /`[^`]*`\s*\/\.swiz\/[^\s"'`;|&]*/g
+const HOME_REFERENCE_RE =
+  /\b(?:os\.)?homedir\s*\(\)|\bhomedir\s*\(\)|process\.env\.(?:HOME|USERPROFILE)|\$\{?HOME\}?/i
+const PATH_BUILDER_RE = /\b(?:path\.)?(?:join|resolve)\s*\(/i
+const SHELL_QUOTED_FRAGMENT_RE = /'([^']*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g
 
 function isWithin(parent: string, child: string): boolean {
   const normalizedParent = parent.replace(/\\/g, "/")
@@ -48,6 +52,35 @@ function isWithin(parent: string, child: string): boolean {
     ? normalizedParent
     : `${normalizedParent}/`
   return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedPrefix)
+}
+
+function isPathLikeFragment(value: string): boolean {
+  return (
+    value.startsWith("/") ||
+    value.startsWith("~") ||
+    value.startsWith(".") ||
+    value.includes("/") ||
+    value.includes("\\")
+  )
+}
+
+function extractQuotedShellFragments(
+  command: string,
+  fragments = new Set<string>(),
+  depth = 0
+): string[] {
+  if (depth > 4) return [...fragments]
+
+  for (const match of command.matchAll(SHELL_QUOTED_FRAGMENT_RE)) {
+    const fragment = (match[1] ?? match[2] ?? match[3] ?? "").trim()
+    if (!fragment || fragments.has(fragment)) continue
+    fragments.add(fragment)
+    if (fragment.includes("'") || fragment.includes('"') || fragment.includes("`")) {
+      extractQuotedShellFragments(fragment, fragments, depth + 1)
+    }
+  }
+
+  return [...fragments]
 }
 
 async function normalizeShellPath(
@@ -109,6 +142,8 @@ async function shouldBlockShellCommand(command: string, cwd: string): Promise<st
   if (!homeDir || !command) return null
   const canonicalHomeDir = await resolveCanonical(homeDir)
   const canonicalCwd = await resolveCanonical(cwd)
+  const hasHomeReference = HOME_REFERENCE_RE.test(command)
+  const hasPathBuilder = PATH_BUILDER_RE.test(command)
 
   const tokens = command.match(/[^\s]+/g) ?? []
   const candidates = new Set<string>([
@@ -116,6 +151,11 @@ async function shouldBlockShellCommand(command: string, cwd: string): Promise<st
     ...Array.from(command.matchAll(COMMAND_SUBST_SWIZ_RE)).map((m) => m[0]!),
     ...Array.from(command.matchAll(BACKTICK_SUBST_SWIZ_RE)).map((m) => m[0]!),
   ])
+  for (const fragment of extractQuotedShellFragments(command)) {
+    if (!isPathLikeFragment(fragment)) continue
+    if (fragment.startsWith(".") && !hasPathBuilder) continue
+    candidates.add(fragment)
+  }
   const seen = new Set<string>()
 
   for (const rawToken of candidates) {
@@ -133,6 +173,13 @@ async function shouldBlockShellCommand(command: string, cwd: string): Promise<st
         continue
 
       if (await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir)) {
+        return candidate
+      }
+      if (
+        hasHomeReference &&
+        hasPathBuilder &&
+        (await isHiddenHomePathInCommand(candidate, canonicalHomeDir, canonicalHomeDir))
+      ) {
         return candidate
       }
     }
@@ -177,7 +224,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
     const toolInput = input.tool_input as Record<string, string> | undefined
 
     if (isShellTool(toolName)) {
-      const command: string = toolInput?.command ?? ""
+      const command: string = (toolInput?.command ?? "").normalize("NFKC")
       if (isSandboxDisableCommand(command)) {
         return preToolUseDeny(
           "Disabling sandboxed-edits is not permitted from agent Bash commands.\n\n" +
@@ -216,7 +263,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
     }
 
     if (isFileEditTool(toolName)) {
-      const filePath: string = toolInput?.file_path ?? ""
+      const filePath: string = (toolInput?.file_path ?? "").normalize("NFKC")
       if (SWIZ_CONFIG_RE.test(filePath)) {
         return preToolUseDeny(
           "Editing swiz config files directly is not permitted from agent file edits.\n\n" +
