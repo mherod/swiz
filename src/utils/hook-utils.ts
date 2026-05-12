@@ -939,7 +939,7 @@ export {
 } from "./edit-projection.ts"
 
 /** ToolHookInput extended with typed task tool_input fields. */
-export interface TaskToolInput extends ToolHookInput {
+export type TaskToolInput = ToolHookInput & {
   tool_input?: {
     taskId?: string | number
     status?: string

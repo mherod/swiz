@@ -152,7 +152,10 @@ export const SessionIdSchema = z.string()
 export type SessionId = z.infer<typeof SessionIdSchema>
 
 /** Absolute path to the session transcript JSONL file. */
-export const TranscriptPathSchema = z.string()
+export const TranscriptPathSchema = z
+  .string()
+  .nullable()
+  .transform((v) => v ?? undefined)
 export type TranscriptPath = z.infer<typeof TranscriptPathSchema>
 
 /** Name of the hook event that fired (e.g. `"PreToolUse"`, `"Stop"`). */
@@ -167,12 +170,8 @@ export type PermissionMode = z.infer<typeof PermissionModeSchema>
 export const ToolNameSchema = z.string()
 export type ToolName = z.infer<typeof ToolNameSchema>
 
-// ─── Tool hook input schemas ─────────────────────────────────────────────────
+// ─── Formatting helpers ───────────────────────────────────────────────────────
 
-/**
- * File-edit tool_input payload — used by hooks that inspect file content.
- * Covers Edit, Write, StrReplace and equivalent cross-agent tools.
- */
 /** NFKC-normalize a string field if present, preventing homoglyph bypasses. */
 function nfkc(s: string | undefined): string | undefined {
   return s?.normalize("NFKC")
@@ -202,6 +201,7 @@ function nfkcDeep(val: JsonLike): JsonLike {
  */
 export const hookBaseSchema = z.looseObject({
   ...PkgHookInputBaseSchema.partial().shape,
+  transcript_path: TranscriptPathSchema.optional(),
   hook_event_name: HookEventNameSchema.optional(),
   // Override package enum — swiz must accept unknown permission modes
   permission_mode: PermissionModeSchema.optional(),
@@ -218,6 +218,226 @@ const toolHookBaseObjectSchema = hookBaseSchema.extend({
   ...ToolCallCoreSchema.partial().shape,
 })
 
+// ─── Gemini CLI hook input schemas ──────────────────────────────────────────
+
+/**
+ * Gemini common input fields — present on every Gemini hook event.
+ * Gemini injects `GEMINI_PROJECT_DIR`, `GEMINI_SESSION_ID`, `GEMINI_CWD`
+ * as env vars; hooks also receive a JSON payload on stdin.
+ */
+export const geminiCommonInputSchema = hookBaseSchema
+
+export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
+
+/**
+ * Gemini SessionStart hook input envelope.
+ * Backed by `GeminiSessionStartInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiSessionStartInputSchema = hookBaseSchema.extend(
+  PkgGeminiSessionStartInputSchema.partial().shape
+)
+
+export type GeminiSessionStartInput = z.infer<typeof geminiSessionStartInputSchema>
+
+/**
+ * Gemini SessionEnd hook input envelope.
+ * Backed by `GeminiSessionEndInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiSessionEndInputSchema = hookBaseSchema.extend(
+  PkgGeminiSessionEndInputSchema.partial().shape
+)
+
+export type GeminiSessionEndInput = z.infer<typeof geminiSessionEndInputSchema>
+
+/**
+ * Gemini BeforeAgent hook input envelope.
+ * Backed by `GeminiBeforeAgentInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiBeforeAgentInputSchema = hookBaseSchema.extend(
+  PkgGeminiBeforeAgentInputSchema.partial().shape
+)
+
+export type GeminiBeforeAgentInput = z.infer<typeof geminiBeforeAgentInputSchema>
+
+/**
+ * Gemini AfterAgent hook input envelope.
+ * Backed by `GeminiAfterAgentInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiAfterAgentInputSchema = hookBaseSchema.extend(
+  PkgGeminiAfterAgentInputSchema.partial().shape
+)
+
+export type GeminiAfterAgentInput = z.infer<typeof geminiAfterAgentInputSchema>
+
+/**
+ * Gemini BeforeModel hook input envelope.
+ * Backed by `GeminiBeforeModelInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiBeforeModelInputSchema = hookBaseSchema.extend(
+  PkgGeminiBeforeModelInputSchema.partial().shape
+)
+
+export type GeminiBeforeModelInput = z.infer<typeof geminiBeforeModelInputSchema>
+
+/**
+ * Gemini AfterModel hook input envelope.
+ * Backed by `GeminiAfterModelInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiAfterModelInputSchema = hookBaseSchema.extend(
+  PkgGeminiAfterModelInputSchema.partial().shape
+)
+
+export type GeminiAfterModelInput = z.infer<typeof geminiAfterModelInputSchema>
+
+/**
+ * Gemini BeforeToolSelection hook input envelope.
+ * Backed by `GeminiBeforeToolSelectionInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiBeforeToolSelectionInputSchema = hookBaseSchema.extend(
+  PkgGeminiBeforeToolSelectionInputSchema.partial().shape
+)
+
+export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSelectionInputSchema>
+
+/**
+ * Gemini BeforeTool hook input envelope.
+ * Fires before a tool executes. `matcher` is regex against tool name.
+ * Can block tool or rewrite arguments.
+ * Derived from `GeminiBeforeToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
+ */
+export const geminiBeforeToolInputSchema = toolHookBaseObjectSchema
+  .extend(PkgGeminiBeforeToolInputSchema.partial().shape)
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
+    }
+    return val
+  })
+
+export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
+
+/**
+ * Gemini AfterTool hook input envelope.
+ * Fires after a tool executes. Can block result or add context.
+ * `matcher` is regex against tool name.
+ * Derived from `GeminiAfterToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
+ */
+export const geminiAfterToolInputSchema = toolHookBaseObjectSchema
+  .extend(PkgGeminiAfterToolInputSchema.partial().shape)
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
+    }
+    return val
+  })
+
+export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
+
+/**
+ * Gemini PreCompress hook input envelope.
+ * Backed by `GeminiPreCompressInputSchema` from `agent-hook-schemas/gemini`.
+ */
+export const geminiPreCompressInputSchema = hookBaseSchema.extend(
+  PkgGeminiPreCompressInputSchema.partial().shape
+)
+
+export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema>
+
+/**
+ * Gemini Notification hook input envelope.
+ * Derived from `GeminiNotificationInputSchema` (`agent-hook-schemas/gemini`) via
+ * `allOptional()`, with `notification_type` overridden to `z.string()` — the package
+ * restricts it to enum `"ToolPermission"`, but swiz accepts any string for forward compat.
+ */
+export const geminiNotificationInputSchema = hookBaseSchema
+  .extend(PkgGeminiNotificationInputSchema.partial().shape)
+  .extend({
+    notification_type: z.string().optional(),
+  })
+
+export type GeminiNotificationInput = z.infer<typeof geminiNotificationInputSchema>
+
+// ─── Codex hook input schemas ───────────────────────────────────────────────
+
+/**
+ * Base input fields for Codex hook envelopes.
+ * Derived from `CodexHookInputBaseSchema` (`agent-hook-schemas/codex`).
+ * Codex uses nullable `transcript_path` (null when no transcript exists).
+ */
+const codexHookBaseSchema = hookBaseSchema.extend(PkgCodexHookInputBaseSchema.partial().shape)
+
+export const codexCommonInputSchema = codexHookBaseSchema
+
+export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
+
+/**
+ * Codex SessionStart hook input envelope.
+ * Backed by `CodexSessionStartInputSchema` from `agent-hook-schemas/codex`.
+ */
+export const codexSessionStartInputSchema = codexHookBaseSchema.extend(
+  PkgCodexSessionStartInputSchema.partial().shape
+)
+
+export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema>
+
+/**
+ * Codex PreToolUse hook input envelope.
+ * Derived from `CodexPreToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
+ * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
+ */
+export const codexPreToolUseInputSchema = toolHookBaseObjectSchema
+  .extend(PkgCodexPreToolUseInputSchema.partial().shape)
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
+    }
+    return val
+  })
+
+export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
+
+/**
+ * Codex PostToolUse hook input envelope.
+ * Derived from `CodexPostToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
+ * Currently only fires for `Bash` tool. Includes `tool_response`.
+ */
+export const codexPostToolUseInputSchema = toolHookBaseObjectSchema
+  .extend(PkgCodexPostToolUseInputSchema.partial().shape)
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
+    }
+    return val
+  })
+
+export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
+
+/**
+ * Codex UserPromptSubmit hook input envelope.
+ * Backed by `CodexUserPromptSubmitInputSchema` from `agent-hook-schemas/codex`.
+ */
+export const codexUserPromptSubmitInputSchema = codexHookBaseSchema.extend(
+  PkgCodexUserPromptSubmitInputSchema.partial().shape
+)
+
+export type CodexUserPromptSubmitInput = z.infer<typeof codexUserPromptSubmitInputSchema>
+
+/**
+ * Codex Stop hook input envelope.
+ * Backed by `CodexStopInputSchema` from `agent-hook-schemas/codex`.
+ */
+export const codexStopInputSchema = codexHookBaseSchema.extend(
+  PkgCodexStopInputSchema.partial().shape
+)
+
+export type CodexStopInput = z.infer<typeof codexStopInputSchema>
+
+// ─── Tool hook input schemas ─────────────────────────────────────────────────
+
+/**
+ * File-edit tool_input payload — used by hooks that inspect file content.
+ * Covers Edit, Write, StrReplace and equivalent cross-agent tools.
+ */
 export const fileEditHookInputSchema = toolHookBaseObjectSchema
   .extend({
     tool_input: z
@@ -259,15 +479,26 @@ export const shellHookInputSchema = toolHookBaseObjectSchema.extend({
 export type ShellHookInput = z.infer<typeof shellHookInputSchema>
 
 /**
- * Base PreToolUse / PostToolUse hook input envelope.
- * Mirrors the `ToolHookInput` interface in hook-utils.ts with runtime validation.
+ * Claude PreToolUse / PostToolUse hook input envelope.
+ * Backed by `ToolCallCoreSchema` from `agent-hook-schemas/common`.
  */
-export const toolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
+export const claudeToolHookInputSchema = toolHookBaseObjectSchema.transform((val) => {
   if (val.tool_input) {
     val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
   }
   return val
 })
+
+/**
+ * Tool-use hook input envelope — union of all supported agent shapes.
+ * Mirrors the `ToolHookInput` interface in hook-utils.ts with runtime validation.
+ * Used by all canonical tool hooks to tolerate Claude, Codex, and Gemini payloads.
+ */
+export const toolHookInputSchema = z.union([
+  claudeToolHookInputSchema,
+  codexPreToolUseInputSchema,
+  geminiBeforeToolInputSchema,
+]) as z.ZodType<HookBase & Partial<z.infer<typeof ToolCallCoreSchema>> & Record<string, unknown>>
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
@@ -295,17 +526,19 @@ export const skillToolInputSchema = toolHookBaseObjectSchema
 export type SkillToolInput = z.infer<typeof skillToolInputSchema>
 
 /** PostToolUse input — extends ToolHookInput with the tool's response payload. */
-export interface PostToolHookInput extends ToolHookInput {
+export type PostToolHookInput = ToolHookInput & {
   tool_response?: JsonLike
 }
 
+// ─── PostToolUse stdin envelope ─────────────────────────────────────────────
+
 /**
- * PostToolUse stdin envelope — tool hook fields plus optional `tool_response` from the runtime.
+ * Claude PostToolUse stdin envelope — tool hook fields plus optional `tool_response` from the runtime.
  * Field set derived from `PostToolUseInputSchema` (`agent-hook-schemas/claude`) via
  * `.partial().shape` — uses `z.looseObject` for clean types in `.transform()` chain.
  */
-export const postToolUseHookInputSchema = z
-  .looseObject({
+export const claudePostToolUseHookInputSchema = toolHookBaseObjectSchema
+  .extend({
     ...PkgPostToolUseInputSchema.partial().shape,
     // Override package enum — swiz must accept unknown permission modes
     permission_mode: PermissionModeSchema.optional(),
@@ -321,16 +554,90 @@ export const postToolUseHookInputSchema = z
     return val
   })
 
+/**
+ * PostToolUse stdin envelope — union of all supported agent shapes.
+ * Most hooks use this canonical schema to parse tool responses.
+ */
+export const postToolUseHookInputSchema = z.union([
+  claudePostToolUseHookInputSchema,
+  codexPostToolUseInputSchema,
+  geminiAfterToolInputSchema,
+  allOptional(PkgPostToolUseFailureInputSchema),
+]) as z.ZodType<HookBase & Record<string, unknown>>
+
 export type PostToolUseHookInput = z.infer<typeof postToolUseHookInputSchema>
 
+// ─── Stop / SubagentStop stdin envelopes ─────────────────────────────────────
+
 /**
- * Stop / SubagentStop hook input envelope.
- * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.
+ * Claude Stop / SubagentStop hook input envelope.
  * Backed by `StopInputSchema` from `agent-hook-schemas/claude`.
  */
-export const stopHookInputSchema = allOptional(PkgStopInputSchema)
+export const claudeStopHookInputSchema = hookBaseSchema.extend(PkgStopInputSchema.partial().shape)
+
+/**
+ * Stop / SubagentStop hook input envelope — union of all supported agent shapes.
+ * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.
+ * Used by all canonical stop hooks to tolerate Claude, Codex, and Gemini payloads.
+ */
+export const stopHookInputSchema = z.union([
+  claudeStopHookInputSchema,
+  codexStopInputSchema,
+  geminiAfterAgentInputSchema,
+]) as z.ZodType<HookBase & Record<string, unknown>>
 
 export type StopHookInput = z.infer<typeof stopHookInputSchema>
+
+/**
+ * Stop / SubagentStop hook input envelope (extended).
+ * Backed by `SubagentStopInputSchema` from `agent-hook-schemas/claude` which
+ * includes `last_assistant_message`, `agent_transcript_path`, `agent_id`, `agent_type`.
+ */
+export const stopHookExtendedInputSchema = hookBaseSchema.extend(
+  PkgSubagentStopInputSchema.partial().shape
+) as z.ZodType<HookBase & Record<string, unknown>>
+
+export type StopHookExtendedInput = z.infer<typeof stopHookExtendedInputSchema>
+
+// ─── Session management stdin envelopes ──────────────────────────────────────
+
+/**
+ * Claude SessionStart hook input envelope.
+ * Backed by `SessionStartInputSchema` from `agent-hook-schemas/claude`.
+ */
+export const claudeSessionStartHookInputSchema = hookBaseSchema.extend(
+  PkgSessionStartInputSchema.partial().shape
+)
+
+/**
+ * SessionStart hook input envelope — union of all supported agent shapes.
+ */
+export const sessionStartHookInputSchema = z.union([
+  claudeSessionStartHookInputSchema,
+  codexSessionStartInputSchema,
+  geminiSessionStartInputSchema,
+]) as z.ZodType<HookBase & Record<string, unknown>>
+
+export type SessionStartHookInput = z.infer<typeof sessionStartHookInputSchema>
+
+/**
+ * Claude UserPromptSubmit hook input envelope.
+ * Backed by `UserPromptSubmitInputSchema` from `agent-hook-schemas/claude`.
+ */
+export const claudeUserPromptSubmitHookInputSchema = hookBaseSchema.extend(
+  PkgUserPromptSubmitInputSchema.partial().shape
+)
+
+/**
+ * UserPromptSubmit hook input envelope — union of all supported agent shapes.
+ */
+export const userPromptSubmitHookInputSchema = z.union([
+  claudeUserPromptSubmitHookInputSchema,
+  codexUserPromptSubmitInputSchema,
+  geminiBeforeAgentInputSchema,
+]) as z.ZodType<HookBase & Record<string, unknown>>
+
+export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInputSchema>
 
 /**
  * PreCompact hook input envelope (and legacy session-shaped events).
@@ -343,7 +650,12 @@ export const sessionHookInputSchema = allOptional(PkgPreCompactInputSchema)
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 
 /** Alias for dispatch validation — preCompact uses the PreCompact input shape. */
-export const preCompactHookInputSchema = sessionHookInputSchema
+export const preCompactHookInputSchema = z.union([
+  sessionHookInputSchema,
+  geminiPreCompressInputSchema,
+])
+
+// ─── Other hook event input schemas ──────────────────────────────────────────
 
 /**
  * PreCommit hook input envelope.
@@ -366,40 +678,21 @@ export const prePushHookInputSchema = z.looseObject({
 
 export type PrePushHookInput = z.infer<typeof prePushHookInputSchema>
 
-// ─── Updated existing schemas with missing fields ───────────────────────────
-
 /**
- * Stop / SubagentStop hook input envelope (extended).
- * Backed by `SubagentStopInputSchema` from `agent-hook-schemas/claude` which
- * includes `last_assistant_message`, `agent_transcript_path`, `agent_id`, `agent_type`.
- */
-export const stopHookExtendedInputSchema = allOptional(PkgSubagentStopInputSchema)
-
-export type StopHookExtendedInput = z.infer<typeof stopHookExtendedInputSchema>
-
-/**
- * SessionStart hook input envelope.
- * Backed by `SessionStartInputSchema` from `agent-hook-schemas/claude`.
- */
-export const sessionStartHookInputSchema = allOptional(PkgSessionStartInputSchema)
-
-export type SessionStartHookInput = z.infer<typeof sessionStartHookInputSchema>
-
-/**
- * UserPromptSubmit hook input envelope.
- * Backed by `UserPromptSubmitInputSchema` from `agent-hook-schemas/claude`.
- */
-export const userPromptSubmitHookInputSchema = allOptional(PkgUserPromptSubmitInputSchema)
-
-export type UserPromptSubmitHookInput = z.infer<typeof userPromptSubmitHookInputSchema>
-
-// ─── New hook event input schemas ───────────────────────────────────────────
-
-/**
- * Notification hook input envelope.
+ * Claude Notification hook input envelope.
  * Backed by `NotificationInputSchema` from `agent-hook-schemas/claude`.
  */
-export const notificationHookInputSchema = allOptional(PkgNotificationInputSchema)
+export const claudeNotificationHookInputSchema = hookBaseSchema.extend(
+  PkgNotificationInputSchema.partial().shape
+)
+
+/**
+ * Notification hook input envelope — union of all supported agent shapes.
+ */
+export const notificationHookInputSchema = z.union([
+  claudeNotificationHookInputSchema,
+  geminiNotificationInputSchema,
+])
 
 export type NotificationHookInput = z.infer<typeof notificationHookInputSchema>
 
@@ -412,10 +705,21 @@ export const permissionRequestHookInputSchema = allOptional(PkgPermissionRequest
 export type PermissionRequestHookInput = z.infer<typeof permissionRequestHookInputSchema>
 
 /**
- * PostToolUseFailure hook input envelope.
+ * Claude PostToolUseFailure hook input envelope.
  * Backed by `PostToolUseFailureInputSchema` from `agent-hook-schemas/claude`.
  */
-export const postToolUseFailureHookInputSchema = allOptional(PkgPostToolUseFailureInputSchema)
+export const claudePostToolUseFailureHookInputSchema = hookBaseSchema.extend(
+  PkgPostToolUseFailureInputSchema.partial().shape
+)
+
+/**
+ * PostToolUseFailure hook input envelope — union of all supported agent shapes.
+ */
+export const postToolUseFailureHookInputSchema = z.union([
+  claudePostToolUseFailureHookInputSchema,
+  // Codex doesn't have a separate failure schema; it uses postToolUse
+  // Gemini doesn't have a separate failure schema; it uses afterTool
+])
 
 export type PostToolUseFailureHookInput = z.infer<typeof postToolUseFailureHookInputSchema>
 
@@ -524,235 +828,24 @@ export const elicitationResultHookInputSchema = allOptional(PkgElicitationResult
 export type ElicitationResultHookInput = z.infer<typeof elicitationResultHookInputSchema>
 
 /**
- * SessionEnd hook input envelope.
+ * Claude SessionEnd hook input envelope.
  * Backed by `SessionEndInputSchema` from `agent-hook-schemas/claude`.
  */
-export const sessionEndHookInputSchema = allOptional(PkgSessionEndInputSchema)
+export const claudeSessionEndHookInputSchema = hookBaseSchema.extend(
+  PkgSessionEndInputSchema.partial().shape
+)
+
+/**
+ * SessionEnd hook input envelope — union of all supported agent shapes.
+ */
+export const sessionEndHookInputSchema = z.union([
+  claudeSessionEndHookInputSchema,
+  geminiSessionEndInputSchema,
+])
 
 export type SessionEndHookInput = z.infer<typeof sessionEndHookInputSchema>
 
-// ─── Gemini CLI hook input schemas ──────────────────────────────────────────
-
-/**
- * Gemini common input fields — present on every Gemini hook event.
- * Gemini injects `GEMINI_PROJECT_DIR`, `GEMINI_SESSION_ID`, `GEMINI_CWD`
- * as env vars; hooks also receive a JSON payload on stdin.
- */
-export const geminiCommonInputSchema = hookBaseSchema
-
-export type GeminiCommonInput = z.infer<typeof geminiCommonInputSchema>
-
-/**
- * Gemini SessionStart hook input envelope.
- * Backed by `GeminiSessionStartInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiSessionStartInputSchema = allOptional(PkgGeminiSessionStartInputSchema)
-
-export type GeminiSessionStartInput = z.infer<typeof geminiSessionStartInputSchema>
-
-/**
- * Gemini SessionEnd hook input envelope.
- * Backed by `GeminiSessionEndInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiSessionEndInputSchema = allOptional(PkgGeminiSessionEndInputSchema)
-
-export type GeminiSessionEndInput = z.infer<typeof geminiSessionEndInputSchema>
-
-/**
- * Gemini BeforeAgent hook input envelope.
- * Backed by `GeminiBeforeAgentInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiBeforeAgentInputSchema = allOptional(PkgGeminiBeforeAgentInputSchema)
-
-export type GeminiBeforeAgentInput = z.infer<typeof geminiBeforeAgentInputSchema>
-
-/**
- * Gemini AfterAgent hook input envelope.
- * Backed by `GeminiAfterAgentInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiAfterAgentInputSchema = allOptional(PkgGeminiAfterAgentInputSchema)
-
-export type GeminiAfterAgentInput = z.infer<typeof geminiAfterAgentInputSchema>
-
-/**
- * Gemini BeforeModel hook input envelope.
- * Backed by `GeminiBeforeModelInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiBeforeModelInputSchema = allOptional(PkgGeminiBeforeModelInputSchema)
-
-export type GeminiBeforeModelInput = z.infer<typeof geminiBeforeModelInputSchema>
-
-/**
- * Gemini AfterModel hook input envelope.
- * Backed by `GeminiAfterModelInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiAfterModelInputSchema = allOptional(PkgGeminiAfterModelInputSchema)
-
-export type GeminiAfterModelInput = z.infer<typeof geminiAfterModelInputSchema>
-
-/**
- * Gemini BeforeToolSelection hook input envelope.
- * Backed by `GeminiBeforeToolSelectionInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiBeforeToolSelectionInputSchema = allOptional(
-  PkgGeminiBeforeToolSelectionInputSchema
-)
-
-export type GeminiBeforeToolSelectionInput = z.infer<typeof geminiBeforeToolSelectionInputSchema>
-
-/**
- * Gemini BeforeTool hook input envelope.
- * Fires before a tool executes. `matcher` is regex against tool name.
- * Can block tool or rewrite arguments.
- * Derived from `GeminiBeforeToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
- */
-export const geminiBeforeToolInputSchema = allOptional(PkgGeminiBeforeToolInputSchema).transform(
-  (val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
-    }
-    return val
-  }
-)
-
-export type GeminiBeforeToolInput = z.infer<typeof geminiBeforeToolInputSchema>
-
-/**
- * Gemini AfterTool hook input envelope.
- * Fires after a tool executes. Can block result or add context.
- * `matcher` is regex against tool name.
- * Derived from `GeminiAfterToolInputSchema` (`agent-hook-schemas/gemini`) + NFKC.
- */
-export const geminiAfterToolInputSchema = allOptional(PkgGeminiAfterToolInputSchema).transform(
-  (val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
-    }
-    return val
-  }
-)
-
-export type GeminiAfterToolInput = z.infer<typeof geminiAfterToolInputSchema>
-
-/**
- * Gemini PreCompress hook input envelope.
- * Backed by `GeminiPreCompressInputSchema` from `agent-hook-schemas/gemini`.
- */
-export const geminiPreCompressInputSchema = allOptional(PkgGeminiPreCompressInputSchema)
-
-export type GeminiPreCompressInput = z.infer<typeof geminiPreCompressInputSchema>
-
-/**
- * Gemini Notification hook input envelope.
- * Derived from `GeminiNotificationInputSchema` (`agent-hook-schemas/gemini`) via
- * `allOptional()`, with `notification_type` overridden to `z.string()` — the package
- * restricts it to enum `"ToolPermission"`, but swiz accepts any string for forward compat.
- */
-export const geminiNotificationInputSchema = allOptional(PkgGeminiNotificationInputSchema).extend({
-  notification_type: z.string().optional(),
-})
-
-export type GeminiNotificationInput = z.infer<typeof geminiNotificationInputSchema>
-
-export const hookSpecificOutputSchema = z.looseObject({
-  hookEventName: z.string().optional(),
-  additionalContext: z.string().optional(),
-  permissionDecision: z.enum(["allow", "deny"]).optional(),
-  permissionDecisionReason: z.string().optional(),
-})
-
-export type HookSpecificOutput = z.infer<typeof hookSpecificOutputSchema>
-
-/**
- * Gemini hook output envelope.
- * Derived from `GeminiHookCommandOutputSchema` (`agent-hook-schemas/gemini`) which
- * covers decision, flow-control, and hookSpecificOutput fields. Local refinement
- * ensures at least one known control field is present (empty `{}` rejected).
- */
-export const geminiHookOutputSchema = PkgGeminiHookCommandOutputSchema.refine(
-  (o) =>
-    "decision" in o ||
-    "hookSpecificOutput" in o ||
-    "systemMessage" in o ||
-    "additionalContext" in o ||
-    "retry" in o ||
-    "halt" in o ||
-    "filteredTools" in o ||
-    "updatedInput" in o ||
-    "mockResponse" in o,
-  { message: "Gemini hook output must contain at least one known control field" }
-)
-
-export type GeminiHookOutput = z.infer<typeof geminiHookOutputSchema>
-
-// ─── Codex hook input schemas ───────────────────────────────────────────────
-
-/**
- * Base input fields for Codex hook envelopes.
- * Derived from `CodexHookInputBaseSchema` (`agent-hook-schemas/codex`).
- * Codex uses nullable `transcript_path` (null when no transcript exists).
- */
-const codexHookBaseSchema = allOptional(PkgCodexHookInputBaseSchema)
-
-export const codexCommonInputSchema = codexHookBaseSchema
-
-export type CodexCommonInput = z.infer<typeof codexCommonInputSchema>
-
-/**
- * Codex SessionStart hook input envelope.
- * Backed by `CodexSessionStartInputSchema` from `agent-hook-schemas/codex`.
- */
-export const codexSessionStartInputSchema = allOptional(PkgCodexSessionStartInputSchema)
-
-export type CodexSessionStartInput = z.infer<typeof codexSessionStartInputSchema>
-
-/**
- * Codex PreToolUse hook input envelope.
- * Derived from `CodexPreToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
- * Currently only fires for `Bash` tool. Includes `turn_id` and `tool_use_id`.
- */
-export const codexPreToolUseInputSchema = allOptional(PkgCodexPreToolUseInputSchema).transform(
-  (val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
-    }
-    return val
-  }
-)
-
-export type CodexPreToolUseInput = z.infer<typeof codexPreToolUseInputSchema>
-
-/**
- * Codex PostToolUse hook input envelope.
- * Derived from `CodexPostToolUseInputSchema` (`agent-hook-schemas/codex`) + NFKC.
- * Currently only fires for `Bash` tool. Includes `tool_response`.
- */
-export const codexPostToolUseInputSchema = allOptional(PkgCodexPostToolUseInputSchema).transform(
-  (val) => {
-    if (val.tool_input) {
-      val.tool_input = nfkcDeep(val.tool_input as JsonLike) as typeof val.tool_input
-    }
-    return val
-  }
-)
-
-export type CodexPostToolUseInput = z.infer<typeof codexPostToolUseInputSchema>
-
-/**
- * Codex UserPromptSubmit hook input envelope.
- * Backed by `CodexUserPromptSubmitInputSchema` from `agent-hook-schemas/codex`.
- */
-export const codexUserPromptSubmitInputSchema = allOptional(PkgCodexUserPromptSubmitInputSchema)
-
-export type CodexUserPromptSubmitInput = z.infer<typeof codexUserPromptSubmitInputSchema>
-
-/**
- * Codex Stop hook input envelope.
- * Backed by `CodexStopInputSchema` from `agent-hook-schemas/codex`.
- */
-export const codexStopInputSchema = allOptional(PkgCodexStopInputSchema)
-
-export type CodexStopInput = z.infer<typeof codexStopInputSchema>
+// ─── Codex hook output envelope ──────────────────────────────────────────────
 
 /**
  * Codex hook output envelope.
@@ -792,7 +885,40 @@ export const codexHookOutputSchema = z
 
 export type CodexHookOutput = z.infer<typeof codexHookOutputSchema>
 
-// ─── Hook output envelope schema ─────────────────────────────────────────────
+// ─── Gemini hook output envelope ─────────────────────────────────────────────
+
+export const hookSpecificOutputSchema = z.looseObject({
+  hookEventName: z.string().optional(),
+  additionalContext: z.string().optional(),
+  permissionDecision: z.enum(["allow", "deny"]).optional(),
+  permissionDecisionReason: z.string().optional(),
+})
+
+export type HookSpecificOutput = z.infer<typeof hookSpecificOutputSchema>
+
+/**
+ * Gemini hook output envelope.
+ * Derived from `GeminiHookCommandOutputSchema` (`agent-hook-schemas/gemini`) which
+ * covers decision, flow-control, and hookSpecificOutput fields. Local refinement
+ * ensures at least one known control field is present (empty `{}` rejected).
+ */
+export const geminiHookOutputSchema = PkgGeminiHookCommandOutputSchema.refine(
+  (o) =>
+    "decision" in o ||
+    "hookSpecificOutput" in o ||
+    "systemMessage" in o ||
+    "additionalContext" in o ||
+    "retry" in o ||
+    "halt" in o ||
+    "filteredTools" in o ||
+    "updatedInput" in o ||
+    "mockResponse" in o,
+  { message: "Gemini hook output must contain at least one known control field" }
+)
+
+export type GeminiHookOutput = z.infer<typeof geminiHookOutputSchema>
+
+// ─── Universal Hook output envelope schema ───────────────────────────────────
 
 /**
  * Per-hook subprocess stdout JSON (all events). See module doc for which fields the

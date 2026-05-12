@@ -128,6 +128,23 @@ describe("dispatch execute integration", () => {
       }
     })
 
+    it("accepts Gemini-style stop payloads (AfterAgent)", async () => {
+      const req: DispatchRequest = {
+        canonicalEvent: "stop",
+        hookEventName: "AfterAgent",
+        payloadStr: JSON.stringify({
+          cwd: "/tmp/gemini-stop-test",
+          session_id: "gemini-session",
+          hook_event_name: "AfterAgent",
+          stop_hook_active: true,
+          last_assistant_message: "Done.",
+        }),
+      }
+      const result = await executeDispatch(req)
+      expect(result).toBeDefined()
+      expect(result.response).toBeDefined()
+    })
+
     it("accepts daemonContext flag without error", async () => {
       const req: DispatchRequest = {
         canonicalEvent: "nonexistentEvent",
