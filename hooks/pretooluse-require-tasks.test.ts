@@ -6,10 +6,26 @@ import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { DIRECT_MERGE_INTENT_RE, isLargeContentPayload } from "./pretooluse-require-tasks.ts"
+import pretooluseTaskGovernance, { runSwizTasksEnforcement } from "./pretooluse-task-governance.ts"
 
 interface HookResult {
   decision?: string
   reason?: string
+}
+
+function hookResultFromOutput(parsed: Record<string, any>): HookResult {
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
+  return {
+    decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
+    reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
+  }
+}
+
+function expectTaskFilesPolicyDeny(result: HookResult) {
+  expect(result.decision).toBe("deny")
+  expect(result.reason).toContain("STOP. Do not edit `.claude/tasks` files directly.")
+  expect(result.reason).not.toContain("Run TaskList")
+  expect(result.reason).not.toContain("no incomplete tasks")
 }
 
 async function runHook({
@@ -74,11 +90,12 @@ async function runHook({
   if (!out.trim()) return {}
 
   const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
-  return {
-    decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
-    reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
-  }
+  return hookResultFromOutput(parsed)
+}
+
+async function runMergedTaskGovernance(input: Record<string, any>): Promise<HookResult> {
+  const output = await pretooluseTaskGovernance.run(input)
+  return hookResultFromOutput(output as Record<string, any>)
 }
 
 const { create: createTempHome } = useTempDir("swiz-require-tasks-")
@@ -233,7 +250,7 @@ describe("pretooluse-require-tasks", () => {
 
   test("denies Edit when no tasks have ever been created", async () => {
     const homeDir = await createTempHome()
-    const sessionId = "session-no-tasks"
+    const sessionId = `session-no-tasks-${Date.now()}`
     // No tasks written — agent is working without any plan
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
@@ -1113,6 +1130,135 @@ describe("strict-no-direct-main merge task blocking", () => {
 
 describe("task-file block bypass regression tests", () => {
   const tasksFilesDenyMessage = "STOP. Do not edit `.claude/tasks` files directly."
+
+  const filePathOnlyCases: Array<{
+    toolName: string
+    command?: string
+    filePath?: string
+    content?: string
+    label: string
+  }> = [
+    {
+      toolName: "Bash",
+      command: "cat .claude/tasks/session-file-only/1.json",
+      label: "Bash command",
+    },
+    {
+      toolName: "Edit",
+      filePath: ".claude/tasks/session-file-only/1.json",
+      label: "Edit file path",
+    },
+    {
+      toolName: "Write",
+      filePath: ".claude/tasks/session-file-only/1.json",
+      content: "{}",
+      label: "Write file path",
+    },
+  ]
+
+  for (const testCase of filePathOnlyCases) {
+    test(`denies ${testCase.label} by task-file policy only`, async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: testCase.toolName,
+        sessionId: `session-policy-only-${testCase.toolName}`,
+        command: testCase.command,
+        filePath: testCase.filePath,
+        content: testCase.content,
+        seedFreshTaskListSync: false,
+      })
+
+      expectTaskFilesPolicyDeny(result)
+    })
+  }
+
+  const mergedGovernanceCases: Array<{
+    toolName: string
+    toolInput: Record<string, string>
+    payloadEnv?: Record<string, string>
+    label: string
+  }> = [
+    {
+      toolName: "Bash",
+      toolInput: { command: "cat .claude/tasks/merged/1.json" },
+      payloadEnv: { CLAUDECODE: "1" },
+      label: "Claude Bash",
+    },
+    {
+      toolName: "Shell",
+      toolInput: { command: "cat .claude/tasks/merged/1.json" },
+      label: "Cursor Shell",
+    },
+    {
+      toolName: "shell_command",
+      toolInput: { command: "cat .claude/tasks/merged/1.json" },
+      payloadEnv: { CLAUDECODE: "1" },
+      label: "shell_command alias",
+    },
+    {
+      toolName: "run_shell_command",
+      toolInput: { command: "cat .claude/tasks/merged/1.json" },
+      payloadEnv: { GEMINI_CLI: "1" },
+      label: "Gemini run_shell_command",
+    },
+    {
+      toolName: "Edit",
+      toolInput: { file_path: ".claude/tasks/merged/1.json", new_string: "{}" },
+      payloadEnv: { CLAUDECODE: "1" },
+      label: "Claude Edit",
+    },
+    {
+      toolName: "StrReplace",
+      toolInput: { file_path: ".claude/tasks/merged/1.json", new_string: "{}" },
+      label: "Cursor StrReplace",
+    },
+    {
+      toolName: "replace",
+      toolInput: { file_path: ".claude/tasks/merged/1.json", new_string: "{}" },
+      payloadEnv: { GEMINI_CLI: "1" },
+      label: "Gemini replace",
+    },
+    {
+      toolName: "Write",
+      toolInput: { file_path: ".claude/tasks/merged/1.json", content: "{}" },
+      payloadEnv: { CLAUDECODE: "1" },
+      label: "Claude/Cursor Write",
+    },
+    {
+      toolName: "write_file",
+      toolInput: { file_path: ".claude/tasks/merged/1.json", content: "{}" },
+      payloadEnv: { GEMINI_CLI: "1" },
+      label: "Gemini write_file",
+    },
+  ]
+
+  for (const testCase of mergedGovernanceCases) {
+    test(`denies ${testCase.label} via merged governance entrypoint`, async () => {
+      const result = await runMergedTaskGovernance({
+        tool_name: testCase.toolName,
+        session_id: `session-merged-${testCase.toolName}`,
+        transcript_path: "",
+        cwd: process.cwd(),
+        tool_input: testCase.toolInput,
+        ...(testCase.payloadEnv ? { _env: testCase.payloadEnv } : {}),
+      })
+
+      expectTaskFilesPolicyDeny(result)
+    })
+  }
+
+  test("direct swiz task command enforcement prefers task-file policy", async () => {
+    const result = hookResultFromOutput(
+      await runSwizTasksEnforcement({
+        tool_input: {
+          command: "swiz tasks update .claude/tasks/session-file-only/1.json",
+        },
+      })
+    )
+
+    expectTaskFilesPolicyDeny(result)
+  })
 
   const editCases: Array<{ toolName: string; filePath: string; label: string }> = [
     { toolName: "Edit", filePath: ".claude/tasks/abc.json", label: "Edit .claude/tasks" },

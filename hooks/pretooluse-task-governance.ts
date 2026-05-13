@@ -1197,7 +1197,7 @@ async function checkNativeTaskUpdateCompletion(
   return "continue"
 }
 
-async function runSwizTasksEnforcement(input: Record<string, any>): Promise<SwizHookOutput> {
+export async function runSwizTasksEnforcement(input: Record<string, any>): Promise<SwizHookOutput> {
   const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
   const sessionId = String(input.session_id ?? "")
   const cwd = (input.cwd as string) ?? undefined
@@ -1260,6 +1260,16 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   if (!agentHasTaskToolsForHookPayload(input)) return {}
   const toolName = String(input.tool_name ?? "")
   const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
+
+  if (isBlockedTool(toolName)) {
+    if (isBlockedTaskFilesEdit(input, toolName)) {
+      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    }
+    const command = String(toolInput.command ?? "")
+    if (isBlockedSwizTaskFilesCommand(command)) {
+      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    }
+  }
 
   // ── Global pending-task overflow guard ────────────────────────────────
   // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
