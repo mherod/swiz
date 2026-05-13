@@ -41,6 +41,7 @@ describe("loadPermissionPolicy", () => {
 
     expect(rules).toEqual([])
     expect(stderr).toBe("")
+    expect(stderr).not.toContain("permission-policy.json unavailable")
   })
 
   it("loads and compiles safe patterns once per rule", async () => {
