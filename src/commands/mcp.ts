@@ -362,6 +362,12 @@ function validatePermissionPattern(pattern: string): boolean {
   return true
 }
 
+function getErrorCode(err: unknown): string | null {
+  if (typeof err !== "object" || err === null || !("code" in err)) return null
+  const code = (err as { code?: unknown }).code
+  return typeof code === "string" ? code : null
+}
+
 const PermissionRuleSchema = z.object({
   tool: z.string(),
   pattern: z.string().max(MAX_PERMISSION_PATTERN_LENGTH).optional(),
@@ -402,7 +408,7 @@ function loadPermissionPolicy(cwd: string): CompiledPermissionRule[] {
       }
       if (!validatePermissionPattern(rule.pattern)) {
         process.stderr.write(
-          `swiz mcp: permission-policy.json skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}\n`
+          `swiz mcp: permission-policy.json at ${path} skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}\n`
         )
         continue
       }
@@ -413,12 +419,15 @@ function loadPermissionPolicy(cwd: string): CompiledPermissionRule[] {
         })
       } catch (err) {
         process.stderr.write(
-          `swiz mcp: permission-policy.json skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}: ${messageFromUnknownError(err)}\n`
+          `swiz mcp: permission-policy.json at ${path} skipped unsafe pattern "${rule.pattern}" in rule for ${rule.tool} — ${INVALID_PATTERN_HINT}: ${messageFromUnknownError(err)}\n`
         )
       }
     }
     return compiled
   } catch (err) {
+    if (getErrorCode(err) === "ENOENT") {
+      return []
+    }
     process.stderr.write(
       `swiz mcp: permission-policy.json unavailable at ${path}: ${messageFromUnknownError(err)}\n`
     )

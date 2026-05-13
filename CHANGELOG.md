@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-05-13
+
+### Fixes
+
+- **MCP permission-policy diagnostics** — Malformed or unreadable
+  `.swiz/permission-policy.json` files now report the affected path
+  and failure reason while missing policy files stay quiet. (#599)
+- **Safer command guard behaviour** — Read-only `sed` commands are now
+  allowed for file inspection, while in-place edits, redirects, and
+  `tee` writes remain blocked.
+- **Gemini stop-event compatibility** — Gemini AfterAgent stop events
+  now map through the unified hook schema path, preventing valid
+  Gemini stop payloads from being rejected.
+
+### Improvements
+
+- **Permission-policy pattern safety** — Unsafe permission-policy
+  regex rules are skipped with clear diagnostics instead of being
+  compiled blindly.
+
 ## 2026-05-09
 
 ### New Features
