@@ -117,7 +117,7 @@ describe("stop-auto-continue: input validation", () => {
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("malformed stop-hook input")
+    expect(result.reason).toContain("could not identify a specific next step")
   })
 
   test("falls back when transcript file does not exist on disk", async () => {

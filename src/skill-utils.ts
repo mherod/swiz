@@ -8,9 +8,17 @@ import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
+/** Resolve the current list of skill directories. */
+export function getSkillDirs(): string[] {
+  const dirs = [join(resolveSpawnCwd(), ".skills"), ...getAllProviderSkillDirs()]
+  const local = join(process.cwd(), ".skills")
+  if (!dirs.includes(local)) dirs.unshift(local)
+  return dirs
+}
+
 // Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
-export const SKILL_DIRS = [join(resolveSpawnCwd(), ".skills"), ...getAllProviderSkillDirs()]
+export const SKILL_DIRS = getSkillDirs()
 // Deterministic precedence for duplicate names: first directory wins.
 export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 
@@ -35,7 +43,9 @@ export function skillExists(name: string): boolean {
     return false
   }
 
-  const found = SKILL_DIRS.some((dir) => existsSync(join(dir, name, "SKILL.md")))
+  // Use dynamic lookup to support CWD changes in tests
+  const dirs = getSkillDirs()
+  const found = dirs.some((dir) => existsSync(join(dir, name, "SKILL.md")))
   _skillCache.set(name, found)
   return found
 }

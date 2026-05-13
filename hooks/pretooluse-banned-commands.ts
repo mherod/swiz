@@ -50,10 +50,11 @@ const AWK_TEE_INPLACE_RE = /awk\b.*\|\s*tee\s+-i\b/
 const PERL_FILE_READ_RE = shellSegmentCommandRe(
   "perl\\s+(?:-[^|;&\\s]*[np][^|;&\\s]*\\s+)+[^|;&]*\\S"
 )
-// Only block sed when it writes files in-place (-i flag) or redirects output to a file.
+// Only block sed when it writes files in-place (-i/--in-place) or redirects output to a file.
 // Read-only sed (e.g. sed -n '...' file, sed '...' file | ...) is permitted.
-const SED_INPLACE_RE = shellSegmentCommandRe("sed\\s+(?:[^-]|-[^-])*-[a-zA-Z]*i")
+const SED_CMD_RE = shellSegmentCommandRe("sed(?:\\s|$)", "g")
 const SED_REDIRECT_RE = shellSegmentCommandRe("sed\\s[^|;&]*>\\s*\\S")
+const SED_VALUE_LONG_FLAGS = new Set(["--expression", "--file"])
 const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
@@ -88,6 +89,50 @@ function isDestructiveDelete(c: string): boolean {
   const first = c.trimStart().split(/\s+/)[0]
   if (DESTRUCTIVE_FIRST_CMDS.has(first ?? "")) return true
   return DESTRUCTIVE_CHAIN_RE.test(c) || FIND_DELETE_RE.test(c) || FIND_EXEC_RM_RE.test(c)
+}
+
+function sedSegmentArgs(command: string, match: RegExpMatchArray): string[] {
+  const matchIndex = match.index ?? 0
+  const sedIndex = match[0].lastIndexOf("sed")
+  const argsStart = matchIndex + sedIndex + "sed".length
+  const rest = command.slice(argsStart)
+  const segmentEnd = rest.search(/[|;&]/)
+  const segment = segmentEnd === -1 ? rest : rest.slice(0, segmentEnd)
+  return segment.trim().split(/\s+/).filter(Boolean)
+}
+
+function sedShortFlagRequiresValue(token: string): boolean {
+  if (!token.startsWith("-") || token === "-" || token.startsWith("--")) return false
+  const flags = token.slice(1)
+  return !flags.includes("i") && /[ef]/.test(flags)
+}
+
+function isSedInPlaceFlag(token: string): boolean {
+  if (token === "--in-place" || token.startsWith("--in-place=")) return true
+  if (!token.startsWith("-") || token === "-" || token.startsWith("--")) return false
+  return token.slice(1).includes("i")
+}
+
+function isSedInlineValueFlag(token: string): boolean {
+  return token.startsWith("--expression=") || token.startsWith("--file=")
+}
+
+function sedFlagConsumesNextToken(token: string): boolean {
+  return SED_VALUE_LONG_FLAGS.has(token) || sedShortFlagRequiresValue(token)
+}
+
+function hasSedInPlaceFlag(command: string): boolean {
+  for (const match of command.matchAll(SED_CMD_RE)) {
+    const args = sedSegmentArgs(command, match)
+    for (let i = 0; i < args.length; i++) {
+      const token = args[i] ?? ""
+      if (token === "--") break
+      if (isSedInlineValueFlag(token)) continue
+      if (isSedInPlaceFlag(token)) return true
+      if (sedFlagConsumesNextToken(token)) i++
+    }
+  }
+  return false
 }
 
 /**
@@ -214,7 +259,7 @@ function buildShellToolRules(): Rule[] {
         "Do not use `perl` to read files from the shell. Use the Read tool or Glob tool instead.\n\nIf you need a specific slice of a file, use Read with line ranges or read the file and filter it in a later step.",
     },
     {
-      match: (c) => SED_INPLACE_RE.test(c) || SED_REDIRECT_RE.test(c),
+      match: (c) => hasSedInPlaceFlag(c) || SED_REDIRECT_RE.test(c),
       message:
         "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • Write tool: overwrite a file with entirely new content\n\nRead-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
     },

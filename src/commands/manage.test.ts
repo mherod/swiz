@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, setDefaultTimeout } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -12,6 +12,9 @@ const DESKTOP_CONFIG_SUBPATH = join(
 )
 
 const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
+
+// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
+setDefaultTimeout(20_000)
 
 async function makeTempHome(prefix = "swiz-manage-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))

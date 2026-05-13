@@ -1110,3 +1110,137 @@ describe("strict-no-direct-main merge task blocking", () => {
     expect(result.decision).toBeUndefined()
   })
 })
+
+describe("task-file block bypass regression tests", () => {
+  const tasksFilesDenyMessage = "STOP. Do not edit `.claude/tasks` files directly."
+
+  const editCases: Array<{ toolName: string; filePath: string; label: string }> = [
+    { toolName: "Edit", filePath: ".claude/tasks/abc.json", label: "Edit .claude/tasks" },
+    { toolName: "Write", filePath: ".claude/tasks/abc.json", label: "Write .claude/tasks" },
+    { toolName: "Edit", filePath: "~/.claude/tasks/abc.json", label: "Edit ~/.claude/tasks" },
+    { toolName: "Write", filePath: "~/.claude/tasks/abc.json", label: "Write ~/.claude/tasks" },
+    {
+      toolName: "Edit",
+      filePath: "/Users/foo/.claude/tasks/1.json",
+      label: "Edit absolute .claude/tasks",
+    },
+    {
+      toolName: "Edit",
+      filePath: "./.claude/tasks/subdir/2.json",
+      label: "Edit relative .claude/tasks subdir",
+    },
+  ]
+
+  for (const { toolName, filePath, label } of editCases) {
+    test(`denies ${label} via evaluatePretooluseRequireTasks unified path`, async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-edit-${label.replace(/\s+/g, "-")}`
+      await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+      const result = await runHook({ homeDir, toolName, sessionId, filePath })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain(tasksFilesDenyMessage)
+    })
+  }
+
+  test("denies Edit .claude/tasks via runRequireTasksChecks merged path", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-edit-merged-path"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: ".claude/tasks/1.json",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(tasksFilesDenyMessage)
+  })
+
+  const bashCases: Array<{ command: string; label: string }> = [
+    { command: "cat .claude/tasks/1.json", label: "Bash cat .claude/tasks" },
+    { command: "cat '.claude/tasks/1.json'", label: "Bash cat quoted .claude/tasks" },
+    { command: "rm ~/.claude/tasks/1.json", label: "Bash rm ~/.claude/tasks" },
+    { command: "echo 'modify' >> .claude/tasks/2.json", label: "Bash echo-append .claude/tasks" },
+    { command: "sed -i 's/foo/bar/' .claude/tasks/config.json", label: "Bash sed .claude/tasks" },
+    { command: "rm -rf ~/.claude/tasks/", label: "Bash rm -rf ~/.claude/tasks" },
+  ]
+
+  for (const { command, label } of bashCases) {
+    test(`denies ${label} via evaluatePretooluseRequireTasks unified path`, async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-bash-${label.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "")}`
+      await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+      const result = await runHook({ homeDir, toolName: "Bash", sessionId, command })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain(tasksFilesDenyMessage)
+    })
+  }
+
+  test("denies Bash .claude/tasks via runRequireTasksChecks merged path", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-bash-merged-path"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+      command: "cat .claude/tasks/1.json",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(tasksFilesDenyMessage)
+  })
+
+  test("denies Edit .claude/tasks even when tool_input is missing command field", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-edit-no-command"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: ".claude/tasks/1.json",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(tasksFilesDenyMessage)
+  })
+
+  test("denies Write .claude/tasks even when tool_input is malformed", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-write-malformed"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Write",
+      sessionId,
+      filePath: ".claude/tasks/2.json",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(tasksFilesDenyMessage)
+  })
+
+  test("allows non-task file edits (positive regression)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-allow-regular-file"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Follow-up", status: "pending" })
+
+    const result = await runHook({ homeDir, toolName: "Edit", sessionId, filePath: "src/foo.ts" })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows Bash commands that do not target .claude/tasks (positive regression)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-allow-regular-bash"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Some task", status: "in_progress" })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Follow-up", status: "pending" })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId, command: "cat README.md" })
+    expect(result.decision).toBeUndefined()
+  })
+})

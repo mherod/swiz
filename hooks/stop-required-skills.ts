@@ -10,6 +10,7 @@
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { formatSkillReferenceForAgent, skillExists } from "../src/skill-utils.ts"
+import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
 import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { blockStopObj, isGitRepo } from "../src/utils/hook-utils.ts"
 import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
@@ -17,6 +18,8 @@ import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-
 interface RequiredStopSkillContext {
   cwd: string
   input: StopHookInput
+  ahead?: number
+  incompleteCount?: number
 }
 
 interface RequiredStopSkillRule {
@@ -24,7 +27,7 @@ interface RequiredStopSkillRule {
   applies?(ctx: RequiredStopSkillContext): boolean | Promise<boolean>
   blockedLine(skillReference: string): string
   actionHeader(skillReference: string): string
-  actionPlan(skillReference: string): ActionPlanItem[]
+  actionPlan(skillReference: string, ctx: RequiredStopSkillContext): ActionPlanItem[]
   why(skillReference: string): string
 }
 
@@ -35,14 +38,15 @@ function formatSessionSkillsForReason(skills: string[]): string {
 function buildMissingSkillReason(
   rule: RequiredStopSkillRule,
   skillReference: string,
-  invokedSkills: string[]
+  invokedSkills: string[],
+  ctx: RequiredStopSkillContext
 ): string {
   return [
     rule.blockedLine(skillReference),
     "",
     formatSessionSkillsForReason(invokedSkills),
     "",
-    formatActionPlan(rule.actionPlan(skillReference), {
+    formatActionPlan(rule.actionPlan(skillReference, ctx), {
       header: rule.actionHeader(skillReference),
     }).trimEnd(),
     `Why this matters: ${rule.why(skillReference)}`,
@@ -53,24 +57,63 @@ function buildMissingSkillReason(
 const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   {
     skill: "end-of-day",
-    applies: async ({ cwd, input }) => {
-      const es = (input as Record<string, any>)._effectiveSettings
-      if (es?.enforceEndOfDay === false) return false
-      if (!(await isGitRepo(cwd))) return false
+    applies: async (ctx) => {
+      const { cwd, input } = ctx
+      const es = (input as any)._effectiveSettings
+      if (es?.enforceEndOfDay === false) {
+        if (process.env.DEBUG_REQUIRED_SKILLS) console.error("end-of-day: enforceEndOfDay is false")
+        return false
+      }
+      if (!(await isGitRepo(cwd))) {
+        if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${cwd} is not a git repo`)
+        return false
+      }
+
+      // Signal 1: Unpushed commits
       const proc = Bun.spawnSync(["git", "-C", cwd, "rev-list", "--count", "@{upstream}..HEAD"], {
         stdout: "pipe",
         stderr: "pipe",
       })
-      if (proc.exitCode !== 0) return false
-      const count = parseInt(new TextDecoder().decode(proc.stdout).trim(), 10)
-      return !Number.isNaN(count) && count > 0
+      const ahead =
+        proc.exitCode === 0 ? parseInt(new TextDecoder().decode(proc.stdout).trim(), 10) : 0
+      if (!Number.isNaN(ahead) && ahead > 0) {
+        if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${ahead} commits ahead`)
+        ctx.ahead = ahead
+        return true
+      }
+
+      // Signal 2: Incomplete tasks
+      const sessionId = (input as any).session_id
+      if (typeof sessionId === "string") {
+        const tasks = await readTasks(sessionId)
+        const incomplete = tasks.filter((t: any) => isIncompleteTaskStatus(t.status))
+        if (incomplete.length > 0) {
+          if (process.env.DEBUG_REQUIRED_SKILLS)
+            console.error(`end-of-day: ${incomplete.length} incomplete tasks`)
+          ctx.incompleteCount = incomplete.length
+          return true
+        }
+      }
+
+      if (process.env.DEBUG_REQUIRED_SKILLS) console.error("end-of-day: no signals fired")
+      return false
     },
     blockedLine: (skillReference) =>
-      `BLOCKED: unpushed commits exist and ${skillReference} has not been run this session.`,
+      `BLOCKED: session handoff incomplete and ${skillReference} has not been run.`,
     actionHeader: (skillReference) => `Run ${skillReference} to complete the session handoff:`,
-    actionPlan: (skillReference) => [
-      `Invoke ${skillReference} to push commits, post resolution evidence, and file follow-up issues before stopping.`,
-    ],
+    actionPlan: (skillReference, ctx) => {
+      const plan: string[] = []
+      if (ctx.ahead && ctx.ahead > 0) {
+        plan.push(`Local commits unpushed (${ctx.ahead} ahead of origin/main).`)
+      }
+      if (ctx.incompleteCount && ctx.incompleteCount > 0) {
+        plan.push(`Session shortlist incomplete (${ctx.incompleteCount} tasks remain).`)
+      }
+      plan.push(
+        `Invoke ${skillReference} to push commits, post resolution evidence, and file follow-up issues before stopping.`
+      )
+      return plan
+    },
     why: (skillReference) =>
       `${skillReference} ensures commits reach the remote (so Closes #N auto-closes issues on GitHub), evidence is posted, and follow-up work is captured — preventing work from being lost when the session ends.`,
   },
@@ -120,14 +163,26 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
   let invokedSkills: string[] | null = null
 
   for (const rule of REQUIRED_STOP_SKILLS) {
-    if (rule.applies && !(await rule.applies(ctx))) continue
-    if (!skillExists(rule.skill)) continue
+    if (rule.applies && !(await rule.applies(ctx))) {
+      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Rule ${rule.skill} does not apply`)
+      continue
+    }
+    if (!skillExists(rule.skill)) {
+      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} does not exist`)
+      continue
+    }
 
     invokedSkills ??= await getSkillsUsedForCurrentSession(parsed)
-    if (invokedSkills.includes(rule.skill)) continue
+    if (process.env.DEBUG_REQUIRED_SKILLS)
+      console.error(`Invoked skills: ${invokedSkills.join(", ")}`)
+    if (invokedSkills.includes(rule.skill)) {
+      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} already invoked`)
+      continue
+    }
 
     const skillReference = formatSkillReferenceForAgent(rule.skill)
-    return blockStopObj(buildMissingSkillReason(rule, skillReference, invokedSkills))
+    if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Blocking on missing skill: ${rule.skill}`)
+    return blockStopObj(buildMissingSkillReason(rule, skillReference, invokedSkills, ctx))
   }
 
   return {}

@@ -32,8 +32,14 @@ describe("pretooluse-banned-commands", () => {
   })
 
   describe("deny severity (blocked)", () => {
-    test("sed is blocked", async () => {
+    test("sed in-place edit is blocked", async () => {
       const result = await runHook("sed -i 's/foo/bar/' file.ts")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Edit tool")
+    })
+
+    test("sed long in-place edit is blocked", async () => {
+      const result = await runHook("sed --in-place 's/foo/bar/' file.ts")
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("Edit tool")
     })
@@ -571,6 +577,16 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBeUndefined()
     })
 
+    test("sed read-only transform passes through", async () => {
+      const result = await runHook("sed 's/foo/bar/' file.ts")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("sed read-only path containing -i passes through", async () => {
+      const result = await runHook("sed -n '1,10p' src/in-place-file.ts")
+      expect(result.decision).toBeUndefined()
+    })
+
     // ── False-positive guard: banned patterns inside quoted arguments ──────────
 
     test("commit message containing 'git stash' in quotes passes through", async () => {
@@ -867,6 +883,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("sed redirecting to a file is blocked", async () => {
       const result = await runHook("sed 's/foo/bar/' input.txt > output.txt")
+      expect(result.decision).toBe("deny")
+    })
+
+    test("sed piped to tee writing a file is blocked", async () => {
+      const result = await runHook("sed -n '1,10p' input.txt | tee output.txt")
       expect(result.decision).toBe("deny")
     })
   })

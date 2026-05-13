@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
@@ -6,6 +6,9 @@ import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { useTempDir } from "../utils/test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
+
+// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
+setDefaultTimeout(20_000)
 
 async function runSwiz(
   args: string[],
