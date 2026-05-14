@@ -44,6 +44,7 @@ import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
+import pretooluseGitFlowIntegrationBaseGate from "../hooks/pretooluse-gitflow-integration-base-gate.ts"
 import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
@@ -325,6 +326,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseNoMergeConflictComments },
       { hook: pretooluseNoCp },
       { hook: pretooluseGitIndexLock },
+      { hook: pretooluseGitFlowIntegrationBaseGate },
       { hook: pretooluseNoNpm },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
