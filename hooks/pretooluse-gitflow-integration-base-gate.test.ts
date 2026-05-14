@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
+import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluateGitFlowGate } from "./pretooluse-gitflow-integration-base-gate"
+
+const { create: createTempDir } = useTempDir("swiz-gitflow-test-")
 
 async function setupGitRepo(tempDir: string, hasDevBranch: boolean = false) {
   await fs.mkdir(tempDir, { recursive: true })
@@ -33,24 +36,15 @@ async function setupGitRepo(tempDir: string, hasDevBranch: boolean = false) {
   }
 }
 
+async function makeGitRepo(hasDevBranch: boolean = false): Promise<string> {
+  const tempDir = await createTempDir()
+  await setupGitRepo(tempDir, hasDevBranch)
+  return tempDir
+}
+
 describe("pretooluse-gitflow-integration-base-gate", () => {
-  let tempDir: string
-
-  beforeEach(async () => {
-    tempDir = `.tmp-gitflow-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    await fs.mkdir(tempDir, { recursive: true })
-  })
-
-  afterEach(async () => {
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true })
-    } catch {
-      // ignore cleanup errors
-    }
-  })
-
   it("should allow main interaction in trunk-based repos (no dev/develop)", async () => {
-    await setupGitRepo(tempDir, false)
+    const tempDir = await makeGitRepo(false)
 
     const input: unknown = {
       tool_name: "Bash",
@@ -66,7 +60,7 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
   })
 
   it("should block main branching in git-flow repos", async () => {
-    await setupGitRepo(tempDir, true)
+    const tempDir = await makeGitRepo(true)
 
     const input: unknown = {
       tool_name: "Bash",
@@ -82,7 +76,7 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
   })
 
   it("should detect git branch from main", async () => {
-    await setupGitRepo(tempDir, true)
+    const tempDir = await makeGitRepo(true)
 
     const input: unknown = {
       tool_name: "Bash",
@@ -97,7 +91,7 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
   })
 
   it("should allow main interaction when hotfix is declared in transcript", async () => {
-    await setupGitRepo(tempDir, true)
+    const tempDir = await makeGitRepo(true)
 
     const transcriptPath = path.join(tempDir, "transcript.txt")
     await fs.writeFile(transcriptPath, "This is a critical hotfix for production")
@@ -117,7 +111,7 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
   })
 
   it("should ignore non-shell tools", async () => {
-    await setupGitRepo(tempDir, true)
+    const tempDir = await makeGitRepo(true)
 
     const input: unknown = {
       tool_name: "Edit",
@@ -132,7 +126,7 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
   })
 
   it("should ignore unrelated commands", async () => {
-    await setupGitRepo(tempDir, true)
+    const tempDir = await makeGitRepo(true)
 
     const input: unknown = {
       tool_name: "Bash",
