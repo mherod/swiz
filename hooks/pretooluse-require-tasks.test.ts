@@ -1140,6 +1140,8 @@ describe("strict-no-direct-main merge task blocking", () => {
 })
 
 describe("task-file block bypass regression tests", () => {
+  // Regression coverage for #588: these cases freeze task-file denials across
+  // direct hook entrypoints and merged agent payloads.
   const tasksFilesDenyMessage = "Task files in `.claude/tasks` are managed automatically"
 
   const filePathOnlyCases: Array<{
