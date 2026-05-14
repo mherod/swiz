@@ -33,7 +33,7 @@ import {
   readSessionLines,
   stripAnsi,
 } from "../src/utils/hook-utils.ts"
-import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
+import { shellSegmentCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 
@@ -122,8 +122,11 @@ const SEGMENT_PREFIX_RE =
 
 /** Strip common command-prefix wrappers from each shell segment so classification sees the real command. */
 function normalizeCommand(cmd: string): string {
-  // Split on shell operators (|, &, ;), trim each segment, strip wrappers, then rejoin.
-  return cmd
+  // Strip quoted string content first so that prose payloads passed via --body/--title/--field
+  // flags (e.g. `gh issue create --body "bun test ..."`) are not matched as test/lint commands,
+  // and so that | characters inside quoted values don't cause incorrect operator splits.
+  const stripped = stripQuotedShellStrings(cmd, { preserveQuotePairs: true })
+  return stripped
     .split(/([|;&])/)
     .map((part, i) => (i % 2 === 0 ? part.trim().replace(SEGMENT_PREFIX_RE, "") : part))
     .join("")
@@ -607,13 +610,16 @@ function checkNarrowGrep(cmd: string): string | null {
 }
 
 export function detectOverfiltering(cmd: string, kind: CommandKind): string | null {
-  if (!cmd.includes("|")) return null
+  // Strip quoted content so that pipe characters inside --body/--title payloads
+  // do not trigger false-positive overfiltering blocks.
+  const cmdForMatching = stripQuotedShellStrings(cmd, { preserveQuotePairs: true })
+  if (!cmdForMatching.includes("|")) return null
 
   const kindLabel = kind === "test" ? "test" : kind === "build" ? "build" : kind
   const issues = [
-    checkLineLimitFilter(TAIL_LINES_RE, cmd, "tail", kindLabel),
-    checkLineLimitFilter(HEAD_LINES_RE, cmd, "head", kindLabel),
-    checkNarrowGrep(cmd),
+    checkLineLimitFilter(TAIL_LINES_RE, cmdForMatching, "tail", kindLabel),
+    checkLineLimitFilter(HEAD_LINES_RE, cmdForMatching, "head", kindLabel),
+    checkNarrowGrep(cmdForMatching),
   ].filter((x): x is string => x !== null)
 
   if (issues.length === 0) return null
