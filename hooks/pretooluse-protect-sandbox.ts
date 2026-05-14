@@ -249,6 +249,18 @@ const pretoolUseProtectSandbox: SwizToolHook = {
 
       const blockedPath = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
       if (blockedPath) {
+        const MEMORY_DIR_RE = /\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\]/
+        if (MEMORY_DIR_RE.test(blockedPath)) {
+          return preToolUseDeny(
+            [
+              "Shell commands referencing the memory directory are not permitted.",
+              "",
+              `  Attempted: ${blockedPath}`,
+              "",
+              "Use /update-memory to add session learnings to the project CLAUDE.md file instead.",
+            ].join("\n")
+          )
+        }
         return preToolUseDeny(
           [
             "Hidden home-directory path references in shell commands are blocked under sandbox mode.",

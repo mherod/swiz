@@ -112,6 +112,20 @@ async function checkHiddenHomePath(target: string, cwd: string): Promise<SwizHoo
   const hiddenRoot = `${normalizedHome}/${normalizedTarget.slice(normalizedHome.length + 1).split("/")[0]}`
   if (isWithin(hiddenRoot, cwd)) return null
 
+  // Memory directory writes should use /update-memory instead of direct file edits
+  const MEMORY_DIR_RE = /\/\.claude\/projects\/[^/]+\/memory\//
+  if (MEMORY_DIR_RE.test(normalizedTarget)) {
+    return preToolUseDeny(
+      [
+        "Writing directly to the memory directory is not permitted.",
+        "",
+        `  Attempted: ${target}`,
+        "",
+        "Use /update-memory to add session learnings to the project CLAUDE.md file instead.",
+      ].join("\n")
+    )
+  }
+
   return preToolUseDeny(
     [
       "Hidden home-directory edits are blocked in sandbox mode.",

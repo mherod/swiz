@@ -143,6 +143,17 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     )
     expect(result.decision).toBe("deny")
   })
+
+  test("returns /update-memory guidance for shell commands referencing memory directory", async () => {
+    const memoryPath = join(TEST_HOME, ".claude", "projects", "my-project", "memory", "MEMORY.md")
+    const result = await runPinnedHomeBashHook(`cat ${memoryPath}`)
+    expect(result.decision).toBe("deny")
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
+    const reason =
+      ((parsed.hookSpecificOutput as Record<string, any>)?.permissionDecisionReason as string) ?? ""
+    expect(reason).toContain("update-memory")
+    expect(reason).not.toContain("Hidden home-directory path references")
+  })
 })
 
 describe("pretooluse-protect-sandbox (file edits)", () => {

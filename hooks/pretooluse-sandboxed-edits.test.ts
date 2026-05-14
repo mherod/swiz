@@ -145,9 +145,8 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(hso?.permissionDecision).toBe("allow")
   })
 
-  test("blocks edits within hidden home-directory paths", async () => {
+  test("blocks memory directory writes with /update-memory redirect guidance", async () => {
     const cwd = await createTempDir()
-    // Use a known fakeHome so we can construct the expected allowed path.
     const fakeHome = await createTempDir()
     const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
     const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
@@ -155,7 +154,22 @@ describe("pretooluse-sandboxed-edits", () => {
     const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("deny")
     const msg = String(hso?.permissionDecisionReason)
+    expect(msg).toContain("Writing directly to the memory directory is not permitted")
+    expect(msg).toContain("/update-memory")
+    expect(msg).not.toContain("Hidden home-directory edits are blocked")
+  })
+
+  test("blocks edits within other hidden home-directory paths with generic message", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const hiddenPath = join(fakeHome, ".some-tool", "config.json")
+    const result = await runHook(cwd, "Write", hiddenPath, { fakeHomeOverride: fakeHome })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+    const msg = String(hso?.permissionDecisionReason)
     expect(msg).toContain("Hidden home-directory edits are blocked")
+    expect(msg).not.toContain("/update-memory")
   })
 
   test("allows hidden home-directory edits when dispatch is inside that hidden root", async () => {
