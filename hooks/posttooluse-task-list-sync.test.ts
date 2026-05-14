@@ -319,7 +319,7 @@ describe("posttooluse-task-list-sync", () => {
     expect(exitCode).toBe(0)
     const parsed = JSON.parse(stdout)
     const ctx: string = parsed.hookSpecificOutput.additionalContext
-    expect(ctx).toContain("Resolve the task list before continuing")
+    expect(ctx).toContain("resolve them before continuing")
     expect(ctx).toContain("Pick the duplicate entry")
     expect(ctx).toContain('"Resolve task state" is on #60 (pending), #61 (in_progress)')
   })

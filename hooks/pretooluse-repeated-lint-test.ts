@@ -33,7 +33,7 @@ import {
   readSessionLines,
   stripAnsi,
 } from "../src/utils/hook-utils.ts"
-import { shellSegmentCommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 
@@ -120,12 +120,31 @@ export function isHelpQuery(cmd: string): boolean {
 const SEGMENT_PREFIX_RE =
   /^(?:(?:timeout\s+\d+|nice(?:\s+-n\s*[-\d]+)?|env|command|sudo(?:\s+-\S+(?:\s+\S+)?)*|time)\s+)+/
 
+/**
+ * Strip only prose payload flag values (--body, --title, --field, --message, --comment, --description)
+ * from a shell command so that prose content like `--body "bun test ..."` is not mistakenly
+ * classified as a test command, and pipe characters inside those values do not trigger
+ * overfiltering detection. Unlike stripQuotedShellStrings, this preserves grep/rg patterns
+ * like `"error|ERR|failed"` which are not attached to prose payload flags.
+ */
+function stripProsePayloadFlagValues(cmd: string): string {
+  return cmd
+    .replace(
+      /--(?:body|title|field|message|comment|description)\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 /** Strip common command-prefix wrappers from each shell segment so classification sees the real command. */
 function normalizeCommand(cmd: string): string {
-  // Strip quoted string content first so that prose payloads passed via --body/--title/--field
-  // flags (e.g. `gh issue create --body "bun test ..."`) are not matched as test/lint commands,
-  // and so that | characters inside quoted values don't cause incorrect operator splits.
-  const stripped = stripQuotedShellStrings(cmd, { preserveQuotePairs: true })
+  // Strip prose payload flag values (--body, --title, etc.) so that content like
+  // `gh issue create --body "bun test ..."` is not classified as a test command,
+  // and so that | characters inside those values don't cause incorrect operator splits.
+  // We use stripProsePayloadFlagValues (not stripQuotedShellStrings) to preserve
+  // grep patterns like "error|ERR|failed" that are not prose payload values.
+  const stripped = stripProsePayloadFlagValues(cmd)
   return stripped
     .split(/([|;&])/)
     .map((part, i) => (i % 2 === 0 ? part.trim().replace(SEGMENT_PREFIX_RE, "") : part))
@@ -601,8 +620,13 @@ function checkLineLimitFilter(
   return `\`${direction} -${n}\` only shows the ${direction === "tail" ? "last" : "first"} ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
 }
 
-function checkNarrowGrep(cmd: string): string | null {
-  const grepMatch = cmd.match(GREP_ERROR_ONLY_RE)
+const GREP_PIPE_PRESENT_RE = /\|\s*(?:rg|grep)\s+/
+
+function checkNarrowGrep(cmdStripped: string, cmdOriginal: string): string | null {
+  // Verify the grep/rg pipe exists outside quoted strings, then extract the
+  // actual pattern from the original command (before quote-stripping erased it).
+  if (!GREP_PIPE_PRESENT_RE.test(cmdStripped)) return null
+  const grepMatch = cmdOriginal.match(GREP_ERROR_ONLY_RE)
   if (!grepMatch) return null
   const pattern = grepMatch[1]?.trim() ?? ""
   if (!NARROW_GREP_KEYWORDS.test(pattern)) return null
@@ -610,16 +634,17 @@ function checkNarrowGrep(cmd: string): string | null {
 }
 
 export function detectOverfiltering(cmd: string, kind: CommandKind): string | null {
-  // Strip quoted content so that pipe characters inside --body/--title payloads
-  // do not trigger false-positive overfiltering blocks.
-  const cmdForMatching = stripQuotedShellStrings(cmd, { preserveQuotePairs: true })
+  // Strip prose payload flag values so that pipe characters inside --body/--title values
+  // do not trigger false-positive overfiltering blocks. Preserves grep patterns like
+  // "error|ERR|failed" which are not attached to prose payload flags.
+  const cmdForMatching = stripProsePayloadFlagValues(cmd)
   if (!cmdForMatching.includes("|")) return null
 
   const kindLabel = kind === "test" ? "test" : kind === "build" ? "build" : kind
   const issues = [
     checkLineLimitFilter(TAIL_LINES_RE, cmdForMatching, "tail", kindLabel),
     checkLineLimitFilter(HEAD_LINES_RE, cmdForMatching, "head", kindLabel),
-    checkNarrowGrep(cmdForMatching),
+    checkNarrowGrep(cmdForMatching, cmd),
   ].filter((x): x is string => x !== null)
 
   if (issues.length === 0) return null

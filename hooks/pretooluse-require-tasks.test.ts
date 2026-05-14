@@ -29,9 +29,9 @@ function hookResultFromOutput(parsed: Record<string, any>): HookResult {
 
 function expectTaskFilesPolicyDeny(result: HookResult) {
   expect(result.decision).toBe("deny")
-  expect(result.reason).toContain("STOP. Do not edit `.claude/tasks` files directly.")
+  expect(result.reason).toContain("Task files in `.claude/tasks` are managed automatically")
   expect(result.reason).not.toContain("Run TaskList")
-  expect(result.reason).not.toContain("no incomplete tasks")
+  expect(result.reason).not.toContain("needs tasks in place first")
 }
 
 async function runHook({
@@ -183,7 +183,7 @@ describe("pretooluse-require-tasks", () => {
     const homeDir = await createTempHome()
     const result = await runHook({ homeDir, toolName: "Bash" })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("no incomplete tasks")
+    expect(result.reason).toContain("needs tasks in place first")
   })
 
   test("denies Bash with prior-session restore message when prior session has incomplete tasks", async () => {
@@ -229,7 +229,7 @@ describe("pretooluse-require-tasks", () => {
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     // All tasks completed — must create new tasks before continuing (no bypass)
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("All session tasks are completed")
+    expect(result.reason).toContain("All planned tasks are done")
   })
 
   test("allows Bash when all tasks completed even with stale transcript (wrap-up exemption)", async () => {
@@ -256,7 +256,7 @@ describe("pretooluse-require-tasks", () => {
     // Should deny — all tasks done, new tasks must be created before continuing
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("All session tasks are completed")
+    expect(result.reason).toContain("All planned tasks are done")
   })
 
   test("denies Edit when no tasks have ever been created", async () => {
@@ -266,7 +266,7 @@ describe("pretooluse-require-tasks", () => {
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("no incomplete tasks")
+    expect(result.reason).toContain("needs tasks in place first")
   })
 
   test("allows Shell when at least one pending task exists", async () => {
@@ -321,7 +321,7 @@ describe("pretooluse-require-tasks", () => {
 
     const result = await runHook({ homeDir, toolName: "Bash", sessionId })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("duplicate task subjects are resolved")
+    expect(result.reason).toContain("Duplicate task subjects found")
     expect(result.reason).toContain("Pick the duplicate entry")
     expect(result.reason).toContain("Run TaskList")
   })
@@ -506,7 +506,7 @@ describe("pretooluse-require-tasks", () => {
       seedFreshTaskListSync: false,
     })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Run TaskList before Bash")
+    expect(result.reason).toContain("task state before Bash")
     expect(result.reason).toContain("Run TaskList now")
     expect(result.reason).not.toContain("Swiz")
     expect(result.reason).not.toContain("drift")
@@ -536,7 +536,7 @@ describe("pretooluse-require-tasks", () => {
       seedFreshTaskListSync: false,
     })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Run TaskList before Edit")
+    expect(result.reason).toContain("task state before Edit")
     expect(result.reason).not.toContain("Swiz")
     expect(result.reason).not.toContain("drift")
     expect(result.reason).not.toContain("recent context")
@@ -776,7 +776,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason ?? "").toContain(".claude/tasks")
     expect(result.reason ?? "").toContain("Allowed approaches")
-    expect(result.reason ?? "").toContain("Banned approach")
+    expect(result.reason ?? "").toContain("Avoid editing")
   })
 
   test("denies Bash when command targets .claude/tasks", async () => {
@@ -802,7 +802,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason ?? "").toContain(".claude/tasks")
     expect(result.reason ?? "").toContain("Allowed approaches")
-    expect(result.reason ?? "").toContain("Banned approach")
+    expect(result.reason ?? "").toContain("Avoid editing")
   })
 
   describe("git repo + CLAUDE.md guard", () => {
@@ -854,7 +854,7 @@ describe("pretooluse-require-tasks", () => {
         sessionId,
       })
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("no incomplete tasks")
+      expect(result.reason).toContain("needs tasks in place first")
     })
   })
 
@@ -1140,7 +1140,7 @@ describe("strict-no-direct-main merge task blocking", () => {
 })
 
 describe("task-file block bypass regression tests", () => {
-  const tasksFilesDenyMessage = "STOP. Do not edit `.claude/tasks` files directly."
+  const tasksFilesDenyMessage = "Task files in `.claude/tasks` are managed automatically"
 
   const filePathOnlyCases: Array<{
     toolName: string
