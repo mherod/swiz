@@ -127,6 +127,16 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(result.decision).toBe("deny")
   })
 
+  test("blocks shell commands that reference hidden home paths with $HOME variable", async () => {
+    const result = await runPinnedHomeBashHook("cat $HOME/.swiz/settings.json")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks shell commands that reference hidden home paths with tilde", async () => {
+    const result = await runPinnedHomeBashHook("cat ~/.swiz/settings.json")
+    expect(result.decision).toBe("deny")
+  })
+
   test("blocks shell commands that reference hidden home paths with command substitution", async () => {
     const result = await runPinnedHomeBashHook('cat $(printf "%s" "$HOME")/.swiz/settings.json')
     expect(result.decision).toBe("deny")
