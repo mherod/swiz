@@ -5,13 +5,19 @@ import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
-import { DIRECT_MERGE_INTENT_RE, isLargeContentPayload } from "./pretooluse-require-tasks.ts"
+import {
+  DIRECT_MERGE_INTENT_RE,
+  evaluatePretooluseRequireTasks,
+  isLargeContentPayload,
+} from "./pretooluse-require-tasks.ts"
 import pretooluseTaskGovernance, { runSwizTasksEnforcement } from "./pretooluse-task-governance.ts"
 
 interface HookResult {
   decision?: string
   reason?: string
 }
+
+const PROJECT_ROOT = process.cwd()
 
 function hookResultFromOutput(parsed: Record<string, any>): HookResult {
   const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
@@ -67,7 +73,7 @@ async function runHook({
     tool_input: toolInput,
     ...(payloadEnv !== undefined ? { _env: payloadEnv } : {}),
     // cwd defaults to the swiz project root (a git repo with CLAUDE.md) when omitted
-    ...(cwd !== undefined ? { cwd } : {}),
+    cwd: cwd ?? PROJECT_ROOT,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   for (const agent of AGENTS) {
@@ -95,6 +101,11 @@ async function runHook({
 
 async function runMergedTaskGovernance(input: Record<string, any>): Promise<HookResult> {
   const output = await pretooluseTaskGovernance.run(input)
+  return hookResultFromOutput(output as Record<string, any>)
+}
+
+async function runStandaloneRequireTasks(input: Record<string, any>): Promise<HookResult> {
+  const output = await evaluatePretooluseRequireTasks(input)
   return hookResultFromOutput(output as Record<string, any>)
 }
 
@@ -1167,6 +1178,48 @@ describe("task-file block bypass regression tests", () => {
         filePath: testCase.filePath,
         content: testCase.content,
         seedFreshTaskListSync: false,
+      })
+
+      expectTaskFilesPolicyDeny(result)
+    })
+  }
+
+  const partialPayloadCases: Array<{
+    toolName: string
+    toolInput: Record<string, string>
+    label: string
+  }> = [
+    {
+      toolName: "Bash",
+      toolInput: { command: "cat .claude/tasks/partial/1.json" },
+      label: "Bash command",
+    },
+    {
+      toolName: "Edit",
+      toolInput: { file_path: ".claude/tasks/partial/1.json" },
+      label: "Edit file path",
+    },
+    {
+      toolName: "Write",
+      toolInput: { file_path: ".claude/tasks/partial/1.json" },
+      label: "Write file path",
+    },
+  ]
+
+  for (const testCase of partialPayloadCases) {
+    test(`denies partial ${testCase.label} payload before standalone guards`, async () => {
+      const result = await runStandaloneRequireTasks({
+        tool_name: testCase.toolName,
+        tool_input: testCase.toolInput,
+      })
+
+      expectTaskFilesPolicyDeny(result)
+    })
+
+    test(`denies partial ${testCase.label} payload before merged guards`, async () => {
+      const result = await runMergedTaskGovernance({
+        tool_name: testCase.toolName,
+        tool_input: testCase.toolInput,
       })
 
       expectTaskFilesPolicyDeny(result)

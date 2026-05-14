@@ -888,6 +888,10 @@ export async function evaluatePretooluseRequireTasks(
   if (isBlockedTool(toolName) && isBlockedTaskFilesEdit(input, toolName)) {
     return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
   }
+  const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
+  if (isBlockedTool(toolName) && isBlockedSwizTaskFilesCommand(command)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
 
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
