@@ -363,6 +363,66 @@ describe("swiz skill --sync-gemini", () => {
   })
 })
 
+// ─── swiz skill --sync --to agents ───────────────────────────────────────────
+
+describe("swiz skill --sync --to agents", () => {
+  test("dry-run syncs to ~/.agents/ without writing files", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "agents-sync-dry-run-xyz"
+    const sourceDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(fakeHome, ".agents", skillName, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Dry run source\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "claude", "--to", "agents", "--dry-run"],
+      fakeHome
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Dry run: syncing Claude Code → Agents skills")
+    expect(stdout).toContain(`would copy ${skillName}`)
+    expect(await Bun.file(targetPath).exists()).toBe(false)
+  })
+
+  test("syncs skills from claude to ~/.agents/ directory", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "agents-sync-xyz"
+    const sourceDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(fakeHome, ".agents", skillName, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Agents target\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "claude", "--to", "agents", "--overwrite"],
+      fakeHome
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`copied ${skillName}`)
+    expect(await Bun.file(targetPath).exists()).toBe(true)
+    expect(await Bun.file(targetPath).text()).toContain("Agents target")
+  })
+
+  test("skips existing targets without --overwrite", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "agents-sync-skip-xyz"
+    const sourceDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetDir = join(fakeHome, ".agents", skillName)
+    const targetPath = join(targetDir, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
+    await mkdir(targetDir, { recursive: true })
+    await writeFile(targetPath, "---\ndescription: Existing agents target\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "claude", "--to", "agents"],
+      fakeHome
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`skipped ${skillName}`)
+    expect(await Bun.file(targetPath).text()).toContain("Existing agents target")
+  })
+})
+
 // ─── convertSkillContent unit tests ──────────────────────────────────────────
 
 describe("convertSkillContent", () => {

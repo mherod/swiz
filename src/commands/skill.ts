@@ -30,11 +30,27 @@ export { parseFrontmatterField, stripFrontmatter }
 const HOME = getHomeDir()
 
 function primarySkillDir(agentId: string): string {
+  if (agentId === "agents") return join(HOME, ".agents")
   const adapter = getProviderAdapter(agentId)
   const primary = adapter?.getSkillDirs()[0]
   if (primary) return primary
 
   return join(HOME, `.${agentId}`, "skills")
+}
+
+type AgentLike = { id: string; name: string }
+
+const PSEUDO_AGENTS: Record<string, AgentLike> = {
+  agents: { id: "agents", name: "Agents" },
+}
+
+function resolveForSync(id: string): AgentLike {
+  const known = getAgent(id)
+  if (known) return known
+  const pseudo = PSEUDO_AGENTS[id]
+  if (pseudo) return pseudo
+  const validIds = [...AGENTS.map((a) => a.id), ...Object.keys(PSEUDO_AGENTS)]
+  throw new Error(`Unknown agent: ${id}. Valid agent IDs: ${validIds.join(", ")}`)
 }
 
 async function listSkills() {
@@ -284,7 +300,8 @@ async function syncSkills(options: {
   overwrite: boolean
 }): Promise<void> {
   const { from, to, dryRun, overwrite } = options
-  const { fromAgent, toAgent } = resolveAgentPair(from, to)
+  const fromAgent = resolveForSync(from)
+  const toAgent = resolveForSync(to)
   const fromSkillsDir = primarySkillDir(from)
   const toSkillsDir = primarySkillDir(to)
   const orderedSkillNames = await discoverSkillNames(fromSkillsDir)
@@ -529,7 +546,8 @@ export const skillCommand: Command = {
     },
     {
       flags: "--to <agent>",
-      description: "Target agent ID for --sync or --convert (claude|cursor|gemini|codex)",
+      description:
+        "Target agent ID for --sync or --convert (claude|cursor|gemini|codex|agents). Use `agents` to sync to ~/.agents/ for OpenCode and similar tools.",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
