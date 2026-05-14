@@ -1380,16 +1380,7 @@ function isDenyOutput(out: SwizHookOutput | null | undefined): boolean {
 async function buildTraceContext(rawInput: unknown): Promise<string> {
   try {
     const input = rawInput as Record<string, any>
-    const toolName = String(input?.tool_name ?? "<unknown>")
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
-    const cwd: string = (input?.cwd as string) ?? process.cwd()
-    const payloadEnv = input?._env as Record<string, string> | undefined
-    const payloadAgent = payloadEnv ? detectCurrentAgentFromEnv(payloadEnv)?.id : undefined
-    const envAgent = detectCurrentAgentFromEnv()?.id
-    // Prefer payload _env (dispatching agent's true context) over the daemon's
-    // process.env, which lacks CLAUDECODE and may be polluted with CODEX_* vars.
-    const agent = payloadAgent ?? envAgent ?? "claude"
-    const enforcement = await isTaskEnforcementProject(cwd).catch(() => false)
 
     let pending = 0
     let inProgress = 0
@@ -1403,13 +1394,23 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
       }
     }
 
-    return (
-      `[task-governance trace] tool=${toolName} agent=${agent} ` +
-      `enforcement=${enforcement} sessionId=${sessionId ? "yes" : "no"} ` +
-      `tasks(total=${total} pending=${pending} inProgress=${inProgress}) verdict=allow`
-    )
+    const countLine = `Tasks: ${inProgress} in_progress, ${pending} pending.`
+
+    if (total === 0 || (pending === 0 && inProgress === 0)) {
+      return `${countLine} What are we working on? Create tasks before starting implementation.`
+    }
+    if (inProgress === 0) {
+      return `${countLine} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+    }
+    if (pending === 0) {
+      return `${countLine} What should we do next? Add a pending task to keep the planning buffer healthy.`
+    }
+    if (pending === 1) {
+      return `${countLine} What should we do next? Add one more pending task to keep the buffer healthy.`
+    }
+    return `${countLine} On track — good task hygiene.`
   } catch (err) {
-    return `[task-governance trace] error building context: ${(err as Error)?.message ?? err}`
+    return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }
 }
 
