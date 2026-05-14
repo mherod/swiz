@@ -81,7 +81,7 @@ describe("buildCountSummary", () => {
       inProgress: 0,
     })
     expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("No in_progress task")
+    expect(s).toContain("No task claimed yet")
   })
 
   it("does not praise when only one pending even with in_progress", () => {
@@ -92,19 +92,19 @@ describe("buildCountSummary", () => {
       inProgress: 1,
     })
     expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("Proactive task planning needed")
+    expect(s).toContain("One pending task left")
   })
 
-  it("still shows urgent zero-pending message without praise", () => {
+  it("shows planning buffer empty message without praise when zero pending", () => {
     const s = buildCountSummary({
       total: 1,
       incomplete: 1,
       pending: 0,
       inProgress: 1,
     })
-    expect(s).toContain("URGENT")
-    expect(s).toContain("verification task")
-    expect(s).toContain("broader next-step task")
+    expect(s).toContain("Planning buffer empty")
+    expect(s).toContain("next step in the current work")
+    expect(s).toContain("broader follow-on")
     expect(s).not.toContain("Good task hygiene")
   })
 
@@ -115,8 +115,8 @@ describe("buildCountSummary", () => {
       pending: 1,
       inProgress: 1,
     })
-    expect(s).toContain("immediate verification step")
-    expect(s).toContain("broader logical next task")
+    expect(s).toContain("immediate next step")
+    expect(s).toContain("broader follow-on task")
   })
 
   it("appends issue hints when pending is low and hints provided", () => {
@@ -152,10 +152,10 @@ describe("buildCountSummary", () => {
       issueHints: [],
     })
     expect(s).not.toContain("Open issues we could plan for")
-    expect(s).toContain("URGENT")
+    expect(s).toContain("Planning buffer empty")
   })
 
-  it("appends issue hints on urgent zero-pending state", () => {
+  it("appends issue hints on zero-pending state", () => {
     const s = buildCountSummary({
       total: 1,
       incomplete: 1,
@@ -163,7 +163,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: ["#100 Critical bug in login"],
     })
-    expect(s).toContain("URGENT")
+    expect(s).toContain("Planning buffer empty")
     expect(s).toContain("Open issues we could plan for")
     expect(s).toContain("#100 Critical bug in login")
   })

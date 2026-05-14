@@ -141,7 +141,7 @@ describe("pretooluse-no-phantom-task-completion", () => {
     const result = await runHook(dir, home, sessionId, toolInput, transcriptPath)
 
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("PHANTOM TASK BLOCK")
+    expect(result.reason).toContain("needs substantive work before it can close")
     expect(result.reason).toContain("Run TaskList now")
   })
 

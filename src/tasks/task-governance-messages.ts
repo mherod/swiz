@@ -75,11 +75,11 @@ function buildDeletionGovernanceMessage(opts: { taskId: string; retryStep: strin
   const taskCreateName = taskCreateToolName()
   const taskUpdateName = taskUpdateToolName()
   return (
-    `STOP. Do not delete task #${opts.taskId} yet.\n\n` +
+    `Task #${opts.taskId} needs a replacement before it can be removed.\n\n` +
     "Keep current work and follow-up work visible before removing this task.\n\n" +
     formatTranslatedActionPlan(
       [
-        `Decide whether task #${opts.taskId} still represents real work. If it does, keep it and update it instead of deleting it.`,
+        `Decide whether task #${opts.taskId} still represents real work. If it does, update it instead of deleting it.`,
         `If the task is stale or duplicate, use ${taskCreateName} or ${taskUpdateName} to make the real current work and next follow-up work visible before retrying deletion.`,
         opts.retryStep,
       ],
@@ -209,7 +209,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
   switch (request.kind) {
     case "prior-session-tasks":
       return (
-        `STOP. This session has no tasks, but a prior session (${request.priorSessionId}) had ${request.priorTaskCount} incomplete task(s):\n` +
+        `Prior incomplete tasks found from session ${request.priorSessionId} (${request.priorTaskCount} task(s)):\n` +
         request.taskLines +
         `\n\n` +
         formatTranslatedActionPlan(
@@ -224,25 +224,23 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "no-tasks":
       return (
-        `STOP. ${request.toolName} is BLOCKED. This session has no incomplete tasks.\n\n` +
-        `Required:\n` +
-        `  • At least ${request.thresholds.minIncomplete} incomplete tasks (pending/in_progress)\n` +
-        `  • At least ${request.thresholds.minPending} pending task for the next intended step\n\n` +
+        `${request.toolName} needs tasks in place first.\n\n` +
+        `Add at least ${request.thresholds.minIncomplete} tasks (including ${request.thresholds.minPending} pending) to get started:\n\n` +
         formatTranslatedActionPlan(
           [
-            `If TaskList still shows no incomplete work, use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} tasks — one current-work task and at least one pending next step.`,
+            `Use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} tasks — one for the current work and at least one pending next step.`,
             "Include a concrete description of the current work and next step.",
             retryAfterTaskList(request.toolName),
           ],
           { taskListFirst: true }
         ) +
-        `\nAfter task minimums are met, ${request.toolName} will be unblocked automatically.`
+        `\nOnce task minimums are met, ${request.toolName} will continue automatically.`
       )
 
     case "all-tasks-completed":
       return (
-        `STOP. All session tasks are completed. ${request.toolName} is BLOCKED.\n\n` +
-        `You have finished all planned work, but new tool calls require active tasks.\n\n` +
+        `All planned tasks are done — great work! Before continuing, add what comes next.\n\n` +
+        `${request.toolName} needs at least ${request.thresholds.minIncomplete} active task(s) to proceed.\n\n` +
         formatTranslatedActionPlan(
           [
             `Use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} task(s) ` +
@@ -255,7 +253,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "missing-task-minimums":
       return (
-        `STOP. ${request.toolName} is BLOCKED. Prepare the task queue before more implementation.\n\n` +
+        `Task queue needs at least 1 pending + 1 in_progress before ${request.toolName} can continue.\n\n` +
         "Keep real current work and follow-up work visible.\n\n" +
         `${request.incompleteTaskList ? `Current incomplete tasks:\n${request.incompleteTaskList}\n\n` : ""}` +
         formatTranslatedActionPlan(
@@ -269,9 +267,10 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "too-many-in-progress":
       return (
-        `STOP. Too many in-progress tasks (${request.inProgressCount}/${request.cap} max). ${request.toolName} is BLOCKED.\n\n` +
+        `Too many tasks active at once (${request.inProgressCount}/${request.cap} max) — ` +
+        `bring it back to ${request.cap} in_progress before ${request.toolName} can continue.\n\n` +
         `Currently in progress:\n${request.taskList}\n\n` +
-        `Having more than ${request.cap} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
+        `Keeping active work focused makes planning more effective.\n\n` +
         formatTranslatedActionPlan(
           [
             `Reduce in_progress count to ${request.cap} or fewer:`,
@@ -283,14 +282,14 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
           ],
           { taskListFirst: true }
         ) +
-        `\nAfter reducing active tasks, ${request.toolName} will be unblocked automatically.`
+        `\nOnce active tasks are reduced, ${request.toolName} will continue automatically.`
       )
 
     case "direct-merge-intent":
       return (
-        `STOP. ${request.toolName} is BLOCKED. The task plan includes "Merge PR" work while the workflow requires PR-based review.\n\n` +
+        `The task plan includes a direct merge, but this workflow routes merges through PR review.\n\n` +
         `Conflicting tasks:\n${request.taskList}\n\n` +
-        `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — direct merges are not permitted.\n\n` +
+        `When strict-no-direct-main is enabled, all merges must go through the PR review workflow.\n\n` +
         formatTranslatedActionPlan(
           [
             `Use ${taskUpdateName} to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").`,
@@ -302,8 +301,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "stale-tasks":
       return (
-        `STOP. Refresh tasks before continuing. ${plural(request.callsSinceLastTaskTool, "tool call")} since last task update. ` +
-        `${request.toolName} is BLOCKED.\n\n` +
+        `Tasks are ${plural(request.callsSinceLastTaskTool, "tool call")} behind — sync them before continuing with ${request.toolName}.\n\n` +
         `Current in-progress task context:\n${request.taskList}\n\n` +
         "Make the task list match the work before continuing.\n\n" +
         formatTranslatedActionPlan(request.planSteps) +
@@ -312,7 +310,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "canonical-tasklist-stale":
       return (
-        `STOP. Run TaskList before ${request.toolName}.\n\n` +
+        `Run TaskList to sync task state before ${request.toolName}.\n\n` +
         formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
       )
 
@@ -324,13 +322,13 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "pending-overflow":
       return (
-        `STOP. ${request.toolName} is BLOCKED.\n\n` +
+        `Run TaskList to clear the task state, then retry ${request.toolName}.\n\n` +
         formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
       )
 
     case "duplicate-subject-state":
       return (
-        `STOP. ${request.toolName} is blocked until the duplicate task subjects are resolved.\n\n` +
+        `Duplicate task subjects found — resolve them before ${request.toolName} can continue.\n\n` +
         formatTranslatedActionPlan(
           [
             "Pick the duplicate entry that represents the real current work.",
@@ -344,8 +342,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "duplicate-subject-create":
       return (
-        `STOP. Do not create another task named "${request.subject}".\n\n` +
-        `Task #${request.collisionId} already covers that work.\n\n` +
+        `Task #${request.collisionId} already covers "${request.subject}" — update that task instead of creating a duplicate.\n\n` +
         formatTranslatedActionPlan(
           [
             `Use ${taskUpdateName} on #${request.collisionId} if that task needs a different status, subject, or description.`,
@@ -357,7 +354,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "duplicate-subject-update":
       return (
-        `STOP. That ${taskUpdateName} would leave task #${request.taskId} with a duplicate active subject.\n\n` +
+        `That ${taskUpdateName} would leave task #${request.taskId} with a duplicate active subject — rename one first.\n\n` +
         formatTranslatedActionPlan(
           [
             "Give one duplicate a unique subject that names distinct work.",
@@ -370,21 +367,21 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "reconciliation-required":
       return (
-        `STOP. ${request.toolName} is blocked until task state is refreshed.\n\n` +
+        `Run TaskList to refresh task state before ${request.toolName}.\n\n` +
         formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
       )
 
     case "completion-rate-limit":
       return (
-        `Task completion rate limit: ${request.recentCompletionCount} completions in the last 5 seconds exceeds the threshold (max ${request.maxCompletions}).\n\n` +
-        `Wait ${request.waitSeconds}s before completing another task.\n\n` +
-        "Before retrying, you MUST:\n" +
+        `Slowing down: ${request.recentCompletionCount} completions in the last 5s (max ${request.maxCompletions}).\n\n` +
+        `Wait ${request.waitSeconds}s, then close tasks one at a time with concrete evidence.\n\n` +
+        "Before retrying:\n" +
         `1. ${TASKLIST_STABILITY_STEP}\n` +
         "2. Verify each task you intend to complete has concrete evidence (commit SHA, test output, file path)\n" +
         "3. Confirm the work described in the task subject has actually been done — not assumed, not deferred\n" +
         `4. ${TASKLIST_CONFIRM_STEP}\n` +
         "5. Complete ONE task at a time, waiting for this hook to clear between each\n\n" +
-        "Rapid-fire completions bypass governance checks and risk leaving work unfinished."
+        "Closing tasks one by one with evidence keeps the work record accurate."
       )
 
     case "native-deletion-threshold":
@@ -396,7 +393,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "completion-threshold":
       return (
-        `STOP. Cannot complete task #${request.taskId} yet.\n\n` +
+        `Before closing task #${request.taskId}, make sure the queue stays healthy.\n\n` +
         "Keep current and follow-up work visible before closing this task.\n\n" +
         formatTranslatedActionPlan(
           [
@@ -409,9 +406,9 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "in-progress-transition-cap":
       return (
-        `STOP. Cannot transition task #${request.taskId} to in_progress — too many active tasks.\n\n` +
-        `Currently in progress (${request.inProgressCount}/${request.cap}):\n${request.taskList}\n\n` +
-        `Maintaining focus requires keeping active work to a manageable level.\n\n` +
+        `Task #${request.taskId} can't go active yet — ${request.inProgressCount} of ${request.cap} in_progress slots are already taken.\n\n` +
+        `Currently in progress:\n${request.taskList}\n\n` +
+        `Focusing on one thing at a time makes it easier to track progress.\n\n` +
         formatTranslatedActionPlan(
           [
             "Resolve or park the in_progress tasks that are no longer active:",
@@ -427,9 +424,8 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "pending-completion-shortcut":
       return (
-        `STOP. Task #${request.taskId} cannot be marked completed yet.\n\n` +
-        "This looks like shortcut completion: the task is still only planned, and it appears to be closed before being actively started.\n\n" +
-        "Move it to active status first, do the stated work, then close it with concrete evidence.\n\n" +
+        `Task #${request.taskId} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
+        "Starting a task before closing it keeps the record honest and makes it easier to track what was done.\n\n" +
         formatTranslatedActionPlan(
           [
             TASKLIST_STABILITY_STEP,
@@ -439,16 +435,16 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
             "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
             TASKLIST_CONFIRM_STEP,
           ],
-          { header: "Required next steps:" }
+          { header: "Next steps:" }
         )
       )
 
     case "phantom-completion": {
       const sessionNote = request.sessionId ? ` (session ${request.sessionId})` : ""
       return (
-        `PHANTOM TASK BLOCK: Task #${request.taskId}${sessionNote} cannot be marked completed.\n\n` +
-        `No substantive tool calls (Edit, Write, Bash, Read, Skill, Glob, Grep…) were\n` +
-        `recorded after this task was adopted as active work. This looks like closure without work execution in progress.\n\n` +
+        `Task #${request.taskId}${sessionNote} needs substantive work before it can close.\n\n` +
+        `No Edit, Write, Bash, Read, Skill, Glob, or Grep calls were recorded after this task went active — ` +
+        `do the work, then close it.\n\n` +
         formatTranslatedActionPlan(
           [
             TASKLIST_STABILITY_STEP,
@@ -463,7 +459,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "tasklist-duplicate-subject-notice":
       return (
-        "TaskList found duplicate active task subjects. Resolve the task list before continuing.\n\n" +
+        "TaskList found duplicate active task subjects — resolve them before continuing.\n\n" +
         formatTranslatedActionPlan(
           [
             "Pick the duplicate entry that represents the real current work.",
@@ -486,13 +482,13 @@ export function buildTaskCreationCountdownMessage(
   if (remaining <= 0) return undefined
 
   if (remaining <= 1) {
-    return `${taskCreateName} required in ${remaining} tool call(s) - tools will be blocked until tasks are defined. We should create focused tasks before continuing.`
+    return `Create tasks now (${remaining} tool call remaining) — ${taskCreateName} required before the next step is blocked.`
   }
   if (remaining <= 3) {
-    return `${taskCreateName} required in ${remaining} tool calls. We should plan the next tasks now to avoid interruption.`
+    return `Plan the next tasks soon — ${taskCreateName} required in ${remaining} tool calls to avoid interruption.`
   }
   if (total >= 2) {
-    return `${total}/${threshold} tool calls before ${taskCreateName} is required. We should create tasks before the work expands further.`
+    return `${total}/${threshold} tool calls in — consider creating tasks now before the work expands further.`
   }
   return undefined
 }
@@ -505,10 +501,10 @@ export function buildTaskAdvisorStalenessMessage(
 ): string | undefined {
   if (staleRemaining > 0) {
     if (staleRemaining <= 2) {
-      return `Task update required in ${staleRemaining} tool call(s) - tools will be blocked until tasks are reviewed. We should run TaskList, refresh task state, and update tasks before the next implementation step.`
+      return `Task update due in ${staleRemaining} tool call(s) — run TaskList, refresh task state, and update tasks before the next implementation step.`
     }
     if (staleRemaining <= 4) {
-      return `Task update due in ${staleRemaining} tool calls. We should run TaskList, record completed work only when it has evidence, refresh active work, or create new tasks for the work underway.`
+      return `Task update due in ${staleRemaining} tool calls — run TaskList, record completed work only when it has evidence, refresh active work, or create new tasks for the work underway.`
     }
     return undefined
   }
@@ -516,19 +512,19 @@ export function buildTaskAdvisorStalenessMessage(
   if (!isImplementationTool) return undefined
 
   const base =
-    `Tasks need attention - it's been ${callsSinceTask} tool calls since the last task update. ` +
-    "We should run TaskList, review progress from fresh state, record completed work only when it has evidence, update active work with current status, or create new tasks for the work underway."
+    `Tasks are ${callsSinceTask} tool calls behind — ` +
+    "run TaskList, record completed work only when it has evidence, update active work with current status, or create new tasks for the work underway."
 
   if (callsSinceTask <= 20) return base
 
-  return `${base} The task list is now far behind the work, so we should pause implementation and make it accurate before continuing with ${toolName}.`
+  return `${base} The task list is now well behind the work — pause implementation and sync it before continuing with ${toolName}.`
 }
 
 export function buildUserPromptTaskContext(pendingCount: number, taskCreateName: string): string {
   if (pendingCount === 0) {
-    return `No pending tasks in this session. We should use ${taskCreateName} to create a task for this prompt before starting work.`
+    return `No pending tasks in this session. Use ${taskCreateName} to create a task for this prompt before starting work.`
   }
-  return `We should use ${taskCreateName} to create a task for this prompt before starting work on it.`
+  return `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
 }
 
 export function buildTaskListBeforeStopMessage(): string {
@@ -542,10 +538,10 @@ export function buildTaskListBeforeStopMessage(): string {
 const TASK_APPROACH_MESSAGE = taskApproachMessage()
 
 export const SWIZ_TASKS_FILES_DENY_MESSAGE =
-  "STOP. Do not edit `.claude/tasks` files directly.\n\n" +
+  "Task files in `.claude/tasks` are managed automatically — use the task tools instead.\n\n" +
   `${TASK_APPROACH_MESSAGE}\n\n` +
-  "Banned approach: `Edit`, `Write`, or `Bash` on `.claude/tasks/**` files.\n" +
-  "Use the native task tools instead of touching task state storage files."
+  "Avoid editing `.claude/tasks/**` files directly with Edit, Write, or Bash.\n" +
+  "Use the native task tools to keep task state accurate and auditable."
 
 export function buildCountSummary(counts: {
   total: number
@@ -570,11 +566,11 @@ function appendPlanningFeedback(
 ): void {
   if (counts.pending === 0) {
     parts.push(
-      "URGENT: Zero pending tasks. We should create two pending tasks now to keep a planning buffer: (1) a verification task for the current step, and (2) a broader next-step task for the natural follow-on work."
+      "Planning buffer empty — add two pending tasks before continuing: one for the next step in the current work, and one for the broader follow-on."
     )
   } else if (counts.pending === 1 && counts.incomplete <= 2) {
     parts.push(
-      "Proactive task planning needed: only 1 pending task remains. We should create 1 more pending task to maintain the planning buffer. Aim for two pending tasks: one immediate verification step and one broader logical next task."
+      "One pending task left — add another to keep the buffer healthy. Aim for one immediate next step and one broader follow-on task."
     )
   }
 
@@ -597,7 +593,7 @@ function appendHygieneFeedback(
 ): void {
   if (counts.inProgress === 0 && counts.incomplete > 0) {
     parts.push(
-      "No in_progress task. We should run TaskList first; if it still shows no active work, adopt one planned task before starting implementation."
+      "No task claimed yet — run TaskList, then use TaskUpdate to set one in_progress before starting implementation."
     )
   } else if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
     parts.push(
@@ -611,15 +607,15 @@ export function formatIncompleteReason(taskDetails: string[]): string {
 
   const header = "Incomplete tasks remain in the current session:\n\n"
   const taskList = taskDetails.map((d) => `  - ${d}`).join("\n")
-  const footer = `\n\nWe should complete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
+  const footer = `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
 
   return header + taskList + footer
 }
 
 export const SWIZ_TASKS_CLI_DENY_MESSAGE =
-  "STOP. Do not use direct task-management CLI calls from this session.\n\n" +
+  "Use the native task tools here instead of the swiz tasks CLI.\n\n" +
   `${TASK_APPROACH_MESSAGE}\n\n` +
-  "Banned approach: `swiz tasks <subcommand>` for all subcommands except `swiz tasks adopt` (including `--recovered`).\n\n" +
+  "Avoid `swiz tasks <subcommand>` for all subcommands except `swiz tasks adopt` (including `--recovered`).\n\n" +
   "Keep task state in the native task flow so planning stays accurate and auditable."
 
 export function buildPendingCompletionTransitionMessage(taskId: string): string {
