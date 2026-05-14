@@ -180,8 +180,8 @@ describe("pretooluse-enforce-taskupdate", () => {
         )
 
         expect(result.decision).toBe("deny")
-        expect(result.reason).toContain("shortcut completion")
-        expect(result.reason).toContain("closed before being actively started")
+        expect(result.reason).toContain("still pending")
+        expect(result.reason).toContain("Starting a task before closing it")
         expect(result.reason).toContain("Run TaskList now")
         expect(result.reason).not.toContain("drift")
         expect(result.reason).not.toContain("recent context")
@@ -211,7 +211,7 @@ describe("pretooluse-enforce-taskupdate", () => {
         )
 
         expect(result.decision).toBe("deny")
-        expect(result.reason).toContain("Do not delete task #1 yet")
+        expect(result.reason).toContain("needs a replacement before it can be removed")
         expect(result.reason).toContain("Run TaskList now")
         expect(result.reason).toContain("Keep current work and follow-up work visible")
         expect(result.reason).not.toContain("Swiz")

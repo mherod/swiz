@@ -109,7 +109,7 @@ describe("pretooluse-require-tasks hook", () => {
         | Record<string, any>
         | undefined
       expect(reason?.permissionDecision).toBe("deny")
-      expect(String(reason?.permissionDecisionReason ?? "")).toContain("no incomplete tasks")
+      expect(String(reason?.permissionDecisionReason ?? "")).toContain("needs tasks in place first")
       // Message must state the exact enforced minimums
       expect(String(reason?.permissionDecisionReason ?? "")).toContain("2")
       expect(String(reason?.permissionDecisionReason ?? "")).toContain("pending")
@@ -159,7 +159,7 @@ describe("pretooluse-require-tasks hook", () => {
       expect(hookOutput?.permissionDecision).toBe("deny")
       // Hook now blocks on stale task sync before checking cap.
       expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
-        "Run TaskList before Bash"
+        "Run TaskList to sync task state before Bash"
       )
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
