@@ -852,3 +852,106 @@ describe("wip/fixup/squash commit subject check", () => {
     expect(result.reason).toContain("WIP: uppercase variant")
   })
 })
+
+// ─── Behind-remote / force-push bypass ───────────────────────────────────────
+
+describe("behind-remote force-push bypass", () => {
+  /**
+   * Creates a work repo where the remote is ahead by 1 commit (simulating a
+   * post-rebase state where `HEAD..@{upstream}` is non-zero).
+   */
+  async function makeRepoWithRemoteAhead(): Promise<string> {
+    const repoDir = await mkdtemp(join(tmpDir, "force-work-"))
+    const bareDir = await mkdtemp(join(tmpDir, "force-bare-"))
+    await makeGitRepoWithUpstream(repoDir, bareDir)
+
+    // Push an extra commit via a second clone so the bare remote advances
+    const clone2 = await mkdtemp(join(tmpDir, "force-clone2-"))
+    await gitCmd(["clone", bareDir, clone2], tmpDir)
+    for (const [k, v] of [
+      ["user.email", "test@example.com"],
+      ["user.name", "Test"],
+      ["commit.gpgsign", "false"],
+    ] as [string, string][]) {
+      await gitCmd(["config", k, v], clone2)
+    }
+    await Bun.write(join(clone2, "remote-only.txt"), "remote advance")
+    await gitCmd(["add", "."], clone2)
+    await gitCmd(["commit", "-m", "remote: advance beyond local"], clone2)
+    await gitCmd(["push", "origin", "HEAD:main"], clone2)
+
+    // Fetch in repoDir so @{upstream} reflects the remote advance
+    await gitCmd(["fetch", "origin"], repoDir)
+
+    return repoDir
+  }
+
+  test("plain push is blocked when remote is ahead", async () => {
+    const repoDir = await makeRepoWithRemoteAhead()
+    await Bun.write(join(repoDir, "local.txt"), "local content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat: local commit after rebase"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("Remote is ahead")
+    expect(result.reason).toContain("git pull --rebase")
+  })
+
+  test("--force-with-lease bypasses the behind-remote block", async () => {
+    const repoDir = await makeRepoWithRemoteAhead()
+    await Bun.write(join(repoDir, "local.txt"), "rebased content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat: post-rebase commit"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main --force-with-lease",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("--force bypasses the behind-remote block", async () => {
+    const repoDir = await makeRepoWithRemoteAhead()
+    await Bun.write(join(repoDir, "local2.txt"), "rebased content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat: post-rebase commit"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main --force",
+      transcriptContent: makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main"
+      ),
+    })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("--force-with-lease still emits advisory when prior checks are missing", async () => {
+    const repoDir = await makeRepoWithRemoteAhead()
+    await Bun.write(join(repoDir, "local3.txt"), "content")
+    await gitCmd(["add", "."], repoDir)
+    await gitCmd(["commit", "-m", "feat: rebased"], repoDir)
+
+    const result = await runHookInRepo({
+      repoDir,
+      command: "git push origin main --force-with-lease",
+      transcriptContent: "",
+    })
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
+    expect(result.reason).toContain("git branch --show-current")
+  })
+})

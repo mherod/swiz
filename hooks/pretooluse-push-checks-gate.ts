@@ -28,6 +28,7 @@ import {
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
   git,
+  hasGitPushForceFlag,
   isShellTool,
   PR_CHECK_RE,
   preToolUseAllow,
@@ -48,7 +49,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
 
   const cwd: string = (hookInput.tool_input?.cwd as string) ?? hookInput.cwd ?? process.cwd()
 
-  const behindBlock = await checkLocalBehind(cwd)
+  const behindBlock = await checkLocalBehind(cwd, hasGitPushForceFlag(command))
   if (behindBlock) return behindBlock
 
   const forkInfo = await detectForkTopology(cwd)
@@ -95,7 +96,8 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
   return checkMissingPriorChecks(priorCommandsResult, eff, largeFileResult.warn)
 }
 
-async function checkLocalBehind(cwd: string): Promise<SwizHookOutput | null> {
+async function checkLocalBehind(cwd: string, isForcePush: boolean): Promise<SwizHookOutput | null> {
+  if (isForcePush) return null
   const result = await spawnWithTimeout(["git", "rev-list", "--count", "HEAD..@{upstream}"], {
     cwd,
     timeoutMs: 5000,
