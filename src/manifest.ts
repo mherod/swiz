@@ -36,6 +36,7 @@ import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
+import pretoolusBranchIntentGate from "../hooks/pretooluse-branch-intent-gate.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
 import pretooluseClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
@@ -289,6 +290,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseStateGate },
       { hook: pretooluseStuckState },
       { hook: pretooluseBlockPreexistingDismissals },
+      { hook: pretoolusBranchIntentGate },
     ],
   },
   {
