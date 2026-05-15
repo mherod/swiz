@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-05-15
+
+### Improvements
+
+- **Transcript user-turn rendering** — `swiz transcript` now humanizes
+  Claude Code's injected markup in user turns. `<command-name>` /
+  `<command-args>` collapse to `/model`, `<bash-input>` becomes
+  `$ cmd`, `<bash-stdout>` becomes `↳ output`, skill-invocation
+  preambles render as `/skill-name` with the SKILL.md body elided,
+  and lone `<local-command-caveat>` turns are suppressed. Detection
+  is anchored to the start of a turn so embedded tags inside
+  user-typed prose are preserved verbatim.
+
+### Fixes
+
+- **Sandbox hooks: allow safe reads** — Read-only inspection paths
+  inside the sandbox guard are now permitted while writes, in-place
+  edits, and shell redirects remain blocked.
+
 ## 2026-05-13
 
 ### Fixes
