@@ -1258,6 +1258,156 @@ export const enforceTaskupdateHook: SwizToolHook = {
 // § 5. Merged Task Governance — single entry point for all preToolUse
 // ═══════════════════════════════════════════════════════════════════════════
 
+type ParsedGovernanceInput = ReturnType<typeof toolHookInputSchema.parse>
+
+/**
+ * Pre-screen: reject any blocked-tool attempt to edit swiz task files or
+ * run a swiz CLI command that mutates task files. Applies even outside a
+ * recognized project root so task-state tampering is always blocked.
+ */
+export function evaluateBlockedTaskFilesPrecheck(
+  input: Record<string, any>,
+  toolName: string,
+  toolInput: Record<string, any>
+): SwizHookOutput | null {
+  if (!isBlockedTool(toolName)) return null
+  if (isBlockedTaskFilesEdit(input, toolName)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
+  const command = String(toolInput.command ?? "")
+  if (isBlockedSwizTaskFilesCommand(command)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
+  return null
+}
+
+/**
+ * Global pending-task overflow guard. Returns the deny outcome when pending
+ * tasks exceed the overflow limit and a TaskList sync is required; null when
+ * no block fires or the check is not applicable (TaskList itself, agent
+ * without task tools, missing session, non-enforcement project).
+ */
+export async function evaluatePendingOverflowGuard(
+  input: Record<string, any>,
+  toolName: string
+): Promise<SwizHookOutput | null> {
+  if (isTaskListTool(toolName)) return null
+  if (!agentHasTaskToolsForHookPayload(input)) return null
+
+  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
+  const cwd: string = (input.cwd as string) ?? process.cwd()
+  if (!sessionId) return null
+  if (!(await isTaskEnforcementProject(cwd))) return null
+
+  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+  return checkPendingOverflow(toolName, allTasks) ?? null
+}
+
+/**
+ * Native TaskUpdate / update_plan branch. Validates allowed schema fields,
+ * runs completion / deletion / rate-limit governance, and runs CLI input
+ * enforcement when the call is a shell-based task command.
+ */
+export async function evaluateNativeTaskUpdatePath(
+  input: Record<string, any>,
+  toolInput: Record<string, any>,
+  parsed: ParsedGovernanceInput
+): Promise<SwizHookOutput> {
+  const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
+  if (unsupported.length > 0) {
+    const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
+    return preToolUseDeny(
+      `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
+        `Allowed fields: ${allowed}.`
+    )
+  }
+
+  const n = await checkNativeTaskUpdateCompletion(input)
+  if (n === "early_exit") return {}
+  if (n !== "continue") return n
+
+  if (shouldInspectShellInput(parsed)) {
+    return await runSwizTasksEnforcement(input)
+  }
+  return {}
+}
+
+/**
+ * TaskCreate / TodoWrite branch. Enforces subject governance (duplicate
+ * detection) and rejects compound or task-shaped subjects via the central
+ * subject detector.
+ */
+export async function evaluateTaskCreatePath(
+  input: Record<string, any>,
+  toolInput: Record<string, any>
+): Promise<SwizHookOutput> {
+  const subject: string = (toolInput?.subject as string) ?? ""
+  const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
+  if (duplicateOutcome) return duplicateOutcome
+
+  const result = detect(subject)
+  if (result.matched) {
+    return preToolUseDeny(formatMessage(result))
+  }
+  return preToolUseAllow()
+}
+
+/**
+ * Edit / Write / Bash branch. Applies project-scope guard conditions,
+ * blocked-task-file deny, CLI enforcement when applicable, and the full
+ * require-tasks check pipeline. Empty-output early-exit when guards fail.
+ */
+export async function evaluateBlockedToolPath(
+  input: Record<string, any>,
+  parsed: ParsedGovernanceInput,
+  toolName: string
+): Promise<SwizHookOutput> {
+  const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
+  const cwd: string = (input.cwd as string) ?? process.cwd()
+
+  if (!validateGuardConditions(sessionId, toolName, input)) return {}
+  if (!(await isTaskEnforcementProject(cwd))) return {}
+
+  const transcriptPath: string = (input.transcript_path as string) ?? ""
+
+  if (isBlockedTaskFilesEdit(input, toolName)) {
+    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+  }
+
+  if (shouldInspectShellInput(parsed)) {
+    const cliResult = await runSwizTasksEnforcement(input)
+    if (cliResult && Object.keys(cliResult).length > 0) {
+      const hso = (cliResult as Record<string, any>).hookSpecificOutput as
+        | Record<string, any>
+        | undefined
+      if (hso?.permissionDecision === "deny") return cliResult
+    }
+  }
+
+  return await runRequireTasksChecks({
+    input,
+    toolName,
+    sessionId: sessionId as string,
+    transcriptPath,
+    cwd,
+  })
+}
+
+/**
+ * Catch-all branch for non-blocked tools. Runs the `swiz tasks` CLI
+ * enforcement pass for shell calls that may invoke the CLI directly;
+ * returns an empty output otherwise.
+ */
+export async function evaluateOtherShellToolPath(
+  input: Record<string, any>,
+  parsed: ParsedGovernanceInput
+): Promise<SwizHookOutput> {
+  if (shouldInspectShellInput(parsed)) {
+    return await runSwizTasksEnforcement(input)
+  }
+  return {}
+}
+
 async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(rawInput)
   const input = parsed as unknown as Record<string, any>
@@ -1265,110 +1415,22 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const toolName = String(input.tool_name ?? "")
   const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
-  if (isBlockedTool(toolName)) {
-    if (isBlockedTaskFilesEdit(input, toolName)) {
-      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
-    }
-    const command = String(toolInput.command ?? "")
-    if (isBlockedSwizTaskFilesCommand(command)) {
-      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
-    }
-  }
+  const blockedTaskFiles = evaluateBlockedTaskFilesPrecheck(input, toolName, toolInput)
+  if (blockedTaskFiles) return blockedTaskFiles
 
-  // ── Global pending-task overflow guard ────────────────────────────────
-  // Mandate a TaskList sync whenever pending tasks exceed the overflow limit.
-  if (!isTaskListTool(toolName) && agentHasTaskToolsForHookPayload(input)) {
-    const sessionIdForOverflow = resolveSafeSessionId(input.session_id as string | undefined)
-    const cwdForOverflow: string = (input.cwd as string) ?? process.cwd()
-    if (sessionIdForOverflow && (await isTaskEnforcementProject(cwdForOverflow))) {
-      const allTasksForOverflow = overlayEventState(
-        await readSessionTasksFresh(sessionIdForOverflow),
-        sessionIdForOverflow
-      )
-      const overflowOutcome = checkPendingOverflow(toolName, allTasksForOverflow)
-      if (overflowOutcome) return overflowOutcome
-    }
-  }
+  const overflow = await evaluatePendingOverflowGuard(input, toolName)
+  if (overflow) return overflow
 
-  // ── TaskUpdate / update_plan path ──────────────────────────────────────
   if (isNativeTaskTool(toolName)) {
-    // Schema validation (sync, cheap)
-    const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
-    if (unsupported.length > 0) {
-      const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
-      return preToolUseDeny(
-        `${taskUpdateToolName()} received unsupported field(s): ${unsupported.map((f) => `\`${f}\``).join(", ")}.\n\n` +
-          `Allowed fields: ${allowed}.`
-      )
-    }
-
-    // Completion / deletion / rate-limit governance
-    const n = await checkNativeTaskUpdateCompletion(input)
-    if (n === "early_exit") return {}
-    if (n !== "continue") return n
-
-    // CLI enforcement for shell-based task commands
-    if (shouldInspectShellInput(parsed)) {
-      return await runSwizTasksEnforcement(input)
-    }
-    return {}
+    return await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
   }
-
-  // ── TaskCreate / TodoWrite path ────────────────────────────────────────
   if (isTaskCreateTool(toolName)) {
-    const subject: string = (toolInput?.subject as string) ?? ""
-    const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
-    if (duplicateOutcome) return duplicateOutcome
-
-    const result = detect(subject)
-    if (result.matched) {
-      return preToolUseDeny(formatMessage(result))
-    }
-    return preToolUseAllow()
+    return await evaluateTaskCreatePath(input, toolInput)
   }
-
-  // ── Edit / Write / Bash path (blocked tools) ──────────────────────────
   if (isBlockedTool(toolName)) {
-    // Guard conditions: only enforce in git repos with CLAUDE.md, on agents with task tools
-    const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
-    const cwd: string = (input.cwd as string) ?? process.cwd()
-
-    if (!validateGuardConditions(sessionId, toolName, input)) return {}
-    if (!(await isTaskEnforcementProject(cwd))) return {}
-
-    const transcriptPath: string = (input.transcript_path as string) ?? ""
-
-    if (isBlockedTaskFilesEdit(input, toolName)) {
-      return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
-    }
-
-    // CLI enforcement runs first for shell tools (catches `swiz tasks` misuse)
-    if (shouldInspectShellInput(parsed)) {
-      const cliResult = await runSwizTasksEnforcement(input)
-      if (cliResult && Object.keys(cliResult).length > 0) {
-        const hso = (cliResult as Record<string, any>).hookSpecificOutput as
-          | Record<string, any>
-          | undefined
-        if (hso?.permissionDecision === "deny") return cliResult
-      }
-    }
-
-    // Full task requirement checks
-    return await runRequireTasksChecks({
-      input,
-      toolName,
-      sessionId: sessionId as string,
-      transcriptPath,
-      cwd,
-    })
+    return await evaluateBlockedToolPath(input, parsed, toolName)
   }
-
-  // ── Other shell tools (not blocked, but check CLI enforcement) ─────────
-  if (shouldInspectShellInput(parsed)) {
-    return await runSwizTasksEnforcement(input)
-  }
-
-  return {}
+  return await evaluateOtherShellToolPath(input, parsed)
 }
 
 function isDenyOutput(out: SwizHookOutput | null | undefined): boolean {
