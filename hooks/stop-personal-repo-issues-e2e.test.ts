@@ -317,6 +317,7 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
         makeIssue(10, "Duplicate report", ["duplicate"]),
         makeIssue(11, "Stale request", ["stale"]),
         makeIssue(12, "Invalid report", ["invalid"]),
+        makeIssue(13, "Backlog follow-up", ["backlog"]),
       ],
     })
     expect(result.blocked).toBe(false)
@@ -327,6 +328,17 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     const result = await runHook(dir, {
       user: "testuser",
       issues: [makeIssue(99, "Critical but stale", ["critical", "stale"])],
+    })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("backlog plus ready issue is still excluded from pickup", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-backlogready", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      issues: [
+        makeIssue(99, "Deferred but tagged ready", ["bug", "backlog", "ready", "priority:high"]),
+      ],
     })
     expect(result.blocked).toBe(false)
   })

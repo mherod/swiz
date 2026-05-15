@@ -1,81 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { createTestRepo } from "../src/utils/test-utils.ts"
+import {
+  createTestRepo,
+  makeWorkflowHookRunner,
+  skillLine,
+  textLine,
+  writeTranscript,
+} from "../src/utils/test-utils.ts"
 
-const BUN_EXE = Bun.which("bun") ?? "bun"
-const WORKSPACE_ROOT = process.cwd()
-
-// ── JSONL transcript builders ─────────────────────────────────────────────────
-
-function skillLine(skillName: string): string {
-  return JSON.stringify({
-    type: "assistant",
-    message: {
-      content: [{ type: "tool_use", id: "t1", name: "Skill", input: { skill: skillName } }],
-    },
-  })
-}
-
-function textLine(text: string): string {
-  return JSON.stringify({
-    type: "assistant",
-    message: { content: [{ type: "text", text }] },
-  })
-}
-
-async function writeTranscript(path: string, lines: string[]): Promise<void> {
-  await writeFile(path, `${lines.filter(Boolean).join("\n")}\n`)
-}
-
-// ── Hook runner ───────────────────────────────────────────────────────────────
-
-interface HookResult {
-  decision?: string
-  reason?: string
-  raw: string
-}
-
-async function runHook(opts: {
-  cwd: string
-  toolName: string
-  command?: string
-  filePath?: string
-  transcriptPath?: string
-}): Promise<HookResult> {
-  const toolInput: Record<string, any> =
-    opts.toolName === "Bash"
-      ? { command: opts.command ?? "echo hello", cwd: opts.cwd }
-      : { file_path: opts.filePath ?? join(opts.cwd, "file.ts"), new_string: "x" }
-
-  const payload = JSON.stringify({
-    tool_name: opts.toolName,
-    tool_input: toolInput,
-    cwd: opts.cwd,
-    transcript_path: opts.transcriptPath ?? "",
-  })
-
-  const proc = Bun.spawn([BUN_EXE, "hooks/pretooluse-branch-intent-gate.ts"], {
-    cwd: WORKSPACE_ROOT,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const [raw] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  const trimmed = raw.trim()
-  if (!trimmed) return { raw: trimmed }
-  const parsed = JSON.parse(trimmed) as Record<string, any>
-  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
-  const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
-  const reason = (hso?.permissionDecisionReason as string) ?? (parsed.reason as string) ?? undefined
-  return { decision, reason, raw: trimmed }
-}
+const runHook = makeWorkflowHookRunner("hooks/pretooluse-branch-intent-gate.ts")
 
 // ── Test repos and transcripts ────────────────────────────────────────────────
 

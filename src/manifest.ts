@@ -67,6 +67,7 @@ import pretooluseNoTaskDelegation from "../hooks/pretooluse-no-task-delegation.t
 import pretooluseOffensiveLanguage from "../hooks/pretooluse-offensive-language.ts"
 import pretoolusePrAgeGate from "../hooks/pretooluse-pr-age-gate.ts"
 import pretoolusePrChangesBranchGuard from "../hooks/pretooluse-pr-changes-branch-guard.ts"
+import pretoolusePrHeadCheckoutGate from "../hooks/pretooluse-pr-head-checkout-gate.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
 import pretoolusePushChecksGate from "../hooks/pretooluse-push-checks-gate.ts"
@@ -339,6 +340,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseMainBranchScopeGate },
       { hook: pretooluseBlockCommitToMain },
       { hook: pretoolusePrChangesBranchGuard },
+      { hook: pretoolusePrHeadCheckoutGate },
       { hook: pretooluseTrunkModeBranchGate },
       { hook: pretooluseIssueSyncBeforeCheckout },
       { hook: pretooluseSkillInvocationGate },

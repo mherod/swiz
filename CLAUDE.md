@@ -77,7 +77,7 @@ alwaysApply: false
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Task exemptions: read-only git, `gh`, `swiz`, setup, recovery. DON'T add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
-- Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Hook/settings/state schemas in `hooks/schemas.ts` and `src/settings/persistence.ts`.
+- Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Settings/state schemas also in `src/settings/persistence.ts`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
 - **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
 - **DO**: Use `resolveThresholds(cwd)` for memory thresholds (default 5000). Never hardcode.
@@ -118,6 +118,7 @@ alwaysApply: false
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks using `git log --oneline -3`. Call task tools every 10 calls; staleness gate at 20.
+- **DO**: On session resume, cross-reference every `completed` commit/push task against `git status`. If a task subject says "commit X" or "push X" but matching files are still uncommitted/unpushed, that is phantom completion — flag it, reopen (or replace) the task, and resolve before creating new work. Never treat `completed` status as ground truth without verifying git state.
 - After each `CLAUDE.md` edit run `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Before issue labeling run `gh label list`; after `gh issue create`, run `/refine-issue <number>`. Use issue body files, not shell heredoc bodies.
 - Verify CI jobs with `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before committing untracked `.lock` or local state.
 ## Standard Work Sequence
@@ -128,20 +129,16 @@ alwaysApply: false
 - Repo is solo (`mherod/swiz`); push to `main`.
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
 - **DO**: Treat `.swiz/config.json` as authoritative for collaboration/trunk policy.
-- Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push: `/push`; `git log origin/main..HEAD`; branch+PR check; capture SHA; `git push`; `gh run list --commit "$SHA" --limit 15`; `gh run watch`; `gh run view --json conclusion,status,jobs`.
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
-- No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
-- Pre-push `bun test` may fail with `proc.stdin.write` TypeError (`Bun.spawn` exhaustion). Run failing test in isolation; if pass, retry.
-- Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
-- **DO**: Before stop after push: verify CI status + update tasks.
-- DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
+- No `--no-verify`; pre-push runs `bun test`; CI: `lint → typecheck → test`. If `bun test` fails with `proc.stdin.write` TypeError (`Bun.spawn` exhaustion), run failing test in isolation; if pass, retry.
+- **DO**: After push: verify CI once with `gh run view --json` (not `gh run watch` alone); `in_progress` is acceptable — pre-push ran full test suite. Update tasks before stop.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
-- DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't skip pre-push log review or run branch/collab/PR checks after push.
+- DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
 - DON'T add `Co-Authored-By` trailers. DON'T use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
-- DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
+- DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
@@ -156,7 +153,7 @@ alwaysApply: false
 - Separate state files for runtime data (`.swiz/context-stats.json`); never mix into config (`.swiz/config.json`).
 - 3-tier resolution: `project > user > default`. Track source per value, not per group. Label with `(project)`, `(user)`, `(default)`.
 - Show all effective values; never hide user/default. No shared `source` for multiple settings.
-- Adding boolean setting (global): update `types.ts`, `registry.ts`, `persistence.ts`, `resolution.ts`, `settings.ts`, `settings-panel.tsx`, `settings.test.ts` (7 files).
+- Adding boolean setting (global): update `types.ts`, `registry.ts`, `persistence.ts`, `resolution.ts`, `settings.ts`, `settings-panel.tsx`, `settings.test.ts`.
 ## CLI Error Handling
 - In `src/commands/`, throw errors instead of `process.exit(1)`.
 - `src/cli.ts` handles command errors via `process.exitCode = 1`.
@@ -167,15 +164,14 @@ alwaysApply: false
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - DO NOT use top-level `await` in `src/` — use lazy async (`let cache; async load() {...}`). Hooks exempt.
-- DO NOT embed ESC (0x1b) in regex literals; construct at runtime. See `hooks/posttooluse-task-output.ts` `ANSI_RE`.
+- DON'T embed ESC (0x1b) in regex literals; construct at runtime. See `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames.
 - **CRITICAL**: In self-referential PreToolUse hooks, add import first, then usage in a second edit. Reversed order deadlocks the session; only `git checkout -- <file>` recovers.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
-- Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
-- With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
+- `Bun.spawn`: use `["sh", "-c", cmd]` for shell; drain stdout/stderr concurrently with `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backup first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`.
@@ -191,7 +187,7 @@ alwaysApply: false
 - `sed -i`/`sed > file`, `awk > file` blocked; read-only pipelines OK. Use `bun -e` or `jq` (not `python`). Use `trash` (not `rm`).
 - DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; they are external repos. For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
-- `REMINDER_FRAGMENT` re-triggers memory enforcement; 30-min `CLAUDE.md` mtime cooldown. Run `swiz install` after hook changes.
+- `REMINDER_FRAGMENT` re-triggers memory enforcement; 30-min `CLAUDE.md` mtime cooldown.
 - Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
 - CLI subprocess tests: use absolute `indexPath`, temp `cwd`, `HOME: tempDir`. No `isolation: "worktree"` (corrupts `.git/config`). Secret fixtures: array join to avoid push protection.
 - **DO**: After every commit, `git log origin/main..HEAD --oneline` before stop; `/push` if unpushed. **DON'T** use `git status` alone for unpushed detection.

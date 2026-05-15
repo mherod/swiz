@@ -15,6 +15,7 @@ export const SKIP_LABELS = new Set([
   "duplicate",
   "on-hold",
   "waiting",
+  "backlog", // deferred follow-up; not ready pickup
   "stale", // common GitHub bot label
   "icebox", // explicit indefinite deferral
   "invalid", // not a valid issue

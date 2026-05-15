@@ -26,7 +26,7 @@ function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
   if (skillExists("refine-issue"))
     subSteps.push(`/refine-issue${refineArg} — Refine the next issue needing attention`)
   subSteps.push(
-    "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, backlog), Priority (priority-high, priority-medium, priority-low)",
+    "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, accepted), Priority (priority-high, priority-medium, priority-low)",
     "Run gh label list to check available labels",
     'Label issues: gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
     "Rule: If you created the issue, NEVER add new comments — always edit the original issue body instead"
