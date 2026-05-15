@@ -11,6 +11,7 @@
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   isShellTool,
   preToolUseAllow,
@@ -45,7 +46,8 @@ async function detectGitFlowRepo(cwd: string): Promise<GitFlowContext> {
     const hasDevBranch = await Bun.file(devRefPath).exists()
     const hasDevlopBranch = await Bun.file(developRefPath).exists()
     const isGitFlowRepo = hasDevBranch || hasDevlopBranch
-    const integrationBase = hasDevBranch ? "dev" : hasDevlopBranch ? "develop" : "main"
+    const defaultBranch = await getDefaultBranch(cwd)
+    const integrationBase = hasDevBranch ? "dev" : hasDevlopBranch ? "develop" : defaultBranch
 
     return {
       hasDevBranch,
@@ -57,7 +59,7 @@ async function detectGitFlowRepo(cwd: string): Promise<GitFlowContext> {
     return {
       hasDevBranch: false,
       hasDevlopBranch: false,
-      integrationBase: "main",
+      integrationBase: await getDefaultBranch(cwd),
       isGitFlowRepo: false,
     }
   }
