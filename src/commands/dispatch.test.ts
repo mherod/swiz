@@ -232,6 +232,61 @@ describe("dispatch routing", () => {
     expect(stderr).toContain("Falling back to allow")
   })
 
+  test("preCompact fallback omits hookSpecificOutput and validates against schema", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preCompact", "PreCompact"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+      },
+    })
+
+    await proc.stdin.write("{")
+    await proc.stdin.end()
+
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed.systemMessage).toContain("Dispatch runtime failure in preCompact")
+    expect(parsed.systemMessage).toContain('Invalid dispatch payload for event "preCompact"')
+    // Claude rejects hookSpecificOutput on PreCompact — fallback must omit it.
+    expect(parsed.hookSpecificOutput).toBeUndefined()
+    const { hookOutputSchema } = await import("../schemas.ts")
+    expect(hookOutputSchema.safeParse(parsed).success).toBe(true)
+  })
+
+  test("preToolUse fallback keeps hookSpecificOutput.additionalContext", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preToolUse", "PreToolUse"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+      },
+    })
+
+    await proc.stdin.write("{")
+    await proc.stdin.end()
+
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed.systemMessage).toContain("Dispatch runtime failure in preToolUse")
+    expect(parsed.hookSpecificOutput?.hookEventName).toBe("PreToolUse")
+    expect(parsed.hookSpecificOutput?.additionalContext).toContain(
+      'Invalid dispatch payload for event "preToolUse"'
+    )
+    const { hookOutputSchema } = await import("../schemas.ts")
+    expect(hookOutputSchema.safeParse(parsed).success).toBe(true)
+  })
+
   test("dispatches directly to daemon without health check", async () => {
     let healthHits = 0
     let dispatchHits = 0

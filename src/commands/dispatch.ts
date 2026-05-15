@@ -298,6 +298,20 @@ function isStopLikeEvent(canonicalEvent: string): boolean {
   return canonicalEvent === "stop" || canonicalEvent === "subagentStop"
 }
 
+/**
+ * Claude only accepts `hookSpecificOutput` on these events. Emitting it elsewhere
+ * (PreCompact, SessionStart, SessionEnd, Notification, SubagentStart, PreCommit, PrePush)
+ * is rejected by the hook output schema as "Invalid input".
+ */
+function supportsHookSpecificOutput(canonicalEvent: string): boolean {
+  return (
+    canonicalEvent === "preToolUse" ||
+    canonicalEvent === "postToolUse" ||
+    canonicalEvent === "userPromptSubmit" ||
+    canonicalEvent === "postToolBatch"
+  )
+}
+
 function describeDispatchFailure(err: unknown): { message: string; detail: string } {
   if (err instanceof Error) {
     return {
@@ -347,21 +361,29 @@ function buildDispatchFailureFallback(
 ): Record<string, any> {
   const { message } = describeDispatchFailure(err)
   const systemMessage = `Dispatch runtime failure in ${canonicalEvent}. Allowed by fallback; details captured in ${logPath}.`
-  const response = isStopLikeEvent(canonicalEvent)
-    ? {
-        continue: true,
-        reason: message,
-        stopReason: message,
-        systemMessage,
-      }
-    : {
-        systemMessage,
-        hookSpecificOutput: {
-          hookEventName,
-          additionalContext: `Dispatch failed: ${message}. See ${logPath}.`,
-        },
-      }
-  return response
+  if (isStopLikeEvent(canonicalEvent)) {
+    return {
+      continue: true,
+      reason: message,
+      stopReason: message,
+      systemMessage,
+    }
+  }
+  const detail = `Dispatch failed: ${message}. See ${logPath}.`
+  if (supportsHookSpecificOutput(canonicalEvent)) {
+    return {
+      systemMessage,
+      hookSpecificOutput: {
+        hookEventName,
+        additionalContext: detail,
+      },
+    }
+  }
+  // Events like PreCompact/SessionStart/Notification reject `hookSpecificOutput` —
+  // collapse the detail into `systemMessage` so the envelope still validates.
+  return {
+    systemMessage: `${systemMessage} ${detail}`,
+  }
 }
 
 function maybeForceDispatchFailureForTesting(): void {
