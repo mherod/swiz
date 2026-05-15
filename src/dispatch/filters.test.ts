@@ -1,58 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { type HookGroup, hookIdentifier } from "../manifest.ts"
 import type { EffectiveSwizSettings } from "../settings.ts"
+import { buildEffectiveTestSettings } from "../utils/test-utils.ts"
 import { filterRequiredSettingsHooks } from "./filters.ts"
 
-/** Minimal effective settings for testing — all gates enabled by default. */
 function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): EffectiveSwizSettings {
-  return {
-    autoContinue: true,
-    critiquesEnabled: true,
-    ambitionMode: "standard",
-    collaborationMode: "auto",
-    narratorVoice: "",
-    narratorSpeed: 0,
-    prAgeGateMinutes: 10,
-    prMergeMode: true,
-    pushCooldownMinutes: 0,
-    pushGate: false,
-    sandboxedEdits: true,
-    speak: false,
-    autoSteer: false,
-    swizNotifyHooks: false,
-    updateMemoryFooter: false,
-    gitStatusGate: true,
-    nonDefaultBranchGate: true,
-    ignoreCi: false,
-    githubCiGate: true,
-    changesRequestedGate: true,
-    personalRepoIssuesGate: true,
-    issueCloseGate: false,
-    memoryUpdateReminder: false,
-    qualityChecksGate: true,
-    skipSecretScan: false,
-    strictNoDirectMain: false,
-    trunkMode: false,
-    autoTransition: true,
-    actionPlanMerge: true,
-    auditStrictness: "strict",
-    taskDurationWarningMinutes: 10,
-    memoryLineThreshold: 1400,
-    memoryWordThreshold: 5000,
-    largeFileSizeKb: 500,
-    largeFileSizeBlockKb: 5120,
-    dirtyWorktreeThreshold: 15,
-    autoSteerTranscriptWatching: false,
-    transcriptMonitorMaxConcurrentDispatches: 0,
-    enforceEndOfDay: true,
-    enforceUnblockMyself: true,
-    enforceMidSessionCheckin: false,
-    enforceMorningStandup: false,
-    enforceWeeklyRetro: false,
-    statusLineSegments: [],
-    source: "global",
-    ...overrides,
-  }
+  return buildEffectiveTestSettings(overrides)
 }
 
 function makeGroup(hooks: HookGroup["hooks"], event = "stop"): HookGroup {

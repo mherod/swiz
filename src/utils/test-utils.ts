@@ -3,11 +3,33 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
+import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, any>
+
+/**
+ * Build a full SwizSettings object for test fixtures.
+ * Derives defaults from the registry so tests don't need to list every field.
+ * Adding a new registry entry won't break tests that use this helper.
+ */
+export function buildTestSettings(overrides: Partial<SwizSettings> = {}): SwizSettings {
+  return { ...DEFAULT_SETTINGS, ...overrides }
+}
+
+/**
+ * Build an EffectiveSwizSettings object for test fixtures.
+ * Strips sessions/disabledHooks and adds source; override any field as needed.
+ */
+export function buildEffectiveTestSettings(
+  overrides: Partial<EffectiveSwizSettings> = {}
+): EffectiveSwizSettings {
+  const { sessions: _s, disabledHooks: _d, ...base } = DEFAULT_SETTINGS
+  return { ...base, source: "global" as const, ...overrides }
+}
 
 /**
  * Result of an in-process dispatch call. Mirrors the fields tests used to

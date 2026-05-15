@@ -9,6 +9,9 @@ package-lock.json
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
+# Agent memory files (written to project root by Claude Code auto-memory)
+memory/
+
 # output
 out
 dist
