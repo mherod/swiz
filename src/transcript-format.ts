@@ -49,6 +49,163 @@ export function formatToolUse(name: string, input: NonNullable<ToolUseBlock["inp
   return name
 }
 
+// ─── Slash-command / local-command tag parsing ───────────────────────────────
+
+const ANSI_STRIP_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+const COMMAND_TAG_RE =
+  /<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)>([\s\S]*?)<\/\1>/gi
+const SYSTEM_TAG_START_RE =
+  /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)>/i
+const SKILL_BASE_DIR_RE = /^Base directory for this skill:\s*(.+)$/im
+const SKILL_BASE_DIR_START_RE = /^\s*Base directory for this skill:/i
+const SKILL_CONTENT_HEAD_RE = /^SKILL CONTENT\s+(\S+)/im
+const SKILL_CONTENT_START_RE = /^\s*SKILL CONTENT\s+\S+/i
+
+function stripAnsiLike(text: string): string {
+  return text.replace(ANSI_STRIP_RE, "").replace(/\[\d+(?:;\d+)*m/g, "")
+}
+
+interface SkillInvocation {
+  /** Inferred skill name (without leading slash). */
+  name: string | null
+  /** Text remaining after the skill body is stripped. */
+  rest: string
+}
+
+/**
+ * Detect the "Base directory for this skill: …" or "SKILL CONTENT …" preamble
+ * that the runtime injects when a skill is invoked. When found, the entire
+ * skill body is treated as boilerplate and removed from the display string.
+ */
+function extractSkillInvocation(text: string): SkillInvocation | null {
+  const baseMatch = SKILL_BASE_DIR_RE.exec(text)
+  if (baseMatch) {
+    const path = baseMatch[1]!.trim()
+    const name = path.split("/").filter(Boolean).pop() ?? null
+    return { name, rest: text.slice(0, baseMatch.index).trim() }
+  }
+  const headMatch = SKILL_CONTENT_HEAD_RE.exec(text)
+  if (headMatch) {
+    return { name: headMatch[1]!.trim() || null, rest: text.slice(0, headMatch.index).trim() }
+  }
+  return null
+}
+
+export interface PrettyUserMessage {
+  /** Final text to display, or null to suppress the turn entirely. */
+  text: string | null
+  /** Optional category for styling hooks downstream. */
+  kind?: "slash-command" | "command-output" | "command-error" | "skill-invocation"
+}
+
+/**
+ * Convert raw user transcript text containing `<command-name>`,
+ * `<command-args>`, `<local-command-stdout>`, or `<local-command-caveat>`
+ * tags into a readable single-line representation. Returns `null` when
+ * the message is purely a caveat with no other content (so the caller
+ * can drop the turn). Returns `undefined` when no transformation is
+ * needed and the raw text should be used as-is.
+ */
+export function prettifyUserMessageText(raw: string): PrettyUserMessage | undefined {
+  const startsWithSystemTag = SYSTEM_TAG_START_RE.test(raw)
+  const startsWithBareSkill = SKILL_BASE_DIR_START_RE.test(raw) || SKILL_CONTENT_START_RE.test(raw)
+  if (!startsWithSystemTag && !startsWithBareSkill) return undefined
+
+  if (!startsWithSystemTag && startsWithBareSkill) {
+    const skill = extractSkillInvocation(raw)
+    if (skill) {
+      const slash = skill.name ? `/${skill.name}` : "(skill body)"
+      const label = skill.rest ? `${slash}\n${skill.rest}` : slash
+      return { text: label, kind: "skill-invocation" }
+    }
+    return undefined
+  }
+
+  const tags: Record<string, string> = {}
+  let remainder = ""
+  let lastEnd = 0
+  for (const match of raw.matchAll(new RegExp(COMMAND_TAG_RE.source, "gi"))) {
+    const index = match.index ?? 0
+    remainder += raw.slice(lastEnd, index)
+    lastEnd = index + match[0].length
+    const name = match[1]!.toLowerCase()
+    if (!(name in tags)) tags[name] = match[2]!.trim()
+  }
+  if (Object.keys(tags).length === 0) return undefined
+  remainder = (remainder + raw.slice(lastEnd)).trim()
+
+  const skill = extractSkillInvocation(remainder)
+  if (skill) remainder = skill.rest
+
+  if ("command-name" in tags) {
+    const cmdName = tags["command-name"]!
+    const normalized = cmdName.startsWith("/") ? cmdName : `/${cmdName}`
+    const args = tags["command-args"]
+    const label = args ? `${normalized} ${args}` : normalized
+    const kind: PrettyUserMessage["kind"] = skill ? "skill-invocation" : "slash-command"
+    return { text: remainder ? `${label}\n${remainder}` : label, kind }
+  }
+
+  if ("bash-input" in tags) {
+    const cmd = tags["bash-input"]!
+    if (!cmd) return remainder ? { text: remainder } : { text: null }
+    return {
+      text: remainder ? `${remainder}\n$ ${cmd}` : `$ ${cmd}`,
+      kind: "slash-command",
+    }
+  }
+
+  if ("bash-stdout" in tags) {
+    const cleaned = stripAnsiLike(tags["bash-stdout"] ?? "")
+    if (!cleaned) return remainder ? { text: remainder } : { text: null }
+    return {
+      text: remainder ? `${remainder}\n↳ ${cleaned}` : `↳ ${cleaned}`,
+      kind: "command-output",
+    }
+  }
+
+  if ("bash-stderr" in tags) {
+    const cleaned = stripAnsiLike(tags["bash-stderr"] ?? "")
+    if (!cleaned) return remainder ? { text: remainder } : { text: null }
+    return {
+      text: remainder ? `${remainder}\n✗ ${cleaned}` : `✗ ${cleaned}`,
+      kind: "command-error",
+    }
+  }
+
+  if (skill) {
+    const slash = skill.name ? `/${skill.name}` : "(skill body)"
+    return {
+      text: remainder ? `${slash}\n${remainder}` : slash,
+      kind: "skill-invocation",
+    }
+  }
+
+  if ("local-command-stdout" in tags) {
+    const cleaned = stripAnsiLike(tags["local-command-stdout"] ?? "")
+    if (!cleaned) return remainder ? { text: remainder } : { text: null }
+    return {
+      text: remainder ? `${remainder}\n↳ ${cleaned}` : `↳ ${cleaned}`,
+      kind: "command-output",
+    }
+  }
+
+  if ("local-command-stderr" in tags) {
+    const cleaned = stripAnsiLike(tags["local-command-stderr"] ?? "")
+    if (!cleaned) return remainder ? { text: remainder } : { text: null }
+    return {
+      text: remainder ? `${remainder}\n✗ ${cleaned}` : `✗ ${cleaned}`,
+      kind: "command-error",
+    }
+  }
+
+  if ("local-command-caveat" in tags) {
+    return remainder ? { text: remainder } : { text: null }
+  }
+
+  return undefined
+}
+
 // ─── Content block helpers ──────────────────────────────────────────────────
 
 export function toContentBlocks(content: string | ContentBlock[] | undefined): ContentBlock[] {
@@ -139,5 +296,8 @@ export function entryToDisplayTurn(
       blocks: extractToolResultBlocks(content),
     }
   }
-  return { role, timestamp: entry.timestamp, text: extractText(content).trim() }
+  const rawText = extractText(content).trim()
+  const pretty = prettifyUserMessageText(rawText)
+  const text = pretty?.text === null ? "" : (pretty?.text ?? rawText)
+  return { role, timestamp: entry.timestamp, text }
 }

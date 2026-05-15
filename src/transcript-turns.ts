@@ -7,6 +7,7 @@ import {
   hasToolResults,
   isNamedToolUseBlock,
   isVisibleTextBlock,
+  prettifyUserMessageText,
   toContentBlocks,
 } from "./transcript-format.ts"
 import {
@@ -51,12 +52,18 @@ function hasVisibleContent(entry: TranscriptEntry, text: string): boolean {
   )
 }
 
+function isSuppressedUserMessage(text: string): boolean {
+  const pretty = prettifyUserMessageText(text)
+  return pretty !== undefined && pretty.text === null
+}
+
 function collectUserTurns(entries: TranscriptEntry[]): Turn[] {
   const turns: Turn[] = []
   for (const entry of entries) {
     if (entry.type !== "user" || !entry.message) continue
     const text = extractText(entry.message.content).trim()
     if (!text || isHookFeedbackContent(text)) continue
+    if (isSuppressedUserMessage(text)) continue
     turns.push({ entry: cloneUserEntryWithPlainText(entry, text), role: "user" })
   }
   return turns
@@ -70,6 +77,7 @@ function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
     if (!entry.message) continue
     const text = extractText(entry.message.content).trim()
     if (entry.type === "user" && isHookFeedbackContent(text)) continue
+    if (entry.type === "user" && isSuppressedUserMessage(text)) continue
     if (!hasVisibleContent(entry, text)) continue
     turns.push({ entry, role: entry.type as "user" | "assistant" })
   }
