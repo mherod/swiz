@@ -397,7 +397,7 @@ describe("pretooluse-task-subject-validation", () => {
     )
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toContain("deny")
-    expect(r.stdout).toContain("Do not create another task named")
+    expect(r.stdout).toContain("already covers")
     expect(r.stdout).toContain("TaskUpdate")
   })
 
