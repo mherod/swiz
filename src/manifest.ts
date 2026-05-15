@@ -23,7 +23,7 @@ import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
 import posttooluseTaskCountContext from "../hooks/posttooluse-task-count-context.ts"
 import posttooluseTaskOutput from "../hooks/posttooluse-task-output.ts"
 import posttooluseTaskSubjectValidation from "../hooks/posttooluse-task-subject-validation.ts"
-import posttooluseTaskSync, {
+import {
   taskAuditSyncHook as posttooluseTaskAuditSync,
   taskListSyncHook as posttooluseTaskListSync,
 } from "../hooks/posttooluse-task-sync.ts"
@@ -369,7 +369,6 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttoolusGitContext },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
-      { hook: posttooluseTaskSync },
     ],
   },
   {
@@ -499,7 +498,6 @@ const TASK_HOOK_IDENTIFIERS = new Set([
   "posttooluse-task-count-context.ts",
   "posttooluse-task-output.ts",
   "posttooluse-task-subject-validation.ts",
-  "posttooluse-task-sync.ts",
   "precompact-task-snapshot.ts",
   "pretooluse-enforce-taskupdate.ts",
   "pretooluse-no-phantom-task-completion.ts",

@@ -69,9 +69,9 @@ describe("buildCountSummary", () => {
       pending: 2,
       inProgress: 1,
     })
-    expect(s).toMatch(
-      /(brilliant|perfect|satisfactory|excellent|solid|sound) task (practice|regulation|discipline|routine|stewardship)/i
-    )
+    expect(s).not.toContain("Tasks: 1 in_progress, 2 pending")
+    expect(s).toContain("Task buffer healthy")
+    expect(s).toContain("Good task hygiene")
     expect(s).toContain("planning buffer")
   })
 
@@ -82,8 +82,9 @@ describe("buildCountSummary", () => {
       pending: 3,
       inProgress: 0,
     })
+    expect(s).not.toContain("Tasks: 0 in_progress, 3 pending")
     expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("No task claimed yet")
+    expect(s).toContain("No active task yet")
   })
 
   it("does not praise when only one pending even with in_progress", () => {
@@ -93,8 +94,9 @@ describe("buildCountSummary", () => {
       pending: 1,
       inProgress: 1,
     })
+    expect(s).not.toContain("Tasks: 1 in_progress, 1 pending")
     expect(s).not.toContain("Good task hygiene")
-    expect(s).toContain("One pending task left")
+    expect(s).toContain("Planning buffer thin")
   })
 
   it("shows planning buffer empty message without praise when zero pending", () => {
@@ -129,7 +131,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: ["#42 Fix auth timeout", "#57 Add retry logic"],
     })
-    expect(s).toContain("Open issues we could plan for")
+    expect(s).toContain("Potential follow-up issues")
     expect(s).toContain("#42 Fix auth timeout")
     expect(s).toContain("#57 Add retry logic")
   })
@@ -142,7 +144,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: ["#42 Fix auth timeout"],
     })
-    expect(s).not.toContain("Open issues we could plan for")
+    expect(s).not.toContain("Potential follow-up issues")
   })
 
   it("does not append issue hints when hints array is empty", () => {
@@ -153,7 +155,7 @@ describe("buildCountSummary", () => {
       inProgress: 1,
       issueHints: [],
     })
-    expect(s).not.toContain("Open issues we could plan for")
+    expect(s).not.toContain("Potential follow-up issues")
     expect(s).toContain("Planning buffer empty")
   })
 
@@ -166,7 +168,7 @@ describe("buildCountSummary", () => {
       issueHints: ["#100 Critical bug in login"],
     })
     expect(s).toContain("Planning buffer empty")
-    expect(s).toContain("Open issues we could plan for")
+    expect(s).toContain("Potential follow-up issues")
     expect(s).toContain("#100 Critical bug in login")
   })
 })

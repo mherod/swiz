@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { rephraseHookMessage } from "./hook-message-rephrasing.ts"
+import { rephraseHookMessage, selectStableHookVariant } from "./hook-message-rephrasing.ts"
 
 describe("rephraseHookMessage", () => {
   test("rephrases positive task-governance wording", () => {
@@ -134,5 +134,13 @@ describe("rephraseHookMessage", () => {
     } finally {
       Date.now = originalNow
     }
+  })
+
+  test("selects deterministic hook voice variants by five-minute window", () => {
+    const variants = ["alpha", "beta", "gamma"]
+    const first = selectStableHookVariant("task-close", variants, 1_710_000_000_000)
+    const second = selectStableHookVariant("task-close", variants, 1_710_000_001_000)
+    expect(second).toBe(first)
+    expect(variants).toContain(first)
   })
 })

@@ -213,13 +213,24 @@ export function buildSplitContextHookOutput(
 
 /** Build a PreToolUse deny response for inline hooks. */
 export function preToolUseDeny(reason: string): SwizHookOutput {
+  return preToolUseDenyWithSystemMessage(
+    reason,
+    extractHookSystemMessagePreview(reason) || "Denied without reason"
+  )
+}
+
+/** Build a PreToolUse deny response with a distinct visible UI preview. */
+export function preToolUseDenyWithSystemMessage(
+  reason: string,
+  systemMessage: string
+): SwizHookOutput {
   const fullReason = `${reason}
 
 You must act on this now. Do not try to stop again without completing the required action.`
 
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: extractHookSystemMessagePreview(reason) || "Denied without reason",
+    systemMessage: systemMessage.trim() || "Denied without reason",
     hookSpecificOutput: hsoPreToolUseDeny(fullReason),
   })
 }

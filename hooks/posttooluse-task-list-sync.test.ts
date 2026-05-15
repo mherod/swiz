@@ -155,7 +155,12 @@ describe("posttooluse-task-list-sync", () => {
     expect(exitCode).toBe(0)
     // No creates or updates, but count context is still emitted
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("Tasks: 0 in_progress, 1 pending")
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain(
+      "Tasks: 0 in_progress, 1 pending"
+    )
+    expect(parsed.hookSpecificOutput.additionalContext).toMatch(
+      /No (active|engaged|ongoing|live|open|current|running) task yet/
+    )
   })
 
   test("updates task file when status changes", async () => {
@@ -319,7 +324,9 @@ describe("posttooluse-task-list-sync", () => {
     expect(exitCode).toBe(0)
     const parsed = JSON.parse(stdout)
     const ctx: string = parsed.hookSpecificOutput.additionalContext
-    expect(ctx).toContain("resolve them before continuing")
+    expect(ctx).toMatch(
+      /resolve them before (continuing|moving on|proceeding|keeping going|pressing on|moving forward)/
+    )
     expect(ctx).toContain("Pick the duplicate entry")
     expect(ctx).toContain('"Resolve task state" is on #60 (pending), #61 (in_progress)')
   })

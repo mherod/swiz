@@ -6,6 +6,10 @@ describe("orderHookContexts", () => {
     expect(orderHookContexts(["first", "second"], "Stop")).toEqual(["first", "second"])
   })
 
+  test("deduplicates repeated context before ordering", () => {
+    expect(orderHookContexts(["same", "same\n", "other"], "PostToolUse")).toEqual(["same", "other"])
+  })
+
   test("stably shuffles longer context lists within a time bucket", () => {
     const originalNow = Date.now
     Date.now = () => 1_710_000_000_000

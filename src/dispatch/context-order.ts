@@ -20,6 +20,22 @@ function contextOrderScore(context: string, windowKey: number, hookEventName: st
   return stableOrderScore(`${windowKey}\0${hookEventName}\0${context}`)
 }
 
+function contextDedupeKey(context: string): string {
+  return context.trim().replace(/\s+/g, " ")
+}
+
+function dedupeHookContexts(contexts: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const deduped: string[] = []
+  for (const context of contexts) {
+    const key = contextDedupeKey(context)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    deduped.push(context)
+  }
+  return deduped
+}
+
 /**
  * Reorder context strings deterministically inside a 5-minute time bucket.
  * Keeps the original order for small outputs where shuffling would only add
@@ -30,10 +46,11 @@ export function orderHookContexts(
   hookEventName: string,
   nowMs: number = Date.now()
 ): string[] {
-  if (contexts.length < 3) return [...contexts]
+  const deduped = dedupeHookContexts(contexts)
+  if (deduped.length < 3) return deduped
 
   const windowKey = Math.floor(nowMs / CONTEXT_ORDER_WINDOW_MS)
-  return [...contexts]
+  return deduped
     .map((context, index) => ({
       context,
       index,

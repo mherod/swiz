@@ -1,5 +1,6 @@
 import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
 import { detectCurrentAgentFromEnv, toolNameForCurrentAgent } from "../agent-paths.ts"
+import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
   type DuplicateSubjectGroup,
@@ -174,6 +175,7 @@ export type TaskGovernanceMessageRequest =
       recentCompletionCount: number
       maxCompletions: number
       waitSeconds: number
+      sessionId?: string
     }
   | {
       kind: "native-deletion-threshold"
@@ -374,15 +376,11 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "completion-rate-limit":
       return (
-        `Slowing down: ${request.recentCompletionCount} completions in the last 5s (max ${request.maxCompletions}).\n\n` +
-        `Wait ${request.waitSeconds}s, then close tasks one at a time with concrete evidence.\n\n` +
-        "Before retrying:\n" +
-        `1. ${TASKLIST_STABILITY_STEP}\n` +
-        "2. Verify each task you intend to complete has concrete evidence (commit SHA, test output, file path)\n" +
-        "3. Confirm the work described in the task subject has actually been done — not assumed, not deferred\n" +
-        `4. ${TASKLIST_CONFIRM_STEP}\n` +
-        "5. Complete ONE task at a time, waiting for this hook to clear between each\n\n" +
-        "Closing tasks one by one with evidence keeps the work record accurate."
+        `${completionRateLimitLead(request)}\n\n` +
+        `Already closed ${request.recentCompletionCount} tasks in the last 5s; the limit is ${request.maxCompletions}. ` +
+        `Wait ${request.waitSeconds}s, then close one task with concrete evidence.\n\n` +
+        "Before retrying: run TaskList, confirm the target task has evidence " +
+        "(commit:, test:, file:, or pr:), and update only that one task."
       )
 
     case "native-deletion-threshold":
@@ -394,12 +392,12 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
 
     case "completion-threshold":
       return (
-        `Before closing task #${request.taskId}, make sure the queue stays healthy.\n\n` +
-        "Keep current and follow-up work visible before closing this task.\n\n" +
+        `${completionThresholdLead(request.taskId)}\n\n` +
+        "Keep both current work and the next follow-up visible before closing this task.\n\n" +
         formatTranslatedActionPlan(
           [
-            `Use ${taskCreateName} or ${taskUpdateName} to make the real current work and next follow-up work visible before completing this task.`,
-            "Retry completion only after TaskList shows the planning buffer is healthy and the task has concrete evidence.",
+            `Use ${taskCreateName} or ${taskUpdateName} to show the real current work and next follow-up.`,
+            "Retry only after TaskList shows a stable planning buffer and the task has concrete evidence.",
           ],
           { taskListFirst: true }
         )
@@ -471,6 +469,68 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         ) +
         `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(request.groups)}`
       )
+  }
+}
+
+function taskVoiceVariant(key: string, variants: readonly string[]): string {
+  return selectStableHookVariant(key, variants)
+}
+
+function completionRateLimitLead(request: {
+  recentCompletionCount: number
+  maxCompletions: number
+  waitSeconds: number
+  sessionId?: string
+}): string {
+  const key = [
+    "completion-rate-limit",
+    request.sessionId ?? "session",
+    request.recentCompletionCount,
+    request.maxCompletions,
+  ].join(":")
+  return taskVoiceVariant(key, [
+    "Task closure cadence is too tight.",
+    "Completion throttle is active.",
+    "Pause the close-out loop.",
+    "Task updates are arriving too quickly.",
+    "Slow the task completion pace.",
+  ])
+}
+
+function completionThresholdLead(taskId: string): string {
+  return taskVoiceVariant(`completion-threshold:${taskId}`, [
+    `Keep a follow-up task visible before closing #${taskId}.`,
+    `Task #${taskId} cannot close until the queue still shows what comes next.`,
+    `The queue would lose its next step if #${taskId} closes now.`,
+    `Task #${taskId} needs visible current and follow-up work before closure.`,
+  ])
+}
+
+export function buildTaskGovernancePreview(request: TaskGovernanceMessageRequest): string | null {
+  switch (request.kind) {
+    case "completion-rate-limit":
+      return taskVoiceVariant(`preview:completion-rate-limit:${request.sessionId ?? "session"}`, [
+        "Task closure paused: wait, then complete one item with evidence.",
+        "Completion throttle active: slow down and retry one task only.",
+        "Pause task closure: the repair path is in the details.",
+        "Task updates are too rapid: verify evidence before retrying.",
+      ])
+    case "completion-threshold":
+      return taskVoiceVariant(`preview:completion-threshold:${request.taskId}`, [
+        "Task closure paused until the queue shows what comes next.",
+        "Queue state needs repair before this task can close.",
+        "Keep current and follow-up work visible before retrying.",
+        "Task update blocked: preserve the planning buffer first.",
+      ])
+    case "pending-completion-shortcut":
+      return taskVoiceVariant(`preview:pending-completion-shortcut:${request.taskId}`, [
+        "Task closure paused: start the pending item before closing it.",
+        "Pending task cannot close directly; make the work visible first.",
+        "Task update blocked: pending work needs an active step first.",
+        "Start the planned task before recording it as complete.",
+      ])
+    default:
+      return null
   }
 }
 
@@ -551,10 +611,26 @@ export function buildCountSummary(counts: {
   inProgress: number
   issueHints?: string[]
 }): string {
-  const parts: string[] = [`Tasks: ${counts.inProgress} in_progress, ${counts.pending} pending.`]
+  const parts: string[] = [formatTaskStateLead(counts)]
   appendPlanningFeedback(parts, counts)
   appendHygieneFeedback(parts, counts)
   return parts.join(" ")
+}
+
+export function formatTaskStateLead(counts: {
+  total: number
+  incomplete: number
+  pending: number
+  inProgress: number
+}): string {
+  if (counts.total === 0 || counts.incomplete === 0) return "Task queue empty."
+  if (counts.inProgress === 0) return "No active task yet."
+  if (counts.pending === 0) return "Planning buffer empty."
+  if (counts.pending === 1 && counts.incomplete <= 2) return "Planning buffer thin."
+  if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
+    return "Task buffer healthy."
+  }
+  return "Task state needs attention."
 }
 
 function appendPlanningFeedback(
@@ -567,11 +643,11 @@ function appendPlanningFeedback(
 ): void {
   if (counts.pending === 0) {
     parts.push(
-      "Planning buffer empty — add two pending tasks before continuing: one for the next step in the current work, and one for the broader follow-on."
+      "Add two pending tasks before continuing: one for the next step in the current work, and one broader follow-on."
     )
   } else if (counts.pending === 1 && counts.incomplete <= 2) {
     parts.push(
-      "One pending task left — add another to keep the buffer healthy. Aim for one immediate next step and one broader follow-on task."
+      "Add another pending task to keep the buffer stable. Prefer one immediate next step and one broader follow-on task."
     )
   }
 
@@ -580,7 +656,7 @@ function appendPlanningFeedback(
     counts.issueHints &&
     counts.issueHints.length > 0
   ) {
-    parts.push(`Open issues we could plan for: ${counts.issueHints.join("; ")}.`)
+    parts.push(`Potential follow-up issues: ${counts.issueHints.join("; ")}.`)
   }
 }
 
@@ -594,13 +670,11 @@ function appendHygieneFeedback(
 ): void {
   if (counts.inProgress === 0 && counts.incomplete > 0) {
     parts.push(
-      "No task claimed yet — run TaskList, then use TaskUpdate to set one in_progress before starting implementation."
+      "Run TaskList, then use TaskUpdate to claim one pending task before starting implementation."
     )
   } else if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
     parts.push(
-      replaceTaskGovernanceSynonyms(
-        "Good task hygiene: we have a planning buffer and one clear in_progress focus. Keep TaskList fresh, update status as work completes, and add pending tasks before the queue runs low."
-      )
+      "Good task hygiene: planning buffer in place; keep statuses current as work changes."
     )
   }
 }

@@ -968,14 +968,24 @@ export function preToolUseAllow(reason = ""): SwizHookOutput {
 
 /** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
 export function preToolUseDeny(reason: string): SwizHookOutput {
+  return preToolUseDenyWithSystemMessage(
+    reason,
+    extractHookSystemMessagePreview(reason) || "Denied without reason"
+  )
+}
+
+/** Build a PreToolUse deny response with a distinct visible UI preview. */
+export function preToolUseDenyWithSystemMessage(
+  reason: string,
+  systemMessage: string
+): SwizHookOutput {
   const fullReason = `${reason}
 
 You must act on this now. Do not try to stop again without completing the required action.`
 
-  const preview = extractHookSystemMessagePreview(reason) || "Denied without reason"
   return {
     suppressOutput: true,
-    systemMessage: preview,
+    systemMessage: systemMessage.trim() || "Denied without reason",
     hookSpecificOutput: hsoPreToolUseDeny(fullReason),
   }
 }

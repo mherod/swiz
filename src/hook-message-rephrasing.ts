@@ -193,6 +193,19 @@ function stableSeed(text: string): number {
   return hash >>> 0
 }
 
+export function selectStableHookVariant<T>(
+  key: string,
+  variants: readonly T[],
+  nowMs = Date.now()
+): T {
+  if (variants.length === 0) {
+    throw new Error("selectStableHookVariant requires at least one variant")
+  }
+  const windowKey = Math.floor(nowMs / REPHRASE_WINDOW_MS)
+  const seed = stableSeed(`${windowKey}\0${key}`)
+  return variants[seed % variants.length]!
+}
+
 function makeSeededRandom(seed: number): () => number {
   let state = seed >>> 0
   return () => {

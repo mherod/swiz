@@ -38,12 +38,14 @@ import {
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
 import {
-  buildPendingCompletionTransitionMessage,
   buildTaskGovernanceMessage,
+  buildTaskGovernancePreview,
+  formatTaskStateLead,
   getTaskToolName,
   SWIZ_TASKS_FILES_DENY_MESSAGE,
   TASKLIST_CONFIRM_STEP,
   TASKLIST_STABILITY_STEP,
+  type TaskGovernanceMessageRequest,
 } from "../src/tasks/task-governance-messages.ts"
 import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
 import {
@@ -89,6 +91,7 @@ import {
   preToolUseAllow,
   preToolUseAllowWithContext,
   preToolUseDeny,
+  preToolUseDenyWithSystemMessage,
   resolveSafeSessionId,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
@@ -117,6 +120,13 @@ function taskCreateToolName(): string {
 function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresholds {
   const mode = auditStrictness as keyof typeof GOVERNANCE_THRESHOLDS
   return GOVERNANCE_THRESHOLDS[mode] ?? GOVERNANCE_THRESHOLDS.strict
+}
+
+function denyTaskGovernance(request: TaskGovernanceMessageRequest): SwizHookOutput {
+  const reason = buildTaskGovernanceMessage(request)
+  const preview = buildTaskGovernancePreview(request)
+  if (preview) return preToolUseDenyWithSystemMessage(reason, preview)
+  return preToolUseDeny(reason)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -974,14 +984,13 @@ function checkCompletionRateLimit(
     completionTimestamps.set(sessionId, recent)
     const oldestInWindow = recent[0] ?? now
     const waitSec = Math.ceil((oldestInWindow + WINDOW_MS - now) / 1000)
-    return preToolUseDeny(
-      buildTaskGovernanceMessage({
-        kind: "completion-rate-limit",
-        recentCompletionCount: recent.length,
-        maxCompletions: MAX_COMPLETIONS_IN_WINDOW,
-        waitSeconds: waitSec,
-      })
-    )
+    return denyTaskGovernance({
+      kind: "completion-rate-limit",
+      recentCompletionCount: recent.length,
+      maxCompletions: MAX_COMPLETIONS_IN_WINDOW,
+      waitSeconds: waitSec,
+      sessionId,
+    })
   }
 
   recent.push(now)
@@ -1100,12 +1109,10 @@ async function handleTaskCompletion(
       (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
 
     if (violatesThresholds) {
-      return preToolUseDeny(
-        buildTaskGovernanceMessage({
-          kind: "completion-threshold",
-          taskId,
-        })
-      )
+      return denyTaskGovernance({
+        kind: "completion-threshold",
+        taskId,
+      })
     }
 
     // Optimistically record in event state + cache for parallel TOCTOU safety.
@@ -1194,7 +1201,7 @@ async function checkNativeTaskUpdateCompletion(
   const allTasks = await readSessionTasks(sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
-    return preToolUseDeny(buildPendingCompletionTransitionMessage(taskId))
+    return denyTaskGovernance({ kind: "pending-completion-shortcut", taskId })
   }
 
   const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)
@@ -1457,31 +1464,34 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
       }
     }
 
-    const countLine = `Tasks: ${inProgress} in_progress, ${pending} pending.`
+    const stateLead = formatTaskStateLead({
+      total,
+      incomplete: pending + inProgress,
+      pending,
+      inProgress,
+    })
 
     if (total === 0 || (pending === 0 && inProgress === 0)) {
       return replaceTaskGovernanceSynonyms(
-        `${countLine} What are we working on? Create tasks before starting implementation.`
+        `${stateLead} What are we working on? Create tasks before starting implementation.`
       )
     }
     if (inProgress === 0) {
       return replaceTaskGovernanceSynonyms(
-        `${countLine} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+        `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
       )
     }
     if (pending === 0) {
       return replaceTaskGovernanceSynonyms(
-        `${countLine} What should we do next? Add a pending task to keep the planning buffer healthy.`
+        `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
       )
     }
     if (pending === 1) {
       return replaceTaskGovernanceSynonyms(
-        `${countLine} What should we do next? Add one more pending task to keep the buffer healthy.`
+        `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
       )
     }
-    return replaceTaskGovernanceSynonyms(
-      `${countLine} On track — ${replaceTaskGovernanceSynonyms("Good task hygiene")}.`
-    )
+    return replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`)
   } catch (err) {
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }
