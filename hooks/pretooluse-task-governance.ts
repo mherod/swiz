@@ -1141,7 +1141,7 @@ async function checkInProgressTransitionCap(
     return null
   }
 
-  // Block: 2+ tasks already in_progress
+  // Block: in-progress count is at or above the configured cap.
   const inProgressTasks = allTasks
     .filter((t) => t.status === "in_progress")
     .map((t) => `  • #${t.id}: ${t.subject}`)

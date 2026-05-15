@@ -1,11 +1,32 @@
 import { describe, expect, test } from "bun:test"
+import { rm } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { writeTask } from "../src/utils/test-utils.ts"
 import {
   evaluateBlockedTaskFilesPrecheck,
   evaluateNativeTaskUpdatePath,
   evaluateOtherShellToolPath,
   evaluatePendingOverflowGuard,
   evaluateTaskCreatePath,
+  getInProgressCap,
 } from "./pretooluse-task-governance.ts"
+
+const HOME = homedir()
+
+async function seedInProgressTasks(sessionId: string, count: number): Promise<void> {
+  for (let i = 1; i <= count; i++) {
+    await writeTask(HOME, sessionId, { id: String(i), subject: `Task ${i}`, status: "in_progress" })
+  }
+}
+
+async function seedPendingTask(sessionId: string, id: string): Promise<void> {
+  await writeTask(HOME, sessionId, { id, subject: "Pending task", status: "pending" })
+}
+
+async function cleanupSession(sessionId: string): Promise<void> {
+  await rm(join(HOME, ".claude", "tasks", sessionId), { recursive: true, force: true })
+}
 
 function permissionDecision(result: unknown): string | undefined {
   const hso = (result as { hookSpecificOutput?: { permissionDecision?: string } } | null)
@@ -109,5 +130,47 @@ describe("evaluateOtherShellToolPath", () => {
     const parsed = input as unknown as Parameters<typeof evaluateOtherShellToolPath>[1]
     const result = await evaluateOtherShellToolPath(input, parsed)
     expect(result).toEqual({})
+  })
+})
+
+describe("checkInProgressTransitionCap boundary (via evaluateNativeTaskUpdatePath)", () => {
+  const CAP = getInProgressCap()
+
+  test("allows transition when 0 tasks are in_progress", async () => {
+    const sessionId = `cap-boundary-0-${Date.now()}`
+    await seedPendingTask(sessionId, "1")
+    const toolInput = { taskId: "1", status: "in_progress" }
+    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
+    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+    await cleanupSession(sessionId)
+    expect(permissionDecision(result)).not.toBe("deny")
+  })
+
+  test(`allows transition when ${CAP - 1} tasks are in_progress (cap - 1)`, async () => {
+    const sessionId = `cap-boundary-${CAP - 1}-${Date.now()}`
+    await seedInProgressTasks(sessionId, CAP - 1)
+    const pendingId = String(CAP)
+    await seedPendingTask(sessionId, pendingId)
+    const toolInput = { taskId: pendingId, status: "in_progress" }
+    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
+    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+    await cleanupSession(sessionId)
+    expect(permissionDecision(result)).not.toBe("deny")
+  })
+
+  test(`denies transition when ${CAP} tasks are already in_progress (at cap)`, async () => {
+    const sessionId = `cap-boundary-${CAP}-${Date.now()}`
+    await seedInProgressTasks(sessionId, CAP)
+    const pendingId = String(CAP + 1)
+    await seedPendingTask(sessionId, pendingId)
+    const toolInput = { taskId: pendingId, status: "in_progress" }
+    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
+    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+    await cleanupSession(sessionId)
+    expect(permissionDecision(result)).toBe("deny")
+    expect(decisionReason(result)).toContain(String(CAP))
   })
 })
