@@ -518,8 +518,7 @@ export async function appendReplyToSink(
     kind: payload.kind,
     content: payload.content,
   })}\n`
-  const write = appendFile(path, row)
-  const queued = replyWriteChain.then(() => write)
+  const queued = replyWriteChain.then(() => appendFile(path, row))
   replyWriteChain = queued.catch(() => {})
   await queued
 }
