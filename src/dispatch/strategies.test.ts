@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { processBlockingResults } from "./blockingStrategy.ts"
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
+import { preparePreToolHints } from "./preToolUseStrategy.ts"
 
 function makeHookExecution(file: string, status: HookExecution["status"] = "ok"): HookExecution {
   return {
@@ -21,6 +22,28 @@ function makeHookExecution(file: string, status: HookExecution["status"] = "ok")
 }
 
 describe("processBlockingResults", () => {
+  it("does not duplicate an existing systemMessage when merged context already contains it", () => {
+    const results = [
+      {
+        execution: makeHookExecution("first.ts"),
+        parsed: {
+          decision: "block",
+          reason: "first",
+          systemMessage: "Task state needs attention.",
+          hookSpecificOutput: {
+            decision: "block",
+            additionalContext: "Task state needs attention.",
+          },
+        },
+      },
+    ]
+
+    const finalResponse: Record<string, any> = {}
+    const executions: HookExecution[] = []
+    processBlockingResults(results, executions, finalResponse, "PreToolUse")
+    expect(finalResponse.systemMessage).toBe("Task state needs attention.")
+  })
+
   it("merges first block additionalContext into systemMessage", () => {
     const results = [
       {
@@ -341,6 +364,31 @@ describe("processBlockingResults", () => {
       "On branch main tracking origin/main. The working tree is clean."
     )
     expect(finalResponse.systemMessage).toContain("On branch main")
+  })
+})
+
+describe("preparePreToolHints", () => {
+  it("drops hints already present as context", () => {
+    expect(
+      preparePreToolHints(["No open task yet.", "Keep going."], ["No open task yet."])
+    ).toEqual(["Keep going."])
+  })
+
+  it("collapses repetitive continue-mode hints into a guardrail summary", () => {
+    const hints = preparePreToolHints(
+      [
+        "Proceed in diagnostic-ownership mode: fix or prove diagnostic claims.",
+        "Remain in direct-tool-invocation mode.",
+        "Stay in ditto-preferred copy mode.",
+        "Carry on in commit-backed issue-closure mode.",
+      ],
+      []
+    )
+    const expectedSummary = [
+      "Active guardrails: diagnostic-ownership; direct-tool-invocation; ditto-preferred copy; ",
+      "commit-backed issue-closure.",
+    ].join("")
+    expect(hints).toEqual([expectedSummary])
   })
 })
 

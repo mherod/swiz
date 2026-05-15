@@ -14,6 +14,62 @@ import {
  */
 type PreToolResult = "deny" | "hint" | "pass"
 
+const MODE_HINT_RE = new RegExp(
+  "^(?:continue|stay|remain|keep going|proceed|carry on|move on|press on)\\s+" +
+    "(?:in|with)\\s+(.+?)(?:\\s+mode)?(?:\\.|:|$)",
+  "i"
+)
+
+function normalizedHintKey(text: string): string {
+  return text.trim().replace(/\s+/g, " ")
+}
+
+function uniqueNonEmpty(items: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const item of items) {
+    const key = normalizedHintKey(item)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push(item)
+  }
+  return unique
+}
+
+function modeHintLabel(hint: string): string | null {
+  const match = hint.match(MODE_HINT_RE)
+  if (!match?.[1]) return null
+  return match[1]
+    .replace(/\s+enabled$/i, "")
+    .replace(/\s+mode$/i, "")
+    .trim()
+}
+
+export function preparePreToolHints(
+  hints: readonly string[],
+  contexts: readonly string[]
+): string[] {
+  const contextKeys = new Set(contexts.map(normalizedHintKey).filter(Boolean))
+  const uniqueHints = uniqueNonEmpty(hints).filter(
+    (hint) => !contextKeys.has(normalizedHintKey(hint))
+  )
+  const modeLabels: string[] = []
+  const nonModeHints: string[] = []
+
+  for (const hint of uniqueHints) {
+    const label = modeHintLabel(hint)
+    if (label) {
+      modeLabels.push(label)
+    } else {
+      nonModeHints.push(hint)
+    }
+  }
+
+  if (modeLabels.length < 3) return uniqueHints
+
+  return [...nonModeHints, `Active guardrails: ${uniqueNonEmpty(modeLabels).join("; ")}.`]
+}
+
 function classifyAllowHint(
   resp: Record<string, any>,
   execution: HookExecution,
@@ -48,19 +104,22 @@ function classifyPreToolResult(
 }
 
 function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, any> {
-  if (hints.length === 0 && contexts.length === 0) {
+  const cleanContexts = uniqueNonEmpty(contexts)
+  const cleanHints = preparePreToolHints(hints, cleanContexts)
+
+  if (cleanHints.length === 0 && cleanContexts.length === 0) {
     log(`   result: all passed`)
     return hookOutputSchema.parse({})
   }
   log(
-    `   result: passed with ${hints.length} hint(s)` +
-      (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
+    `   result: passed with ${cleanHints.length} hint(s)` +
+      (cleanContexts.length > 0 ? ` and ${cleanContexts.length} context(s)` : "")
   )
   return hookOutputSchema.parse({
-    ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
+    ...(cleanContexts.length > 0 ? { systemMessage: cleanContexts.join("\n\n") } : {}),
     hookSpecificOutput: hsoPreToolUseMergedAllow({
-      hintsJoined: hints.length > 0 ? hints.join("\n\n") : undefined,
-      contextsJoined: contexts.length > 0 ? contexts.join("\n\n") : undefined,
+      hintsJoined: cleanHints.length > 0 ? cleanHints.join("\n\n") : undefined,
+      contextsJoined: cleanContexts.length > 0 ? cleanContexts.join("\n\n") : undefined,
     }),
   })
 }

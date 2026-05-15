@@ -25,6 +25,21 @@ function mergeHookContexts(contexts: string[], hookEventName: string): string | 
   return ordered.join("\n\n")
 }
 
+function normalizedContextText(text: string): string {
+  return text.trim().replace(/\s+/g, " ")
+}
+
+function appendContext(existing: unknown, mergedContext: string): string {
+  const existingText = typeof existing === "string" ? existing.trim() : ""
+  if (!existingText) return mergedContext
+
+  const existingKey = normalizedContextText(existingText)
+  const mergedKey = normalizedContextText(mergedContext)
+  if (existingKey === mergedKey || existingKey.includes(mergedKey)) return existingText
+  if (mergedKey.includes(existingKey)) return mergedContext
+  return `${existingText}\n\n${mergedContext}`
+}
+
 async function resolveAutoSteerEnabled(
   payload: EnrichedDispatchPayload,
   sessionId: string
@@ -167,7 +182,7 @@ export function processBlockingResults(
 
   const mergedContext = mergeHookContexts(contexts, hookEventName)
   if (mergedContext) {
-    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
+    finalResponse.systemMessage = appendContext(finalResponse.systemMessage, mergedContext)
 
     const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
     existingHso.additionalContext = mergedContext
@@ -228,7 +243,7 @@ export function processAggregatedStopResults(
 
   const mergedContext = mergeHookContexts(contexts, hookEventName)
   if (mergedContext) {
-    finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
+    finalResponse.systemMessage = appendContext(finalResponse.systemMessage, mergedContext)
 
     const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
     existingHso.additionalContext = mergedContext
