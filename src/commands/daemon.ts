@@ -9,6 +9,7 @@ import {
 } from "../settings.ts"
 import { setGlobalTaskStateCache } from "../tasks/task-recovery.ts"
 import { TaskStateCache } from "../tasks/task-state-cache.ts"
+import { invalidateTurnsCache } from "../transcript-turns.ts"
 import { findAllProviderSessions, type Session } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { clearFileCache } from "../utils/file-cache.ts"
@@ -243,6 +244,7 @@ function setupWatchers(
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
     sessionDataCache.invalidateProject(cwd)
+    invalidateTurnsCache(cwd)
     watchers.unregisterByLabelSuffix(`:${cwd}`)
     caches.upstreamSyncRegistry.unregister(cwd)
     caches.prReviewMonitor.clearProject(cwd)
@@ -260,6 +262,7 @@ function setupWatchers(
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
     sessionDataCache.invalidateProject(cwd)
+    invalidateTurnsCache(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
     caches.prReviewMonitor.clearProject(cwd)
     for (const key of snapshots.keys()) {

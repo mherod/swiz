@@ -23,6 +23,7 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import {
   buildTaskCountsFromTasks,
@@ -742,6 +743,7 @@ function handleMetricsRoute(url: URL, ctx: DaemonWebServerContext): Response {
       hits: ctx.transcriptIndex.hits,
       misses: ctx.transcriptIndex.misses,
     },
+    turnsCache: getTurnsCacheStats(),
     eligibility: { size: ctx.eligibilityCache.size },
     cooldown: { size: ctx.cooldownRegistry.size },
     gitState: { size: ctx.gitStateCache.size },

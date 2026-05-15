@@ -1,5 +1,6 @@
 import { LRUCache } from "lru-cache"
 import type { DisplayTurn } from "../scripts/transcript/monitor-state.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
 import type { TimeRange, TranscriptArgs } from "./transcript-args.ts"
 import { type DebugEvent, loadDebugLog, parseDebugEvents } from "./transcript-debug.ts"
 import {
@@ -31,6 +32,19 @@ interface CachedTurns {
 }
 
 const turnsCache = new LRUCache<string, CachedTurns>({ max: 50, ttl: 15_000 })
+let _turnsCacheHits = 0
+let _turnsCacheMisses = 0
+
+export function getTurnsCacheStats(): { size: number; hits: number; misses: number } {
+  return { size: turnsCache.size, hits: _turnsCacheHits, misses: _turnsCacheMisses }
+}
+
+export function invalidateTurnsCache(cwd: string): void {
+  const projectKey = projectKeyFromCwd(cwd)
+  for (const key of turnsCache.keys()) {
+    if (key.includes(projectKey)) turnsCache.delete(key)
+  }
+}
 
 // ─── Turn types ─────────────────────────────────────────────────────────────
 
@@ -110,8 +124,12 @@ export async function loadTurns(session: Session, userOnly = false): Promise<Tur
   const mtimeMs = stat.mtimeMs ?? 0
   const cacheKey = `${session.path}:${userOnly ? "1" : "0"}`
   const cached = turnsCache.get(cacheKey)
-  if (cached?.mtimeMs === mtimeMs) return cached.turns
+  if (cached?.mtimeMs === mtimeMs) {
+    _turnsCacheHits++
+    return cached.turns
+  }
 
+  _turnsCacheMisses++
   const text = await file.text()
   const turns = collectTurns(parseTranscriptEntries(text, session.format), userOnly)
   turnsCache.set(cacheKey, { turns, mtimeMs })
