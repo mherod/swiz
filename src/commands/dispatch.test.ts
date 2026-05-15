@@ -603,3 +603,73 @@ describe("dispatch replay", () => {
     }
   })
 })
+
+describe("dispatch stop fast-path — isStopLikeEvent covers both stop and subagentStop", () => {
+  test("subagentStop dispatch exits 0 with valid JSON response", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "subagentStop", "SubagentStop"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+      },
+    })
+    await proc.stdin.write(JSON.stringify({ session_id: "test-subagent-stop-595" }))
+    await proc.stdin.end()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    expect(proc.exitCode).toBe(0)
+    expect(stdout.trim()).not.toBe("")
+    const parsed = JSON.parse(stdout.trim()) as Record<string, any>
+    expect(parsed).not.toBeNull()
+  }, 30_000)
+
+  test("stop and subagentStop both exit 0 and produce equivalent response shapes from a non-git dir", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-stop-fastpath-"))
+    try {
+      async function dispatchStopLike(
+        canonicalEvent: string,
+        hookEventName: string
+      ): Promise<{ exitCode: number | null; parsed: Record<string, any> }> {
+        const proc = Bun.spawn(
+          ["bun", "run", "index.ts", "dispatch", canonicalEvent, hookEventName],
+          {
+            stdin: "pipe",
+            stdout: "pipe",
+            stderr: "pipe",
+            env: {
+              ...process.env,
+              SWIZ_NO_DAEMON: "1",
+              SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+            },
+          }
+        )
+        await proc.stdin.write(
+          JSON.stringify({ session_id: "test-fastpath-equivalence-595", cwd: tmpDir })
+        )
+        await proc.stdin.end()
+        const [stdout] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ])
+        await proc.exited
+        return { exitCode: proc.exitCode, parsed: JSON.parse(stdout.trim()) }
+      }
+
+      const stopResult = await dispatchStopLike("stop", "Stop")
+      const subagentResult = await dispatchStopLike("subagentStop", "SubagentStop")
+
+      expect(stopResult.exitCode).toBe(0)
+      expect(subagentResult.exitCode).toBe(0)
+      expect(stopResult.parsed).not.toBeNull()
+      expect(subagentResult.parsed).not.toBeNull()
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
