@@ -1,3 +1,4 @@
+import { LRUCache } from "lru-cache"
 import type { DisplayTurn } from "../scripts/transcript/monitor-state.ts"
 import type { TimeRange, TranscriptArgs } from "./transcript-args.ts"
 import { type DebugEvent, loadDebugLog, parseDebugEvents } from "./transcript-debug.ts"
@@ -21,6 +22,15 @@ import {
   type TranscriptEntry,
 } from "./transcript-utils.ts"
 import { stripAnsi } from "./utils/transcript.ts"
+
+// ─── Turn cache ──────────────────────────────────────────────────────────────
+
+interface CachedTurns {
+  turns: Turn[]
+  mtimeMs: number
+}
+
+const turnsCache = new LRUCache<string, CachedTurns>({ max: 50, ttl: 15_000 })
 
 // ─── Turn types ─────────────────────────────────────────────────────────────
 
@@ -95,8 +105,17 @@ export async function loadTurns(session: Session, userOnly = false): Promise<Tur
   if (!(await file.exists())) {
     throw new Error(`Transcript not found: ${session.path}`)
   }
+
+  const stat = await file.stat()
+  const mtimeMs = stat.mtimeMs ?? 0
+  const cacheKey = `${session.path}:${userOnly ? "1" : "0"}`
+  const cached = turnsCache.get(cacheKey)
+  if (cached?.mtimeMs === mtimeMs) return cached.turns
+
   const text = await file.text()
-  return collectTurns(parseTranscriptEntries(text, session.format), userOnly)
+  const turns = collectTurns(parseTranscriptEntries(text, session.format), userOnly)
+  turnsCache.set(cacheKey, { turns, mtimeMs })
+  return turns
 }
 
 // ─── Utility ────────────────────────────────────────────────────────────────
