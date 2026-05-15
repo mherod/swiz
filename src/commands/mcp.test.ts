@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { evaluatePermissionPolicy, loadPermissionPolicy } from "./mcp.ts"
+import { appendReplyToSink, evaluatePermissionPolicy, loadPermissionPolicy } from "./mcp.ts"
 
 async function writeRawPolicy(cwd: string, content: string): Promise<string> {
   const policyPath = join(cwd, ".swiz", "permission-policy.json")
@@ -157,5 +157,43 @@ describe("loadPermissionPolicy", () => {
     expect(rules).toEqual([])
     expect(stderr).toContain(`permission-policy.json unavailable at ${policyPath}`)
     expect(stderr).toMatch(/EISDIR|is a directory|illegal operation/i)
+  })
+})
+
+describe("appendReplyToSink", () => {
+  it("writes a JSONL line to the replies log", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-mcp-reply-test-"))
+    await appendReplyToSink("/some/project", { content: "hello", kind: "note" }, home)
+    const logPath = join(home, ".swiz", "mcp-replies.jsonl")
+    const raw = await readFile(logPath, "utf8")
+    const line = JSON.parse(raw.trim())
+    expect(line.content).toBe("hello")
+    expect(line.kind).toBe("note")
+    expect(line.cwd).toBe("/some/project")
+    expect(typeof line.ts).toBe("number")
+  })
+
+  it("appends multiple writes in order", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-mcp-reply-order-"))
+    await appendReplyToSink("/proj", { content: "first", kind: "note" }, home)
+    await appendReplyToSink("/proj", { content: "second", kind: "note" }, home)
+    const logPath = join(home, ".swiz", "mcp-replies.jsonl")
+    const lines = (await readFile(logPath, "utf8")).trim().split("\n")
+    expect(lines).toHaveLength(2)
+    expect(JSON.parse(lines[0]!).content).toBe("first")
+    expect(JSON.parse(lines[1]!).content).toBe("second")
+  })
+
+  it("rejects when the log path is an existing directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-mcp-reply-fail-"))
+    // Occupy the log path with a directory so appendFile fails.
+    await mkdir(join(home, ".swiz", "mcp-replies.jsonl"), { recursive: true })
+    let threw = false
+    try {
+      await appendReplyToSink("/proj", { content: "x", kind: "note" }, home)
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(true)
   })
 })

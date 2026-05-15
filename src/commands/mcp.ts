@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
-import { mkdirSync, readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
-import { appendFile } from "node:fs/promises"
+import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node:fs"
+import { appendFile, mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "../home.ts"
@@ -504,13 +504,13 @@ function registerPermissionRelay(lowLevel: McpLowLevelServer, cwd: string): void
 
 let replyWriteChain = Promise.resolve()
 
-async function appendReplyToSink(
+export async function appendReplyToSink(
   cwd: string,
-  payload: { content: string; kind: string }
+  payload: { content: string; kind: string },
+  home = getHomeDirWithFallback("/tmp")
 ): Promise<void> {
-  const home = getHomeDirWithFallback("/tmp")
   const path = swizMcpRepliesLogPath(home)
-  mkdirSync(dirname(path), { recursive: true })
+  await mkdir(dirname(path), { recursive: true })
   const row = `${JSON.stringify({
     ts: Date.now(),
     project_key: projectKeyFromCwd(cwd),
