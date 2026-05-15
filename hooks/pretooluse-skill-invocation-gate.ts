@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 
 // PreToolUse hook: Block `git commit`, `git push`, and `gh issue edit` label
-// operations unless the corresponding skill has been invoked in the current
-// session — but only when that skill is installed on this machine.
+// operations unless the corresponding skill has been invoked recently in the
+// current session — but only when that skill is installed on this machine.
 //
 // Rules:
-//   git commit                                →  requires /commit skill to have been used this session
-//   git push                                  →  requires /push   skill to have been used this session
+//   git commit                                →  requires recent /commit skill
+//   git push                                  →  requires recent /push skill
 //   gh issue edit … --add-label triaged       →  requires /triage-issues skill
 //   gh issue edit … --remove-label backlog    →  requires /refine-issue skill
 //   gh issue edit … --add-label/--remove-label →  requires /refine-issue skill (any label change)
@@ -25,12 +25,14 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
-import { formatSkillReferenceForAgent, skillExists } from "../src/skill-utils.ts"
-import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
-  getSkillsUsedForCurrentSession,
-  getToolsUsedForCurrentSession,
-} from "../src/transcript-summary.ts"
+  formatCurrentSessionUsageWindow,
+  formatSkillReferenceForAgent,
+  getRecentlyInvokedSkillsForCurrentSession,
+  getRecentlyUsedToolsForCurrentSession,
+  skillExists,
+} from "../src/skill-utils.ts"
+import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
   GH_ISSUE_LABEL_CHANGE_RE,
@@ -47,7 +49,8 @@ import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
 function formatSessionSkillsForReason(skills: string[]): string {
-  return `Skills used this session: ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
+  const window = formatCurrentSessionUsageWindow()
+  return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
 const pretoolusSkillInvocationGate: SwizHook = {
@@ -100,7 +103,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const transcriptPath: string = (input.transcript_path as string) ?? ""
     if (!transcriptPath) return {}
 
-    const invokedSkills = await getSkillsUsedForCurrentSession(input)
+    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(input)
     const reason = formatSessionSkillsForReason(invokedSkills)
     const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
@@ -108,17 +111,15 @@ const pretoolusSkillInvocationGate: SwizHook = {
       // For commits, also require TaskList to have been called — ensures the
       // task state cache is synced before the commit workflow proceeds.
       if (requiredSkill === "commit") {
-        const toolNames = await getToolsUsedForCurrentSession(input)
+        const toolNames = await getRecentlyUsedToolsForCurrentSession(input)
         if (!toolNames.some((n) => isTaskListTool(n))) {
           return preToolUseDeny(
             "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
-              "Call TaskList to sync task state, then retry the commit."
+              `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow()}.`
           )
         }
       }
-      return preToolUseAllow(
-        `${skillReferenceForAgent} skill was invoked in this session.\n${reason}`
-      )
+      return preToolUseAllow(`${skillReferenceForAgent} skill was invoked recently.\n${reason}`)
     }
 
     // ── Block with actionable instructions ────────────────────────────────────────
@@ -130,7 +131,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
           formatActionPlan(
             [`Invoke the ${skillReferenceForAgent} skill before adding the triaged label.`],
             {
-              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
             }
           ) +
           `\nWhy this matters: the ${skillReferenceForAgent} skill runs the full triage workflow ` +
@@ -145,7 +146,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
           formatActionPlan(
             [`Invoke the ${skillReferenceForAgent} skill before modifying issue labels.`],
             {
-              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
             }
           ) +
           `\nWhy this matters: the ${skillReferenceForAgent} skill validates label changes against issue state. Modifying labels directly skips these safeguards.`
@@ -159,7 +160,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
           formatActionPlan(
             [`Invoke the ${skillReferenceForAgent} skill before running \`gh pr create\`.`],
             {
-              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
             }
           ) +
           `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete PR workflow (branch checks, AC verification, linked issues). Running \`gh pr create\` directly skips these safeguards.`
@@ -173,7 +174,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
           formatActionPlan(
             [`Invoke the ${skillReferenceForAgent} skill before dismissing a PR review.`],
             {
-              header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
             }
           ) +
           `\nWhy this matters: the ${skillReferenceForAgent} skill requires addressing every reviewer comment before dismissal. Dismissing a review directly skips this accountability.`
@@ -188,7 +189,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
         formatActionPlan(
           [`Invoke the ${skillReferenceForAgent} skill before running git ${verb}.`],
           {
-            header: `The ${skillReferenceForAgent} skill has not been invoked in this session:`,
+            header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
           }
         ) +
         `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete ` +

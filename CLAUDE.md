@@ -55,6 +55,15 @@ alwaysApply: false
 - **6-module structure**: types → context → validators → action-plan → evaluate → wrapper.
 - **Deduplication**: Export from core, import by orchestrator only. Delete re-export wrappers.
 - Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
+## Skill Requirement Gates
+- Skill/tool "used this session" requirements mean used recently: within the last 20 transcript turns and last 10 minutes. Use shared helpers in `src/transcript-summary.ts`/`src/skill-utils.ts` (`getRecentlyInvokedSkillsForCurrentSession`, `getRecentlyUsedToolsForCurrentSession`, `getRecentBashCommandsUsedForCurrentSession`, `formatCurrentSessionUsageWindow`). DON'T rescan transcripts or duplicate recency math in individual hooks.
+- `hooks/pretooluse-skill-invocation-gate.ts`: requires recent `/commit` before `git commit`, `/push` before `git push`, `/triage-issues` before adding `triaged`, `/refine-issue` before label changes, `/pr-open` before `gh pr create`, and `/pr-comments-address` before dismissing PR reviews. Branch deletion pushes are exempt.
+- Commit gating also requires a recent `TaskList` before `git commit` after `/commit`, so task state is fresh.
+- `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch (`git branch --show-current`), PR (`gh pr list --state open --head ...`), and required CI (`swiz ci-wait ...`) checks must be recent or the hook emits an advisory. Behind-remote, WIP/fixup/squash commits, secrets, and large files remain hard blocks.
+- `hooks/stop-required-skills.ts`: stop requires recent applicable stop skills in priority order: `/end-of-day` when unpushed commits or incomplete tasks exist, `/farm-out-issues` in git repos, `/continue-with-tasks`, then `/reflect-on-session-mistakes`.
+- `hooks/stop-incomplete-tasks.ts` and `hooks/stop-completion-auditor/task-reconciliation.ts` require recent `TaskList` when task state must be synced before stop. `hooks/posttooluse-mid-session-prompt.ts` only suppresses the prompt if `/mid-session-checkin` was recent.
+- When changing current-session usage semantics, update transcript-backed parsing and daemon `_currentSessionToolUsage` providers together; daemon state must retain event timestamps/turn indexes when recency matters.
+- Hook output is rephrased. Tests should assert stable decisions, categories, and required window text, not exact rephrased command strings unless the literal text is the behavior under test.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -65,6 +74,10 @@ alwaysApply: false
 - Hooks are TypeScript. Use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
 - Output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`, etc. — call `process.exit(0)`. **DON'T** write raw `console.log(JSON.stringify(...))`.
 - **Hook message tone**: User-facing hook output must sound human. State next action first. **DON'T** mention Swiz, hook mechanics, audit/sync/cache/drift/recent-context rationale, internal limits, raw counts, or projected thresholds unless needed for a choice.
+- **Behavior-level hook messaging**: Don't echo the exact detector pattern, regex match, or forbidden phrase that fired. Scold the behavior and direct the next action: do the work, use the canonical helper, inspect evidence, or record a concrete blocker. Preserve command examples only when they are the desired action.
+- **Stop hook aggregation output**: `src/dispatch/blockingStrategy.ts` owns the combined stop block. Aggregate stop output with named sections, one action-required footer, and clear separators. Strip duplicate `blockStopObj()` footers and repeated `stop-ship-checklist` preambles before concatenation. **DON'T** join raw stop reasons with bare `\n\n\n\n`; it collapses into mechanical blobs in compact UIs.
+- **Stop ship checklist plans**: In `hooks/stop-ship-checklist/action-plan.ts`, build workflow groups as top-level strings followed by substep arrays: `combinedPlan.push(label, step.planSteps)`. **DON'T** push `[label, step.planSteps]`; that renders every group as `a.` and makes the action plan unreadable.
+- **Quality check stop output**: `hooks/stop-quality-checks.ts` must summarize long lint/typecheck output through `summarizeCheckOutput()`. Preserve diagnostic headers like `src/file.ts:line:col`, `Found N errors`, and `Checked N files`, but trim verbose code frames. **DON'T** paste full Biome/ESLint frames into stop reasons.
 - **Task-governance hook messages**: Keep shared text in `src/tasks/task-governance-messages.ts`. Block shortcut task behavior without bypass recipes: no exact completion chains, projected count math, or raw state dumps. Give next steps: `TaskList`, task update/create, evidence, retry.
 - **TaskList hook copy**: Say run `TaskList` now and when to retry. **DON'T** explain stabilization, refresh, drift, or dependencies.
 - **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })`. DON'T use `Bun.spawn()` with manual timers.

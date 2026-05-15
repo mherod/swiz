@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { z } from "zod"
 import { getHomeDir } from "../../home.ts"
-import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
+import type { CurrentSessionToolUsage, CurrentSessionUsageEvent } from "../../transcript-summary.ts"
 import { appendJsonlEntry, readJsonlFileTail } from "../../utils/jsonl.ts"
 import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
@@ -227,6 +227,20 @@ function recoverSkillInvocation(detail: string): string | null {
   return skill || null
 }
 
+function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSessionUsageEvent[] {
+  const events: CurrentSessionUsageEvent[] = []
+  for (let index = 0; index < calls.length; index++) {
+    const call = calls[index]!
+    events.push({ kind: "tool", value: call.name, turnIndex: index, timestamp: call.timestamp })
+    if (call.name === "Skill") {
+      const skill = recoverSkillInvocation(call.detail)
+      if (skill)
+        events.push({ kind: "skill", value: skill, turnIndex: index, timestamp: call.timestamp })
+    }
+  }
+  return events
+}
+
 export function buildSessionToolUsageStateFromCapturedCalls(
   calls: CapturedToolCall[],
   lastSeen: number
@@ -241,6 +255,7 @@ export function buildSessionToolUsageStateFromCapturedCalls(
   return {
     toolNames: calls.map((call) => call.name),
     skillInvocations,
+    events: usageEventsFromCapturedCalls(calls),
     lastSeen,
   }
 }
@@ -254,6 +269,7 @@ export function seedSessionToolUsage(
   const entry: SessionToolUsageState = {
     toolNames: [...usage.toolNames],
     skillInvocations: [...usage.skillInvocations],
+    events: usage.events ? [...usage.events] : undefined,
     lastSeen: nowMs,
   }
   sessionToolUsage.set(sessionId, entry)
@@ -272,17 +288,23 @@ export function captureSessionToolUsage(
     ? {
         toolNames: existing.toolNames,
         skillInvocations: existing.skillInvocations,
+        events: existing.events ?? [],
         lastSeen: nowMs,
       }
     : {
         toolNames: [],
         skillInvocations: [],
+        events: [],
         lastSeen: nowMs,
       }
 
+  const turnIndex = entry.toolNames.length
+  const timestamp = new Date(nowMs).toISOString()
   entry.toolNames.push(toolName)
+  entry.events?.push({ kind: "tool", value: toolName, turnIndex, timestamp })
   if (toolName === "Skill" && typeof toolInput?.skill === "string" && toolInput.skill) {
     entry.skillInvocations.push(toolInput.skill)
+    entry.events?.push({ kind: "skill", value: toolInput.skill, turnIndex, timestamp })
   }
   sessionToolUsage.set(sessionId, entry)
   return entry

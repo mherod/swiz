@@ -102,6 +102,7 @@ async function createSkill(dir: string, name: string, heading: string): Promise<
 
 async function createTranscript(dir: string, skills: string[] = []): Promise<string> {
   const transcriptPath = join(dir, "transcript.jsonl")
+  const now = Date.now()
   const content =
     skills.length > 0
       ? skills.map((skill) => ({
@@ -119,8 +120,29 @@ async function createTranscript(dir: string, skills: string[] = []): Promise<str
   await writeFile(
     transcriptPath,
     `${JSON.stringify({
+      timestamp: new Date(now - 1000).toISOString(),
       type: "assistant",
       message: { content },
+    })}\n`
+  )
+  return transcriptPath
+}
+
+async function createOldTranscript(dir: string, skills: string[]): Promise<string> {
+  const transcriptPath = join(dir, "old-transcript.jsonl")
+  const old = Date.now() - 11 * 60 * 1000
+  await writeFile(
+    transcriptPath,
+    `${JSON.stringify({
+      timestamp: new Date(old).toISOString(),
+      type: "assistant",
+      message: {
+        content: skills.map((skill) => ({
+          type: "tool_use",
+          name: "Skill",
+          input: { skill },
+        })),
+      },
     })}\n`
   )
   return transcriptPath
@@ -183,6 +205,19 @@ describe("stop-required-skills", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
     expect(result.decision).toBeUndefined()
+  })
+
+  test("treats required skills older than ten minutes as missing", async () => {
+    const dir = await tmp.create()
+    await initGitRepo(dir)
+    for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+    const transcriptPath = await createOldTranscript(dir, ALL_REQUIRED_SKILLS)
+
+    const result = await runHook(dir, transcriptPath)
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain("last 20 turns and last 10 minutes")
   })
 
   async function runGitCmd(cwd: string, args: string[]): Promise<void> {

@@ -601,6 +601,7 @@ async function getCurrentSessionToolUsageFromDaemon(
     return {
       toolNames: [...cached.toolNames],
       skillInvocations: [...cached.skillInvocations],
+      events: cached.events ? [...cached.events] : undefined,
     }
   }
 
@@ -611,6 +612,7 @@ async function getCurrentSessionToolUsageFromDaemon(
   return {
     toolNames: [...seeded.toolNames],
     skillInvocations: [...seeded.skillInvocations],
+    events: seeded.events ? [...seeded.events] : undefined,
   }
 }
 

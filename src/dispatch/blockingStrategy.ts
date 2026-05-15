@@ -12,6 +12,12 @@ import {
   runStrategyPipeline,
 } from "./strategy-base.ts"
 
+const ACTION_REQUIRED_FOOTER =
+  "You must act on this now. Do not try to stop again without completing the required action."
+
+const STOP_SHIP_CHECKLIST_PREAMBLE =
+  "You cannot stop until everything below is resolved. Follow the single action plan in order."
+
 /** Resolved auto-steer context from an enriched payload. */
 interface StopAutoSteerContext {
   sessionId: string
@@ -38,6 +44,49 @@ function appendContext(existing: unknown, mergedContext: string): string {
   if (existingKey === mergedKey || existingKey.includes(mergedKey)) return existingText
   if (mergedKey.includes(existingKey)) return mergedContext
   return `${existingText}\n\n${mergedContext}`
+}
+
+function stripRepeatedStopFooter(reason: string): string {
+  let text = reason.trim()
+  while (text.endsWith(ACTION_REQUIRED_FOOTER)) {
+    text = text.slice(0, -ACTION_REQUIRED_FOOTER.length).trim()
+  }
+  return text
+}
+
+function trimRepeatedStopPreamble(reason: string): string {
+  const text = reason.trim()
+  if (!text.startsWith(STOP_SHIP_CHECKLIST_PREAMBLE)) return text
+  return text.slice(STOP_SHIP_CHECKLIST_PREAMBLE.length).trimStart()
+}
+
+function friendlyStopHookName(file: string): string {
+  const base = file.split(/[\\/]/).pop()?.replace(/\.ts$/, "") ?? file
+  return base.replace(/^stop-/, "").replace(/-/g, " ")
+}
+
+function formatAggregatedStopReason(blocks: Array<{ file: string; reason: string }>): string {
+  const seen = new Set<string>()
+  const sections: string[] = []
+
+  for (const block of blocks) {
+    const body = trimRepeatedStopPreamble(stripRepeatedStopFooter(block.reason))
+    const dedupeKey = normalizedContextText(body)
+    if (!body || seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    sections.push(`### ${friendlyStopHookName(block.file)}\n${body}`)
+  }
+
+  if (sections.length === 0) return ACTION_REQUIRED_FOOTER
+  if (sections.length === 1) return `${sections[0]}\n\n${ACTION_REQUIRED_FOOTER}`
+
+  return [
+    `Stop is blocked by ${sections.length} checks. Resolve them in the order shown.`,
+    "",
+    sections.join("\n\n---\n\n"),
+    "",
+    ACTION_REQUIRED_FOOTER,
+  ].join("\n")
 }
 
 async function resolveAutoSteerEnabled(
@@ -205,7 +254,7 @@ export function processAggregatedStopResults(
   finalResponse: HookOutput,
   hookEventName: string
 ): void {
-  const blockReasons: string[] = []
+  const blockReasons: Array<{ file: string; reason: string }> = []
   const contexts: string[] = []
 
   for (const { execution, parsed: resp } of results) {
@@ -218,7 +267,7 @@ export function processAggregatedStopResults(
       log(`   ✗ BLOCK from ${execution.file}`)
       execution.status = "block"
       const reason = (resp as { reason?: string }).reason
-      if (reason) blockReasons.push(reason)
+      if (reason) blockReasons.push({ file: execution.file, reason })
       const ctx = extractContext(resp)
       if (ctx) contexts.push(ctx)
       executions.push(execution)
@@ -236,9 +285,8 @@ export function processAggregatedStopResults(
 
   if (blockReasons.length > 0) {
     finalResponse.decision = "block"
-    const uniqueReasons = [...new Set(blockReasons)]
-    finalResponse.reason = uniqueReasons.join("\n\n\n\n")
-    log(`   result: ${blockReasons.length} block(s) aggregated (${uniqueReasons.length} unique)`)
+    finalResponse.reason = formatAggregatedStopReason(blockReasons)
+    log(`   result: ${blockReasons.length} block(s) aggregated`)
   }
 
   const mergedContext = mergeHookContexts(contexts, hookEventName)

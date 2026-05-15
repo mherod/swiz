@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { clearSkillCache, formatSkillReferenceForAgent } from "../src/skill-utils.ts"
 import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
+
+const HOOK = join(import.meta.dir, "pretooluse-skill-invocation-gate.ts")
 
 describe("pretooluse-skill-invocation-gate", () => {
   const agentEnvKeys = [
@@ -11,6 +16,7 @@ describe("pretooluse-skill-invocation-gate", () => {
     "GEMINI_PROJECT_DIR",
     "CODEX_MANAGED_BY_NPM",
     "CODEX_THREAD_ID",
+    "HOME",
   ] as const
   const originalEnv = new Map(agentEnvKeys.map((key) => [key, process.env[key]]))
 
@@ -32,7 +38,76 @@ describe("pretooluse-skill-invocation-gate", () => {
   afterEach(() => {
     // Restore env
     restoreAgentEnv()
+    clearSkillCache()
   })
+
+  function assistantLine(content: unknown[], timestampMs = Date.now() - 1000): string {
+    return JSON.stringify({
+      timestamp: new Date(timestampMs).toISOString(),
+      type: "assistant",
+      message: { content },
+    })
+  }
+
+  function summaryFromLines(sessionLines: string[]): Record<string, unknown> {
+    return {
+      toolNames: [],
+      toolCallCount: 0,
+      bashCommands: [],
+      skillInvocations: [],
+      hasGitPush: false,
+      sessionLines,
+      sessionDurationMs: 0,
+      successfulTestRuns: 0,
+      lastVerificationTime: null,
+      sessionScope: "trivial",
+    }
+  }
+
+  async function runPrOpenGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
+    const projectDir = await mkdtemp(join(tmpdir(), "skill-gate-project-"))
+    try {
+      const skillDir = join(projectDir, ".skills", "pr-open")
+      await mkdir(skillDir, { recursive: true })
+      await writeFile(join(skillDir, "SKILL.md"), "# pr-open\n")
+
+      const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
+        string,
+        string
+      >
+      for (const key of agentEnvKeys) {
+        if (key !== "CLAUDECODE" && key !== "HOME") delete env[key]
+      }
+
+      const proc = Bun.spawn(["bun", HOOK], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: projectDir,
+        env,
+      })
+      await proc.stdin.write(
+        JSON.stringify({
+          tool_name: "Bash",
+          tool_input: {
+            command: "gh pr create --title 'test' --body 'body'",
+          },
+          transcript_path: "fake-transcript.json",
+          _transcriptSummary: summaryFromLines(sessionLines),
+        })
+      )
+      await proc.stdin.end()
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      if (!stdout.trim()) throw new Error(`Hook emitted no output. stderr: ${stderr}`)
+      return JSON.parse(stdout) as Record<string, any>
+    } finally {
+      await rm(projectDir, { recursive: true, force: true })
+    }
+  }
 
   it("blocks git commit when running in Claude (supports Skill tool) and skill exists", async () => {
     // Simulate Claude agent
@@ -65,6 +140,48 @@ describe("pretooluse-skill-invocation-gate", () => {
       // This could happen if we are not in a git repo or skill is missing.
       console.log("Gate skipped - possibly skill missing or not in git repo")
     }
+  })
+
+  it("allows gh pr create only when pr-open was used within the recency window", async () => {
+    const result = await runPrOpenGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("blocks gh pr create when pr-open was used more than ten minutes ago", async () => {
+    const old = Date.now() - 11 * 60 * 1000
+
+    const result = await runPrOpenGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }], old),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecisionReason?: string } }).hookSpecificOutput
+        ?.permissionDecisionReason
+    ).toContain("last 20 turns and last 10 minutes")
+  })
+
+  it("blocks gh pr create when pr-open is outside the last twenty turns", async () => {
+    const result = await runPrOpenGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }]),
+      ...Array.from({ length: 20 }, (_, index) =>
+        assistantLine([{ type: "tool_use", name: "Read", input: { file_path: `file-${index}` } }])
+      ),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
   })
 
   it("skips gate when running in Cursor (does NOT support Skill tool)", async () => {

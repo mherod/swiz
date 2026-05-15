@@ -14,8 +14,8 @@ import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { StopHookInput } from "../src/schemas.ts"
 import { stopHookInputSchema } from "../src/schemas.ts"
+import { getRecentlyUsedToolsForCurrentSession } from "../src/skill-utils.ts"
 import { buildTaskListBeforeStopMessage } from "../src/tasks/task-governance-messages.ts"
-import { getToolsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
 import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
 
@@ -29,7 +29,7 @@ export async function evaluateStopIncompleteTasksHook(
   // This ensures the task-state-cache is synced via posttooluse-task-list-sync.
   const transcriptSource = (input as Record<string, any>) ?? parsed.transcript_path ?? ""
   if (transcriptSource) {
-    const toolNames = await getToolsUsedForCurrentSession(transcriptSource)
+    const toolNames = await getRecentlyUsedToolsForCurrentSession(transcriptSource)
     const hasTaskActivity = toolNames.some((n) => isTaskTool(n))
     const hasTaskList = toolNames.some((n) => isTaskListTool(n))
     if (hasTaskActivity && !hasTaskList) {

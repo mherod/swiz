@@ -197,7 +197,7 @@ function buildSafeReadOnlyAllowMessage(blockedPath: string): string {
   return [
     "Read-only inspection command approved for a hidden home-directory path.",
     "",
-    `  Attempted: ${blockedPath}`,
+    `Attempted path: ${blockedPath}.`,
     "",
     SAFE_READ_ONLY_INSPECTION_HINT,
   ].join("\n")
@@ -277,7 +277,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
             [
               "Shell commands referencing the memory directory are not permitted.",
               "",
-              `  Attempted: ${blockedPath}`,
+              `Attempted path: ${blockedPath}.`,
               "",
               "Use /update-memory to add session learnings to the project CLAUDE.md file instead.",
               "",
@@ -289,10 +289,9 @@ const pretoolUseProtectSandbox: SwizToolHook = {
           [
             "Hidden home-directory path references in shell commands are blocked under sandbox mode.",
             "",
-            `  Attempted: ${blockedPath}`,
+            `Attempted path: ${blockedPath}.`,
             "",
-            "Use shell commands only on paths inside the current dispatch cwd unless that cwd is",
-            "itself that hidden home path.",
+            "Use shell commands only on paths inside the current dispatch cwd unless that cwd is itself the hidden home path.",
             "",
             SAFE_READ_ONLY_INSPECTION_HINT,
           ].join("\n")

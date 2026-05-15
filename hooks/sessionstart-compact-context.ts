@@ -27,8 +27,10 @@ import {
 
 const TASK_PREVIEW_LIMIT = 3
 const TASK_SUBJECT_MAX_CHARS = 120
-const COMPACT_CONTEXT_MAX_CHARS = 2400
-const BUDGET_TRUNCATION_NOTE = "[Compaction context truncated to stay within budget.]"
+// Leave headroom because buildContextHookOutput applies hook-message rephrasing
+// after this local trim, and some replacements are a few characters longer.
+const COMPACT_CONTEXT_MAX_CHARS = 2320
+const BUDGET_TRUNCATION_NOTE = "[Compaction context truncated to fit budget.]"
 
 function summarizeSnapshot(snapshot: CompactSnapshot): CompactSnapshotSummary {
   return snapshot.summary ?? buildCompactSnapshotSummary(snapshot.tasks)

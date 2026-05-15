@@ -93,16 +93,19 @@ async function createTranscript(dir: string): Promise<string> {
   const path = join(dir, "transcript.jsonl")
   await writeFile(
     path,
-    `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "echo hi" } }] } })}\n`
+    `${JSON.stringify({ timestamp: new Date(Date.now() - 1000).toISOString(), type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "echo hi" } }] } })}\n`
   )
   return path
 }
 
-async function createTranscriptWithCheckin(dir: string): Promise<string> {
+async function createTranscriptWithCheckin(
+  dir: string,
+  timestampMs = Date.now() - 1000
+): Promise<string> {
   const path = join(dir, "transcript.jsonl")
   await writeFile(
     path,
-    `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "mid-session-checkin" } }] } })}\n`
+    `${JSON.stringify({ timestamp: new Date(timestampMs).toISOString(), type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", input: { skill: "mid-session-checkin" } }] } })}\n`
   )
   return path
 }
@@ -123,6 +126,23 @@ describe("posttooluse-mid-session-prompt", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
     expect(result.additionalContext).toBeUndefined()
+  })
+
+  test("old mid-session-checkin in transcript still suggests when signals fire", async () => {
+    const dir = await tmp.create()
+    await initGitRepo(dir)
+    await makeCommit(dir, "init.txt")
+    for (let i = 0; i < 12; i++) {
+      await writeFile(join(dir, `dirty-${i}.txt`), "x")
+    }
+    const transcriptPath = await createTranscriptWithCheckin(dir, Date.now() - 11 * 60 * 1000)
+
+    const result = await runHook(dir, transcriptPath, {
+      _testSessionStartMs: OLD_START,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.additionalContext).toBeDefined()
+    expect(result.additionalContext).toContain("mid-session-checkin")
   })
 
   test("(b) recent mid-session-checkin in transcript → no suggestion", async () => {

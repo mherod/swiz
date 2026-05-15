@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { processBlockingResults } from "./blockingStrategy.ts"
+import { processAggregatedStopResults, processBlockingResults } from "./blockingStrategy.ts"
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
 import { preparePreToolHints } from "./preToolUseStrategy.ts"
@@ -393,6 +393,48 @@ describe("preparePreToolHints", () => {
 })
 
 describe("BlockingStrategy stop aggregation", () => {
+  it("formats aggregated stop blocks with one footer and named sections", () => {
+    const footer =
+      "You must act on this now. Do not try to stop again without completing the required action."
+    const results = [
+      {
+        execution: makeHookExecution("hooks/stop-ship-checklist.ts"),
+        parsed: {
+          decision: "block",
+          reason: [
+            "You cannot stop until everything below is resolved. Follow the single action plan in order.",
+            "",
+            "### Repository",
+            "Commit and push work.",
+            "",
+            footer,
+          ].join("\n"),
+        },
+      },
+      {
+        execution: makeHookExecution("hooks/stop-quality-checks.ts"),
+        parsed: {
+          decision: "block",
+          reason: `Quality checks failed.\n\n${footer}`,
+        },
+      },
+    ]
+
+    const finalResponse: Record<string, any> = {}
+    const executions: HookExecution[] = []
+    processAggregatedStopResults(results, executions, finalResponse, "Stop")
+
+    const reason = finalResponse.reason as string
+    expect(finalResponse.decision).toBe("block")
+    expect(reason).toContain("Stop is blocked by 2 checks.")
+    expect(reason).toContain("### ship checklist")
+    expect(reason).toContain("### quality checks")
+    expect(reason).not.toContain(
+      "You cannot stop until everything below is resolved. Follow the single action plan in order.\n\n### Repository"
+    )
+    expect(reason.match(/You must act on this now/g)).toHaveLength(1)
+  })
+
   it("stop events must NOT abort on first block — they aggregate all responses", () => {
     // Stop events use a collection window (STOP_COLLECTION_TIMEOUT_MS) to let all
     // hooks race fairly. Slower hooks like stop-personal-repo-issues (GitHub API)

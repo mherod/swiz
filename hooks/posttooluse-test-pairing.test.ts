@@ -34,7 +34,8 @@ function expectMatched(result: SwizHookOutput, expectedPath: string): void {
   }
 
   expect(result.systemMessage).toContain(expectedPath)
-  expect(result.systemMessage).toContain("check if it needs updating")
+  expect(result.systemMessage).toContain("needs updating")
+  expect(result.systemMessage).toContain("reflect your changes")
 }
 
 describe("evaluatePosttooluseTestPairing", () => {

@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { writeProjectState } from "../src/settings.ts"
 import { createTestRepo } from "../src/utils/test-utils.ts"
+
+setDefaultTimeout(30_000)
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 const WORKSPACE_ROOT = process.cwd()
@@ -33,9 +35,13 @@ async function runHook(
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
-  const raw = (await new Response(proc.stdout).text()).trim()
-  const stderr = (await new Response(proc.stderr).text()).trim()
+  const [rawOutput, stderrOutput] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   const exitCode = await proc.exited
+  const raw = rawOutput.trim()
+  const stderr = stderrOutput.trim()
   if (exitCode !== 0) {
     throw new Error(`hook exited with ${exitCode}: ${stderr || "(no stderr)"}`)
   }

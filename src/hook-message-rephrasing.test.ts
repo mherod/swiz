@@ -123,6 +123,29 @@ describe("rephraseHookMessage", () => {
     ).toBe("Take on and allocate, remain or stay, permitted or authorized, plan of action.")
   })
 
+  test("does not rewrite inline command examples", () => {
+    expect(
+      rephraseHookMessage(
+        "Run `git branch --show-current` and `gh pr list --state open --head $(git branch --show-current)`.",
+        () => 0
+      )
+    ).toBe(
+      "Run `git branch --show-current` and `gh pr list --state open --head $(git branch --show-current)`."
+    )
+  })
+
+  test("does not rewrite fenced code examples", () => {
+    expect(rephraseHookMessage("Use:\n```bash\ngit branch --show-current\n```", () => 0)).toBe(
+      "Use:\n```bash\ngit branch --show-current\n```"
+    )
+  })
+
+  test("does not rewrite hyphenated internal labels", () => {
+    expect(rephraseHookMessage("Remain in active-task-buffer mode.", () => 0)).toBe(
+      "Stay in active-task-buffer mode."
+    )
+  })
+
   test("stabilizes default selection within a five-minute window", () => {
     const originalNow = Date.now
     Date.now = () => 1_710_000_000_000

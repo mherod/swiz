@@ -174,7 +174,8 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("pre-existing")
+      expect(result.reason).toContain("dismissing diagnostic ownership")
+      expect(result.reason).not.toContain("This warning is pre-existing")
     })
 
     test("'existed before' claim after test failures blocks", async () => {
@@ -185,7 +186,8 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("existed before")
+      expect(result.reason).toContain("Acceptable next actions")
+      expect(result.reason).not.toContain("existed before")
     })
 
     test("'unrelated to this refactor' claim blocks", async () => {
@@ -554,7 +556,8 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toMatch(/pre[- ]existing|not caused by/i)
+      expect(result.reason).toContain("dismissing diagnostic ownership")
+      expect(result.reason).not.toContain("not caused by")
     })
   })
 
@@ -569,7 +572,7 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("pre-existing")
+      expect(result.reason).toContain("dismissing diagnostic ownership")
     })
 
     test("'pre existing' (spaced) blocks after lint diagnostics", async () => {
@@ -580,7 +583,7 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("pre-existing")
+      expect(result.reason).toContain("dismissing diagnostic ownership")
     })
   })
 
@@ -598,7 +601,7 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("pre-existing")
+      expect(result.reason).toContain("dismissing diagnostic ownership")
     })
 
     test("file read output between dismissal and blocked tool does not clear", async () => {
@@ -657,7 +660,7 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("pre-existing")
+      expect(result.reason).toContain("dismissing diagnostic ownership")
     })
 
     test("dismissal in prior session cleared by fix in current session allows", async () => {

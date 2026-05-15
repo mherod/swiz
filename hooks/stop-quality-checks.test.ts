@@ -3,6 +3,7 @@ import {
   findScript,
   isQualityChecksEnabled,
   LINT_SCRIPTS,
+  summarizeCheckOutput,
   TYPECHECK_SCRIPTS,
 } from "./stop-quality-checks.ts"
 
@@ -120,6 +121,31 @@ describe("stop-quality-checks: findScript", () => {
     test("both arrays are non-empty", () => {
       expect(LINT_SCRIPTS.length).toBeGreaterThan(0)
       expect(TYPECHECK_SCRIPTS.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe("summarizeCheckOutput", () => {
+    test("trims verbose code frames to diagnostic headers", () => {
+      const verbose = [
+        "> swiz@ lint /repo",
+        "> biome check . && eslint .",
+        "Checked 771 files in 508ms. No fixes applied.",
+        "Found 3 errors.",
+        "src/skill-utils.ts:298:35 lint/suspicious/noExplicitAny",
+        "",
+        "  ! Unexpected any. Specify a different type.",
+        "    297 │ export async function getRecentlyInvokedSkillsForCurrentSession(",
+        "  > 298 │   source: string | Record<string, any>,",
+        ...Array.from({ length: 60 }, (_, index) => `frame line ${index}`),
+      ].join("\n")
+
+      const summary = summarizeCheckOutput(verbose)
+
+      expect(summary).toContain("Checked 771 files")
+      expect(summary).toContain("Found 3 errors")
+      expect(summary).toContain("src/skill-utils.ts:298:35")
+      expect(summary).toContain("Output trimmed")
+      expect(summary).not.toContain("frame line 59")
     })
   })
 })

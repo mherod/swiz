@@ -76,7 +76,8 @@ function detectTaskToolName(s: string): CompoundMatch | null {
     if (new RegExp(`\\b${tool}\\b`).test(s)) {
       return {
         matched: true,
-        intro: `Task subjects must describe the work, not the tool call. Remove "${tool}" and describe what you are actually doing. Examples:`,
+        intro:
+          "You are creating bookkeeping about the task tool instead of tracking the work. Name the real work to do now. Acceptable next actions:",
         suggestions: [
           "Fix authentication bug in login flow",
           "Add pagination to search results",
@@ -105,6 +106,26 @@ function detectComplianceGaming(s: string): CompoundMatch | null {
       "Fix authentication bug in login flow",
       "Add pagination to search results",
       "Refactor database connection pooling",
+    ],
+  }
+}
+
+const LEADING_DEFERRAL_RE = /^[\s•◼*-]*defer(?:red|ring)?(?:\b|#)/i
+const NEXT_SESSION_DEFERRAL_RE = /\bto\s+(?:the\s+)?next\s+session\b/i
+
+function detectDeferral(s: string): CompoundMatch | null {
+  if (!LEADING_DEFERRAL_RE.test(s) && !NEXT_SESSION_DEFERRAL_RE.test(s)) {
+    return null
+  }
+
+  return {
+    matched: true,
+    intro:
+      "You are avoiding the work, not tracking it. Do the work now, or record the concrete blocker with evidence. Acceptable next actions:",
+    suggestions: [
+      "Inspect the failing issue path",
+      "Implement the verified fix",
+      "Record the blocker and evidence",
     ],
   }
 }
@@ -235,6 +256,9 @@ export function detect(s: string): DetectionResult {
 
   const gaming = detectComplianceGaming(s)
   if (gaming) return gaming
+
+  const deferral = detectDeferral(s)
+  if (deferral) return deferral
 
   const issues = detectMultipleIssues(s, verb)
   if (issues) return issues

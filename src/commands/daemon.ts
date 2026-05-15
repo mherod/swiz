@@ -417,6 +417,7 @@ function mergeSessionToolUsageStates(
   return {
     toolNames: [...existing.toolNames, ...recovered.toolNames],
     skillInvocations: [...existing.skillInvocations, ...recovered.skillInvocations],
+    events: [...(existing.events ?? []), ...(recovered.events ?? [])],
     lastSeen: Math.max(existing.lastSeen, recovered.lastSeen),
   }
 }

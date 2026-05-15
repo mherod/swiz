@@ -157,9 +157,11 @@ for (const [match, replacements] of REPHRASE_RULES) {
 }
 
 const REPHRASE_PATTERN = new RegExp(
-  REPHRASE_RULES.map(([match]) => `(?<!\\w)${escapeRegExp(match)}(?!\\w)`).join("|"),
+  REPHRASE_RULES.map(([match]) => `(?<![\\w-])${escapeRegExp(match)}(?![\\w-])`).join("|"),
   "gi"
 )
+
+const CODE_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g
 
 function preserveCase(original: string, replacement: string): string {
   if (original === original.toUpperCase()) return replacement.toUpperCase()
@@ -221,9 +223,15 @@ function createWindowedRandomSource(text: string, nowMs = Date.now()): () => num
 
 export function rephraseHookMessage(text: string, randomSource?: () => number): string {
   const source = randomSource ?? createWindowedRandomSource(text)
-  return text.replace(REPHRASE_PATTERN, (match) => {
-    const replacements = REPHRASE_LOOKUP.get(match.toLowerCase())
-    if (!replacements) return match
-    return chooseReplacement(match, replacements, source)
-  })
+  return text
+    .split(CODE_SEGMENT_RE)
+    .map((segment) => {
+      if (segment.startsWith("`")) return segment
+      return segment.replace(REPHRASE_PATTERN, (match) => {
+        const replacements = REPHRASE_LOOKUP.get(match.toLowerCase())
+        if (!replacements) return match
+        return chooseReplacement(match, replacements, source)
+      })
+    })
+    .join("")
 }

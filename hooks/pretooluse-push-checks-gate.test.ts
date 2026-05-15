@@ -8,9 +8,26 @@ import { type AdvisoryHookResult, neutralAgentEnv } from "../src/utils/test-util
 
 /** Build a transcript JSONL string containing Bash tool_use entries. */
 function makeTranscript(...commands: string[]): string {
+  const now = Date.now()
   return commands
-    .map((cmd) =>
+    .map((cmd, index) =>
       JSON.stringify({
+        timestamp: new Date(now - (commands.length - index) * 1000).toISOString(),
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: "Bash", input: { command: cmd } }],
+        },
+      })
+    )
+    .join("\n")
+}
+
+function makeOldTranscript(...commands: string[]): string {
+  const old = Date.now() - 11 * 60 * 1000
+  return commands
+    .map((cmd, index) =>
+      JSON.stringify({
+        timestamp: new Date(old + index * 1000).toISOString(),
         type: "assistant",
         message: {
           content: [{ type: "tool_use", name: "Bash", input: { command: cmd } }],
@@ -163,7 +180,7 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
-      expect(result.reason).toContain("git branch --show-current")
+      expect(result.reason).toContain("Branch ")
     })
 
     test("'git branch -a' triggers advisory", async () => {
@@ -231,7 +248,7 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
-      expect(result.reason).toContain("git branch --show-current")
+      expect(result.reason).toContain("Branch ")
       expect(result.reason).toContain("gh pr list")
     })
 
@@ -243,6 +260,39 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
+    })
+  })
+
+  describe("advisory — stale checks", () => {
+    test("branch and PR checks older than ten minutes trigger advisory", async () => {
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: makeOldTranscript(
+          "git branch --show-current",
+          "gh pr list --state open --head main"
+        ),
+      })
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
+      expect(result.reason).toContain("last 20 turns and last 10 minutes")
+      expect(result.reason).toContain("Branch ")
+      expect(result.reason).toContain("gh pr list")
+    })
+
+    test("checks outside the last twenty turns trigger advisory", async () => {
+      const transcript = makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open --head main",
+        ...Array.from({ length: 20 }, (_, index) => `echo filler-${index}`)
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
+      expect(result.reason).toContain("Branch ")
+      expect(result.reason).toContain("gh pr list")
     })
   })
 
@@ -266,7 +316,7 @@ describe("pretooluse-push-checks-gate", () => {
         command: "git push origin main",
         transcriptContent: "",
       })
-      expect(result.reason).toContain("git branch --show-current")
+      expect(result.reason).toContain("Branch ")
       expect(result.reason).toContain("gh pr list --state open --head")
     })
   })
@@ -341,7 +391,7 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
-      expect(result.reason).toContain("git branch --show-current")
+      expect(result.reason).toContain("Branch ")
     })
   })
 })
@@ -575,7 +625,7 @@ describe("parametric: git branch --show-current variant regression matrix", () =
       expect(result.blocked).toBe(false) // never blocks — advisory only
       if (!satisfied) {
         expect(result.advisory).toBe(true)
-        expect(result.reason).toContain("git branch --show-current")
+        expect(result.reason).toContain("Branch ")
       }
     })
   }
@@ -952,6 +1002,6 @@ describe("behind-remote force-push bypass", () => {
     })
     expect(result.blocked).toBe(false)
     expect(result.advisory).toBe(true)
-    expect(result.reason).toContain("git branch --show-current")
+    expect(result.reason).toContain("Branch ")
   })
 })

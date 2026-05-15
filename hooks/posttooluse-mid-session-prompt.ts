@@ -10,8 +10,8 @@ import { ghJson } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
+import { getRecentlyInvokedSkillsForCurrentSession } from "../src/skill-utils.ts"
 import { midSessionPrBaselinePath } from "../src/temp-paths.ts"
-import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
 
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000
@@ -116,7 +116,7 @@ const posttoolusMidSessionPrompt: SwizHook = {
     const sessionStartMs = await getSessionStartMs(transcriptPath, sessionStartOverride)
     if (Date.now() - sessionStartMs < THREE_HOURS_MS) return {}
 
-    const skillsUsed = await getSkillsUsedForCurrentSession(input)
+    const skillsUsed = await getRecentlyInvokedSkillsForCurrentSession(input)
     if (skillsUsed.includes("mid-session-checkin")) return {}
 
     const safeSession = sanitizeSessionId(sessionId) ?? "unknown"

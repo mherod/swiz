@@ -9,9 +9,13 @@
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { formatSkillReferenceForAgent, skillExists } from "../src/skill-utils.ts"
+import {
+  formatCurrentSessionUsageWindow,
+  formatSkillReferenceForAgent,
+  getRecentlyInvokedSkillsForCurrentSession,
+  skillExists,
+} from "../src/skill-utils.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
-import { getSkillsUsedForCurrentSession } from "../src/transcript-summary.ts"
 import { blockStopObj, isGitRepo } from "../src/utils/hook-utils.ts"
 import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
@@ -32,7 +36,8 @@ interface RequiredStopSkillRule {
 }
 
 function formatSessionSkillsForReason(skills: string[]): string {
-  return `Skills used this session: ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
+  const window = formatCurrentSessionUsageWindow()
+  return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
 function buildMissingSkillReason(
@@ -121,9 +126,8 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     skill: "farm-out-issues",
     applies: ({ cwd }) => isGitRepo(cwd),
     blockedLine: (skillReference) =>
-      `BLOCKED: The ${skillReference} skill has not been invoked in this session.`,
-    actionHeader: (skillReference) =>
-      `The ${skillReference} skill has not been invoked in this session:`,
+      `BLOCKED: The ${skillReference} skill has not been invoked recently.`,
+    actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
     actionPlan: (skillReference) => [
       `Invoke the ${skillReference} skill to batch and distribute pending issues.`,
     ],
@@ -134,8 +138,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     skill: "continue-with-tasks",
     blockedLine: (skillReference) =>
       `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
-    actionHeader: (skillReference) =>
-      `The ${skillReference} skill has not been invoked in this session:`,
+    actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
     actionPlan: (skillReference) => [
       `Invoke the ${skillReference} skill to confirm the next task-carrying continuation path before ending the session.`,
     ],
@@ -146,8 +149,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     skill: "reflect-on-session-mistakes",
     blockedLine: (skillReference) =>
       `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
-    actionHeader: (skillReference) =>
-      `The ${skillReference} skill has not been invoked in this session:`,
+    actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
     actionPlan: (skillReference) => [
       `Invoke the ${skillReference} skill to identify patterns to avoid before ending the session.`,
     ],
@@ -172,7 +174,7 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       continue
     }
 
-    invokedSkills ??= await getSkillsUsedForCurrentSession(parsed)
+    invokedSkills ??= await getRecentlyInvokedSkillsForCurrentSession(parsed)
     if (process.env.DEBUG_REQUIRED_SKILLS)
       console.error(`Invoked skills: ${invokedSkills.join(", ")}`)
     if (invokedSkills.includes(rule.skill)) {

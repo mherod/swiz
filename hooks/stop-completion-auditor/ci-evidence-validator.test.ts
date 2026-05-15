@@ -25,6 +25,7 @@ function makeCtx(overrides: Partial<CompletionAuditContext> = {}): CompletionAud
     toolCallCount: 15,
     taskToolUsed: true,
     observedToolNames: [],
+    recentObservedToolNames: [],
     summary: null,
     ...overrides,
   }

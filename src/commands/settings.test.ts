@@ -921,6 +921,7 @@ describe("SETTINGS_REGISTRY", () => {
       "pushGate",
       "sandboxedEdits",
       "speak",
+      "suggestWebSearch",
       "autoSteer",
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",

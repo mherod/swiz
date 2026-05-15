@@ -251,22 +251,20 @@ async function getAllTranscriptLines(
 function buildBlockMessage(state: ScanState): string {
   const diagnosticSnippet = extractDiagnosticSnippet(state.lastDiagnosticOutput)
   return (
-    `BLOCKED: You claimed diagnostic issues are "pre-existing" or "unrelated" without proof.\n\n` +
-    `Your claim:\n` +
-    `  "${state.dismissalLine}"\n\n` +
-    `But the most recent diagnostic output still shows issues:\n` +
+    `BLOCKED: You are dismissing diagnostic ownership instead of resolving it.\n\n` +
+    `The most recent diagnostic output still shows issues:\n` +
     `${diagnosticSnippet ? `\`\`\`\n${diagnosticSnippet}\n\`\`\`\n\n` : ""}` +
-    `To proceed, you must do one of:\n` +
+    `Do the work now. Acceptable next actions:\n` +
     `  1. Fix the reported issues\n` +
     `  2. Run a scoped verification on only the changed files\n` +
     `  3. Provide transcript-visible baseline evidence (e.g. git diff, git log)\n` +
-    `     proving the exact diagnostic predates your changes\n\n` +
-    `Do not dismiss diagnostics without evidence. The linter/test output is the authority.`
+    `     for the exact diagnostic and changed file\n\n` +
+    `Do not rephrase the dismissal. Own the diagnostic evidence and move the work forward.`
   )
 }
 
 function resolveAllowReason(state: ScanState): string | null {
-  if (state.cleared) return "Pre-existing dismissal cleared via evidence"
+  if (state.cleared) return "Diagnostic ownership cleared via evidence"
   if (!state.dismissalText) {
     return "Continue in diagnostic-ownership mode: fix or prove diagnostic claims."
   }

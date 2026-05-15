@@ -34,7 +34,7 @@ export function buildUnifiedActionPlan(steps: WorkflowStep[]): {
           ? "CI on your branch"
           : "Issues and pull requests"
 
-    combinedPlan.push([label, step.planSteps])
+    combinedPlan.push(label, step.planSteps)
   }
 
   const plan = formatActionPlan(combinedPlan, {

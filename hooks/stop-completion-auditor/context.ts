@@ -67,6 +67,7 @@ export async function resolveCompletionAuditContext(
       toolCallCount: 0, // Will be set by caller
       taskToolUsed: false, // Will be set by caller
       observedToolNames: [], // Will be set by caller
+      recentObservedToolNames: [], // Will be set by caller
       summary,
     }
   } catch {

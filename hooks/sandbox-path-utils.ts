@@ -23,7 +23,7 @@ export const SAFE_READ_ONLY_INSPECTION_HINT = [
   "If you only need to inspect the target, use Read or a read-only shell command instead of Edit/Write.",
   "Safe examples: cat, head, tail, grep, rg, and sed -n.",
   "Do not append writes, tees, redirects, or command chaining when you only need a read.",
-].join("\n")
+].join(" ")
 
 function sanitizeShellCommand(command: string): string {
   return stripQuotedShellStrings(stripHeredocs(normalizeCommand(command).normalize("NFKC")))

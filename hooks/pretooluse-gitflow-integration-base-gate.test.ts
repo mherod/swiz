@@ -106,8 +106,9 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
     }
 
     const result = await evaluateGitFlowGate(input)
-    const resultStr = JSON.stringify(result)
-    expect(resultStr).toContain("allowed")
+    expect("hookSpecificOutput" in result).toBe(true)
+    if (!("hookSpecificOutput" in result)) return
+    expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
   })
 
   it("should ignore non-shell tools", async () => {

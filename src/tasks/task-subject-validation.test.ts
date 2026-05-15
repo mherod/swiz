@@ -28,6 +28,14 @@ describe("detect", () => {
   })
 
   describe("compliance-gaming rejection", () => {
+    test("rejects task tool names without echoing the tripped tool", () => {
+      const result = detect("TaskCreate for issue work")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("bookkeeping")
+      expect(result.intro).not.toContain("TaskCreate")
+    })
+
     test("rejects 'Ensure a task is in progress'", () => {
       const result = detect("Ensure a task is in progress")
       expect(result.matched).toBe(true)
@@ -63,6 +71,34 @@ describe("detect", () => {
 
     test("does not reject 'Ensure login flow handles errors'", () => {
       expect(detect("Ensure login flow handles errors").matched).toBe(false)
+    })
+  })
+
+  describe("deferral rejection", () => {
+    test("rejects leading Defer issue subjects", () => {
+      const result = detect("Defer #1727")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("avoiding the work")
+      expect(result.intro).not.toContain("subject")
+    })
+
+    test("rejects deferred task marker example", () => {
+      const result = detect("◼ Defer #1727 campaign PUT sba_user_ids wipe to next session")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("Do the work now")
+    })
+
+    test("rejects next-session destination phrase", () => {
+      const result = detect("Move campaign PUT sba_user_ids wipe to next session")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("concrete blocker with evidence")
+    })
+
+    test("does not reject technical deferred loading work", () => {
+      expect(detect("Implement deferred image loading").matched).toBe(false)
     })
   })
 

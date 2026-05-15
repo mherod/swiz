@@ -6,6 +6,12 @@ import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
+import {
+  type CurrentSessionUsageRecencyOptions,
+  formatCurrentSessionUsageWindow,
+  getRecentSkillsUsedForCurrentSession,
+  getRecentToolsUsedForCurrentSession,
+} from "./transcript-summary.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
 /** Resolve the current list of skill directories. */
@@ -284,6 +290,40 @@ export function formatSkillReferenceForAgent(skillName: string): string {
       return `\`$${skillName}\``
   }
   return `Skill(${skillName})`
+}
+
+export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions }
+
+type CurrentSessionUsageSource = Parameters<typeof getRecentSkillsUsedForCurrentSession>[0]
+
+export async function getRecentlyInvokedSkillsForCurrentSession(
+  source: CurrentSessionUsageSource,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return getRecentSkillsUsedForCurrentSession(source, options)
+}
+
+export async function getRecentlyUsedToolsForCurrentSession(
+  source: CurrentSessionUsageSource,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return getRecentToolsUsedForCurrentSession(source, options)
+}
+
+export async function wasSkillRecentlyInvokedInCurrentSession(
+  source: CurrentSessionUsageSource,
+  skillName: string,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<boolean> {
+  return (await getRecentlyInvokedSkillsForCurrentSession(source, options)).includes(skillName)
+}
+
+export async function wasToolRecentlyUsedInCurrentSession(
+  source: CurrentSessionUsageSource,
+  toolName: string,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<boolean> {
+  return (await getRecentlyUsedToolsForCurrentSession(source, options)).includes(toolName)
 }
 
 /**

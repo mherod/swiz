@@ -32,6 +32,24 @@ export function findScript(
 }
 
 const SCRIPT_TIMEOUT_MS = 45_000
+const MAX_FAILURE_SUMMARY_LINES = 40
+const DIAGNOSTIC_LINE_RE =
+  /^(?:[\w./-]+:\d+:\d+\s|Found \d+|Checked \d+|[×!] |\S*ELIFECYCLE|Command failed|TIMEOUT:)/
+
+export function summarizeCheckOutput(output: string): string {
+  const lines = output.trim().split(/\r?\n/).filter(Boolean)
+  if (lines.length <= MAX_FAILURE_SUMMARY_LINES) return output.trim()
+
+  const diagnosticLines = lines
+    .map((line) => line.trimEnd())
+    .filter((line) => DIAGNOSTIC_LINE_RE.test(line.trim()))
+    .slice(0, MAX_FAILURE_SUMMARY_LINES)
+
+  const kept =
+    diagnosticLines.length > 0 ? diagnosticLines : lines.slice(0, MAX_FAILURE_SUMMARY_LINES)
+  const omitted = Math.max(0, lines.length - kept.length)
+  return `${kept.join("\n")}\n\n(Output trimmed: ${omitted} more line(s). Run the command for full details.)`
+}
 
 async function runScript(
   pm: string,
@@ -170,7 +188,9 @@ async function collectFailures(
   const failures: string[] = []
   for (let i = 0; i < results.length; i++) {
     if (!results[i]!.passed) {
-      failures.push(`\`${pm} run ${scriptNames[i]}\` failed:\n${results[i]!.output}`)
+      failures.push(
+        `\`${pm} run ${scriptNames[i]}\` failed:\n${summarizeCheckOutput(results[i]!.output)}`
+      )
     }
   }
   return failures

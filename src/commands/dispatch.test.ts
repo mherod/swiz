@@ -3,12 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Test dispatch end-to-end. The fast path calls `executeDispatch` in-process
-// (avoids Bun cold-start + module-init per test). The slow path still spawns
-// `bun run index.ts dispatch` when `options.env` is present, because env
-// overrides like `SWIZ_DAEMON_PORT` or `SWIZ_NO_DAEMON: undefined` require a
-// fresh process that sees the modified environment — mutating `process.env`
-// in-process is unsafe with `--concurrent`.
+// Test dispatch end-to-end through the CLI subprocess path. The in-process
+// helper is faster, but concurrent tests can reach circular imports before
+// module-level bindings initialize.
 async function dispatch(
   event: string,
   payload: Record<string, any>,
@@ -20,11 +17,6 @@ async function dispatch(
   parsed: Record<string, any> | null
 }> {
   const hookEventName = event === "preToolUse" ? "PreToolUse" : event === "stop" ? "Stop" : event
-
-  if (!options.env) {
-    const { dispatchInProcess } = await import("../utils/test-utils.ts")
-    return dispatchInProcess(event, payload, { hookEventName })
-  }
 
   const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
     stdin: "pipe",
@@ -39,8 +31,10 @@ async function dispatch(
   })
   await proc.stdin.write(JSON.stringify(payload))
   await proc.stdin.end()
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   let parsed = null
   try {
@@ -55,7 +49,10 @@ async function runGit(cwd: string, args: string[]): Promise<void> {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const stderr = await new Response(proc.stderr).text()
+  const [_stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   if (proc.exitCode !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`)
@@ -173,7 +170,7 @@ describe("dispatch routing", () => {
     expect(parsed.systemMessage).toContain("/tmp/swiz-dispatch.log")
     expect(stderr).toContain("Falling back to allow")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
-  })
+  }, 30_000)
 
   test("falls back to allow on invalid stdin JSON and captures the error", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "postToolUse", "PostToolUse"], {

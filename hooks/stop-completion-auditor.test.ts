@@ -157,6 +157,19 @@ const SESSION_ID = "test-auditor-session-abc123"
 
 const tmp = useTempDir()
 
+function toolLine(
+  toolName: string,
+  id: string,
+  input: Record<string, unknown> = {},
+  timestampMs = Date.now() - 1000
+): string {
+  return JSON.stringify({
+    timestamp: new Date(timestampMs).toISOString(),
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: toolName, id, input }] },
+  })
+}
+
 /** Set up an isolated HOME with a tasks dir and a transcript above threshold. */
 async function createFixture(): Promise<{
   home: string
@@ -178,12 +191,7 @@ async function createFixtureWithTools(toolNames: string[]): Promise<{
 
   const lines: string[] = []
   for (const [i, toolName] of toolNames.entries()) {
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        message: { content: [{ type: "tool_use", name: toolName, id: `t${i}`, input: {} }] },
-      })
-    )
+    lines.push(toolLine(toolName, `t${i}`))
   }
   const transcriptPath = join(home, "transcript.jsonl")
   await writeFile(transcriptPath, `${lines.join("\n")}\n`)
@@ -344,6 +352,28 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     })
     expect(result.blocked).toBe(false)
   })
+
+  it("blocks when TaskList exists but is outside the recent usage window", async () => {
+    const old = Date.now() - 11 * 60 * 1000
+    const { home, tasksDir, transcriptPath } = await createFixtureWithTools(["TaskList"])
+    await writeFile(transcriptPath, `${toolLine("TaskList", "old-task-list", {}, old)}\n`)
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Completed task",
+        status: "completed",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    const result = await runAuditor(home, transcriptPath)
+
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("TaskList was not called recently")
+    expect(result.reason).toContain("last 20 turns and last 10 minutes")
+  })
 })
 
 // ─── CI verification enforcement ──────────────────────────────────────────────
@@ -362,40 +392,12 @@ async function createFixtureWithPush(): Promise<{
   const lines: string[] = []
   // 12 regular tool calls to exceed threshold
   for (let i = 0; i < 12; i++) {
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Read", id: `t${i}`, input: {} }] },
-      })
-    )
+    lines.push(toolLine("Read", `t${i}`))
   }
   // A Bash tool call with `git push`
-  lines.push(
-    JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          {
-            type: "tool_use",
-            name: "Bash",
-            id: "push1",
-            input: { command: "git push origin main" },
-          },
-        ],
-      },
-    })
-  )
+  lines.push(toolLine("Bash", "push1", { command: "git push origin main" }))
   // TaskCreate + TaskList to satisfy task detection and TaskList gate
-  lines.push(
-    JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
-    }),
-    JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "tool_use", name: "TaskList", id: "tl1", input: {} }] },
-    })
-  )
+  lines.push(toolLine("TaskCreate", "tc1"), toolLine("TaskList", "tl1"))
 
   const transcriptPath = join(home, "transcript.jsonl")
   await writeFile(transcriptPath, `${lines.join("\n")}\n`)
@@ -523,38 +525,10 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     // Build transcript lines with a git push for the current session
     const lines: string[] = []
     for (let i = 0; i < 12; i++) {
-      lines.push(
-        JSON.stringify({
-          type: "assistant",
-          message: { content: [{ type: "tool_use", name: "Read", id: `t${i}`, input: {} }] },
-        })
-      )
+      lines.push(toolLine("Read", `t${i}`))
     }
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          content: [
-            {
-              type: "tool_use",
-              name: "Bash",
-              id: "push1",
-              input: { command: "git push origin main" },
-            },
-          ],
-        },
-      })
-    )
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
-      }),
-      JSON.stringify({
-        type: "assistant",
-        message: { content: [{ type: "tool_use", name: "TaskList", id: "tl1", input: {} }] },
-      })
-    )
+    lines.push(toolLine("Bash", "push1", { command: "git push origin main" }))
+    lines.push(toolLine("TaskCreate", "tc1"), toolLine("TaskList", "tl1"))
 
     // Write both transcript files in project dir
     const currentTranscript = join(projectDir, `${CURRENT_SESSION}.jsonl`)

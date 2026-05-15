@@ -40,6 +40,7 @@ export async function evaluateStopCompletionAuditor(input: StopHookInput): Promi
     toolCallCount: stats.total,
     taskToolUsed: stats.taskToolUsed,
     observedToolNames: stats.toolNames,
+    recentObservedToolNames: stats.recentToolNames,
   }
 
   // Check: Require TaskList sync before stop if tasks exist

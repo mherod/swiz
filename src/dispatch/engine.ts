@@ -133,10 +133,18 @@ type HookDef = HookGroup["hooks"][number]
 /** Per-dispatch log buffer. When a dispatch is active, lines accumulate here
  *  and are flushed as a single appendFile at the end. Falls back to per-line
  *  writes when called outside a dispatch context (e.g. direct test calls). */
-const _logBufferStorage = new AsyncLocalStorage<string[]>()
+type GlobalWithLogBufferStorage = typeof globalThis & {
+  __swizDispatchLogBufferStorage?: AsyncLocalStorage<string[]>
+}
+
+function getLogBufferStorage(): AsyncLocalStorage<string[]> {
+  const globalStorage = globalThis as GlobalWithLogBufferStorage
+  globalStorage.__swizDispatchLogBufferStorage ??= new AsyncLocalStorage<string[]>()
+  return globalStorage.__swizDispatchLogBufferStorage
+}
 
 export function log(msg: string): void {
-  const buffer = _logBufferStorage.getStore()
+  const buffer = getLogBufferStorage().getStore()
   if (buffer) {
     buffer.push(`${msg}\n`)
   } else {
@@ -153,7 +161,7 @@ export function log(msg: string): void {
  */
 export async function withLogBuffer<T>(fn: () => Promise<T>): Promise<T> {
   const buffer: string[] = []
-  return _logBufferStorage.run(buffer, async () => {
+  return getLogBufferStorage().run(buffer, async () => {
     try {
       return await fn()
     } finally {

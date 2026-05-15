@@ -47,6 +47,24 @@ export interface TranscriptSummary {
   sessionScope: SessionScope
 }
 
+export const CURRENT_SESSION_USAGE_MAX_TURNS = 20
+export const CURRENT_SESSION_USAGE_MAX_AGE_MS = 10 * 60 * 1000
+
+export interface CurrentSessionUsageRecencyOptions {
+  maxTurns?: number
+  maxAgeMs?: number
+  nowMs?: number
+}
+
+export type CurrentSessionUsageEventKind = "tool" | "skill" | "bash-command"
+
+export interface CurrentSessionUsageEvent {
+  kind: CurrentSessionUsageEventKind
+  value: string
+  turnIndex: number
+  timestamp: string | null
+}
+
 /**
  * Lightweight current-session usage data that can be injected by dispatch
  * without requiring a full transcript summary.
@@ -54,6 +72,12 @@ export interface TranscriptSummary {
 export interface CurrentSessionToolUsage {
   toolNames: string[]
   skillInvocations: string[]
+  events?: CurrentSessionUsageEvent[]
+}
+
+export interface RecentCurrentSessionUsage extends CurrentSessionToolUsage {
+  bashCommands: string[]
+  events: CurrentSessionUsageEvent[]
 }
 
 export interface CurrentSessionTaskToolStats {
@@ -221,6 +245,32 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   }
 }
 
+function collectToolUsageEventsFromBlock(
+  block: ToolBlock,
+  turnIndex: number,
+  timestamp: string | null
+): CurrentSessionUsageEvent[] {
+  if (block?.type !== "tool_use") return []
+  const name = extractToolName(block)
+  if (!name) return []
+
+  const events: CurrentSessionUsageEvent[] = [{ kind: "tool", value: name, turnIndex, timestamp }]
+  const command = extractShellCommand(block, name)
+  if (command) {
+    events.push({
+      kind: "bash-command",
+      value: normalizeCommand(command),
+      turnIndex,
+      timestamp,
+    })
+  }
+  if (name === "Skill") {
+    const skill = block?.input?.skill ?? ""
+    if (skill) events.push({ kind: "skill", value: skill, turnIndex, timestamp })
+  }
+  return events
+}
+
 /** Match `<command-name>skill-name</command-name>` tags in user messages (skill expansion). */
 const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
 
@@ -270,6 +320,103 @@ export function collectSessionToolUsage(
   return acc
 }
 
+export function collectCurrentSessionUsageEvents(
+  sessionLines: string[]
+): CurrentSessionUsageEvent[] {
+  const events: CurrentSessionUsageEvent[] = []
+  for (let turnIndex = 0; turnIndex < sessionLines.length; turnIndex++) {
+    const line = sessionLines[turnIndex] ?? ""
+    if (!line.trim()) continue
+    const timestamp = extractTimestamp(line)
+    for (const block of parseAssistantToolBlocks(line)) {
+      events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
+    }
+    for (const skill of extractUserSkillExpansions(line)) {
+      events.push({ kind: "skill", value: skill, turnIndex, timestamp })
+    }
+  }
+  return events
+}
+
+function resolveUsageRecencyOptions(
+  options: CurrentSessionUsageRecencyOptions = {}
+): Required<CurrentSessionUsageRecencyOptions> {
+  return {
+    maxTurns: options.maxTurns ?? CURRENT_SESSION_USAGE_MAX_TURNS,
+    maxAgeMs: options.maxAgeMs ?? CURRENT_SESSION_USAGE_MAX_AGE_MS,
+    nowMs: options.nowMs ?? Date.now(),
+  }
+}
+
+function isTimestampWithinWindow(
+  timestamp: string | null,
+  nowMs: number,
+  maxAgeMs: number
+): boolean {
+  if (maxAgeMs < 0) return true
+  if (!timestamp) return false
+  const eventMs = Date.parse(timestamp)
+  if (!Number.isFinite(eventMs)) return false
+  return nowMs - eventMs <= maxAgeMs
+}
+
+export function filterRecentCurrentSessionUsageEvents(
+  sessionLines: string[],
+  options: CurrentSessionUsageRecencyOptions = {}
+): CurrentSessionUsageEvent[] {
+  const events = collectCurrentSessionUsageEvents(sessionLines)
+  if (events.length === 0) return []
+
+  const lastTurnIndex = Math.max(0, sessionLines.length - 1)
+  return filterRecentUsageEvents(events, lastTurnIndex, options)
+}
+
+function filterRecentUsageEvents(
+  events: CurrentSessionUsageEvent[],
+  lastTurnIndex: number,
+  options: CurrentSessionUsageRecencyOptions = {}
+): CurrentSessionUsageEvent[] {
+  const { maxTurns, maxAgeMs, nowMs } = resolveUsageRecencyOptions(options)
+  const firstAllowedTurnIndex = Math.max(0, lastTurnIndex - maxTurns + 1)
+  return events.filter(
+    (event) =>
+      event.turnIndex >= firstAllowedTurnIndex &&
+      isTimestampWithinWindow(event.timestamp, nowMs, maxAgeMs)
+  )
+}
+
+function usageFromEvents(events: CurrentSessionUsageEvent[]): RecentCurrentSessionUsage {
+  return {
+    toolNames: events.filter((event) => event.kind === "tool").map((event) => event.value),
+    skillInvocations: events.filter((event) => event.kind === "skill").map((event) => event.value),
+    bashCommands: events
+      .filter((event) => event.kind === "bash-command")
+      .map((event) => event.value),
+    events,
+  }
+}
+
+async function readRecentSessionUsage(
+  transcriptPath: string,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<RecentCurrentSessionUsage> {
+  return (await tryReadRecentSessionUsage(transcriptPath, options)) ?? usageFromEvents([])
+}
+
+async function tryReadRecentSessionUsage(
+  transcriptPath: string,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<RecentCurrentSessionUsage | null> {
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return usageFromEvents(
+      filterRecentCurrentSessionUsageEvents(extractSessionLines(text), options)
+    )
+  } catch {
+    return null
+  }
+}
+
 async function readSessionToolUsage(transcriptPath: string): Promise<SummaryAccumulator> {
   try {
     const text = await Bun.file(transcriptPath).text()
@@ -284,6 +431,17 @@ function transcriptPathFromUsageSource(source: string | Record<string, any>): st
   return typeof source.transcript_path === "string" ? source.transcript_path : ""
 }
 
+function isCurrentSessionUsageEvent(value: unknown): value is CurrentSessionUsageEvent {
+  if (!value || typeof value !== "object") return false
+  const event = value as Record<string, unknown>
+  return (
+    (event.kind === "tool" || event.kind === "skill" || event.kind === "bash-command") &&
+    typeof event.value === "string" &&
+    typeof event.turnIndex === "number" &&
+    (typeof event.timestamp === "string" || event.timestamp === null)
+  )
+}
+
 export function getCurrentSessionToolUsage(
   input: Record<string, any>
 ): CurrentSessionToolUsage | null {
@@ -296,6 +454,9 @@ export function getCurrentSessionToolUsage(
         skillInvocations: candidate.skillInvocations.filter(
           (v): v is string => typeof v === "string"
         ),
+        events: Array.isArray(candidate.events)
+          ? candidate.events.filter(isCurrentSessionUsageEvent)
+          : undefined,
       }
     }
   }
@@ -305,6 +466,7 @@ export function getCurrentSessionToolUsage(
     ? {
         toolNames: summary.toolNames,
         skillInvocations: summary.skillInvocations,
+        events: collectCurrentSessionUsageEvents(summary.sessionLines),
       }
     : null
 }
@@ -347,6 +509,38 @@ export async function getToolsUsedForCurrentSession(
   return transcriptPath ? (await readSessionToolUsage(transcriptPath)).toolNames : []
 }
 
+export async function getRecentCurrentSessionUsage(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<RecentCurrentSessionUsage> {
+  if (typeof source !== "string") {
+    const summary = getTranscriptSummary(source)
+    if (summary) {
+      return usageFromEvents(filterRecentCurrentSessionUsageEvents(summary.sessionLines, options))
+    }
+    const transcriptPath = transcriptPathFromUsageSource(source)
+    if (transcriptPath) {
+      const transcriptUsage = await tryReadRecentSessionUsage(transcriptPath, options)
+      if (transcriptUsage) return transcriptUsage
+    }
+    const usage = getCurrentSessionToolUsage(source)
+    if (usage?.events) {
+      const lastTurnIndex =
+        usage.events.length > 0 ? Math.max(...usage.events.map((event) => event.turnIndex)) : 0
+      return usageFromEvents(filterRecentUsageEvents(usage.events, lastTurnIndex, options))
+    }
+  }
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  return transcriptPath ? readRecentSessionUsage(transcriptPath, options) : usageFromEvents([])
+}
+
+export async function getRecentToolsUsedForCurrentSession(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return (await getRecentCurrentSessionUsage(source, options)).toolNames
+}
+
 /**
  * Read the current session transcript and return every skill invoked via the Skill tool.
  * Only lines after the last compaction boundary are considered.
@@ -360,6 +554,13 @@ export async function getSkillsUsedForCurrentSession(
   }
   const transcriptPath = transcriptPathFromUsageSource(source)
   return transcriptPath ? (await readSessionToolUsage(transcriptPath)).skillInvocations : []
+}
+
+export async function getRecentSkillsUsedForCurrentSession(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return (await getRecentCurrentSessionUsage(source, options)).skillInvocations
 }
 
 export async function getCurrentSessionTaskToolStats(
@@ -376,6 +577,20 @@ export async function getBashCommandsUsedForCurrentSession(
   transcriptPath: string
 ): Promise<string[]> {
   return (await readSessionToolUsage(transcriptPath)).bashCommands
+}
+
+export async function getRecentBashCommandsUsedForCurrentSession(
+  source: string | Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<string[]> {
+  return (await getRecentCurrentSessionUsage(source, options)).bashCommands
+}
+
+export function formatCurrentSessionUsageWindow(
+  options: CurrentSessionUsageRecencyOptions = {}
+): string {
+  const { maxTurns, maxAgeMs } = resolveUsageRecencyOptions(options)
+  return `last ${maxTurns} turns and last ${Math.floor(maxAgeMs / 60000)} minutes`
 }
 
 export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {

@@ -19,7 +19,7 @@ import {
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
 import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
-import type { CapturedToolCall } from "./daemon/utils.ts"
+import type { CapturedToolCall, SessionToolUsageState } from "./daemon/utils.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import { hydratePersistedSessionToolState } from "./daemon.ts"
 
@@ -337,10 +337,7 @@ describe("hydratePersistedSessionToolState", () => {
     const state = {
       sessionActivity: new Map<string, { lastSeen: number; dispatches: number }>(),
       sessionToolCalls: new Map<string, CapturedToolCall[]>(),
-      sessionToolUsage: new Map<
-        string,
-        { toolNames: string[]; skillInvocations: string[]; lastSeen: number }
-      >(),
+      sessionToolUsage: new Map<string, SessionToolUsageState>(),
     }
 
     const sessions: Session[] = [
@@ -367,6 +364,26 @@ describe("hydratePersistedSessionToolState", () => {
     expect(state.sessionToolUsage.get("session-1")).toEqual({
       toolNames: ["Read", "Skill"],
       skillInvocations: ["commit"],
+      events: [
+        {
+          kind: "tool",
+          value: "Read",
+          turnIndex: 0,
+          timestamp: "2026-04-03T10:00:00.000Z",
+        },
+        {
+          kind: "tool",
+          value: "Skill",
+          turnIndex: 1,
+          timestamp: "2026-04-03T10:01:00.000Z",
+        },
+        {
+          kind: "skill",
+          value: "commit",
+          turnIndex: 1,
+          timestamp: "2026-04-03T10:01:00.000Z",
+        },
+      ],
       lastSeen: Date.parse("2026-04-03T10:01:00.000Z"),
     })
     expect(state.sessionActivity.get("session-1")).toEqual({
@@ -386,10 +403,17 @@ describe("hydratePersistedSessionToolState", () => {
           [{ name: "Read", detail: "/tmp/file.ts", timestamp: "2026-04-03T10:00:00.000Z" }],
         ],
       ]),
-      sessionToolUsage: new Map<
-        string,
-        { toolNames: string[]; skillInvocations: string[]; lastSeen: number }
-      >([["session-1", { toolNames: ["Read"], skillInvocations: [], lastSeen: 10 }]]),
+      sessionToolUsage: new Map<string, SessionToolUsageState>([
+        [
+          "session-1",
+          {
+            toolNames: ["Read"],
+            skillInvocations: [],
+            events: [{ kind: "tool", value: "Read", turnIndex: 0, timestamp: null }],
+            lastSeen: 10,
+          },
+        ],
+      ]),
     }
 
     const count = await hydratePersistedSessionToolState("/repo", state, {
@@ -416,6 +440,21 @@ describe("hydratePersistedSessionToolState", () => {
     expect(state.sessionToolUsage.get("session-1")).toEqual({
       toolNames: ["Read", "Read", "Bash"],
       skillInvocations: [],
+      events: [
+        { kind: "tool", value: "Read", turnIndex: 0, timestamp: null },
+        {
+          kind: "tool",
+          value: "Read",
+          turnIndex: 0,
+          timestamp: "2026-04-03T10:00:00.000Z",
+        },
+        {
+          kind: "tool",
+          value: "Bash",
+          turnIndex: 1,
+          timestamp: "2026-04-03T10:02:00.000Z",
+        },
+      ],
       lastSeen: Date.parse("2026-04-03T10:02:00.000Z"),
     })
     expect(state.sessionActivity.get("session-1")).toEqual({

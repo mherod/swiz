@@ -16,6 +16,9 @@ import {
   formatTurnsAsContext,
   getCurrentSessionTaskToolStats,
   getCurrentSessionToolUsage,
+  getRecentBashCommandsUsedForCurrentSession,
+  getRecentSkillsUsedForCurrentSession,
+  getRecentToolsUsedForCurrentSession,
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
   getUnsupportedTranscriptFormatMessage,
@@ -265,6 +268,114 @@ describe("transcript-utils.ts", () => {
       expect(getCurrentSessionToolUsage(payload)?.toolNames).toEqual(["TaskCreate", "Read", "Edit"])
       expect(await getToolsUsedForCurrentSession(payload)).toEqual(["TaskCreate", "Read", "Edit"])
       expect(await getSkillsUsedForCurrentSession(payload)).toEqual(["commit"])
+    })
+
+    it("recent usage prefers transcript_path over injected daemon usage events", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("recent-prefers-transcript.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Skill", input: { skill: "transcript-skill" } }],
+          },
+        }),
+      ])
+      const payload = {
+        transcript_path: transcriptPath,
+        _currentSessionToolUsage: {
+          toolNames: ["Skill"],
+          skillInvocations: ["cached-skill"],
+          events: [
+            {
+              kind: "skill",
+              value: "cached-skill",
+              turnIndex: 0,
+              timestamp: new Date(now - 500).toISOString(),
+            },
+          ],
+        },
+      }
+
+      try {
+        expect(await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })).toEqual([
+          "transcript-skill",
+        ])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recent usage requires both the last twenty turns and last ten minutes", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("recent-usage.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 11 * 60 * 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Skill", input: { skill: "old-skill" } },
+              { type: "tool_use", name: "Bash", input: { command: "git branch --show-current" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Skill", input: { skill: "recent-skill" } },
+              { type: "tool_use", name: "Bash", input: { command: "gh pr list --head main" } },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getRecentSkillsUsedForCurrentSession(transcriptPath, { nowMs: now })).toEqual([
+          "recent-skill",
+        ])
+        expect(await getRecentToolsUsedForCurrentSession(transcriptPath, { nowMs: now })).toEqual([
+          "Skill",
+          "Bash",
+        ])
+        expect(
+          await getRecentBashCommandsUsedForCurrentSession(transcriptPath, { nowMs: now })
+        ).toEqual(["gh pr list --head main"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recent usage excludes entries outside the last twenty turns", async () => {
+      const now = Date.now()
+      const lines = [
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Skill", input: { skill: "stale-by-turn" } }],
+          },
+        }),
+        ...Array.from({ length: 20 }, (_, index) =>
+          JSON.stringify({
+            timestamp: new Date(now - 900 + index).toISOString(),
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", name: "Read", input: { file_path: `file-${index}` } }],
+            },
+          })
+        ),
+      ]
+      const transcriptPath = await writeTranscriptFile("recent-turn-window.jsonl", lines)
+
+      try {
+        expect(await getRecentSkillsUsedForCurrentSession(transcriptPath, { nowMs: now })).toEqual(
+          []
+        )
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
     })
 
     it("deriveCurrentSessionTaskToolStats tracks the latest task tool call", () => {

@@ -43,6 +43,7 @@ export interface CompletionAuditContext {
   toolCallCount: number
   taskToolUsed: boolean
   observedToolNames: string[]
+  recentObservedToolNames: string[]
   summary: TranscriptSummary | null
 }
 

@@ -23,10 +23,11 @@ import {
   BRANCH_CHECK_RE,
   CI_WAIT_RE,
   detectForkTopology,
-  extractBashCommands,
   formatActionPlan,
+  formatCurrentSessionUsageWindow,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
+  getRecentBashCommandsUsedForCurrentSession,
   git,
   hasGitPushForceFlag,
   isShellTool,
@@ -74,7 +75,7 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
         cwd,
         timeoutMs: 5000,
       }),
-      extractBashCommands(transcriptPath),
+      getRecentBashCommandsUsedForCurrentSession(hookInput as Record<string, any>),
       readSwizSettings(),
       readProjectSettings(cwd),
     ])
@@ -293,7 +294,7 @@ function checkMissingPriorChecks(
   return preToolUseAllow(
     `Pre-push advisory mode: branch/PR/CI verification is incomplete.\n\n` +
       formatActionPlan(missing, {
-        header: "The following checks have not been run in this session:",
+        header: `The following checks have not been run recently (${formatCurrentSessionUsageWindow()}):`,
       }) +
       `\n\nConsider running these checks to avoid pushing large work directly\n` +
       `to main in a collaborative repo, or creating duplicate PRs.`

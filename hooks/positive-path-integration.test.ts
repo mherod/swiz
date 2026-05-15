@@ -43,21 +43,31 @@ async function runHook(
   await proc.stdin.write(payload)
   await proc.stdin.end()
 
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
 
   let json: Record<string, any> | null = null
   try {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
+  return { exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 /** Run a git command and wait for it to finish. */
 async function gitExec(args: string[], cwd: string): Promise<void> {
-  await Bun.spawn(["git", ...args], { cwd }).exited
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
+  if (exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed (${exitCode}): ${stderr || stdout}`)
+  }
 }
 
 /** Create a minimal git repo with one commit. */
@@ -73,9 +83,11 @@ async function createGitRepo(): Promise<string> {
 /** Create a JSONL transcript with N tool_use entries of specified names. */
 async function createTranscript(dir: string, toolNames: string[]): Promise<string> {
   const path = join(dir, "transcript.jsonl")
+  const timestamp = new Date().toISOString()
   const lines = toolNames.map((name) =>
     JSON.stringify({
       type: "assistant",
+      timestamp,
       message: { content: [{ type: "tool_use", name }] },
     })
   )
@@ -433,7 +445,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("1 tool call(s)")
+    expect(ctx).toContain("1 tool call")
     expect(ctx).toContain("blocked")
   })
 
@@ -469,7 +481,8 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     const ctx = hso?.additionalContext as string
-    expect(ctx).toContain("Task update required")
+    expect(ctx).toContain("Task update")
+    expect(ctx).toContain("TaskList")
   })
 
   test("does not treat codex update_plan as a task tool (#570)", async () => {
@@ -801,7 +814,7 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const ctx = (r.json?.hookSpecificOutput as Record<string, any>)?.additionalContext as string
     expect(ctx).toContain("Post-compaction context")
-    expect(ctx).toContain("Compaction context truncated to stay within budget.")
+    expect(ctx).toMatch(/Compaction context truncated to .*budget/)
     expect(ctx.length).toBeLessThanOrEqual(2400)
   })
 })
