@@ -4,6 +4,15 @@
 
 ### Improvements
 
+- **Issue workflow preflight gate** — New `pretooluse-issue-workflow-gate`
+  hook enforces the `work-on-issue` sequence before implementation begins.
+  Blocks file edits and mutating git commands until GitHub connectivity or
+  `git fetch` evidence appears in the transcript. If a linked PR head branch
+  is discovered, blocks until the worktree is on that branch or the workflow
+  routes to `work-on-prs`. If a target branch is declared, blocks until
+  the worktree matches it. Discovery commands, branch checkout/switch, and
+  branch creation are always allowed.
+
 - **Transcript user-turn rendering** — `swiz transcript` now humanizes
   Claude Code's injected markup in user turns. `<command-name>` /
   `<command-args>` collapse to `/model`, `<bash-input>` becomes
