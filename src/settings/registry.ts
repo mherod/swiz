@@ -101,6 +101,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "suggestWebSearch",
+    aliases: ["suggest-web-search", "websearch-suggest"],
+    kind: "boolean",
+    scopes: ["global", "project"],
+    default: true,
+    docs: {
+      description: "Emit a WebSearch reminder at session start",
+      effectExplanation:
+        "When enabled, the sessionstart-websearch-suggester hook injects a WebSearch reminder into the session context for agents that support it.",
+      enableDescription: "Enable WebSearch reminder at session start",
+      disableDescription: "Suppress WebSearch reminder at session start",
+    },
+  },
+  {
     key: "autoSteer",
     aliases: ["auto-steer", "autosteer", "auto_steer"],
     kind: "boolean",

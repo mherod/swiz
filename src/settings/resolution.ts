@@ -132,6 +132,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "largeFileSizeKb",
   "dirtyWorktreeThreshold",
   "speak",
+  "suggestWebSearch",
   "autoSteerTranscriptWatching",
   "transcriptMonitorMaxConcurrentDispatches",
   "actionPlanMerge",

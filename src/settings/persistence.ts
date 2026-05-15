@@ -291,6 +291,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "pushGate",
     "qualityChecksGate",
     "speak",
+    "suggestWebSearch",
     "autoSteerTranscriptWatching",
     "strictNoDirectMain",
     "trunkMode",

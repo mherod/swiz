@@ -29,6 +29,9 @@ export function evaluateSessionstartWebSearchSuggester(input: unknown): SwizHook
   const hookInput = sessionStartHookInputSchema.parse(input)
   const raw = hookInput as Record<string, unknown>
 
+  const effectiveSettings = raw._effectiveSettings as Record<string, unknown> | undefined
+  if (effectiveSettings?.suggestWebSearch === false) return {}
+
   // Only Claude exposes a WebSearch tool today. Skip the suggestion for
   // agents that don't expose a WebSearch-equivalent surface.
   const agent = detectCurrentAgentFromHookPayload(raw)

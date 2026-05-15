@@ -122,6 +122,8 @@ export interface ProjectSwizSettings {
   pushGate?: boolean
   /** Read agent output aloud using text-to-speech. */
   speak?: boolean
+  /** Emit a WebSearch reminder in the session context at session start. Defaults to true. */
+  suggestWebSearch?: boolean
   /** Enable daemon-driven auto-steering by monitoring session transcripts. */
   autoSteerTranscriptWatching?: boolean
   /**
@@ -188,6 +190,8 @@ export interface SwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  /** When true, emit a WebSearch reminder context block at session start. */
+  suggestWebSearch: boolean
   /** When true, types "Continue" into the terminal after every tool call via AppleScript. */
   autoSteer: boolean
   /** When true, allow transcript/session monitoring to synthesize pseudo-hook dispatches. */
