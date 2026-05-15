@@ -23,6 +23,7 @@ import {
   isGitRepo,
 } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
+import { rephraseHookMessage } from "../hook-message-rephrasing.ts"
 import { isInlineSwizHookRun, SwizHookExit } from "../inline-hook-context.ts"
 import { buildContextHookOutput, type SwizHookOutput } from "../SwizHook.ts"
 import {
@@ -201,10 +202,11 @@ export function denyPreToolUse(reason: string): never {
 }
 
 function allowPreToolUseObj(reason: string): HookOutput {
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : reason
   return hookOutputSchema.parse({
     suppressOutput: true,
-    systemMessage: extractHookSystemMessagePreview(reason),
-    hookSpecificOutput: hsoPreToolUseAllow(reason),
+    systemMessage: extractHookSystemMessagePreview(rephrasedReason),
+    hookSpecificOutput: hsoPreToolUseAllow(rephrasedReason),
   })
 }
 
@@ -229,8 +231,10 @@ function allowPreToolUseWithContextObj(
 
 /** Emit a PreToolUse allow with both a visible hint and additionalContext. */
 export function allowPreToolUseWithContext(reason: string, additionalContext: string): never {
-  const effectiveReason = reason || additionalContext
-  exitWithHookObject(allowPreToolUseWithContextObj(additionalContext, effectiveReason))
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : ""
+  const rephrasedContext = additionalContext ? rephraseHookMessage(additionalContext) : ""
+  const effectiveReason = rephrasedReason || rephrasedContext
+  exitWithHookObject(allowPreToolUseWithContextObj(rephrasedContext, effectiveReason))
 }
 
 function allowPreToolUseWithUpdatedInputObj(
@@ -953,11 +957,12 @@ export type TaskToolInput = ToolHookInput & {
 
 /** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
 export function preToolUseAllow(reason = ""): SwizHookOutput {
-  const preview = extractHookSystemMessagePreview(reason)
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : reason
+  const preview = extractHookSystemMessagePreview(rephrasedReason)
   return {
     suppressOutput: true,
     systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseAllow(reason),
+    hookSpecificOutput: hsoPreToolUseAllow(rephrasedReason),
   }
 }
 
@@ -980,25 +985,28 @@ export function preToolUseAllowWithContext(
   reason: string,
   additionalContext: string
 ): SwizHookOutput {
-  const effectiveReason = reason || additionalContext
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : ""
+  const rephrasedContext = additionalContext ? rephraseHookMessage(additionalContext) : ""
+  const effectiveReason = rephrasedReason || rephrasedContext
   return {
     suppressOutput: true,
-    ...(additionalContext && { systemMessage: additionalContext }),
+    ...(rephrasedContext && { systemMessage: rephrasedContext }),
     hookSpecificOutput: hsoPreToolUseAllowContextual(
       effectiveReason || undefined,
-      additionalContext || undefined
+      rephrasedContext || undefined
     ),
   }
 }
 
 /** Same envelope as `emitContext` in hook-utils, without `process.exit` (safe for inline dispatch). */
 export function postToolUseAdditionalContext(context: string): SwizHookOutput {
+  const rephrasedContext = rephraseHookMessage(context)
   return {
-    systemMessage: context,
+    systemMessage: rephrasedContext,
     suppressOutput: true,
     hookSpecificOutput: hookSpecificOutputSchema.parse({
       hookEventName: "PostToolUse",
-      additionalContext: context,
+      additionalContext: rephrasedContext,
     }),
   }
 }

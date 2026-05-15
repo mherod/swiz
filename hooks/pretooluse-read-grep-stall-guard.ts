@@ -14,6 +14,7 @@
 // Dual-mode: exports a SwizToolHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { rephraseHookMessage } from "../src/hook-message-rephrasing.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, READ_TOOLS, SEARCH_TOOLS } from "../src/tool-matchers.ts"
@@ -88,7 +89,7 @@ const pretooluseReadGrepStallGuard: SwizToolHook = {
               "If you're blocked, explain what's preventing progress and ask the user for guidance.",
               "If the task is complete, update your tasks accordingly.",
             ],
-            { header: "Action plan:" }
+            { header: rephraseHookMessage("Action plan:") }
           ) +
           `\nAfter making an Edit or Write, Read/Grep/Glob will be unblocked automatically.`
       )

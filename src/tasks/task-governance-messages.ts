@@ -1,5 +1,6 @@
 import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
 import { detectCurrentAgentFromEnv, toolNameForCurrentAgent } from "../agent-paths.ts"
+import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
   type DuplicateSubjectGroup,
   formatDuplicateSubjectGroups,
@@ -34,11 +35,11 @@ function taskUpdateToolName(): string {
 function taskApproachMessage(): string {
   const taskCreateName = taskCreateToolName()
   const taskUpdateName = taskUpdateToolName()
-  return (
+  return replaceTaskGovernanceSynonyms(
     "Allowed approaches:\n" +
-    `  - ${taskCreateName} - add new tasks\n` +
-    `  - ${taskUpdateName} - status, subject, description, and marking completed\n` +
-    `  - ${toolNameForCurrentAgent("TaskList")} / ${toolNameForCurrentAgent("TaskGet")} - query tasks`
+      `  - ${taskCreateName} - add new tasks\n` +
+      `  - ${taskUpdateName} - status, subject, description, and marking completed\n` +
+      `  - ${toolNameForCurrentAgent("TaskList")} / ${toolNameForCurrentAgent("TaskGet")} - query tasks`
   )
 }
 
@@ -597,7 +598,9 @@ function appendHygieneFeedback(
     )
   } else if (counts.pending >= PLENTY_PENDING_THRESHOLD && counts.inProgress >= 1) {
     parts.push(
-      "Good task hygiene: we have a planning buffer and one clear in_progress focus. Keep TaskList fresh, update status as work completes, and add pending tasks before the queue runs low."
+      replaceTaskGovernanceSynonyms(
+        "Good task hygiene: we have a planning buffer and one clear in_progress focus. Keep TaskList fresh, update status as work completes, and add pending tasks before the queue runs low."
+      )
     )
   }
 }

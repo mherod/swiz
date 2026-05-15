@@ -26,6 +26,7 @@ import {
   shouldCaptureIncomingPayloads,
   writeIncomingDispatchCapture,
 } from "./dispatch/incoming-capture.ts"
+import { rephraseHookMessage } from "./hook-message-rephrasing.ts"
 import {
   type FileEditHookInput,
   type HookOutput,
@@ -169,12 +170,13 @@ export type SwizHookOutput = HookOutput | {}
  * PostToolUse, etc. Safe for manifest-linked inline hooks (no hook-utils import).
  */
 export function buildContextHookOutput(eventName: string, context: string): SwizHookOutput {
+  const rephrasedContext = rephraseHookMessage(context)
   return hookOutputSchema.parse({
-    systemMessage: context,
+    systemMessage: rephrasedContext,
     suppressOutput: true,
     hookSpecificOutput: hookSpecificOutputSchema.parse({
       hookEventName: eventName,
-      additionalContext: context,
+      additionalContext: rephrasedContext,
     }),
   })
 }
@@ -190,12 +192,16 @@ export function buildSplitContextHookOutput(
   additionalContext: string,
   systemMessage?: string
 ): SwizHookOutput {
+  const rephrasedAdditionalContext = rephraseHookMessage(additionalContext)
+  const rephrasedSystemMessage = systemMessage?.trim()
+    ? rephraseHookMessage(systemMessage)
+    : undefined
   return hookOutputSchema.parse({
-    ...(systemMessage?.trim() ? { systemMessage } : {}),
+    ...(rephrasedSystemMessage ? { systemMessage: rephrasedSystemMessage } : {}),
     suppressOutput: true,
     hookSpecificOutput: hookSpecificOutputSchema.parse({
       hookEventName: eventName,
-      additionalContext,
+      additionalContext: rephrasedAdditionalContext,
     }),
   })
 }

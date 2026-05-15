@@ -45,6 +45,7 @@ import {
   TASKLIST_CONFIRM_STEP,
   TASKLIST_STABILITY_STEP,
 } from "../src/tasks/task-governance-messages.ts"
+import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
 import {
   applyCacheTaskUpdate,
   findPriorSessionTasks,
@@ -1459,18 +1460,28 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
     const countLine = `Tasks: ${inProgress} in_progress, ${pending} pending.`
 
     if (total === 0 || (pending === 0 && inProgress === 0)) {
-      return `${countLine} What are we working on? Create tasks before starting implementation.`
+      return replaceTaskGovernanceSynonyms(
+        `${countLine} What are we working on? Create tasks before starting implementation.`
+      )
     }
     if (inProgress === 0) {
-      return `${countLine} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+      return replaceTaskGovernanceSynonyms(
+        `${countLine} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+      )
     }
     if (pending === 0) {
-      return `${countLine} What should we do next? Add a pending task to keep the planning buffer healthy.`
+      return replaceTaskGovernanceSynonyms(
+        `${countLine} What should we do next? Add a pending task to keep the planning buffer healthy.`
+      )
     }
     if (pending === 1) {
-      return `${countLine} What should we do next? Add one more pending task to keep the buffer healthy.`
+      return replaceTaskGovernanceSynonyms(
+        `${countLine} What should we do next? Add one more pending task to keep the buffer healthy.`
+      )
     }
-    return `${countLine} On track — good task hygiene.`
+    return replaceTaskGovernanceSynonyms(
+      `${countLine} On track — ${replaceTaskGovernanceSynonyms("Good task hygiene")}.`
+    )
   } catch (err) {
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }

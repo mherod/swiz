@@ -4,6 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { JsonObject } from "./test-utils.ts"
 
+const DIRECT_ALLOW_RE =
+  /^(Stay|Remain|Keep going|Proceed|Carry on) in direct-tool-invocation mode\.$/i
+const CONTEXT_ALLOW_RE =
+  /^(Stay|Remain|Keep going|Proceed|Carry on) in (brilliant|perfect|satisfactory|excellent|solid|sound) task (practice|regulation|discipline|routine|stewardship) mode\.$/i
+const CONTEXT_REASON_RE = /^(Keep going|Proceed|Carry on|Move on|Press on|Stay|Remain)$/i
+
 /**
  * Run an inline bun script that imports and calls a hook-utils helper.
  * This avoids mocking process.exit — the helper runs in a real subprocess.
@@ -157,6 +163,32 @@ describe("allowPreToolUseWithContext", () => {
     expect(hso.permissionDecisionReason).toBe("Heads up")
     expect(hso.additionalContext).toBe("Task #7 has been running for 12m")
     expect(parsed.systemMessage).toBe("Task #7 has been running for 12m")
+  })
+
+  test("rephrases direct allow reasons", async () => {
+    const { exitCode, parsed } = await runHelper(
+      `preToolUseAllow } from "./hook-utils.ts"; ` +
+        `Date.now = () => 1710000000000; console.log(JSON.stringify(preToolUseAllow("Continue in direct-tool-invocation mode.")))`
+    )
+    expect(exitCode).toBe(0)
+    const hso = parsed.hookSpecificOutput as JsonObject
+    expect(hso.permissionDecision).toBe("allow")
+    expect(parsed.systemMessage).toMatch(DIRECT_ALLOW_RE)
+    expect(hso.permissionDecisionReason).toBe(parsed.systemMessage)
+  })
+
+  test("rephrases mechanical wording in context", async () => {
+    const { exitCode, parsed } = await runHelper(
+      `allowPreToolUseWithContext } from "./hook-utils.ts"; ` +
+        `Date.now = () => 1710000000000; allowPreToolUseWithContext("Continue", "Continue in good task hygiene mode.")`
+    )
+    expect(exitCode).toBe(0)
+    const hso = parsed.hookSpecificOutput as JsonObject
+    expect(hso.permissionDecision).toBe("allow")
+    expect(hso.permissionDecisionReason).toMatch(CONTEXT_REASON_RE)
+    expect(hso.additionalContext).toMatch(CONTEXT_ALLOW_RE)
+    expect(parsed.systemMessage).toBe(hso.additionalContext)
+    expect(parsed.systemMessage).toMatch(CONTEXT_ALLOW_RE)
   })
 })
 

@@ -775,7 +775,7 @@ describe("pretooluse-require-tasks", () => {
     })
     expect(result.decision).toBe("deny")
     expect(result.reason ?? "").toContain(".claude/tasks")
-    expect(result.reason ?? "").toContain("Allowed approaches")
+    expect(result.reason ?? "").toContain("approaches")
     expect(result.reason ?? "").toContain("Avoid editing")
   })
 
@@ -801,7 +801,7 @@ describe("pretooluse-require-tasks", () => {
     })
     expect(result.decision).toBe("deny")
     expect(result.reason ?? "").toContain(".claude/tasks")
-    expect(result.reason ?? "").toContain("Allowed approaches")
+    expect(result.reason ?? "").toContain("approaches")
     expect(result.reason ?? "").toContain("Avoid editing")
   })
 

@@ -69,7 +69,9 @@ describe("buildCountSummary", () => {
       pending: 2,
       inProgress: 1,
     })
-    expect(s).toContain("Good task hygiene")
+    expect(s).toMatch(
+      /(brilliant|perfect|satisfactory|excellent|solid|sound) task (practice|regulation|discipline|routine|stewardship)/i
+    )
     expect(s).toContain("planning buffer")
   })
 
