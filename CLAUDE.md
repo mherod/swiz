@@ -214,9 +214,7 @@ alwaysApply: false
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
 ## Dispatch & Daemon Context
-- **DON'T**: Call `detectTerminal()` in daemon — read `_terminal` from payload. DON'T `JSON.parse(enrichedPayloadStr)` per hook — use `buildSpawnContext()` once.
-- **DON'T**: `merge({}, payload, ...)` — mutate directly. Deep clones duplicate `_env` (~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only.
-- **DO**: Cap AI prompt context size in hooks. Trace actual code path (daemon vs CLI) when diagnosing dispatch failures.
-
-### Payload Backfill
-- **DO**: `backfillPayloadDefaults()` (`src/dispatch/payload-backfill.ts`): cwd payload→`$GEMINI_CWD`/`$GEMINI_PROJECT_DIR`/`$CLAUDE_PROJECT_DIR`→`process.cwd()`; session_id payload→`$GEMINI_SESSION_ID`→latest `~/.claude/projects/<projectKey>/*.jsonl` mtime→`"unknown-session"`. CLI injects cwd pre-forward. Disk scan skipped when cwd=`process`. Records `payload._inferredFields`.
+- DON'T `detectTerminal()` in daemon — read `_terminal` from payload. DON'T `JSON.parse(enrichedPayloadStr)` per hook — use `buildSpawnContext()` once.
+- DON'T `merge({}, payload, ...)` — mutate directly (deep clones duplicate `_env` ~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only.
+- Cap AI prompt context size in hooks. Trace actual code path (daemon vs CLI) when diagnosing dispatch failures.
+- `backfillPayloadDefaults()` (`src/dispatch/payload-backfill.ts`): cwd payload → `$GEMINI_CWD`/`$GEMINI_PROJECT_DIR`/`$CLAUDE_PROJECT_DIR` → `process.cwd()`; session_id → `$GEMINI_SESSION_ID` → latest `~/.claude/projects/<projectKey>/*.jsonl` mtime → `"unknown-session"`. Records `payload._inferredFields`.
