@@ -25,8 +25,8 @@ alwaysApply: false
 - Translation is metadata-driven: `translateMatcher()`, `translateEvent()`, `toolNameForCurrentAgent()`, `resolveTranslationAgent()`. Never hard-code agent tool/event names. Precedence: explicit → env+aliases → unique observed tools → `detectCurrentAgent()`.
 - Daemon dispatch preserves origin env: `swiz dispatch` stores agent vars in `_env`; `applyDispatchEnv()` wraps in-process hooks. Daemon hooks use `_env` + `detectCurrentAgentFromEnv()`, not launchd env.
 - Keep installed/current/backend detection separate: `detectInstalledAgents()` checks `PATH`/settings; `detectAgentCli()`/`detectBestAgentCli()` find Cursor's `agent` binary for fallback prompting. Do not use either for hook-agent detection.
-- Task governance pivots on `AgentDef.tasksEnabled`. `agentHasTaskTools()` defaults `true`; `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false. `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements without task tools. Codex has `tasksEnabled=false`; `update_plan` is not Claude-style task enforcement/advisory.
-- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env`, then process env, then Claude; `swiz tasks` CLI denial only applies to resolved Claude. Stop validators skip task creation/audit checks when task tools are unavailable; `stop-incomplete-tasks` exempts `isCurrentAgent("gemini")`.
+- Task governance pivots on `AgentDef.tasksEnabled`. `agentHasTaskTools()` defaults `true`; `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false. `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements without task tools. Codex has `tasksEnabled=false`; `update_plan` not Claude-style enforcement.
+- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env` → process env → Claude; `swiz tasks` denial applies only to resolved Claude. Stop validators skip task checks when task tools unavailable; `stop-incomplete-tasks` exempts `isCurrentAgent("gemini")`.
 - Task storage follows detection: `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots, falling back to Claude. Apply `_env` in daemon dispatch or tasks may use the wrong provider root.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
@@ -40,29 +40,29 @@ alwaysApply: false
 - Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` synchronized.
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
-- DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
-- DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
-- DO NOT hard-code agent-specific event names or tool names in hook scripts.
+- DON'T duplicate preToolUse matcher strings — `manifest.find()` returns first match. Add to existing group.
+- DON'T add sync hooks to unmatched preToolUse groups (`manifest.test.ts` requires `matcher`; async-only groups exempt).
+- DON'T hard-code agent-specific event names or tool names in hook scripts.
 - `classifyHookOutput` validates stdout against `hookOutputSchema`; `"invalid-schema"` on failure. Requires `systemMessage`/`reason`/`stopReason`/`additionalContext`; `{}` valid. Stop normalized via `stopHookOutputSchema`.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook**: Use `preToolUseAllow()`/`preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`; `if (import.meta.main) await runSwizHookAsMain(hook)` (DON'T also `Bun.stdin.json()` — double-read = silent exit 0). Helper extraction + migration ship in one commit (`bun run typecheck` between). Safe imports: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/{edit-projection,inline-hook-helpers,package-detection}`, `hooks/schemas`. Avoid `hook-utils.ts`/`git-utils.ts` (circular).
-- **Debt marker self-detection**: Hook files with keywords in `//` comments trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` headers or dynamic regex (`"TO" + "DO"`).
+- **Debt marker**: `//` comments with keywords trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` or `"TO" + "DO"` regex.
 - **Phase 2 extraction**: 6 modules (types→context→validators→action-plan→evaluate→wrapper). Export from core, import by orchestrator only; delete re-export wrappers. Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
 ## Branch Change Detection
 - Canonical (import; never redefine): `src/utils/git-utils.ts` exports `BRANCH_CHECK_RE`, `GIT_CHECKOUT_RE`, `GIT_SWITCH_RE`, `GH_PR_CHECKOUT_RE`, `GIT_CHECKOUT_NEW_BRANCH_RE`, `getDefaultBranch(cwd)` (project setting → upstream → remote → main/master). Equality via `src/git-helpers.ts::isDefaultBranch()` — never `=== "main"`.
-- Reads `git branch --show-current`: `hooks/pretooluse-{pr-head-checkout-gate,issue-workflow-gate,pr-changes-branch-guard,pr-age-gate,stale-approval-gate,trunk-mode-branch-gate,branch-intent-gate,block-commit-to-main,main-branch-scope-gate,gitflow-integration-base-gate,sandboxed-edits}.ts`; `hooks/posttooluse-{pr-context,state-transition}.ts`; `src/commands/{push-ci,push-wait,status,daemon/pr-review-monitor}.ts`.
+- Consumers of `git branch --show-current`: all pretooluse branch gates, posttooluse-{pr-context,state-transition}, and push/status commands. Never redefine branch regexes — always import from `src/utils/git-utils.ts`.
 - `pretooluse-push-checks-gate.ts` gates `git push` on recent `BRANCH_CHECK_RE` transcript hit. `posttooluse-{pr-context,state-transition}.ts` fire on checkout/switch.
 - Stop gates: `hooks/stop-{non-default-branch,branch-conflicts,quality-checks}.ts`. Daemon cache: `src/utils/daemon-git-state.ts` (POST `/git/state`). Status surfaces: `src/commands/{status-line,status}.ts`. Settings: project-only `defaultBranch` in `src/settings/{types,registry,persistence}.ts` — consume via `getDefaultBranch()`.
 ## Skill Requirement Gates
 - Skill/tool "used this session" requirements mean used recently: within the last 20 transcript turns and last 10 minutes. Use shared helpers in `src/transcript-summary.ts`/`src/skill-utils.ts` (`getRecentlyInvokedSkillsForCurrentSession`, `getRecentlyUsedToolsForCurrentSession`, `getRecentBashCommandsUsedForCurrentSession`, `formatCurrentSessionUsageWindow`). DON'T rescan transcripts or duplicate recency math in individual hooks.
 - `hooks/pretooluse-skill-invocation-gate.ts`: requires recent `/commit` before `git commit`, `/push` before `git push`, `/triage-issues` before adding `triaged`, `/refine-issue` before label changes, `/pr-open` before `gh pr create`, and `/pr-comments-address` before dismissing PR reviews. Branch deletion pushes are exempt.
-- Commit gating also requires a recent `TaskList` before `git commit` after `/commit`, so task state is fresh.
-- `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch (`git branch --show-current`), PR (`gh pr list --state open --head ...`), and required CI (`swiz ci-wait ...`) checks must be recent or the hook emits an advisory. Behind-remote, WIP/fixup/squash commits, secrets, and large files remain hard blocks.
-- `hooks/stop-required-skills.ts`: stop requires recent applicable stop skills in priority order: `/end-of-day` when unpushed commits or incomplete tasks exist, `/farm-out-issues` in git repos, `/continue-with-tasks`, then `/reflect-on-session-mistakes`.
-- `hooks/stop-incomplete-tasks.ts` and `hooks/stop-completion-auditor/task-reconciliation.ts` require recent `TaskList` when task state must be synced before stop. `hooks/posttooluse-mid-session-prompt.ts` only suppresses the prompt if `/mid-session-checkin` was recent.
-- When changing current-session usage semantics, update transcript-backed parsing and daemon `_currentSessionToolUsage` providers together; daemon state must retain event timestamps/turn indexes when recency matters.
-- Hook output is rephrased. Tests should assert stable decisions, categories, and required window text, not exact rephrased command strings unless the literal text is the behavior under test.
+- Commit gating requires recent `TaskList` before `git commit` after `/commit`.
+- `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch, PR, and CI checks must be recent or the hook emits an advisory. Behind-remote, WIP/fixup/squash commits, secrets, and large files are hard blocks.
+- `hooks/stop-required-skills.ts`: stop needs recent skills in order: `/end-of-day` (unpushed commits/incomplete tasks), `/farm-out-issues` (git repos), `/continue-with-tasks`, `/reflect-on-session-mistakes`.
+- `stop-incomplete-tasks.ts` and `stop-completion-auditor/task-reconciliation.ts` require recent `TaskList` before stop. `posttooluse-mid-session-prompt.ts` only suppresses the prompt if `/mid-session-checkin` was recent.
+- When changing current-session usage semantics, update transcript parsing and daemon `_currentSessionToolUsage` together; retain timestamps/turn indexes when recency matters.
+- Hook output is rephrased; tests assert stable decisions/categories/window text, not exact command strings.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -118,7 +118,7 @@ alwaysApply: false
 
 ## Task Lifecycle & Enforcement
 - State machine: `pending` → `in_progress` → `completed` or `deleted`.
-- Gates: stop (`hooks/stop-incomplete-tasks/evaluate.ts`) blocks incomplete tasks; transition (`pretooluse-task-transition-validator.ts`) blocks `pending`→`completed`; phantom (`pretooluse-no-phantom-task-completion.ts`) requires substantive tool calls (`Edit`, `Write`, `Bash`, `Read`, `Skill`, `Glob`, `Grep`) and evidence.
+- Gates: `stop-incomplete-tasks/evaluate.ts` blocks incomplete; `pretooluse-task-transition-validator.ts` blocks `pending`→`completed`; `pretooluse-no-phantom-task-completion.ts` requires substantive tool calls and evidence.
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s and requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`. `find` is not exempt.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
@@ -146,6 +146,7 @@ alwaysApply: false
 - **DO**: After push: verify CI once with `gh run view --json` (not `gh run watch` alone); `in_progress` is acceptable — pre-push ran full test suite. Update tasks before stop.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
 - DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
+- `swiz settings` tests are flaky in CI (20–30s subprocess-spawn timeouts); pre-existing, not regressions from code changes (confirmed on doc-only commits, run IDs 25944297820, 25944269296). Don't chase settings timeouts as caused by recent work.
 - DON'T add `Co-Authored-By` trailers. DON'T use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
@@ -175,10 +176,11 @@ alwaysApply: false
 - No top-level `await` in `src/`; use lazy async (`let cache; async load() {...}`). Hooks exempt.
 - DON'T embed ESC (0x1b) in regex literals; construct at runtime — see `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - Bun test output parse: `/\bRan \d+ tests? across \d+ files?\./`; absent → emit "unknown number of". Strip ANSI before matching.
-- **CRITICAL self-ref PreToolUse**: edit import first, then usage (second edit). Reversed deadlocks session — recover with `git checkout -- <file>`. Atomic rename of declaration + all usages in one edit; DON'T add unrequested renames. Remove utility fn + all usages atomically.
+- **CRITICAL self-ref PreToolUse**: edit import before usage. Reversed order deadlocks — recover via `git checkout -- <file>`. Rename declaration + all usages atomically; DON'T add unrequested renames. Remove fn + all usages atomically.
 - DO: Read every file in full before editing — snippets miss conflicts.
 - ANSI escape codes direct; no color libraries.
 - `Bun.spawn`: use `["sh", "-c", cmd]` for shell; drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
+- Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
 - Settings writes: `.bak` backup first.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; `IN PROGRESS` before `COMPLETED`. Stop-memory prompts include `Cause: <cause>`.
@@ -204,6 +206,7 @@ alwaysApply: false
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse`.
 ## Agent Behavior
 - DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"` for unwanted), use hedging ("small", "minor", "trivial", "quick", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook"). Use Claude Agent SDK in-process.
+- DON'T re-implement — inspect existing code first. Fixes for #595 and #596 were already in place; only tests were missing.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
@@ -215,6 +218,6 @@ alwaysApply: false
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
 ## Dispatch & Daemon Context
 - DON'T `detectTerminal()` in daemon — read `_terminal` from payload. DON'T `JSON.parse(enrichedPayloadStr)` per hook — use `buildSpawnContext()` once.
-- DON'T `merge({}, payload, ...)` — mutate directly (deep clones duplicate `_env` ~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only.
+- DON'T `merge({}, payload, ...)` — mutate directly (deep clones duplicate `_env` ~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only. DON'T start the write promise before the chain — rejection is unowned. Pattern: `const queued = chain.then(() => appendFile(path, row)); chain = queued.catch(() => {})`.
 - Cap AI prompt context size in hooks. Trace actual code path (daemon vs CLI) when diagnosing dispatch failures.
 - `backfillPayloadDefaults()` (`src/dispatch/payload-backfill.ts`): cwd payload → `$GEMINI_CWD`/`$GEMINI_PROJECT_DIR`/`$CLAUDE_PROJECT_DIR` → `process.cwd()`; session_id → `$GEMINI_SESSION_ID` → latest `~/.claude/projects/<projectKey>/*.jsonl` mtime → `"unknown-session"`. Records `payload._inferredFields`.
