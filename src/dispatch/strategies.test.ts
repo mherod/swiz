@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { processBlockingResults } from "./blockingStrategy.ts"
+import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
 
 function makeHookExecution(file: string, status: HookExecution["status"] = "ok"): HookExecution {
@@ -239,6 +240,40 @@ describe("processBlockingResults", () => {
     processBlockingResults(results, [], finalResponse, "Stop")
     const msg = finalResponse.systemMessage as string
     expect(msg.indexOf("pre-block")).toBeLessThan(msg.indexOf("from-block"))
+  })
+
+  it("stably shuffles three merged contexts in a time window", () => {
+    const originalNow = Date.now
+    Date.now = () => 1_710_000_000_000
+    try {
+      const results = [
+        {
+          execution: makeHookExecution("a.ts"),
+          parsed: {
+            hookSpecificOutput: { additionalContext: "alpha" },
+          },
+        },
+        {
+          execution: makeHookExecution("b.ts"),
+          parsed: {
+            hookSpecificOutput: { additionalContext: "beta" },
+          },
+        },
+        {
+          execution: makeHookExecution("c.ts"),
+          parsed: {
+            hookSpecificOutput: { additionalContext: "gamma" },
+          },
+        },
+      ]
+      const finalResponse: Record<string, any> = {}
+      processBlockingResults(results, [], finalResponse, "Stop")
+      expect(finalResponse.systemMessage).toBe(
+        orderHookContexts(["alpha", "beta", "gamma"], "Stop").join("\n\n")
+      )
+    } finally {
+      Date.now = originalNow
+    }
   })
 
   it("records aborted hooks without merging their parsed output", () => {

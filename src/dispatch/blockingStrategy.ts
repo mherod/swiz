@@ -1,6 +1,7 @@
 import { merge } from "lodash-es"
 import type { HookOutput } from "../schemas.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
+import { orderHookContexts } from "./context-order.ts"
 import { coerceDispatchAgentEnvelopeInPlace } from "./dispatch-zod-surfaces.ts"
 import { extractContext, type HookExecution, isBlock, log, writeResponse } from "./engine.ts"
 import type { EnrichedDispatchPayload } from "./execute.ts"
@@ -16,6 +17,12 @@ interface StopAutoSteerContext {
   sessionId: string
   safeSession: string
   terminalApp: string
+}
+
+function mergeHookContexts(contexts: string[], hookEventName: string): string | null {
+  if (contexts.length === 0) return null
+  const ordered = orderHookContexts(contexts, hookEventName)
+  return ordered.join("\n\n")
 }
 
 async function resolveAutoSteerEnabled(
@@ -158,8 +165,8 @@ export function processBlockingResults(
     executions.push(execution)
   }
 
-  if (contexts.length > 0) {
-    const mergedContext = contexts.join("\n\n")
+  const mergedContext = mergeHookContexts(contexts, hookEventName)
+  if (mergedContext) {
     finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
 
     const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
@@ -219,8 +226,8 @@ export function processAggregatedStopResults(
     log(`   result: ${blockReasons.length} block(s) aggregated (${uniqueReasons.length} unique)`)
   }
 
-  if (contexts.length > 0) {
-    const mergedContext = contexts.join("\n\n")
+  const mergedContext = mergeHookContexts(contexts, hookEventName)
+  if (mergedContext) {
     finalResponse.systemMessage = `${finalResponse.systemMessage ? `${finalResponse.systemMessage}\n\n` : ""}${mergedContext}`
 
     const existingHso = mergeHookSpecificOutputClone(finalResponse, hookEventName)
