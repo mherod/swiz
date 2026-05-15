@@ -46,6 +46,7 @@ import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-str
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretooluseGitFlowIntegrationBaseGate from "../hooks/pretooluse-gitflow-integration-base-gate.ts"
 import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
+import pretooluseIssueWorkflowGate from "../hooks/pretooluse-issue-workflow-gate.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
 import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
@@ -341,6 +342,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseBlockCommitToMain },
       { hook: pretoolusePrChangesBranchGuard },
       { hook: pretoolusePrHeadCheckoutGate },
+      { hook: pretooluseIssueWorkflowGate },
       { hook: pretooluseTrunkModeBranchGate },
       { hook: pretooluseIssueSyncBeforeCheckout },
       { hook: pretooluseSkillInvocationGate },
