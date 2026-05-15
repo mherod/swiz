@@ -181,11 +181,11 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip outside git repos or when `CLAUDE.md` is missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - **DO**: Own every diagnostic — investigate all test failures before completing tasks.
 - Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
-- Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
+- Bun test: `--reporter=dots`. Use `--concurrent` for multi-file only; single-file rejected. Run once — piped re-runs trigger repeated-test hook.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file`, `awk > file` blocked; read-only pipelines OK. Use `bun -e` or `jq` (not `python`). Use `trash` (not `rm`).
-- DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; they are external repos. For cross-repo bugs, file an issue with error, root cause, fix, and criteria.
+- DO NOT edit `~/.claude/hooks/` or `~/.claude/skills/`; file cross-repo bugs as issues with error, root cause, fix, and criteria.
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
 - `REMINDER_FRAGMENT` re-triggers memory enforcement; 30-min `CLAUDE.md` mtime cooldown.
 - Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
