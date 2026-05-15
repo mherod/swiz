@@ -14,9 +14,14 @@ import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
 import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
-import { preToolUseDeny } from "../src/utils/hook-utils.ts"
+import { preToolUseAllowWithContext, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
-import { isHiddenTopLevelHomePath, resolveCanonical } from "./sandbox-path-utils.ts"
+import {
+  isHiddenTopLevelHomePath,
+  isSafeReadOnlyShellCommand,
+  resolveCanonical,
+  SAFE_READ_ONLY_INSPECTION_HINT,
+} from "./sandbox-path-utils.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
@@ -188,6 +193,16 @@ async function shouldBlockShellCommand(command: string, cwd: string): Promise<st
   return null
 }
 
+function buildSafeReadOnlyAllowMessage(blockedPath: string): string {
+  return [
+    "Read-only inspection command approved for a hidden home-directory path.",
+    "",
+    `  Attempted: ${blockedPath}`,
+    "",
+    SAFE_READ_ONLY_INSPECTION_HINT,
+  ].join("\n")
+}
+
 /**
  * Returns true when the command attempts to disable the sandboxed-edits setting.
  * Matches both disable paths:
@@ -249,6 +264,13 @@ const pretoolUseProtectSandbox: SwizToolHook = {
 
       const blockedPath = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
       if (blockedPath) {
+        if (isSafeReadOnlyShellCommand(command)) {
+          return preToolUseAllowWithContext(
+            "Read-only inspection command is allowed.",
+            buildSafeReadOnlyAllowMessage(blockedPath)
+          )
+        }
+
         const MEMORY_DIR_RE = /\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\]/
         if (MEMORY_DIR_RE.test(blockedPath)) {
           return preToolUseDeny(
@@ -258,6 +280,8 @@ const pretoolUseProtectSandbox: SwizToolHook = {
               `  Attempted: ${blockedPath}`,
               "",
               "Use /update-memory to add session learnings to the project CLAUDE.md file instead.",
+              "",
+              SAFE_READ_ONLY_INSPECTION_HINT,
             ].join("\n")
           )
         }
@@ -269,6 +293,8 @@ const pretoolUseProtectSandbox: SwizToolHook = {
             "",
             "Use shell commands only on paths inside the current dispatch cwd unless that cwd is",
             "itself that hidden home path.",
+            "",
+            SAFE_READ_ONLY_INSPECTION_HINT,
           ].join("\n")
         )
       }

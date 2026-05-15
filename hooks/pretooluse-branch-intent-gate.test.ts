@@ -25,7 +25,7 @@ function textLine(text: string): string {
 }
 
 async function writeTranscript(path: string, lines: string[]): Promise<void> {
-  await writeFile(path, lines.filter(Boolean).join("\n") + "\n")
+  await writeFile(path, `${lines.filter(Boolean).join("\n")}\n`)
 }
 
 // ── Hook runner ───────────────────────────────────────────────────────────────

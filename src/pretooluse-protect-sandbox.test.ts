@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { isSandboxDisableCommand } from "../hooks/pretooluse-protect-sandbox.ts"
+import { isSafeReadOnlyShellCommand } from "../hooks/sandbox-path-utils.ts"
 
 describe("isSandboxDisableCommand", () => {
   // ── disable subcommand ────────────────────────────────────────────────────
@@ -68,5 +69,23 @@ describe("isSandboxDisableCommand", () => {
 
   it("allows: empty string", () => {
     expect(isSandboxDisableCommand("")).toBe(false)
+  })
+})
+
+describe("isSafeReadOnlyShellCommand", () => {
+  it("allows simple read-only inspection commands", () => {
+    expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("head -n 20 ~/.swiz/settings.json")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("tail -n 20 ~/.swiz/settings.json")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("grep foo ~/.swiz/settings.json | head -n 5")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("sed -n '1,10p' ~/.swiz/settings.json")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("rg foo ~/.swiz/settings.json")).toBe(true)
+  })
+
+  it("rejects chaining, redirects, and command substitution", () => {
+    expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json && echo done")).toBe(false)
+    expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json > /tmp/out")).toBe(false)
+    expect(isSafeReadOnlyShellCommand("sed -i 's/foo/bar/' ~/.swiz/settings.json")).toBe(false)
+    expect(isSafeReadOnlyShellCommand('cat $(printf "%s" "$HOME")/.swiz/settings.json')).toBe(false)
   })
 })

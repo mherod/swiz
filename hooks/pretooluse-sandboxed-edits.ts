@@ -15,9 +15,17 @@ import { fileEditHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
+import {
+  preToolUseAllow,
+  preToolUseAllowWithContext,
+  preToolUseDeny,
+} from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
-import { isHiddenTopLevelHomePath, resolveCanonical } from "./sandbox-path-utils.ts"
+import {
+  isHiddenTopLevelHomePath,
+  resolveCanonical,
+  SAFE_READ_ONLY_INSPECTION_HINT,
+} from "./sandbox-path-utils.ts"
 
 function isWithin(parent: string, child: string): boolean {
   const normalizedParent = parent.replace(/\\/g, "/")
@@ -47,6 +55,8 @@ async function checkTrunkMode(cwd: string): Promise<SwizHookOutput | null> {
         `  Default branch: ${defaultBranch}`,
         "",
         `Switch to the default branch first: git checkout ${defaultBranch}`,
+        "",
+        SAFE_READ_ONLY_INSPECTION_HINT,
       ].join("\n")
     )
   }
@@ -72,6 +82,8 @@ function checkSwizConfigEdit(filePath: string): SwizHookOutput | null {
       "  swiz settings enable <setting>",
       "  swiz settings disable <setting>",
       "  swiz state set <state>",
+      "",
+      SAFE_READ_ONLY_INSPECTION_HINT,
     ].join("\n")
   )
 }
@@ -88,8 +100,9 @@ async function checkAllowedRoots(target: string, cwd: string): Promise<SwizHookO
   const allowedRoots = [cwd, tmp, tmpLiteral]
 
   if (allowedRoots.some((root) => isWithin(root, target))) {
-    return preToolUseAllow(
-      `Continue in sandboxed-edit mode: ${target.split("/").slice(-2).join("/")} is within the session sandbox.`
+    return preToolUseAllowWithContext(
+      `Continue in sandboxed-edit mode: ${target.split("/").slice(-2).join("/")} is within the session sandbox.`,
+      SAFE_READ_ONLY_INSPECTION_HINT
     )
   }
 
@@ -122,6 +135,8 @@ async function checkHiddenHomePath(target: string, cwd: string): Promise<SwizHoo
         `  Attempted: ${target}`,
         "",
         "Use /update-memory to add session learnings to the project CLAUDE.md file instead.",
+        "",
+        SAFE_READ_ONLY_INSPECTION_HINT,
       ].join("\n")
     )
   }
@@ -135,6 +150,8 @@ async function checkHiddenHomePath(target: string, cwd: string): Promise<SwizHoo
       "",
       "You can only edit hidden home-directory paths when the sandbox dispatcher",
       "is running inside that same hidden root.",
+      "",
+      SAFE_READ_ONLY_INSPECTION_HINT,
     ].join("\n")
   )
 }
@@ -227,6 +244,8 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
         "",
         "Sandboxed-edits mode is enabled: only edits within the current project directory or temporary directories are allowed.",
         buildIssueGuidance(null),
+        "",
+        SAFE_READ_ONLY_INSPECTION_HINT,
         crossRepoHint,
       ]
         .filter(Boolean)

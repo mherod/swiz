@@ -117,24 +117,31 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("blocks shell commands that reference hidden home paths with absolute paths", async () => {
+  test("allows shell commands that read hidden home paths with absolute paths", async () => {
     const result = await runPinnedHomeBashHook(`cat ${join(TEST_HOME, ".swiz", "settings.json")}`)
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
   })
 
-  test("blocks shell commands that reference hidden home paths with relative paths", async () => {
+  test("allows shell commands that read hidden home paths with relative paths", async () => {
     const result = await runPinnedHomeBashHook("cat .swiz/settings.json", { cwd: TEST_HOME })
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
   })
 
-  test("blocks shell commands that reference hidden home paths with $HOME variable", async () => {
+  test("allows shell commands that read hidden home paths with $HOME variable", async () => {
     const result = await runPinnedHomeBashHook("cat $HOME/.swiz/settings.json")
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
   })
 
-  test("blocks shell commands that reference hidden home paths with tilde", async () => {
+  test("allows shell commands that read hidden home paths with tilde", async () => {
     const result = await runPinnedHomeBashHook("cat ~/.swiz/settings.json")
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows grep and sed read-only pipelines against hidden home paths", async () => {
+    const result = await runPinnedHomeBashHook(
+      `grep sandboxedEdits ${join(TEST_HOME, ".swiz", "settings.json")} | head -n 5`
+    )
+    expect(result.decision).toBe("allow")
   })
 
   test("blocks shell commands that reference hidden home paths with command substitution", async () => {
@@ -154,15 +161,15 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(result.decision).toBe("deny")
   })
 
-  test("returns /update-memory guidance for shell commands referencing memory directory", async () => {
+  test("returns /update-memory guidance for shell commands writing the memory directory", async () => {
     const memoryPath = join(TEST_HOME, ".claude", "projects", "my-project", "memory", "MEMORY.md")
-    const result = await runPinnedHomeBashHook(`cat ${memoryPath}`)
+    const result = await runPinnedHomeBashHook(`echo hello > ${memoryPath}`)
     expect(result.decision).toBe("deny")
     const parsed = JSON.parse(result.stdout) as Record<string, any>
     const reason =
       ((parsed.hookSpecificOutput as Record<string, any>)?.permissionDecisionReason as string) ?? ""
     expect(reason).toContain("update-memory")
-    expect(reason).not.toContain("Hidden home-directory path references")
+    expect(reason).toContain("read-only shell command")
   })
 })
 

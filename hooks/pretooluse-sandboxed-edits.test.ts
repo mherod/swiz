@@ -156,6 +156,7 @@ describe("pretooluse-sandboxed-edits", () => {
     const msg = String(hso?.permissionDecisionReason)
     expect(msg).toContain("Writing directly to the memory directory is not permitted")
     expect(msg).toContain("/update-memory")
+    expect(msg).toContain("read-only shell command")
     expect(msg).not.toContain("Hidden home-directory edits are blocked")
   })
 
@@ -169,6 +170,7 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(hso?.permissionDecision).toBe("deny")
     const msg = String(hso?.permissionDecisionReason)
     expect(msg).toContain("Hidden home-directory edits are blocked")
+    expect(msg).toContain("read-only shell command")
     expect(msg).not.toContain("/update-memory")
   })
 
@@ -192,6 +194,7 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(reason?.permissionDecision).toBe("deny")
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
+    expect(msg).toContain("read-only shell command")
     expect(msg).not.toContain("different repository")
   })
 
