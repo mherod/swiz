@@ -2018,6 +2018,30 @@ describe("IssueStore event-sourced sync (#521)", () => {
     }
   })
 
+  test("listKnownRepoCwds returns repos with stored cwd cursors", () => {
+    const store = createStore()
+    try {
+      expect(store.listKnownRepoCwds()).toEqual([])
+
+      store.setSyncCursor("owner/repo-a", "cwd", "/home/user/repo-a")
+      store.setSyncCursor("owner/repo-b", "cwd", "/home/user/repo-b")
+      // A different kind should not appear.
+      store.setSyncCursor("owner/repo-a", "last_synced", "2026-01-01T00:00:00Z")
+
+      const known = store.listKnownRepoCwds()
+      expect(known).toHaveLength(2)
+      expect(known).toContainEqual({ repo: "owner/repo-a", cwd: "/home/user/repo-a" })
+      expect(known).toContainEqual({ repo: "owner/repo-b", cwd: "/home/user/repo-b" })
+
+      // Updating cwd replaces the previous value.
+      store.setSyncCursor("owner/repo-a", "cwd", "/home/user/new-path")
+      const updated = store.listKnownRepoCwds()
+      expect(updated.find((r) => r.repo === "owner/repo-a")?.cwd).toBe("/home/user/new-path")
+    } finally {
+      store.close()
+    }
+  })
+
   test("syncUpstreamState appends new events and advances cursor", async () => {
     const store = createStore()
     try {
@@ -2091,6 +2115,41 @@ describe("IssueStore event-sourced sync (#521)", () => {
       expect(result.events.cursor).toBeNull()
       // Cursor preserved for next-sync retry.
       expect(store.getSyncCursor(repo, "issue_events")).toBe("2026-04-09T10:00:00Z")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("syncUpstreamState writes last_synced and cwd cursors after sync", async () => {
+    const store = createStore()
+    try {
+      const repo = "owner/repo"
+      const cwd = "/home/user/my-repo"
+
+      const client: GitHubClient = {
+        listIssues: async () => [],
+        listPullRequests: async () => [],
+        listWorkflowRuns: async () => [],
+        listIssueComments: async () => null,
+        listLabels: async () => [],
+        listMilestones: async () => [],
+        listBranchWorkflowRuns: async () => null,
+        getBranchProtection: async () => null,
+        listIssueEventsSince: async () => [],
+      }
+
+      const before = Date.now()
+      await syncUpstreamState(repo, cwd, { store, client })
+      const after = Date.now()
+
+      const lastSynced = store.getSyncCursor(repo, "last_synced")
+      expect(lastSynced).not.toBeNull()
+      const ts = new Date(lastSynced!).getTime()
+      expect(ts).toBeGreaterThanOrEqual(before)
+      expect(ts).toBeLessThanOrEqual(after)
+
+      expect(store.getSyncCursor(repo, "cwd")).toBe(cwd)
+      expect(store.listKnownRepoCwds()).toContainEqual({ repo, cwd })
     } finally {
       store.close()
     }
