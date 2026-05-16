@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, utimes, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  appendPayloadToJsonl,
   buildIncomingCaptureFilename,
   buildIncomingDispatchCaptureEnvelope,
   normalizeEventNameToCanonical,
@@ -114,6 +115,35 @@ describe("incoming-capture", () => {
     // Unique suffix ensures different files
     expect(a).not.toBe(b)
     expect(b).not.toBe(c)
+  })
+
+  it("appendPayloadToJsonl writes sanitized JSON line to {event}.jsonl", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-jsonl-"))
+    const payload = { tool_name: "Bash", _env: { SECRET: "x" }, user_email: "u@e.com" }
+    await appendPayloadToJsonl("PreToolUse", payload, dir)
+    const content = await readFile(join(dir, "preToolUse.jsonl"), "utf8")
+    const obj = JSON.parse(content.trim()) as Record<string, unknown>
+    expect(obj._env).toBeUndefined()
+    expect(obj._envKeys).toEqual(["SECRET"])
+    expect(obj.user_email).toBe("[redacted]")
+    expect(obj.tool_name).toBe("Bash")
+    expect(typeof obj._capturedAt).toBe("string")
+  })
+
+  it("appendPayloadToJsonl appends successive lines to the same file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-append-"))
+    const payload = { session_id: "s1", cwd: "/p" }
+    await appendPayloadToJsonl("stop", payload, dir)
+    await appendPayloadToJsonl("stop", payload, dir)
+    const content = await readFile(join(dir, "stop.jsonl"), "utf8")
+    expect(content.trim().split("\n")).toHaveLength(2)
+  })
+
+  it("appendPayloadToJsonl normalizes PascalCase event name in filename", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-norm-"))
+    await appendPayloadToJsonl("PostToolUse", { cwd: "/x" }, dir)
+    const exists = await Bun.file(join(dir, "postToolUse.jsonl")).exists()
+    expect(exists).toBe(true)
   })
 
   it("pruneStaleIncomingCaptures removes stale .json only", async () => {

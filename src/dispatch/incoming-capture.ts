@@ -7,6 +7,9 @@
  * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
  * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`.
  *
+ * **JSONL files**: Each dispatch also appends a sanitized raw payload line to
+ * `/tmp/swiz-incoming/{canonicalEventName}.jsonl` for easy streaming inspection.
+ *
  * **Event name normalization:** Filenames use canonical camelCase event names for consistency across agents:
  * - Agent-specific names (PreToolUse, PostToolUse, beforeShellExecution, etc.) are normalized
  * - Maps to canonical names (preToolUse, postToolUse, sessionStart, etc.)
@@ -177,12 +180,13 @@ export function buildIncomingDispatchCaptureEnvelope(
  */
 export async function appendPayloadToJsonl(
   hookEventName: string,
-  payload: Record<string, any>
+  payload: Record<string, any>,
+  dir: string = SWIZ_INCOMING_ROOT
 ): Promise<void> {
-  await mkdir(SWIZ_INCOMING_ROOT, { recursive: true })
+  await mkdir(dir, { recursive: true })
   const canonical = normalizeEventNameToCanonical(hookEventName)
   const safe = sanitizeHookFilenameSegment(canonical)
-  const path = join(SWIZ_INCOMING_ROOT, `${safe}.jsonl`)
+  const path = join(dir, `${safe}.jsonl`)
   const sanitized = sanitizeDispatchPayloadForCapture(payload)
   const line = `${JSON.stringify({ ...sanitized, _capturedAt: new Date().toISOString() })}\n`
   await appendFile(path, line)
