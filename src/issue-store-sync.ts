@@ -641,6 +641,8 @@ export async function syncUpstreamState(
   // captured even when they don't alter the snapshot state we just diffed.
   await syncIssueEvents(s, gh, repo, result)
 
+  s.setSyncCursor(repo, "last_synced", new Date().toISOString())
+
   return result
 }
 
