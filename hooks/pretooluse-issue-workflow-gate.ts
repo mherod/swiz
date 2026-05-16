@@ -13,6 +13,11 @@
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
+import {
+  branchReferenceAliases,
+  branchReferencesAlign,
+  normalizeBranchReference,
+} from "../src/utils/branch-reference.ts"
 import { git, isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
@@ -35,12 +40,20 @@ const GH_ACTIVITY_RE =
 // git checkout/switch to an existing branch (not -b/-B): alignment commands
 const GIT_CHECKOUT_PLAIN_RE = /\bgit\s+(?:checkout|switch)\s+(?!-[bB])\S+/
 
-// PR head branch from transcript text (same patterns as pr-head-checkout-gate)
-const PR_HEAD_BRANCH_RE =
-  /\b(?:head\s*=\s*|head\s+branch\s*:\s*|PR\s+head\s*:\s*|head\s+ref\s*:\s*|headRefName["'\s]*:["'\s]*)([a-zA-Z0-9._/-]+)/i
+const BRANCH_VALUE_PATTERN = "[`'\"<]*([a-zA-Z0-9][a-zA-Z0-9._/-]*)[`'\">]*"
 
-// Target branch from transcript text (same pattern as branch-intent-gate)
-const TARGET_BRANCH_RE = /\btarget\s+branch[\s:]+([a-zA-Z0-9._/-]+)/i
+// PR head branch from transcript text (same patterns as pr-head-checkout-gate)
+const PR_HEAD_BRANCH_RE = new RegExp(
+  "\\b(?:head\\s*=\\s*|head\\s+branch\\s*:\\s*|PR\\s+head\\s*:\\s*|head\\s+ref\\s*:\\s*|headRefName[\"'\\s]*:[\"'\\s]*)" +
+    BRANCH_VALUE_PATTERN,
+  "i"
+)
+
+// Target branch from transcript text.
+const TARGET_BRANCH_RE = new RegExp(
+  `\\btarget\\s+branch\\b\\s*(?::|=|\\bis\\b)\\s*${BRANCH_VALUE_PATTERN}`,
+  "i"
+)
 
 // ── Transcript scanning ───────────────────────────────────────────────────────
 
@@ -56,8 +69,7 @@ interface ScanResult {
 function extractBranch(text: string, re: RegExp): string | null {
   const match = re.exec(text)
   if (!match) return null
-  const branch = (match[1] ?? "").replace(/["'>]+$/, "").trim()
-  return branch.length > 0 ? branch : null
+  return normalizeBranchReference(match[1] ?? "")
 }
 
 function scanLines(lines: string[]): ScanResult {
@@ -120,7 +132,10 @@ function isBlockedBashCommand(command: string): boolean {
 }
 
 function isCheckoutToBranch(command: string, branch: string): boolean {
-  return GIT_CHECKOUT_PLAIN_RE.test(command) && command.includes(branch)
+  return (
+    GIT_CHECKOUT_PLAIN_RE.test(command) &&
+    branchReferenceAliases(branch).some((b) => command.includes(b))
+  )
 }
 
 // ── Denial messages ───────────────────────────────────────────────────────────
@@ -242,13 +257,13 @@ export async function evaluateIssueWorkflowGate(input: unknown): Promise<SwizHoo
   if (!currentBranch) return {}
 
   // AC #3: Linked PR found — require PR branch checkout or routing to work-on-prs
-  if (prHeadBranch && currentBranch !== prHeadBranch && !routedToPrs) {
+  if (prHeadBranch && !branchReferencesAlign(currentBranch, prHeadBranch) && !routedToPrs) {
     if (isShell && isCheckoutToBranch(command, prHeadBranch)) return {}
     return preToolUseDeny(buildLinkedPrDenyMessage(currentBranch, prHeadBranch))
   }
 
   // AC #4: Target branch declared — require checkout alignment
-  if (targetBranch && currentBranch !== targetBranch) {
+  if (targetBranch && !branchReferencesAlign(currentBranch, targetBranch)) {
     if (isShell && isCheckoutToBranch(command, targetBranch)) return {}
     return preToolUseDeny(buildBranchAlignDenyMessage(currentBranch, targetBranch))
   }

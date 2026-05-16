@@ -391,6 +391,50 @@ describe("pretooluse-issue-workflow-gate", () => {
       expect(result.decision).toBeUndefined()
     })
 
+    test("allows Edit when target branch has sentence punctuation", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-issue"),
+        bashLine("git fetch origin --prune"),
+        textLine("Target branch: main.\nIntegration base: main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit when target branch is wrapped in a code span", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-issue"),
+        bashLine("git fetch origin --prune"),
+        textLine("Target branch: `main`.\nIntegration base: main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit when remote target branch matches local branch", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-issue"),
+        bashLine("git fetch origin --prune"),
+        textLine("Target branch: origin/main\nIntegration base: main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("ignores invalid target branch references instead of blocking", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-issue"),
+        bashLine("git fetch origin --prune"),
+        textLine("Target branch: main..topic\nIntegration base: main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
     test("allows git checkout to target branch", async () => {
       const repo = await makeRepo() // on main
       const tp = await makeTranscript(repo, [

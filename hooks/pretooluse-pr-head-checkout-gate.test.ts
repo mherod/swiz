@@ -223,6 +223,26 @@ describe("pretooluse-pr-head-checkout-gate", () => {
       expect(result.decision).toBeUndefined()
     })
 
+    test("allows Edit when declared PR head has sentence punctuation", async () => {
+      const repo = await makeRepo({ branch: "feat/pr-609" })
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-prs"),
+        textLine("Existing related PR: #609 head=feat/pr-609. base=main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit when declared PR head is a remote branch reference", async () => {
+      const repo = await makeRepo({ branch: "feat/pr-609" })
+      const tp = await makeTranscript(repo, [
+        skillLine("work-on-prs"),
+        textLine("Existing related PR: #609 head=origin/feat/pr-609 base=main"),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
+    })
+
     test("allows git commit when on PR head branch", async () => {
       const repo = await makeRepo({ branch: "feat/pr-609" })
       const tp = await makeTranscript(repo, [

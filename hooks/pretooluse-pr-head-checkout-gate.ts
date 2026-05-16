@@ -11,6 +11,11 @@
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
+import {
+  branchReferenceAliases,
+  branchReferencesAlign,
+  normalizeBranchReference,
+} from "../src/utils/branch-reference.ts"
 import { git, isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
@@ -30,8 +35,12 @@ const GIT_CHECKOUT_PLAIN_RE = /\bgit\s+(?:checkout|switch)\s+(?!-[bB])\S+/
 // Extracts the PR head branch from transcript text.
 // Matches: head=<branch>, head branch: <branch>, PR head: <branch>,
 //          headRefName: "<branch>", head ref: <branch>
-const PR_HEAD_BRANCH_RE =
-  /\b(?:head\s*=\s*|head\s+branch\s*:\s*|PR\s+head\s*:\s*|head\s+ref\s*:\s*|headRefName["'\s]*:["'\s]*)([a-zA-Z0-9._/-]+)/i
+const BRANCH_VALUE_PATTERN = "[`'\"<]*([a-zA-Z0-9][a-zA-Z0-9._/-]*)[`'\">]*"
+const PR_HEAD_BRANCH_RE = new RegExp(
+  "\\b(?:head\\s*=\\s*|head\\s+branch\\s*:\\s*|PR\\s+head\\s*:\\s*|head\\s+ref\\s*:\\s*|headRefName[\"'\\s]*:[\"'\\s]*)" +
+    BRANCH_VALUE_PATTERN,
+  "i"
+)
 
 // ── Transcript scanning ───────────────────────────────────────────────────────
 
@@ -54,8 +63,7 @@ function detectWorkflowSkill(content: unknown[]): boolean {
 function extractHeadBranchFromText(text: string): string | null {
   const match = PR_HEAD_BRANCH_RE.exec(text)
   if (!match) return null
-  const branch = (match[1] ?? "").replace(/["'>]+$/, "").trim()
-  return branch.length > 0 ? branch : null
+  return normalizeBranchReference(match[1] ?? "")
 }
 
 function scanLines(lines: string[]): ScanResult {
@@ -102,7 +110,10 @@ function isBlockedBashCommand(command: string): boolean {
 }
 
 function isCheckoutToPrHead(command: string, prHeadBranch: string): boolean {
-  return GIT_CHECKOUT_PLAIN_RE.test(command) && command.includes(prHeadBranch)
+  return (
+    GIT_CHECKOUT_PLAIN_RE.test(command) &&
+    branchReferenceAliases(prHeadBranch).some((branch) => command.includes(branch))
+  )
 }
 
 // ── Denial message ────────────────────────────────────────────────────────────
@@ -168,7 +179,7 @@ export async function evaluatePretoolusePrHeadCheckoutGate(
 
   const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
   if (!currentBranch) return {}
-  if (currentBranch === prHeadBranch) return {}
+  if (branchReferencesAlign(currentBranch, prHeadBranch)) return {}
 
   // Checkout/switch TO the PR head branch is always allowed
   if (isShell && isCheckoutToPrHead(command, prHeadBranch)) return {}
