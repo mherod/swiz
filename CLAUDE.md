@@ -142,8 +142,8 @@ alwaysApply: false
 - Pre-push: `/push`; `git log origin/main..HEAD`; branch+PR check; capture SHA; `git push`; `gh run list --commit "$SHA" --limit 15`; `gh run watch`; `gh run view --json conclusion,status,jobs`.
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
-- No `--no-verify`; pre-push runs `bun test`; CI: `lint → typecheck → test`. If `bun test` fails with `proc.stdin.write` TypeError (`Bun.spawn` exhaustion), run failing test in isolation; if pass, retry.
-- **DO**: After push: verify CI once with `gh run view --json` (not `gh run watch` alone); `in_progress` is acceptable — pre-push ran full test suite. Update tasks before stop.
+- No `--no-verify`; pre-push runs `bun test`; CI: `lint → typecheck → test`. If `bun test` fails with `proc.stdin.write` TypeError or `ReferenceError: Cannot access 'default' before initialization`, run failing test in isolation; if pass, retry.
+- **DO**: After push: verify CI once with `gh run view --json`; `in_progress` is acceptable — pre-push ran full test suite. Update tasks before stop.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
 - DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
 - `swiz settings` tests are flaky in CI (20–30s subprocess-spawn timeouts); pre-existing, not regressions from code changes (confirmed on doc-only commits, run IDs 25944297820, 25944269296). Don't chase settings timeouts as caused by recent work.
