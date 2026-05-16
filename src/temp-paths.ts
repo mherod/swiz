@@ -4,9 +4,8 @@
  */
 
 import { tmpdir } from "node:os"
-import { join } from "node:path"
 
-export const TMP_ROOT = "/tmp"
+export const TMP_ROOT = tmpdir()
 
 /** Incoming dispatch payload dumps (on by default; disable with `SWIZ_CAPTURE_INCOMING=0`). See `incoming-capture.ts`. */
 export const SWIZ_INCOMING_ROOT = `${TMP_ROOT}/swiz-incoming`
@@ -72,7 +71,7 @@ export function swizPseudoHookLogPath(): string {
 }
 
 export function stopIncompleteTasksLogPath(): string {
-  return join(tmpdir(), "swiz-logging.log")
+  return `${TMP_ROOT}/swiz-logging.log`
 }
 
 export function stopAutoContSuggestionsPath(safeSession: string): string {
