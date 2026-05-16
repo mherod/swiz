@@ -96,8 +96,18 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
         "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes."
       )
 
-      // Merge action plan steps into tasks
+      // Issues steps (follow-up/backlog work) are only merged into the task buffer when this
+      // session is project-affiliated — i.e. the agent has already been working in this repo.
+      // Git and CI steps always merge because they represent current-session work.
+      let shouldMergeTasks = false
+      const { getSessionIdsForProject } = await import("../../src/tasks/task-resolver.ts")
+      const { projectKeyFromCwd } = await import("../../src/project-key.ts")
+      const projectKey = projectKeyFromCwd(cwd)
+      const projectSessionIds = await getSessionIdsForProject(projectKey)
+      shouldMergeTasks = projectSessionIds.has(sessionId)
+
       for (const step of result.steps) {
+        if (step.kind === "issues" && !shouldMergeTasks) continue
         await mergeActionPlanIntoTasks(step.planSteps, sessionId, cwd)
       }
 
