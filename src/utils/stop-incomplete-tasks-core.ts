@@ -197,9 +197,7 @@ export async function checkIncompleteTasks(
     `BLOCK: ${incompleteDetails.length} incomplete (session=${sessionId.slice(0, 8)}): ${incompleteDetails.join("; ")}`
   )
 
-  const sourceCtx = tasksDir
-    ? `Task files location: ${tasksDir} — use ${getTaskToolName("TaskUpdate")} to update status, not direct file edits`
-    : `Session: ${sessionId.slice(0, 8)}... — use ${getTaskToolName("TaskUpdate")} to update status`
+  const sourceCtx = `Use ${getTaskToolName("TaskList")} to review tasks, then ${getTaskToolName("TaskUpdate")} to update their status.`
 
   return blockStopObj(
     formatActionPlan(
