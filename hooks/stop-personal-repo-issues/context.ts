@@ -100,7 +100,8 @@ export function buildStopContext(
   ctx: RepoContext,
   gathered: Awaited<ReturnType<typeof gatherStopContext>>,
   projectState: ProjectState | null,
-  strictNoDirectMain: boolean
+  strictNoDirectMain: boolean,
+  defaultBranch: string
 ): StopContext | null {
   const total =
     gathered.sortedIssues.length + gathered.sortedRefinement.length + gathered.blockedIssues.length
@@ -117,5 +118,6 @@ export function buildStopContext(
     firstRefinementNum: gathered.sortedRefinement[0]?.number,
     firstIssueNum: gathered.sortedIssues[0]?.number,
     strictNoDirectMain,
+    defaultBranch,
   }
 }

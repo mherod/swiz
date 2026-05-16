@@ -2,6 +2,7 @@ import type { ActionPlanItem } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../../src/schemas.ts"
 import { readProjectState } from "../../src/settings.ts"
+import { getDefaultBranch } from "../../src/utils/git-utils.ts"
 import { blockStopObj, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import { buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
 import {
@@ -38,8 +39,8 @@ export async function collectPersonalRepoIssuesStopParsed(
     const settings = getEffectiveSwizSettings(await readSwizSettings(), ctx.sessionId)
     const strictNoDirectMain = settings.strictNoDirectMain
 
-    // Parallelize: project state + issue gathering (independent)
-    const [projectState, gathered] = await Promise.all([
+    // Parallelize: project state + issue gathering + default branch (independent)
+    const [projectState, gathered, defaultBranch] = await Promise.all([
       readProjectState(ctx.cwd),
       gatherStopContext(
         ctx.cwd,
@@ -48,8 +49,9 @@ export async function collectPersonalRepoIssuesStopParsed(
         false, // hasChangesRequested: handled by stop-pr-feedback
         new Set() // allOpenPRIssueNumbers: handled by stop-pr-feedback
       ),
+      getDefaultBranch(ctx.cwd),
     ])
-    const stopCtx = buildStopContext(ctx, gathered, projectState, strictNoDirectMain)
+    const stopCtx = buildStopContext(ctx, gathered, projectState, strictNoDirectMain, defaultBranch)
     if (!stopCtx) return null
 
     const planSteps = buildStopPlanSteps(stopCtx)

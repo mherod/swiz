@@ -61,7 +61,7 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   }
   subSteps.push(
     `Claim ownership: gh issue edit ${issueNum} --add-assignee @me`,
-    "Verify branch starting point: git branch --show-current (must be main), git pull --rebase --autostash",
+    `Verify branch starting point: git branch --show-current, then check out the correct base (default: ${ctx.defaultBranch}; or an existing feature branch / PR head if one exists for this issue), git pull --rebase --autostash`,
     `Plan with ${getTaskToolName("TaskCreate")} before touching any code for issue #${issueNum}`,
     `Check for blockers on #${issueNum}: inspect labels and body for blocked/depends-on references`,
     "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --concurrent",

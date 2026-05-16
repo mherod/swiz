@@ -611,6 +611,29 @@ describe("E2E stop-personal-repo-issues: PR fixtures are isolated from the issue
     expect(result.reason).toContain("#30")
   })
 
+  test("branch guidance never contains hardcoded 'must be main'", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-nobranch", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [],
+      issues: [makeIssue(40, "Some issue", ["bug", "ready", "priority-high"])],
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).not.toContain("must be main")
+  })
+
+  test("branch guidance contains the resolved default branch name", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-branchname", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [],
+      issues: [makeIssue(41, "Some issue", ["bug", "ready", "priority-high"])],
+    })
+    expect(result.blocked).toBe(true)
+    // getDefaultBranch falls back to "main" when origin/HEAD is not configured
+    expect(result.reason).toMatch(/default: main|default: master/)
+  })
+
   test("conflicting PR fixtures alone do not block the issue hook", async () => {
     const dir = await createGitRepoWithGitHubRemote("-conflictbookends", "testuser", "myrepo")
     const result = await runHook(dir, {

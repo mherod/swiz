@@ -31,6 +31,8 @@ export interface StopContext {
   firstIssueNum?: number
   /** When true, omit "merge existing PR" guidance from issue-pickup steps. */
   strictNoDirectMain: boolean
+  /** Resolved default branch for this repo (e.g. "main", "dev", "master"). */
+  defaultBranch: string
 }
 
 export interface RepoContext {
