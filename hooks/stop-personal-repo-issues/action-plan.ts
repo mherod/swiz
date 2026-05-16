@@ -26,9 +26,11 @@ function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
   if (skillExists("refine-issue"))
     subSteps.push(`/refine-issue${refineArg} — Refine the next issue needing attention`)
   subSteps.push(
-    "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, accepted), Priority (priority-high, priority-medium, priority-low)",
+    "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, backlog), Priority (priority-high, priority-medium, priority-low)",
     "Run gh label list to check available labels",
-    'Label issues: gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
+    "Choose readiness based on intent: immediate pickup → ready; needs more detail → triaged; future/follow-up work → backlog",
+    'Example (immediate work): gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-refinement"',
+    'Example (follow-up/future): gh issue edit <number> --add-label "enhancement,backlog,priority-medium" --remove-label "needs-refinement"',
     "Rule: If you created the issue, NEVER add new comments — always edit the original issue body instead"
   )
   return [
@@ -90,7 +92,7 @@ function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
   subSteps.push(
     `Read the latest comments on #${blockedNum} to understand the block reason — dependencies, upstream issues, or missing information`,
     `Check if the blocking condition has been resolved (e.g., dependency issue closed, upstream fix merged)`,
-    `If unblockable: remove the block label and add a readiness label: gh issue edit ${blockedNum} --remove-label "blocked" --add-label "ready"`,
+    `If unblockable: remove the block label and choose readiness (ready for immediate pickup, backlog for future work): gh issue edit ${blockedNum} --remove-label "blocked" --add-label "ready"`,
     `If still blocked: document current status in a comment and move to the next blocked issue`
   )
   if (skillExists("refine-issue"))

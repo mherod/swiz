@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { extractOwnerFromUrl } from "../src/utils/hook-utils.ts"
+import { buildStopPlanSteps } from "./stop-personal-repo-issues/action-plan.ts"
 import { filterVisibleIssues } from "./stop-personal-repo-issues/issues.ts"
+import type { StopContext } from "./stop-personal-repo-issues/types.ts"
 import {
   type Issue,
   missingRefinementCategories,
@@ -1252,5 +1254,55 @@ describe("filterVisibleIssues (production) — backlog label exclusion (#618)", 
 
   test("excludes issue with backlog + bug", () => {
     expect(filterVisibleIssues([makeIssue(["backlog", "bug"])])).toHaveLength(0)
+  })
+})
+
+describe("buildStopPlanSteps refinement guidance — no hardcoded ready labels (#616)", () => {
+  function makeRefinementCtx(overrides?: Partial<StopContext>): StopContext {
+    return {
+      cwd: "/tmp/test",
+      sessionId: "test-session",
+      isPersonalRepo: true,
+      projectState: null,
+      sortedRefinement: [{ number: 99, title: "Follow-up: add rate limiting", labels: [] }],
+      sortedIssues: [],
+      blockedIssues: [],
+      firstRefinementNum: 99,
+      firstIssueNum: undefined,
+      strictNoDirectMain: false,
+      defaultBranch: "main",
+      ...overrides,
+    }
+  }
+
+  test("refinement guidance includes backlog example", () => {
+    const ctx = makeRefinementCtx()
+    const steps = buildStopPlanSteps(ctx)
+    const flat = JSON.stringify(steps)
+    expect(flat).toContain("backlog")
+  })
+
+  test("refinement guidance does not hardcode bug,ready,priority-high as the only example", () => {
+    const ctx = makeRefinementCtx()
+    const steps = buildStopPlanSteps(ctx)
+    const flat = JSON.stringify(steps)
+    // Must not emit the old single-example pattern that always uses "ready"
+    expect(flat).not.toContain('"bug,ready,priority-high"')
+  })
+
+  test("refinement guidance uses needs-refinement not needs-triage", () => {
+    const ctx = makeRefinementCtx()
+    const steps = buildStopPlanSteps(ctx)
+    const flat = JSON.stringify(steps)
+    expect(flat).not.toContain("needs-triage")
+    expect(flat).toContain("needs-refinement")
+  })
+
+  test("refinement guidance explains readiness choice (ready vs backlog)", () => {
+    const ctx = makeRefinementCtx()
+    const steps = buildStopPlanSteps(ctx)
+    const flat = JSON.stringify(steps)
+    expect(flat).toContain("ready")
+    expect(flat).toContain("backlog")
   })
 })
