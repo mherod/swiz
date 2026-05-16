@@ -513,6 +513,65 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).not.toContain("recent context")
   })
 
+  test("still denies Bash when canonical TaskList sync is missing and tasks are healthy", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-missing-tasklist-sync-healthy-bash-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "3",
+      subject: "Follow-up step",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+      seedFreshTaskListSync: false,
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("task state before Bash")
+    expect(result.reason).toContain("Run TaskList now")
+  })
+
+  test("allows Write when canonical TaskList sync is missing and tasks are healthy", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-missing-tasklist-sync-healthy-write-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "3",
+      subject: "Follow-up step",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Write",
+      sessionId,
+      content: "export const value = 1",
+      seedFreshTaskListSync: false,
+    })
+    expect(result.decision).toBeUndefined()
+  })
+
   test("denies when canonical TaskList sync is older than 5 minutes", async () => {
     const homeDir = await createTempHome()
     const sessionId = `session-stale-tasklist-sync-${Date.now()}`

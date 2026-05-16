@@ -9,15 +9,36 @@
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { resolveSafeSessionId } from "../src/session-id.ts"
+import { hadHealthyPendingTaskBufferBeforeTaskCreate } from "../src/tasks/task-buffer-health.ts"
+import { readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
 
-export function evaluatePosttooluseTaskSubjectValidation(input: unknown): SwizHookOutput {
+async function sessionHadHealthyPendingBufferBeforeCreate(
+  sessionId: string | undefined,
+  subject: string
+): Promise<boolean> {
+  try {
+    const safeSessionId = resolveSafeSessionId(sessionId)
+    if (!safeSessionId) return false
+    const tasks = await readSessionTasksFresh(safeSessionId)
+    return hadHealthyPendingTaskBufferBeforeTaskCreate(tasks, subject)
+  } catch {
+    return false
+  }
+}
+
+export async function evaluatePosttooluseTaskSubjectValidation(
+  input: unknown
+): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
   const subject = String(parsed.tool_input?.subject ?? "")
 
   const result = detect(subject)
   if (!result.matched) return {}
+
+  if (await sessionHadHealthyPendingBufferBeforeCreate(parsed.session_id, subject)) return {}
 
   const message = formatMessage(
     result,

@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
-import { homedir } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeTask } from "../src/utils/test-utils.ts"
 import {
@@ -12,20 +12,47 @@ import {
   getInProgressCap,
 } from "./pretooluse-task-governance.ts"
 
-const HOME = homedir()
+const TASK_HOME = join(
+  tmpdir(),
+  `swiz-task-governance-dispatch-${process.pid}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`
+)
+
+afterAll(async () => {
+  await rm(TASK_HOME, { recursive: true, force: true })
+})
 
 async function seedInProgressTasks(sessionId: string, count: number): Promise<void> {
   for (let i = 1; i <= count; i++) {
-    await writeTask(HOME, sessionId, { id: String(i), subject: `Task ${i}`, status: "in_progress" })
+    await writeTask(TASK_HOME, sessionId, {
+      id: String(i),
+      subject: `Task ${i}`,
+      status: "in_progress",
+    })
   }
 }
 
 async function seedPendingTask(sessionId: string, id: string): Promise<void> {
-  await writeTask(HOME, sessionId, { id, subject: "Pending task", status: "pending" })
+  await writeTask(TASK_HOME, sessionId, { id, subject: "Pending task", status: "pending" })
+}
+
+async function seedPendingTasks(sessionId: string, count: number): Promise<void> {
+  for (let i = 1; i <= count; i++) {
+    await writeTask(TASK_HOME, sessionId, {
+      id: String(i),
+      subject: `Pending task ${i}`,
+      status: "pending",
+    })
+  }
 }
 
 async function cleanupSession(sessionId: string): Promise<void> {
-  await rm(join(HOME, ".claude", "tasks", sessionId), { recursive: true, force: true })
+  await rm(join(TASK_HOME, ".claude", "tasks", sessionId), { recursive: true, force: true })
+}
+
+function uniqueSessionId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function permissionDecision(result: unknown): string | undefined {
@@ -108,19 +135,59 @@ describe("evaluateTaskCreatePath", () => {
   test("denies an obviously compound subject when no session task buffer exists", async () => {
     // Use a session id that maps to no on-disk tasks so the duplicate check is a no-op
     // and the compound detector is the only decision-maker.
-    const sessionId = `pgrep-dispatch-test-${Date.now()}`
-    const input = { tool_name: "TaskCreate", session_id: sessionId }
-    const result = await evaluateTaskCreatePath(input, {
-      subject: "add user login and fix typo in header",
-    })
-    expect(permissionDecision(result)).toBe("deny")
+    const sessionId = uniqueSessionId("pgrep-dispatch-test")
+    try {
+      await cleanupSession(sessionId)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, {
+        subject: "add user login and fix typo in header",
+      })
+      expect(permissionDecision(result)).toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 
   test("allows a simple, focused subject", async () => {
-    const sessionId = `pgrep-dispatch-test-allow-${Date.now()}`
-    const input = { tool_name: "TaskCreate", session_id: sessionId }
-    const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
-    expect(permissionDecision(result)).toBe("allow")
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-allow")
+    try {
+      await cleanupSession(sessionId)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, { subject: "fix login bug" })
+      expect(permissionDecision(result)).toBe("allow")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("allows a compound subject when pending task buffer is healthy", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-buffer")
+    try {
+      await cleanupSession(sessionId)
+      await seedPendingTasks(sessionId, 2)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, {
+        subject: "add user login and fix typo in header",
+      })
+      expect(permissionDecision(result)).toBe("allow")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies a compound subject when only an in-progress task exists", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-inprogress")
+    try {
+      await cleanupSession(sessionId)
+      await seedInProgressTasks(sessionId, 1)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, {
+        subject: "add user login and fix typo in header",
+      })
+      expect(permissionDecision(result)).toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 })
 
@@ -137,40 +204,67 @@ describe("checkInProgressTransitionCap boundary (via evaluateNativeTaskUpdatePat
   const CAP = getInProgressCap()
 
   test("allows transition when 0 tasks are in_progress", async () => {
-    const sessionId = `cap-boundary-0-${Date.now()}`
-    await seedPendingTask(sessionId, "1")
-    const toolInput = { taskId: "1", status: "in_progress" }
-    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
-    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
-    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
-    await cleanupSession(sessionId)
-    expect(permissionDecision(result)).not.toBe("deny")
+    const sessionId = uniqueSessionId("cap-boundary-0")
+    try {
+      await cleanupSession(sessionId)
+      await seedPendingTask(sessionId, "1")
+      const toolInput = { taskId: "1", status: "in_progress" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 
   test(`allows transition when ${CAP - 1} tasks are in_progress (cap - 1)`, async () => {
-    const sessionId = `cap-boundary-${CAP - 1}-${Date.now()}`
-    await seedInProgressTasks(sessionId, CAP - 1)
-    const pendingId = String(CAP)
-    await seedPendingTask(sessionId, pendingId)
-    const toolInput = { taskId: pendingId, status: "in_progress" }
-    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
-    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
-    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
-    await cleanupSession(sessionId)
-    expect(permissionDecision(result)).not.toBe("deny")
+    const sessionId = uniqueSessionId(`cap-boundary-${CAP - 1}`)
+    try {
+      await cleanupSession(sessionId)
+      await seedInProgressTasks(sessionId, CAP - 1)
+      const pendingId = String(CAP)
+      await seedPendingTask(sessionId, pendingId)
+      const toolInput = { taskId: pendingId, status: "in_progress" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 
   test(`denies transition when ${CAP} tasks are already in_progress (at cap)`, async () => {
-    const sessionId = `cap-boundary-${CAP}-${Date.now()}`
-    await seedInProgressTasks(sessionId, CAP)
-    const pendingId = String(CAP + 1)
-    await seedPendingTask(sessionId, pendingId)
-    const toolInput = { taskId: pendingId, status: "in_progress" }
-    const input = { session_id: sessionId, tool_name: "TaskUpdate", tool_input: toolInput }
-    const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
-    const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
-    await cleanupSession(sessionId)
-    expect(permissionDecision(result)).toBe("deny")
-    expect(decisionReason(result)).toContain(String(CAP))
+    const sessionId = uniqueSessionId(`cap-boundary-${CAP}`)
+    try {
+      await cleanupSession(sessionId)
+      await seedInProgressTasks(sessionId, CAP)
+      const pendingId = String(CAP + 1)
+      await seedPendingTask(sessionId, pendingId)
+      const toolInput = { taskId: pendingId, status: "in_progress" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain(String(CAP))
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 })

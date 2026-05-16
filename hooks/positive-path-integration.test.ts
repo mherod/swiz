@@ -528,6 +528,31 @@ describe("posttooluse-task-subject-validation: positive paths", () => {
     expect(r.json?.reason).toContain("Delete this task")
   })
 
+  test("compound subject produces no block when pending buffer was already healthy", async () => {
+    const home = await createTempDir()
+    const sessionId = `post-compound-buffer-${Date.now()}`
+    const subject = "Fix authentication and update deploy pipeline"
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Verify behavior",
+      status: "pending",
+    })
+    await createTaskFile(home, sessionId, { id: "2", subject: "Review CI", status: "pending" })
+    await createTaskFile(home, sessionId, { id: "3", subject, status: "pending" })
+
+    const r = await runHook(
+      HOOK,
+      {
+        tool_name: "TaskCreate",
+        session_id: sessionId,
+        tool_input: { subject },
+      },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toBe("")
+  })
+
   test("subject with 3+ comma-separated items emits block", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",

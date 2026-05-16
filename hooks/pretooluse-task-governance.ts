@@ -27,6 +27,10 @@ import {
   readSwizSettings,
 } from "../src/settings.ts"
 import {
+  hasHealthyPendingTaskBuffer,
+  hasHealthyTaskBuffer,
+} from "../src/tasks/task-buffer-health.ts"
+import {
   isBlockedSwizTaskFilesCommand,
   isBlockedSwizTasksCliCommand,
   isBlockedTaskFilePath,
@@ -79,6 +83,7 @@ import {
   getCurrentSessionTaskToolStats,
   hasFileInTree,
   isEditTool,
+  isFileEditTool,
   isGitRepo,
   isShellTool,
   isTaskCreateTool,
@@ -115,6 +120,11 @@ function taskUpdateToolName(): string {
 
 function taskCreateToolName(): string {
   return getTaskToolName("TaskCreate")
+}
+
+function taskHomeForInput(input: Record<string, any>): string | undefined {
+  const value = input._taskHome
+  return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
 function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresholds {
@@ -179,37 +189,35 @@ export const taskSubjectValidationHook: SwizToolHook = {
     const result = detect(subject)
     if (!result.matched) return preToolUseAllow()
 
-    if (await sessionHasHealthyTaskBuffer(input)) {
-      const note =
-        "Compound subject allowed: session task health is good (≥2 pending or ≥1 in_progress). " +
-        "Consider splitting follow-up work into focused tasks anyway."
-      return preToolUseAllowWithContext(note, note)
-    }
+    if (await sessionHasHealthyPendingTaskBuffer(input)) return allowCompoundSubjectWithBuffer()
 
     return preToolUseDeny(formatMessage(result))
   },
 }
 
 /**
- * Returns true when the session already has enough task buffer to absorb a
- * compound subject without losing planning fidelity: at least 2 pending tasks
- * OR at least 1 in_progress task.
+ * Returns true when the session already has enough pending task buffer to
+ * absorb a compound subject without losing planning fidelity.
  */
-async function sessionHasHealthyTaskBuffer(input: Record<string, any>): Promise<boolean> {
+async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): Promise<boolean> {
   try {
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     if (!sessionId) return false
-    const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
-    let pending = 0
-    let inProgress = 0
-    for (const t of allTasks) {
-      if (t.status === "pending") pending++
-      else if (t.status === "in_progress") inProgress++
-    }
-    return pending >= 2 || inProgress >= 1
+    const allTasks = overlayEventState(
+      await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
+      sessionId
+    )
+    return hasHealthyPendingTaskBuffer(allTasks)
   } catch {
     return false
   }
+}
+
+function allowCompoundSubjectWithBuffer(): SwizHookOutput {
+  const note =
+    "Compound subject allowed: session already has a healthy pending task buffer (≥2 pending tasks). " +
+    "Consider splitting follow-up work into focused tasks anyway."
+  return preToolUseAllowWithContext(note, note)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -523,7 +531,8 @@ async function checkTaskStaleness(
 
 async function checkCanonicalTaskListSync(
   toolName: string,
-  sessionId: string
+  sessionId: string,
+  allTasks: Array<{ id: string; status: string; subject: string }>
 ): Promise<SwizHookOutput | undefined> {
   if (isTaskListTool(toolName) || isTaskCreateTool(toolName)) return undefined
 
@@ -532,6 +541,7 @@ async function checkCanonicalTaskListSync(
   if (ageMs !== null && ageMs <= CANONICAL_TASKLIST_SYNC_MAX_AGE_MS) {
     return undefined
   }
+  if (isFileEditTool(toolName) && hasHealthyTaskBuffer(allTasks)) return undefined
 
   return preToolUseDeny(
     buildTaskGovernanceMessage({
@@ -750,8 +760,11 @@ function checkDuplicateSubjectResolution(
   return buildDuplicateSubjectStateBlock(toolName, groups)
 }
 
-async function readTaskSubjectEntries(sessionId: string): Promise<TaskSubjectEntry[]> {
-  return overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+async function readTaskSubjectEntries(
+  sessionId: string,
+  home?: string
+): Promise<TaskSubjectEntry[]> {
+  return overlayEventState(await readSessionTasksFresh(sessionId, home), sessionId)
 }
 
 async function checkTaskCreateSubjectGovernance(
@@ -761,7 +774,7 @@ async function checkTaskCreateSubjectGovernance(
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) return undefined
 
-  const allTasks = await readTaskSubjectEntries(sessionId)
+  const allTasks = await readTaskSubjectEntries(sessionId, taskHomeForInput(input))
   const duplicateState = checkDuplicateSubjectResolution(
     String(input.tool_name ?? "TaskCreate"),
     input,
@@ -778,7 +791,7 @@ async function checkTaskUpdateSubjectGovernance(
   input: Record<string, any>,
   sessionId: string
 ): Promise<SwizHookOutput | undefined> {
-  const allTasks = await readTaskSubjectEntries(sessionId)
+  const allTasks = await readTaskSubjectEntries(sessionId, taskHomeForInput(input))
   const duplicateState = checkDuplicateSubjectResolution("TaskUpdate", input, allTasks)
   if (duplicateState) return duplicateState
 
@@ -830,7 +843,7 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
 
-  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId)
+  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, allTasks)
   if (taskListSyncOutcome) return taskListSyncOutcome
 
   const pendingOverflowOutcome = checkPendingOverflow(toolName, allTasks)
@@ -1125,9 +1138,10 @@ async function handleTaskCompletion(
 
 async function checkInProgressTransitionCap(
   taskId: string,
-  sessionId: string
+  sessionId: string,
+  home?: string
 ): Promise<SwizHookOutput | null> {
-  const allTasks = await readSessionTasks(sessionId)
+  const allTasks = await readSessionTasks(sessionId, home)
   const inProgressCount = allTasks.filter((t) => t.status === "in_progress").length
   const currentTask = allTasks.find((t) => t.id === taskId)
 
@@ -1181,10 +1195,11 @@ async function checkNativeTaskUpdateCompletion(
   }
 
   if (toolInput.status === "in_progress") {
-    const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId)
+    const taskHome = taskHomeForInput(input)
+    const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, taskHome)
     if (transitionDenied) return transitionDenied
     // Optimistically record in event state + cache for parallel TOCTOU safety.
-    const allTasks = await readSessionTasks(sessionId)
+    const allTasks = await readSessionTasks(sessionId, taskHome)
     const currentTask = allTasks.find((t) => t.id === taskId)
     if (currentTask && currentTask.status !== "in_progress") {
       applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
@@ -1343,7 +1358,7 @@ export async function evaluateNativeTaskUpdatePath(
 /**
  * TaskCreate / TodoWrite branch. Enforces subject governance (duplicate
  * detection) and rejects compound or task-shaped subjects via the central
- * subject detector.
+ * subject detector unless the pending task buffer is already healthy.
  */
 export async function evaluateTaskCreatePath(
   input: Record<string, any>,
@@ -1355,6 +1370,7 @@ export async function evaluateTaskCreatePath(
 
   const result = detect(subject)
   if (result.matched) {
+    if (await sessionHasHealthyPendingTaskBuffer(input)) return allowCompoundSubjectWithBuffer()
     return preToolUseDeny(formatMessage(result))
   }
   return preToolUseAllow()

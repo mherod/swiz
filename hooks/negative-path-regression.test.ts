@@ -351,9 +351,9 @@ describe("pretooluse-task-subject-validation", () => {
     expect(r.stdout).not.toContain('"deny"')
   })
 
-  test("compound subject is allowed when session has 1+ in_progress task", async () => {
+  test("compound subject is denied when session has only an in_progress task", async () => {
     const home = await createTempDir()
-    const sessionId = "compound-relax-inprogress"
+    const sessionId = "compound-deny-inprogress"
     const sessionDir = join(home, ".claude", "tasks", sessionId)
     const { mkdir, writeFile } = await import("node:fs/promises")
     await mkdir(sessionDir, { recursive: true })
@@ -372,7 +372,7 @@ describe("pretooluse-task-subject-validation", () => {
       { HOME: home, CLAUDECODE: "1" }
     )
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).not.toContain('"deny"')
+    expect(r.stdout).toContain('"deny"')
   })
 
   test("duplicate active subject is denied with direct repair guidance", async () => {

@@ -8,6 +8,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeTranscript, type SimpleHookResult } from "../src/utils/test-utils.ts"
 
+const BUN_EXE = Bun.which("bun") ?? "bun"
+const WORKSPACE_ROOT = process.cwd()
+const HOOK_SCRIPT = join(WORKSPACE_ROOT, "hooks/pretooluse-block-preexisting-dismissals.ts")
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Build a JSONL entry for a shell tool_use + its tool_result. */
@@ -98,14 +102,18 @@ async function runHook(opts: {
     cwd: tmpDir,
   })
 
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-block-preexisting-dismissals.ts"], {
+  const proc = Bun.spawn([BUN_EXE, HOOK_SCRIPT], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    cwd: WORKSPACE_ROOT,
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
+  const [out] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
 
   if (!out.trim()) return { blocked: false, reason: "" }
@@ -416,14 +424,18 @@ describe("pretooluse-block-preexisting-dismissals", () => {
         cwd: nonGitDir,
       })
 
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-block-preexisting-dismissals.ts"], {
+      const proc = Bun.spawn([BUN_EXE, HOOK_SCRIPT], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        cwd: WORKSPACE_ROOT,
       })
       await proc.stdin.write(payload)
       await proc.stdin.end()
-      const out = await new Response(proc.stdout).text()
+      const [out] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
       await proc.exited
 
       expect(out.trim()).toBe("")
