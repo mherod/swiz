@@ -173,6 +173,48 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
   })
 })
 
+describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
+  test("allows cat of a skill file under ~/.claude/skills/ (current skill root)", async () => {
+    const result = await runPinnedHomeBashHook(
+      `cat ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows cat of a skill file under ~/.cursor/skills/ (alternate skill root)", async () => {
+    const result = await runPinnedHomeBashHook(
+      `cat ${join(TEST_HOME, ".cursor", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("allow")
+  })
+
+  test("blocks writes to skill files under ~/.claude/skills/", async () => {
+    const result = await runPinnedHomeBashHook(
+      `echo "# Modified" > ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks writes to skill files under alternate skill root ~/.cursor/skills/", async () => {
+    const result = await runPinnedHomeBashHook(
+      `echo "# Modified" > ${join(TEST_HOME, ".cursor", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("deny")
+  })
+
+  test("denial message for blocked skill-path write mentions read-only alternatives and skill roots", async () => {
+    const result = await runPinnedHomeBashHook(
+      `echo "# Modified" > ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("deny")
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
+    const reason =
+      ((parsed.hookSpecificOutput as Record<string, any>)?.permissionDecisionReason as string) ?? ""
+    expect(reason).toContain("skill")
+    expect(reason).toContain("read-only")
+  })
+})
+
 describe("pretooluse-protect-sandbox (file edits)", () => {
   test("blocks Edit to .swiz/config.json", async () => {
     const result = await runFileEditHook(HOOK, {

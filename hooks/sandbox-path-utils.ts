@@ -20,9 +20,10 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
 ])
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
-  "If you only need to inspect the target, use Read or a read-only shell command instead of Edit/Write.",
-  "Safe examples: cat, head, tail, grep, rg, and sed -n.",
-  "Do not append writes, tees, redirects, or command chaining when you only need a read.",
+  "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n).",
+  "Skill files under configured skill roots (e.g., ~/.claude/skills/, ~/.cursor/skills/) are readable with those commands.",
+  "Use the local .skills/ copy when the global path is not accessible.",
+  "Do not chain writes, tees, redirects, or command substitution when you only need a read.",
 ].join(" ")
 
 function sanitizeShellCommand(command: string): string {
