@@ -15,7 +15,7 @@ import {
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 const WINDOW_MS = 20 * 60 * 1000
-const EDIT_LIMIT = 5
+const EDIT_LIMIT = 8
 const BASH_FAILURE_LIMIT = 3
 const COMMAND_KEY_LENGTH = 60
 const UNBLOCK_SKILL = ["un", "block-myself"].join("")

@@ -103,7 +103,7 @@ async function withTranscript<T>(lines: string[], fn: (path: string) => Promise<
 
 describe("pretooluse-stuck-state", () => {
   test("repeat-edit without commit blocks", async () => {
-    const lines = Array.from({ length: 5 }, (_, index) => {
+    const lines = Array.from({ length: 8 }, (_, index) => {
       const id = `edit-${index}`
       return [
         assistantTool(id, "Edit", { file_path: "src/app.ts" }, 19 - index),
@@ -118,7 +118,7 @@ describe("pretooluse-stuck-state", () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.reason).toContain("same file edited 6 times in 20 minutes without commit")
+      expect(result.reason).toContain("same file edited 9 times in 20 minutes without commit")
       expect(result.reason).toContain("/unblock-myself")
     })
   })
