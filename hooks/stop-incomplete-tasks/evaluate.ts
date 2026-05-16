@@ -8,6 +8,7 @@ import { agentHasTaskToolsForHookPayload, isCurrentAgent } from "../../src/agent
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { promoteNextTaskFromIssues } from "../../src/tasks/task-service.ts"
+import { sessionTaskSentinelPath } from "../../src/temp-paths.ts"
 import {
   deduplicateStaleTasks,
   getIncompleteDetails,
@@ -20,6 +21,15 @@ import {
   isDeferredSubject,
   stripDeferralPrefix,
 } from "./incomplete-check-validator.ts"
+
+const SHIP_CHECKLIST_SENTINEL_KEY = "stop-ship-checklist-task-created"
+
+async function hasShipChecklistSentinel(sessionId: string): Promise<boolean> {
+  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  if (!safeSession) return false
+  const path = sessionTaskSentinelPath(SHIP_CHECKLIST_SENTINEL_KEY, safeSession)
+  return await Bun.file(path).exists()
+}
 
 /**
  * Evaluate incomplete tasks and return blocking output or empty object.
@@ -46,9 +56,13 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   // Re-filter after deduplication
   const remainingIncomplete = filterIncompleteStatus(ctx.allTasks)
   if (remainingIncomplete.length === 0) {
-    // Zero incomplete tasks is a governance violation — the task system enforces
-    // ≥2 incomplete at all times. Promote a successor and block the stop so the
-    // agent acts on the promoted task instead of exiting.
+    // Zero incomplete tasks is normally a governance violation — promote a successor
+    // so the agent always exits with a task buffer. Exception: when the ship checklist
+    // was the only task source for this session (sentinel exists) and all those tasks
+    // are now complete, promotion creates an unrelated issue task and loops forever.
+    // In that terminal state, allow stop rather than manufacturing synthetic work.
+    if (await hasShipChecklistSentinel(ctx.sessionId)) return {}
+
     const cwdInput = (input as Record<string, unknown>).cwd
     const cwd = typeof cwdInput === "string" ? cwdInput : undefined
     const promoted = await promoteNextTaskFromIssues(ctx.sessionId, cwd)
