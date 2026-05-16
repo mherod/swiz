@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { extractOwnerFromUrl } from "../src/utils/hook-utils.ts"
+import { filterVisibleIssues } from "./stop-personal-repo-issues/issues.ts"
 import {
   type Issue,
   missingRefinementCategories,
@@ -1217,5 +1218,39 @@ describe("cached-issue state filter", () => {
     const out = keepOnlyOpen(rows)
     expect(out).toHaveLength(1)
     expect(out[0]?.number).toBe(8)
+  })
+})
+
+// ─── Production filterVisibleIssues — issue #618 backlog exclusion ────────────
+
+describe("filterVisibleIssues (production) — backlog label exclusion (#618)", () => {
+  function makeIssue(labels: string[]): Issue {
+    return {
+      number: 1,
+      title: "test",
+      labels: labels.map((name) => ({ name })),
+      author: { login: "mherod" },
+      assignees: [],
+    }
+  }
+
+  test("excludes issue labeled only backlog", () => {
+    expect(filterVisibleIssues([makeIssue(["backlog"])])).toHaveLength(0)
+  })
+
+  test("surfaces issue labeled only ready", () => {
+    expect(filterVisibleIssues([makeIssue(["ready"])])).toHaveLength(1)
+  })
+
+  test("surfaces issue with no labels", () => {
+    expect(filterVisibleIssues([makeIssue([])])).toHaveLength(1)
+  })
+
+  test("excludes issue with backlog + ready (negative filter takes precedence)", () => {
+    expect(filterVisibleIssues([makeIssue(["backlog", "ready"])])).toHaveLength(0)
+  })
+
+  test("excludes issue with backlog + bug", () => {
+    expect(filterVisibleIssues([makeIssue(["backlog", "bug"])])).toHaveLength(0)
   })
 })
