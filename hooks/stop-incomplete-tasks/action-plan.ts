@@ -8,8 +8,11 @@ import { blockStopObj } from "../../src/utils/hook-utils.ts"
 
 export { formatIncompleteReason } from "../../src/tasks/task-governance-messages.ts"
 
-export function buildIncompleteBlockOutput(taskDetails: string[]): SwizHookOutput {
-  const reason = formatIncompleteReason(taskDetails)
+export function buildIncompleteBlockOutput(
+  taskDetails: string[],
+  sourceCtx?: { tasksDir: string | null; sessionId: string }
+): SwizHookOutput {
+  const reason = formatIncompleteReason(taskDetails, sourceCtx)
   return blockStopObj(reason)
 }
 

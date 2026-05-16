@@ -98,5 +98,8 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     const subject = line.replace(/\s*\(task #[^)]*\)\s*$/, "")
     return !isDeferredSubject(subject)
   })
-  return buildIncompleteBlockOutput(taskDetails)
+  return buildIncompleteBlockOutput(taskDetails, {
+    tasksDir: ctx.tasksDir,
+    sessionId: ctx.sessionId,
+  })
 }

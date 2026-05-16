@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { formatIncompleteReason } from "../tasks/task-governance-messages.ts"
 import type { SessionTask } from "../tasks/task-recovery.ts"
 import { getIncompleteDetails } from "./stop-incomplete-tasks-core.ts"
 
@@ -58,5 +59,45 @@ describe("getIncompleteDetails — deferred-subject exemption (#580)", () => {
     const tasks: SessionTask[] = [task("30", "pending", "Wire up — please consider the cache flow")]
     const details = getIncompleteDetails(tasks)
     expect(details).toHaveLength(1)
+  })
+})
+
+describe("formatIncompleteReason — source context (#613)", () => {
+  it("includes tasksDir path when sourceCtx is provided", () => {
+    const details = ["Implement feature (task #1)"]
+    const reason = formatIncompleteReason(details, {
+      tasksDir: "/Users/dev/.claude/tasks/session-abc123",
+      sessionId: "session-abc123",
+    })
+    expect(reason).toContain("Task files:")
+    expect(reason).toContain("/Users/dev/.claude/tasks/session-abc123")
+  })
+
+  it("falls back to session-derived path when tasksDir is null", () => {
+    const details = ["Wire up migration (task #2)"]
+    const reason = formatIncompleteReason(details, {
+      tasksDir: null,
+      sessionId: "my-session-id",
+    })
+    expect(reason).toContain("Task files:")
+    expect(reason).toContain("my-session-id")
+  })
+
+  it("omits task files line when no sourceCtx is provided (backwards compat)", () => {
+    const details = ["Finish implementation (task #3)"]
+    const reason = formatIncompleteReason(details)
+    expect(reason).not.toContain("Task files:")
+    expect(reason).toContain("Finish implementation")
+  })
+
+  it("still includes task subjects and completion guidance", () => {
+    const details = ["Ship the feature (task #10)"]
+    const reason = formatIncompleteReason(details, {
+      tasksDir: "/home/.claude/tasks/sess",
+      sessionId: "sess",
+    })
+    expect(reason).toContain("Ship the feature")
+    expect(reason).toContain("task #10")
+    expect(reason).toContain("Complete these tasks before stopping")
   })
 })

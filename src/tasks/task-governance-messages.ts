@@ -679,14 +679,20 @@ function appendHygieneFeedback(
   }
 }
 
-export function formatIncompleteReason(taskDetails: string[]): string {
+export function formatIncompleteReason(
+  taskDetails: string[],
+  sourceCtx?: { tasksDir: string | null; sessionId: string }
+): string {
   if (taskDetails.length === 0) return ""
 
   const header = "Incomplete tasks remain in the current session:\n\n"
   const taskList = taskDetails.map((d) => `  - ${d}`).join("\n")
+  const sourceNote = sourceCtx
+    ? `\n\nTask files: ${sourceCtx.tasksDir ?? `~/.claude/tasks/${sourceCtx.sessionId}`}`
+    : ""
   const footer = `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
 
-  return header + taskList + footer
+  return header + taskList + sourceNote + footer
 }
 
 export const SWIZ_TASKS_CLI_DENY_MESSAGE =

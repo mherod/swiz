@@ -197,10 +197,15 @@ export async function checkIncompleteTasks(
     `BLOCK: ${incompleteDetails.length} incomplete (session=${sessionId.slice(0, 8)}): ${incompleteDetails.join("; ")}`
   )
 
+  const sourceCtx = tasksDir
+    ? `Task files location: ${tasksDir} — use ${getTaskToolName("TaskUpdate")} to update status, not direct file edits`
+    : `Session: ${sessionId.slice(0, 8)}... — use ${getTaskToolName("TaskUpdate")} to update status`
+
   return blockStopObj(
     formatActionPlan(
       [
         ...incompleteDetails,
+        sourceCtx,
         `If the work is already done, use ${getTaskToolName("TaskUpdate")} to mark each current-session task as completed.`,
         "If the work is still needed, complete it before stopping.",
       ],
