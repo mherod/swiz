@@ -28,6 +28,13 @@ async function makeTranscript(repo: string, lines: string[]): Promise<string> {
   return path
 }
 
+function userLine(text: string): string {
+  return JSON.stringify({
+    type: "user",
+    message: { content: [{ type: "text", text }] },
+  })
+}
+
 afterAll(async () => {
   for (const dir of cleanupDirs) {
     await Bun.$`rm -rf ${dir}`.quiet()
@@ -75,6 +82,19 @@ describe("pretooluse-pr-head-checkout-gate", () => {
         command: "git commit -m 'fix'",
         transcriptPath: tp,
       })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit when PR workflow evidence is from an older user turn", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        userLine("work on PR 609"),
+        skillLine("work-on-prs"),
+        textLine("head=feat/pr-609"),
+        userLine("unrelated follow-up"),
+        textLine("I will make a small unrelated edit."),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
       expect(result.decision).toBeUndefined()
     })
   })

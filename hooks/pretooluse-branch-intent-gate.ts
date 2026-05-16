@@ -13,6 +13,7 @@
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
+import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import { isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
@@ -73,7 +74,7 @@ function scanLines(lines: string[]): ScanResult {
   let targetDeclared = false
   let baseDeclared = false
 
-  for (const line of lines) {
+  for (const line of linesAfterLatestUserMessage(lines)) {
     if (!line.trim()) continue
     let entry: Record<string, any>
     try {

@@ -28,6 +28,13 @@ async function makeTranscript(repo: string, lines: string[]): Promise<string> {
   return path
 }
 
+function userLine(text: string): string {
+  return JSON.stringify({
+    type: "user",
+    message: { content: [{ type: "text", text }] },
+  })
+}
+
 // Helpers to generate Bash tool-use lines (prior commands already executed in session)
 function bashLine(command: string): string {
   return JSON.stringify({
@@ -135,6 +142,18 @@ describe("pretooluse-issue-workflow-gate", () => {
       const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
       expect(result.reason).toContain("gh auth status")
       expect(result.reason).toContain("git fetch origin --prune")
+    })
+
+    test("allows Edit when workflow evidence is from an older user turn", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [
+        userLine("work on issue 42"),
+        skillLine("work-on-issue"),
+        userLine("unrelated follow-up"),
+        textLine("I will make a small unrelated edit."),
+      ])
+      const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: tp })
+      expect(result.decision).toBeUndefined()
     })
   })
 
