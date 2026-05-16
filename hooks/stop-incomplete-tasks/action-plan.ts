@@ -12,3 +12,11 @@ export function buildIncompleteBlockOutput(taskDetails: string[]): SwizHookOutpu
   const reason = formatIncompleteReason(taskDetails)
   return blockStopObj(reason)
 }
+
+export function buildSoleDeferralSteeringOutput(realWork: string): SwizHookOutput {
+  const reason = [
+    "The last remaining task was parked under a deferral label instead of completed.",
+    `Do the work now: ${realWork}`,
+  ].join(" ")
+  return blockStopObj(reason)
+}

@@ -112,9 +112,14 @@ function detectComplianceGaming(s: string): CompoundMatch | null {
 
 const LEADING_DEFERRAL_RE = /^[\s•◼*-]*defer(?:red|ring)?(?:\b|#)/i
 const NEXT_SESSION_DEFERRAL_RE = /\bto\s+(?:the\s+)?next\s+session\b/i
+const FUTURE_PREFIX_RE = /^future\s*:/i
 
 function detectDeferral(s: string): CompoundMatch | null {
-  if (!LEADING_DEFERRAL_RE.test(s) && !NEXT_SESSION_DEFERRAL_RE.test(s)) {
+  if (
+    !LEADING_DEFERRAL_RE.test(s) &&
+    !NEXT_SESSION_DEFERRAL_RE.test(s) &&
+    !FUTURE_PREFIX_RE.test(s)
+  ) {
     return null
   }
 

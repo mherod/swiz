@@ -167,6 +167,52 @@ describe("stop-incomplete-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
+  test("blocks when sole remaining task has a deferral prefix (dodge steering)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-sole-deferred"
+
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Ship the feature",
+      status: "completed",
+    })
+    // Only one incomplete task remains — and it's a deferral dodge
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Future: add rate-limiting to comments endpoint",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, sessionId })
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("add rate-limiting to comments endpoint")
+    expect(result.reason).toContain("Do the work now")
+  })
+
+  test("still allows stop when multiple deferred tasks remain (not a dodge)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-multi-deferred"
+
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Ship the feature",
+      status: "completed",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Future: add rate-limiting to comments endpoint",
+      status: "pending",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "3",
+      subject: "Consider extracting helper",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, sessionId })
+    expect(result.decision).toBeUndefined()
+  })
+
   test("blocks when real pending task sits alongside deferred subjects", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-deferred-mixed"

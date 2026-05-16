@@ -100,6 +100,22 @@ describe("detect", () => {
     test("does not reject technical deferred loading work", () => {
       expect(detect("Implement deferred image loading").matched).toBe(false)
     })
+
+    test("rejects Future: prefix as deferral tactic", () => {
+      const result = detect("Future: add retry logic to payment processor")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("avoiding the work")
+    })
+
+    test("rejects Future: prefix case-insensitively", () => {
+      expect(detect("FUTURE: migrate to new auth provider").matched).toBe(true)
+      expect(detect("future: clean up legacy endpoints").matched).toBe(true)
+    })
+
+    test("rejects Future: with extra whitespace before colon", () => {
+      expect(detect("Future : refactor billing module").matched).toBe(true)
+    })
   })
 
   describe("no match (single concern)", () => {

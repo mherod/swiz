@@ -12,12 +12,13 @@ import {
   deduplicateStaleTasks,
   getIncompleteDetails,
 } from "../../src/utils/stop-incomplete-tasks-core.ts"
-import { buildIncompleteBlockOutput } from "./action-plan.ts"
+import { buildIncompleteBlockOutput, buildSoleDeferralSteeringOutput } from "./action-plan.ts"
 import { resolveTaskCheckContext } from "./context.ts"
 import {
   filterBlockingIncomplete,
   filterIncompleteStatus,
   isDeferredSubject,
+  stripDeferralPrefix,
 } from "./incomplete-check-validator.ts"
 
 /**
@@ -64,7 +65,16 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   // forward-looking notes that carry over to the next session — they satisfy
   // the planning buffer for hygiene but should not block stop. See issue #563.
   const blockingIncomplete = filterBlockingIncomplete(ctx.allTasks)
-  if (blockingIncomplete.length === 0) return {}
+  if (blockingIncomplete.length === 0) {
+    // Edge case: exactly one deferred task is the sole remaining task. That is
+    // likely a dodge — the agent parked real work under a "Future:" label instead
+    // of completing it. Steer back to the actual work.
+    if (remainingIncomplete.length === 1 && isDeferredSubject(remainingIncomplete[0]?.subject)) {
+      const subject = remainingIncomplete[0]?.subject ?? ""
+      return buildSoleDeferralSteeringOutput(stripDeferralPrefix(subject) || subject)
+    }
+    return {}
+  }
 
   // Build block output — only list non-deferred tasks so the agent isn't told
   // to act on tasks that the hook has already decided to carry over.
