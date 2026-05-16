@@ -276,6 +276,35 @@ Investigate if:
 
 ---
 
+---
+
+## Codex and Task Storage
+
+Codex sessions have `tasksEnabled: false` in `src/agents.ts`. This means task-governance hooks skip Codex sessions entirely — `pretooluse-task-governance.ts` does not enforce task buffers, and `stop-incomplete-tasks` does not block Codex stop events.
+
+### Canonical task root
+
+Stop hooks that read task state (including `stop-incomplete-tasks`) always resolve task files through `getSessionTasksDir()` in `src/tasks/task-recovery.ts`, which points to `~/.claude/tasks/<session_id>/`. This is true regardless of which agent triggered the hook.
+
+The provider adapters expose their own `tasksDir` (e.g., `~/.codex/tasks/` for Codex), but that path is used only by `createDefaultTaskStore()` / `getProviderTaskRoots()` for runtime task I/O — it is **not** the path stop hooks read.
+
+| Context | Path used |
+|---------|-----------|
+| Stop hook task reads | `~/.claude/tasks/<session_id>/` |
+| Codex runtime task I/O | `~/.codex/tasks/<session_id>/` |
+
+### Troubleshooting a stop block
+
+When `stop-incomplete-tasks` blocks and shows a `session_id`, locate the task files at:
+
+```
+~/.claude/tasks/<session_id>/
+```
+
+List task state with `swiz tasks --session <session_id>` rather than reading JSON files directly. To resolve incomplete tasks, use `TaskUpdate` (not direct file edits) — direct edits bypass validation and may leave the task store in an inconsistent state.
+
+If you are running a Codex session and still hit a task block, the session may have been partially attributed to a prior Claude session. Check `~/.claude/tasks/` for a session directory whose ID matches the one in the block message.
+
 See also:
 - [`commands.md`](./commands.md) — full command reference including `idea`, `reflect`, and `continue`
 - [`dispatch-engine.md`](./dispatch-engine.md) — how hook events are dispatched at runtime
