@@ -412,6 +412,22 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("--body-file")
     })
+
+    test("gh issue create --body with shell-sensitive content is blocked", async () => {
+      const result = await runHook(
+        "gh issue create --title 'Bug' --body \"Steps: $(./repro.sh) then check <output>.\""
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--body-file")
+    })
+
+    test("gh issue create --body with backtick content is blocked", async () => {
+      const result = await runHook(
+        "gh issue create --title 'Fix' --body \"Run `make test` first.\""
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--body-file")
+    })
   })
 
   describe("allowed commands (no output)", () => {
