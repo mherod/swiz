@@ -16,7 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { mkdir, readdir, stat, unlink } from "node:fs/promises"
+import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
@@ -169,6 +169,33 @@ export function buildIncomingDispatchCaptureEnvelope(
   }
 
   return envelope
+}
+
+/**
+ * Append a sanitized raw payload as one JSON line to `/tmp/swiz-incoming/{canonicalEventName}.jsonl`.
+ * Caller should check `shouldCaptureIncomingPayloads()` before calling.
+ */
+export async function appendPayloadToJsonl(
+  hookEventName: string,
+  payload: Record<string, any>
+): Promise<void> {
+  await mkdir(SWIZ_INCOMING_ROOT, { recursive: true })
+  const canonical = normalizeEventNameToCanonical(hookEventName)
+  const safe = sanitizeHookFilenameSegment(canonical)
+  const path = join(SWIZ_INCOMING_ROOT, `${safe}.jsonl`)
+  const sanitized = sanitizeDispatchPayloadForCapture(payload)
+  const line = `${JSON.stringify({ ...sanitized, _capturedAt: new Date().toISOString() })}\n`
+  await appendFile(path, line)
+}
+
+/** Fire-and-forget wrapper for `appendPayloadToJsonl`. */
+export function schedulePayloadJsonlAppend(
+  hookEventName: string,
+  payload: Record<string, any>
+): void {
+  void appendPayloadToJsonl(hookEventName, payload).catch((err) => {
+    debugLog("[incoming-capture] jsonl append failed:", messageFromUnknownError(err))
+  })
 }
 
 export async function writeIncomingDispatchCapture(

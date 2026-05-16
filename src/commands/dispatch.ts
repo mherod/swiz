@@ -30,7 +30,10 @@ import {
   shouldCaptureIncomingPayloads,
   withLogBuffer,
 } from "../dispatch"
-import { writeIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
+import {
+  schedulePayloadJsonlAppend,
+  writeIncomingDispatchCapture,
+} from "../dispatch/incoming-capture.ts"
 import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
 import { isGitRepo } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
@@ -477,6 +480,7 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
       incomingBeforeNormalize,
       normalizedPayload: normalizedPayloadForCapture,
     })
+    schedulePayloadJsonlAppend(hookEventName, incomingBeforeNormalize ?? payload)
   }
 
   // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)

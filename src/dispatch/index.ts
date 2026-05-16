@@ -91,6 +91,7 @@ export {
 } from "./filters.ts"
 export {
   scheduleIncomingDispatchCapture,
+  schedulePayloadJsonlAppend,
   shouldCaptureIncomingPayloads,
 } from "./incoming-capture.ts"
 export { backfillPayloadDefaults } from "./payload-backfill.ts"

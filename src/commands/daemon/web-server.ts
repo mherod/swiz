@@ -9,6 +9,10 @@ import {
 } from "../../dispatch/dispatch-zod-surfaces.ts"
 import { isBlock } from "../../dispatch/engine.ts"
 import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
+import {
+  schedulePayloadJsonlAppend,
+  shouldCaptureIncomingPayloads,
+} from "../../dispatch/incoming-capture.ts"
 import { isStopLikeDispatchEvent } from "../../dispatch/stop-response.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
@@ -658,6 +662,9 @@ async function handleDispatchRoute(
       ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
       await seedSessionFromDisk(sessionId, sessionTasksDir)
+    }
+    if (parsedPayload && hookEventName && shouldCaptureIncomingPayloads()) {
+      schedulePayloadJsonlAppend(hookEventName, parsedPayload as Record<string, any>)
     }
   } catch {
     // Best-effort — don't block dispatch if payload parsing or seeding fails
