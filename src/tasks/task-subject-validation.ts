@@ -1,5 +1,6 @@
 // Shared logic for compound task subject detection and splitting.
 
+import { getHomeDirOrNull } from "../home.ts"
 import { TASK_TOOLS } from "../tool-matchers.ts"
 import { isPlaceholderSubject } from "../utils/inline-hook-helpers.ts"
 
@@ -135,6 +136,45 @@ function detectDeferral(s: string): CompoundMatch | null {
   }
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function stripTrailingSeparators(s: string): string {
+  return s.replace(/[\\/]+$/, "")
+}
+
+function detectHomeDirectoryReference(s: string): CompoundMatch | null {
+  const normalized = s.normalize("NFKC")
+  if (/(^|[\s"'`(])(?:~|\$HOME|\$\{HOME\})(?:[\\/]|$)/.test(normalized)) {
+    return homeDirectoryMatch()
+  }
+
+  const home = getHomeDirOrNull()
+  if (!home) return null
+
+  const normalizedHome = stripTrailingSeparators(home.normalize("NFKC"))
+  if (!normalizedHome || normalizedHome === "~" || normalizedHome === "/") return null
+
+  const homePathRe = new RegExp(`(^|[\\s"'\\\`(])${escapeRegExp(normalizedHome)}(?:[\\\\/]|$)`)
+  if (!homePathRe.test(normalized)) return null
+
+  return homeDirectoryMatch()
+}
+
+function homeDirectoryMatch(): CompoundMatch {
+  return {
+    matched: true,
+    intro:
+      "Task subjects must not include the user's home directory. Use repo-relative paths or describe the work without local machine paths. Examples:",
+    suggestions: [
+      "Edit src/tasks/task-subject-validation.ts",
+      "Update task subject validation",
+      "Fix task subject wording",
+    ],
+  }
+}
+
 function detectMultipleIssues(s: string, verb: string | null): CompoundMatch | null {
   const hashes = s.match(/#\d+/g) ?? []
   if (hashes.length < 2) return null
@@ -264,6 +304,9 @@ export function detect(s: string): DetectionResult {
 
   const deferral = detectDeferral(s)
   if (deferral) return deferral
+
+  const homeDirectory = detectHomeDirectoryReference(s)
+  if (homeDirectory) return homeDirectory
 
   const issues = detectMultipleIssues(s, verb)
   if (issues) return issues

@@ -1,6 +1,25 @@
 import { describe, expect, test } from "bun:test"
 import { type CompoundMatch, detect, formatMessage } from "./task-subject-validation.ts"
 
+function withHome<T>(home: string | undefined, fn: () => T): T {
+  const previousHome = process.env.HOME
+  if (home === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = home
+  }
+
+  try {
+    return fn()
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+  }
+}
+
 describe("detect", () => {
   describe("recovered task rejection", () => {
     test("rejects subject starting with 'Recovered task'", () => {
@@ -115,6 +134,40 @@ describe("detect", () => {
 
     test("rejects Future: with extra whitespace before colon", () => {
       expect(detect("Future : refactor billing module").matched).toBe(true)
+    })
+  })
+
+  describe("home directory rejection", () => {
+    test("rejects literal home directory paths", () => {
+      withHome("/Users/example", () => {
+        const result = detect("Edit /Users/example/Development/swiz/src/tasks/file.ts")
+        expect(result.matched).toBe(true)
+        if (!result.matched) return
+        expect(result.intro).toContain("home directory")
+        expect(result.suggestions).toContain("Edit src/tasks/task-subject-validation.ts")
+      })
+    })
+
+    test("rejects symbolic home directory paths", () => {
+      expect(detect("Inspect ~/.claude/tasks/session")).toMatchObject({ matched: true })
+      expect(detect("Inspect $HOME/.claude/tasks/session")).toMatchObject({ matched: true })
+      expect(detect("Inspect ${HOME}/.claude/tasks/session")).toMatchObject({ matched: true })
+    })
+
+    test("does not reject repo-relative paths", () => {
+      withHome("/Users/example", () => {
+        expect(detect("Edit src/tasks/task-subject-validation.ts").matched).toBe(false)
+      })
+    })
+
+    test("does not reject path prefixes that only resemble home", () => {
+      withHome("/Users/example", () => {
+        expect(detect("Inspect /Users/example-work/project").matched).toBe(false)
+      })
+    })
+
+    test("does not reject approximate counts with tilde", () => {
+      expect(detect("Audit ~10 task subjects").matched).toBe(false)
     })
   })
 
