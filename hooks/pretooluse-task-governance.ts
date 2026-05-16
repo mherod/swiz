@@ -282,6 +282,7 @@ function isMemoryMarkdownEdit(input: Record<string, any>, toolName: string): boo
   return MEMORY_MARKDOWN_RE.test(filePath)
 }
 
+/** Layer 1 of the task-file block chain — Edit/Write path guard. See `src/tasks/task-cli-governance.ts` for the two-layer pattern. */
 function isBlockedTaskFilesEdit(input: Record<string, any>, toolName: string): boolean {
   if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
   const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
@@ -811,10 +812,12 @@ async function checkTaskUpdateSubjectGovernance(
 
 async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
+  // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
   if (isBlockedTaskFilesEdit(input, toolName)) {
     return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
   }
   const command = String(input.tool_input?.command ?? "")
+  // Layer 2: Shell command guard — catches cat, jq, pipes, redirects, subshells
   if (isBlockedSwizTaskFilesCommand(command)) {
     return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
   }
