@@ -15,10 +15,11 @@
 //
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
+import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { readSwizSettings } from "../src/settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   extractMergeBranch,
   extractPrNumber,
@@ -189,9 +190,18 @@ export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizH
 
   if (!isGhPrMerge && !isGitMerge) return {}
 
-  const settings = await readSwizSettings()
-  const graceMinutes = settings.prAgeGateMinutes
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  const eff = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+
+  const graceMinutes = eff.prAgeGateMinutes
   if (graceMinutes <= 0) return {}
+
+  const policy = getCollaborationModePolicy(eff.collaborationMode)
+  if (!policy.prHooksActive) return {}
+
   const gracePeriodMs = graceMinutes * 60 * 1000
 
   if (isGhPrMerge) {

@@ -1,11 +1,87 @@
-import { describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   extractMergeBranch,
   extractPrNumber,
   GH_PR_MERGE_RE,
   GIT_MERGE_RE,
 } from "../src/utils/hook-utils.ts"
-import { formatRemaining } from "./pretooluse-pr-age-gate.ts"
+import { evaluatePretoolusePrAgeGate, formatRemaining } from "./pretooluse-pr-age-gate.ts"
+
+// ── collab-mode bypass ───────────────────────────────────────────────────────
+
+describe("collab-mode bypass", () => {
+  let tmpDir: string
+
+  beforeAll(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "pr-age-gate-test-"))
+  })
+
+  afterAll(async () => {
+    const { rm } = await import("node:fs/promises")
+    await rm(tmpDir, { recursive: true, force: true })
+  })
+
+  async function makeProjectDir(collaborationMode: string): Promise<string> {
+    const projectDir = await mkdtemp(join(tmpDir, `proj-`))
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await Bun.write(
+      join(swizDir, "config.json"),
+      JSON.stringify({ collaborationMode, prAgeGateMinutes: 10 })
+    )
+    return projectDir
+  }
+
+  function makeInput(command: string, cwd: string): unknown {
+    return {
+      tool_name: "Bash",
+      tool_input: { command, cwd },
+      cwd,
+      session_id: "test-session",
+      transcript_path: "/dev/null",
+    }
+  }
+
+  it("bypasses grace period when collab-mode is solo", async () => {
+    const projectDir = await makeProjectDir("solo")
+    const result = await evaluatePretoolusePrAgeGate(
+      makeInput("gh pr merge 42 --squash", projectDir)
+    )
+    // Solo mode: prHooksActive=false → early return {} before any gh call
+    expect(result).toEqual({})
+  })
+
+  it("bypasses grace period when collab-mode is auto", async () => {
+    const projectDir = await makeProjectDir("auto")
+    const result = await evaluatePretoolusePrAgeGate(
+      makeInput("gh pr merge 15 --squash", projectDir)
+    )
+    // Auto mode: prHooksActive=false → early return {}
+    expect(result).toEqual({})
+  })
+
+  it("does not bypass grace period for non-merge commands even in solo mode", async () => {
+    const projectDir = await makeProjectDir("solo")
+    const result = await evaluatePretoolusePrAgeGate(makeInput("gh pr list", projectDir))
+    // Not a merge command → returns {} immediately (no gate applicable)
+    expect(result).toEqual({})
+  })
+
+  it("passes through non-shell tool inputs regardless of collab-mode", async () => {
+    const projectDir = await makeProjectDir("team")
+    const result = await evaluatePretoolusePrAgeGate({
+      tool_name: "Edit",
+      tool_input: { path: "foo.ts" },
+      cwd: projectDir,
+      session_id: "test-session",
+      transcript_path: "/dev/null",
+    })
+    expect(result).toEqual({})
+  })
+})
 
 // ── GH_PR_MERGE_RE ─────────────────────────────────────────────────────────
 
