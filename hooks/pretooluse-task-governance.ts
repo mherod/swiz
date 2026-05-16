@@ -1236,7 +1236,11 @@ async function checkNativeTaskUpdateCompletion(
   const allTasks = await readSessionTasks(sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
-    return denyTaskGovernance({ kind: "pending-completion-shortcut", taskId })
+    return denyTaskGovernance({
+      kind: "pending-completion-shortcut",
+      taskId,
+      subject: currentTask.subject,
+    })
   }
 
   const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)

@@ -195,6 +195,7 @@ export type TaskGovernanceMessageRequest =
   | {
       kind: "pending-completion-shortcut"
       taskId: string
+      subject?: string
     }
   | {
       kind: "phantom-completion"
@@ -421,9 +422,12 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
         )
       )
 
-    case "pending-completion-shortcut":
+    case "pending-completion-shortcut": {
+      const taskRef = request.subject
+        ? `Task #${request.taskId} ("${request.subject}")`
+        : `Task #${request.taskId}`
       return (
-        `Task #${request.taskId} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
+        `${taskRef} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
         "Starting a task before closing it keeps the record honest and makes it easier to track what was done.\n\n" +
         formatTranslatedActionPlan(
           [
@@ -437,6 +441,7 @@ export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest
           { header: "Next steps:" }
         )
       )
+    }
 
     case "phantom-completion": {
       const sessionNote = request.sessionId ? ` (session ${request.sessionId})` : ""
@@ -701,6 +706,6 @@ export const SWIZ_TASKS_CLI_DENY_MESSAGE =
   "Avoid `swiz tasks <subcommand>` for all subcommands except `swiz tasks adopt` (including `--recovered`).\n\n" +
   "Keep task state in the native task flow so planning stays accurate and auditable."
 
-export function buildPendingCompletionTransitionMessage(taskId: string): string {
-  return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId })
+export function buildPendingCompletionTransitionMessage(taskId: string, subject?: string): string {
+  return buildTaskGovernanceMessage({ kind: "pending-completion-shortcut", taskId, subject })
 }
