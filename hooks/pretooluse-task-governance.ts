@@ -238,7 +238,7 @@ async function denyAutoSteerOrBlock(
   return preToolUseDeny(reason)
 }
 
-const STALENESS_THRESHOLD = 20
+const STALENESS_THRESHOLD = 30
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
 function canStartInProgress(inProgressCount: number, cap = IN_PROGRESS_CAP): boolean {

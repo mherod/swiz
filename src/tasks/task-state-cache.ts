@@ -82,8 +82,8 @@ function queueDiskRevert(
 /** Default max age (ms) for freshness-guaranteed reads. */
 const DEFAULT_MAX_STALE_MS = 60_000
 
-/** Canonical TaskList snapshots must be refreshed within 5 minutes. */
-export const CANONICAL_TASKLIST_SYNC_MAX_AGE_MS = 5 * 60_000
+/** Canonical TaskList snapshots must be refreshed within 10 minutes. */
+export const CANONICAL_TASKLIST_SYNC_MAX_AGE_MS = 10 * 60_000
 
 /** Maximum cached sessions before LRU eviction. */
 const MAX_CACHED_SESSIONS = 50
