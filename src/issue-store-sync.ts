@@ -642,6 +642,7 @@ export async function syncUpstreamState(
   await syncIssueEvents(s, gh, repo, result)
 
   s.setSyncCursor(repo, "last_synced", new Date().toISOString())
+  s.setSyncCursor(repo, "cwd", cwd)
 
   return result
 }

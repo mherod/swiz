@@ -93,6 +93,17 @@ export class UpstreamSyncRegistry {
     return { deduped: false }
   }
 
+  /**
+   * Re-register all repos previously synced by reading the `cwd` cursor written
+   * by `syncUpstreamState`. Called on daemon startup so background sync resumes
+   * for every repo in the issue store without waiting for a dispatch to arrive.
+   */
+  async restoreKnownRepos(): Promise<void> {
+    const { getIssueStore } = await import("../../issue-store.ts")
+    const known = getIssueStore().listKnownRepoCwds()
+    await Promise.all(known.map(({ cwd }) => this.register(cwd)))
+  }
+
   /** Trigger an immediate sync for a project. */
   async syncNow(cwd: string): Promise<UpstreamSyncResult | null> {
     const entry = this.entries.get(cwd)

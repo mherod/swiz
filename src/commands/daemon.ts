@@ -246,7 +246,8 @@ function setupWatchers(
     sessionDataCache.invalidateProject(cwd)
     invalidateTurnsCache(cwd)
     watchers.unregisterByLabelSuffix(`:${cwd}`)
-    caches.upstreamSyncRegistry.unregister(cwd)
+    // Do NOT unregister from upstreamSyncRegistry here — background sync continues
+    // for idle projects so the issue store stays fresh without needing external triggers.
     caches.prReviewMonitor.clearProject(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
     for (const key of snapshots.keys()) {
@@ -524,6 +525,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   }
 
   state.touchProject(cwd)
+  // Re-register repos previously synced so the daemon resumes background sync
+  // on startup without waiting for an active dispatch session.
+  void caches.upstreamSyncRegistry.restoreKnownRepos()
   const pruneTranscriptMemory = createPruner(
     state,
     caches,

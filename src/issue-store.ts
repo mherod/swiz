@@ -1050,6 +1050,13 @@ export class IssueStore {
       .run(repo, kind, value, Date.now())
   }
 
+  /** Return all repos that have a stored `cwd`, so the daemon can re-register them for sync on startup. */
+  listKnownRepoCwds(): { repo: string; cwd: string }[] {
+    return this.db
+      .query("SELECT repo, value AS cwd FROM sync_cursors WHERE kind = 'cwd'")
+      .all() as { repo: string; cwd: string }[]
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
   /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection, event log, sync cursors) for a repo. Preserves pending mutations. */
