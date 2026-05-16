@@ -1318,11 +1318,18 @@ export function evaluateBlockedTaskFilesPrecheck(
 ): SwizHookOutput | null {
   if (!isBlockedTool(toolName)) return null
   if (isBlockedTaskFilesEdit(input, toolName)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    const filePath = String(toolInput.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+    })
   }
   const command = String(toolInput.command ?? "")
   if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: command,
+    })
   }
   return null
 }
@@ -1418,7 +1425,12 @@ export async function evaluateBlockedToolPath(
   const transcriptPath: string = (input.transcript_path as string) ?? ""
 
   if (isBlockedTaskFilesEdit(input, toolName)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+      sessionId: sessionId ?? undefined,
+    })
   }
 
   if (shouldInspectShellInput(parsed)) {

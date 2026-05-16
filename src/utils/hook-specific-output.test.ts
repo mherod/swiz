@@ -4,6 +4,7 @@ import {
   extractPreToolSurfaceDecision,
   getHookSpecificOutput,
   hsoPreToolUseAllow,
+  hsoPreToolUseDenyTaskFile,
   mergeHookSpecificOutputClone,
 } from "./hook-specific-output.ts"
 
@@ -59,5 +60,38 @@ describe("builders", () => {
       hookEventName: "notification",
       additionalContext: "x",
     })
+  })
+})
+
+describe("hsoPreToolUseDenyTaskFile", () => {
+  test("sets denialCategory to task-file-access", () => {
+    const hso = hsoPreToolUseDenyTaskFile("blocked reason") as Record<string, any>
+    expect(hso.denialCategory).toBe("task-file-access")
+    expect(hso.permissionDecision).toBe("deny")
+    expect(hso.hookEventName).toBe("PreToolUse")
+  })
+
+  test("includes toolName and blockedPath when provided", () => {
+    const hso = hsoPreToolUseDenyTaskFile("blocked", {
+      toolName: "Bash",
+      blockedPath: "~/.claude/tasks/1.json",
+      sessionId: "sess-123",
+    }) as Record<string, any>
+    expect(hso.toolName).toBe("Bash")
+    expect(hso.blockedPath).toBe("~/.claude/tasks/1.json")
+    expect(hso.sessionId).toBe("sess-123")
+  })
+
+  test("omits optional meta fields when not provided", () => {
+    const hso = hsoPreToolUseDenyTaskFile("blocked") as Record<string, any>
+    expect(hso.toolName).toBeUndefined()
+    expect(hso.blockedPath).toBeUndefined()
+    expect(hso.sessionId).toBeUndefined()
+  })
+
+  test("passes permissionDecisionReason through", () => {
+    const hso = hsoPreToolUseDenyTaskFile("my reason") as Record<string, any>
+    expect(typeof hso.permissionDecisionReason).toBe("string")
+    expect((hso.permissionDecisionReason as string).length).toBeGreaterThan(0)
   })
 })
