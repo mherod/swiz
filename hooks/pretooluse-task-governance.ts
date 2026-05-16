@@ -96,6 +96,7 @@ import {
   preToolUseAllow,
   preToolUseAllowWithContext,
   preToolUseDeny,
+  preToolUseDenyTaskFileAccess,
   preToolUseDenyWithSystemMessage,
   resolveSafeSessionId,
   scheduleAutoSteer,
@@ -814,12 +815,21 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
   // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
   if (isBlockedTaskFilesEdit(input, toolName)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+      sessionId,
+    })
   }
   const command = String(input.tool_input?.command ?? "")
   // Layer 2: Shell command guard — catches cat, jq, pipes, redirects, subshells
   if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: command,
+      sessionId,
+    })
   }
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
@@ -913,11 +923,18 @@ export async function evaluatePretooluseRequireTasks(
 
   const toolName = String(input.tool_name ?? "")
   if (isBlockedTool(toolName) && isBlockedTaskFilesEdit(input, toolName)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+    })
   }
   const command = String((input.tool_input as Record<string, any> | undefined)?.command ?? "")
   if (isBlockedTool(toolName) && isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: command,
+    })
   }
 
   const parsed = await tryParseAndGuard(input)
@@ -1233,7 +1250,10 @@ export async function runSwizTasksEnforcement(input: Record<string, any>): Promi
   const cwd = (input.cwd as string) ?? undefined
 
   if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDeny(SWIZ_TASKS_FILES_DENY_MESSAGE)
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      blockedPath: command,
+      sessionId,
+    })
   }
 
   if (!isBlockedSwizTasksCliCommand(command)) {

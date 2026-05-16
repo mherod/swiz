@@ -44,7 +44,11 @@ import {
   isJsonLikeRecord,
   messageFromUnknownError,
 } from "./utils/hook-json-helpers.ts"
-import { hsoPreToolUseDeny } from "./utils/hook-specific-output.ts"
+import {
+  hsoPreToolUseDeny,
+  hsoPreToolUseDenyTaskFile,
+  type TaskFileDenyMeta,
+} from "./utils/hook-specific-output.ts"
 
 // ─── Standalone runner ──────────────────────────────────────────────────────
 
@@ -217,6 +221,21 @@ export function preToolUseDeny(reason: string): SwizHookOutput {
     reason,
     extractHookSystemMessagePreview(reason) || "Denied without reason"
   )
+}
+
+/** Build a task-file-access denial with structured telemetry metadata. */
+export function preToolUseDenyTaskFileAccess(
+  reason: string,
+  meta: TaskFileDenyMeta = {}
+): SwizHookOutput {
+  const fullReason = `${reason}
+
+You must act on this now. Do not try to stop again without completing the required action.`
+  return hookOutputSchema.parse({
+    suppressOutput: true,
+    systemMessage: (extractHookSystemMessagePreview(reason) || "Denied without reason").trim(),
+    hookSpecificOutput: hsoPreToolUseDenyTaskFile(fullReason, meta),
+  })
 }
 
 /** Build a PreToolUse deny response with a distinct visible UI preview. */

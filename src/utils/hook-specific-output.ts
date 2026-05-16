@@ -74,6 +74,31 @@ export function hsoPreToolUseDeny(permissionDecisionReason: string): HookSpecifi
   })
 }
 
+export interface TaskFileDenyMeta {
+  /** Agent tool name that triggered the block (e.g. "Bash", "Edit"). */
+  toolName?: string
+  /** The file path or command fragment that matched the task-files guard. */
+  blockedPath?: string
+  /** Session ID from the hook payload. */
+  sessionId?: string
+}
+
+/** PreToolUse deny for task-file-access blocks; adds structured telemetry fields. */
+export function hsoPreToolUseDenyTaskFile(
+  permissionDecisionReason: string,
+  meta: TaskFileDenyMeta = {}
+): HookSpecificOutput {
+  return hookSpecificOutputSchema.parse({
+    hookEventName: "PreToolUse",
+    permissionDecision: "deny",
+    permissionDecisionReason,
+    denialCategory: "task-file-access",
+    ...(meta.toolName !== undefined ? { toolName: meta.toolName } : {}),
+    ...(meta.blockedPath !== undefined ? { blockedPath: meta.blockedPath } : {}),
+    ...(meta.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
+  })
+}
+
 export function hsoPreToolUseAllowContextual(
   effectiveReason: string | undefined,
   additionalContext: string | undefined

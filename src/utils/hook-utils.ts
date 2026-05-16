@@ -52,6 +52,8 @@ import {
   hsoPreToolUseAllowContextual,
   hsoPreToolUseAllowWithUpdatedInput,
   hsoPreToolUseDeny,
+  hsoPreToolUseDenyTaskFile,
+  type TaskFileDenyMeta,
 } from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 export { getTaskToolName }
@@ -976,6 +978,21 @@ export function preToolUseDeny(reason: string): SwizHookOutput {
     reason,
     extractHookSystemMessagePreview(reason) || "Denied without reason"
   )
+}
+
+/** Build a task-file-access denial with structured telemetry metadata. */
+export function preToolUseDenyTaskFileAccess(
+  reason: string,
+  meta: TaskFileDenyMeta = {}
+): SwizHookOutput {
+  const fullReason = `${reason}
+
+You must act on this now. Do not try to stop again without completing the required action.`
+  return {
+    suppressOutput: true,
+    systemMessage: (extractHookSystemMessagePreview(reason) || "Denied without reason").trim(),
+    hookSpecificOutput: hsoPreToolUseDenyTaskFile(fullReason, meta),
+  }
 }
 
 /** Build a PreToolUse deny response with a distinct visible UI preview. */
