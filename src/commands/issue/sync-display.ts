@@ -63,6 +63,12 @@ interface StoredItem {
   title: string
   state?: string
   assignees?: Array<{ login: string }>
+  labels?: Array<{ name: string }>
+}
+
+function fmtLabels(item: StoredItem): string {
+  const names = (item.labels ?? []).map((l) => l.name).filter(Boolean)
+  return names.length > 0 ? ` \x1b[2m[${names.join(", ")}]\x1b[0m` : ""
 }
 
 export function printOpenItems(repo: string, assigneeFilter?: string): void {
@@ -82,13 +88,13 @@ export function printOpenItems(repo: string, assigneeFilter?: string): void {
   if (openIssues.length > 0) {
     console.log(`\nOpen Issues (${openIssues.length}):`)
     for (const issue of openIssues) {
-      console.log(`  #${issue.number} ${issue.title}`)
+      console.log(`  #${issue.number} ${issue.title}${fmtLabels(issue)}`)
     }
   }
   if (openPrs.length > 0) {
     console.log(`\nOpen Pull Requests (${openPrs.length}):`)
     for (const pr of openPrs) {
-      console.log(`  #${pr.number} ${pr.title}`)
+      console.log(`  #${pr.number} ${pr.title}${fmtLabels(pr)}`)
     }
   }
 }
