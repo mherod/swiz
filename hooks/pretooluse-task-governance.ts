@@ -52,6 +52,7 @@ import {
   type TaskGovernanceMessageRequest,
 } from "../src/tasks/task-governance-messages.ts"
 import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-rephrasing.ts"
+import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import {
   applyCacheTaskUpdate,
   findPriorSessionTasks,
@@ -1536,15 +1537,15 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
         `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
       )
     }
-    if (pending === 0) {
-      return replaceTaskGovernanceSynonyms(
-        `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
-      )
-    }
-    if (pending === 1) {
-      return replaceTaskGovernanceSynonyms(
-        `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
-      )
+    if (pending <= 1) {
+      const cwd = input?.cwd as string | undefined
+      const hints = await fetchIssueHints(cwd)
+      const hintSuffix = hints.length > 0 ? ` Open issues to consider: ${hints.join("; ")}.` : ""
+      const bufferMsg =
+        pending === 0
+          ? `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
+          : `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
+      return replaceTaskGovernanceSynonyms(`${bufferMsg}${hintSuffix}`)
     }
     return replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`)
   } catch (err) {

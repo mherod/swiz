@@ -12,61 +12,16 @@
  */
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
-import { getRepoSlug } from "../src/git-helpers.ts"
-import { getIssueStore } from "../src/issue-store.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { buildCountSummary, buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { getSessionEventState } from "../src/tasks/task-event-state.ts"
+import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
 
 export { buildCountSummary, buildCountSummaryFromTasks }
-
-const SKIP_LABELS_LOWER = new Set([
-  "blocked",
-  "upstream",
-  "wontfix",
-  "wont-fix",
-  "duplicate",
-  "on-hold",
-  "waiting",
-  "stale",
-  "icebox",
-  "invalid",
-  "needs-info",
-])
-
-/** Fast, fail-open read of top issue titles from the SQLite store. No network calls. */
-async function fetchIssueHints(cwd: string | undefined, limit = 3): Promise<string[]> {
-  if (!cwd) return []
-  try {
-    const slug = await getRepoSlug(cwd)
-    if (!slug) return []
-
-    const store = getIssueStore()
-    // Use a 24-hour TTL — hints are suggestions, not enforcement.
-    // The default 5-minute TTL filters out data between daemon sync cycles.
-    const HINT_TTL_MS = 24 * 60 * 60 * 1000
-    const issues = store.listIssues<{
-      number: number
-      title: string
-      labels: Array<{ name: string }>
-    }>(slug, HINT_TTL_MS)
-
-    const hints: string[] = []
-    for (const issue of issues) {
-      if (hints.length >= limit) break
-      const skip = (issue.labels ?? []).some((l) => SKIP_LABELS_LOWER.has(l.name.toLowerCase()))
-      if (skip) continue
-      hints.push(`#${issue.number} ${issue.title}`)
-    }
-    return hints
-  } catch {
-    return []
-  }
-}
 
 /**
  * Apply the just-executed tool mutation on top of disk-read tasks.
