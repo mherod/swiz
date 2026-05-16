@@ -146,7 +146,7 @@ alwaysApply: false
 - **DO**: After push: verify CI once with `gh run view --json`; `in_progress` is acceptable — pre-push ran full test suite. Update tasks before stop.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
 - DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
-- `swiz settings` tests are flaky in CI (20–30s subprocess-spawn timeouts); pre-existing, not regressions from code changes (confirmed on doc-only commits, run IDs 25944297820, 25944269296). Don't chase settings timeouts as caused by recent work.
+- `swiz settings` CI tests flaky (20–30s timeouts), pre-existing (run IDs 25944297820, 25944269296). Also blocks Dependabot PRs #584/#586/#587/#621 (labeled `chore`); dep bumps are not at fault. No open issue — check before filing.
 - DON'T add `Co-Authored-By` trailers. DON'T use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
