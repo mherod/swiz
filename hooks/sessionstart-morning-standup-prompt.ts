@@ -22,14 +22,16 @@ function isoDate(now: Date = new Date()): string {
 }
 
 export async function evaluateSessionstartMorningStandupPrompt(
-  input: unknown
+  input: unknown,
+  /** Override the sentinel path — for testing only. */
+  _testSentinelPath?: string
 ): Promise<SwizHookOutput> {
   const hookInput = sessionStartHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return {}
 
-  const sentinel = swizCeremonyDayFlagPath("morning-standup", isoDate())
+  const sentinel = _testSentinelPath ?? swizCeremonyDayFlagPath("morning-standup", isoDate())
   try {
     await stat(sentinel)
     return {} // sentinel exists — already prompted (or skill ran) today

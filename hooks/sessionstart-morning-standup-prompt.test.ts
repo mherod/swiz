@@ -1,14 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { rm, writeFile } from "node:fs/promises"
-import { swizCeremonyDayFlagPath } from "../src/temp-paths.ts"
+import { join } from "node:path"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluateSessionstartMorningStandupPrompt } from "./sessionstart-morning-standup-prompt.ts"
 
 const tmp = useTempDir("swiz-morning-standup-test-")
-
-function todaySentinel(): string {
-  return swizCeremonyDayFlagPath("morning-standup", new Date().toISOString().slice(0, 10))
-}
 
 async function initGitRepo(dir: string): Promise<void> {
   const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
@@ -28,34 +23,29 @@ describe("sessionstart-morning-standup-prompt", () => {
   test("sentinel present today → no output", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
-    const sentinel = todaySentinel()
-    await writeFile(sentinel, "")
-    try {
-      const result = await evaluateSessionstartMorningStandupPrompt({ ...BASE_INPUT, cwd: dir })
-      expect(result).toEqual({})
-    } finally {
-      await rm(sentinel, { force: true })
-    }
+    // Use a per-test isolated sentinel path to prevent races with concurrent test files.
+    const sentinel = join(dir, "morning-standup.flag")
+    await Bun.write(sentinel, "")
+    const result = await evaluateSessionstartMorningStandupPrompt(
+      { ...BASE_INPUT, cwd: dir },
+      sentinel
+    )
+    expect(result).toEqual({})
   })
 
   test("no sentinel → fires with morning-standup suggestion and writes sentinel", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
-    const sentinel = todaySentinel()
-    await rm(sentinel, { force: true })
-    try {
-      const result = (await evaluateSessionstartMorningStandupPrompt({
-        ...BASE_INPUT,
-        cwd: dir,
-      })) as Record<string, any>
-      const ctx: string =
-        (result?.hookSpecificOutput?.additionalContext as string | undefined) ??
-        (result?.systemMessage as string | undefined) ??
-        ""
-      expect(ctx.length).toBeGreaterThan(0)
-      expect(ctx).toMatch(/morning.standup/i)
-    } finally {
-      await rm(sentinel, { force: true })
-    }
+    const sentinel = join(dir, "morning-standup.flag")
+    const result = (await evaluateSessionstartMorningStandupPrompt(
+      { ...BASE_INPUT, cwd: dir },
+      sentinel
+    )) as Record<string, any>
+    const ctx: string =
+      (result?.hookSpecificOutput?.additionalContext as string | undefined) ??
+      (result?.systemMessage as string | undefined) ??
+      ""
+    expect(ctx.length).toBeGreaterThan(0)
+    expect(ctx).toMatch(/morning.standup/i)
   })
 })
