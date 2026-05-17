@@ -928,7 +928,6 @@ export { spawnSpeak } from "../speech.ts"
 // ─── Auto-steer scheduling (extracted to auto-steer-helpers.ts) ────────────
 export {
   type AutoSteerRequest,
-  consumeAutoSteerRequest,
   isAutoSteerAvailable,
   type SendAutoSteerOptions,
   scheduleAutoSteer,

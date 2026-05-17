@@ -25,7 +25,10 @@ import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
-import { isAppleScriptTerminalApp } from "../src/utils/auto-steer-helpers.ts"
+import {
+  consumeAutoSteerRequest,
+  isAppleScriptTerminalApp,
+} from "../src/utils/auto-steer-helpers.ts"
 import { sendAutoSteer } from "../src/utils/hook-utils.ts"
 import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
@@ -81,8 +84,6 @@ async function getTriggersToDeliver(
 }
 
 async function deliverTriggers(
-  store: ReturnType<typeof getAutoSteerStore>,
-  safeSession: string,
   sessionId: string,
   triggersToDeliver: AutoSteerTrigger[],
   terminal: { app: TerminalApp; name: string } | undefined
@@ -90,8 +91,7 @@ async function deliverTriggers(
   const app = terminal?.app ?? detectTerminal().app
   const sent = new Set<string>()
   for (const trigger of triggersToDeliver) {
-    const requests = store.consumeOne(safeSession, trigger)
-    const req = requests[0]
+    const req = await consumeAutoSteerRequest(sessionId, trigger)
     if (req && !sent.has(req.message)) {
       await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
       sent.add(req.message)
@@ -123,7 +123,7 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
   if (triggersToDeliver.length === 0) return {}
   if (await shouldDeferAutoSteerForForegroundChatApp()) return {}
 
-  await deliverTriggers(store, safeSession, sessionId, triggersToDeliver, terminal)
+  await deliverTriggers(sessionId, triggersToDeliver, terminal)
 
   store.prune()
   return {}
