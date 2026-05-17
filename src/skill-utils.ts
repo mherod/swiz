@@ -66,11 +66,12 @@ export function skillExists(name: string): boolean {
 
 /**
  * Like skillExists but uses the hook payload to detect the originating agent.
- * Prevents the daemon's process-env agent detection from masking Codex sessions
- * that have no Skill tool — in those cases the gate should be skipped entirely.
+ * For agents with no Skill tool, returns false EXCEPT for Codex, which accesses
+ * skills by reading SKILL.md files directly — file existence signals availability.
  */
 export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
+  if (agent?.id === "codex") return skillFileExists(name)
   if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
   return skillExists(name)
 }
