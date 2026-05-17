@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeTask } from "../src/utils/test-utils.ts"
-import {
+import pretooluseTaskGovernance, {
   evaluateBlockedTaskFilesPrecheck,
   evaluateNativeTaskUpdatePath,
   evaluateOtherShellToolPath,
@@ -65,6 +65,12 @@ function decisionReason(result: unknown): string | undefined {
   const hso = (result as { hookSpecificOutput?: { permissionDecisionReason?: string } } | null)
     ?.hookSpecificOutput
   return hso?.permissionDecisionReason
+}
+
+function additionalContext(result: unknown): string | undefined {
+  const hso = (result as { hookSpecificOutput?: { additionalContext?: string } } | null)
+    ?.hookSpecificOutput
+  return hso?.additionalContext
 }
 
 describe("evaluateBlockedTaskFilesPrecheck", () => {
@@ -197,6 +203,43 @@ describe("evaluateOtherShellToolPath", () => {
     const parsed = input as unknown as Parameters<typeof evaluateOtherShellToolPath>[1]
     const result = await evaluateOtherShellToolPath(input, parsed)
     expect(result).toEqual({})
+  })
+})
+
+describe("pretooluseTaskGovernance context", () => {
+  test("adds firm context for existing deferral-task subjects without exposing the trigger", async () => {
+    const sessionId = uniqueSessionId("deferral-context")
+    try {
+      await cleanupSession(sessionId)
+      await writeTask(TASK_HOME, sessionId, {
+        id: "1",
+        subject: "Consider issue #633: reduce governance complexity",
+        status: "pending",
+      })
+      await writeTask(TASK_HOME, sessionId, {
+        id: "2",
+        subject: "Implement task subject governance context",
+        status: "in_progress",
+      })
+
+      const result = await pretooluseTaskGovernance.run({
+        tool_name: "Read",
+        tool_input: {},
+        session_id: sessionId,
+        cwd: process.cwd(),
+        _taskHome: TASK_HOME,
+      })
+
+      const context = additionalContext(result) ?? ""
+      expect(permissionDecision(result)).toBe("allow")
+      expect(context).toContain("Deferral tactic detected")
+      expect(context).toContain("completed in this session, not some next session")
+      expect(context).toContain("That behavior is wrong")
+      expect(context.toLowerCase()).not.toContain("consider issue")
+      expect(context).not.toContain("#633")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 })
 

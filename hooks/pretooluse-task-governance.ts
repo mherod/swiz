@@ -68,6 +68,7 @@ import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
 } from "../src/tasks/task-state-cache.ts"
+import { isTaskSubjectWorkDeferral } from "../src/tasks/task-subject-deferral.ts"
 import {
   applyTaskUpdatePreview,
   duplicateSubjectSeverity,
@@ -1503,16 +1504,41 @@ function isDenyOutput(out: SwizHookOutput | null | undefined): boolean {
   return hso?.permissionDecision === "deny"
 }
 
+function buildDeferralTaskContext(
+  allTasks: Array<{ status: string; subject: string }>
+): string | null {
+  const deferralTaskCount = allTasks.filter(
+    (task) => isIncompleteTaskStatus(task.status) && isTaskSubjectWorkDeferral(task.subject)
+  ).length
+  if (deferralTaskCount === 0) return null
+
+  const subjectText = deferralTaskCount === 1 ? "task subject" : "task subjects"
+  const verb = deferralTaskCount === 1 ? "uses" : "use"
+  return (
+    `Deferral tactic detected: ${deferralTaskCount} active ${subjectText} ${verb} deferral framing. ` +
+    "That behavior is wrong. The task should be completed in this session, not some next session. " +
+    "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+  )
+}
+
+function withDeferralTaskContext(baseContext: string, deferralContext: string | null): string {
+  return deferralContext ? `${baseContext}\n\n${deferralContext}` : baseContext
+}
+
 async function buildTraceContext(rawInput: unknown): Promise<string> {
   try {
     const input = rawInput as Record<string, any>
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
 
+    let allTasks: Array<{ id: string; status: string; subject: string }> = []
     let pending = 0
     let inProgress = 0
     let total = 0
     if (sessionId) {
-      const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+      allTasks = overlayEventState(
+        await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
+        sessionId
+      )
       total = allTasks.length
       for (const t of allTasks) {
         if (t.status === "pending") pending++
@@ -1526,28 +1552,42 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
       pending,
       inProgress,
     })
+    const deferralContext = buildDeferralTaskContext(allTasks)
 
     if (total === 0 || (pending === 0 && inProgress === 0)) {
-      return replaceTaskGovernanceSynonyms(
-        `${stateLead} What are we working on? Create tasks before starting implementation.`
+      return withDeferralTaskContext(
+        replaceTaskGovernanceSynonyms(
+          `${stateLead} What are we working on? Create tasks before starting implementation.`
+        ),
+        deferralContext
       )
     }
     if (inProgress === 0) {
-      return replaceTaskGovernanceSynonyms(
-        `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+      return withDeferralTaskContext(
+        replaceTaskGovernanceSynonyms(
+          `${stateLead} What are we currently working on? Claim a pending task with TaskUpdate before starting.`
+        ),
+        deferralContext
       )
     }
     if (pending <= 1) {
       const cwd = input?.cwd as string | undefined
       const hints = await fetchIssueHints(cwd)
-      const hintSuffix = hints.length > 0 ? ` Open issues to consider: ${hints.join("; ")}.` : ""
+      const hintSuffix =
+        !deferralContext && hints.length > 0 ? ` Open issues to consider: ${hints.join("; ")}.` : ""
       const bufferMsg =
         pending === 0
           ? `${stateLead} What should we do next? Add a pending task to keep the planning buffer stable.`
           : `${stateLead} What should we do next? Add one more pending task to keep the buffer stable.`
-      return replaceTaskGovernanceSynonyms(`${bufferMsg}${hintSuffix}`)
+      return withDeferralTaskContext(
+        replaceTaskGovernanceSynonyms(`${bufferMsg}${hintSuffix}`),
+        deferralContext
+      )
     }
-    return replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`)
+    return withDeferralTaskContext(
+      replaceTaskGovernanceSynonyms(`${stateLead} On track — good task hygiene.`),
+      deferralContext
+    )
   } catch (err) {
     return `Task state unavailable: ${(err as Error)?.message ?? err}`
   }
