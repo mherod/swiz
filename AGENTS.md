@@ -1,5 +1,4 @@
 # CLAUDE.md
-Direct guide for Swiz CLI project conventions.
 ---
 description: Swiz CLI guidance — architecture, patterns, and conventions.
 globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"

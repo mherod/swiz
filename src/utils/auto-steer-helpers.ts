@@ -5,13 +5,15 @@
  * Extracted from hook-utils.ts (issue #422).
  */
 
-import { statSync, utimesSync, writeFileSync } from "node:fs"
+import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { z } from "zod"
 import type { AutoSteerTrigger } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import {
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   swizMcpChannelHeartbeatPath,
   swizMcpChannelNotifyPath,
+  swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
 
@@ -41,15 +43,134 @@ const MCP_CHANNEL_TRIGGERS = new Set<AutoSteerTrigger>([
   "after_all_tasks_complete",
 ])
 
-export function isMcpChannelLiveForCwd(cwd: string): boolean {
-  if (!cwd) return false
+export type McpChannelWatcherState = "starting" | "active" | "error" | "unavailable" | "closed"
+
+export interface McpChannelStatusSnapshot {
+  projectKey: string
+  cwd: string
+  pid: number
+  serverName: string
+  serverVersion: string
+  connected: boolean
+  watcherState: McpChannelWatcherState
+  startedAt: number
+  updatedAt: number
+  lastDrainStartedAt?: number
+  lastDrainCompletedAt?: number
+  lastDrainError?: string
+  deliveredCount: number
+}
+
+const mcpChannelStatusSchema = z.object({
+  projectKey: z.string(),
+  cwd: z.string(),
+  pid: z.number(),
+  serverName: z.string(),
+  serverVersion: z.string(),
+  connected: z.boolean(),
+  watcherState: z.enum(["starting", "active", "error", "unavailable", "closed"]),
+  startedAt: z.number(),
+  updatedAt: z.number(),
+  lastDrainStartedAt: z.number().optional(),
+  lastDrainCompletedAt: z.number().optional(),
+  lastDrainError: z.string().optional(),
+  deliveredCount: z.number(),
+})
+
+export type McpChannelAvailabilityReason =
+  | "available"
+  | "cwd-missing"
+  | "heartbeat-missing"
+  | "heartbeat-stale"
+  | "status-missing"
+  | "status-invalid"
+  | "status-stale"
+  | "server-disconnected"
+
+export interface McpChannelAvailability {
+  available: boolean
+  reason: McpChannelAvailabilityReason
+  projectKey?: string
+  heartbeatAgeMs?: number
+  statusAgeMs?: number
+  status?: McpChannelStatusSnapshot
+}
+
+function ageMs(path: string, now: number): number | null {
   try {
-    const path = swizMcpChannelHeartbeatPath(projectKeyFromCwd(cwd))
-    const mtimeMs = statSync(path).mtimeMs
-    return Date.now() - mtimeMs < SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS
+    return Math.max(0, now - statSync(path).mtimeMs)
   } catch {
-    return false
+    return null
   }
+}
+
+function parseMcpChannelStatus(raw: string): McpChannelStatusSnapshot | null {
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const parsed = mcpChannelStatusSchema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+export function getMcpChannelAvailability(
+  cwd: string | undefined,
+  now: number = Date.now()
+): McpChannelAvailability {
+  if (!cwd) return { available: false, reason: "cwd-missing" }
+  const projectKey = projectKeyFromCwd(cwd)
+  const heartbeatAgeMs = ageMs(swizMcpChannelHeartbeatPath(projectKey), now)
+  if (heartbeatAgeMs === null) {
+    return { available: false, reason: "heartbeat-missing", projectKey }
+  }
+  if (heartbeatAgeMs > SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS) {
+    return { available: false, reason: "heartbeat-stale", projectKey, heartbeatAgeMs }
+  }
+
+  const statusPath = swizMcpChannelStatusPath(projectKey)
+  const statusAgeMs = ageMs(statusPath, now)
+  if (statusAgeMs === null) {
+    return { available: false, reason: "status-missing", projectKey, heartbeatAgeMs }
+  }
+  if (statusAgeMs > SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS) {
+    return {
+      available: false,
+      reason: "status-stale",
+      projectKey,
+      heartbeatAgeMs,
+      statusAgeMs,
+    }
+  }
+
+  const status = parseMcpChannelStatus(readFileSync(statusPath, "utf8"))
+  if (!status) {
+    return { available: false, reason: "status-invalid", projectKey, heartbeatAgeMs, statusAgeMs }
+  }
+  if (!status.connected) {
+    return {
+      available: false,
+      reason: "server-disconnected",
+      projectKey,
+      heartbeatAgeMs,
+      statusAgeMs,
+      status,
+    }
+  }
+
+  return {
+    available: true,
+    reason: "available",
+    projectKey,
+    heartbeatAgeMs,
+    statusAgeMs,
+    status,
+  }
+}
+
+export function isMcpChannelLiveForCwd(cwd: string): boolean {
+  return getMcpChannelAvailability(cwd).available
 }
 
 export interface AutoSteerRequest {

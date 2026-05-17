@@ -17,6 +17,7 @@ import {
   SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
   swizMcpChannelHeartbeatPath,
   swizMcpChannelNotifyPath,
+  swizMcpChannelStatusPath,
   swizMcpRepliesLogPath,
 } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
@@ -107,10 +108,36 @@ export async function pushChannelEvent(event: ChannelEvent, projectKey: string):
 // tearing down alongside the agent session.
 const CHANNEL_TRIGGERS = ["next_turn", "after_commit", "after_all_tasks_complete"] as const
 
-async function drainAutoSteersOnce(projectKey: string): Promise<void> {
-  if (activeServer === null) return
+interface McpChannelRuntimeStatus {
+  projectKey: string
+  cwd: string
+  pid: number
+  serverName: string
+  serverVersion: string
+  connected: boolean
+  watcherState: "starting" | "active" | "error" | "unavailable" | "closed"
+  startedAt: number
+  updatedAt: number
+  lastDrainStartedAt?: number
+  lastDrainCompletedAt?: number
+  lastDrainError?: string
+  deliveredCount: number
+}
+
+function writeChannelStatus(status: McpChannelRuntimeStatus): void {
+  const updated = { ...status, updatedAt: Date.now() }
+  try {
+    writeFileSync(swizMcpChannelStatusPath(status.projectKey), `${JSON.stringify(updated)}\n`)
+  } catch {
+    // status is diagnostic only; keep the MCP transport alive
+  }
+}
+
+async function drainAutoSteersOnce(projectKey: string): Promise<number> {
+  if (activeServer === null) return 0
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
+  let delivered = 0
   for (const trigger of CHANNEL_TRIGGERS) {
     while (true) {
       const req = store.consumeOneByProjectKey(projectKey, trigger)
@@ -127,14 +154,16 @@ async function drainAutoSteersOnce(projectKey: string): Promise<void> {
           },
           projectKey
         )
+        delivered += 1
       } catch (err) {
         const message = messageFromUnknownError(err)
         process.stderr.write(`swiz mcp: failed to push auto-steer event: ${message}\n`)
         // Don't re-enqueue: the row is marked delivered. Move on.
-        return
+        return delivered
       }
     }
   }
+  return delivered
 }
 
 function refreshChannelHeartbeat(projectKey: string): void {
@@ -178,8 +207,22 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
   let stopped = false
   let draining = false
   let pending = false
+  const startedAt = Date.now()
+  const status: McpChannelRuntimeStatus = {
+    projectKey,
+    cwd,
+    pid: process.pid,
+    serverName: SERVER_NAME,
+    serverVersion: SERVER_VERSION,
+    connected: activeServer !== null,
+    watcherState: "starting",
+    startedAt,
+    updatedAt: startedAt,
+    deliveredCount: 0,
+  }
 
   refreshChannelHeartbeat(projectKey)
+  writeChannelStatus(status)
 
   const drain = async (): Promise<void> => {
     if (stopped) return
@@ -190,9 +233,17 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
     draining = true
     try {
       refreshChannelHeartbeat(projectKey)
-      await drainAutoSteersOnce(projectKey)
+      status.connected = activeServer !== null
+      status.lastDrainStartedAt = Date.now()
+      status.lastDrainError = undefined
+      writeChannelStatus(status)
+      status.deliveredCount += await drainAutoSteersOnce(projectKey)
+      status.lastDrainCompletedAt = Date.now()
+      writeChannelStatus(status)
     } catch (err) {
       const message = messageFromUnknownError(err)
+      status.lastDrainError = message
+      writeChannelStatus(status)
       process.stderr.write(`swiz mcp: auto-steer drain error: ${message}\n`)
     } finally {
       draining = false
@@ -208,10 +259,18 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
   let watcher: ReturnType<typeof watch> | null = null
   try {
     watcher = watch(notifyPath, { persistent: false }, () => void drain())
+    status.watcherState = "active"
+    writeChannelStatus(status)
     watcher.on("error", (err) => {
+      status.watcherState = "error"
+      status.lastDrainError = String(err)
+      writeChannelStatus(status)
       process.stderr.write(`swiz mcp: notify watch error: ${String(err)}\n`)
     })
   } catch (err) {
+    status.watcherState = "unavailable"
+    status.lastDrainError = String(err)
+    writeChannelStatus(status)
     process.stderr.write(`swiz mcp: notify watch failed to start: ${String(err)}\n`)
   }
 
@@ -224,6 +283,9 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
 
   return () => {
     stopped = true
+    status.connected = false
+    status.watcherState = "closed"
+    writeChannelStatus(status)
     clearInterval(timer)
     try {
       watcher?.close()

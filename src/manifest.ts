@@ -10,6 +10,7 @@ import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
+import posttooluseMcpChannelTrace from "../hooks/posttooluse-mcp-channel-trace.ts"
 import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
 import posttoolusMidSessionPrompt from "../hooks/posttooluse-mid-session-prompt.ts"
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
@@ -381,6 +382,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "postToolUse",
     hooks: [
       { hook: posttoolusGitContext },
+      { hook: posttooluseMcpChannelTrace },
       { hook: posttooluseSpeakNarrator },
       { hook: posttooluseAutoSteer },
     ],

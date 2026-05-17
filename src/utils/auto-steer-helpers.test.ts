@@ -4,8 +4,16 @@ import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getAutoSteerStore, projectKeyFromCwd, resetAutoSteerStore } from "../auto-steer-store.ts"
-import { swizMcpChannelHeartbeatPath, swizMcpChannelNotifyPath } from "../temp-paths.ts"
-import { scheduleAutoSteer, scheduleAutoSteerViaChannel } from "./auto-steer-helpers.ts"
+import {
+  swizMcpChannelHeartbeatPath,
+  swizMcpChannelNotifyPath,
+  swizMcpChannelStatusPath,
+} from "../temp-paths.ts"
+import {
+  getMcpChannelAvailability,
+  scheduleAutoSteer,
+  scheduleAutoSteerViaChannel,
+} from "./auto-steer-helpers.ts"
 
 const TERMINAL_ENV_KEYS = [
   "TERM_PROGRAM",
@@ -27,6 +35,7 @@ const TERMINAL_ENV_KEYS = [
 
 const originalEnv = new Map<string, string | undefined>()
 const tmpDirs: string[] = []
+const tmpFiles: string[] = []
 let envLock: Promise<void> = Promise.resolve()
 let releaseEnvLock: (() => void) | null = null
 
@@ -68,6 +77,32 @@ async function setupAutoSteerHome(): Promise<string> {
   return home
 }
 
+async function writeLiveChannelStatus(cwd: string): Promise<void> {
+  const projectKey = projectKeyFromCwd(cwd)
+  tmpFiles.push(
+    swizMcpChannelHeartbeatPath(projectKey),
+    swizMcpChannelNotifyPath(projectKey),
+    swizMcpChannelStatusPath(projectKey)
+  )
+  const now = Date.now()
+  await Bun.write(swizMcpChannelHeartbeatPath(projectKey), "")
+  await Bun.write(
+    swizMcpChannelStatusPath(projectKey),
+    `${JSON.stringify({
+      projectKey,
+      cwd,
+      pid: 1234,
+      serverName: "swiz",
+      serverVersion: "0.2.0",
+      connected: true,
+      watcherState: "active",
+      startedAt: now - 1000,
+      updatedAt: now,
+      deliveredCount: 0,
+    })}\n`
+  )
+}
+
 describe("auto-steer helpers", () => {
   let originalHome: string | undefined
 
@@ -90,7 +125,11 @@ describe("auto-steer helpers", () => {
       for (const dir of tmpDirs) {
         await rm(dir, { recursive: true, force: true })
       }
+      for (const file of tmpFiles) {
+        await rm(file, { force: true })
+      }
       tmpDirs.length = 0
+      tmpFiles.length = 0
     } finally {
       releaseEnvLock?.()
       releaseEnvLock = null
@@ -101,7 +140,7 @@ describe("auto-steer helpers", () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
     const projectKey = projectKeyFromCwd(cwd)
-    await Bun.write(swizMcpChannelHeartbeatPath(projectKey), "")
+    await writeLiveChannelStatus(cwd)
 
     const scheduled = await scheduleAutoSteerViaChannel("session-1", "Take the next task", cwd)
 
@@ -113,6 +152,7 @@ describe("auto-steer helpers", () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
     const projectKey = projectKeyFromCwd(cwd)
+    tmpFiles.push(swizMcpChannelNotifyPath(projectKey))
 
     const scheduled = await scheduleAutoSteerViaChannel("session-closed", "Take the next task", cwd)
 
@@ -124,7 +164,7 @@ describe("auto-steer helpers", () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
     const projectKey = projectKeyFromCwd(cwd)
-    await Bun.write(swizMcpChannelHeartbeatPath(projectKey), "")
+    await writeLiveChannelStatus(cwd)
 
     const scheduled = await scheduleAutoSteer("session-2", "Continue from swiz", "next_turn", cwd)
 
@@ -137,7 +177,7 @@ describe("auto-steer helpers", () => {
     const cwd = join(home, "repo")
     const projectKey = projectKeyFromCwd(cwd)
     process.env.TERM_PROGRAM = "Apple_Terminal"
-    await Bun.write(swizMcpChannelHeartbeatPath(projectKey), "")
+    await writeLiveChannelStatus(cwd)
 
     const scheduled = await scheduleAutoSteer(
       "session-3",
@@ -151,5 +191,19 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
     expect(store.consumeOneByProjectKey(projectKey, "next_turn")).toBeNull()
     expect(store.consumeOne("session-3", "next_turn")[0]?.message).toBe("Continue via terminal")
+  })
+
+  test("getMcpChannelAvailability explains missing status separately from heartbeat", async () => {
+    const home = await setupAutoSteerHome()
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    tmpFiles.push(swizMcpChannelHeartbeatPath(projectKey), swizMcpChannelStatusPath(projectKey))
+    await Bun.write(swizMcpChannelHeartbeatPath(projectKey), "")
+
+    const availability = getMcpChannelAvailability(cwd)
+
+    expect(availability.available).toBe(false)
+    expect(availability.reason).toBe("status-missing")
+    expect(availability.heartbeatAgeMs).toBeNumber()
   })
 })

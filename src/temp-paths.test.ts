@@ -5,6 +5,7 @@ import {
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   stopIncompleteTasksLogPath,
   swizDispatchLogPath,
+  swizMcpChannelStatusPath,
   swizPseudoHookLogPath,
   TMP_ROOT,
 } from "./temp-paths.ts"
@@ -39,5 +40,9 @@ describe("path builder functions use TMP_ROOT", () => {
 
   test("MCP heartbeat freshness exceeds the drain interval", () => {
     expect(SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS).toBeGreaterThan(SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS)
+  })
+
+  test("swizMcpChannelStatusPath starts with TMP_ROOT", () => {
+    expect(swizMcpChannelStatusPath("project")).toStartWith(TMP_ROOT)
   })
 })

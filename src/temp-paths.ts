@@ -88,6 +88,14 @@ export function swizMcpChannelHeartbeatPath(projectKey: string): string {
   return `${TMP_ROOT}/swiz-mcp-channel-${projectKey}.heartbeat`
 }
 
+/**
+ * JSON diagnostic snapshot written by the `swiz mcp` drain loop. Unlike the
+ * heartbeat mtime, this records why the channel appears usable or degraded.
+ */
+export function swizMcpChannelStatusPath(projectKey: string): string {
+  return `${TMP_ROOT}/swiz-mcp-channel-${projectKey}.status.json`
+}
+
 /** Safety fallback interval for the MCP channel auto-steer drain loop. */
 export const SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS = 5_000
 
