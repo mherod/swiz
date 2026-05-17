@@ -8,8 +8,12 @@
 //   git commit                                →  requires recent /commit skill
 //   git push                                  →  requires recent /push skill
 //   gh issue edit … --add-label triaged       →  requires /triage-issues skill
-//   gh issue edit … --remove-label backlog    →  requires /refine-issue skill
-//   gh issue edit … --add-label/--remove-label →  requires /refine-issue skill (any label change)
+//   gh issue edit … --add-label/--remove-label →  requires /refine-issue skill
+//     UNLESS all changed labels are readiness-only (backlog, ready, blocked,
+//     upstream, needs-refinement, needs-breakdown) — those communicate scheduling
+//     state, not issue quality, so /refine-issue is not required.
+//   gh issue create                           →  NOT gated (label arg is --label,
+//     not --add-label; creation is not a label change on an existing issue)
 //   gh pr create                              →  requires /pr-open skill
 //   gh pr review … --dismiss                  →  requires /pr-comments-address skill
 //
@@ -42,7 +46,6 @@ import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
   GH_ISSUE_LABEL_CHANGE_RE,
-  GH_ISSUE_REMOVE_BACKLOG_LABEL_RE,
   GH_PR_CREATE_RE,
   GH_PR_REVIEW_DISMISS_RE,
   GIT_COMMIT_RE,
@@ -52,6 +55,33 @@ import {
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+
+/** Labels that communicate scheduling state — not issue quality. Changing only these
+ *  labels does not require /refine-issue. */
+const READINESS_LABELS = new Set([
+  "backlog",
+  "ready",
+  "blocked",
+  "upstream",
+  "needs-refinement",
+  "needs-breakdown",
+])
+
+/** Extract all label names from --add-label and --remove-label arguments. */
+function extractChangedLabels(command: string): string[] {
+  const matches = [...command.matchAll(/--(?:add|remove)-label\s+["']?([^"'\s]+)["']?/g)]
+  return matches.flatMap((m) =>
+    (m[1] ?? "")
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean)
+  )
+}
+
+/** Returns true when every changed label is a readiness/scheduling label. */
+function allLabelsAreReadinessOnly(labels: string[]): boolean {
+  return labels.length > 0 && labels.every((l) => READINESS_LABELS.has(l))
+}
 
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
 function formatSessionSkillsForReason(
@@ -92,10 +122,10 @@ const pretoolusSkillInvocationGate: SwizHook = {
       requiredSkill = "push"
     } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
       requiredSkill = "triage-issues"
-    } else if (GH_ISSUE_REMOVE_BACKLOG_LABEL_RE.test(command)) {
-      requiredSkill = "refine-issue"
     } else if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
-      requiredSkill = "refine-issue"
+      if (!allLabelsAreReadinessOnly(extractChangedLabels(command))) {
+        requiredSkill = "refine-issue"
+      }
     } else if (GH_PR_CREATE_RE.test(cleanedCommand)) {
       requiredSkill = "pr-open"
     } else if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) {

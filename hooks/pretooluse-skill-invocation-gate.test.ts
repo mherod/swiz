@@ -191,6 +191,116 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("deny")
   })
 
+  async function runLabelGateSubprocess(
+    command: string,
+    sessionLines: string[] = []
+  ): Promise<Record<string, any>> {
+    const projectDir = await mkdtemp(join(tmpdir(), "label-gate-project-"))
+    try {
+      const skillDir = join(projectDir, ".skills", "refine-issue")
+      await mkdir(skillDir, { recursive: true })
+      await writeFile(join(skillDir, "SKILL.md"), "# refine-issue\n")
+
+      const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
+        string,
+        string
+      >
+      for (const key of agentEnvKeys) {
+        if (key !== "CLAUDECODE" && key !== "HOME") delete env[key]
+      }
+
+      const proc = Bun.spawn(["bun", HOOK], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: projectDir,
+        env,
+      })
+      await proc.stdin.write(
+        JSON.stringify({
+          tool_name: "Bash",
+          tool_input: { command },
+          transcript_path: "fake-transcript.json",
+          _transcriptSummary: summaryFromLines(sessionLines),
+        })
+      )
+      await proc.stdin.end()
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      // Empty stdout = hook returned {} (implicit allow). Non-empty output = JSON decision.
+      if (!stdout.trim()) return {}
+      if (stderr && !stdout.trim()) throw new Error(`Hook emitted no output. stderr: ${stderr}`)
+      return JSON.parse(stdout) as Record<string, any>
+    } finally {
+      await rm(projectDir, { recursive: true, force: true })
+    }
+  }
+
+  describe("refine-issue gate — readiness label scoping", () => {
+    it("allows --add-label backlog without /refine-issue (readiness label)", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --add-label backlog")
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).not.toBe("deny")
+    })
+
+    it("allows --add-label ready without /refine-issue (readiness label)", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --add-label ready")
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).not.toBe("deny")
+    })
+
+    it("allows --remove-label backlog without /refine-issue (readiness label)", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --remove-label backlog")
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).not.toBe("deny")
+    })
+
+    it("blocks --add-label bug without /refine-issue (type label)", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --add-label bug")
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
+    })
+
+    it("blocks --add-label priority-high without /refine-issue (priority label)", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --add-label priority-high")
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
+    })
+
+    it("blocks mixed readiness+type labels without /refine-issue", async () => {
+      const result = await runLabelGateSubprocess(
+        "gh issue edit 630 --add-label backlog --add-label bug"
+      )
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
+    })
+
+    it("allows --add-label backlog when /refine-issue was used recently", async () => {
+      const result = await runLabelGateSubprocess("gh issue edit 630 --add-label backlog", [
+        assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "refine-issue" } }]),
+      ])
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).not.toBe("deny")
+    })
+  })
+
   it("skips gate when running in Cursor (does NOT support Skill tool)", async () => {
     // Simulate Cursor agent
     process.env.CURSOR_TRACE_ID = "1"
