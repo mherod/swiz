@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { clearSkillCache, formatSkillReferenceForAgent } from "../src/skill-utils.ts"
+import { clearSkillCache } from "../src/skill-utils.ts"
 import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
 import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
 
@@ -113,37 +113,40 @@ describe("pretooluse-skill-invocation-gate", () => {
     })
   }
 
-  it("blocks git commit when running in Claude (supports Skill tool) and skill exists", async () => {
-    // Simulate Claude agent
-    process.env.CLAUDECODE = "1"
-
-    // We assume 'commit' skill exists in the project or global (it usually does in this repo)
-    // If it doesn't, this test might skip, but in this repo it should exist.
-
-    const input = {
+  it("blocks git commit when commit skill is installed and no prior skill invocation", async () => {
+    const result = await runGateSubprocess("commit", {
       tool_name: "Bash",
-      tool_input: {
-        command: "git commit -m 'test'",
-      },
+      tool_input: { command: "git commit -m 'test'" },
       transcript_path: "fake-transcript.json",
-      // Mocking getSkillsUsedForCurrentSession return value via input properties if needed,
-      // but getSkillsUsedForCurrentSession usually reads from disk.
-      // For this test, we want to see it BLOCK.
-    }
+      _transcriptSummary: summaryFromLines([]),
+    })
 
-    const result = await pretooluseSkillInvocationGate.run(input)
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+  })
 
-    // If skillExists('commit') is true, it should block.
-    // In the actual project, 'commit' skill exists.
-    if (result && Object.keys(result).length > 0) {
-      expect((result as { systemMessage?: string }).systemMessage).toContain(
-        `BLOCKED: running git commit requires the ${formatSkillReferenceForAgent("commit")} skill`
-      )
-    } else {
-      // If it didn't block, it means skillExists('commit') returned false.
-      // This could happen if we are not in a git repo or skill is missing.
-      console.log("Gate skipped - possibly skill missing or not in git repo")
-    }
+  it("allows git commit when commit skill and TaskList were recently invoked", async () => {
+    const sessionLines = [
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),
+      assistantLine([{ type: "tool_use", name: "TaskList" }]),
+    ]
+    const result = await runGateSubprocess("commit", {
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: {
+        ...summaryFromLines(sessionLines),
+        toolNames: ["TaskList"],
+      },
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
   })
 
   it("allows gh pr create only when pr-open was used within the recency window", async () => {
