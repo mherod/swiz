@@ -813,47 +813,16 @@ async function checkTaskUpdateSubjectGovernance(
   return buildTaskUpdateDuplicateSubjectBlock(taskId, groups)
 }
 
-async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
-  const { input, toolName, sessionId, transcriptPath, cwd } = parsed
-  // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
-  if (isBlockedTaskFilesEdit(input, toolName)) {
-    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: filePath,
-      sessionId,
-    })
-  }
-  const command = String(input.tool_input?.command ?? "")
-  // Layer 2: Shell command guard — catches cat, jq, pipes, redirects, subshells
-  if (isBlockedSwizTaskFilesCommand(command)) {
-    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
-      toolName,
-      blockedPath: command,
-      sessionId,
-    })
-  }
-
-  let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
-  try {
-    const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-    const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
-    thresholds = resolveGovernanceThresholds(effectiveSettings.auditStrictness)
-  } catch {
-    // Settings read failure → use strict thresholds as default
-  }
-
-  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
-  const activeTasks = allTasks
-    .filter((t) => isIncompleteTaskStatus(t.status))
-    .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
-
-  const duplicateSubjectOutcome = checkDuplicateSubjectResolution(toolName, input, allTasks)
-  if (duplicateSubjectOutcome) return duplicateSubjectOutcome
-
+async function runTaskStateChecks(
+  toolName: string,
+  sessionId: string,
+  cwd: string,
+  allTasks: Array<{ id: string; status: string; subject: string }>,
+  activeTasks: string[],
+  thresholds: GovernanceThresholds,
+  input: Record<string, any>,
+  transcriptPath: string
+): Promise<SwizHookOutput> {
   if (needsReconciliation(sessionId) && isBlockedTool(toolName) && !isTaskListTool(toolName)) {
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
@@ -897,10 +866,60 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   })
   if (staleOutcome) return staleOutcome
 
-  const slowOutcome = await emitSlowTaskWarning(allTasks, sessionId, cwd)
-  if (slowOutcome) return slowOutcome
+  return (await emitSlowTaskWarning(allTasks, sessionId, cwd)) ?? {}
+}
 
-  return {}
+async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutput> {
+  const { input, toolName, sessionId, transcriptPath, cwd } = parsed
+  // Layer 1: Edit/Write file-path guard (see task-cli-governance.ts)
+  if (isBlockedTaskFilesEdit(input, toolName)) {
+    const filePath = String((input.tool_input as Record<string, any> | undefined)?.file_path ?? "")
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: filePath,
+      sessionId,
+    })
+  }
+  const command = String(input.tool_input?.command ?? "")
+  // Layer 2: Shell command guard — catches cat, jq, pipes, redirects, subshells
+  if (isBlockedSwizTaskFilesCommand(command)) {
+    return preToolUseDenyTaskFileAccess(SWIZ_TASKS_FILES_DENY_MESSAGE, {
+      toolName,
+      blockedPath: command,
+      sessionId,
+    })
+  }
+
+  let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
+  try {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
+    thresholds = resolveGovernanceThresholds(effectiveSettings.auditStrictness)
+  } catch {
+    // Settings read failure → use strict thresholds as default
+  }
+
+  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+  const activeTasks = allTasks
+    .filter((t) => isIncompleteTaskStatus(t.status))
+    .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
+
+  const duplicateSubjectOutcome = checkDuplicateSubjectResolution(toolName, input, allTasks)
+  if (duplicateSubjectOutcome) return duplicateSubjectOutcome
+
+  return await runTaskStateChecks(
+    toolName,
+    sessionId,
+    cwd,
+    allTasks,
+    activeTasks,
+    thresholds,
+    input,
+    transcriptPath
+  )
 }
 
 function unexpectedHookFailureOutput(err: unknown): SwizHookOutput {
@@ -1196,6 +1215,24 @@ async function checkInProgressTransitionCap(
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
+async function handleNativeInProgressUpdate(
+  taskId: string,
+  sessionId: string,
+  input: Record<string, any>
+): Promise<NativeTaskUpdateResult> {
+  const taskHome = taskHomeForInput(input)
+  const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, taskHome)
+  if (transitionDenied) return transitionDenied
+  // Optimistically record in event state + cache for parallel TOCTOU safety.
+  const allTasks = await readSessionTasks(sessionId, taskHome)
+  const currentTask = allTasks.find((t) => t.id === taskId)
+  if (currentTask && currentTask.status !== "in_progress") {
+    applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
+    applyCacheTaskUpdate(sessionId, { ...currentTask, status: "in_progress" })
+  }
+  return "continue"
+}
+
 async function checkNativeTaskUpdateCompletion(
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
@@ -1217,17 +1254,7 @@ async function checkNativeTaskUpdateCompletion(
   }
 
   if (toolInput.status === "in_progress") {
-    const taskHome = taskHomeForInput(input)
-    const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, taskHome)
-    if (transitionDenied) return transitionDenied
-    // Optimistically record in event state + cache for parallel TOCTOU safety.
-    const allTasks = await readSessionTasks(sessionId, taskHome)
-    const currentTask = allTasks.find((t) => t.id === taskId)
-    if (currentTask && currentTask.status !== "in_progress") {
-      applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
-      applyCacheTaskUpdate(sessionId, { ...currentTask, status: "in_progress" })
-    }
-    return "continue"
+    return await handleNativeInProgressUpdate(taskId, sessionId, input)
   }
 
   if (toolInput.status !== "completed") return "early_exit"
@@ -1525,26 +1552,34 @@ function withDeferralTaskContext(baseContext: string, deferralContext: string | 
   return deferralContext ? `${baseContext}\n\n${deferralContext}` : baseContext
 }
 
+async function readTaskCountsForTrace(
+  sessionId: string | null,
+  input: Record<string, any>
+): Promise<{
+  allTasks: Array<{ id: string; status: string; subject: string }>
+  pending: number
+  inProgress: number
+  total: number
+}> {
+  if (!sessionId) return { allTasks: [], pending: 0, inProgress: 0, total: 0 }
+  const allTasks = overlayEventState(
+    await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
+    sessionId
+  )
+  let pending = 0
+  let inProgress = 0
+  for (const t of allTasks) {
+    if (t.status === "pending") pending++
+    else if (t.status === "in_progress") inProgress++
+  }
+  return { allTasks, pending, inProgress, total: allTasks.length }
+}
+
 async function buildTraceContext(rawInput: unknown): Promise<string> {
   try {
     const input = rawInput as Record<string, any>
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
-
-    let allTasks: Array<{ id: string; status: string; subject: string }> = []
-    let pending = 0
-    let inProgress = 0
-    let total = 0
-    if (sessionId) {
-      allTasks = overlayEventState(
-        await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
-        sessionId
-      )
-      total = allTasks.length
-      for (const t of allTasks) {
-        if (t.status === "pending") pending++
-        else if (t.status === "in_progress") inProgress++
-      }
-    }
+    const { allTasks, pending, inProgress, total } = await readTaskCountsForTrace(sessionId, input)
 
     const stateLead = formatTaskStateLead({
       total,
