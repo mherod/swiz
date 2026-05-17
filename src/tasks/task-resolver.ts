@@ -499,7 +499,8 @@ export async function resolveTaskById(
  */
 export async function getOrphanSessionIds(
   tasksDir = createDefaultTaskStore().tasksDir,
-  projectsDir = createDefaultTaskStore().projectsDir
+  projectsDir = createDefaultTaskStore().projectsDir,
+  filterCwd?: string
 ): Promise<Set<string>> {
   const allIndexed = await getAllProjectSessionIds(projectsDir)
   let entries: string[]
@@ -512,7 +513,11 @@ export async function getOrphanSessionIds(
   for (const s of entries) {
     if (!allIndexed.has(s)) orphans.add(s)
   }
-  return orphans
+  if (!filterCwd) return orphans
+
+  const { matched, remaining } = await partitionByMeta([...orphans], filterCwd, tasksDir)
+  await scanTranscriptsForCwd(new Set(remaining), filterCwd, projectsDir, matched)
+  return matched
 }
 
 /**

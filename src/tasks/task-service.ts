@@ -645,7 +645,7 @@ export async function completeTaskWithAutoTransition(
  * target session.
  */
 export async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise<void> {
-  const orphanIds = await getOrphanSessionIds()
+  const orphanIds = await getOrphanSessionIds(undefined, undefined, cwd)
   if (orphanIds.size === 0) {
     console.log("\n  No recovered sessions to adopt.\n")
     return

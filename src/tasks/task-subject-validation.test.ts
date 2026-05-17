@@ -192,8 +192,8 @@ describe("detect", () => {
       expect(detect("Refactor future-proofing helpers").matched).toBe(false)
     })
 
-    test("does not reject Follow-up prefix without next session wording", () => {
-      expect(detect("Follow-up: docs for new flag").matched).toBe(false)
+    test("rejects Follow-up prefix (all Follow-up: tasks are deferrals)", () => {
+      expect(detect("Follow-up: docs for new flag").matched).toBe(true)
     })
   })
 
