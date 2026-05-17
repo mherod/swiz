@@ -147,10 +147,22 @@ function buildFailingResult(branch: string, failing: CIRun[]): WorkflowStep {
     "Wait for CI to go green: gh run watch <run-id> --exit-status"
   )
 
+  const trackSubSteps: ActionPlanItem[] = [
+    "Verify this failure predates your changes and is a known recurring pattern",
+    "File a GitHub issue titled with the workflow name and run ID, including the conclusion and log evidence",
+    "Include the new issue URL in your EOD summary as ownership evidence",
+    "Stop is acceptable once the tracking issue is filed and linked in the summary",
+  ]
+
   return {
     kind: "ci",
     summary,
-    planSteps: ["Analyze and fix CI failures before stopping:", fixSubSteps],
+    planSteps: [
+      "Preferred: fix CI before stopping:",
+      fixSubSteps,
+      "Alternative (known recurring failure only): file a tracking issue:",
+      trackSubSteps,
+    ],
   }
 }
 
