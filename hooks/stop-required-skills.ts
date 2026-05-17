@@ -19,7 +19,7 @@ import {
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
-  skillExists,
+  skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
 import { blockStopObj, isGitRepo } from "../src/utils/hook-utils.ts"
@@ -189,7 +189,7 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Rule ${rule.skill} does not apply`)
       continue
     }
-    if (!skillExists(rule.skill)) {
+    if (!skillExistsForHookPayload(rule.skill, parsed as Record<string, unknown>)) {
       if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} does not exist`)
       continue
     }

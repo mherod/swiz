@@ -306,4 +306,23 @@ describe("pretooluse-skill-invocation-gate", () => {
     // Should return empty object (allow/skip) because skillExists returns false for Gemini
     expect(result).toEqual({})
   })
+
+  it("skips gate when _env in payload identifies a Codex session (daemon context)", async () => {
+    // Simulate daemon running as Claude (process env has CLAUDECODE), but dispatching
+    // a hook payload that originated from a Codex session.  Without this fix the
+    // daemon's process-env agent (Claude) would satisfy the Skill tool check, and
+    // Codex — which has no Skill tool — would be incorrectly blocked.
+    process.env.CLAUDECODE = "1"
+
+    const input = {
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _env: { CODEX_MANAGED_BY_NPM: "1" },
+    }
+
+    const result = await pretooluseSkillInvocationGate.run(input)
+
+    expect(result).toEqual({})
+  })
 })

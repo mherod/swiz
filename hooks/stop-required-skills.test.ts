@@ -338,6 +338,23 @@ describe("stop-required-skills", () => {
     })
   })
 
+  test("skips all skill requirements when payload _env identifies a Codex session", async () => {
+    // Daemon process has CLAUDECODE (would normally trigger skill gates) but the
+    // dispatched payload carries _env from a Codex session.  Codex has no Skill
+    // tool so all skill requirements should be bypassed — the hook must allow.
+    const dir = await tmp.create()
+    await initGitRepo(dir)
+    for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+    const transcriptPath = await createTranscript(dir) // no skills invoked
+
+    const result = await runHookWithInput(dir, transcriptPath, {
+      _env: { CODEX_MANAGED_BY_NPM: "1" },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBeUndefined()
+  })
+
   test("fails open when the active agent does not support the Skill tool", async () => {
     const dir = await tmp.create()
     const transcriptPath = await createTranscript(dir)

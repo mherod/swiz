@@ -40,7 +40,7 @@ import {
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
   getRecentlyUsedToolsForCurrentSession,
-  skillExists,
+  skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
@@ -186,7 +186,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     const requiredSkill = classifyRequiredSkill(command, cleanedCommand)
     if (!requiredSkill) return {}
-    if (!skillExists(requiredSkill)) return {}
+    if (!skillExistsForHookPayload(requiredSkill, rawInput)) return {}
 
     // ── Resolve project/global recency window ─────────────────────────────────────
 

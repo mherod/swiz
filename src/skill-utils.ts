@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
+import { detectCurrentAgentFromHookPayload } from "./agent-paths.ts"
 import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
@@ -54,6 +55,17 @@ export function skillExists(name: string): boolean {
   const found = dirs.some((dir) => existsSync(join(dir, name, "SKILL.md")))
   _skillCache.set(name, found)
   return found
+}
+
+/**
+ * Like skillExists but uses the hook payload to detect the originating agent.
+ * Prevents the daemon's process-env agent detection from masking Codex sessions
+ * that have no Skill tool — in those cases the gate should be skipped entirely.
+ */
+export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
+  const agent = detectCurrentAgentFromHookPayload(payload)
+  if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
+  return skillExists(name)
 }
 
 /**
