@@ -54,8 +54,8 @@ alwaysApply: false
 - After `/commit`, recent `TaskList` required before `git commit`.
 - `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch, PR, and CI checks must be recent or hook emits advisory. Behind-remote, WIP/fixup/squash commits, secrets, large files are hard blocks.
 - `hooks/stop-required-skills.ts`: stop requires in order: `/end-of-day` (unpushed commits/incomplete tasks), `/farm-out-issues` (git repos), `/continue-with-tasks`, `/reflect-on-session-mistakes`.
-- `stop-incomplete-tasks.ts` and `stop-completion-auditor/task-reconciliation.ts` require recent `TaskList` before stop. `posttooluse-mid-session-prompt.ts` only suppresses prompt if `/mid-session-checkin` was recent.
-- When changing current-session usage semantics, update transcript parsing and daemon `_currentSessionToolUsage` together; retain timestamps/turn indexes when recency matters.
+- `stop-incomplete-tasks.ts` and `stop-completion-auditor/task-reconciliation.ts` require recent `TaskList` before stop.
+- When changing current-session usage semantics, update transcript parsing and daemon `_currentSessionToolUsage` together.
 - Hook output is rephrased; tests assert stable decisions/categories/window text, not exact command strings.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
@@ -105,7 +105,7 @@ alwaysApply: false
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
 - **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + `applyTaskUpdate()` write-through. `getTasksFresh()` forces disk reload when no watcher/openCount zero. **DO**: `watchSession()` on daemon activate. **DON'T**: Trust cache for stop hooks — use `readSessionTasksFresh()`.
 - **In-memory event state**: `src/tasks/task-event-state.ts` — `Map<sessionId, EventTaskState[]>` updated by PostToolUse hooks. `posttooluse-task-count-context` reads `getSessionEventState()` first (zero I/O), falls back to disk + `applyMutationOverlay`.
-- **Last-task-standing enforcement**: `updateStatus()` calls unconditional `validateLastTaskStanding`; on empty-would-result, `promoteNextTaskFromIssues()` auto-creates a successor from `IssueStore` ready issues. Blocks only if no candidate. `skipLastTaskGuard` for explicit overrides.
+- **Last-task-standing enforcement**: `updateStatus()` calls unconditional `validateLastTaskStanding`; on empty-would-result, `promoteNextTaskFromIssues()` auto-creates a successor from `IssueStore` ready issues. `skipLastTaskGuard` for explicit overrides.
 - **Native task file lifecycle**: Native `TaskCreate`/`TaskUpdate` DELETE `.json` files on completion; session dir keeps only `.highwatermark` + `.lock`. `readSessionTasksFresh` returns `[]` on clean sessions. **DON'T** treat `allTasks.length === 0` as "no tasks created" in stop hooks.
 - **CI evidence field**: Native `TaskUpdate description` stores evidence in `t.description`, NOT `t.completionEvidence` (only set by `swiz tasks complete --evidence`). Stop hooks MUST check both. See `ci-evidence-validator.ts::taskHasCiEvidence`.
 - **CI evidence transcript fallback**: When `allTasks = []`, `ci-evidence-validator` scans `TranscriptSummary.bashCommands` for CI verification commands. Regex: `CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/`.
@@ -114,11 +114,12 @@ alwaysApply: false
 - State machine: `pending` → `in_progress` → `completed` or `deleted`.
 - Gates: `stop-incomplete-tasks/evaluate.ts` blocks incomplete; `pretooluse-task-transition-validator.ts` blocks `pending`→`completed`; `pretooluse-no-phantom-task-completion.ts` requires substantive tool calls and evidence.
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
-- Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`. `find` not exempt.
+- Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
-- Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`. Example: `test:5_pass_0_fail -- integration verified`.
+- Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks using `git log --oneline -3`. Call task tools every 10 calls; staleness gate at 20.
 - On session resume, verify every `completed` commit/push task against `git status` — uncommitted/unpushed files mean phantom completion; reopen the task before new work.
