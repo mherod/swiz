@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * PreToolUse hook: Enforce --concurrent policy on bun test invocations.
  *
@@ -8,33 +9,46 @@
  * Dual-mode: exports a SwizShellHook for inline dispatch and remains
  * executable as a standalone script for backwards compatibility and testing.
  */
-
+import { bunTestArgSegments, isSingleFileBunTestArgs } from "../src/command-utils.ts"
 import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
-import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
-// Evaluate each shell segment independently so chained commands are handled.
-// Try \d>&\d? before [^|;&] so redirections like 2>&1 aren't split on &
-const BUN_TEST_SEGMENT_RE = new RegExp(
-  `${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b((?:\\d>&\\d?|[^|;&])*)`,
-  "g"
-)
-// Matches a test/spec file path (e.g., "src/foo.test.ts", "./hooks/bar.spec.js")
-// Note: accepts piped output (e.g., `bun test src/foo.test.ts | tail -50`) as single-file tests
-const TEST_FILE_RE = /(?:\.\/)?[\w./-]+\.(?:test|spec)\.\w+/
-
-/** Returns true when the segment targets exactly one test file (no dirs/globs). */
-function isSingleFileTest(segment: string): boolean {
-  const stripped = segment
-    .replace(/\s+--\w[\w-]*(?:=\S+)?/g, "") // flags (--flag or --flag=value)
-    .replace(/\s*(?:[12]?>>?|2>&1|>&)\s*\S+/g, "") // redirections
-    .replace(/\s*\|.*$/g, "") // pipes and everything after
+function denySingleFileConcurrent(segment: string) {
+  const originalInvocation = `bun test${segment}`.trim()
+  const correctedInvocation = originalInvocation
+    .replace(/\s+--concurrent(?:=\S+)?/, "")
+    .replace(/\s{2,}/g, " ")
     .trim()
-  const positionals = stripped.split(/\s+/).filter(Boolean)
-  const testFiles = positionals.filter((p) => TEST_FILE_RE.test(p))
-  return testFiles.length === 1
+  return preToolUseDeny(
+    "Don't use `--concurrent` when testing a single file.\n\n" +
+      `Blocked command:\n  ${originalInvocation}\n\n` +
+      `Use this instead:\n  ${correctedInvocation}`
+  )
+}
+
+function denyMissingConcurrent(segment: string) {
+  const originalInvocation = `bun test${segment}`.trim()
+  const redirectRe = /(\s+(?:[12]?>>?|2>&1|>&)\s*\S+(?:\s+(?:[12]?>>?|2>&1|>&)\s*\S+)*)$/
+  const redirectMatch = originalInvocation.match(redirectRe)
+  const correctedInvocation = redirectMatch
+    ? `${originalInvocation.slice(0, redirectMatch.index)} --concurrent${redirectMatch[0]}`
+    : `${originalInvocation} --concurrent`
+  return preToolUseDeny(
+    "Use `bun test` with `--concurrent`.\n\n" +
+      `Blocked command:\n  ${originalInvocation}\n\n` +
+      `Use this instead:\n  ${correctedInvocation}`
+  )
+}
+
+function evaluateBunTestSegment(segment: string) {
+  const hasConcurrentFlag = /(?:^|\s)--concurrent(?:\s|=|$)/.test(segment)
+  const singleFile = isSingleFileBunTestArgs(segment)
+
+  if (singleFile && hasConcurrentFlag) return denySingleFileConcurrent(segment)
+  if (singleFile || hasConcurrentFlag) return null
+  return denyMissingConcurrent(segment)
 }
 
 function evaluate(input: ShellHookInput) {
@@ -43,40 +57,9 @@ function evaluate(input: ShellHookInput) {
 
   const command: string = input.tool_input?.command ?? ""
 
-  for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
-    const segment = segMatch[1] ?? ""
-    const hasConcurrentFlag = /(?:^|\s)--concurrent(?:\s|=|$)/.test(segment)
-    const singleFile = isSingleFileTest(segment)
-
-    if (singleFile && hasConcurrentFlag) {
-      // Single file with --concurrent — remove it
-      const originalInvocation = `bun test${segment}`.trim()
-      const correctedInvocation = originalInvocation
-        .replace(/\s+--concurrent(?:=\S+)?/, "")
-        .replace(/\s{2,}/g, " ")
-        .trim()
-      return preToolUseDeny(
-        "Don't use `--concurrent` when testing a single file.\n\n" +
-          `Blocked command:\n  ${originalInvocation}\n\n` +
-          `Use this instead:\n  ${correctedInvocation}`
-      )
-    }
-
-    if (singleFile || hasConcurrentFlag) continue
-
-    // Multi-file / general without --concurrent — add it
-    const originalInvocation = `bun test${segment}`.trim()
-    // Insert --concurrent before any trailing shell redirections
-    const redirectRe = /(\s+(?:[12]?>>?|2>&1|>&)\s*\S+(?:\s+(?:[12]?>>?|2>&1|>&)\s*\S+)*)$/
-    const redirectMatch = originalInvocation.match(redirectRe)
-    const correctedInvocation = redirectMatch
-      ? `${originalInvocation.slice(0, redirectMatch.index)} --concurrent${redirectMatch[0]}`
-      : `${originalInvocation} --concurrent`
-    return preToolUseDeny(
-      "Use `bun test` with `--concurrent`.\n\n" +
-        `Blocked command:\n  ${originalInvocation}\n\n` +
-        `Use this instead:\n  ${correctedInvocation}`
-    )
+  for (const segment of bunTestArgSegments(command)) {
+    const violation = evaluateBunTestSegment(segment)
+    if (violation) return violation
   }
   return preToolUseAllow(
     "Continue in concurrent Bun test mode: multi-file runs include --concurrent and single-file runs stay focused."

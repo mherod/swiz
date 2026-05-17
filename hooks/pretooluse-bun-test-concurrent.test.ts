@@ -52,6 +52,27 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.decision).toBe("allow")
   })
 
+  test("allows quoted filter argument containing bun test", async () => {
+    const result = await runHook('rg -v "bun test" some-file.ts')
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows quoted pipe before bun test", async () => {
+    const result = await runHook('rg "|bun test" hooks/pretooluse-bun-test-concurrent.ts')
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows quoted semicolon before bun test", async () => {
+    const result = await runHook('grep "; bun test" hooks/*.ts')
+    expect(result.decision).toBe("allow")
+  })
+
+  test("blocks actual bun test after a pipe", async () => {
+    const result = await runHook("rg foo hooks | bun test")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("--concurrent")
+  })
+
   test("allows single test file with stderr redirection", async () => {
     const result = await runHook("bun test src/commands/state.test.ts 2> /tmp/out.log")
     expect(result.decision).toBe("allow")

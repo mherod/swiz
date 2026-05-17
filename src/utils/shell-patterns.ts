@@ -46,6 +46,96 @@ export const SHELL_SEGMENT_BOUNDARY = `(?:^|[|;&])`
 /** Matches boundaries suitable for whole-command token checks. */
 export const SHELL_TOKEN_BOUNDARY = String.raw`(?:^|\s|&&|\|\||;)`
 
+type ShellQuote = '"' | "'" | null
+
+interface SegmentSplitState {
+  segments: string[]
+  current: string
+  quote: ShellQuote
+}
+
+function previousNonWhitespace(command: string, index: number): string | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = command[i]
+    if (ch !== " " && ch !== "\t") return ch
+  }
+  return undefined
+}
+
+function pushShellSegment(state: SegmentSplitState): void {
+  const trimmed = state.current.trim()
+  if (trimmed) state.segments.push(trimmed)
+  state.current = ""
+}
+
+function appendQuotedChar(state: SegmentSplitState, command: string, index: number): number {
+  const ch = command[index]!
+  state.current += ch
+
+  if (state.quote === '"' && ch === "\\" && index + 1 < command.length) {
+    state.current += command[++index]!
+  } else if (ch === state.quote) {
+    state.quote = null
+  }
+
+  return index
+}
+
+function consumeSegmentBoundary(
+  state: SegmentSplitState,
+  command: string,
+  index: number
+): number | null {
+  const ch = command[index]!
+  if (ch === ";" || ch === "\n") {
+    pushShellSegment(state)
+    return index
+  }
+  if (ch === "|") {
+    pushShellSegment(state)
+    return command[index + 1] === "|" ? index + 1 : index
+  }
+  if (ch === "&" && previousNonWhitespace(command, index) !== ">") {
+    pushShellSegment(state)
+    return command[index + 1] === "&" ? index + 1 : index
+  }
+  return null
+}
+
+function appendUnquotedChar(state: SegmentSplitState, command: string, index: number): number {
+  const ch = command[index]!
+  if (ch === '"' || ch === "'") {
+    state.quote = ch
+  } else if (ch === "\\" && index + 1 < command.length) {
+    state.current += ch + command[++index]!
+    return index
+  } else {
+    const boundaryIndex = consumeSegmentBoundary(state, command, index)
+    if (boundaryIndex !== null) return boundaryIndex
+  }
+
+  state.current += ch
+  return index
+}
+
+/**
+ * Split a shell command into executable segments at unquoted separators.
+ *
+ * Separators are `|`, `||`, `;`, newline, `&`, and `&&`. Quoted separators are
+ * preserved as argument text. File descriptor redirects like `2>&1` stay in the
+ * surrounding segment rather than splitting on `&`.
+ */
+export function splitShellSegments(command: string): string[] {
+  const state: SegmentSplitState = { segments: [], current: "", quote: null }
+
+  for (let i = 0; i < command.length; i++) {
+    i = state.quote ? appendQuotedChar(state, command, i) : appendUnquotedChar(state, command, i)
+  }
+
+  pushShellSegment(state)
+  return state.segments
+}
+
 /**
  * Strip quoted shell string contents before pattern matching command tokens.
  *
