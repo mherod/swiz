@@ -39,6 +39,7 @@ import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
 import pretooluseBlockTasksDirBash from "../hooks/pretooluse-block-tasks-dir-bash.ts"
+import pretooluseBlockTasksDirEdit from "../hooks/pretooluse-block-tasks-dir-edit.ts"
 import pretooluseBlockTasksDirGlob from "../hooks/pretooluse-block-tasks-dir-glob.ts"
 import pretooluseBlockTasksDirRead from "../hooks/pretooluse-block-tasks-dir-read.ts"
 import pretoolusBranchIntentGate from "../hooks/pretooluse-branch-intent-gate.ts"
@@ -382,6 +383,11 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Glob",
     hooks: [{ hook: pretooluseBlockTasksDirGlob }],
+  },
+  {
+    event: "preToolUse",
+    matcher: "Edit|Write|NotebookEdit",
+    hooks: [{ hook: pretooluseBlockTasksDirEdit }],
   },
   {
     event: "postToolUse",

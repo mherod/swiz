@@ -36,6 +36,16 @@ async function runLsHook(path: string) {
   })
 }
 
+async function runEditHook(toolName: "Edit" | "Write" | "NotebookEdit", filePath: string) {
+  const toolInput =
+    toolName === "NotebookEdit" ? { notebook_path: filePath } : { file_path: filePath }
+  return await runHookInProcess("hooks/pretooluse-block-tasks-dir-edit.ts", {
+    tool_name: toolName,
+    tool_input: toolInput,
+    session_id: "test-session",
+  })
+}
+
 describe("pretooluse-block-tasks-dir-read", () => {
   test("blocks read of exact tasks directory", async () => {
     const result = await runHook(TASKS_DIR)
@@ -159,6 +169,45 @@ describe("pretooluse-block-tasks-dir-glob", () => {
 
   test("allows glob with tasks-dir prefix but not the tasks dir itself", async () => {
     const result = await runGlobHook(`${TASKS_DIR}-backup/**`)
+    expect(result.decision).toBe("allow")
+  })
+})
+
+describe("pretooluse-block-tasks-dir-edit", () => {
+  test("blocks Edit of exact tasks directory", async () => {
+    const result = await runEditHook("Edit", TASKS_DIR)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskCreate")
+  })
+
+  test("blocks Edit of file inside tasks directory", async () => {
+    const result = await runEditHook("Edit", `${TASKS_DIR}/abc123/task-1.json`)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskUpdate")
+  })
+
+  test("blocks Write of file inside tasks directory", async () => {
+    const result = await runEditHook("Write", `${TASKS_DIR}/some-session/task.json`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks NotebookEdit of notebook inside tasks directory", async () => {
+    const result = await runEditHook("NotebookEdit", `${TASKS_DIR}/session-id/notebook.ipynb`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("allows Edit of unrelated path", async () => {
+    const result = await runEditHook("Edit", "/Users/matthewherod/Development/swiz/src/manifest.ts")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows Write of unrelated path", async () => {
+    const result = await runEditHook("Write", "/tmp/my-output.json")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows path that is a prefix but not the tasks dir", async () => {
+    const result = await runEditHook("Edit", `${TASKS_DIR}-backup/file.json`)
     expect(result.decision).toBe("allow")
   })
 })
