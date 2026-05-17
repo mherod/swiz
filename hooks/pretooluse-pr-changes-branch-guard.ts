@@ -14,6 +14,7 @@ import {
   detectForkTopology,
   type ForkTopology,
   forkPushCmd,
+  GH_PR_CHECKOUT_RE,
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
   getOpenPrForBranch,
@@ -38,7 +39,9 @@ type Review = {
 function isValidShellCommand(input: Record<string, any>): boolean {
   if (!isShellTool((input?.tool_name as string) ?? "")) return false
   const command: string = ((input?.tool_input as Record<string, any>)?.command as string) ?? ""
-  return GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command)
+  return (
+    GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command) || GH_PR_CHECKOUT_RE.test(command)
+  )
 }
 
 async function isValidEnvironment(cwd: string): Promise<boolean> {
