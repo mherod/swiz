@@ -44,6 +44,19 @@ describe("isTaskSubjectWorkDeferral", () => {
     ).toBe(true)
   })
 
+  test("matches consider-issue subjects that defer current work", () => {
+    expect(
+      isTaskSubjectWorkDeferral(
+        "◻ Consider issue #633: reduce pretooluse-task-governance complexity"
+      )
+    ).toBe(true)
+    expect(
+      isTaskSubjectWorkDeferral(
+        "◻ Consider issue #636: expose auditStrictness in swiz settings output"
+      )
+    ).toBe(true)
+  })
+
   test("matches to/for/until next sprint or release", () => {
     expect(isTaskSubjectWorkDeferral("Save this fix for next sprint")).toBe(true)
     expect(isTaskSubjectWorkDeferral("Hold until next release")).toBe(true)

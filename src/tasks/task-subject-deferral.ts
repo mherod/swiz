@@ -1,4 +1,5 @@
-const LEADING_MARKER_CHARS = String.raw`[\s•◼◻⏳✓✗*-]*`
+const LEADING_MARKER_CHARS = String.raw`[\s•◼◻⏳✓✗⎿*-]*`
+const ISSUE_REF = String.raw`(?:issue\s*)?#\d+`
 
 const WORK_DEFERRAL_PATTERNS = [
   // "Defer #1727", "Deferred: ...", "Deferring: ..."
@@ -11,8 +12,30 @@ const WORK_DEFERRAL_PATTERNS = [
   new RegExp(`^${LEADING_MARKER_CHARS}icebox(?:ed)?\\b`, "i"),
   // "Carry over billing work", "Carry-forward the migration"
   new RegExp(`^${LEADING_MARKER_CHARS}carry[-\\s]?(?:over|forward)\\b`, "i"),
-  // "Pick next issue: feat(posts) archive controls (#1717)" — issue selection as deferral
-  new RegExp(`^${LEADING_MARKER_CHARS}pick\\s+next\\s+issue\\s*:`, "i"),
+  // Issue-selection labels are not concrete current-session work.
+  new RegExp(
+    `^${LEADING_MARKER_CHARS}(?:pick|choose|select|grab|take|queue|line\\s+up|shortlist|prioriti[sz]e)\\s+(?:the\\s+)?(?:next\\s+)?(?:issue|pick|task|work\\s+item)\\b`,
+    "i"
+  ),
+  new RegExp(
+    `^${LEADING_MARKER_CHARS}(?:next|candidate|possible|potential|optional)\\s+(?:issue|pick|task|work\\s+item)\\b`,
+    "i"
+  ),
+  new RegExp(
+    `^${LEADING_MARKER_CHARS}(?:consider|revisit|evaluate|assess|scope|plan|circle\\s+back\\s+to|come\\s+back\\s+to|return\\s+to)\\s+${ISSUE_REF}\\b`,
+    "i"
+  ),
+  new RegExp(
+    `^${LEADING_MARKER_CHARS}(?:consider|revisit|evaluate|assess|scope|plan)\\s+(?:the\\s+)?(?:next\\s+)?issue\\b`,
+    "i"
+  ),
+  new RegExp(
+    `^${LEADING_MARKER_CHARS}(?:maybe|if\\s+time|when\\s+time\\s+allows|if\\s+there(?:'s|\\s+is)?\\s+time)\\b.*(?:issue|#\\d+)`,
+    "i"
+  ),
+  /\b(?:not\s+now|later\s+if|when\s+there(?:'s|\s+is)\s+time)\b/i,
+  /\b(?:after|following)\s+(?:this|the)\s+(?:session|turn|current\s+task)\b/i,
+  /\b(?:save|leave|reserve)\b.*\b(?:later|tomorrow|next\s+(?:session|sprint|release|iteration|cycle|week))\b/i,
   // "... to/for/until next session/sprint/release/iteration/cycle/week"
   /\b(?:to|for|until)\s+(?:the\s+)?next\s+(?:session|sprint|release|iteration|cycle|week)\b/i,
   // "Next session: ...", "Next sprint: ...", etc.
@@ -38,7 +61,9 @@ const CARRYOVER_DEFERRAL_PREFIX_RE = /^\s*(?:consider\b|revisit\b|future\s*:|fol
  * the work to do now.
  */
 export function isTaskSubjectWorkDeferral(subject: string | undefined | null): boolean {
-  return typeof subject === "string" && WORK_DEFERRAL_PATTERNS.some((re) => re.test(subject))
+  if (typeof subject !== "string") return false
+  const normalized = subject.normalize("NFKC")
+  return WORK_DEFERRAL_PATTERNS.some((re) => re.test(normalized))
 }
 
 /**
