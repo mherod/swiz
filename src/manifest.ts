@@ -13,6 +13,7 @@ import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
 import posttooluseMcpChannelTrace from "../hooks/posttooluse-mcp-channel-trace.ts"
 import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
 import posttoolusMidSessionPrompt from "../hooks/posttooluse-mid-session-prompt.ts"
+import posttoolusPrChangesContext from "../hooks/posttooluse-pr-changes-context.ts"
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
 import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
@@ -72,6 +73,7 @@ import pretooluseNoTaskDelegation from "../hooks/pretooluse-no-task-delegation.t
 import pretooluseOffensiveLanguage from "../hooks/pretooluse-offensive-language.ts"
 import pretoolusePrAgeGate from "../hooks/pretooluse-pr-age-gate.ts"
 import pretoolusePrChangesBranchGuard from "../hooks/pretooluse-pr-changes-branch-guard.ts"
+import pretoolusePrChangesSkillGate from "../hooks/pretooluse-pr-changes-skill-gate.ts"
 import pretoolusePrHeadCheckoutGate from "../hooks/pretooluse-pr-head-checkout-gate.ts"
 import pretoolUseProtectSandbox from "../hooks/pretooluse-protect-sandbox.ts"
 import pretoolusePprotectStrictMain from "../hooks/pretooluse-protect-strict-main.ts"
@@ -345,6 +347,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseMainBranchScopeGate },
       { hook: pretooluseBlockCommitToMain },
       { hook: pretoolusePrChangesBranchGuard },
+      { hook: pretoolusePrChangesSkillGate },
       { hook: pretoolusePrHeadCheckoutGate },
       { hook: pretooluseIssueWorkflowGate },
       { hook: pretooluseTrunkModeBranchGate },
@@ -417,6 +420,7 @@ export const bundledHookManifest: HookGroup[] = [
     matcher: "Bash",
     hooks: [
       { hook: posttoolusPrContext },
+      { hook: posttoolusPrChangesContext },
       { hook: posttoolusePrCreateRefine },
       { hook: posttooluseGitTaskAutocomplete },
       { hook: posttoolusePostPushCooldown },
