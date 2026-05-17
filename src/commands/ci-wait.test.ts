@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { expandSha, parseCiWaitArgs } from "./ci-wait.ts"
+import { discoverRunId, expandSha, parseCiWaitArgs } from "./ci-wait.ts"
 
 // ─── expandSha ────────────────────────────────────────────────────────────
 
@@ -65,5 +65,66 @@ describe("parseCiWaitArgs", () => {
 
   it("throws for non-numeric timeout", () => {
     expect(() => parseCiWaitArgs(["abc", "--timeout", "abc"])).toThrow("positive number")
+  })
+})
+
+// ─── discoverRunId ────────────────────────────────────────────────────────
+
+describe("discoverRunId", () => {
+  it("returns the run ID on the first successful attempt", async () => {
+    const findFn = async (_sha: string) => 42
+    const result = await discoverRunId("abc123", { findFn, intervalMs: 0 })
+    expect(result).toBe(42)
+  })
+
+  it("returns null after exhausting all attempts", async () => {
+    const calls: number[] = []
+    const findFn = async (_sha: string) => {
+      calls.push(1)
+      return null
+    }
+    const result = await discoverRunId("abc123", { maxAttempts: 3, findFn, intervalMs: 0 })
+    expect(result).toBeNull()
+    expect(calls).toHaveLength(3)
+  })
+
+  it("returns run ID found on the third attempt", async () => {
+    let attempt = 0
+    const findFn = async (_sha: string) => {
+      attempt++
+      return attempt === 3 ? 99 : null
+    }
+    const result = await discoverRunId("abc123", { maxAttempts: 3, findFn, intervalMs: 0 })
+    expect(result).toBe(99)
+    expect(attempt).toBe(3)
+  })
+
+  it("calls onWaiting between failed attempts", async () => {
+    const waitingCalls: [number, number][] = []
+    let attempt = 0
+    const findFn = async (_sha: string) => {
+      attempt++
+      return attempt === 2 ? 7 : null
+    }
+    await discoverRunId("abc123", {
+      maxAttempts: 3,
+      findFn,
+      intervalMs: 0,
+      onWaiting: (a, max) => waitingCalls.push([a, max]),
+    })
+    expect(waitingCalls).toEqual([[1, 3]])
+  })
+
+  it("does not sleep after the last failed attempt", async () => {
+    const sleeps: number[] = []
+    const findFn = async (_sha: string) => null
+    await discoverRunId("abc123", {
+      maxAttempts: 2,
+      findFn,
+      intervalMs: 0,
+      onWaiting: (a) => sleeps.push(a),
+    })
+    // Only 1 sleep between attempt 1 and 2; no sleep after attempt 2
+    expect(sleeps).toHaveLength(1)
   })
 })

@@ -84,6 +84,39 @@ export async function findRunId(fullSha: string): Promise<number | null> {
   }
 }
 
+export interface DiscoverRunIdOptions {
+  /** Maximum number of attempts before returning null (default: 3). */
+  maxAttempts?: number
+  /** Milliseconds to wait between failed attempts (default: 5 000). */
+  intervalMs?: number
+  /** Override the run-finder for testing (default: findRunId). */
+  findFn?: (sha: string) => Promise<number | null>
+  /** Called before each sleep when no run is found yet. */
+  onWaiting?: (attempt: number, maxAttempts: number) => void
+}
+
+/**
+ * Try to find a CI run ID for the given full SHA, retrying up to maxAttempts times.
+ * Returns the run ID on first success, or null after all attempts are exhausted.
+ *
+ * This is the swiz-side implementation of the "3× 5s backoff" check that the push
+ * hard-success gate should use instead of a single one-shot gh run list call.
+ */
+export async function discoverRunId(
+  fullSha: string,
+  { maxAttempts = 3, intervalMs = 5_000, findFn = findRunId, onWaiting }: DiscoverRunIdOptions = {}
+): Promise<number | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const id = await findFn(fullSha)
+    if (id !== null) return id
+    if (attempt < maxAttempts - 1) {
+      onWaiting?.(attempt + 1, maxAttempts)
+      await sleep(intervalMs)
+    }
+  }
+  return null
+}
+
 // ─── Core: discover run then stream via gh run watch ──────────────────────
 
 export async function waitForCiCompletion(
