@@ -960,6 +960,8 @@ describe("SETTINGS_REGISTRY", () => {
       "enforceMidSessionCheckin",
       "enforceMorningStandup",
       "enforceWeeklyRetro",
+      "skillRecencyMaxTurns",
+      "skillRecencyMaxAgeMinutes",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {

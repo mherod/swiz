@@ -265,6 +265,7 @@ interface ProjectPolicyInfo {
   memoryWordSource: "project" | "user" | "default"
   trunkMode: boolean
   auditStrictness: string
+  auditStrictnessSource: "project" | "user" | "default"
   source: "project" | "default"
   autoSteerTranscriptWatching: boolean
   autoSteerTranscriptWatchingSource: "project" | "user" | "default"
@@ -280,6 +281,7 @@ interface PrintSettingsOptions {
   strictNoDirectMainSource?: "global" | "project"
   projectPolicyInfo?: ProjectPolicyInfo
   detectedStacks?: string[]
+  rawSettings?: SwizSettings
 }
 
 function printHeader(path: string | null, fileExists: boolean, sessionId: string | null): void {
@@ -356,15 +358,22 @@ function formatSettingValue(def: (typeof SETTINGS_REGISTRY)[number], value: unkn
   return (value as string) || "system default"
 }
 
-function numericGlobalSettingsRows(effective: EffectiveSwizSettings): SettingsRow[] {
+function numericGlobalSettingsRows(
+  effective: EffectiveSwizSettings,
+  rawSettings?: SwizSettings
+): SettingsRow[] {
   return SETTINGS_REGISTRY.filter(
     (def) => (def.kind === "numeric" || def.kind === "string") && def.scopes.includes("global")
-  ).map((def) => ({
-    label: `${def.aliases[0] ?? def.key}:`,
-    value: formatSettingValue(def, effective[def.key as keyof EffectiveSwizSettings]),
-    scope: "(user)",
-    description: def.docs?.description,
-  }))
+  ).map((def) => {
+    const isExplicitlySet =
+      rawSettings !== undefined && rawSettings[def.key as keyof SwizSettings] !== undefined
+    return {
+      label: `${def.aliases[0] ?? def.key}:`,
+      value: formatSettingValue(def, effective[def.key as keyof EffectiveSwizSettings]),
+      scope: isExplicitlySet ? "(user)" : "(default)",
+      description: def.docs?.description,
+    }
+  })
 }
 
 function resolveGlobalScopes(
@@ -388,7 +397,8 @@ function descFor(key: string): string | undefined {
 function buildGlobalSettingsRows(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
   ambitionSource: "global" | "project" | "session" | undefined,
-  strictNoDirectMainSource: "global" | "project" | undefined
+  strictNoDirectMainSource: "global" | "project" | undefined,
+  rawSettings?: SwizSettings
 ): SettingsRow[] {
   const scopes = resolveGlobalScopes(effective, ambitionSource, strictNoDirectMainSource)
 
@@ -418,16 +428,22 @@ function buildGlobalSettingsRows(
       scope: scopes.strict,
       description: descFor("strictNoDirectMain"),
     },
-    ...numericGlobalSettingsRows(effective),
+    ...numericGlobalSettingsRows(effective, rawSettings),
   ]
 }
 
 function printGlobalSettings(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
   ambitionSource: "global" | "project" | "session" | undefined,
-  strictNoDirectMainSource: "global" | "project" | undefined
+  strictNoDirectMainSource: "global" | "project" | undefined,
+  rawSettings?: SwizSettings
 ): void {
-  const rows = buildGlobalSettingsRows(effective, ambitionSource, strictNoDirectMainSource)
+  const rows = buildGlobalSettingsRows(
+    effective,
+    ambitionSource,
+    strictNoDirectMainSource,
+    rawSettings
+  )
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
@@ -477,7 +493,7 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
     {
       label: "audit-strictness:",
       value: projectPolicyInfo.auditStrictness,
-      scope,
+      scope: `(${projectPolicyInfo.auditStrictnessSource})`,
     },
     {
       label: "auto-steer-transcript-watching:",
@@ -500,7 +516,12 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
 
 function printSettings(opts: PrintSettingsOptions): void {
   printHeader(opts.path, opts.fileExists, opts.sessionId)
-  printGlobalSettings(opts.effective, opts.ambitionSource, opts.strictNoDirectMainSource)
+  printGlobalSettings(
+    opts.effective,
+    opts.ambitionSource,
+    opts.strictNoDirectMainSource,
+    opts.rawSettings
+  )
   if (opts.projectPolicyInfo) {
     printProjectPolicy(opts.projectPolicyInfo, opts.detectedStacks)
   }
@@ -546,7 +567,13 @@ function buildProjectPolicyInfo(
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     memoryWordSource: memoryThresholds.memoryWordSource,
     trunkMode: projectSettings?.trunkMode ?? false,
-    auditStrictness: projectSettings?.auditStrictness ?? "strict",
+    auditStrictness: projectSettings?.auditStrictness ?? settings.auditStrictness ?? "strict",
+    auditStrictnessSource:
+      projectSettings?.auditStrictness !== undefined
+        ? "project"
+        : settings.auditStrictness !== undefined
+          ? "user"
+          : "default",
     source: policy.source,
     autoSteerTranscriptWatching:
       projectSettings?.autoSteerTranscriptWatching ?? settings.autoSteerTranscriptWatching,
@@ -583,6 +610,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
       projectSettings?.strictNoDirectMain !== undefined ? "project" : "global",
     projectPolicyInfo: buildProjectPolicyInfo(parsed.targetDir, settings, projectSettings),
     detectedStacks,
+    rawSettings: settings,
   })
 }
 
