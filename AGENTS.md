@@ -194,12 +194,12 @@ alwaysApply: false
 - DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
 - DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
-- `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
+- `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; scope per-project state by `cwd`.
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
-- `swiz daemon status` fetches `/metrics`. Metrics: in-memory only, tracked globally and per-project.
+- `swiz daemon status` fetches `/metrics`; metrics are in-memory, global and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
-- **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL.
+- **DO**: Restart daemon after `src/web/**`, hook, or dispatch changes. If live `swiz dispatch` contradicts current code, replay raw payload with `bun hooks/<hook>.ts < /tmp/swiz-incoming/<file>.raw.json`; if standalone passes, restart port 7943 and confirm fresh `swiz daemon status`.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. Daemon `syncUpstreamState` keeps it fresh. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
 - **DO**: Add consumer-needed fields (e.g., `mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
 - **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits. Close: `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
