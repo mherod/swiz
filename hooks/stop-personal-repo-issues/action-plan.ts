@@ -118,16 +118,25 @@ function buildBlockedIssueReviewSteps(
   ]
 }
 
-const planStepBuilders: Record<StopSection, (ctx: StopContext) => ActionPlanItem[] | null> = {
-  refinement: (ctx) => (ctx.sortedRefinement.length > 0 ? buildRefinementSteps(ctx) : null),
-  readyIssues: (ctx) => (ctx.sortedIssues.length > 0 ? buildIssuePickupSteps(ctx) : null),
-  blocked: (ctx) => (ctx.blockedIssues.length > 0 ? buildBlockedIssueReviewSteps(ctx) : null),
+const planStepBuilders: Record<
+  StopSection,
+  (ctx: StopContext, payload?: Record<string, unknown>) => ActionPlanItem[] | null
+> = {
+  refinement: (ctx, payload) =>
+    ctx.sortedRefinement.length > 0 ? buildRefinementSteps(ctx, payload) : null,
+  readyIssues: (ctx, payload) =>
+    ctx.sortedIssues.length > 0 ? buildIssuePickupSteps(ctx, payload) : null,
+  blocked: (ctx, payload) =>
+    ctx.blockedIssues.length > 0 ? buildBlockedIssueReviewSteps(ctx, payload) : null,
 }
 
-export function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
+export function buildStopPlanSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
   for (const key of planSectionOrderForProjectState(ctx.projectState)) {
-    const steps = planStepBuilders[key](ctx)
+    const steps = planStepBuilders[key](ctx, payload)
     if (steps) planSteps.push(...steps)
   }
   return planSteps

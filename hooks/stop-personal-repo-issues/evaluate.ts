@@ -54,7 +54,7 @@ export async function collectPersonalRepoIssuesStopParsed(
     const stopCtx = buildStopContext(ctx, gathered, projectState, strictNoDirectMain, defaultBranch)
     if (!stopCtx) return null
 
-    const planSteps = buildStopPlanSteps(stopCtx)
+    const planSteps = buildStopPlanSteps(stopCtx, parsed as Record<string, unknown>)
 
     let shouldMergeTasks = false
     if (ctx.sessionId) {

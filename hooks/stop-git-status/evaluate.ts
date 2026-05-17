@@ -92,6 +92,7 @@ export async function collectGitWorkflowStop(
     collabMode,
     trunkMode,
     defaultBranch,
+    hookPayload: input as Record<string, unknown>,
   })
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)

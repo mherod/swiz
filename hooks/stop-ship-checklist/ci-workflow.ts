@@ -16,8 +16,9 @@ import {
   hasGhCli,
   isDefaultBranch,
   isGitHubRemote,
-  skillExists,
+  skillExistsForHookPayload,
 } from "../../src/utils/hook-utils.ts"
+
 import type { WorkflowStep } from "./types.ts"
 
 // CI poll budget for the stop-ship checklist. MAX_POLL_MS caps the total
@@ -124,7 +125,11 @@ export async function pollUntilComplete(
   return relevant
 }
 
-function buildFailingResult(branch: string, failing: CIRun[]): WorkflowStep {
+function buildFailingResult(
+  branch: string,
+  failing: CIRun[],
+  payload: Record<string, unknown>
+): WorkflowStep {
   const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
   let summary = `GitHub CI is failing on branch '${branch}'.\n\n`
   summary += `Failing checks (${failing.length}): ${names}\n\n`
@@ -136,7 +141,7 @@ function buildFailingResult(branch: string, failing: CIRun[]): WorkflowStep {
   summary += "\n"
 
   const fixSubSteps: ActionPlanItem[] = []
-  if (skillExists("ci-status")) {
+  if (skillExistsForHookPayload("ci-status", payload)) {
     fixSubSteps.push("/ci-status — Analyze failures and fix them")
   }
   fixSubSteps.push(
@@ -166,13 +171,17 @@ function buildFailingResult(branch: string, failing: CIRun[]): WorkflowStep {
   }
 }
 
-function buildActiveResult(branch: string, active: CIRun[]): WorkflowStep {
+function buildActiveResult(
+  branch: string,
+  active: CIRun[],
+  payload: Record<string, unknown>
+): WorkflowStep {
   const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
   let summary = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
   summary += `Active checks (${active.length}): ${names}\n\n`
 
   const waitSubSteps: ActionPlanItem[] = []
-  if (skillExists("ci-status")) {
+  if (skillExistsForHookPayload("ci-status", payload)) {
     waitSubSteps.push("/ci-status — Check results once CI completes")
   }
   waitSubSteps.push(
@@ -205,10 +214,12 @@ export async function collectCiWorkflow(input: StopHookInput): Promise<WorkflowS
     if (!relevant.length) return null
 
     const failing = findFailing(relevant)
-    if (failing.length > 0) return buildFailingResult(branch, failing)
+    if (failing.length > 0)
+      return buildFailingResult(branch, failing, input as Record<string, unknown>)
 
     const stillActive = findActive(relevant)
-    if (stillActive.length > 0) return buildActiveResult(branch, stillActive)
+    if (stillActive.length > 0)
+      return buildActiveResult(branch, stillActive, input as Record<string, unknown>)
 
     return null
   } catch {

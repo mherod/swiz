@@ -7,7 +7,7 @@
 
 import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
 import type { CollaborationMode } from "../../src/settings.ts"
-import { isDefaultBranch, skillExists } from "../../src/utils/hook-utils.ts"
+import { isDefaultBranch, skillExistsForHookPayload } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem } from "./types.ts"
 
 /**
@@ -87,9 +87,9 @@ function pushSubStepsForPolicy(
 /**
  * Build commit action plan step.
  */
-function buildCommitSteps(): [string, ActionPlanItem[]] {
+function buildCommitSteps(payload?: Record<string, unknown>): [string, ActionPlanItem[]] {
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("commit")) {
+  if (skillExistsForHookPayload("commit", payload ?? {})) {
     subSteps.push("/commit — Stage and commit with Conventional Commits")
   }
   subSteps.push(
@@ -103,9 +103,9 @@ function buildCommitSteps(): [string, ActionPlanItem[]] {
 /**
  * Build pull action plan step.
  */
-function buildPullSteps(): [string, ActionPlanItem[]] {
+function buildPullSteps(payload?: Record<string, unknown>): [string, ActionPlanItem[]] {
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("resolve-conflicts")) {
+  if (skillExistsForHookPayload("resolve-conflicts", payload ?? {})) {
     subSteps.push("/resolve-conflicts — Use if conflicts arise during rebase")
   }
   subSteps.push("git pull --rebase --autostash")
@@ -119,13 +119,14 @@ interface PushStepParams {
   collabMode: CollaborationMode
   trunkMode: boolean
   defaultBranch: string
+  hookPayload?: Record<string, unknown>
 }
 
 /**
  * Build push action plan step.
  */
 function buildPushSteps(p: PushStepParams): [string, ActionPlanItem[]] {
-  const { branch, upstream, ahead, collabMode, trunkMode, defaultBranch } = p
+  const { branch, upstream, ahead, collabMode, trunkMode, defaultBranch, hookPayload } = p
   const policy = getCollaborationModePolicy(collabMode)
   const onDefault = isDefaultBranch(branch, defaultBranch)
   const mainBlocked =
@@ -143,7 +144,7 @@ function buildPushSteps(p: PushStepParams): [string, ActionPlanItem[]] {
           ? `Push ${ahead} commit(s) to '${upstream}':`
           : `Push your committed changes to '${upstream}':`
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("push")) {
+  if (skillExistsForHookPayload("push", hookPayload ?? {})) {
     subSteps.push("/push — Push to remote with collaboration guard")
   }
   subSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode, trunkMode, defaultBranch))
@@ -164,6 +165,7 @@ export function buildGitWorkflowSections(opts: {
   collabMode: CollaborationMode
   trunkMode: boolean
   defaultBranch: string
+  hookPayload?: Record<string, unknown>
 }): ActionPlanItem[] {
   const {
     summary: _,
@@ -176,16 +178,17 @@ export function buildGitWorkflowSections(opts: {
     collabMode,
     trunkMode,
     defaultBranch,
+    hookPayload,
   } = opts
 
   const steps: ActionPlanItem[] = []
 
   if (hasUncommitted) {
-    const [header, subSteps] = buildCommitSteps()
+    const [header, subSteps] = buildCommitSteps(hookPayload)
     steps.push(header, ...subSteps)
   }
   if (behind > 0) {
-    const [header, subSteps] = buildPullSteps()
+    const [header, subSteps] = buildPullSteps(hookPayload)
     steps.push(header, ...subSteps)
   }
   if (ahead > 0 || (hasUncommitted && hasRemote)) {
@@ -196,6 +199,7 @@ export function buildGitWorkflowSections(opts: {
       collabMode,
       trunkMode,
       defaultBranch,
+      hookPayload,
     })
     steps.push(header, ...subSteps)
   }

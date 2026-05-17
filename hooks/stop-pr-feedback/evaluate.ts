@@ -26,7 +26,7 @@ export async function collectPrFeedbackStopParsed(
     const stopCtx = buildStopContext(ctx, prs)
     if (!stopCtx) return null
 
-    const planSteps = buildStopPlanSteps(stopCtx)
+    const planSteps = buildStopPlanSteps(stopCtx, parsed as Record<string, unknown>)
 
     let shouldMergeTasks = false
     if (ctx.sessionId) {

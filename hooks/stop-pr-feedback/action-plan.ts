@@ -2,7 +2,7 @@ import {
   type ActionPlanItem,
   formatActionPlan,
   skillAdvice,
-  skillExists,
+  skillExistsForHookPayload,
 } from "../../src/utils/hook-utils.ts"
 import { selectRebaseSuggestionPRs } from "./pull-requests.ts"
 import type { StopContext } from "./types.ts"
@@ -37,7 +37,10 @@ function buildConflictSteps(ctx: StopContext): ActionPlanItem[] {
   ]
 }
 
-function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
+function buildPrFeedbackSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const feedbackPRs = [...ctx.changesRequestedPRs, ...ctx.reviewRequiredPRs]
   const allChangesRequested = feedbackPRs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
   const label = allChangesRequested
@@ -51,7 +54,8 @@ function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
   const firstPrNum =
     ctx.changesRequestedPRs[0]?.number ?? ctx.reviewRequiredPRs[0]?.number ?? "<number>"
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("work-on-prs")) subSteps.push("/work-on-prs — Start working on the next PR")
+  if (skillExistsForHookPayload("work-on-prs", payload ?? {}))
+    subSteps.push("/work-on-prs — Start working on the next PR")
   subSteps.push(
     `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
     "Implement a fix for each unresolved item; commit each fix separately",
@@ -67,18 +71,22 @@ function buildPrFeedbackSteps(ctx: StopContext): ActionPlanItem[] {
 
 const planStepBuilders: Record<
   "feedback" | "conflict",
-  (ctx: StopContext) => ActionPlanItem[] | null
+  (ctx: StopContext, payload?: Record<string, unknown>) => ActionPlanItem[] | null
 > = {
-  feedback: (ctx) => (feedbackPrCount(ctx) > 0 ? buildPrFeedbackSteps(ctx) : null),
+  feedback: (ctx, payload) =>
+    feedbackPrCount(ctx) > 0 ? buildPrFeedbackSteps(ctx, payload) : null,
   conflict: (ctx) => (ctx.conflictingPRs.length > 0 ? buildConflictSteps(ctx) : null),
 }
 
-export function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
+export function buildStopPlanSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
 
   // Order: feedback first, then conflicts
   for (const key of ["feedback", "conflict"] as const) {
-    const steps = planStepBuilders[key](ctx)
+    const steps = planStepBuilders[key](ctx, payload)
     if (steps) planSteps.push(...steps)
   }
 
