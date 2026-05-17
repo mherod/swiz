@@ -31,6 +31,19 @@ describe("isTaskSubjectWorkDeferral", () => {
     expect(isTaskSubjectWorkDeferral("Carryforward: UI work")).toBe(true)
   })
 
+  test("matches issue-pick subjects that defer current work", () => {
+    expect(
+      isTaskSubjectWorkDeferral(
+        "◻ Pick next issue: feat(posts) hidden/archive visibility filtering (#1716)"
+      )
+    ).toBe(true)
+    expect(
+      isTaskSubjectWorkDeferral(
+        "◻ Pick next issue: feat(posts) archive controls and Show archived UI (#1717)"
+      )
+    ).toBe(true)
+  })
+
   test("matches to/for/until next sprint or release", () => {
     expect(isTaskSubjectWorkDeferral("Save this fix for next sprint")).toBe(true)
     expect(isTaskSubjectWorkDeferral("Hold until next release")).toBe(true)

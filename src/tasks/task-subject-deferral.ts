@@ -11,6 +11,8 @@ const WORK_DEFERRAL_PATTERNS = [
   new RegExp(`^${LEADING_MARKER_CHARS}icebox(?:ed)?\\b`, "i"),
   // "Carry over billing work", "Carry-forward the migration"
   new RegExp(`^${LEADING_MARKER_CHARS}carry[-\\s]?(?:over|forward)\\b`, "i"),
+  // "Pick next issue: feat(posts) archive controls (#1717)" — issue selection as deferral
+  new RegExp(`^${LEADING_MARKER_CHARS}pick\\s+next\\s+issue\\s*:`, "i"),
   // "... to/for/until next session/sprint/release/iteration/cycle/week"
   /\b(?:to|for|until)\s+(?:the\s+)?next\s+(?:session|sprint|release|iteration|cycle|week)\b/i,
   // "Next session: ...", "Next sprint: ...", etc.
