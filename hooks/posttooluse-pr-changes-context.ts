@@ -58,15 +58,26 @@ const posttoolusPrChangesContext: SwizShellHook = {
     const defaultBranch = await getDefaultBranch(cwd)
     if (isDefaultBranch(branch, defaultBranch)) return {}
 
+    const repo = await getRepoNameWithOwner(cwd)
+    if (!repo) return {}
+
+    // IssueStore fast-path: skip API calls when store confirms no CHANGES_REQUESTED
+    try {
+      const { getIssueStoreReader } = await import("../src/issue-store.ts")
+      const branchDetail = await getIssueStoreReader().getPrBranchDetail<{
+        reviewDecision?: string
+      }>(repo, branch)
+      if (branchDetail !== null && branchDetail.reviewDecision !== "CHANGES_REQUESTED") return {}
+    } catch {
+      // Store unavailable — fall through to API
+    }
+
     const pr = await getOpenPrForBranch<{ number: number; title: string }>(
       branch,
       cwd,
       "number,title"
     )
     if (!pr) return {}
-
-    const repo = await getRepoNameWithOwner(cwd)
-    if (!repo) return {}
 
     const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
     if (!reviews) return {}

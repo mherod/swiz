@@ -21,7 +21,7 @@ import type { ShellHookInput } from "../src/schemas.ts"
 import { GIT_PUSH_RE, GIT_SYNC_RE, isShellTool } from "../src/utils/hook-utils.ts"
 
 const UPSTREAM_MUTATING_RE =
-  /\bgh\s+(pr\s+(create|merge|close|edit|reopen)|issue\s+(create|close|comment|edit|reopen))\b/i
+  /\bgh\s+(pr\s+(create|merge|close|edit|reopen|review)|issue\s+(create|close|comment|edit|reopen))\b/i
 
 const GH_API_ISSUE_PATCH_RE = /\bgh\s+api\s+\S*\/(?:issues|pulls)\/\d+\b.*-X\s+PATCH\b/i
 
