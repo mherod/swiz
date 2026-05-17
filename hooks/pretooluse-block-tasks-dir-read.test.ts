@@ -12,6 +12,14 @@ async function runHook(filePath: string, toolName = "Read") {
   })
 }
 
+async function runBashHook(command: string) {
+  return await runHookInProcess("hooks/pretooluse-block-tasks-dir-bash.ts", {
+    tool_name: "Bash",
+    tool_input: { command },
+    session_id: "test-session",
+  })
+}
+
 describe("pretooluse-block-tasks-dir-read", () => {
   test("blocks read of exact tasks directory", async () => {
     const result = await runHook(TASKS_DIR)
@@ -42,6 +50,50 @@ describe("pretooluse-block-tasks-dir-read", () => {
 
   test("allows path that is a prefix but not the tasks dir", async () => {
     const result = await runHook(`${TASKS_DIR}-backup/file.json`)
+    expect(result.decision).toBe("allow")
+  })
+})
+
+describe("pretooluse-block-tasks-dir-bash", () => {
+  test("blocks cat of file inside tasks directory (expanded path)", async () => {
+    const result = await runBashHook(`cat ${TASKS_DIR}/abc123/task-1.json`)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskList")
+  })
+
+  test("blocks ls of tasks directory (expanded path)", async () => {
+    const result = await runBashHook(`ls ${TASKS_DIR}`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks access via tilde shorthand", async () => {
+    const result = await runBashHook("cat ~/.claude/tasks/session/task.json")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskGet")
+  })
+
+  test("blocks access via $HOME variable", async () => {
+    const result = await runBashHook("ls $HOME/.claude/tasks/")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks access via ${HOME} variable", async () => {
+    const result = await runBashHook("cat ${HOME}/.claude/tasks/abc/task.json")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("allows unrelated Bash command", async () => {
+    const result = await runBashHook("git status")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows path that merely contains tasks substring", async () => {
+    const result = await runBashHook("ls /tmp/my-tasks/data.json")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows path with tasks-dir prefix but not the tasks dir itself", async () => {
+    const result = await runBashHook(`ls ${TASKS_DIR}-backup/file.json`)
     expect(result.decision).toBe("allow")
   })
 })

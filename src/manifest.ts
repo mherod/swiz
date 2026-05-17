@@ -36,6 +36,7 @@ import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
+import pretooluseBlockTasksDirBash from "../hooks/pretooluse-block-tasks-dir-bash.ts"
 import pretooluseBlockTasksDirRead from "../hooks/pretooluse-block-tasks-dir-read.ts"
 import pretoolusBranchIntentGate from "../hooks/pretooluse-branch-intent-gate.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
@@ -352,6 +353,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseRepeatedLintTest },
       { hook: pretooluseNoReadyToBacklog },
       { hook: pretooluseNoIssueClose },
+      { hook: pretooluseBlockTasksDirBash },
     ],
   },
   {
