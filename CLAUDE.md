@@ -26,7 +26,7 @@ alwaysApply: false
 - Daemon dispatch preserves origin env via `_env` (set by `swiz dispatch`, applied by `applyDispatchEnv()`); daemon hooks use `_env` + `detectCurrentAgentFromEnv()`, not launchd env.
 - Keep installed/current/backend detection separate: `detectInstalledAgents()` checks `PATH`/settings; `detectAgentCli()`/`detectBestAgentCli()` find Cursor's `agent` binary for fallback. Never use either for hook-agent detection.
 - Task governance pivots on `AgentDef.tasksEnabled` (default true). `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false; `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements. Codex has `tasksEnabled=false` (uses `update_plan`).
-- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env` → process env → Claude. Stop validators skip task checks when task tools unavailable; `stop-incomplete-tasks` exempts gemini. `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots — apply `_env` in daemon dispatch or tasks use the wrong root.
+- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env` → process env → Claude. Stop validators skip task checks when tools unavailable; `stop-incomplete-tasks` exempts gemini. `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots — apply `_env` in daemon dispatch or tasks use the wrong root.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -39,7 +39,7 @@ alwaysApply: false
 - Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` in sync. `validateDispatchRoutes()` must pass from both `swiz dispatch` and `swiz install`. Keep `src/dispatch-routing.test.ts` green.
 - Never duplicate preToolUse matcher strings (`manifest.find()` returns first) — add to existing group. Never add sync hooks to unmatched preToolUse groups. Never hard-code agent-specific event/tool names in hook scripts.
 - `classifyHookOutput` validates stdout against `hookOutputSchema`; `"invalid-schema"` on failure. Requires `systemMessage`/`reason`/`stopReason`/`additionalContext`; `{}` valid. Stop normalized via `stopHookOutputSchema`.
-- `lefthook.yml` requires `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` (omitting triggers global-link check). Hooks scanning staged diffs must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` (regex defs in hook source self-trigger).
+- `lefthook.yml` requires `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` (omitting triggers global-link check). Hooks scanning staged diffs must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` (hook source self-triggers).
 - **Inline SwizHook**: Use `preToolUseAllow()`/`preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`; `if (import.meta.main) await runSwizHookAsMain(hook)` — never also `Bun.stdin.json()` (double-read = silent exit 0). Safe imports: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/{edit-projection,inline-hook-helpers,package-detection}`, `hooks/schemas`. Avoid `hook-utils.ts`/`git-utils.ts` (circular).
 - **Debt marker**: `//` comments with keywords trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` or `"TO" + "DO"` regex.
 - **Phase 2 extraction**: 6 modules (types→context→validators→action-plan→evaluate→wrapper). Export from core, import by orchestrator only; delete re-export wrappers. Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
@@ -49,7 +49,7 @@ alwaysApply: false
 - `pretooluse-push-checks-gate.ts` gates `git push` on recent `BRANCH_CHECK_RE` transcript hit. `posttooluse-{pr-context,state-transition}.ts` fire on checkout/switch.
 - Stop gates: `hooks/stop-{non-default-branch,branch-conflicts,quality-checks}.ts`. Daemon cache: `src/utils/daemon-git-state.ts` (POST `/git/state`). Status surfaces: `src/commands/{status-line,status}.ts`. Settings: project-only `defaultBranch` in `src/settings/{types,registry,persistence}.ts` — consume via `getDefaultBranch()`.
 ## Skill Requirement Gates
-- "Used this session" = last 30 transcript turns AND last 20 minutes. Shared helpers: `src/transcript-summary.ts`/`src/skill-utils.ts` (`getRecentlyInvokedSkillsForCurrentSession`, `getRecentlyUsedToolsForCurrentSession`, `getRecentBashCommandsUsedForCurrentSession`, `formatCurrentSessionUsageWindow`). Never rescan transcripts or duplicate recency math.
+- "Used this session" = last 30 transcript turns AND last 20 minutes. Shared helpers: `src/transcript-summary.ts`/`src/skill-utils.ts` (`getRecentlyInvokedSkillsForCurrentSession`, `getRecentlyUsedToolsForCurrentSession`, `getRecentBashCommandsUsedForCurrentSession`, `formatCurrentSessionUsageWindow`). Never rescan or duplicate recency math.
 - `hooks/pretooluse-skill-invocation-gate.ts`: requires `/commit` before `git commit`, `/push` before `git push`, `/triage-issues` to add `triaged`, `/refine-issue` for label changes, `/pr-open` for `gh pr create`, `/pr-comments-address` before dismissing reviews. Branch-delete pushes exempt.
 - After `/commit`, recent `TaskList` required before `git commit`.
 - `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch, PR, and CI checks must be recent or hook emits advisory. Behind-remote, WIP/fixup/squash commits, secrets, large files are hard blocks.
@@ -66,7 +66,7 @@ alwaysApply: false
 - Per hook: increment section count, add table row, increment `**N hooks**`, run `bun test src/readme-hook-counts.test.ts`.
 - Hooks are TypeScript. Use `hooks/hook-utils.ts`, read JSON stdin, exit 0.
 - Output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`, etc. — call `process.exit(0)`. **DON'T** write raw `console.log(JSON.stringify(...))`.
-- **Hook tone**: Human voice; next action first. DON'T mention Swiz/hook mechanics, audit/sync/cache/drift, raw counts, thresholds, or echo the detector pattern/regex/forbidden phrase. Scold behavior, direct next action.
+- **Hook tone**: Human voice; next action first. DON'T mention Swiz/hook mechanics, audit/sync/cache/drift, raw counts, thresholds, or echo detector patterns. Scold behavior, direct next action.
 - **Stop aggregation** (`src/dispatch/blockingStrategy.ts`): named sections, one action-required footer, clear separators. Strip duplicate footers/`stop-ship-checklist` preambles. DON'T join with bare `\n\n\n\n`.
 - **Stop ship checklist** (`hooks/stop-ship-checklist/action-plan.ts`): `combinedPlan.push(label, step.planSteps)` — separate args, not tuple.
 - **Quality stop** (`hooks/stop-quality-checks.ts`): use `summarizeCheckOutput()`. Keep `file:line:col`, `Found N errors`, `Checked N files`; drop code frames.
@@ -85,7 +85,7 @@ alwaysApply: false
 - **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
 - **DO**: Use `resolveThresholds(cwd)` for memory thresholds (default 5000). Never hardcode.
 - **DO**: Use `computeProjectedContent()` — suppresses interpolation. DON'T call `.replace()`. Fail-open on errors.
-- NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
+- NFKC-normalize `new_string`/`content`/`old_string` in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
 - Track current diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
@@ -95,7 +95,7 @@ alwaysApply: false
 - For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
-- In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
+- In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
@@ -103,8 +103,8 @@ alwaysApply: false
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
-- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + `applyTaskUpdate()` write-through. `getTasksFresh()` forces disk reload when no watcher/openCount zero. **DO**: `watchSession()` on daemon activate. **DON'T**: Trust cache for stop hooks — use `readSessionTasksFresh()`.
-- **In-memory event state**: `src/tasks/task-event-state.ts` — `Map<sessionId, EventTaskState[]>` updated by PostToolUse hooks. `posttooluse-task-count-context` reads `getSessionEventState()` first (zero I/O), falls back to disk + `applyMutationOverlay`.
+- **Task state cache**: `TaskStateCache` (`src/tasks/task-state-cache.ts`) — LRU + `fs.watch` + `applyTaskUpdate()` write-through. `getTasksFresh()` forces reload when no watcher/openCount zero. **DO**: `watchSession()` on daemon activate. **DON'T**: Trust cache for stop hooks — use `readSessionTasksFresh()`.
+- **In-memory event state**: `src/tasks/task-event-state.ts` — `Map<sessionId, EventTaskState[]>` updated by PostToolUse hooks. `posttooluse-task-count-context` reads `getSessionEventState()` first, falls back to disk + `applyMutationOverlay`.
 - **Last-task-standing enforcement**: `updateStatus()` calls unconditional `validateLastTaskStanding`; on empty-would-result, `promoteNextTaskFromIssues()` auto-creates a successor from `IssueStore` ready issues. `skipLastTaskGuard` for explicit overrides.
 - **Native task file lifecycle**: Native `TaskCreate`/`TaskUpdate` DELETE `.json` files on completion; session dir keeps only `.highwatermark` + `.lock`. `readSessionTasksFresh` returns `[]` on clean sessions. **DON'T** treat `allTasks.length === 0` as "no tasks created" in stop hooks.
 - **CI evidence field**: Native `TaskUpdate description` stores evidence in `t.description`, NOT `t.completionEvidence` (only set by `swiz tasks complete --evidence`). Stop hooks MUST check both. See `ci-evidence-validator.ts::taskHasCiEvidence`.
@@ -116,13 +116,13 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at the END of closeout; 20-min recency windows expire if invoked early. Recency resets after compaction.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout end; 20-min windows expire if invoked early. Recency resets after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
-- On session resume, verify every `completed` commit/push task against `git status` — uncommitted/unpushed files mean phantom completion; reopen the task before new work.
+- On session resume, verify every `completed` commit/push task against `git status` — uncommitted/unpushed = phantom completion; reopen the task before new work.
 - After `CLAUDE.md` edit: `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Post `gh issue create`: `/refine-issue <number>`. Use body files, not heredoc.
 - Verify CI jobs with `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before committing untracked `.lock` or local state.
 ## Standard Work Sequence
@@ -131,19 +131,19 @@ alwaysApply: false
 - Resolve issues with `swiz issue resolve <number> --body "<text>"`; `Fixes #N` auto-closes on push. No `duplicate`/`wontfix` close without evidence.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push to `main`. Run `swiz settings` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` is authoritative for collaboration/trunk policy.
-- CI `paths-ignore`: `.claude/**`, `docs/**` only; markdown triggers CI.
+- CI `paths-ignore`: `.claude/**`, `docs/**`; markdown triggers CI.
 - Pre-push flow: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
 - No `--no-verify`. Pre-push runs `bun test`; CI runs `lint → typecheck → test`. If `bun test` fails with `proc.stdin.write` TypeError or `ReferenceError: Cannot access 'default' before initialization`, isolate failing test then retry.
 - After push: verify CI with `gh run view --json`; `in_progress` acceptable (pre-push ran full suite). Update tasks before stop.
 - `github.base_ref` empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
 - DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
-- `swiz settings` CI tests flaky (20–30s timeouts); pre-existing (run IDs 25944297820, 25944269296), dep bumps are not at fault. No branch protection rules: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
+- `swiz settings` CI tests flaky (20–30s timeouts); pre-existing (run IDs 25944297820, 25944269296), dep bumps not at fault. No branch protection rules: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
 - Never add `Co-Authored-By` trailers. Never use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
-- `swiz daemon status` fetches `/metrics`. Metrics: in-memory only, tracked globally and per-project.
+- `swiz daemon status` fetches `/metrics`. Metrics: in-memory, tracked globally and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`).
@@ -170,7 +170,7 @@ alwaysApply: false
 - DO: Read every file in full before editing — snippets miss conflicts.
 - ANSI escape codes direct; no color libraries.
 - `Bun.spawn`: use `["sh", "-c", cmd]` for shell; drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
-- DON'T pass functions with optional params directly to `.flatMap()`/`.map()` — the injected `(value, index, array)` args corrupt optional positionals. Always wrap: `.flatMap((b) => fn(b))`.
+- DON'T pass multi-param functions to `.flatMap()`/`.map()` — injected `(value, index, array)` args corrupt optional positionals. Wrap: `.flatMap((b) => fn(b))`.
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
 - Settings writes: `.bak` backup first.
@@ -178,10 +178,10 @@ alwaysApply: false
 - On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - Unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` / `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in ONE debug pass, then read. Empty recency results → print event timestamps vs cutoff first (skill may just be stale, not parsing broken).
-- DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) BEFORE the next hook-gated action — hooks run in-process from loaded code.
-- DON'T: Write merge/fallback/defensive logic to mask an unverified parser bug — Read the live data first, fix the actual mismatch (often one character).
-- DON'T: Retry the same command after an unexpected hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
+- DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in ONE pass, then read. Empty recency results → print event timestamps vs cutoff first (may be stale).
+- DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action — hooks run in-process from loaded code.
+- DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch (often one character).
+- DON'T: Retry the same command after a hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
 - Bun test: `--reporter=dots`. `--concurrent` multi-file only; single-file rejected. Run once — piped re-runs trigger repeated-test hook.
 - DO: Edit a file between `bun run format` and `bun run lint` — hook detects no-change consecutive runs.
@@ -208,11 +208,11 @@ alwaysApply: false
 - Close via `Fixes #N` in commits (not CLI). Read all comments first. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into the body — don't `gh issue comment` on your own issues. Pick highest priority autonomously.
 ## Testing
 - DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure (run failing file in isolation first).
-- Biome `expect()` chain format: break after `.toBe(` not after `expect(`. Wrong: `expect(\n  longCall()\n).toBe(x)`. Correct: `expect(longCall()).toBe(\n  x\n)`.
+- Biome: break `expect()` chains after `.toBe(`, not `expect(`. Wrong: `expect(\n  longCall()\n).toBe(x)`. Correct: `expect(longCall()).toBe(\n  x\n)`.
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
 ## Dispatch & Daemon Context
 - DON'T `detectTerminal()` in daemon — read `_terminal` from payload. DON'T `JSON.parse(enrichedPayloadStr)` per hook — use `buildSpawnContext()` once.
 - DON'T `merge({}, payload, ...)` — mutate directly (deep clones duplicate `_env` ~50KB). DON'T read-modify-write JSONL in hot paths — `appendFile` only. DON'T start the write promise before the chain — rejection is unowned. Pattern: `const queued = chain.then(() => appendFile(path, row)); chain = queued.catch(() => {})`.
-- Cap AI prompt context size in hooks. Trace actual code path (daemon vs CLI) when diagnosing dispatch failures.
+- Cap AI prompt context size in hooks. Trace code path (daemon vs CLI) when diagnosing dispatch failures.
 - `backfillPayloadDefaults()` (`src/dispatch/payload-backfill.ts`): cwd payload → `$GEMINI_CWD`/`$GEMINI_PROJECT_DIR`/`$CLAUDE_PROJECT_DIR` → `process.cwd()`; session_id → `$GEMINI_SESSION_ID` → latest `~/.claude/projects/<projectKey>/*.jsonl` mtime → `"unknown-session"`. Records `payload._inferredFields`.
