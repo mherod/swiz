@@ -135,6 +135,35 @@ describe("detect", () => {
     test("rejects Future: with extra whitespace before colon", () => {
       expect(detect("Future : refactor billing module").matched).toBe(true)
     })
+
+    test("rejects leading 'Next session:' prefix as deferral tactic", () => {
+      const result = detect("Next session: resolve issue #52 Dependabot security alerts")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("avoiding the work")
+    })
+
+    test("rejects 'Next session:' prefix without colon", () => {
+      expect(detect("Next session fix issue #43").matched).toBe(true)
+    })
+
+    test("rejects bullet-prefixed 'Next session:' deferral", () => {
+      expect(detect("◻ Next session: fix issue #49 Zod v4 migration").matched).toBe(true)
+    })
+
+    test("rejects Later/Backlog/TODO/Postponed/Punt prefixes as deferral tactics", () => {
+      expect(detect("Later: add metrics dashboard").matched).toBe(true)
+      expect(detect("Backlog: rework auth flow").matched).toBe(true)
+      expect(detect("TODO: refactor billing").matched).toBe(true)
+      expect(detect("Postponed: migrate to Postgres").matched).toBe(true)
+      expect(detect("Punt: investigate flaky test").matched).toBe(true)
+      expect(detect("Tomorrow: send weekly digest").matched).toBe(true)
+    })
+
+    test("does not reject legitimate work mentioning 'session' or 'future'", () => {
+      expect(detect("Add session token refresh logic").matched).toBe(false)
+      expect(detect("Refactor future-proofing helpers").matched).toBe(false)
+    })
   })
 
   describe("home directory rejection", () => {

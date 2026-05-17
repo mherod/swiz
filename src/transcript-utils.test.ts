@@ -256,6 +256,78 @@ describe("transcript-utils.ts", () => {
       }
     })
 
+    it("recognizes 'Base directory for this skill: .../skills/<name>' activation banner", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-banner.jsonl", [
+        JSON.stringify({
+          type: "user",
+          message: {
+            content:
+              "Base directory for this skill: /Users/me/.claude/skills/commit\n\n# Commit Skill\n\nUse this to commit.",
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes queue-operation entries with leading slash-command", async () => {
+      const transcriptPath = await writeTranscriptFile("queue-op-skill.jsonl", [
+        JSON.stringify({
+          type: "queue-operation",
+          operation: "enqueue",
+          content: "/commit",
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes attachment.queued_command entries with leading slash-command", async () => {
+      const transcriptPath = await writeTranscriptFile("queued-command-attachment.jsonl", [
+        JSON.stringify({
+          type: "attachment",
+          attachment: {
+            type: "queued_command",
+            prompt: "/push origin main",
+            commandMode: "prompt",
+          },
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["push"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("does not treat mid-line slash-command mentions as invocations", async () => {
+      const transcriptPath = await writeTranscriptFile("inline-slash-skill.jsonl", [
+        JSON.stringify({
+          type: "queue-operation",
+          operation: "enqueue",
+          content: "Please remember to use /commit before pushing",
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual([])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
     it("reads current-session tool usage from enriched payload without touching transcript files", async () => {
       const payload = {
         transcript_path: "/nonexistent/transcript.jsonl",
