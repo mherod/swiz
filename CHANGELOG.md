@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-05-17
+
+### Features
+
+- **Configurable skill recency window** — `skillRecencyMaxTurns` and
+  `skillRecencyMaxAgeMinutes` can now be set per-project or globally via
+  `.swiz/config.json` or the global swiz config. Skill-invocation gates
+  (`pretooluse-skill-invocation-gate`, `stop-required-skills`) resolve the
+  window from project → global → default (30 turns / 20 minutes).
+
+- **Tasks directory Glob blocking** — `pretooluse-block-tasks-dir-glob` now
+  intercepts `Glob` calls targeting `~/.claude/tasks/**`. Covers absolute
+  expanded paths, tilde shorthand, and `$HOME`/`${HOME}` variable forms.
+  Joins the existing `Read` and `Bash` hooks for complete tasks-dir coverage.
+
+### Fixes
+
+- **Tasks directory Bash blocking** — Added `pretooluse-block-tasks-dir-bash`
+  to intercept shell commands (`cat`, `ls`, `head`, etc.) reading task JSON
+  files directly. Closes the gap left by the Read-only hook.
+
+- **Dashboard 404** — `messageFromUnknownError` was imported across a
+  server/client boundary in `dashboard-state.ts`; inlined the one-liner to
+  eliminate the import and fix the 404 on the web dashboard.
+
+### Refactoring
+
+- **DOM hierarchy** — Removed two redundant wrapper `<div>` elements from the
+  header and dashboard-stats components; deleted orphaned CSS rules.
+
+- **Test constants** — Skill-window assertions in `transcript-utils.test.ts`
+  now reference `CURRENT_SESSION_USAGE_MAX_TURNS` /
+  `CURRENT_SESSION_USAGE_MAX_AGE_MS` instead of hardcoded literals, so the
+  tests auto-adapt if defaults change.
+
 ## 2026-05-15
 
 ### Improvements
