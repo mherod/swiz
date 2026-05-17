@@ -14,10 +14,49 @@ describe("isTaskSubjectWorkDeferral", () => {
     expect(isTaskSubjectWorkDeferral("Future : refactor billing module")).toBe(true)
   })
 
+  test("matches park/shelve/icebox leading words", () => {
+    expect(isTaskSubjectWorkDeferral("Park this issue")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Parked: billing refactor")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Parking this for now")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Shelve the auth migration")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Shelved: billing work")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Icebox: redesign the UI")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Iceboxed: dark mode implementation")).toBe(true)
+  })
+
+  test("matches carry-over and carry-forward", () => {
+    expect(isTaskSubjectWorkDeferral("Carry over the billing migration")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Carry-over: auth refactor")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Carry forward the database changes")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Carryforward: UI work")).toBe(true)
+  })
+
+  test("matches to/for/until next sprint or release", () => {
+    expect(isTaskSubjectWorkDeferral("Save this fix for next sprint")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Hold until next release")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Push to next iteration")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Next sprint: fix auth bug")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Next release: bump deps")).toBe(true)
+  })
+
+  test("matches follow-up with vague intent words", () => {
+    expect(isTaskSubjectWorkDeferral("Follow-up: consider issue #633")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Follow-up: revisit cache TTL strategy")).toBe(true)
+  })
+
+  test("matches someday/eventually/hold leading words", () => {
+    expect(isTaskSubjectWorkDeferral("Someday: migrate to new framework")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Eventually: add dark mode")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Hold: auth refactor")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Hold off: billing changes")).toBe(true)
+  })
+
   test("does not match legitimate current-session work", () => {
     expect(isTaskSubjectWorkDeferral("Implement deferred image loading")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Follow-up: docs for new flag")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Add session token refresh logic")).toBe(false)
+    expect(isTaskSubjectWorkDeferral("Follow-up: implement the verified fix")).toBe(false)
+    expect(isTaskSubjectWorkDeferral("Refactor carry-over validation logic")).toBe(false)
   })
 })
 
@@ -27,6 +66,8 @@ describe("isTaskSubjectCarryoverDeferral", () => {
     expect(isTaskSubjectCarryoverDeferral("Future: revisit cache TTL")).toBe(true)
     expect(isTaskSubjectCarryoverDeferral("Follow-up: docs for new flag")).toBe(true)
     expect(isTaskSubjectCarryoverDeferral("Follow up: docs for new flag")).toBe(true)
+    expect(isTaskSubjectCarryoverDeferral("Revisit: cache TTL after load testing")).toBe(true)
+    expect(isTaskSubjectCarryoverDeferral("Revisit authentication flow design")).toBe(true)
   })
 
   test("does not match arbitrary next-session phrasing", () => {
