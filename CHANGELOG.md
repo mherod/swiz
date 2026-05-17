@@ -17,6 +17,14 @@
 
 ### Fixes
 
+- **Refine-issue gate scope narrowed** — `pretooluse-skill-invocation-gate`
+  no longer requires `/refine-issue` before `gh issue edit --add-label` /
+  `--remove-label` when every changed label is a readiness/scheduling label
+  (`backlog`, `ready`, `blocked`, `upstream`, `needs-refinement`,
+  `needs-breakdown`). Type and priority label changes (`bug`, `enhancement`,
+  `priority-*`) still require the skill. `gh issue create` is excluded from
+  the gate entirely. Closes #630.
+
 - **Tasks directory Bash blocking** — Added `pretooluse-block-tasks-dir-bash`
   to intercept shell commands (`cat`, `ls`, `head`, etc.) reading task JSON
   files directly. Closes the gap left by the Read-only hook.
