@@ -270,9 +270,9 @@ describe("transcript-utils.ts", () => {
       expect(await getSkillsUsedForCurrentSession(payload)).toEqual(["commit"])
     })
 
-    it("recent usage prefers transcript_path over injected daemon usage events", async () => {
+    it("recent usage merges transcript skills with injected daemon usage events", async () => {
       const now = Date.now()
-      const transcriptPath = await writeTranscriptFile("recent-prefers-transcript.jsonl", [
+      const transcriptPath = await writeTranscriptFile("recent-merges-sources.jsonl", [
         JSON.stringify({
           timestamp: new Date(now - 1000).toISOString(),
           type: "assistant",
@@ -298,9 +298,89 @@ describe("transcript-utils.ts", () => {
       }
 
       try {
-        expect(await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })).toEqual([
-          "transcript-skill",
-        ])
+        const skills = await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })
+        expect(skills).toContain("transcript-skill")
+        expect(skills).toContain("cached-skill")
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recent usage deduplicates skills appearing in both transcript and daemon cache", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("recent-dedupes-skills.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "human",
+          message: { content: "<command-name>commit</command-name>\nBase directory..." },
+        }),
+        JSON.stringify({
+          timestamp: new Date(now - 800).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Skill", input: { skill: "commit" } }],
+          },
+        }),
+      ])
+      const payload = {
+        transcript_path: transcriptPath,
+        _currentSessionToolUsage: {
+          toolNames: ["Skill"],
+          skillInvocations: ["commit"],
+          events: [
+            {
+              kind: "skill",
+              value: "commit",
+              turnIndex: 0,
+              timestamp: new Date(now - 600).toISOString(),
+            },
+          ],
+        },
+      }
+
+      try {
+        const skills = await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })
+        expect(skills).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recent usage detects user-typed slash command skill even when daemon cache lacks it", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("recent-user-skill.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 2000).toISOString(),
+          type: "human",
+          message: { content: "<command-name>commit</command-name>\nBase directory..." },
+        }),
+        JSON.stringify({
+          timestamp: new Date(now - 500).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }],
+          },
+        }),
+      ])
+      const payload = {
+        transcript_path: transcriptPath,
+        _currentSessionToolUsage: {
+          toolNames: ["Bash"],
+          skillInvocations: [],
+          events: [
+            {
+              kind: "tool",
+              value: "Bash",
+              turnIndex: 0,
+              timestamp: new Date(now - 500).toISOString(),
+            },
+          ],
+        },
+      }
+
+      try {
+        const skills = await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })
+        expect(skills).toContain("commit")
       } finally {
         await rm(dirname(transcriptPath), { recursive: true, force: true })
       }
@@ -357,15 +437,24 @@ describe("transcript-utils.ts", () => {
             content: [{ type: "tool_use", name: "Skill", input: { skill: "stale-by-turn" } }],
           },
         }),
-        ...Array.from({ length: 20 }, (_, index) =>
+        // Twenty user turns push the window forward past the skill above; each
+        // user entry increments turnIndex (turns are user/human messages, not
+        // raw JSONL lines), so the skill at turn 0 falls outside the 20-turn
+        // window once turn 20 is reached.
+        ...Array.from({ length: 20 }, (_, index) => [
           JSON.stringify({
-            timestamp: new Date(now - 900 + index).toISOString(),
+            timestamp: new Date(now - 900 + index * 2).toISOString(),
+            type: "user",
+            message: { content: `noop-${index}` },
+          }),
+          JSON.stringify({
+            timestamp: new Date(now - 900 + index * 2 + 1).toISOString(),
             type: "assistant",
             message: {
               content: [{ type: "tool_use", name: "Read", input: { file_path: `file-${index}` } }],
             },
-          })
-        ),
+          }),
+        ]).flat(),
       ]
       const transcriptPath = await writeTranscriptFile("recent-turn-window.jsonl", lines)
 

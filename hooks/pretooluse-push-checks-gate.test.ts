@@ -6,19 +6,29 @@ import { type AdvisoryHookResult, neutralAgentEnv } from "../src/utils/test-util
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Build a transcript JSONL string containing Bash tool_use entries. */
+/** Build a transcript JSONL string containing Bash tool_use entries. Each
+ *  command is prefixed by a user message so it counts as its own turn (turns
+ *  are bounded by user/human entries, not raw JSONL lines). */
 function makeTranscript(...commands: string[]): string {
   const now = Date.now()
   return commands
-    .map((cmd, index) =>
-      JSON.stringify({
-        timestamp: new Date(now - (commands.length - index) * 1000).toISOString(),
-        type: "assistant",
-        message: {
-          content: [{ type: "tool_use", name: "Bash", input: { command: cmd } }],
-        },
-      })
-    )
+    .flatMap((cmd, index) => {
+      const ts = now - (commands.length - index) * 1000
+      return [
+        JSON.stringify({
+          timestamp: new Date(ts - 1).toISOString(),
+          type: "user",
+          message: { content: `prompt-${index}` },
+        }),
+        JSON.stringify({
+          timestamp: new Date(ts).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: cmd } }],
+          },
+        }),
+      ]
+    })
     .join("\n")
 }
 

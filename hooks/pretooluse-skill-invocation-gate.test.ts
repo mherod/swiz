@@ -173,9 +173,16 @@ describe("pretooluse-skill-invocation-gate", () => {
   it("blocks gh pr create when pr-open is outside the last twenty turns", async () => {
     const result = await runPrOpenGateSubprocess([
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }]),
-      ...Array.from({ length: 20 }, (_, index) =>
-        assistantLine([{ type: "tool_use", name: "Read", input: { file_path: `file-${index}` } }])
-      ),
+      // Twenty user/assistant turn pairs push the window past the original
+      // Skill call. Turns count user messages now, not raw JSONL lines.
+      ...Array.from({ length: 20 }, (_, index) => [
+        JSON.stringify({
+          timestamp: new Date(Date.now() - 60_000 + index * 100).toISOString(),
+          type: "user",
+          message: { content: `noop-${index}` },
+        }),
+        assistantLine([{ type: "tool_use", name: "Read", input: { file_path: `file-${index}` } }]),
+      ]).flat(),
     ])
 
     expect(

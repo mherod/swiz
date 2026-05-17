@@ -271,30 +271,98 @@ function collectToolUsageEventsFromBlock(
   return events
 }
 
-/** Match `<command-name>skill-name</command-name>` tags in user messages (skill expansion). */
+/** Match `<command-name>skill-name</command-name>` tags in user messages (legacy skill expansion). */
 const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
 
-function extractUserSkillExpansions(line: string): string[] {
-  const entry = tryParseJsonLine(line) as
-    | { type?: string; message?: { content?: string | Array<{ type?: string; text?: string }> } }
-    | undefined
-  if (entry?.type !== "human") return []
-  const content = entry?.message?.content
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content
-            .filter((b) => b?.type === "text")
-            .map((b) => b.text ?? "")
-            .join("")
-        : ""
+/** Match a leading slash-command at the start of a queued-command prompt (`/skill ...`). */
+const QUEUED_SLASH_COMMAND_RE = /^\s*\/([a-z][a-z0-9-]*)\b/
+
+/**
+ * Match the skill activation banner emitted by Claude Code when a slash-command
+ * skill is loaded into the conversation. The banner appears in user messages as
+ * `Base directory for this skill: <abs-path>/skills/<skill-name>` (followed by
+ * the SKILL.md content). This is the most reliable post-load marker because it
+ * only fires once the skill content is actually injected into the agent.
+ */
+const SKILL_DIR_BANNER_RE = /Base directory for this skill:\s*\S*?\/skills\/([a-z][a-z0-9-]*)\b/g
+
+function extractSkillsFromLegacyCommandTags(text: string): string[] {
   if (!text) return []
   const skills: string[] = []
   for (const match of text.matchAll(COMMAND_NAME_RE)) {
     if (match[1]) skills.push(match[1])
   }
   return skills
+}
+
+function extractSkillsFromActivationBanner(text: string): string[] {
+  if (!text) return []
+  const skills: string[] = []
+  for (const match of text.matchAll(SKILL_DIR_BANNER_RE)) {
+    if (match[1]) skills.push(match[1])
+  }
+  return skills
+}
+
+function extractSkillFromSlashPrompt(text: string | undefined | null): string | null {
+  if (!text) return null
+  const match = QUEUED_SLASH_COMMAND_RE.exec(text)
+  return match?.[1] ?? null
+}
+
+interface UserMessageContentBlock {
+  type?: string
+  text?: string
+}
+
+interface ParsedTranscriptEntry {
+  type?: string
+  operation?: string
+  content?: string | UserMessageContentBlock[]
+  message?: { content?: string | UserMessageContentBlock[] }
+  attachment?: { type?: string; prompt?: string }
+}
+
+function extractTextFromUserMessage(
+  content: string | UserMessageContentBlock[] | undefined
+): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter((b) => b?.type === "text")
+    .map((b) => b.text ?? "")
+    .join("")
+}
+
+function extractUserSkillExpansions(line: string): string[] {
+  const entry = tryParseJsonLine(line) as ParsedTranscriptEntry | undefined
+  if (!entry) return []
+
+  // Newer Claude Code records user-typed slash commands as queue-operation
+  // entries with a leading-slash prompt in their content field.
+  if (entry.type === "queue-operation" && entry.operation === "enqueue") {
+    const text = typeof entry.content === "string" ? entry.content : ""
+    const skill = extractSkillFromSlashPrompt(text)
+    return skill ? [skill] : []
+  }
+
+  // The same prompt is also persisted as an attachment of type queued_command.
+  if (entry.type === "attachment" && entry.attachment?.type === "queued_command") {
+    const skill = extractSkillFromSlashPrompt(entry.attachment.prompt)
+    return skill ? [skill] : []
+  }
+
+  // Skill content injected after the slash command resolves shows up in user
+  // messages with the activation banner and the legacy command-name tag (older
+  // Claude Code versions). Detect both so the gate works across formats.
+  if (entry.type === "user" || entry.type === "human") {
+    const text = extractTextFromUserMessage(entry.message?.content)
+    const skills = extractSkillsFromActivationBanner(text)
+    skills.push(...extractSkillsFromLegacyCommandTags(text))
+    return skills
+  }
+
+  return []
 }
 
 export function collectSessionToolUsage(
@@ -324,9 +392,15 @@ export function collectCurrentSessionUsageEvents(
   sessionLines: string[]
 ): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
-  for (let turnIndex = 0; turnIndex < sessionLines.length; turnIndex++) {
-    const line = sessionLines[turnIndex] ?? ""
+  let turnIndex = 0
+  for (let i = 0; i < sessionLines.length; i++) {
+    const line = sessionLines[i] ?? ""
     if (!line.trim()) continue
+    const entry = tryParseJsonLine(line) as { type?: string } | undefined
+    // Treat each user/human message as a new turn so the turn-based recency
+    // window means "last N user turns" rather than "last N raw JSONL lines"
+    // (attachments, ai-title, and queue-operation entries shouldn't burn turns).
+    if (entry?.type === "user" || entry?.type === "human") turnIndex++
     const timestamp = extractTimestamp(line)
     for (const block of parseAssistantToolBlocks(line)) {
       events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
@@ -367,7 +441,9 @@ export function filterRecentCurrentSessionUsageEvents(
   const events = collectCurrentSessionUsageEvents(sessionLines)
   if (events.length === 0) return []
 
-  const lastTurnIndex = Math.max(0, sessionLines.length - 1)
+  // turnIndex now counts user/human messages, not raw line positions; the last
+  // event's turnIndex is the freshest "current turn" reference for windowing.
+  const lastTurnIndex = events.reduce((acc, event) => Math.max(acc, event.turnIndex), 0)
   return filterRecentUsageEvents(events, lastTurnIndex, options)
 }
 
@@ -519,19 +595,51 @@ export async function getRecentCurrentSessionUsage(
       return usageFromEvents(filterRecentCurrentSessionUsageEvents(summary.sessionLines, options))
     }
     const transcriptPath = transcriptPathFromUsageSource(source)
-    if (transcriptPath) {
-      const transcriptUsage = await tryReadRecentSessionUsage(transcriptPath, options)
-      if (transcriptUsage) return transcriptUsage
-    }
-    const usage = getCurrentSessionToolUsage(source)
-    if (usage?.events) {
-      const lastTurnIndex =
-        usage.events.length > 0 ? Math.max(...usage.events.map((event) => event.turnIndex)) : 0
-      return usageFromEvents(filterRecentUsageEvents(usage.events, lastTurnIndex, options))
+    const transcriptUsage = transcriptPath
+      ? await tryReadRecentSessionUsage(transcriptPath, options)
+      : null
+    const cachedUsage = getCurrentSessionToolUsage(source)
+    const cachedEvents = cachedUsage?.events
+      ? filterRecentUsageEvents(
+          cachedUsage.events,
+          cachedUsage.events.length > 0
+            ? Math.max(...cachedUsage.events.map((event) => event.turnIndex))
+            : 0,
+          options
+        )
+      : []
+    if (transcriptUsage || cachedEvents.length > 0) {
+      // Merge transcript and daemon-cache events so both user-typed `/skill`
+      // expansions (visible only in the transcript) and agent-invoked tool calls
+      // captured by the daemon are surfaced to recency gates.
+      return usageFromEvents(mergeUsageEvents(transcriptUsage?.events ?? [], cachedEvents))
     }
   }
   const transcriptPath = transcriptPathFromUsageSource(source)
   return transcriptPath ? readRecentSessionUsage(transcriptPath, options) : usageFromEvents([])
+}
+
+function mergeUsageEvents(
+  primary: CurrentSessionUsageEvent[],
+  secondary: CurrentSessionUsageEvent[]
+): CurrentSessionUsageEvent[] {
+  if (secondary.length === 0 && primary.length === 0) return primary
+  const merged: CurrentSessionUsageEvent[] = []
+  const seenSkills = new Set<string>()
+  const seenToolish = new Set<string>()
+  for (const event of [...primary, ...secondary]) {
+    if (event.kind === "skill") {
+      if (seenSkills.has(event.value)) continue
+      seenSkills.add(event.value)
+      merged.push(event)
+      continue
+    }
+    const key = `${event.kind}|${event.value}|${event.turnIndex}`
+    if (seenToolish.has(key)) continue
+    seenToolish.add(key)
+    merged.push(event)
+  }
+  return merged
 }
 
 export async function getRecentToolsUsedForCurrentSession(
