@@ -244,9 +244,12 @@ describe("GIT_WRITE_RE", () => {
   test("does not match git log", () => {
     expect(GIT_WRITE_RE.test("git log")).toBe(false)
   })
-  test("matches stash push but not stash list", () => {
+  test("matches stash push but not stash list or stash show", () => {
     expect(GIT_WRITE_RE.test("git stash push")).toBe(true)
     expect(GIT_WRITE_RE.test("git stash list")).toBe(false)
+    expect(GIT_WRITE_RE.test("git stash show")).toBe(false)
+    expect(GIT_WRITE_RE.test("git stash show --stat")).toBe(false)
+    expect(GIT_WRITE_RE.test("git stash show -p stash@{0}")).toBe(false)
   })
 })
 

@@ -396,7 +396,7 @@ export const GIT_READ_RE = gitSubcommandRe(
 
 /** Matches git subcommands that mutate state (with optional global opts). */
 export const GIT_WRITE_RE = new RegExp(
-  `\\bgit\\s+${GIT_GLOBAL_OPTS}(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\\s+(?!list)|cherry-pick|revert|rm|mv|apply)\\b`
+  `\\bgit\\s+${GIT_GLOBAL_OPTS}(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\\s+(?!list|show)|cherry-pick|revert|rm|mv|apply)\\b`
 )
 
 /** Matches `git [opts] push|pull|fetch` — mechanical sync ops. */
