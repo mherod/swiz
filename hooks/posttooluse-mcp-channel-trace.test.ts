@@ -63,6 +63,19 @@ describe("posttooluse-mcp-channel-trace", () => {
     expect(trace).toContain("reason=heartbeat-missing")
   })
 
+  test("includes originating agent name when payload identifies Codex", () => {
+    const trace = buildMcpChannelTrace({
+      session_id: "session",
+      cwd: "/no/channel",
+      tool_name: "Bash",
+      tool_input: {},
+      _env: { CODEX_THREAD_ID: "thread" },
+      _terminal: { app: "unknown", name: "Unknown" },
+    })
+
+    expect(trace).toContain("agent=Codex-CLI")
+  })
+
   test("reports MCP channel transport when live and no AppleScript terminal exists", async () => {
     const cwd = await makeCwd()
     await writeLiveStatus(cwd)

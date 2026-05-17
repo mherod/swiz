@@ -8,6 +8,7 @@
  * transport without forcing another shell probe.
  */
 
+import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -32,6 +33,14 @@ function injectedTerminalApp(raw: Record<string, unknown>): TerminalApp {
   return detectTerminal().app
 }
 
+function formatTraceValue(value: string): string {
+  return value.trim().replace(/\s+/g, "-") || "unknown"
+}
+
+function agentNameForTrace(raw: Record<string, unknown>): string {
+  return formatTraceValue(detectCurrentAgentFromHookPayload(raw)?.name ?? "unknown")
+}
+
 export function buildMcpChannelTrace(input: unknown): string | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
@@ -47,6 +56,7 @@ export function buildMcpChannelTrace(input: unknown): string | null {
   const status = availability.status
   const parts = [
     "[swiz context trace]",
+    `agent=${agentNameForTrace(raw)}`,
     `tool=${parsed.tool_name ?? "unknown"}`,
     `transport=${transport}`,
     `terminal=${terminalApp}`,
