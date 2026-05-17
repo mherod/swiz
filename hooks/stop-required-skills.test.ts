@@ -216,7 +216,8 @@ describe("stop-required-skills", () => {
     const result = await runHook(dir, transcriptPath)
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("farm-out-issues")
+    // farm-out-issues is bypassed (no new commits since it ran); next blocking rule fires
+    expect(result.reason).toContain("continue-with-tasks")
     expect(result.reason).toContain("last 30 turns and last 20 minutes")
   })
 
@@ -389,6 +390,73 @@ describe("stop-required-skills", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("farm-out-issues")
     expect(result.reason).toContain("compaction reset the recency window")
+  })
+
+  describe("farm-out-issues bypass rule", () => {
+    async function createFarmOutOldThenBash(dir: string, bashCommand: string): Promise<string> {
+      const transcriptPath = join(dir, "farm-out-old.jsonl")
+      const old = Date.now() - 25 * 60 * 1000
+      const recent = Date.now() - 1000
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({
+            timestamp: new Date(old).toISOString(),
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", name: "Skill", input: { skill: "farm-out-issues" } }],
+            },
+          }),
+          JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "ok" }] } }),
+          JSON.stringify({
+            timestamp: new Date(recent).toISOString(),
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", name: "Bash", input: { command: bashCommand } }],
+            },
+          }),
+        ].join("\n") + "\n"
+      )
+      return transcriptPath
+    }
+
+    test("bypasses farm-out-issues gate when no git commits happened since last invocation", async () => {
+      const dir = await tmp.create()
+      await initGitRepo(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      const transcriptPath = await createFarmOutOldThenBash(dir, "bun test --reporter=dots")
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBe("block")
+      // farm-out-issues bypassed; next rule fires
+      expect(result.reason).not.toContain("farm-out-issues")
+      expect(result.reason).toContain("continue-with-tasks")
+    })
+
+    test("does not bypass farm-out-issues gate when a git push happened after last invocation", async () => {
+      const dir = await tmp.create()
+      await initGitRepo(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      const transcriptPath = await createFarmOutOldThenBash(dir, "git push origin main")
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBe("block")
+      expect(result.reason).toContain("farm-out-issues")
+    })
+
+    test("does not bypass farm-out-issues gate when a git commit happened after last invocation", async () => {
+      const dir = await tmp.create()
+      await initGitRepo(dir)
+      for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+      const transcriptPath = await createFarmOutOldThenBash(dir, "git commit -m feat: add feature")
+
+      const result = await runHook(dir, transcriptPath)
+      expect(result.exitCode).toBe(0)
+      expect(result.decision).toBe("block")
+      expect(result.reason).toContain("farm-out-issues")
+    })
   })
 
   test("fails open when the active agent does not support the Skill tool", async () => {

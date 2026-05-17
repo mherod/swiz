@@ -23,6 +23,12 @@ import {
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
+import {
+  type CurrentSessionUsageEvent,
+  collectCurrentSessionUsageEvents,
+  extractSessionLines,
+  getCurrentSessionToolUsage,
+} from "../src/transcript-summary.ts"
 import { blockStopObj, isGitRepo } from "../src/utils/hook-utils.ts"
 import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
@@ -40,6 +46,34 @@ interface RequiredStopSkillRule {
   actionHeader(skillReference: string): string
   actionPlan(skillReference: string, ctx: RequiredStopSkillContext): ActionPlanItem[]
   why(skillReference: string): string
+  /** When true, bypass the recency gate if no git commit/push occurred since the skill last ran. */
+  bypassIfNoNewCommits?: boolean
+}
+
+const GIT_COMMIT_OR_PUSH_RE = /\bgit\s+(?:commit|push)\b/
+
+/**
+ * Returns true if `skillName` was invoked this session AND no `git commit` or
+ * `git push` bash command occurred after that invocation. When true the skill's
+ * recency window may be expired but its last run is still valid.
+ */
+function noNewCommitsSinceSkillInvocation(
+  skillName: string,
+  events: CurrentSessionUsageEvent[]
+): boolean {
+  let lastSkillTurnIndex = -1
+  for (const event of events) {
+    if (event.kind === "skill" && event.value === skillName) {
+      lastSkillTurnIndex = Math.max(lastSkillTurnIndex, event.turnIndex)
+    }
+  }
+  if (lastSkillTurnIndex < 0) return false
+  return !events.some(
+    (event) =>
+      event.kind === "bash-command" &&
+      event.turnIndex > lastSkillTurnIndex &&
+      GIT_COMMIT_OR_PUSH_RE.test(event.value)
+  )
 }
 
 function formatSessionSkillsForReason(
@@ -206,6 +240,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     ],
     why: (skillReference) =>
       `the ${skillReference} skill batches and distributes pending issues across sessions. Stopping without running it leaves issues untriaged and unassigned.`,
+    bypassIfNoNewCommits: true,
   },
   {
     skill: "continue-with-tasks",
@@ -266,6 +301,23 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
     if (invokedSkills.includes(rule.skill)) {
       if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} already invoked`)
       continue
+    }
+
+    if (rule.bypassIfNoNewCommits) {
+      let allEvents = getCurrentSessionToolUsage(parsed as Record<string, any>)?.events
+      if (!allEvents && parsed.transcript_path) {
+        try {
+          const text = await Bun.file(parsed.transcript_path).text()
+          allEvents = collectCurrentSessionUsageEvents(extractSessionLines(text))
+        } catch {
+          allEvents = undefined
+        }
+      }
+      if (allEvents && noNewCommitsSinceSkillInvocation(rule.skill, allEvents)) {
+        if (process.env.DEBUG_REQUIRED_SKILLS)
+          console.error(`Skill ${rule.skill} bypassed — no new commits since last invocation`)
+        continue
+      }
     }
 
     const skillReference = formatSkillReferenceForAgent(rule.skill)
