@@ -116,14 +116,14 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`. **DON'T** complete deferred buffer tasks — leave ≥2 `Follow-up:` pending and stop. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at the END of closeout; 20-min recency windows expire if invoked early.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
-- After compaction: `TaskList`, close stale tasks using `git log --oneline -3`. Call task tools every 10 calls; staleness gate at 20.
+- After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
 - On session resume, verify every `completed` commit/push task against `git status` — uncommitted/unpushed files mean phantom completion; reopen the task before new work.
-- After `CLAUDE.md` edit: `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Pre-issue labeling: `gh label list`; post `gh issue create`: `/refine-issue <number>`. Use body files, not heredoc.
+- After `CLAUDE.md` edit: `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Post `gh issue create`: `/refine-issue <number>`. Use body files, not heredoc.
 - Verify CI jobs with `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before committing untracked `.lock` or local state.
 ## Standard Work Sequence
 - Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
@@ -162,7 +162,6 @@ alwaysApply: false
 - Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
 - In CI/hook scripts, don't use `console.log` for status/debug; use `console.error`.
 - `src/debug-logging.test.ts` allowlists `console.*`; elsewhere use `debugLog` from `./debug.ts`. Allowlist edits need a justification comment.
-- Reference: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - No top-level `await` in `src/`; use lazy async (`let cache; async load() {...}`). Hooks exempt.
 - DON'T embed ESC (0x1b) in regex literals; construct at runtime — see `hooks/posttooluse-task-output.ts` `ANSI_RE`.
@@ -199,8 +198,8 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse`.
 ## Agent Behavior
-- DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"` for unwanted), use hedging ("small", "minor", "trivial", "quick", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook"). Use Claude Agent SDK in-process.
-- DON'T re-implement — inspect existing code first. Fixes for #595 and #596 were already in place; only tests were missing.
+- DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"` for unwanted), use hedging ("trivial", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook"). Use Claude Agent SDK in-process.
+- DON'T re-implement — inspect existing code first.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
