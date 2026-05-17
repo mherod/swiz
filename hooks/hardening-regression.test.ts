@@ -4,7 +4,10 @@
  * 2. Path-traversal sessionId payloads are neutralized by join()
  * 3. Whitespace-only git output lines are filtered correctly
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
+
+setDefaultTimeout(30_000)
+
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"

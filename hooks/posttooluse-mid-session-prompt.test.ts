@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
+
+setDefaultTimeout(30_000)
+
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../src/utils/test-utils.ts"

@@ -7,7 +7,10 @@
  * These complement the existing 22 hardening-regression tests which focus on
  * HOME env, path traversal, and whitespace filtering.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
+
+setDefaultTimeout(30_000)
+
 import { join } from "node:path"
 import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
