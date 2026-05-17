@@ -98,9 +98,18 @@ describe("isTaskSubjectWorkDeferral", () => {
     expect(isTaskSubjectWorkDeferral("Next release: bump deps")).toBe(true)
   })
 
-  test("matches follow-up with vague intent words", () => {
+  test("matches all Follow-up: tasks regardless of verb", () => {
     expect(isTaskSubjectWorkDeferral("Follow-up: consider issue #633")).toBe(true)
     expect(isTaskSubjectWorkDeferral("Follow-up: revisit cache TTL strategy")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Follow-up: assess issue #633 for next session")).toBe(true)
+    expect(
+      isTaskSubjectWorkDeferral("Follow-up: expose auditStrictness in swiz settings output")
+    ).toBe(true)
+    expect(
+      isTaskSubjectWorkDeferral("Follow-up: reduce complexity of pretooluse-task-governance.ts")
+    ).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Follow-up: docs for new flag")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Follow-up: implement the verified fix")).toBe(true)
   })
 
   test("matches someday/eventually/hold leading words", () => {
@@ -112,9 +121,7 @@ describe("isTaskSubjectWorkDeferral", () => {
 
   test("does not match legitimate current-session work", () => {
     expect(isTaskSubjectWorkDeferral("Implement deferred image loading")).toBe(false)
-    expect(isTaskSubjectWorkDeferral("Follow-up: docs for new flag")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Add session token refresh logic")).toBe(false)
-    expect(isTaskSubjectWorkDeferral("Follow-up: implement the verified fix")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Refactor carry-over validation logic")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Fix issue #633 task governance complexity")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Implement issue #636 settings output")).toBe(false)

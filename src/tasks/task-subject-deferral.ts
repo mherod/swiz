@@ -43,9 +43,8 @@ const WORK_DEFERRAL_PATTERNS = [
     `^${LEADING_MARKER_CHARS}next\\s+(?:session|sprint|release|iteration|cycle|week)\\b`,
     "i"
   ),
-  // "Follow-up: consider X", "Follow-up: revisit X" — vague intent masking deferral
-  new RegExp(`^${LEADING_MARKER_CHARS}follow-up\\s*:\\s*(?:consider|revisit)\\b`, "i"),
-  new RegExp(`^${LEADING_MARKER_CHARS}follow-up\\s*:.*\\bnext\\s+session\\b`, "i"),
+  // Any "Follow-up: X" task defers current-session work — do it now or record a real blocker
+  new RegExp(`^${LEADING_MARKER_CHARS}follow[-\\s]?up\\s*:`, "i"),
   new RegExp(`^${LEADING_MARKER_CHARS}future\\s*[:\\s-]`, "i"),
   // "Later:", "Backlog:", "Someday:", "Eventually:", "Hold:", "Hold off:"
   new RegExp(
