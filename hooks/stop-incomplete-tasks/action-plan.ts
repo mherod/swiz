@@ -20,6 +20,8 @@ export function buildSoleDeferralSteeringOutput(realWork: string): SwizHookOutpu
   const reason = [
     "The last remaining task was parked under a deferral label instead of completed.",
     `Do the work now: ${realWork}`,
-  ].join(" ")
+    "",
+    "If this is genuinely next-session work, add a second Follow-up: or Consider task so there are two deferred items — stop is allowed when two or more deferred tasks remain.",
+  ].join("\n")
   return blockStopObj(reason)
 }
