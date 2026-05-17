@@ -231,6 +231,20 @@ function buildDenyMessage(
   )
 }
 
+interface GatedCommandCtx {
+  requiredSkill: string
+}
+
+function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | null {
+  if (!isShellTool(String((rawInput.tool_name as string | undefined) ?? ""))) return null
+  const toolInput = (rawInput.tool_input as Record<string, any>) ?? {}
+  const command: string = ((toolInput.command as string) ?? (toolInput.cmd as string)) || ""
+  const requiredSkill = classifyRequiredSkill(command, stripQuotedShellStrings(command))
+  if (!requiredSkill) return null
+  if (!skillExistsForHookPayload(requiredSkill, rawInput)) return null
+  return { requiredSkill }
+}
+
 function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
   return skill === "commit" && agentHasTaskToolsForHookPayload(input)
 }
@@ -256,19 +270,9 @@ const pretoolusSkillInvocationGate: SwizHook = {
   timeout: 5,
 
   run: async (rawInput: Record<string, any>): Promise<SwizHookOutput> => {
-    const input = rawInput as Record<string, any>
-    if (!isShellTool(String(input.tool_name ?? ""))) return {}
-
-    const toolInput = (input.tool_input as Record<string, any>) ?? {}
-    const command: string = ((toolInput.command as string) ?? (toolInput.cmd as string)) || ""
-    // Strip quoted strings for structural gh patterns; label-value patterns must use raw command.
-    const cleanedCommand = stripQuotedShellStrings(command)
-
-    const requiredSkill = classifyRequiredSkill(command, cleanedCommand)
-    if (!requiredSkill) return {}
-    if (!skillExistsForHookPayload(requiredSkill, rawInput)) return {}
-
-    // ── Resolve project/global recency window ─────────────────────────────────────
+    const ctx = resolveGatedCommand(rawInput)
+    if (!ctx) return {}
+    const { requiredSkill } = ctx
 
     const cwd: string = (rawInput.cwd as string) ?? process.cwd()
     const [maxTurns, maxAgeMinutes] = await Promise.all([
@@ -284,12 +288,10 @@ const pretoolusSkillInvocationGate: SwizHook = {
       maxAgeMs: maxAgeMinutes * 60 * 1000,
     }
 
-    // ── Scan transcript for prior skill invocations ───────────────────────────────
-
-    const transcriptPath: string = (input.transcript_path as string) ?? ""
+    const transcriptPath: string = (rawInput.transcript_path as string) ?? ""
     if (!transcriptPath) return {}
 
-    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(input, recencyOptions)
+    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
     const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
     const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
