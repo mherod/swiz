@@ -121,15 +121,13 @@ export function Header({
 
   return (
     <header className="bento-title">
-      <div className="title-row">
-        <div className="title-row-left">
-          <img key={mascotSrc} src={mascotSrc} alt="swiz" className="title-mascot" />
-          <h1 className="topbar-title">swiz daemon</h1>
-          <output className="status-pill">
-            <span className="status-dot" aria-hidden="true" />
-            <span>Live</span>
-          </output>
-        </div>
+      <div className="title-row-left">
+        <img key={mascotSrc} src={mascotSrc} alt="swiz" className="title-mascot" />
+        <h1 className="topbar-title">swiz daemon</h1>
+        <output className="status-pill">
+          <span className="status-dot" aria-hidden="true" />
+          <span>Live</span>
+        </output>
       </div>
       <span className="topbar-meta">Updated {lastUpdated}</span>
       <p className="topbar-summary">

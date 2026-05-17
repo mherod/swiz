@@ -258,13 +258,6 @@ body::before {
   font-size: 0.72rem;
 }
 
-.title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
 .title-row-left {
   display: flex;
   align-items: center;
@@ -2693,10 +2686,6 @@ tbody tr:hover {
 .metric-details > table,
 .metric-details > ul {
   margin-top: 8px;
-}
-
-.panel-dashboard-stats {
-  gap: 12px;
 }
 
 .stats-grid {

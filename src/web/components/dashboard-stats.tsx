@@ -204,29 +204,27 @@ export function DashboardStats({
     : 0
 
   return (
-    <div className="panel-dashboard-stats">
-      <div className="stats-grid">
-        <div className="stats-group">
-          <h3 className="stats-group-title">Current Session</h3>
-          <CurrentSessionStats
-            activeSession={activeSession}
-            loadedMessageCount={loadedMessageCount}
-            totalToolCalls={totalToolCalls}
-            activeDispatch={activeDispatch}
-            activeRuntimeSeconds={activeRuntimeSeconds}
-          />
-        </div>
+    <div className="stats-grid">
+      <div className="stats-group">
+        <h3 className="stats-group-title">Current Session</h3>
+        <CurrentSessionStats
+          activeSession={activeSession}
+          loadedMessageCount={loadedMessageCount}
+          totalToolCalls={totalToolCalls}
+          activeDispatch={activeDispatch}
+          activeRuntimeSeconds={activeRuntimeSeconds}
+        />
+      </div>
 
-        <div className="stats-divider" />
+      <div className="stats-divider" />
 
-        <div className="stats-group">
-          <h3 className="stats-group-title">Project Performance</h3>
-          <ProjectPerformanceStats
-            totalDispatches={totalDispatches}
-            avgLatency={avgLatency}
-            hottestEvent={hottestEvent}
-          />
-        </div>
+      <div className="stats-group">
+        <h3 className="stats-group-title">Project Performance</h3>
+        <ProjectPerformanceStats
+          totalDispatches={totalDispatches}
+          avgLatency={avgLatency}
+          hottestEvent={hottestEvent}
+        />
       </div>
     </div>
   )
