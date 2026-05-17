@@ -38,6 +38,10 @@ const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = "update-memory/SKILL.md"
 const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
 const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
 const COOLDOWN_MS = 30 * 60 * 1000 // 30 minutes
+// Matches individual auto-memory entries under ~/.claude/projects/<key>/memory/<slug>.md.
+// These are written by the built-in auto-memory system, not the /update-memory skill,
+// so enforcement must neither block nor treat them as satisfying the enforcement requirement.
+const AUTO_MEMORY_PATH_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\][^/\\]+\.md$/i
 
 interface EnforcementState {
   skillReadComplete: boolean
@@ -65,6 +69,10 @@ function toolReadsUpdateMemorySkill(toolName: string, toolInput: unknown): boole
   return strings.some((value) => value.includes(UPDATE_MEMORY_SKILL_PATH_FRAGMENT))
 }
 
+function isAutoMemoryPath(path: string): boolean {
+  return AUTO_MEMORY_PATH_RE.test(path.trim())
+}
+
 function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
   if (!isEditTool(toolName) && !isWriteTool(toolName) && !isNotebookTool(toolName)) {
     return false
@@ -74,7 +82,9 @@ function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
   collectStrings(toolInput, strings)
 
   return strings.some(
-    (value) => MARKDOWN_FILE_RE.test(value.trim()) || APPLY_PATCH_MARKDOWN_RE.test(value)
+    (value) =>
+      !isAutoMemoryPath(value) &&
+      (MARKDOWN_FILE_RE.test(value.trim()) || APPLY_PATCH_MARKDOWN_RE.test(value))
   )
 }
 
@@ -289,6 +299,18 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}
   const cwd = input.cwd ?? process.cwd()
+
+  // Auto-memory entries written by the built-in memory system are exempt from
+  // enforcement — they are distinct from /update-memory skill rule writes and must
+  // not be blocked or used to satisfy the skill-read/markdown-write requirements.
+  const toolInputStrings: string[] = []
+  collectStrings(toolInput, toolInputStrings)
+  if (
+    (isWriteTool(toolName) || isEditTool(toolName)) &&
+    toolInputStrings.some((v) => isAutoMemoryPath(v))
+  ) {
+    return {}
+  }
 
   const pendingReminder = await getPendingReminderLines(transcriptPath, cwd, toolName)
   if (!pendingReminder) return {}

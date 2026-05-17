@@ -438,6 +438,76 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
   })
 
+  describe("auto-memory path exemption", () => {
+    test("allows Write to auto-memory path even when enforcement is active", async () => {
+      const dir = await createEnforcementProjectDir(createTempDir)
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+        // No skill read, no markdown write — enforcement should be active
+      ])
+
+      const result = await runHook({
+        cwd: dir,
+        tool_name: "Write",
+        tool_input: {
+          file_path: `/Users/test/.claude/projects/test-proj/memory/feedback-lesson.md`,
+          content:
+            "---\nname: feedback-lesson\ndescription: Test\nmetadata:\n  type: feedback\n---\nLesson body.",
+        },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // exempted — auto-memory write passes through
+    })
+
+    test("allows Write to auto-memory path when markdownWriteComplete is already true", async () => {
+      const dir = await createEnforcementProjectDir(createTempDir)
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+        // Previous markdown write satisfies step 2 but skill not yet read
+        toolUse("Write", { file_path: "CLAUDE.md", content: "DO: something.\n" }),
+      ])
+
+      const result = await runHook({
+        cwd: dir,
+        tool_name: "Write",
+        tool_input: {
+          file_path: `/Users/test/.claude/projects/test-proj/memory/user-role.md`,
+          content: "---\nname: user-role\nmetadata:\n  type: user\n---\nUser is a developer.",
+        },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // exempted — not blocked by "skill not read" gate
+    })
+
+    test("auto-memory write does not satisfy markdownWriteComplete (normal writes still blocked)", async () => {
+      const dir = await createEnforcementProjectDir(createTempDir)
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+        // Auto-memory write in transcript — should NOT satisfy markdownWriteComplete
+        toolUse("Write", {
+          file_path: `/Users/test/.claude/projects/test-proj/memory/feedback.md`,
+          content: "---\nname: feedback\nmetadata:\n  type: feedback\n---\nSome lesson.",
+        }),
+      ])
+
+      const result = await runHook({
+        cwd: dir,
+        tool_name: "Edit",
+        tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, any>
+      expect(hso?.permissionDecision).toBe("deny") // still blocked — auto-memory didn't satisfy enforcement
+      expect(String(hso?.permissionDecisionReason)).toContain("Read the /update-memory skill")
+    })
+  })
+
   describe("git repo + CLAUDE.md guard", () => {
     test("skips enforcement when cwd is not a git repo", async () => {
       const nonGitDir = await createTempDir()
