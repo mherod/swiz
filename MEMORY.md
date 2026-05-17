@@ -38,6 +38,7 @@ When stop reports **tasks needing attention** (e.g. “wait for CI”, “mark t
 3. **Native tasks** — If work is already shipped, use **TaskUpdate** / `swiz tasks complete` so every current-session task is **`completed`** with accepted evidence (`commit:`, `test:`, `file:`, `note:`—only those prefixes are accepted by `swiz tasks complete`; use `note:` for CI-green confirmation if no test artifact applies). If work remains, keep or create **`in_progress`** / **`pending`** tasks and finish the implementation before stop.
 
 - **DON’T**: Treat **”pushed”** or **”pre-push passed locally”** as session-complete while `origin/main`’s latest run for that commit is missing, `in_progress`, **`cancelled`**, or **`failure`**.
+- **DON’T**: Describe CI state as “waiting for CI”, “monitoring CI”, or “CI is in progress” in EOD summaries or stop content — stop hooks treat passive-waiting language as inventing external dependencies. Run `gh run view <id> --json conclusion,status,jobs` and report the actual `conclusion` value.
 
 ## Hook edge cases
 
