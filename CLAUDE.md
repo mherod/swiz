@@ -116,7 +116,7 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. Recency resets after compaction.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. Recency resets after compaction. **DON'T** use `Follow-up: consider/revisit X` — `isTaskSubjectWorkDeferral` blocks these. Use `Consider issue #N: <topic>` or `Follow-up: <concrete verb> X`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
@@ -180,7 +180,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` / `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in ONE pass, then read. Empty recency results → print event timestamps vs cutoff first (may be stale).
 - DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action — hooks run in-process from loaded code.
-- DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch (often one character).
+- DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry the same command after a hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
 - Bun test: `--reporter=dots`. `--concurrent` multi-file only; single-file rejected. Run once — piped re-runs trigger repeated-test hook.
@@ -199,8 +199,7 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse`.
 ## Agent Behavior
-- DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"`), use hedging ("trivial", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook", "escape hatch"). Use Claude Agent SDK in-process.
-- DON'T re-implement — inspect existing code first.
+- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (update subject via `TaskUpdate`); hedge ("trivial"/"just"/"likely") before investigating; use compliance-gaming phrases ("satisfies the gate"/"unblocks the hook"); re-implement without inspecting first. Use Claude Agent SDK in-process.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
