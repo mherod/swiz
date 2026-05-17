@@ -78,6 +78,18 @@ export function skillExistsForHookPayload(name: string, payload: Record<string, 
 
 export { agentHasTaskToolsForHookPayload }
 
+/**
+ * Returns true when the agent identified by the hook payload supports the Skill tool.
+ * Used by stop hooks to fail-open for agents (e.g. Codex) that cannot invoke /skills.
+ */
+export function agentHasSkillToolForHookPayload(payload: Record<string, unknown>): boolean {
+  const agent = detectCurrentAgentFromHookPayload(payload)
+  if (agent !== null) return agentSupportsTool(agent, "Skill")
+  const current = detectCurrentAgent()
+  if (current !== null) return agentSupportsTool(current, "Skill")
+  return true
+}
+
 export function skillGateAgentIdForHookPayload(payload: Record<string, unknown>): string {
   return detectCurrentAgentFromHookPayload(payload)?.id ?? detectCurrentAgent()?.id ?? "unknown"
 }

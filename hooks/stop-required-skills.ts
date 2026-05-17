@@ -15,6 +15,7 @@ import {
   resolveNumericSetting,
 } from "../src/settings/resolution.ts"
 import {
+  agentHasSkillToolForHookPayload,
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
@@ -234,6 +235,9 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
   const ctx: RequiredStopSkillContext = { cwd, input: parsed }
+
+  // Fail-open: agents that cannot invoke the Skill tool cannot satisfy these requirements.
+  if (!agentHasSkillToolForHookPayload(parsed as Record<string, unknown>)) return {}
 
   const [maxTurns, maxAgeMinutes] = await Promise.all([
     resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
