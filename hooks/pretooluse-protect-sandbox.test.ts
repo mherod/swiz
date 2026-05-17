@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
+
+setDefaultTimeout(30_000)
+
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import {

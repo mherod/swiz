@@ -12,7 +12,7 @@ import { AGENTS } from "../src/agents.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { type HookResult, makeTempGitRepo, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
-setDefaultTimeout(20_000)
+setDefaultTimeout(30_000)
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 

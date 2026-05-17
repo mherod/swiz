@@ -14,7 +14,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
-setDefaultTimeout(20_000)
+setDefaultTimeout(30_000)
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 

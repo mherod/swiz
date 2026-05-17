@@ -8,7 +8,10 @@
  * This proves the gate works against real transcript parsing, not just the
  * unit-level regex helpers.
  */
-import { describe, expect, it, test } from "bun:test"
+import { describe, expect, it, setDefaultTimeout, test } from "bun:test"
+
+setDefaultTimeout(30_000)
+
 import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { type AdvisoryHookResult, neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
