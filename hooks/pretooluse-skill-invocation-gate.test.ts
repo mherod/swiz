@@ -64,12 +64,15 @@ describe("pretooluse-skill-invocation-gate", () => {
     }
   }
 
-  async function runPrOpenGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
-    const projectDir = await mkdtemp(join(tmpdir(), "skill-gate-project-"))
+  async function runGateSubprocess(
+    skillName: string,
+    payload: object
+  ): Promise<Record<string, any>> {
+    const projectDir = await mkdtemp(join(tmpdir(), "gate-subprocess-"))
     try {
-      const skillDir = join(projectDir, ".skills", "pr-open")
+      const skillDir = join(projectDir, ".skills", skillName)
       await mkdir(skillDir, { recursive: true })
-      await writeFile(join(skillDir, "SKILL.md"), "# pr-open\n")
+      await writeFile(join(skillDir, "SKILL.md"), `# ${skillName}\n`)
 
       const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
         string,
@@ -86,27 +89,27 @@ describe("pretooluse-skill-invocation-gate", () => {
         cwd: projectDir,
         env,
       })
-      await proc.stdin.write(
-        JSON.stringify({
-          tool_name: "Bash",
-          tool_input: {
-            command: "gh pr create --title 'test' --body 'body'",
-          },
-          transcript_path: "fake-transcript.json",
-          _transcriptSummary: summaryFromLines(sessionLines),
-        })
-      )
+      await proc.stdin.write(JSON.stringify(payload))
       await proc.stdin.end()
-      const [stdout, stderr] = await Promise.all([
+      const [stdout] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
       ])
       await proc.exited
-      if (!stdout.trim()) throw new Error(`Hook emitted no output. stderr: ${stderr}`)
+      if (!stdout.trim()) return {}
       return JSON.parse(stdout) as Record<string, any>
     } finally {
       await rm(projectDir, { recursive: true, force: true })
     }
+  }
+
+  async function runPrOpenGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
+    return await runGateSubprocess("pr-open", {
+      tool_name: "Bash",
+      tool_input: { command: "gh pr create --title 'test' --body 'body'" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
   }
 
   it("blocks git commit when running in Claude (supports Skill tool) and skill exists", async () => {
@@ -195,48 +198,12 @@ describe("pretooluse-skill-invocation-gate", () => {
     command: string,
     sessionLines: string[] = []
   ): Promise<Record<string, any>> {
-    const projectDir = await mkdtemp(join(tmpdir(), "label-gate-project-"))
-    try {
-      const skillDir = join(projectDir, ".skills", "refine-issue")
-      await mkdir(skillDir, { recursive: true })
-      await writeFile(join(skillDir, "SKILL.md"), "# refine-issue\n")
-
-      const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
-        string,
-        string
-      >
-      for (const key of agentEnvKeys) {
-        if (key !== "CLAUDECODE" && key !== "HOME") delete env[key]
-      }
-
-      const proc = Bun.spawn(["bun", HOOK], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: projectDir,
-        env,
-      })
-      await proc.stdin.write(
-        JSON.stringify({
-          tool_name: "Bash",
-          tool_input: { command },
-          transcript_path: "fake-transcript.json",
-          _transcriptSummary: summaryFromLines(sessionLines),
-        })
-      )
-      await proc.stdin.end()
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      // Empty stdout = hook returned {} (implicit allow). Non-empty output = JSON decision.
-      if (!stdout.trim()) return {}
-      if (stderr && !stdout.trim()) throw new Error(`Hook emitted no output. stderr: ${stderr}`)
-      return JSON.parse(stdout) as Record<string, any>
-    } finally {
-      await rm(projectDir, { recursive: true, force: true })
-    }
+    return await runGateSubprocess("refine-issue", {
+      tool_name: "Bash",
+      tool_input: { command },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
   }
 
   describe("refine-issue gate — readiness label scoping", () => {
