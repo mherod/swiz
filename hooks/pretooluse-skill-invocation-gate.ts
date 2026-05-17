@@ -92,6 +92,84 @@ function formatSessionSkillsForReason(
   return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
+/**
+ * Classify which skill is required for the given shell command.
+ * Returns null when no skill gate applies (command is not gated or is exempt).
+ */
+function classifyRequiredSkill(command: string, cleanedCommand: string): string | null {
+  if (GIT_COMMIT_RE.test(command)) return "commit"
+  if (GIT_PUSH_RE.test(command)) {
+    if (GIT_PUSH_DELETE_RE.test(command)) return null // branch deletion is not a code push
+    return "push"
+  }
+  if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) return "triage-issues"
+  if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
+    return allLabelsAreReadinessOnly(extractChangedLabels(command)) ? null : "refine-issue"
+  }
+  if (GH_PR_CREATE_RE.test(cleanedCommand)) return "pr-open"
+  if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) return "pr-comments-address"
+  return null
+}
+
+/** Per-skill deny message configuration (action phrase, plan step, why-matters). */
+const SKILL_DENY_CONFIGS: Record<
+  string,
+  (ref: string) => { action: string; planStep: string; whyMatters: string }
+> = {
+  "triage-issues": (ref) => ({
+    action: 'adding the "triaged" label',
+    planStep: `Invoke the ${ref} skill before adding the triaged label.`,
+    whyMatters:
+      `the ${ref} skill runs the full triage workflow (repro, severity, owner assignment). ` +
+      `Adding the label directly skips these safeguards.`,
+  }),
+  "refine-issue": (ref) => ({
+    action: "changing issue labels",
+    planStep: `Invoke the ${ref} skill before modifying issue labels.`,
+    whyMatters:
+      `the ${ref} skill validates label changes against issue state. ` +
+      `Modifying labels directly skips these safeguards.`,
+  }),
+  "pr-open": (ref) => ({
+    action: "opening a new pull request",
+    planStep: `Invoke the ${ref} skill before running \`gh pr create\`.`,
+    whyMatters:
+      `the ${ref} skill enforces the complete PR workflow (branch checks, AC verification, linked issues). ` +
+      `Running \`gh pr create\` directly skips these safeguards.`,
+  }),
+  "pr-comments-address": (ref) => ({
+    action: "dismissing a pull request review",
+    planStep: `Invoke the ${ref} skill before dismissing a PR review.`,
+    whyMatters:
+      `the ${ref} skill requires addressing every reviewer comment before dismissal. ` +
+      `Dismissing a review directly skips this accountability.`,
+  }),
+}
+
+function buildDenyMessage(
+  requiredSkill: string,
+  reason: string,
+  skillReferenceForAgent: string
+): SwizHookOutput {
+  const verb = requiredSkill === "commit" ? "commit" : "push"
+  const configFactory = SKILL_DENY_CONFIGS[requiredSkill]
+  const { action, planStep, whyMatters } = configFactory?.(skillReferenceForAgent) ?? {
+    action: `git ${verb}`,
+    planStep: `Invoke the ${skillReferenceForAgent} skill before running git ${verb}.`,
+    whyMatters:
+      `the ${skillReferenceForAgent} skill enforces the complete ${verb} workflow ` +
+      `(branch checks, task preflight, message format). Running git ${verb} directly skips these safeguards.`,
+  }
+  return preToolUseDeny(
+    `BLOCKED: ${action} requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+      `${reason}\n\n` +
+      formatActionPlan([planStep], {
+        header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
+      }) +
+      `\nWhy this matters: ${whyMatters}`
+  )
+}
+
 const pretoolusSkillInvocationGate: SwizHook = {
   name: "pretooluse-skill-invocation-gate",
   event: "preToolUse",
@@ -103,38 +181,11 @@ const pretoolusSkillInvocationGate: SwizHook = {
     if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
     const command: string = ((input.tool_input as Record<string, any>)?.command as string) ?? ""
-
-    // Strip quoted strings for structural pattern matching (gh pr create,
-    // gh pr review --dismiss). Label-value patterns (triaged, backlog) must
-    // match against the raw command because the label name is typically quoted
-    // and would be removed by stripping.
+    // Strip quoted strings for structural gh patterns; label-value patterns must use raw command.
     const cleanedCommand = stripQuotedShellStrings(command)
 
-    // Determine which skill is relevant for this command.
-    // - Git commands: raw command (no complex quoted args)
-    // - Label operations: raw command (label value is inside quotes)
-    // - Structural gh commands: cleanedCommand (quotes hide flags/structure)
-    let requiredSkill: string | null = null
-    if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
-    else if (GIT_PUSH_RE.test(command)) {
-      // Branch deletion (--delete or :branch) is not a code push — skip gate
-      if (GIT_PUSH_DELETE_RE.test(command)) return {}
-      requiredSkill = "push"
-    } else if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
-      requiredSkill = "triage-issues"
-    } else if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
-      if (!allLabelsAreReadinessOnly(extractChangedLabels(command))) {
-        requiredSkill = "refine-issue"
-      }
-    } else if (GH_PR_CREATE_RE.test(cleanedCommand)) {
-      requiredSkill = "pr-open"
-    } else if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) {
-      requiredSkill = "pr-comments-address"
-    }
-
+    const requiredSkill = classifyRequiredSkill(command, cleanedCommand)
     if (!requiredSkill) return {}
-
-    // Only enforce if the skill is installed on this machine
     if (!skillExists(requiredSkill)) return {}
 
     // ── Resolve project/global recency window ─────────────────────────────────────
@@ -163,8 +214,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
     if (invokedSkills.includes(requiredSkill)) {
-      // For commits, also require TaskList to have been called — ensures the
-      // task state cache is synced before the commit workflow proceeds.
+      // For commits, also require TaskList — ensures task state cache is synced.
       if (requiredSkill === "commit") {
         const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
         if (!toolNames.some((n) => isTaskListTool(n))) {
@@ -177,80 +227,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
       return preToolUseAllow(`${skillReferenceForAgent} skill was invoked recently.\n${reason}`)
     }
 
-    // ── Block with actionable instructions ────────────────────────────────────────
-
-    if (requiredSkill === "triage-issues") {
-      return preToolUseDeny(
-        `BLOCKED: adding the "triaged" label requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
-          `${reason}\n\n` +
-          formatActionPlan(
-            [`Invoke the ${skillReferenceForAgent} skill before adding the triaged label.`],
-            {
-              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-            }
-          ) +
-          `\nWhy this matters: the ${skillReferenceForAgent} skill runs the full triage workflow ` +
-          `(repro, severity, owner assignment). Adding the label directly skips these safeguards.`
-      )
-    }
-
-    if (requiredSkill === "refine-issue") {
-      return preToolUseDeny(
-        `BLOCKED: changing issue labels requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
-          `${reason}\n\n` +
-          formatActionPlan(
-            [`Invoke the ${skillReferenceForAgent} skill before modifying issue labels.`],
-            {
-              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-            }
-          ) +
-          `\nWhy this matters: the ${skillReferenceForAgent} skill validates label changes against issue state. Modifying labels directly skips these safeguards.`
-      )
-    }
-
-    if (requiredSkill === "pr-open") {
-      return preToolUseDeny(
-        `BLOCKED: opening a new pull request requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
-          `${reason}\n\n` +
-          formatActionPlan(
-            [`Invoke the ${skillReferenceForAgent} skill before running \`gh pr create\`.`],
-            {
-              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-            }
-          ) +
-          `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete PR workflow (branch checks, AC verification, linked issues). Running \`gh pr create\` directly skips these safeguards.`
-      )
-    }
-
-    if (requiredSkill === "pr-comments-address") {
-      return preToolUseDeny(
-        `BLOCKED: dismissing a pull request review requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
-          `${reason}\n\n` +
-          formatActionPlan(
-            [`Invoke the ${skillReferenceForAgent} skill before dismissing a PR review.`],
-            {
-              header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-            }
-          ) +
-          `\nWhy this matters: the ${skillReferenceForAgent} skill requires addressing every reviewer comment before dismissal. Dismissing a review directly skips this accountability.`
-      )
-    }
-
-    const verb = requiredSkill === "commit" ? "commit" : "push"
-
-    return preToolUseDeny(
-      `BLOCKED: git ${verb} requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
-        `${reason}\n\n` +
-        formatActionPlan(
-          [`Invoke the ${skillReferenceForAgent} skill before running git ${verb}.`],
-          {
-            header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-          }
-        ) +
-        `\nWhy this matters: the ${skillReferenceForAgent} skill enforces the complete ` +
-        `${verb} workflow (branch checks, task preflight, message format). ` +
-        `Running git ${verb} directly skips these safeguards.`
-    )
+    return buildDenyMessage(requiredSkill, reason, skillReferenceForAgent)
   },
 }
 
