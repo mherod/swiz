@@ -151,6 +151,28 @@ describe("detect", () => {
       expect(detect("◻ Next session: fix issue #49 Zod v4 migration").matched).toBe(true)
     })
 
+    test("rejects issue-selection labels as deferral tactics", () => {
+      expect(detect("◻ Pick next issue: feat(posts) archive controls (#1717)").matched).toBe(true)
+      expect(detect("◻ Consider issue #633: reduce governance complexity").matched).toBe(true)
+      expect(detect("Candidate issue #700: improve CI output").matched).toBe(true)
+      expect(detect("Maybe issue #701 if time").matched).toBe(true)
+      expect(detect("Fix issue #702 after this session").matched).toBe(true)
+    })
+
+    test("deferral rejection steers firmly without exposing trigger wording", () => {
+      const result = detect("◻ Consider issue #633: reduce governance complexity")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      const message = formatMessage(result)
+      expect(message).toContain("deferral tactic")
+      expect(message).toContain("unacceptable")
+      expect(message).toContain("Do the work now")
+      expect(message.toLowerCase()).not.toContain("consider issue")
+      expect(message.toLowerCase()).not.toContain("pick next issue")
+      expect(message.toLowerCase()).not.toContain("future:")
+      expect(message.toLowerCase()).not.toContain("later:")
+    })
+
     test("rejects Follow-up subjects that defer to next session", () => {
       expect(detect("Follow-up: pick up #641 at next session start").matched).toBe(true)
       expect(detect("Follow-up: pick up #637 CI retry backoff at next session").matched).toBe(true)

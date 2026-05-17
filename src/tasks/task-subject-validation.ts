@@ -118,10 +118,10 @@ function detectDeferral(s: string): CompoundMatch | null {
   return {
     matched: true,
     intro:
-      "You are avoiding the work, not tracking it. Do the work now, or record the concrete blocker with evidence. Acceptable next actions:",
+      "This is a deferral tactic and it is unacceptable. You are avoiding the work, not tracking it. Do the work now, or record the concrete blocker with evidence. Acceptable next actions:",
     suggestions: [
-      "Inspect the failing issue path",
-      "Implement the verified fix",
+      "Name the concrete source change",
+      "Start the actual investigation",
       "Record the blocker and evidence",
     ],
   }

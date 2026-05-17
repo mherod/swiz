@@ -57,6 +57,39 @@ describe("isTaskSubjectWorkDeferral", () => {
     ).toBe(true)
   })
 
+  test("matches issue-selection labels that avoid naming current work", () => {
+    expect(isTaskSubjectWorkDeferral("Choose next issue: fix settings output")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Select issue #633: reduce governance complexity")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Queue issue #636: expose auditStrictness")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Candidate issue #700: improve CI output")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Optional pick: refactor hook routing")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Shortlist next work item: improve task recovery")).toBe(true)
+  })
+
+  test("matches vague issue consideration labels", () => {
+    expect(isTaskSubjectWorkDeferral("Revisit issue #633: task governance complexity")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Evaluate #636: settings output")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Assess issue #700 before choosing work")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Plan next issue after CI")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Circle back to issue #701")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Return to #702: hook cleanup")).toBe(true)
+  })
+
+  test("matches soft time-based issue deferrals", () => {
+    expect(isTaskSubjectWorkDeferral("Maybe issue #633 if time")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("If time, issue #636 settings output")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("When time allows, review issue #700")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Fix issue #701 after this session")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Leave the CI cleanup for tomorrow")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Reserve hook cleanup for next sprint")).toBe(true)
+  })
+
+  test("matches copied terminal tree markers before deferral subjects", () => {
+    expect(
+      isTaskSubjectWorkDeferral("⎿  ◻ Consider issue #636: expose auditStrictness in settings")
+    ).toBe(true)
+  })
+
   test("matches to/for/until next sprint or release", () => {
     expect(isTaskSubjectWorkDeferral("Save this fix for next sprint")).toBe(true)
     expect(isTaskSubjectWorkDeferral("Hold until next release")).toBe(true)
@@ -83,6 +116,8 @@ describe("isTaskSubjectWorkDeferral", () => {
     expect(isTaskSubjectWorkDeferral("Add session token refresh logic")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Follow-up: implement the verified fix")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Refactor carry-over validation logic")).toBe(false)
+    expect(isTaskSubjectWorkDeferral("Fix issue #633 task governance complexity")).toBe(false)
+    expect(isTaskSubjectWorkDeferral("Implement issue #636 settings output")).toBe(false)
   })
 })
 
