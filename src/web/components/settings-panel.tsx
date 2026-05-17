@@ -92,6 +92,8 @@ interface CachedProjectSettingsResponse {
     transcriptMonitorMaxConcurrentDispatches?: number
     autoSteerTranscriptWatching?: boolean
     speak?: boolean
+    skillRecencyMaxTurns?: number
+    skillRecencyMaxAgeMinutes?: number
   } | null
   globalSettings?: {
     prMergeMode?: boolean
@@ -114,6 +116,8 @@ interface ProjectSettingsForm {
   transcriptMonitorMaxConcurrentDispatches: number | ""
   autoSteerTranscriptWatching: boolean | "inherit"
   speak: boolean | "inherit"
+  skillRecencyMaxTurns: number | ""
+  skillRecencyMaxAgeMinutes: number | ""
 }
 
 const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
@@ -132,6 +136,8 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   transcriptMonitorMaxConcurrentDispatches: "",
   autoSteerTranscriptWatching: "inherit",
   speak: "inherit",
+  skillRecencyMaxTurns: "",
+  skillRecencyMaxAgeMinutes: "",
 }
 
 function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettingsForm {
@@ -191,6 +197,8 @@ const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
   transcriptMonitorMaxConcurrentDispatches: "",
   autoSteerTranscriptWatching: "inherit",
   speak: "inherit",
+  skillRecencyMaxTurns: "",
+  skillRecencyMaxAgeMinutes: "",
 }
 
 function projectSettingsToForm(response: CachedProjectSettingsResponse): ProjectSettingsForm {
@@ -216,6 +224,8 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
         | boolean
         | "inherit",
       speak: (s.speak ?? "inherit") as boolean | "inherit",
+      skillRecencyMaxTurns: s.skillRecencyMaxTurns,
+      skillRecencyMaxAgeMinutes: s.skillRecencyMaxAgeMinutes,
     }),
   }
 }
@@ -720,6 +730,18 @@ function ProjectFieldsGrid({
         label="Transcript monitor dispatch cap"
         value={form.transcriptMonitorMaxConcurrentDispatches}
         onChange={optNum("transcriptMonitorMaxConcurrentDispatches")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Skill recency max turns"
+        value={form.skillRecencyMaxTurns}
+        onChange={optNum("skillRecencyMaxTurns")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Skill recency max age (min)"
+        value={form.skillRecencyMaxAgeMinutes}
+        onChange={optNum("skillRecencyMaxAgeMinutes")}
         placeholder="Inherit global"
       />
     </div>
