@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
+  CURRENT_SESSION_USAGE_MAX_AGE_MS,
+  CURRENT_SESSION_USAGE_MAX_TURNS,
   contentBlockSchema,
   countToolCalls,
   deriveCurrentSessionTaskToolStats,
@@ -458,11 +460,11 @@ describe("transcript-utils.ts", () => {
       }
     })
 
-    it("recent usage requires both the last twenty turns and last ten minutes", async () => {
+    it("recent usage requires both within the turn window and age window", async () => {
       const now = Date.now()
       const transcriptPath = await writeTranscriptFile("recent-usage.jsonl", [
         JSON.stringify({
-          timestamp: new Date(now - 11 * 60 * 1000).toISOString(),
+          timestamp: new Date(now - (CURRENT_SESSION_USAGE_MAX_AGE_MS + 60 * 1000)).toISOString(),
           type: "assistant",
           message: {
             content: [
@@ -499,7 +501,7 @@ describe("transcript-utils.ts", () => {
       }
     })
 
-    it("recent usage excludes entries outside the last twenty turns", async () => {
+    it("recent usage excludes entries outside the turn window", async () => {
       const now = Date.now()
       const lines = [
         JSON.stringify({
@@ -509,11 +511,11 @@ describe("transcript-utils.ts", () => {
             content: [{ type: "tool_use", name: "Skill", input: { skill: "stale-by-turn" } }],
           },
         }),
-        // Twenty user turns push the window forward past the skill above; each
-        // user entry increments turnIndex (turns are user/human messages, not
-        // raw JSONL lines), so the skill at turn 0 falls outside the 20-turn
-        // window once turn 20 is reached.
-        ...Array.from({ length: 20 }, (_, index) => [
+        // CURRENT_SESSION_USAGE_MAX_TURNS user turns push the window forward
+        // past the skill above; each user entry increments turnIndex (turns are
+        // user/human messages, not raw JSONL lines), so the skill at turn 0
+        // falls outside the window once the max is reached.
+        ...Array.from({ length: CURRENT_SESSION_USAGE_MAX_TURNS }, (_, index) => [
           JSON.stringify({
             timestamp: new Date(now - 900 + index * 2).toISOString(),
             type: "user",
