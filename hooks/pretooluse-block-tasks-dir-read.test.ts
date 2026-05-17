@@ -20,6 +20,22 @@ async function runBashHook(command: string) {
   })
 }
 
+async function runGlobHook(pattern: string) {
+  return await runHookInProcess("hooks/pretooluse-block-tasks-dir-glob.ts", {
+    tool_name: "Glob",
+    tool_input: { pattern },
+    session_id: "test-session",
+  })
+}
+
+async function runLsHook(path: string) {
+  return await runHookInProcess("hooks/pretooluse-block-tasks-dir-glob.ts", {
+    tool_name: "Glob",
+    tool_input: { path },
+    session_id: "test-session",
+  })
+}
+
 describe("pretooluse-block-tasks-dir-read", () => {
   test("blocks read of exact tasks directory", async () => {
     const result = await runHook(TASKS_DIR)
@@ -94,6 +110,55 @@ describe("pretooluse-block-tasks-dir-bash", () => {
 
   test("allows path with tasks-dir prefix but not the tasks dir itself", async () => {
     const result = await runBashHook(`ls ${TASKS_DIR}-backup/file.json`)
+    expect(result.decision).toBe("allow")
+  })
+})
+
+describe("pretooluse-block-tasks-dir-glob", () => {
+  test("blocks glob pattern targeting the tasks directory (expanded path)", async () => {
+    const result = await runGlobHook(`${TASKS_DIR}/**/*.json`)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskList")
+  })
+
+  test("blocks glob pattern equal to the tasks directory", async () => {
+    const result = await runGlobHook(TASKS_DIR)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks glob with wildcard immediately after tasks dir", async () => {
+    const result = await runGlobHook(`${TASKS_DIR}*`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks glob via tilde shorthand", async () => {
+    const result = await runGlobHook("~/.claude/tasks/**/*.json")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("TaskGet")
+  })
+
+  test("blocks glob via $HOME variable", async () => {
+    const result = await runGlobHook("$HOME/.claude/tasks/*.json")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks LS path targeting the tasks directory", async () => {
+    const result = await runLsHook(TASKS_DIR)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("allows glob targeting an unrelated path", async () => {
+    const result = await runGlobHook("/Users/matthewherod/Development/swiz/**/*.ts")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows glob with tasks substring but not the tasks dir", async () => {
+    const result = await runGlobHook("/tmp/my-tasks/**/*.json")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows glob with tasks-dir prefix but not the tasks dir itself", async () => {
+    const result = await runGlobHook(`${TASKS_DIR}-backup/**`)
     expect(result.decision).toBe("allow")
   })
 })
