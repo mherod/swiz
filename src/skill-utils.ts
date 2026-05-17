@@ -2,7 +2,10 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
-import { detectCurrentAgentFromHookPayload } from "./agent-paths.ts"
+import {
+  agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromHookPayload,
+} from "./agent-paths.ts"
 import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
@@ -38,6 +41,11 @@ export function clearSkillCache(): void {
   _skillCache.clear()
 }
 
+function skillFileExists(name: string): boolean {
+  if (!name.trim()) return false
+  return getSkillDirs().some((dir) => existsSync(join(dir, name, "SKILL.md")))
+}
+
 /** Check if a skill exists in any of the skill directories. Cached per process. */
 export function skillExists(name: string): boolean {
   if (!name.trim()) return false
@@ -51,8 +59,7 @@ export function skillExists(name: string): boolean {
   }
 
   // Use dynamic lookup to support CWD changes in tests
-  const dirs = getSkillDirs()
-  const found = dirs.some((dir) => existsSync(join(dir, name, "SKILL.md")))
+  const found = skillFileExists(name)
   _skillCache.set(name, found)
   return found
 }
@@ -64,8 +71,15 @@ export function skillExists(name: string): boolean {
  */
 export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
+  if (agent?.id === "codex") return skillFileExists(name)
   if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
   return skillExists(name)
+}
+
+export { agentHasTaskToolsForHookPayload }
+
+export function skillGateAgentIdForHookPayload(payload: Record<string, unknown>): string {
+  return detectCurrentAgentFromHookPayload(payload)?.id ?? detectCurrentAgent()?.id ?? "unknown"
 }
 
 /**

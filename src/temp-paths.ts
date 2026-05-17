@@ -6,9 +6,10 @@
 import { tmpdir } from "node:os"
 
 export const TMP_ROOT = tmpdir()
+export const PUBLIC_TMP_ROOT = "/tmp"
 
 /** Incoming dispatch payload dumps (on by default; disable with `SWIZ_CAPTURE_INCOMING=0`). See `incoming-capture.ts`. */
-export const SWIZ_INCOMING_ROOT = `${TMP_ROOT}/swiz-incoming`
+export const SWIZ_INCOMING_ROOT = `${PUBLIC_TMP_ROOT}/swiz-incoming`
 
 export function swizDispatchLogPath(): string {
   return `${TMP_ROOT}/swiz-dispatch.log`
@@ -64,6 +65,14 @@ export function swizPushResultPath(repoKey: string): string {
 
 export function swizEmergencyBypassPath(repoKey: string): string {
   return `${TMP_ROOT}/swiz-emergency-bypass-${repoKey}.json`
+}
+
+export function skillRequirementCooldownPath(
+  safeSession: string,
+  safeAgent: string,
+  safeSkill: string
+): string {
+  return `${TMP_ROOT}/swiz-skill-requirement-${safeSession}-${safeAgent}-${safeSkill}.timestamp`
 }
 
 export function swizPseudoHookLogPath(): string {

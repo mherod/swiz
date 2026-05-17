@@ -746,6 +746,8 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   // to it any more (#570).
   const EXPECTED_CODEX_ALIASES: Record<string, string> = {
     Bash: "shell_command",
+    exec_command: "exec_command",
+    "functions.exec_command": "functions.exec_command",
     Edit: "apply_patch",
     Write: "apply_patch",
     Read: "read_file",
@@ -753,6 +755,7 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     Glob: "list_dir",
     NotebookEdit: "apply_patch",
     update_plan: "update_plan",
+    "functions.update_plan": "functions.update_plan",
   }
 
   it("toolAliases object matches expected table exactly (shape + values)", async () => {

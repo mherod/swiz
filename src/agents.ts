@@ -243,6 +243,8 @@ export const AGENTS: AgentDef[] = registerAgents([
     // task tool to it.
     toolAliases: {
       Bash: "shell_command",
+      exec_command: "exec_command",
+      "functions.exec_command": "functions.exec_command",
       Edit: "apply_patch",
       Write: "apply_patch",
       Read: "read_file",
@@ -250,6 +252,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       Glob: "list_dir",
       NotebookEdit: "apply_patch",
       update_plan: "update_plan",
+      "functions.update_plan": "functions.update_plan",
     },
     eventMap: {
       stop: "Stop",

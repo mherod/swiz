@@ -151,6 +151,11 @@ describe("detect", () => {
       expect(detect("◻ Next session: fix issue #49 Zod v4 migration").matched).toBe(true)
     })
 
+    test("rejects Follow-up subjects that defer to next session", () => {
+      expect(detect("Follow-up: pick up #641 at next session start").matched).toBe(true)
+      expect(detect("Follow-up: pick up #637 CI retry backoff at next session").matched).toBe(true)
+    })
+
     test("rejects Later/Backlog/TODO/Postponed/Punt prefixes as deferral tactics", () => {
       expect(detect("Later: add metrics dashboard").matched).toBe(true)
       expect(detect("Backlog: rework auth flow").matched).toBe(true)
@@ -163,6 +168,10 @@ describe("detect", () => {
     test("does not reject legitimate work mentioning 'session' or 'future'", () => {
       expect(detect("Add session token refresh logic").matched).toBe(false)
       expect(detect("Refactor future-proofing helpers").matched).toBe(false)
+    })
+
+    test("does not reject Follow-up prefix without next session wording", () => {
+      expect(detect("Follow-up: docs for new flag").matched).toBe(false)
     })
   })
 

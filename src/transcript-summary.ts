@@ -5,7 +5,7 @@
 // as `_transcriptSummary`. Extracted from hooks/hook-utils.ts (issue #84).
 
 import { normalizeCommand } from "./command-utils.ts"
-import { isShellTool, isTaskTool } from "./tool-matchers.ts"
+import { isShellTool, isTaskTool, READ_TOOLS } from "./tool-matchers.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
 
@@ -183,7 +183,33 @@ function filterSessionLines(allLines: string[]): string[] {
 interface ToolBlock {
   type?: string
   name?: string
-  input?: { command?: string; skill?: string }
+  input?: {
+    command?: string
+    cmd?: string
+    file_path?: string
+    path?: string
+    paths?: string[]
+    skill?: string
+  }
+}
+
+interface CodexFunctionCallPayload {
+  type?: string
+  name?: string
+  arguments?: string | ToolBlock["input"]
+}
+
+function parseCodexFunctionCallInput(
+  rawArguments: CodexFunctionCallPayload["arguments"]
+): ToolBlock["input"] {
+  if (!rawArguments) return undefined
+  if (typeof rawArguments !== "string") return rawArguments
+  try {
+    const parsed = JSON.parse(rawArguments) as ToolBlock["input"]
+    return parsed && typeof parsed === "object" ? parsed : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function parseAssistantToolBlocks(line: string): ToolBlock[] {
@@ -191,11 +217,26 @@ function parseAssistantToolBlocks(line: string): ToolBlock[] {
     | {
         type?: string
         message?: { content?: ToolBlock[] }
+        payload?: CodexFunctionCallPayload
       }
     | undefined
-  if (entry?.type !== "assistant") return []
-  const content = entry?.message?.content
-  return Array.isArray(content) ? content : []
+  if (entry?.type === "assistant") {
+    const content = entry?.message?.content
+    return Array.isArray(content) ? content : []
+  }
+
+  const payload = entry?.payload
+  if (entry?.type === "response_item" && payload?.type === "function_call" && payload.name) {
+    return [
+      {
+        type: "tool_use",
+        name: payload.name,
+        input: parseCodexFunctionCallInput(payload.arguments),
+      },
+    ]
+  }
+
+  return []
 }
 
 interface SummaryAccumulator {
@@ -223,7 +264,7 @@ function extractToolName(block: ToolBlock): string {
 }
 
 function extractShellCommand(block: ToolBlock, name: string): string {
-  return isShellTool(name) ? (block?.input?.command ?? "") : ""
+  return isShellTool(name) ? (block?.input?.command ?? block?.input?.cmd ?? "") : ""
 }
 
 function accumulateShellCommand(block: ToolBlock, name: string, acc: SummaryAccumulator): void {
@@ -231,6 +272,48 @@ function accumulateShellCommand(block: ToolBlock, name: string, acc: SummaryAccu
   if (!cmd) return
   acc.bashCommands.push(normalizeCommand(cmd))
   if (!acc.hasGitPush && GIT_PUSH_PATTERN.test(cmd)) acc.hasGitPush = true
+}
+
+const SKILL_MD_DIRECTORY_PATH_RE =
+  /(?:^|[\\/])\.?skills[\\/](?:[^\\/\s"'`]+[\\/])*([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
+const SKILL_MD_BASENAME_PATH_RE = /(?:^|[\\/])([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
+
+const SKILL_MD_SHELL_READ_RE = /^(?:(?:cat|bat|less|more|head|tail|nl|grep|rg)\b|sed\s+-n\b)/i
+
+function extractSkillsFromSkillMdPathText(text: string, allowBasenamePath = false): string[] {
+  const skills: string[] = []
+  for (const match of text.matchAll(SKILL_MD_DIRECTORY_PATH_RE)) {
+    if (match[1] && !skills.includes(match[1])) skills.push(match[1])
+  }
+  if (!allowBasenamePath) return skills
+  for (const match of text.matchAll(SKILL_MD_BASENAME_PATH_RE)) {
+    if (match[1] && !skills.includes(match[1])) skills.push(match[1])
+  }
+  return skills
+}
+
+function extractPathValues(input: ToolBlock["input"]): string[] {
+  if (!input) return []
+  const paths = [input.file_path, input.path].filter((value): value is string => Boolean(value))
+  if (Array.isArray(input.paths)) paths.push(...input.paths.filter(Boolean))
+  return paths
+}
+
+function extractDirectSkillReadInvocations(block: ToolBlock, name: string): string[] {
+  if (READ_TOOLS.has(name)) {
+    return extractPathValues(block.input).flatMap((path) => extractSkillsFromSkillMdPathText(path))
+  }
+
+  if (!isShellTool(name)) return []
+  const command = normalizeCommand(extractShellCommand(block, name)).trim()
+  if (!SKILL_MD_SHELL_READ_RE.test(command)) return []
+  return extractSkillsFromSkillMdPathText(command, true)
+}
+
+function appendSkillInvocations(skills: string[], acc: SummaryAccumulator): void {
+  for (const skill of skills) {
+    if (!acc.skillInvocations.includes(skill)) acc.skillInvocations.push(skill)
+  }
 }
 
 function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
@@ -243,6 +326,40 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
     const skill = block?.input?.skill ?? ""
     if (skill) acc.skillInvocations.push(skill)
   }
+  appendSkillInvocations(extractDirectSkillReadInvocations(block, name), acc)
+}
+
+function collectShellCommandUsageEvents(
+  block: ToolBlock,
+  name: string,
+  turnIndex: number,
+  timestamp: string | null
+): CurrentSessionUsageEvent[] {
+  const command = extractShellCommand(block, name)
+  if (!command) return []
+  return [
+    {
+      kind: "bash-command",
+      value: normalizeCommand(command),
+      turnIndex,
+      timestamp,
+    },
+  ]
+}
+
+function collectSkillUsageEventsFromBlock(
+  block: ToolBlock,
+  name: string,
+  turnIndex: number,
+  timestamp: string | null
+): CurrentSessionUsageEvent[] {
+  const skills = new Set<string>()
+  if (name === "Skill") {
+    const skill = block?.input?.skill ?? ""
+    if (skill) skills.add(skill)
+  }
+  for (const skill of extractDirectSkillReadInvocations(block, name)) skills.add(skill)
+  return [...skills].map((value) => ({ kind: "skill", value, turnIndex, timestamp }))
 }
 
 function collectToolUsageEventsFromBlock(
@@ -255,27 +372,16 @@ function collectToolUsageEventsFromBlock(
   if (!name) return []
 
   const events: CurrentSessionUsageEvent[] = [{ kind: "tool", value: name, turnIndex, timestamp }]
-  const command = extractShellCommand(block, name)
-  if (command) {
-    events.push({
-      kind: "bash-command",
-      value: normalizeCommand(command),
-      turnIndex,
-      timestamp,
-    })
-  }
-  if (name === "Skill") {
-    const skill = block?.input?.skill ?? ""
-    if (skill) events.push({ kind: "skill", value: skill, turnIndex, timestamp })
-  }
+  events.push(...collectShellCommandUsageEvents(block, name, turnIndex, timestamp))
+  events.push(...collectSkillUsageEventsFromBlock(block, name, turnIndex, timestamp))
   return events
 }
 
 /** Match `<command-name>skill-name</command-name>` tags in user messages (legacy skill expansion). */
 const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
 
-/** Match a leading slash-command at the start of a queued-command prompt (`/skill ...`). */
-const QUEUED_SLASH_COMMAND_RE = /^\s*\/([a-z][a-z0-9-]*)\b/
+/** Match a leading skill prompt at the start of queued/user text (`/skill ...` or `$skill ...`). */
+const QUEUED_SKILL_PROMPT_RE = /^\s*[/$]([a-z][a-z0-9-]*)\b/
 
 /**
  * Match the skill activation banner emitted by Claude Code when a slash-command
@@ -306,7 +412,7 @@ function extractSkillsFromActivationBanner(text: string): string[] {
 
 function extractSkillFromSlashPrompt(text: string | undefined | null): string | null {
   if (!text) return null
-  const match = QUEUED_SLASH_COMMAND_RE.exec(text)
+  const match = QUEUED_SKILL_PROMPT_RE.exec(text)
   return match?.[1] ?? null
 }
 
@@ -320,18 +426,38 @@ interface ParsedTranscriptEntry {
   operation?: string
   content?: string | UserMessageContentBlock[]
   message?: { content?: string | UserMessageContentBlock[] }
+  payload?: {
+    type?: string
+    role?: string
+    content?: string | UserMessageContentBlock[]
+  }
   attachment?: { type?: string; prompt?: string }
 }
 
 function extractTextFromUserMessage(
   content: string | UserMessageContentBlock[] | undefined
 ): string {
-  if (typeof content === "string") return content
+  if (typeof content === "string") return stripUserQueryWrapper(content)
   if (!Array.isArray(content)) return ""
-  return content
-    .filter((b) => b?.type === "text")
-    .map((b) => b.text ?? "")
-    .join("")
+  return stripUserQueryWrapper(
+    content
+      .filter((b) => b?.type === "text" || b?.type === "input_text")
+      .map((b) => b.text ?? "")
+      .join("")
+  )
+}
+
+function stripUserQueryWrapper(text: string): string {
+  const match = text.match(/^\s*<user_query>\s*([\s\S]*?)\s*<\/user_query>\s*$/)
+  return match?.[1]?.trim() ?? text
+}
+
+function extractUserEntryText(entry: ParsedTranscriptEntry): string {
+  const texts = [
+    extractTextFromUserMessage(entry.message?.content),
+    extractTextFromUserMessage(entry.content),
+  ].filter(Boolean)
+  return texts.join("\n")
 }
 
 function extractUserSkillExpansions(line: string): string[] {
@@ -341,7 +467,7 @@ function extractUserSkillExpansions(line: string): string[] {
   // Newer Claude Code records user-typed slash commands as queue-operation
   // entries with a leading-slash prompt in their content field.
   if (entry.type === "queue-operation" && entry.operation === "enqueue") {
-    const text = typeof entry.content === "string" ? entry.content : ""
+    const text = extractTextFromUserMessage(entry.content)
     const skill = extractSkillFromSlashPrompt(text)
     return skill ? [skill] : []
   }
@@ -352,13 +478,22 @@ function extractUserSkillExpansions(line: string): string[] {
     return skill ? [skill] : []
   }
 
+  if (entry.type === "response_item" && entry.payload?.type === "message") {
+    if (entry.payload.role !== "user") return []
+    const text = extractTextFromUserMessage(entry.payload.content)
+    const skill = extractSkillFromSlashPrompt(text)
+    return skill ? [skill] : []
+  }
+
   // Skill content injected after the slash command resolves shows up in user
   // messages with the activation banner and the legacy command-name tag (older
   // Claude Code versions). Detect both so the gate works across formats.
   if (entry.type === "user" || entry.type === "human") {
-    const text = extractTextFromUserMessage(entry.message?.content)
+    const text = extractUserEntryText(entry)
     const skills = extractSkillsFromActivationBanner(text)
     skills.push(...extractSkillsFromLegacyCommandTags(text))
+    const promptedSkill = extractSkillFromSlashPrompt(text)
+    if (promptedSkill) skills.push(promptedSkill)
     return skills
   }
 
@@ -374,11 +509,7 @@ export function collectSessionToolUsage(
     for (const block of parseAssistantToolBlocks(line)) {
       processToolBlock(block, acc)
     }
-    for (const skill of extractUserSkillExpansions(line)) {
-      if (!acc.skillInvocations.includes(skill)) {
-        acc.skillInvocations.push(skill)
-      }
-    }
+    appendSkillInvocations(extractUserSkillExpansions(line), acc)
     const ts = extractTimestamp(line)
     if (ts) {
       if (!acc.firstTimestamp) acc.firstTimestamp = ts
@@ -591,13 +722,13 @@ export async function getRecentCurrentSessionUsage(
 ): Promise<RecentCurrentSessionUsage> {
   if (typeof source !== "string") {
     const summary = getTranscriptSummary(source)
-    if (summary) {
-      return usageFromEvents(filterRecentCurrentSessionUsageEvents(summary.sessionLines, options))
-    }
     const transcriptPath = transcriptPathFromUsageSource(source)
     const transcriptUsage = transcriptPath
       ? await tryReadRecentSessionUsage(transcriptPath, options)
       : null
+    const summaryEvents = summary
+      ? filterRecentCurrentSessionUsageEvents(summary.sessionLines, options)
+      : []
     const cachedUsage = getCurrentSessionToolUsage(source)
     const cachedEvents = cachedUsage?.events
       ? filterRecentUsageEvents(
@@ -608,11 +739,16 @@ export async function getRecentCurrentSessionUsage(
           options
         )
       : []
-    if (transcriptUsage || cachedEvents.length > 0) {
+    if (summaryEvents.length > 0 || transcriptUsage || cachedEvents.length > 0) {
       // Merge transcript and daemon-cache events so both user-typed `/skill`
       // expansions (visible only in the transcript) and agent-invoked tool calls
       // captured by the daemon are surfaced to recency gates.
-      return usageFromEvents(mergeUsageEvents(transcriptUsage?.events ?? [], cachedEvents))
+      return usageFromEvents(
+        mergeUsageEvents(
+          mergeUsageEvents(summaryEvents, transcriptUsage?.events ?? []),
+          cachedEvents
+        )
+      )
     }
   }
   const transcriptPath = transcriptPathFromUsageSource(source)

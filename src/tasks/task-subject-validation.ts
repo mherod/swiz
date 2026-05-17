@@ -3,6 +3,7 @@
 import { getHomeDirOrNull } from "../home.ts"
 import { TASK_TOOLS } from "../tool-matchers.ts"
 import { isPlaceholderSubject } from "../utils/inline-hook-helpers.ts"
+import { isTaskSubjectWorkDeferral } from "./task-subject-deferral.ts"
 
 export interface CompoundResult {
   matched: false
@@ -111,23 +112,8 @@ function detectComplianceGaming(s: string): CompoundMatch | null {
   }
 }
 
-const LEADING_DEFERRAL_RE = /^[\s•◼◻⏳✓✗*-]*defer(?:red|ring)?(?:\b|#)/i
-const NEXT_SESSION_DEFERRAL_RE = /\bto\s+(?:the\s+)?next\s+session\b/i
-const LEADING_NEXT_SESSION_RE = /^[\s•◼◻⏳✓✗*-]*next\s+session\b/i
-const FUTURE_PREFIX_RE = /^[\s•◼◻⏳✓✗*-]*future\s*[:\s-]/i
-const LATER_PREFIX_RE =
-  /^[\s•◼◻⏳✓✗*-]*(?:later|todo|backlog|punt|punted|postponed?|tomorrow)\b\s*[:\s-]/i
-
 function detectDeferral(s: string): CompoundMatch | null {
-  if (
-    !LEADING_DEFERRAL_RE.test(s) &&
-    !NEXT_SESSION_DEFERRAL_RE.test(s) &&
-    !LEADING_NEXT_SESSION_RE.test(s) &&
-    !FUTURE_PREFIX_RE.test(s) &&
-    !LATER_PREFIX_RE.test(s)
-  ) {
-    return null
-  }
+  if (!isTaskSubjectWorkDeferral(s)) return null
 
   return {
     matched: true,

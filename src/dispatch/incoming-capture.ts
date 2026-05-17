@@ -1,11 +1,14 @@
 /**
  * Dispatch stdin payloads are written to `/tmp/swiz-incoming/` **by default** for inspection.
+ * Every dispatch writes a `*.raw.json` companion file containing the exact stdin
+ * bytes before JSON parsing, normalization, sanitization, or enrichment.
  *
  * **Disable** with **`SWIZ_CAPTURE_INCOMING=0`** or **`SWIZ_CAPTURE_INCOMING_PAYLOADS=0`** (also
  * `false`, `no`, `off`). Files older than **10 minutes** are removed on each write.
  *
  * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
- * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`.
+ * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`; raw companion:
+ * `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.raw.json`.
  *
  * **JSONL files**: Each dispatch also appends a sanitized raw payload line to
  * `/tmp/swiz-incoming/{canonicalEventName}.jsonl` for easy streaming inspection.
@@ -104,6 +107,10 @@ export function buildIncomingCaptureFilename(hookEventName: string): string {
   return `${datePart}T${timePart}-${safe}-${id}.json`
 }
 
+export function buildRawIncomingCaptureFilename(captureFilename: string): string {
+  return captureFilename.replace(/\.json$/, ".raw.json")
+}
+
 /** Remove `*.json` under `dir` whose mtime is older than `maxAgeMs`. */
 export async function pruneStaleIncomingCaptures(
   dir: string = SWIZ_INCOMING_ROOT,
@@ -159,6 +166,7 @@ export function buildIncomingDispatchCaptureEnvelope(
       hookEventName: args.hookEventName,
       capturedAt: new Date().toISOString(),
       parseError: args.parseError,
+      rawPayloadFile: "",
     },
   }
 
@@ -203,12 +211,17 @@ export function schedulePayloadJsonlAppend(
 }
 
 export async function writeIncomingDispatchCapture(
-  args: IncomingDispatchCaptureArgs
+  args: IncomingDispatchCaptureArgs,
+  dir: string = SWIZ_INCOMING_ROOT
 ): Promise<void> {
-  await mkdir(SWIZ_INCOMING_ROOT, { recursive: true })
-  await pruneStaleIncomingCaptures()
+  await mkdir(dir, { recursive: true })
+  await pruneStaleIncomingCaptures(dir)
   const filename = buildIncomingCaptureFilename(args.hookEventName)
-  const path = join(SWIZ_INCOMING_ROOT, filename)
+  const rawFilename = buildRawIncomingCaptureFilename(filename)
+  const path = join(dir, filename)
+  const rawPath = join(dir, rawFilename)
   const envelope = buildIncomingDispatchCaptureEnvelope(args)
+  envelope._swizIncomingCapture.rawPayloadFile = rawFilename
+  await Bun.write(rawPath, args.payloadStr)
   await Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`)
 }

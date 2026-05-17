@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { swizEmergencyBypassPath } from "../temp-paths.ts"
 import { isEmergencyBypassActive } from "./emergency-bypass.ts"
 
 /** Absolute path to the CLI entry point, resolved once at import time. */
@@ -9,7 +10,7 @@ const INDEX_PATH = resolve(join(import.meta.dir, "..", "..", "index.ts"))
 const KEYS_TO_CLEAN: string[] = []
 
 function keyPath(key: string): string {
-  return `/tmp/swiz-emergency-bypass-${key}.json`
+  return swizEmergencyBypassPath(key)
 }
 
 async function writeBypassState(

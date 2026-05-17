@@ -22,6 +22,7 @@ export const SHELL_TOOLS = new Set([
   "shell",
   "shell_command",
   "exec_command",
+  "functions.exec_command",
 ])
 export const EDIT_TOOLS = new Set(["Edit", "StrReplace", "replace", "apply_patch"])
 export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch"])

@@ -24,6 +24,7 @@ import {
   type SessionTask,
 } from "../tasks/task-recovery.ts"
 import { validateTransition } from "../tasks/task-service.ts"
+import { isTaskSubjectCarryoverDeferral } from "../tasks/task-subject-deferral.ts"
 import { stopIncompleteTasksLogPath } from "../temp-paths.ts"
 import {
   autoTransitionForComplete,
@@ -98,23 +99,11 @@ export async function deduplicateStaleTasks(
 
 // ─── Incomplete detail formatting ───────────────────────────────────────────
 
-/**
- * Subjects starting with "Consider", "Future:", or "Follow-up:" represent
- * forward-looking notes intentionally deferred past the current session and
- * must not block stop. Mirrors `isDeferredSubject` in
- * hooks/stop-incomplete-tasks/incomplete-check-validator.ts. See #580.
- */
-const DEFERRED_SUBJECT_RE = /^\s*(?:consider\b|future\s*:|follow[-\s]?up\s*:)/i
-
-function isDeferredSubject(subject: string | undefined | null): boolean {
-  return typeof subject === "string" && DEFERRED_SUBJECT_RE.test(subject)
-}
-
 export function getIncompleteDetails(allTasks: SessionTask[]): string[] {
   const incompleteTaskRows = allTasks
     .filter((t) => t.id && t.id !== "null")
     .filter((t): t is SessionTask => isIncompleteTaskStatus(t.status))
-    .filter((t) => !isDeferredSubject(t.subject))
+    .filter((t) => !isTaskSubjectCarryoverDeferral(t.subject))
   return orderBy(
     incompleteTaskRows,
     [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],

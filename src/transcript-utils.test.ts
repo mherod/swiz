@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   CURRENT_SESSION_USAGE_MAX_AGE_MS,
   CURRENT_SESSION_USAGE_MAX_TURNS,
+  computeSummaryFromSessionLines,
   contentBlockSchema,
   countToolCalls,
   deriveCurrentSessionTaskToolStats,
@@ -235,6 +236,202 @@ describe("transcript-utils.ts", () => {
       }
     })
 
+    it("recognizes direct Read of a SKILL.md file as a skill invocation", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-read.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Read",
+                input: { file_path: "/Users/me/.codex/skills/commit/SKILL.md" },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes read-only shell commands that open SKILL.md files", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("skill-shell-read.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Bash",
+                input: {
+                  command: "sed -n '1,200p' /Users/me/.agents/skills/push/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getRecentSkillsUsedForCurrentSession(transcriptPath, { nowMs: now })).toEqual([
+          "push",
+        ])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes cat reads of tilde-based SKILL.md paths", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-cat-tilde.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Bash",
+                input: {
+                  command: "cat ~/.codex/skills/commit/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes cat reads of abbreviated SKILL.md paths", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-cat-abbreviated.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Bash",
+                input: {
+                  command: "cat ~/.../commit/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes Codex exec_command cmd reads of SKILL.md paths", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-codex-cmd.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "functions.exec_command",
+                input: {
+                  cmd: "cat ~/.../commit/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes exec_command with command field reads of SKILL.md paths", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-exec-command.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "exec_command",
+                input: {
+                  command: "cat /Users/me/.agents/skills/commit/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes Codex response_item function_call reads of SKILL.md paths", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-codex-response-item.jsonl", [
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "cat ~/.../commit/SKILL.md" }),
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("does not treat shell writes to SKILL.md files as skill invocations", async () => {
+      const transcriptPath = await writeTranscriptFile("skill-shell-write.jsonl", [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Bash",
+                input: {
+                  command: "echo '# Modified' > /Users/me/.codex/skills/commit/SKILL.md",
+                },
+              },
+            ],
+          },
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual([])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
     it("recognizes <command-name> tag expansions in user messages as skill invocations", async () => {
       const transcriptPath = await writeTranscriptFile("command-name-skills.jsonl", [
         JSON.stringify({
@@ -282,6 +479,91 @@ describe("transcript-utils.ts", () => {
           type: "queue-operation",
           operation: "enqueue",
           content: "/commit",
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes queue-operation entries with leading Codex skill prompts", async () => {
+      const transcriptPath = await writeTranscriptFile("queue-op-codex-skill.jsonl", [
+        JSON.stringify({
+          type: "queue-operation",
+          operation: "enqueue",
+          content: "$commit",
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes user messages with leading Codex skill prompts", async () => {
+      const transcriptPath = await writeTranscriptFile("user-codex-skill.jsonl", [
+        JSON.stringify({
+          type: "user",
+          message: { content: "$commit" },
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes Codex top-level user content with leading skill prompts", async () => {
+      const transcriptPath = await writeTranscriptFile("user-codex-top-level-skill.jsonl", [
+        JSON.stringify({
+          type: "user",
+          content: [{ type: "input_text", text: "$commit" }],
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes Codex response_item user messages with leading skill prompts", async () => {
+      const transcriptPath = await writeTranscriptFile("user-codex-response-item-skill.jsonl", [
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "$commit" }],
+          },
+          timestamp: new Date().toISOString(),
+        }),
+      ])
+
+      try {
+        expect(await getSkillsUsedForCurrentSession(transcriptPath)).toEqual(["commit"])
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recognizes wrapped user_query skill prompts", async () => {
+      const transcriptPath = await writeTranscriptFile("user-query-codex-skill.jsonl", [
+        JSON.stringify({
+          type: "user",
+          message: { content: "<user_query>\n$commit\n</user_query>" },
           timestamp: new Date().toISOString(),
         }),
       ])
@@ -375,6 +657,33 @@ describe("transcript-utils.ts", () => {
         const skills = await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })
         expect(skills).toContain("transcript-skill")
         expect(skills).toContain("cached-skill")
+      } finally {
+        await rm(dirname(transcriptPath), { recursive: true, force: true })
+      }
+    })
+
+    it("recent usage falls back to transcript when injected summary is stale", async () => {
+      const now = Date.now()
+      const transcriptPath = await writeTranscriptFile("recent-stale-summary.jsonl", [
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "cat ~/.../commit/SKILL.md" }),
+          },
+        }),
+      ])
+      const payload = {
+        transcript_path: transcriptPath,
+        _transcriptSummary: computeSummaryFromSessionLines([]),
+      }
+
+      try {
+        expect(await getRecentSkillsUsedForCurrentSession(payload, { nowMs: now })).toEqual([
+          "commit",
+        ])
       } finally {
         await rm(dirname(transcriptPath), { recursive: true, force: true })
       }

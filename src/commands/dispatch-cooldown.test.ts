@@ -6,6 +6,7 @@ import {
   isWithinCooldown,
   markHookCooldown,
 } from "../dispatch/index.ts"
+import { TMP_ROOT } from "../temp-paths.ts"
 
 // Each test uses a unique cwd derived from the test name and PID to avoid
 // shared sentinel paths between tests or across test-process runs.
@@ -16,9 +17,10 @@ function uniqueCwd(label: string): string {
 }
 
 describe("hookCooldownPath", () => {
-  test("returns a /tmp sentinel path", () => {
+  test("returns a sentinel path under TMP_ROOT", () => {
     const p = hookCooldownPath(TEST_HOOK, uniqueCwd("path"))
-    expect(p).toMatch(/^\/tmp\/swiz-hook-cooldown-[0-9a-f]+\.timestamp$/)
+    expect(p).toStartWith(TMP_ROOT)
+    expect(p).toMatch(/swiz-hook-cooldown-[0-9a-f]+\.timestamp$/)
   })
 
   test("same hook + cwd always produces same path", () => {
@@ -37,7 +39,9 @@ describe("hookCooldownPath", () => {
 
   test("stable hash: known hook+cwd yields fixed path (regression for Bun.hash instability)", () => {
     const cwd = "/tmp/swiz-cooldown-golden"
-    expect(hookCooldownPath(TEST_HOOK, cwd)).toBe("/tmp/swiz-hook-cooldown-cb5998f7.timestamp")
+    expect(hookCooldownPath(TEST_HOOK, cwd)).toBe(
+      `${TMP_ROOT}/swiz-hook-cooldown-cb5998f7.timestamp`
+    )
   })
 })
 

@@ -9,15 +9,17 @@
  */
 
 import { isIncompleteTaskStatus, type SessionTask } from "../../src/tasks/task-recovery.ts"
-
-export const DEFERRED_SUBJECT_RE = /^\s*(?:consider\b|future\s*:|follow[-\s]?up\s*:)/i
+import {
+  isTaskSubjectCarryoverDeferral,
+  stripTaskSubjectCarryoverDeferralPrefix,
+} from "../../src/tasks/task-subject-deferral.ts"
 
 export function isDeferredSubject(subject: string | undefined | null): boolean {
-  return typeof subject === "string" && DEFERRED_SUBJECT_RE.test(subject)
+  return isTaskSubjectCarryoverDeferral(subject)
 }
 
 export function stripDeferralPrefix(subject: string): string {
-  return subject.replace(DEFERRED_SUBJECT_RE, "").trim()
+  return stripTaskSubjectCarryoverDeferralPrefix(subject)
 }
 
 export function filterIncompleteStatus(allTasks: SessionTask[]): SessionTask[] {

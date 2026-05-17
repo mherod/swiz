@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
 import {
+  PUBLIC_TMP_ROOT,
+  SWIZ_INCOMING_ROOT,
   SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   stopIncompleteTasksLogPath,
@@ -18,6 +20,13 @@ describe("TMP_ROOT", () => {
   test("is a non-empty string", () => {
     expect(typeof TMP_ROOT).toBe("string")
     expect(TMP_ROOT.length).toBeGreaterThan(0)
+  })
+})
+
+describe("PUBLIC_TMP_ROOT", () => {
+  test("uses stable /tmp for human-inspected captures", () => {
+    expect(PUBLIC_TMP_ROOT).toBe("/tmp")
+    expect(SWIZ_INCOMING_ROOT).toBe("/tmp/swiz-incoming")
   })
 })
 

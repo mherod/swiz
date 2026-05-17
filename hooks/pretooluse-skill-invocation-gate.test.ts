@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearSkillCache, formatSkillReferenceForAgent } from "../src/skill-utils.ts"
+import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
 import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
 
 const HOOK = join(import.meta.dir, "pretooluse-skill-invocation-gate.ts")
@@ -307,22 +308,83 @@ describe("pretooluse-skill-invocation-gate", () => {
     expect(result).toEqual({})
   })
 
-  it("skips gate when _env in payload identifies a Codex session (daemon context)", async () => {
-    // Simulate daemon running as Claude (process env has CLAUDECODE), but dispatching
-    // a hook payload that originated from a Codex session.  Without this fix the
-    // daemon's process-env agent (Claude) would satisfy the Skill tool check, and
-    // Codex — which has no Skill tool — would be incorrectly blocked.
-    process.env.CLAUDECODE = "1"
+  it("allows Codex git commit after a direct SKILL.md read without requiring TaskList", async () => {
+    const result = await runGateSubprocess("commit", {
+      tool_name: "functions.exec_command",
+      tool_input: { cmd: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _env: { CODEX_MANAGED_BY_NPM: "1" },
+      _transcriptSummary: summaryFromLines([
+        assistantLine([
+          {
+            type: "tool_use",
+            name: "functions.exec_command",
+            input: { cmd: "cat ~/.../commit/SKILL.md" },
+          },
+        ]),
+      ]),
+    })
 
-    const input = {
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("blocks Codex git commit when the commit skill was not used recently", async () => {
+    const result = await runGateSubprocess("commit", {
+      tool_name: "exec_command",
+      tool_input: { cmd: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _env: { CODEX_MANAGED_BY_NPM: "1" },
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+    ).toMatchObject({ permissionDecision: "deny" })
+  })
+
+  it("does not repeat the same missing-skill denial within two minutes", async () => {
+    const sessionId = `skill-cooldown-${Date.now()}`
+    const payload = {
       tool_name: "Bash",
       tool_input: { command: "git commit -m 'test'" },
       transcript_path: "fake-transcript.json",
-      _env: { CODEX_MANAGED_BY_NPM: "1" },
+      session_id: sessionId,
+      _transcriptSummary: summaryFromLines([]),
     }
 
-    const result = await pretooluseSkillInvocationGate.run(input)
+    const first = await runGateSubprocess("commit", payload)
+    const second = await runGateSubprocess("commit", payload)
 
-    expect(result).toEqual({})
+    expect(
+      (first as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect(
+      (second as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).not.toBe("deny")
+  })
+
+  it("repeats the missing-skill denial after the cooldown expires", async () => {
+    const sessionId = `skill-cooldown-old-${Date.now()}`
+    await Bun.write(
+      skillRequirementCooldownPath(sessionId, "claude", "commit"),
+      String(Date.now() - 121_000)
+    )
+
+    const result = await runGateSubprocess("commit", {
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      session_id: sessionId,
+      _transcriptSummary: summaryFromLines([]),
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
   })
 })

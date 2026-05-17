@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { entryToDisplayTurn, prettifyUserMessageText } from "./transcript-format.ts"
+import { entryToDisplayTurn, formatToolUse, prettifyUserMessageText } from "./transcript-format.ts"
 
 describe("prettifyUserMessageText", () => {
   it("returns undefined when no tags are present", () => {
@@ -175,5 +175,35 @@ describe("entryToDisplayTurn user prettification", () => {
     }
     const turn = entryToDisplayTurn(entry, "user")
     expect(turn.text).toBe("Hello world")
+  })
+})
+
+describe("formatToolUse", () => {
+  it("displays exec_command reading a SKILL.md as skill(name)", () => {
+    expect(
+      formatToolUse("exec_command", { command: "cat /Users/me/.agents/skills/commit/SKILL.md" })
+    ).toBe("skill(commit)")
+  })
+
+  it("displays Bash reading a SKILL.md via sed -n as skill(name)", () => {
+    expect(
+      formatToolUse("Bash", { command: "sed -n '1,200p' /Users/me/.claude/skills/push/SKILL.md" })
+    ).toBe("skill(push)")
+  })
+
+  it("displays Read of a SKILL.md file_path as skill(name)", () => {
+    expect(formatToolUse("Read", { file_path: "/Users/me/.claude/skills/commit/SKILL.md" })).toBe(
+      "skill(commit)"
+    )
+  })
+
+  it("does not rewrite non-SKILL.md shell commands", () => {
+    expect(formatToolUse("Bash", { command: "git status" })).toBe("Bash(git status)")
+    expect(formatToolUse("exec_command", { command: "ls -la" })).toBe("exec_command(ls -la)")
+  })
+
+  it("does not treat shell writes to SKILL.md as skill invocations", () => {
+    const writeCmd = "echo '# Modified' > /Users/me/.claude/skills/commit/SKILL.md"
+    expect(formatToolUse("Bash", { command: writeCmd })).toBe(`Bash(${writeCmd})`)
   })
 })

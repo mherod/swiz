@@ -29,19 +29,23 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import { sanitizeSessionId } from "../src/session-id.ts"
 import {
   DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
   DEFAULT_SKILL_RECENCY_MAX_TURNS,
   resolveNumericSetting,
 } from "../src/settings/resolution.ts"
 import {
+  agentHasTaskToolsForHookPayload,
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
   getRecentlyUsedToolsForCurrentSession,
   skillExistsForHookPayload,
+  skillGateAgentIdForHookPayload,
 } from "../src/skill-utils.ts"
+import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
 import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
@@ -66,6 +70,50 @@ const READINESS_LABELS = new Set([
   "needs-refinement",
   "needs-breakdown",
 ])
+
+const SKILL_REQUIREMENT_COOLDOWN_MS = 2 * 60 * 1000
+
+function safeCooldownPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "")
+}
+
+function skillRequirementCooldownFile(
+  input: Record<string, unknown>,
+  requiredSkill: string
+): string | null {
+  const safeSession = sanitizeSessionId(String(input.session_id ?? ""))
+  const safeAgent = safeCooldownPart(skillGateAgentIdForHookPayload(input)) || "unknown"
+  const safeSkill = safeCooldownPart(requiredSkill)
+  if (!safeSession || !safeSkill) return null
+  return skillRequirementCooldownPath(safeSession, safeAgent, safeSkill)
+}
+
+async function isSkillRequirementOnCooldown(
+  input: Record<string, unknown>,
+  requiredSkill: string
+): Promise<boolean> {
+  const path = skillRequirementCooldownFile(input, requiredSkill)
+  if (!path) return false
+  try {
+    const raw = (await Bun.file(path).text()).trim()
+    const lastPromptMs = parseInt(raw, 10)
+    if (Number.isNaN(lastPromptMs)) return false
+    return Date.now() - lastPromptMs < SKILL_REQUIREMENT_COOLDOWN_MS
+  } catch {
+    return false
+  }
+}
+
+async function markSkillRequirementCooldown(
+  input: Record<string, unknown>,
+  requiredSkill: string
+): Promise<void> {
+  const path = skillRequirementCooldownFile(input, requiredSkill)
+  if (!path) return
+  await Bun.write(path, String(Date.now())).catch(() => {
+    // Non-fatal: if the sentinel write fails, the gate still blocks normally.
+  })
+}
 
 /** Extract all label names from --add-label and --remove-label arguments. */
 function extractChangedLabels(command: string): string[] {
@@ -170,6 +218,10 @@ function buildDenyMessage(
   )
 }
 
+function commitRequiresTaskList(input: Record<string, unknown>): boolean {
+  return agentHasTaskToolsForHookPayload(input)
+}
+
 const pretoolusSkillInvocationGate: SwizHook = {
   name: "pretooluse-skill-invocation-gate",
   event: "preToolUse",
@@ -180,7 +232,8 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const input = rawInput as Record<string, any>
     if (!isShellTool(String(input.tool_name ?? ""))) return {}
 
-    const command: string = ((input.tool_input as Record<string, any>)?.command as string) ?? ""
+    const toolInput = (input.tool_input as Record<string, any>) ?? {}
+    const command: string = ((toolInput.command as string) ?? (toolInput.cmd as string)) || ""
     // Strip quoted strings for structural gh patterns; label-value patterns must use raw command.
     const cleanedCommand = stripQuotedShellStrings(command)
 
@@ -215,7 +268,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     if (invokedSkills.includes(requiredSkill)) {
       // For commits, also require TaskList — ensures task state cache is synced.
-      if (requiredSkill === "commit") {
+      if (requiredSkill === "commit" && commitRequiresTaskList(rawInput)) {
         const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
         if (!toolNames.some((n) => isTaskListTool(n))) {
           return preToolUseDeny(
@@ -227,6 +280,8 @@ const pretoolusSkillInvocationGate: SwizHook = {
       return preToolUseAllow(`${skillReferenceForAgent} skill was invoked recently.\n${reason}`)
     }
 
+    if (await isSkillRequirementOnCooldown(rawInput, requiredSkill)) return {}
+    await markSkillRequirementCooldown(rawInput, requiredSkill)
     return buildDenyMessage(requiredSkill, reason, skillReferenceForAgent)
   },
 }

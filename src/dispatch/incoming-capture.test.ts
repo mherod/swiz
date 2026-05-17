@@ -1,17 +1,19 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   appendPayloadToJsonl,
   buildIncomingCaptureFilename,
   buildIncomingDispatchCaptureEnvelope,
+  buildRawIncomingCaptureFilename,
   normalizeEventNameToCanonical,
   pruneStaleIncomingCaptures,
   SWIZ_INCOMING_RETENTION_MS,
   sanitizeDispatchPayloadForCapture,
   sanitizeHookFilenameSegment,
   shouldCaptureIncomingPayloads,
+  writeIncomingDispatchCapture,
 } from "./incoming-capture.ts"
 
 describe("incoming-capture", () => {
@@ -115,6 +117,49 @@ describe("incoming-capture", () => {
     // Unique suffix ensures different files
     expect(a).not.toBe(b)
     expect(b).not.toBe(c)
+  })
+
+  it("buildRawIncomingCaptureFilename uses a raw JSON companion name", () => {
+    expect(
+      buildRawIncomingCaptureFilename("2026-01-01T00-00-00.000-preToolUse-abc12345.json")
+    ).toBe("2026-01-01T00-00-00.000-preToolUse-abc12345.raw.json")
+  })
+
+  it("writeIncomingDispatchCapture writes exact raw wire payload bytes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-raw-"))
+    const rawPayload = '{"tool_name":"Bash","user_email":"user@example.com"}'
+    await writeIncomingDispatchCapture(
+      {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        parseError: false,
+        payloadStr: rawPayload,
+        incomingBeforeNormalize: {
+          tool_name: "Bash",
+          user_email: "user@example.com",
+        },
+        normalizedPayload: {
+          tool_name: "Bash",
+          user_email: "user@example.com",
+          cwd: "/proj",
+        },
+      },
+      dir
+    )
+
+    const files = await readdir(dir)
+    const rawFile = files.find((file) => file.endsWith(".raw.json"))
+    const envelopeFile = files.find((file) => file.endsWith(".json") && !file.endsWith(".raw.json"))
+    expect(rawFile).toBeDefined()
+    expect(envelopeFile).toBeDefined()
+    expect(await readFile(join(dir, rawFile ?? ""), "utf8")).toBe(rawPayload)
+
+    const envelope = JSON.parse(await readFile(join(dir, envelopeFile ?? ""), "utf8")) as Record<
+      string,
+      any
+    >
+    expect(envelope._swizIncomingCapture.rawPayloadFile).toBe(rawFile)
+    expect(envelope.incoming.user_email).toBe("[redacted]")
   })
 
   it("appendPayloadToJsonl writes sanitized JSON line to {event}.jsonl", async () => {

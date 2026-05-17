@@ -13,6 +13,16 @@ import {
 
 // ─── Tool-use label formatting ────────────────────────────────────────────────
 
+const SKILL_MD_SHELL_READ_RE = /^(?:cat|bat|less|more|head|tail|nl|grep|rg)\b|^sed\s+-n\b/i
+const SKILL_MD_PATH_RE =
+  /(?:^|[\\/])\.?skills[\\/](?:[^\\/\s"'`]+[\\/])*([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/i
+
+function tryExtractSkillFromSkillMd(value: string, commandMode = false): string | null {
+  if (commandMode && !SKILL_MD_SHELL_READ_RE.test(value)) return null
+  const match = value.match(SKILL_MD_PATH_RE)
+  return match?.[1] ?? null
+}
+
 const TOOL_KEY_PARAM: Record<string, string> = {
   Read: "file_path",
   Write: "file_path",
@@ -41,8 +51,17 @@ export function formatToolUse(name: string, input: NonNullable<ToolUseBlock["inp
   }
   const param = TOOL_KEY_PARAM[name]
   if (param && input[param] !== undefined) {
-    if (param === "command") return `${name}(${String(input[param])})`
-    return `${name}(${truncateLabel(String(input[param]))})`
+    const val = String(input[param])
+    if (param === "command") {
+      const skill = tryExtractSkillFromSkillMd(val, true)
+      if (skill) return `skill(${skill})`
+      return `${name}(${val})`
+    }
+    if (param === "file_path") {
+      const skill = tryExtractSkillFromSkillMd(val)
+      if (skill) return `skill(${skill})`
+    }
+    return `${name}(${truncateLabel(val)})`
   }
   const firstStr = Object.values(input).find((v) => typeof v === "string")
   if (firstStr) return `${name}(${truncateLabel(String(firstStr))})`
