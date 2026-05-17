@@ -198,7 +198,7 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse`.
 ## Agent Behavior
-- DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"` for unwanted), use hedging ("trivial", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook"). Use Claude Agent SDK in-process.
+- DON'T ask permission (invocation is authorization), dismiss findings as "pre-existing", delete tasks after course correction (update subject; `TaskUpdate status="deleted"`), use hedging ("trivial", "just", "likely") before investigating, or use compliance-gaming phrases ("satisfies the gate", "unblocks the hook", "escape hatch"). Use Claude Agent SDK in-process.
 - DON'T re-implement — inspect existing code first.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
