@@ -1162,6 +1162,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1188,6 +1189,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1228,6 +1230,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1275,6 +1278,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1308,6 +1312,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1407,6 +1412,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1451,6 +1457,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       },
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1478,6 +1485,7 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1583,6 +1591,7 @@ describe("syncUpstreamState with branch protection", () => {
         return null
       },
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -1608,6 +1617,7 @@ describe("syncUpstreamState with branch protection", () => {
       listBranchWorkflowRuns: async () => null,
       getBranchProtection: async () => null,
       listIssueEventsSince: async () => null,
+      listPullRequestReviews: async () => null,
     }
 
     try {
@@ -2057,6 +2067,7 @@ describe("IssueStore event-sourced sync (#521)", () => {
         listMilestones: async () => [],
         listBranchWorkflowRuns: async () => null,
         getBranchProtection: async () => null,
+        listPullRequestReviews: async () => null,
         listIssueEventsSince: async (_repo: string, sinceIso: string | null) => {
           // The client contract filters by sinceIso — mimic that here.
           const all = [
@@ -2107,6 +2118,7 @@ describe("IssueStore event-sourced sync (#521)", () => {
         listMilestones: async () => [],
         listBranchWorkflowRuns: async () => null,
         getBranchProtection: async () => null,
+        listPullRequestReviews: async () => null,
         listIssueEventsSince: async () => null, // API error path
       }
 
@@ -2135,6 +2147,7 @@ describe("IssueStore event-sourced sync (#521)", () => {
         listMilestones: async () => [],
         listBranchWorkflowRuns: async () => null,
         getBranchProtection: async () => null,
+        listPullRequestReviews: async () => null,
         listIssueEventsSince: async () => [],
       }
 

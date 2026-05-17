@@ -157,6 +157,14 @@ export interface GitHubPullRequestRecord {
   head?: { ref: string }
 }
 
+/** Raw review shape returned by GitHub pull request review APIs. */
+export interface GitHubReviewRecord {
+  state: string
+  user?: { login: string }
+  body?: string
+  submitted_at?: string
+}
+
 /** Raw comment shape returned by GitHub issue comment APIs. */
 export interface GitHubCommentRecord {
   id: number
@@ -240,6 +248,8 @@ export interface GitHubClient {
   listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null>
   /** Fetch comments for a single issue. Returns null on error. */
   listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null>
+  /** Fetch reviews for a single pull request. Returns null on error. */
+  listPullRequestReviews(cwd: string, prNumber: number): Promise<GitHubReviewRecord[] | null>
   /** List repo labels. Returns null on error. */
   listLabels(cwd: string): Promise<GitHubLabelRecord[] | null>
   /** List open milestones. Returns null on error. */

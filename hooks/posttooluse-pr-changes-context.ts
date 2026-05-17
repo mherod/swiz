@@ -61,13 +61,18 @@ const posttoolusPrChangesContext: SwizShellHook = {
     const repo = await getRepoNameWithOwner(cwd)
     if (!repo) return {}
 
-    // IssueStore fast-path: skip API calls when store confirms no CHANGES_REQUESTED
+    // IssueStore fast-path: use cached review data when available
+    let storedChangesRequested: Array<{ login: string; body: string }> | null = null
     try {
       const { getIssueStoreReader } = await import("../src/issue-store.ts")
       const branchDetail = await getIssueStoreReader().getPrBranchDetail<{
         reviewDecision?: string
+        changesRequestedReviews?: Array<{ login: string; body: string }>
       }>(repo, branch)
       if (branchDetail !== null && branchDetail.reviewDecision !== "CHANGES_REQUESTED") return {}
+      if (branchDetail?.changesRequestedReviews) {
+        storedChangesRequested = branchDetail.changesRequestedReviews
+      }
     } catch {
       // Store unavailable — fall through to API
     }
@@ -79,13 +84,22 @@ const posttoolusPrChangesContext: SwizShellHook = {
     )
     if (!pr) return {}
 
-    const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
-    if (!reviews) return {}
-
-    const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
+    let changesRequested: Array<{ login: string; body?: string }>
+    if (storedChangesRequested !== null) {
+      changesRequested = storedChangesRequested
+    } else {
+      const reviews = await ghJson<Review[]>(
+        ["api", `repos/${repo}/pulls/${pr.number}/reviews`],
+        cwd
+      )
+      if (!reviews) return {}
+      changesRequested = reviews
+        .filter((r) => r.state === "CHANGES_REQUESTED")
+        .map((r) => ({ login: r.user.login, body: r.body }))
+    }
     if (changesRequested.length === 0) return {}
 
-    const reviewers = [...new Set(changesRequested.map((r) => r.user.login))].join(", ")
+    const reviewers = [...new Set(changesRequested.map((r) => r.login))].join(", ")
     const skillInstalled = skillExistsForHookPayload(
       "pr-comments-address",
       input as Record<string, unknown>
@@ -106,7 +120,7 @@ const posttoolusPrChangesContext: SwizShellHook = {
 
     const details = changesRequested
       .slice(0, 3)
-      .map((r) => `- @${r.user.login}: ${r.body ? r.body.slice(0, 200) : "No comment provided"}`)
+      .map((r) => `- @${r.login}: ${r.body ? r.body.slice(0, 200) : "No comment provided"}`)
       .join("\n")
     if (details) {
       lines.push(``, `Requested changes:`, details)

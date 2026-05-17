@@ -471,13 +471,21 @@ async function syncBranchData(
   if (!prs || !prsChanged) return
   for (const pr of prs) {
     if (!pr.headRefName) continue
-    const comments = await ctx.client.listIssueComments(ctx.cwd, pr.number)
+    const [comments, reviews] = await Promise.all([
+      ctx.client.listIssueComments(ctx.cwd, pr.number),
+      ctx.client.listPullRequestReviews(ctx.cwd, pr.number),
+    ])
     const prData = pr as { reviewDecision?: string; requestedReviewers?: Array<{ login: string }> }
     const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
+    const changesRequestedReviews = (reviews ?? [])
+      .filter((r) => r.state === "CHANGES_REQUESTED")
+      .map((r) => ({ login: r.user?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
+      .filter((r) => r.login)
     const detail = {
       reviewDecision: prData.reviewDecision ?? "",
       requestedReviewers: reviewerLogins,
       commentCount: comments?.length ?? 0,
+      changesRequestedReviews,
     }
     const newJson = JSON.stringify(detail)
     const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)

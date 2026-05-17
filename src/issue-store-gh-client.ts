@@ -16,6 +16,7 @@ import type {
   GitHubLabelRecord,
   GitHubMilestoneRecord,
   GitHubPullRequestRecord,
+  GitHubReviewRecord,
 } from "./issue-store.ts"
 import { fetchGhJson } from "./issue-store.ts"
 
@@ -65,6 +66,16 @@ export class GhCliGitHubClient implements GitHubClient {
   async listIssueComments(cwd: string, issueNumber: number): Promise<GitHubCommentRecord[] | null> {
     return fetchGhJson<GitHubCommentRecord[]>(
       ["issue", "view", String(issueNumber), "--json", "comments", "--jq", ".comments"],
+      cwd
+    )
+  }
+
+  async listPullRequestReviews(
+    cwd: string,
+    prNumber: number
+  ): Promise<GitHubReviewRecord[] | null> {
+    return fetchGhJson<GitHubReviewRecord[]>(
+      ["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`],
       cwd
     )
   }
