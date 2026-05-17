@@ -36,6 +36,7 @@ import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
+import pretooluseBlockTasksDirRead from "../hooks/pretooluse-block-tasks-dir-read.ts"
 import pretoolusBranchIntentGate from "../hooks/pretooluse-branch-intent-gate.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
@@ -362,6 +363,11 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Read|Grep|Glob",
     hooks: [{ hook: pretooluseReadGrepStallGuard }],
+  },
+  {
+    event: "preToolUse",
+    matcher: "Read",
+    hooks: [{ hook: pretooluseBlockTasksDirRead }],
   },
   {
     event: "postToolUse",
