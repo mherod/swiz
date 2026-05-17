@@ -14,6 +14,7 @@ import {
   writeTaskUpdate,
 } from "../tasks/task-service.ts"
 import {
+  SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
   swizMcpChannelHeartbeatPath,
   swizMcpChannelNotifyPath,
   swizMcpRepliesLogPath,
@@ -101,8 +102,6 @@ export async function pushChannelEvent(event: ChannelEvent, projectKey: string):
 
 // Safety fallback only — the fast path is fs.watch on the notify sentinel.
 // Keep this loose so we don't hammer SQLite when nothing is enqueued.
-const AUTO_STEER_POLL_INTERVAL_MS = 5_000
-
 // Triggers delivered via the MCP channel. `on_session_stop` stays on the
 // AppleScript path because by the time stop fires, the MCP transport is
 // tearing down alongside the agent session.
@@ -217,7 +216,7 @@ function startAutoSteerDrainLoop(cwd: string): () => void {
   }
 
   // Safety fallback poll — catches any missed notify (rename, nfs, etc.).
-  const timer = setInterval(() => void drain(), AUTO_STEER_POLL_INTERVAL_MS)
+  const timer = setInterval(() => void drain(), SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS)
   timer.unref?.()
 
   // Kick once at startup so any messages queued before we connected are flushed.

@@ -17,41 +17,19 @@
  * Dual-mode: SwizHook + runSwizHookAsMain.
  */
 
-import { statSync } from "node:fs"
 import type { AutoSteerTrigger } from "../src/auto-steer-store.ts"
 import { getAutoSteerStore } from "../src/auto-steer-store.ts"
-import { projectKeyFromCwd } from "../src/project-key.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import {
-  SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
-  swizMcpChannelHeartbeatPath,
-} from "../src/temp-paths.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
+import { isAppleScriptTerminalApp } from "../src/utils/auto-steer-helpers.ts"
 import { sendAutoSteer } from "../src/utils/hook-utils.ts"
 import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
 import { detectTerminal } from "../src/utils/terminal-detection.ts"
-
-/**
- * True when a `swiz mcp` drain loop is actively serving this project (heartbeat
- * sentinel refreshed within the fresh window). PostToolUse then yields
- * `next_turn` delivery to the MCP channel path so Claude receives auto-steers
- * as `<channel source="swiz">` events instead of AppleScript keystrokes.
- */
-function isMcpChannelLiveForCwd(cwd: string): boolean {
-  if (!cwd) return false
-  try {
-    const path = swizMcpChannelHeartbeatPath(projectKeyFromCwd(cwd))
-    const mtimeMs = statSync(path).mtimeMs
-    return Date.now() - mtimeMs < SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS
-  } catch {
-    return false
-  }
-}
 
 function hasCommitTrigger(
   store: ReturnType<typeof getAutoSteerStore>,
@@ -81,17 +59,13 @@ async function getTriggersToDeliver(
   store: ReturnType<typeof getAutoSteerStore>,
   safeSession: string,
   sessionId: string,
-  rec: Record<string, any>
+  rec: Record<string, any>,
+  terminalApp: TerminalApp
 ): Promise<AutoSteerTrigger[]> {
   const triggers: AutoSteerTrigger[] = []
+  if (!isAppleScriptTerminalApp(terminalApp)) return triggers
 
-  // When the MCP channel drain loop is live for this project, it owns
-  // `next_turn` delivery — skip the AppleScript path so both consumers don't
-  // race for the same queue row.
-  const cwd = (rec.cwd as string) ?? ""
-  const mcpLive = isMcpChannelLiveForCwd(cwd)
-
-  if (!mcpLive && store.hasPending(safeSession, "next_turn")) {
+  if (store.hasPending(safeSession, "next_turn")) {
     triggers.push("next_turn")
   }
 
@@ -136,12 +110,19 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
   if (!safeSession) return {}
 
   const store = getAutoSteerStore()
-  const triggersToDeliver = await getTriggersToDeliver(store, safeSession, sessionId, rec)
+  const terminal = rec._terminal as { app: TerminalApp; name: string } | undefined
+  const terminalApp = terminal?.app ?? detectTerminal().app
+  const triggersToDeliver = await getTriggersToDeliver(
+    store,
+    safeSession,
+    sessionId,
+    rec,
+    terminalApp
+  )
 
   if (triggersToDeliver.length === 0) return {}
   if (await shouldDeferAutoSteerForForegroundChatApp()) return {}
 
-  const terminal = rec._terminal as { app: TerminalApp; name: string } | undefined
   await deliverTriggers(store, safeSession, sessionId, triggersToDeliver, terminal)
 
   store.prune()

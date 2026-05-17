@@ -88,8 +88,11 @@ export function swizMcpChannelHeartbeatPath(projectKey: string): string {
   return `${TMP_ROOT}/swiz-mcp-channel-${projectKey}.heartbeat`
 }
 
+/** Safety fallback interval for the MCP channel auto-steer drain loop. */
+export const SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS = 5_000
+
 /** MCP heartbeat freshness window. Must exceed the drain interval plus a margin. */
-export const SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS = 5_000
+export const SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS = 15_000
 
 /**
  * Notify sentinel touched by auto-steer producers to wake the MCP drain loop.

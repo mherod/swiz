@@ -5,10 +5,14 @@
  * Extracted from hook-utils.ts (issue #422).
  */
 
-import { utimesSync, writeFileSync } from "node:fs"
+import { statSync, utimesSync, writeFileSync } from "node:fs"
 import type { AutoSteerTrigger } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { swizMcpChannelNotifyPath } from "../temp-paths.ts"
+import {
+  SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
+  swizMcpChannelHeartbeatPath,
+  swizMcpChannelNotifyPath,
+} from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
 
 /**
@@ -28,6 +32,23 @@ function touchMcpChannelNotify(cwd: string): void {
     } catch {
       // swallow — notify is advisory
     }
+  }
+}
+
+const MCP_CHANNEL_TRIGGERS = new Set<AutoSteerTrigger>([
+  "next_turn",
+  "after_commit",
+  "after_all_tasks_complete",
+])
+
+export function isMcpChannelLiveForCwd(cwd: string): boolean {
+  if (!cwd) return false
+  try {
+    const path = swizMcpChannelHeartbeatPath(projectKeyFromCwd(cwd))
+    const mtimeMs = statSync(path).mtimeMs
+    return Date.now() - mtimeMs < SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS
+  } catch {
+    return false
   }
 }
 
@@ -122,12 +143,25 @@ interface AutoSteerEligibility {
 async function checkAutoSteerEligibility(sessionId: string): Promise<AutoSteerEligibility> {
   const { detectTerminal } = await import("./terminal-detection.ts")
   const terminal = detectTerminal()
+  const settingsAutoSteer = await isAutoSteerSettingEnabled(sessionId)
   if (!AUTOSTEER_SUPPORTED_TERMINALS.has(terminal.app)) {
-    return { terminalApp: null, settingsAutoSteer: false }
+    return { terminalApp: null, settingsAutoSteer }
   }
+  return { terminalApp: terminal.app, settingsAutoSteer }
+}
+
+async function isAutoSteerSettingEnabled(sessionId: string): Promise<boolean> {
   const { getEffectiveSwizSettings, readSwizSettings } = await import("../settings.ts")
   const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
-  return { terminalApp: terminal.app, settingsAutoSteer: settings.autoSteer }
+  return settings.autoSteer
+}
+
+function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
+  return !!cwd && MCP_CHANNEL_TRIGGERS.has(trigger) && isMcpChannelLiveForCwd(cwd)
+}
+
+export function isAppleScriptTerminalApp(app: string | null | undefined): boolean {
+  return !!app && AUTOSTEER_SUPPORTED_TERMINALS.has(app)
 }
 
 /**
@@ -222,9 +256,9 @@ export async function sendAutoSteer(
  * The message will be typed into the terminal on the next PostToolUse cycle,
  * giving the agent actionable context (not just "Continue").
  *
- * Returns true if the request was scheduled, false if auto-steer is disabled
- * or the terminal doesn't support AppleScript. Callers should fall back to
- * their normal deny/block behavior when this returns false.
+ * Returns true if the request was scheduled. AppleScript-capable terminals are
+ * preferred because the MCP channel is advisory and may drop notifications.
+ * The MCP channel is used only when no AppleScript transport is available.
  */
 export async function scheduleAutoSteer(
   sessionId: string,
@@ -232,15 +266,24 @@ export async function scheduleAutoSteer(
   trigger?: AutoSteerTrigger,
   cwd?: string
 ): Promise<boolean> {
-  const { terminalApp, settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
-  if (!terminalApp || !settingsAutoSteer) return false
-
   const safeSession = await sanitizeSessionOrReturnNull(sessionId)
   if (!safeSession) return false
 
+  const resolvedTrigger = trigger ?? "next_turn"
+  const { terminalApp, settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
+  if (!settingsAutoSteer) return false
+
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  store.enqueue(safeSession, message, trigger ?? "next_turn", { cwd })
+  if (terminalApp) {
+    store.enqueue(safeSession, message, resolvedTrigger)
+    return true
+  }
+
+  if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
+
+  const enqueued = store.enqueue(safeSession, message, resolvedTrigger, { cwd })
+  if (enqueued) touchMcpChannelNotify(cwd)
   return true
 }
 
@@ -252,9 +295,10 @@ export async function scheduleAutoSteer(
  * the SQLite queue by project_key (cwd) and pushes each message to the
  * connected agent as a `<channel source="swiz">` event.
  *
- * Returns true if enqueued, false if the store de-duplicated it or the
- * session id could not be sanitized. The `autoSteer` setting is still
- * respected — channel delivery is a transport, not a bypass of policy.
+ * Returns true if enqueued, false if the channel is not currently live, the
+ * store de-duplicated it, or the session id could not be sanitized. The
+ * `autoSteer` setting is still respected — channel delivery is a transport,
+ * not a bypass of policy.
  */
 export async function scheduleAutoSteerViaChannel(
   sessionId: string,
@@ -263,8 +307,8 @@ export async function scheduleAutoSteerViaChannel(
   trigger: AutoSteerTrigger = "next_turn",
   opts?: { ttlMs?: number }
 ): Promise<boolean> {
-  const { settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
-  if (!settingsAutoSteer) return false
+  if (!(await isAutoSteerSettingEnabled(sessionId))) return false
+  if (!canUseMcpChannel(trigger, cwd)) return false
 
   const safeSession = await sanitizeSessionOrReturnNull(sessionId)
   if (!safeSession) return false

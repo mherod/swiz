@@ -9,9 +9,9 @@
  * phrases are found — the current tool call is never blocked.
  *
  * Delivery is auto-steer-only: the agent receives the rebuttal on the next
- * turn (either through the MCP channel when it is live, or via the
- * AppleScript terminal path). When auto-steer cannot be scheduled (setting
- * off, terminal unsupported), the hook emits nothing and the tool proceeds.
+ * turn, preferring AppleScript terminal delivery and falling back to the MCP
+ * channel only when no terminal transport is available. When auto-steer cannot
+ * be scheduled, the hook emits nothing and the tool proceeds.
  *
  * When an AI provider is available, generates a refined message that uses
  * transcript context to directly challenge the specific objection — falling
@@ -23,11 +23,7 @@ import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { extractSessionLines } from "../src/transcript-summary.ts"
-import {
-  messageFromUnknownError,
-  scheduleAutoSteer,
-  scheduleAutoSteerViaChannel,
-} from "../src/utils/hook-utils.ts"
+import { messageFromUnknownError, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -136,21 +132,11 @@ export async function evaluatePretooluseOffensiveLanguage(
     : formatAllDenialMessages(matches, STEER_SUFFIX)
 
   const cwd = (input.cwd as string) ?? ""
-  // Prefer MCP channel delivery (works without terminal support).
-  // Fall back to terminal-based auto-steer if channel unavailable.
-  const delivered = cwd ? await scheduleAutoSteerViaChannel(sessionId, message, cwd) : false
+  const delivered = await scheduleAutoSteer(sessionId, message, undefined, cwd || undefined)
   if (!delivered) {
-    const terminalDelivered = await scheduleAutoSteer(
-      sessionId,
-      message,
-      undefined,
-      cwd || undefined
+    process.stderr.write(
+      "pretooluse-offensive-language: auto-steer delivery failed (terminal and channel unavailable)\n"
     )
-    if (!terminalDelivered) {
-      process.stderr.write(
-        "pretooluse-offensive-language: auto-steer delivery failed (both channel and terminal)\n"
-      )
-    }
   }
   return {}
 }

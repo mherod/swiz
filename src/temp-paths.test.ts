@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
 import {
+  SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS,
+  SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   stopIncompleteTasksLogPath,
   swizDispatchLogPath,
   swizPseudoHookLogPath,
@@ -33,5 +35,9 @@ describe("path builder functions use TMP_ROOT", () => {
 
   test("swizPseudoHookLogPath starts with TMP_ROOT", () => {
     expect(swizPseudoHookLogPath()).toStartWith(TMP_ROOT)
+  })
+
+  test("MCP heartbeat freshness exceeds the drain interval", () => {
+    expect(SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS).toBeGreaterThan(SWIZ_MCP_CHANNEL_DRAIN_INTERVAL_MS)
   })
 })
