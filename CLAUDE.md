@@ -170,6 +170,7 @@ alwaysApply: false
 - DO: Read every file in full before editing — snippets miss conflicts.
 - ANSI escape codes direct; no color libraries.
 - `Bun.spawn`: use `["sh", "-c", cmd]` for shell; drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
+- DON'T pass functions with optional params directly to `.flatMap()`/`.map()` — the injected `(value, index, array)` args corrupt optional positionals. Always wrap: `.flatMap((b) => fn(b))`.
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
 - Settings writes: `.bak` backup first.
@@ -207,6 +208,7 @@ alwaysApply: false
 - Close via `Fixes #N` in commits (not CLI). Read all comments first. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into the body — don't `gh issue comment` on your own issues. Pick highest priority autonomously.
 ## Testing
 - DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure (run failing file in isolation first).
+- Biome `expect()` chain format: break after `.toBe(` not after `expect(`. Wrong: `expect(\n  longCall()\n).toBe(x)`. Correct: `expect(longCall()).toBe(\n  x\n)`.
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
 ## Dispatch & Daemon Context
