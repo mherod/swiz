@@ -10,7 +10,7 @@ import {
   isShellTool,
   preToolUseAllow,
   preToolUseDeny,
-  skillExists,
+  skillExistsForHookPayload,
 } from "../src/utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
@@ -230,7 +230,7 @@ export function isPlainRedirectOnly(c: string): boolean {
   return SHELL_REDIRECT_PLAIN_RE.test(c)
 }
 
-function buildShellToolRules(): Rule[] {
+function buildShellToolRules(payload: Record<string, unknown>): Rule[] {
   return [
     {
       match: (c) => GREP_CMD_RE.test(c),
@@ -273,7 +273,9 @@ function buildShellToolRules(): Rule[] {
       message: [
         "Do not use destructive deletion commands. Files cannot be recovered.",
         "\nUse safe deletion instead:\n  • trash <path>         — moves to macOS Trash (recoverable)\n  • mv <path> ~/.Trash/  — manual fallback if trash unavailable",
-        ...(skillExists("delete-safely") ? ["\nSee the /delete-safely skill for details."] : []),
+        ...(skillExistsForHookPayload("delete-safely", payload)
+          ? ["\nSee the /delete-safely skill for details."]
+          : []),
       ].join(""),
     },
     {
@@ -284,7 +286,7 @@ function buildShellToolRules(): Rule[] {
   ]
 }
 
-function buildGitRules(): Rule[] {
+function buildGitRules(payload: Record<string, unknown>): Rule[] {
   const GH_ISSUE_EDIT_BODY_SENSITIVE_RE =
     /gh\s+issue\s+edit\b[\s\S]*\s--body(?:=|\s+)(["'])(?:(?!\1).)*(?:`|\$\(|<[^>]*>)(?:(?!\1).)*\1/
   const GH_ISSUE_CREATE_BODY_SENSITIVE_RE =
@@ -295,7 +297,7 @@ function buildGitRules(): Rule[] {
       message: [
         "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
         '\nInstead:\n  • Commit work-in-progress: `git commit -m "wip: ..."`',
-        ...(skillExists("commit")
+        ...(skillExistsForHookPayload("commit", payload)
           ? ["  • Use the /commit skill to preserve your current state"]
           : []),
         "  • If you need a clean slate, commit first, then revert in a new commit",
@@ -381,8 +383,16 @@ function buildRuntimeRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
   return rules
 }
 
-function buildRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
-  return [...buildShellToolRules(), ...buildGitRules(), ...buildRuntimeRules(pm, runtime)]
+function buildRules(
+  pm: string | null,
+  runtime: "bun" | "node",
+  payload: Record<string, unknown>
+): Rule[] {
+  return [
+    ...buildShellToolRules(payload),
+    ...buildGitRules(payload),
+    ...buildRuntimeRules(pm, runtime),
+  ]
 }
 
 const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
@@ -467,10 +477,11 @@ function parseHookInput(input: Record<string, any>): {
 export async function evaluatePretooluseBannedCommands(input: unknown): Promise<SwizHookOutput> {
   const PM = await detectPackageManager()
   const RUNTIME: "bun" | "node" = PM === "bun" ? "bun" : "node"
-  const RULES = buildRules(PM, RUNTIME)
 
   const parsed = toolHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return {}
+
+  const RULES = buildRules(PM, RUNTIME, parsed as Record<string, unknown>)
 
   const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })

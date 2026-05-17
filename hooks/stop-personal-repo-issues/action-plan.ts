@@ -4,12 +4,19 @@ import {
   normaliseLabel,
 } from "../../src/issue-refinement.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
-import { type ActionPlanItem, formatActionPlan, skillExists } from "../../src/utils/hook-utils.ts"
+import {
+  type ActionPlanItem,
+  formatActionPlan,
+  skillExistsForHookPayload,
+} from "../../src/utils/hook-utils.ts"
 import { MAX_SHOWN_ISSUES, REVIEWABLE_BLOCK_NORM } from "./constants.ts"
 import { planSectionOrderForProjectState, statePriorityHint } from "./project-state.ts"
 import type { StopContext, StopSection } from "./types.ts"
 
-function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
+function buildRefinementSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const shownRefinement = ctx.sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
   const hiddenRefinement = ctx.sortedRefinement.length - shownRefinement.length
   const issueListParts = shownRefinement.map((issue) => {
@@ -23,7 +30,7 @@ function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
   if (hiddenRefinement > 0) issueListParts.push(`…and ${hiddenRefinement} more`)
   const refineArg = ctx.firstRefinementNum !== undefined ? ` ${ctx.firstRefinementNum}` : ""
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("refine-issue"))
+  if (skillExistsForHookPayload("refine-issue", payload ?? {}))
     subSteps.push(`/refine-issue${refineArg} — Refine the next issue needing attention`)
   subSteps.push(
     "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, backlog), Priority (priority-high, priority-medium, priority-low)",
@@ -39,7 +46,10 @@ function buildRefinementSteps(ctx: StopContext): ActionPlanItem[] {
   ]
 }
 
-function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
+function buildIssuePickupSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const issueContext = ctx.isPersonalRepo
     ? "in this personal repository"
     : "assigned to or created by you"
@@ -50,7 +60,7 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   const issueArg = ctx.firstIssueNum !== undefined ? ` ${ctx.firstIssueNum}` : ""
   const issueNum = ctx.firstIssueNum ?? "<number>"
   const subSteps: ActionPlanItem[] = []
-  if (skillExists("work-on-issue"))
+  if (skillExistsForHookPayload("work-on-issue", payload ?? {}))
     subSteps.push(`/work-on-issue${issueArg} — Start working on the next issue`)
   subSteps.push(
     `Read the full issue body AND all comments for #${issueNum} before planning — comments contain refinements, automation output, and acceptance criteria updates`,
@@ -75,7 +85,10 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
   ]
 }
 
-function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
+function buildBlockedIssueReviewSteps(
+  ctx: StopContext,
+  payload?: Record<string, unknown>
+): ActionPlanItem[] {
   const shownBlocked = ctx.blockedIssues.slice(0, MAX_SHOWN_ISSUES)
   const hiddenBlocked = ctx.blockedIssues.length - shownBlocked.length
   const issueListParts = shownBlocked.map((issue) => {
@@ -95,9 +108,9 @@ function buildBlockedIssueReviewSteps(ctx: StopContext): ActionPlanItem[] {
     `If unblockable: remove the block label and choose readiness (ready for immediate pickup, backlog for future work): gh issue edit ${blockedNum} --remove-label "blocked" --add-label "ready"`,
     `If still blocked: document current status in a comment and move to the next blocked issue`
   )
-  if (skillExists("refine-issue"))
+  if (skillExistsForHookPayload("refine-issue", payload ?? {}))
     subSteps.push(`/refine-issue ${blockedNum} — Refine and re-label the unblocked issue`)
-  if (skillExists("triage-issues"))
+  if (skillExistsForHookPayload("triage-issues", payload ?? {}))
     subSteps.push("/triage-issues — Run the full grooming workflow across the backlog")
   return [
     `Review ${ctx.blockedIssues.length} blocked issue(s) — dependencies may have been resolved: ${issueListParts.join("; ")}`,

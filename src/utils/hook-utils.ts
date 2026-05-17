@@ -33,7 +33,7 @@ import {
   type SessionHookInput,
   type ToolHookInput,
 } from "../schemas.ts"
-import { skillAdvice, skillExists } from "../skill-utils.ts"
+import { skillAdvice, skillExists, skillExistsForHookPayload } from "../skill-utils.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import {
@@ -83,7 +83,7 @@ if (!Bun.which("bun")) {
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
 
-export { skillExists }
+export { skillExists, skillExistsForHookPayload }
 export {
   detectCurrentAgent,
   detectCurrentAgentFromEnv,
