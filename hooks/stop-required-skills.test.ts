@@ -355,6 +355,42 @@ describe("stop-required-skills", () => {
     expect(result.decision).toBeUndefined()
   })
 
+  test("includes compaction note when required skill was used only before a compaction boundary", async () => {
+    const dir = await tmp.create()
+    await initGitRepo(dir)
+    for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+
+    // Transcript: skill before compaction, system boundary, then unrelated post-compaction content.
+    const transcriptPath = join(dir, "compact-transcript.jsonl")
+    const now = Date.now()
+    await writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({
+          timestamp: new Date(now - 5000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Skill", input: { skill: "farm-out-issues" } }],
+          },
+        }),
+        JSON.stringify({ type: "system", subtype: "compact" }),
+        JSON.stringify({
+          timestamp: new Date(now - 1000).toISOString(),
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: "echo test" } }],
+          },
+        }),
+      ].join("\n") + "\n"
+    )
+
+    const result = await runHook(dir, transcriptPath)
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain("compaction reset the recency window")
+  })
+
   test("fails open when the active agent does not support the Skill tool", async () => {
     const dir = await tmp.create()
     const transcriptPath = await createTranscript(dir)

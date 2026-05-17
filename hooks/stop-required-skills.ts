@@ -54,9 +54,10 @@ function buildMissingSkillReason(
   skillReference: string,
   invokedSkills: string[],
   ctx: RequiredStopSkillContext,
-  options?: CurrentSessionUsageRecencyOptions
+  options?: CurrentSessionUsageRecencyOptions,
+  compactionReset?: boolean
 ): string {
-  return [
+  const parts = [
     rule.blockedLine(skillReference),
     "",
     formatSessionSkillsForReason(invokedSkills, options),
@@ -65,7 +66,68 @@ function buildMissingSkillReason(
       header: rule.actionHeader(skillReference),
     }).trimEnd(),
     `Why this matters: ${rule.why(skillReference)}`,
-  ].join("\n")
+  ]
+  if (compactionReset) {
+    parts.push(
+      "",
+      `Note: context compaction reset the recency window — re-invoke ${skillReference} to satisfy this check.`
+    )
+  }
+  return parts.join("\n")
+}
+
+/** Returns true when `skillName` appears in transcript entries before the last compaction boundary. */
+async function hasPreCompactionSkill(
+  transcriptPath: string | undefined | null,
+  skillName: string
+): Promise<boolean> {
+  if (!transcriptPath) return false
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    const lines = text.split("\n").filter(Boolean)
+
+    let boundaryIdx = -1
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i] ?? "") as { type?: string }
+        if (entry?.type === "system") {
+          boundaryIdx = i
+          break
+        }
+      } catch {
+        /* skip malformed line */
+      }
+    }
+    if (boundaryIdx <= 0) return false
+
+    for (let i = 0; i < boundaryIdx; i++) {
+      try {
+        const entry = JSON.parse(lines[i] ?? "") as {
+          type?: string
+          message?: {
+            content?: Array<{ type?: string; name?: string; input?: { skill?: string } }>
+          }
+        }
+        if (entry?.type !== "assistant") continue
+        const content = entry?.message?.content
+        if (!Array.isArray(content)) continue
+        for (const block of content) {
+          if (
+            block?.type === "tool_use" &&
+            block?.name === "Skill" &&
+            block?.input?.skill === skillName
+          ) {
+            return true
+          }
+        }
+      } catch {
+        /* skip malformed line */
+      }
+    }
+    return false
+  } catch {
+    return false
+  }
 }
 
 // Add future stop-gated skills here in the exact order they should block.
@@ -204,8 +266,16 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
 
     const skillReference = formatSkillReferenceForAgent(rule.skill)
     if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Blocking on missing skill: ${rule.skill}`)
+    const compactionReset = await hasPreCompactionSkill(parsed.transcript_path, rule.skill)
     return blockStopObj(
-      buildMissingSkillReason(rule, skillReference, invokedSkills, ctx, recencyOptions)
+      buildMissingSkillReason(
+        rule,
+        skillReference,
+        invokedSkills,
+        ctx,
+        recencyOptions,
+        compactionReset
+      )
     )
   }
 
