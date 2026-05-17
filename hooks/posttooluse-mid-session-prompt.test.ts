@@ -135,7 +135,7 @@ describe("posttooluse-mid-session-prompt", () => {
     for (let i = 0; i < 12; i++) {
       await writeFile(join(dir, `dirty-${i}.txt`), "x")
     }
-    const transcriptPath = await createTranscriptWithCheckin(dir, Date.now() - 11 * 60 * 1000)
+    const transcriptPath = await createTranscriptWithCheckin(dir, Date.now() - 21 * 60 * 1000)
 
     const result = await runHook(dir, transcriptPath, {
       _testSessionStartMs: OLD_START,

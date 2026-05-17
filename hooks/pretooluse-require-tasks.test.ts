@@ -585,7 +585,7 @@ describe("pretooluse-require-tasks", () => {
       subject: "Next step",
       status: "pending",
     })
-    await writeTaskListSyncSentinel(sessionId, Date.now() - 6 * 60_000)
+    await writeTaskListSyncSentinel(sessionId, Date.now() - 11 * 60_000)
 
     const result = await runHook({
       homeDir,

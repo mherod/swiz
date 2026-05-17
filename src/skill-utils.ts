@@ -71,7 +71,6 @@ export function skillExists(name: string): boolean {
  */
 export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
-  if (agent?.id === "codex") return skillFileExists(name)
   if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
   return skillExists(name)
 }
