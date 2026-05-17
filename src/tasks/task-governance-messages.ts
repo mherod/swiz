@@ -207,273 +207,354 @@ export type TaskGovernanceMessageRequest =
       groups: ReadonlyArray<DuplicateSubjectGroup>
     }
 
-export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest): string {
+type Req<K extends TaskGovernanceMessageRequest["kind"]> = Extract<
+  TaskGovernanceMessageRequest,
+  { kind: K }
+>
+
+function buildPriorSessionTasksMessage(r: Req<"prior-session-tasks">): string {
+  const taskCreateName = taskCreateToolName()
+  return (
+    `Prior incomplete tasks found from session ${r.priorSessionId} (${r.priorTaskCount} task(s)):\n` +
+    r.taskLines +
+    `\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `If the work is already done, mark the prior tasks complete:\n${r.completeExamples}`,
+        `If the work is still needed, use ${taskCreateName} to re-create these tasks and mark the current one in_progress.`,
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildNoTasksMessage(r: Req<"no-tasks">): string {
+  const taskCreateName = taskCreateToolName()
+  return (
+    `${r.toolName} needs tasks in place first.\n\n` +
+    `Add at least ${r.thresholds.minIncomplete} tasks (including ${r.thresholds.minPending} pending) to get started:\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskCreateName} to add at least ${r.thresholds.minIncomplete} tasks — one for the current work and at least one pending next step.`,
+        "Include a concrete description of the current work and next step.",
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    ) +
+    `\nOnce task minimums are met, ${r.toolName} will continue automatically.`
+  )
+}
+
+function buildAllTasksCompletedMessage(r: Req<"all-tasks-completed">): string {
+  const taskCreateName = taskCreateToolName()
+  return (
+    `All planned tasks are done — great work! Before continuing, add what comes next.\n\n` +
+    `${r.toolName} needs at least ${r.thresholds.minIncomplete} active task(s) to proceed.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskCreateName} to add at least ${r.thresholds.minIncomplete} task(s) ` +
+          `(including at least ${r.thresholds.minPending} pending) before continuing.`,
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildMissingTaskMinimumsMessage(r: Req<"missing-task-minimums">): string {
   const taskCreateName = taskCreateToolName()
   const taskUpdateName = taskUpdateToolName()
+  return (
+    `Task queue needs at least 1 pending + 1 in_progress before ${r.toolName} can continue.\n\n` +
+    "Keep real current work and follow-up work visible.\n\n" +
+    `${r.incompleteTaskList ? `Current incomplete tasks:\n${r.incompleteTaskList}\n\n` : ""}` +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskCreateName} or ${taskUpdateName} to make the real current work and the next follow-up work visible.`,
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildTooManyInProgressMessage(r: Req<"too-many-in-progress">): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `Too many tasks active at once (${r.inProgressCount}/${r.cap} max) — ` +
+    `bring it back to ${r.cap} in_progress before ${r.toolName} can continue.\n\n` +
+    `Currently in progress:\n${r.taskList}\n\n` +
+    `Keeping active work focused makes planning more effective.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `Reduce in_progress count to ${r.cap} or fewer:`,
+        [
+          "Record completed tasks only when the work has evidence.",
+          `Use ${taskUpdateName} to move non-active tasks back to pending.`,
+        ],
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    ) +
+    `\nOnce active tasks are reduced, ${r.toolName} will continue automatically.`
+  )
+}
+
+function buildDirectMergeIntentMessage(r: Req<"direct-merge-intent">): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `The task plan includes a direct merge, but this workflow routes merges through PR review.\n\n` +
+    `Conflicting tasks:\n${r.taskList}\n\n` +
+    `When strict-no-direct-main is enabled, all merges must go through the PR review workflow.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskUpdateName} to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").`,
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildStaleTasksMessage(r: Req<"stale-tasks">): string {
+  return (
+    `Tasks are ${plural(r.callsSinceLastTaskTool, "tool call")} behind — sync them before continuing with ${r.toolName}.\n\n` +
+    `Current in-progress task context:\n${r.taskList}\n\n` +
+    "Make the task list match the work before continuing.\n\n" +
+    formatTranslatedActionPlan(r.planSteps) +
+    `\nAfter TaskList and task updates are done, retry ${r.toolName}.`
+  )
+}
+
+function buildCanonicalTasklistStaleMessage(r: Req<"canonical-tasklist-stale">): string {
+  return (
+    `Run TaskList to sync task state before ${r.toolName}.\n\n` +
+    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
+  )
+}
+
+function buildTaskDeletionThresholdMessage(r: Req<"task-deletion-threshold">): string {
+  return buildDeletionGovernanceMessage({
+    taskId: r.taskId,
+    retryStep: retryAfterTaskList(r.toolName),
+  })
+}
+
+function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
+  return (
+    `Run TaskList to clear the task state, then retry ${r.toolName}.\n\n` +
+    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
+  )
+}
+
+function buildDuplicateSubjectStateMessage(r: Req<"duplicate-subject-state">): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `Duplicate task subjects found — resolve them before ${r.toolName} can continue.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        "Pick the duplicate entry that represents the real current work.",
+        `Use ${taskUpdateName} to rename the other duplicate, or cancel it if it is not real work.`,
+        retryAfterTaskList(r.toolName),
+      ],
+      { taskListFirst: true }
+    ) +
+    `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(r.groups)}`
+  )
+}
+
+function buildDuplicateSubjectCreateMessage(r: Req<"duplicate-subject-create">): string {
+  const taskCreateName = taskCreateToolName()
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `Task #${r.collisionId} already covers "${r.subject}" — update that task instead of creating a duplicate.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskUpdateName} on #${r.collisionId} if that task needs a different status, subject, or description.`,
+        `Use a different ${taskCreateName} subject only if this is genuinely separate work.`,
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildDuplicateSubjectUpdateMessage(r: Req<"duplicate-subject-update">): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `That ${taskUpdateName} would leave task #${r.taskId} with a duplicate active subject — rename one first.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        "Give one duplicate a unique subject that names distinct work.",
+        "If one duplicate is stale, cancel it instead of keeping two active tasks with the same name.",
+      ],
+      { taskListFirst: true }
+    ) +
+    `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(r.groups)}`
+  )
+}
+
+function buildReconciliationRequiredMessage(r: Req<"reconciliation-required">): string {
+  return (
+    `Run TaskList to refresh task state before ${r.toolName}.\n\n` +
+    formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
+  )
+}
+
+function buildCompletionRateLimitMessage(r: Req<"completion-rate-limit">): string {
+  return (
+    `${completionRateLimitLead(r)}\n\n` +
+    `Already closed ${r.recentCompletionCount} tasks in the last 5s; the limit is ${r.maxCompletions}. ` +
+    `Wait ${r.waitSeconds}s, then close one task with concrete evidence.\n\n` +
+    "Before retrying: run TaskList, confirm the target task has evidence " +
+    "(commit:, test:, file:, or pr:), and update only that one task."
+  )
+}
+
+function buildNativeDeletionThresholdMessage(r: Req<"native-deletion-threshold">): string {
+  return buildDeletionGovernanceMessage({
+    taskId: r.taskId,
+    retryStep:
+      "Retry the deletion only after TaskList shows the task queue still represents real current and follow-up work.",
+  })
+}
+
+function buildCompletionThresholdMessage(r: Req<"completion-threshold">): string {
+  const taskCreateName = taskCreateToolName()
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `${completionThresholdLead(r.taskId)}\n\n` +
+    "Keep both current work and the next follow-up visible before closing this task.\n\n" +
+    formatTranslatedActionPlan(
+      [
+        `Use ${taskCreateName} or ${taskUpdateName} to show the real current work and next follow-up.`,
+        "Retry only after TaskList shows a stable planning buffer and the task has concrete evidence.",
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildInProgressTransitionCapMessage(r: Req<"in-progress-transition-cap">): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    `Task #${r.taskId} can't go active yet — ${r.inProgressCount} of ${r.cap} in_progress slots are already taken.\n\n` +
+    `Currently in progress:\n${r.taskList}\n\n` +
+    `Focusing on one thing at a time makes it easier to track progress.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        "Resolve or park the in_progress tasks that are no longer active:",
+        [
+          "Record completed work only when it has evidence.",
+          `Use ${taskUpdateName} to move non-active tasks back to pending.`,
+        ],
+        `Retry adopting task #${r.taskId} as active work only after TaskList shows focus has been restored.`,
+      ],
+      { taskListFirst: true }
+    )
+  )
+}
+
+function buildPendingCompletionShortcutMessage(r: Req<"pending-completion-shortcut">): string {
+  const taskUpdateName = taskUpdateToolName()
+  const taskRef = r.subject ? `Task #${r.taskId} ("${r.subject}")` : `Task #${r.taskId}`
+  return (
+    `${taskRef} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
+    "Starting a task before closing it keeps the record honest and makes it easier to track what was done.\n\n" +
+    formatTranslatedActionPlan(
+      [
+        TASKLIST_STABILITY_STEP,
+        `Use ${taskUpdateName} to reflect the task you are genuinely working on now.`,
+        "Move this task to active status before making implementation or verification changes.",
+        "Perform the implementation or verification work described by the task.",
+        "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
+        TASKLIST_CONFIRM_STEP,
+      ],
+      { header: "Next steps:" }
+    )
+  )
+}
+
+function buildPhantomCompletionMessage(r: Req<"phantom-completion">): string {
+  const sessionNote = r.sessionId ? ` (session ${r.sessionId})` : ""
+  return (
+    `Task #${r.taskId}${sessionNote} needs substantive work before it can close.\n\n` +
+    `No Edit, Write, Bash, Read, Skill, Glob, or Grep calls were recorded after this task went active — ` +
+    `do the work, then close it.\n\n` +
+    formatTranslatedActionPlan(
+      [
+        TASKLIST_STABILITY_STEP,
+        "Use Edit, Write, Bash, or Skill to actually perform the work described in the task subject.",
+        "Include traceable evidence in description: commit:<sha>, file:<path>, test:<result>, pr:<url>.",
+        TASKLIST_CONFIRM_STEP,
+      ],
+      { header: "To resolve:" }
+    )
+  )
+}
+
+function buildTasklistDuplicateSubjectNoticeMessage(
+  r: Req<"tasklist-duplicate-subject-notice">
+): string {
+  const taskUpdateName = taskUpdateToolName()
+  return (
+    "TaskList found duplicate active task subjects — resolve them before continuing.\n\n" +
+    formatTranslatedActionPlan(
+      [
+        "Pick the duplicate entry that represents the real current work.",
+        `Use ${taskUpdateName} to give the other duplicate a unique subject, or cancel it if it is not real work.`,
+        `${TASKLIST_CONFIRM_STEP} Continue after each active subject appears once.`,
+      ],
+      { confirm: false }
+    ) +
+    `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(r.groups)}`
+  )
+}
+
+export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest): string {
   switch (request.kind) {
     case "prior-session-tasks":
-      return (
-        `Prior incomplete tasks found from session ${request.priorSessionId} (${request.priorTaskCount} task(s)):\n` +
-        request.taskLines +
-        `\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `If the work is already done, mark the prior tasks complete:\n${request.completeExamples}`,
-            `If the work is still needed, use ${taskCreateName} to re-create these tasks and mark the current one in_progress.`,
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildPriorSessionTasksMessage(request)
     case "no-tasks":
-      return (
-        `${request.toolName} needs tasks in place first.\n\n` +
-        `Add at least ${request.thresholds.minIncomplete} tasks (including ${request.thresholds.minPending} pending) to get started:\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} tasks — one for the current work and at least one pending next step.`,
-            "Include a concrete description of the current work and next step.",
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        ) +
-        `\nOnce task minimums are met, ${request.toolName} will continue automatically.`
-      )
-
+      return buildNoTasksMessage(request)
     case "all-tasks-completed":
-      return (
-        `All planned tasks are done — great work! Before continuing, add what comes next.\n\n` +
-        `${request.toolName} needs at least ${request.thresholds.minIncomplete} active task(s) to proceed.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskCreateName} to add at least ${request.thresholds.minIncomplete} task(s) ` +
-              `(including at least ${request.thresholds.minPending} pending) before continuing.`,
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildAllTasksCompletedMessage(request)
     case "missing-task-minimums":
-      return (
-        `Task queue needs at least 1 pending + 1 in_progress before ${request.toolName} can continue.\n\n` +
-        "Keep real current work and follow-up work visible.\n\n" +
-        `${request.incompleteTaskList ? `Current incomplete tasks:\n${request.incompleteTaskList}\n\n` : ""}` +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskCreateName} or ${taskUpdateName} to make the real current work and the next follow-up work visible.`,
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildMissingTaskMinimumsMessage(request)
     case "too-many-in-progress":
-      return (
-        `Too many tasks active at once (${request.inProgressCount}/${request.cap} max) — ` +
-        `bring it back to ${request.cap} in_progress before ${request.toolName} can continue.\n\n` +
-        `Currently in progress:\n${request.taskList}\n\n` +
-        `Keeping active work focused makes planning more effective.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `Reduce in_progress count to ${request.cap} or fewer:`,
-            [
-              "Record completed tasks only when the work has evidence.",
-              `Use ${taskUpdateName} to move non-active tasks back to pending.`,
-            ],
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        ) +
-        `\nOnce active tasks are reduced, ${request.toolName} will continue automatically.`
-      )
-
+      return buildTooManyInProgressMessage(request)
     case "direct-merge-intent":
-      return (
-        `The task plan includes a direct merge, but this workflow routes merges through PR review.\n\n` +
-        `Conflicting tasks:\n${request.taskList}\n\n` +
-        `When strict-no-direct-main is enabled, all merges must go through the PR review workflow.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskUpdateName} to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").`,
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildDirectMergeIntentMessage(request)
     case "stale-tasks":
-      return (
-        `Tasks are ${plural(request.callsSinceLastTaskTool, "tool call")} behind — sync them before continuing with ${request.toolName}.\n\n` +
-        `Current in-progress task context:\n${request.taskList}\n\n` +
-        "Make the task list match the work before continuing.\n\n" +
-        formatTranslatedActionPlan(request.planSteps) +
-        `\nAfter TaskList and task updates are done, retry ${request.toolName}.`
-      )
-
+      return buildStaleTasksMessage(request)
     case "canonical-tasklist-stale":
-      return (
-        `Run TaskList to sync task state before ${request.toolName}.\n\n` +
-        formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
-      )
-
+      return buildCanonicalTasklistStaleMessage(request)
     case "task-deletion-threshold":
-      return buildDeletionGovernanceMessage({
-        taskId: request.taskId,
-        retryStep: retryAfterTaskList(request.toolName),
-      })
-
+      return buildTaskDeletionThresholdMessage(request)
     case "pending-overflow":
-      return (
-        `Run TaskList to clear the task state, then retry ${request.toolName}.\n\n` +
-        formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
-      )
-
+      return buildPendingOverflowMessage(request)
     case "duplicate-subject-state":
-      return (
-        `Duplicate task subjects found — resolve them before ${request.toolName} can continue.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            "Pick the duplicate entry that represents the real current work.",
-            `Use ${taskUpdateName} to rename the other duplicate, or cancel it if it is not real work.`,
-            retryAfterTaskList(request.toolName),
-          ],
-          { taskListFirst: true }
-        ) +
-        `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(request.groups)}`
-      )
-
+      return buildDuplicateSubjectStateMessage(request)
     case "duplicate-subject-create":
-      return (
-        `Task #${request.collisionId} already covers "${request.subject}" — update that task instead of creating a duplicate.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskUpdateName} on #${request.collisionId} if that task needs a different status, subject, or description.`,
-            `Use a different ${taskCreateName} subject only if this is genuinely separate work.`,
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildDuplicateSubjectCreateMessage(request)
     case "duplicate-subject-update":
-      return (
-        `That ${taskUpdateName} would leave task #${request.taskId} with a duplicate active subject — rename one first.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            "Give one duplicate a unique subject that names distinct work.",
-            "If one duplicate is stale, cancel it instead of keeping two active tasks with the same name.",
-          ],
-          { taskListFirst: true }
-        ) +
-        `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(request.groups)}`
-      )
-
+      return buildDuplicateSubjectUpdateMessage(request)
     case "reconciliation-required":
-      return (
-        `Run TaskList to refresh task state before ${request.toolName}.\n\n` +
-        formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(request.toolName)])
-      )
-
+      return buildReconciliationRequiredMessage(request)
     case "completion-rate-limit":
-      return (
-        `${completionRateLimitLead(request)}\n\n` +
-        `Already closed ${request.recentCompletionCount} tasks in the last 5s; the limit is ${request.maxCompletions}. ` +
-        `Wait ${request.waitSeconds}s, then close one task with concrete evidence.\n\n` +
-        "Before retrying: run TaskList, confirm the target task has evidence " +
-        "(commit:, test:, file:, or pr:), and update only that one task."
-      )
-
+      return buildCompletionRateLimitMessage(request)
     case "native-deletion-threshold":
-      return buildDeletionGovernanceMessage({
-        taskId: request.taskId,
-        retryStep:
-          "Retry the deletion only after TaskList shows the task queue still represents real current and follow-up work.",
-      })
-
+      return buildNativeDeletionThresholdMessage(request)
     case "completion-threshold":
-      return (
-        `${completionThresholdLead(request.taskId)}\n\n` +
-        "Keep both current work and the next follow-up visible before closing this task.\n\n" +
-        formatTranslatedActionPlan(
-          [
-            `Use ${taskCreateName} or ${taskUpdateName} to show the real current work and next follow-up.`,
-            "Retry only after TaskList shows a stable planning buffer and the task has concrete evidence.",
-          ],
-          { taskListFirst: true }
-        )
-      )
-
+      return buildCompletionThresholdMessage(request)
     case "in-progress-transition-cap":
-      return (
-        `Task #${request.taskId} can't go active yet — ${request.inProgressCount} of ${request.cap} in_progress slots are already taken.\n\n` +
-        `Currently in progress:\n${request.taskList}\n\n` +
-        `Focusing on one thing at a time makes it easier to track progress.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            "Resolve or park the in_progress tasks that are no longer active:",
-            [
-              "Record completed work only when it has evidence.",
-              `Use ${taskUpdateName} to move non-active tasks back to pending.`,
-            ],
-            `Retry adopting task #${request.taskId} as active work only after TaskList shows focus has been restored.`,
-          ],
-          { taskListFirst: true }
-        )
-      )
-
-    case "pending-completion-shortcut": {
-      const taskRef = request.subject
-        ? `Task #${request.taskId} ("${request.subject}")`
-        : `Task #${request.taskId}`
-      return (
-        `${taskRef} is still pending — set it in_progress first, do the work, then close it with evidence.\n\n` +
-        "Starting a task before closing it keeps the record honest and makes it easier to track what was done.\n\n" +
-        formatTranslatedActionPlan(
-          [
-            TASKLIST_STABILITY_STEP,
-            `Use ${taskUpdateName} to reflect the task you are genuinely working on now.`,
-            "Move this task to active status before making implementation or verification changes.",
-            "Perform the implementation or verification work described by the task.",
-            "Record completion only with concrete evidence such as commit:, file:, test:, or pr:.",
-            TASKLIST_CONFIRM_STEP,
-          ],
-          { header: "Next steps:" }
-        )
-      )
-    }
-
-    case "phantom-completion": {
-      const sessionNote = request.sessionId ? ` (session ${request.sessionId})` : ""
-      return (
-        `Task #${request.taskId}${sessionNote} needs substantive work before it can close.\n\n` +
-        `No Edit, Write, Bash, Read, Skill, Glob, or Grep calls were recorded after this task went active — ` +
-        `do the work, then close it.\n\n` +
-        formatTranslatedActionPlan(
-          [
-            TASKLIST_STABILITY_STEP,
-            "Use Edit, Write, Bash, or Skill to actually perform the work described in the task subject.",
-            "Include traceable evidence in description: commit:<sha>, file:<path>, test:<result>, pr:<url>.",
-            TASKLIST_CONFIRM_STEP,
-          ],
-          { header: "To resolve:" }
-        )
-      )
-    }
-
+      return buildInProgressTransitionCapMessage(request)
+    case "pending-completion-shortcut":
+      return buildPendingCompletionShortcutMessage(request)
+    case "phantom-completion":
+      return buildPhantomCompletionMessage(request)
     case "tasklist-duplicate-subject-notice":
-      return (
-        "TaskList found duplicate active task subjects — resolve them before continuing.\n\n" +
-        formatTranslatedActionPlan(
-          [
-            "Pick the duplicate entry that represents the real current work.",
-            `Use ${taskUpdateName} to give the other duplicate a unique subject, or cancel it if it is not real work.`,
-            `${TASKLIST_CONFIRM_STEP} Continue after each active subject appears once.`,
-          ],
-          { confirm: false }
-        ) +
-        `\n\nDuplicates to fix:\n${formatDuplicateSubjectGroups(request.groups)}`
-      )
+      return buildTasklistDuplicateSubjectNoticeMessage(request)
   }
 }
 
