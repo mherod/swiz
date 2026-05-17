@@ -139,6 +139,10 @@ export interface ProjectSwizSettings {
   auditStrictness?: AuditStrictness
   /** Warn when an in-progress task exceeds this runtime. */
   taskDurationWarningMinutes?: number
+  /** Override skill recency gate: max session turns to look back (default 30). */
+  skillRecencyMaxTurns?: number
+  /** Override skill recency gate: max age in minutes to look back (default 20). */
+  skillRecencyMaxAgeMinutes?: number
   /** Hook filenames to skip for this project (e.g. "stop-ship-checklist.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
@@ -230,6 +234,8 @@ export interface SwizSettings {
   /** Control governance strictness: strict (always enforce), relaxed (relax for exploratory), local-dev (relax locally, strict for push/CI). */
   auditStrictness: AuditStrictness
   taskDurationWarningMinutes: number
+  skillRecencyMaxTurns: number
+  skillRecencyMaxAgeMinutes: number
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
@@ -310,6 +316,8 @@ export const projectSettingsSchema = z.object({
   trunkMode: z.boolean().optional(),
   auditStrictness: auditStrictnessSchema.optional(),
   taskDurationWarningMinutes: z.number().int().min(1).optional(),
+  skillRecencyMaxTurns: z.number().int().min(1).optional(),
+  skillRecencyMaxAgeMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
   largeFileAllowPatterns: z.array(z.string().min(1)).optional(),

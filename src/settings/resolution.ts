@@ -40,6 +40,8 @@ export const DEFAULT_MEMORY_LINE_THRESHOLD = 1400
 export const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
 export const DEFAULT_LARGE_FILE_SIZE_KB = 500
 export const DEFAULT_TASK_DURATION_WARNING_MINUTES = 10
+export const DEFAULT_SKILL_RECENCY_MAX_TURNS = 30
+export const DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES = 20
 
 export const DEFAULT_DIRTY_WORKTREE_THRESHOLD = 15
 export const DEFAULT_TRIVIAL_MAX_FILES = 3
@@ -129,6 +131,8 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "strictNoDirectMain",
   "trunkMode",
   "taskDurationWarningMinutes",
+  "skillRecencyMaxTurns",
+  "skillRecencyMaxAgeMinutes",
   "largeFileSizeKb",
   "dirtyWorktreeThreshold",
   "speak",

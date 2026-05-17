@@ -439,6 +439,42 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "skillRecencyMaxTurns",
+    aliases: [
+      "skill-recency-max-turns",
+      "skillrecencymaxturns",
+      "skill_recency_max_turns",
+      "skill-recency-turns",
+    ],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 30,
+    docs: {
+      description: "Max session turns to look back when checking skill recency gates",
+      effectExplanation:
+        "Controls how far back skill-invocation gates scan for recent skill usage. Higher values mean gates stay satisfied longer into a session.",
+      valuePlaceholder: "turns",
+    },
+  },
+  {
+    key: "skillRecencyMaxAgeMinutes",
+    aliases: [
+      "skill-recency-max-age-minutes",
+      "skillrecencymaxageminutes",
+      "skill_recency_max_age_minutes",
+      "skill-recency-age",
+    ],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    default: 20,
+    docs: {
+      description: "Max age in minutes to look back when checking skill recency gates",
+      effectExplanation:
+        "Skill-invocation gates exclude events older than this many minutes even if within the turn limit. Raise to widen the recency window.",
+      valuePlaceholder: "minutes",
+    },
+  },
+  {
     key: "narratorSpeed",
     aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
     kind: "numeric",

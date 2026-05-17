@@ -10,6 +10,12 @@
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
+  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
+  DEFAULT_SKILL_RECENCY_MAX_TURNS,
+  resolveNumericSetting,
+} from "../src/settings/resolution.ts"
+import {
+  type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
@@ -35,8 +41,11 @@ interface RequiredStopSkillRule {
   why(skillReference: string): string
 }
 
-function formatSessionSkillsForReason(skills: string[]): string {
-  const window = formatCurrentSessionUsageWindow()
+function formatSessionSkillsForReason(
+  skills: string[],
+  options?: CurrentSessionUsageRecencyOptions
+): string {
+  const window = formatCurrentSessionUsageWindow(options)
   return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
@@ -44,12 +53,13 @@ function buildMissingSkillReason(
   rule: RequiredStopSkillRule,
   skillReference: string,
   invokedSkills: string[],
-  ctx: RequiredStopSkillContext
+  ctx: RequiredStopSkillContext,
+  options?: CurrentSessionUsageRecencyOptions
 ): string {
   return [
     rule.blockedLine(skillReference),
     "",
-    formatSessionSkillsForReason(invokedSkills),
+    formatSessionSkillsForReason(invokedSkills, options),
     "",
     formatActionPlan(rule.actionPlan(skillReference, ctx), {
       header: rule.actionHeader(skillReference),
@@ -162,6 +172,16 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
   const ctx: RequiredStopSkillContext = { cwd, input: parsed }
+
+  const [maxTurns, maxAgeMinutes] = await Promise.all([
+    resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
+    resolveNumericSetting(cwd, "skillRecencyMaxAgeMinutes", DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES),
+  ])
+  const recencyOptions: CurrentSessionUsageRecencyOptions = {
+    maxTurns,
+    maxAgeMs: maxAgeMinutes * 60 * 1000,
+  }
+
   let invokedSkills: string[] | null = null
 
   for (const rule of REQUIRED_STOP_SKILLS) {
@@ -174,7 +194,7 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       continue
     }
 
-    invokedSkills ??= await getRecentlyInvokedSkillsForCurrentSession(parsed)
+    invokedSkills ??= await getRecentlyInvokedSkillsForCurrentSession(parsed, recencyOptions)
     if (process.env.DEBUG_REQUIRED_SKILLS)
       console.error(`Invoked skills: ${invokedSkills.join(", ")}`)
     if (invokedSkills.includes(rule.skill)) {
@@ -184,7 +204,9 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
 
     const skillReference = formatSkillReferenceForAgent(rule.skill)
     if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Blocking on missing skill: ${rule.skill}`)
-    return blockStopObj(buildMissingSkillReason(rule, skillReference, invokedSkills, ctx))
+    return blockStopObj(
+      buildMissingSkillReason(rule, skillReference, invokedSkills, ctx, recencyOptions)
+    )
   }
 
   return {}

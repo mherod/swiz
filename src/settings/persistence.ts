@@ -269,6 +269,8 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "largeFileSizeKb",
     "dirtyWorktreeThreshold",
     "taskDurationWarningMinutes",
+    "skillRecencyMaxTurns",
+    "skillRecencyMaxAgeMinutes",
   ])
 
   // transcriptMonitorMaxConcurrentDispatches allows 0 (unlimited) — non-negative guard

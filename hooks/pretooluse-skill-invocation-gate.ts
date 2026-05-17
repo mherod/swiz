@@ -26,6 +26,12 @@
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import {
+  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
+  DEFAULT_SKILL_RECENCY_MAX_TURNS,
+  resolveNumericSetting,
+} from "../src/settings/resolution.ts"
+import {
+  type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
@@ -48,8 +54,11 @@ import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
-function formatSessionSkillsForReason(skills: string[]): string {
-  const window = formatCurrentSessionUsageWindow()
+function formatSessionSkillsForReason(
+  skills: string[],
+  options?: CurrentSessionUsageRecencyOptions
+): string {
+  const window = formatCurrentSessionUsageWindow(options)
   return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
@@ -98,24 +107,40 @@ const pretoolusSkillInvocationGate: SwizHook = {
     // Only enforce if the skill is installed on this machine
     if (!skillExists(requiredSkill)) return {}
 
+    // ── Resolve project/global recency window ─────────────────────────────────────
+
+    const cwd: string = (rawInput.cwd as string) ?? process.cwd()
+    const [maxTurns, maxAgeMinutes] = await Promise.all([
+      resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
+      resolveNumericSetting(
+        cwd,
+        "skillRecencyMaxAgeMinutes",
+        DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES
+      ),
+    ])
+    const recencyOptions: CurrentSessionUsageRecencyOptions = {
+      maxTurns,
+      maxAgeMs: maxAgeMinutes * 60 * 1000,
+    }
+
     // ── Scan transcript for prior skill invocations ───────────────────────────────
 
     const transcriptPath: string = (input.transcript_path as string) ?? ""
     if (!transcriptPath) return {}
 
-    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(input)
-    const reason = formatSessionSkillsForReason(invokedSkills)
+    const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(input, recencyOptions)
+    const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
     const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
     if (invokedSkills.includes(requiredSkill)) {
       // For commits, also require TaskList to have been called — ensures the
       // task state cache is synced before the commit workflow proceeds.
       if (requiredSkill === "commit") {
-        const toolNames = await getRecentlyUsedToolsForCurrentSession(input)
+        const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
         if (!toolNames.some((n) => isTaskListTool(n))) {
           return preToolUseDeny(
             "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
-              `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow()}.`
+              `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow(recencyOptions)}.`
           )
         }
       }
