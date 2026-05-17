@@ -10,6 +10,7 @@ function getExpectedCanonicalEvents(): Set<string> {
   const events = new Set<string>()
   for (const group of manifest) {
     if (group.scheduled) continue
+    if (group.hooks.length === 0) continue
     events.add(group.event)
   }
   return events
@@ -72,6 +73,7 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
 
   const missing: string[] = []
   for (const event of expected) {
+    if (agent.unsupportedEvents?.includes(event)) continue
     if (!installed.has(event)) {
       const agentEvent = translateEvent(event, agent)
       missing.push(`${event} (${agentEvent})`)
