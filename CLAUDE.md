@@ -18,7 +18,7 @@ alwaysApply: false
 - Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude; **DON'T** spawn `claude` CLI.
-- Extract helpers for complexity/max-lines. Consolidate duplicate utilities into a canonical module (e.g., `agent-paths.ts`) and re-export.
+- Extract helpers; consolidate duplicate utilities into a canonical module (e.g., `agent-paths.ts`) and re-export.
 ## Agent Detection
 - `src/agents.ts` owns agent metadata (`envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`). Add signals there first.
 - Runtime detection in `src/agent-paths.ts` (re-exported by `src/detect.ts`): `detectCurrentAgentFromEnv(env)` checks `envVars` in `AGENTS` order; `detectCurrentAgent()` falls back to parent `processPattern`; `isRunningInAgent()` is shell/shim-only (non-TTY stdin, `CURSOR_TRACE_ID`, `CLAUDECODE`).
@@ -81,7 +81,7 @@ alwaysApply: false
 - Task exemptions: read-only git, `gh`, `swiz`, setup, recovery. DON'T add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Settings/state schemas also in `src/settings/persistence.ts`.
-- **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
+- **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window.
 - **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
 - **DO**: Use `resolveThresholds(cwd)` for memory thresholds (default 5000). Never hardcode.
 - **DO**: Use `computeProjectedContent()` — suppresses interpolation. DON'T call `.replace()`. Fail-open on errors.
@@ -94,12 +94,11 @@ alwaysApply: false
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
-- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement.
-- In `hook-utils.ts`, lazy `await import(...)` for `projectKeyFromCwd` (circular avoidance).
+- Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; use lazy `await import(...)` in `hook-utils.ts` (circular avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
-- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
+- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking. Auto-memory writes (`~/.claude/projects/*/memory/*.md`) are exempt via `AUTO_MEMORY_PATH_RE` + `isAutoMemoryPath()`. **DO**: When exempting a path from a two-phase gate, add the exemption in BOTH the early-return (block path) AND the `toolWritesMarkdown` check (satisfy-requirement path) — exempt paths must not bypass OR satisfy the gate.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
-- **DO**: When extracting from a shared module, re-export all types downstream consumers import. Verify `pnpm typecheck` before committing.
+- **DO**: When extracting from a shared module, re-export all types downstream consumers import.
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
@@ -116,13 +115,13 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. Recency resets after compaction. **DON'T** use `Follow-up: consider/revisit X` — `isTaskSubjectWorkDeferral` blocks these. Use `Consider issue #N: <topic>` or `Follow-up: <concrete verb> X`.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. **DON'T** use `Follow-up: consider/revisit X` — `isTaskSubjectWorkDeferral` blocks these. Use `Consider issue #N: <topic>` or `Follow-up: <concrete verb> X`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
-- Session resume: verify `completed` commit/push tasks against `git status` — uncommitted/unpushed = phantom; reopen before new work.
+- Session resume: verify `completed` commit/push tasks against `git status` — uncommitted/unpushed = phantom; reopen.
 - After `CLAUDE.md` edit: `wc -w CLAUDE.md`; `/compact-memory` near threshold. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
 - CI: `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before untracked `.lock`/local state.
 ## Standard Work Sequence
@@ -174,12 +173,12 @@ alwaysApply: false
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
 - Settings writes: `.bak` backup first.
-- Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; `IN PROGRESS` before `COMPLETED`. Stop-memory prompts include `Cause: <cause>`.
+- Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; `IN PROGRESS` before `COMPLETED`.
 - On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - Unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` / `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in ONE pass, then read. Empty recency results → print event timestamps vs cutoff first (may be stale).
-- DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action — hooks run in-process from loaded code.
+- DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in one pass. Empty recency: print timestamps vs cutoff first.
+- DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action.
 - DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry the same command after a hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
@@ -197,7 +196,7 @@ alwaysApply: false
 - DON'T: Treat first-run `pretooluse-repeated-lint-test` blocks as violations — make any Edit between runs.
 - DON'T: Declare commit/push success before reading tool output confirming it.
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
-- DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse`.
+- DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
 - DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (update subject via `TaskUpdate`); hedge ("trivial"/"just"/"likely") before investigating; use compliance-gaming phrases ("satisfies the gate"/"unblocks the hook"); re-implement without inspecting first. Use Claude Agent SDK in-process.
 ## Output & Shell
