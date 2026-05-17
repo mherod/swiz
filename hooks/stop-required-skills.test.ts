@@ -130,7 +130,7 @@ async function createTranscript(dir: string, skills: string[] = []): Promise<str
 
 async function createOldTranscript(dir: string, skills: string[]): Promise<string> {
   const transcriptPath = join(dir, "old-transcript.jsonl")
-  const old = Date.now() - 11 * 60 * 1000
+  const old = Date.now() - 21 * 60 * 1000
   await writeFile(
     transcriptPath,
     `${JSON.stringify({
@@ -207,7 +207,7 @@ describe("stop-required-skills", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("treats required skills older than ten minutes as missing", async () => {
+  test("treats required skills older than twenty minutes as missing", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
@@ -217,7 +217,7 @@ describe("stop-required-skills", () => {
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("farm-out-issues")
-    expect(result.reason).toContain("last 20 turns and last 10 minutes")
+    expect(result.reason).toContain("last 30 turns and last 20 minutes")
   })
 
   async function runGitCmd(cwd: string, args: string[]): Promise<void> {

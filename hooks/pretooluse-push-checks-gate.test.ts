@@ -33,7 +33,7 @@ function makeTranscript(...commands: string[]): string {
 }
 
 function makeOldTranscript(...commands: string[]): string {
-  const old = Date.now() - 11 * 60 * 1000
+  const old = Date.now() - 21 * 60 * 1000
   return commands
     .map((cmd, index) =>
       JSON.stringify({
@@ -274,7 +274,7 @@ describe("pretooluse-push-checks-gate", () => {
   })
 
   describe("advisory — stale checks", () => {
-    test("branch and PR checks older than ten minutes trigger advisory", async () => {
+    test("branch and PR checks older than twenty minutes trigger advisory", async () => {
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: makeOldTranscript(
@@ -284,16 +284,16 @@ describe("pretooluse-push-checks-gate", () => {
       })
       expect(result.blocked).toBe(false)
       expect(result.advisory).toBe(true)
-      expect(result.reason).toContain("last 20 turns and last 10 minutes")
+      expect(result.reason).toContain("last 30 turns and last 20 minutes")
       expect(result.reason).toContain("Branch ")
       expect(result.reason).toContain("gh pr list")
     })
 
-    test("checks outside the last twenty turns trigger advisory", async () => {
+    test("checks outside the last thirty turns trigger advisory", async () => {
       const transcript = makeTranscript(
         "git branch --show-current",
         "gh pr list --state open --head main",
-        ...Array.from({ length: 20 }, (_, index) => `echo filler-${index}`)
+        ...Array.from({ length: 31 }, (_, index) => `echo filler-${index}`)
       )
       const result = await runHook({
         command: "git push origin main",

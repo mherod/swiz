@@ -47,8 +47,8 @@ export interface TranscriptSummary {
   sessionScope: SessionScope
 }
 
-export const CURRENT_SESSION_USAGE_MAX_TURNS = 20
-export const CURRENT_SESSION_USAGE_MAX_AGE_MS = 10 * 60 * 1000
+export const CURRENT_SESSION_USAGE_MAX_TURNS = 30
+export const CURRENT_SESSION_USAGE_MAX_AGE_MS = 20 * 60 * 1000
 
 export interface CurrentSessionUsageRecencyOptions {
   maxTurns?: number

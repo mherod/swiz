@@ -153,8 +153,8 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("allow")
   })
 
-  it("blocks gh pr create when pr-open was used more than ten minutes ago", async () => {
-    const old = Date.now() - 11 * 60 * 1000
+  it("blocks gh pr create when pr-open was used more than twenty minutes ago", async () => {
+    const old = Date.now() - 21 * 60 * 1000
 
     const result = await runPrOpenGateSubprocess([
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }], old),
@@ -167,15 +167,15 @@ describe("pretooluse-skill-invocation-gate", () => {
     expect(
       (result as { hookSpecificOutput?: { permissionDecisionReason?: string } }).hookSpecificOutput
         ?.permissionDecisionReason
-    ).toContain("last 20 turns and last 10 minutes")
+    ).toContain("last 30 turns and last 20 minutes")
   })
 
-  it("blocks gh pr create when pr-open is outside the last twenty turns", async () => {
+  it("blocks gh pr create when pr-open is outside the last thirty turns", async () => {
     const result = await runPrOpenGateSubprocess([
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-open" } }]),
-      // Twenty user/assistant turn pairs push the window past the original
-      // Skill call. Turns count user messages now, not raw JSONL lines.
-      ...Array.from({ length: 20 }, (_, index) => [
+      // Thirty-one user/assistant turn pairs push the window past the Skill call.
+      // Turns count user messages now, not raw JSONL lines.
+      ...Array.from({ length: 31 }, (_, index) => [
         JSON.stringify({
           timestamp: new Date(Date.now() - 60_000 + index * 100).toISOString(),
           type: "user",

@@ -354,7 +354,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
   })
 
   it("blocks when TaskList exists but is outside the recent usage window", async () => {
-    const old = Date.now() - 11 * 60 * 1000
+    const old = Date.now() - 21 * 60 * 1000
     const { home, tasksDir, transcriptPath } = await createFixtureWithTools(["TaskList"])
     await writeFile(transcriptPath, `${toolLine("TaskList", "old-task-list", {}, old)}\n`)
     await writeFile(
@@ -372,7 +372,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
 
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain("TaskList was not called recently")
-    expect(result.reason).toContain("last 20 turns and last 10 minutes")
+    expect(result.reason).toContain("last 30 turns and last 20 minutes")
   })
 })
 
