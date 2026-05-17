@@ -231,8 +231,22 @@ function buildDenyMessage(
   )
 }
 
-function commitRequiresTaskList(input: Record<string, unknown>): boolean {
-  return agentHasTaskToolsForHookPayload(input)
+function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
+  return skill === "commit" && agentHasTaskToolsForHookPayload(input)
+}
+
+async function checkTaskListRequirement(
+  skill: string,
+  input: Record<string, any>,
+  recencyOptions: CurrentSessionUsageRecencyOptions
+): Promise<SwizHookOutput | null> {
+  if (!requiresTaskListCheck(skill, input)) return null
+  const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
+  if (toolNames.some((n) => isTaskListTool(n))) return null
+  return preToolUseDeny(
+    "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
+      `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow(recencyOptions)}.`
+  )
 }
 
 const pretoolusSkillInvocationGate: SwizHook = {
@@ -280,16 +294,8 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
     if (invokedSkills.includes(requiredSkill)) {
-      // For commits, also require TaskList — ensures task state cache is synced.
-      if (requiredSkill === "commit" && commitRequiresTaskList(rawInput)) {
-        const toolNames = await getRecentlyUsedToolsForCurrentSession(input, recencyOptions)
-        if (!toolNames.some((n) => isTaskListTool(n))) {
-          return preToolUseDeny(
-            "BLOCKED: git commit requires TaskList to have been called first.\n\n" +
-              `Call TaskList to sync task state, then retry the commit. The TaskList call must be within the ${formatCurrentSessionUsageWindow(recencyOptions)}.`
-          )
-        }
-      }
+      const blocked = await checkTaskListRequirement(requiredSkill, rawInput, recencyOptions)
+      if (blocked) return blocked
       return preToolUseAllow(`${skillReferenceForAgent} skill was invoked recently.\n${reason}`)
     }
 
