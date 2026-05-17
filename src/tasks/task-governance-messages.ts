@@ -511,51 +511,34 @@ function buildTasklistDuplicateSubjectNoticeMessage(
   )
 }
 
+const MESSAGE_BUILDERS: {
+  [K in TaskGovernanceMessageRequest["kind"]]: (r: Req<K>) => string
+} = {
+  "prior-session-tasks": buildPriorSessionTasksMessage,
+  "no-tasks": buildNoTasksMessage,
+  "all-tasks-completed": buildAllTasksCompletedMessage,
+  "missing-task-minimums": buildMissingTaskMinimumsMessage,
+  "too-many-in-progress": buildTooManyInProgressMessage,
+  "direct-merge-intent": buildDirectMergeIntentMessage,
+  "stale-tasks": buildStaleTasksMessage,
+  "canonical-tasklist-stale": buildCanonicalTasklistStaleMessage,
+  "task-deletion-threshold": buildTaskDeletionThresholdMessage,
+  "pending-overflow": buildPendingOverflowMessage,
+  "duplicate-subject-state": buildDuplicateSubjectStateMessage,
+  "duplicate-subject-create": buildDuplicateSubjectCreateMessage,
+  "duplicate-subject-update": buildDuplicateSubjectUpdateMessage,
+  "reconciliation-required": buildReconciliationRequiredMessage,
+  "completion-rate-limit": buildCompletionRateLimitMessage,
+  "native-deletion-threshold": buildNativeDeletionThresholdMessage,
+  "completion-threshold": buildCompletionThresholdMessage,
+  "in-progress-transition-cap": buildInProgressTransitionCapMessage,
+  "pending-completion-shortcut": buildPendingCompletionShortcutMessage,
+  "phantom-completion": buildPhantomCompletionMessage,
+  "tasklist-duplicate-subject-notice": buildTasklistDuplicateSubjectNoticeMessage,
+}
+
 export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest): string {
-  switch (request.kind) {
-    case "prior-session-tasks":
-      return buildPriorSessionTasksMessage(request)
-    case "no-tasks":
-      return buildNoTasksMessage(request)
-    case "all-tasks-completed":
-      return buildAllTasksCompletedMessage(request)
-    case "missing-task-minimums":
-      return buildMissingTaskMinimumsMessage(request)
-    case "too-many-in-progress":
-      return buildTooManyInProgressMessage(request)
-    case "direct-merge-intent":
-      return buildDirectMergeIntentMessage(request)
-    case "stale-tasks":
-      return buildStaleTasksMessage(request)
-    case "canonical-tasklist-stale":
-      return buildCanonicalTasklistStaleMessage(request)
-    case "task-deletion-threshold":
-      return buildTaskDeletionThresholdMessage(request)
-    case "pending-overflow":
-      return buildPendingOverflowMessage(request)
-    case "duplicate-subject-state":
-      return buildDuplicateSubjectStateMessage(request)
-    case "duplicate-subject-create":
-      return buildDuplicateSubjectCreateMessage(request)
-    case "duplicate-subject-update":
-      return buildDuplicateSubjectUpdateMessage(request)
-    case "reconciliation-required":
-      return buildReconciliationRequiredMessage(request)
-    case "completion-rate-limit":
-      return buildCompletionRateLimitMessage(request)
-    case "native-deletion-threshold":
-      return buildNativeDeletionThresholdMessage(request)
-    case "completion-threshold":
-      return buildCompletionThresholdMessage(request)
-    case "in-progress-transition-cap":
-      return buildInProgressTransitionCapMessage(request)
-    case "pending-completion-shortcut":
-      return buildPendingCompletionShortcutMessage(request)
-    case "phantom-completion":
-      return buildPhantomCompletionMessage(request)
-    case "tasklist-duplicate-subject-notice":
-      return buildTasklistDuplicateSubjectNoticeMessage(request)
-  }
+  return (MESSAGE_BUILDERS[request.kind] as (r: TaskGovernanceMessageRequest) => string)(request)
 }
 
 function taskVoiceVariant(key: string, variants: readonly string[]): string {
