@@ -39,6 +39,9 @@ interface GlobalSettingsForm {
   enforceMidSessionCheckin: boolean
 }
 
+// Matches DEFAULT_MEMORY_WORD_THRESHOLD in src/settings/resolution.ts — update both when the default changes.
+const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
+
 const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   autoContinue: false,
   critiquesEnabled: false,
@@ -52,7 +55,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   gitStatusGate: true,
   ambitionMode: "standard",
   auditStrictness: "strict",
-  memoryWordThreshold: 5000,
+  memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
   memoryLineThreshold: 1000,
   pushCooldownMinutes: 10,
   prAgeGateMinutes: 15,
@@ -155,7 +158,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
     auditStrictness:
       (settings.auditStrictness as GlobalSettingsForm["auditStrictness"]) ?? "strict",
-    memoryWordThreshold: Number(settings.memoryWordThreshold) || 5000,
+    memoryWordThreshold: Number(settings.memoryWordThreshold) || DEFAULT_MEMORY_WORD_THRESHOLD,
     memoryLineThreshold: Number(settings.memoryLineThreshold) || 1000,
     pushCooldownMinutes: Number(settings.pushCooldownMinutes) || 10,
     prAgeGateMinutes: Number(settings.prAgeGateMinutes) || 15,
