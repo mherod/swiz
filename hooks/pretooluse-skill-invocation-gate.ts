@@ -192,6 +192,22 @@ const SKILL_DENY_CONFIGS: Record<
       `the ${ref} skill requires addressing every reviewer comment before dismissal. ` +
       `Dismissing a review directly skips this accountability.`,
   }),
+  commit: (ref) => ({
+    action: "running git commit",
+    planStep: `Invoke the ${ref} skill before running git commit.`,
+    whyMatters:
+      `the ${ref} skill enforces the complete commit workflow ` +
+      `(task preflight, conventional message format, pre-commit hooks). ` +
+      `Running git commit directly skips these safeguards.`,
+  }),
+  push: (ref) => ({
+    action: "running git push",
+    planStep: `Invoke the ${ref} skill before running git push.`,
+    whyMatters:
+      `the ${ref} skill enforces the complete push workflow ` +
+      `(branch checks, CI readiness, PR state). ` +
+      `Running git push directly skips these safeguards.`,
+  }),
 }
 
 function buildDenyMessage(
@@ -199,14 +215,11 @@ function buildDenyMessage(
   reason: string,
   skillReferenceForAgent: string
 ): SwizHookOutput {
-  const verb = requiredSkill === "commit" ? "commit" : "push"
   const configFactory = SKILL_DENY_CONFIGS[requiredSkill]
   const { action, planStep, whyMatters } = configFactory?.(skillReferenceForAgent) ?? {
-    action: `git ${verb}`,
-    planStep: `Invoke the ${skillReferenceForAgent} skill before running git ${verb}.`,
-    whyMatters:
-      `the ${skillReferenceForAgent} skill enforces the complete ${verb} workflow ` +
-      `(branch checks, task preflight, message format). Running git ${verb} directly skips these safeguards.`,
+    action: `using ${requiredSkill}`,
+    planStep: `Invoke the ${skillReferenceForAgent} skill before continuing.`,
+    whyMatters: `the ${skillReferenceForAgent} skill enforces the required workflow. Bypassing it skips these safeguards.`,
   }
   return preToolUseDeny(
     `BLOCKED: ${action} requires the ${skillReferenceForAgent} skill to be used first.\n\n` +

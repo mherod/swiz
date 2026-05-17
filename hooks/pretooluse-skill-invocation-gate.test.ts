@@ -137,7 +137,7 @@ describe("pretooluse-skill-invocation-gate", () => {
     // In the actual project, 'commit' skill exists.
     if (result && Object.keys(result).length > 0) {
       expect((result as { systemMessage?: string }).systemMessage).toContain(
-        `BLOCKED: git commit requires the ${formatSkillReferenceForAgent("commit")} skill`
+        `BLOCKED: running git commit requires the ${formatSkillReferenceForAgent("commit")} skill`
       )
     } else {
       // If it didn't block, it means skillExists('commit') returned false.
