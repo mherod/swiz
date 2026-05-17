@@ -116,38 +116,38 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 deferred task remaining → stop steers back; ≥2 → stop allowed. Source: `stop-incomplete-tasks/incomplete-check-validator.ts::DEFERRED_SUBJECT_RE`. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout end; 20-min windows expire if invoked early. Recency resets after compaction.
+- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. Recency resets after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
-- On session resume, verify every `completed` commit/push task against `git status` — uncommitted/unpushed = phantom completion; reopen the task before new work.
-- After `CLAUDE.md` edit: `wc -w CLAUDE.md`; run `/compact-memory` near threshold. Post `gh issue create`: `/refine-issue <number>`. Use body files, not heredoc.
-- Verify CI jobs with `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before committing untracked `.lock` or local state.
+- Session resume: verify `completed` commit/push tasks against `git status` — uncommitted/unpushed = phantom; reopen before new work.
+- After `CLAUDE.md` edit: `wc -w CLAUDE.md`; `/compact-memory` near threshold. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
+- CI: `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before untracked `.lock`/local state.
 ## Standard Work Sequence
 - Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
-- Keep push task `in_progress` until `gh run view --json` confirms. No sleeps, no `--force-with-lease`, no `TaskUpdate`/`TaskList` during push/CI, no stop after unpushed commit. `TaskOutput` timeout ≤120000ms.
-- Resolve issues with `swiz issue resolve <number> --body "<text>"`; `Fixes #N` auto-closes on push. No `duplicate`/`wontfix` close without evidence.
+- Push task stays `in_progress` until `gh run view --json` confirms. No sleeps, no `--force-with-lease`, no `TaskUpdate`/`TaskList` during push/CI, no stop after unpushed commit. `TaskOutput` timeout ≤120000ms.
+- Close issues via `swiz issue resolve <number> --body "<text>"`; `Fixes #N` auto-closes on push. No `duplicate`/`wontfix` without evidence.
 ## Push and CI
-- Repo is solo (`mherod/swiz`); push to `main`. Run `swiz settings` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` is authoritative for collaboration/trunk policy.
+- Solo repo (`mherod/swiz`); push to `main`. Run `swiz settings` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` authoritative for collab/trunk policy.
 - CI `paths-ignore`: `.claude/**`, `docs/**`; markdown triggers CI.
-- Pre-push flow: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
-- No `--no-verify`. Pre-push runs `bun test`; CI runs `lint → typecheck → test`. If `bun test` fails with `proc.stdin.write` TypeError or `ReferenceError: Cannot access 'default' before initialization`, isolate failing test then retry.
-- After push: verify CI with `gh run view --json`; `in_progress` acceptable (pre-push ran full suite). Update tasks before stop.
+- Pre-push: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
+- No `--no-verify`. Pre-push: `bun test`; CI: `lint → typecheck → test`. On `proc.stdin.write` TypeError/`ReferenceError: Cannot access 'default' before initialization`, isolate failing test then retry.
+- After push: verify with `gh run view --json`; `in_progress` acceptable. Update tasks before stop.
 - `github.base_ref` empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
-- DON'T call `TaskUpdate`/`TaskList` after push starts; don't stop with unpushed commits; don't push `main`/`master` without collab guard; don't run branch/collab/PR checks after push.
-- `swiz settings` CI tests flaky (20–30s timeouts); pre-existing (run IDs 25944297820, 25944269296), dep bumps not at fault. No branch protection rules: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
+- DON'T: `TaskUpdate`/`TaskList` after push starts; stop with unpushed commits; push `main`/`master` without collab guard; run branch/collab/PR checks after push.
+- `swiz settings` CI tests flaky (20–30s), pre-existing, dep bumps not at fault. No branch protection: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
 - Never add `Co-Authored-By` trailers. Never use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
-- `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
-- Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
-- `swiz daemon status` fetches `/metrics`. Metrics: in-memory, tracked globally and per-project.
+- `src/commands/daemon.ts`: `Bun.serve` on port 7943; multi-project — scope state by `cwd`.
+- Endpoints: `/health`, `/dispatch`, `/status-line/snapshot` (POST), `/metrics`, `/ci-watch`, `/ci-watches`. Metrics in-memory, global + per-project; `swiz daemon status` fetches `/metrics`.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
-- **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
-- **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`).
+- `src/web/**`: browser-resolvable imports only (`./`, `../`, `/web/...`) — no bare package imports. After changes restart: `lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
+- **IssueStore TTL**: 5 min max (`DEFAULT_TTL_MS = 300_000`). `pr_branch_detail` stores `{ reviewDecision, requestedReviewers, commentCount, changesRequestedReviews }`; refreshed by `syncBranchData` when PRs change. **DO**: Use `getPrBranchDetail` in hooks instead of direct `gh api .../reviews` calls. Stale rows return `null` → fall through to API. **DON'T** exceed the 5-min cap on any cache.
+- **IssueStore refresh**: `posttooluse-upstream-sync-on-push` POSTs `/projects/sync-now` after `git push/pull/fetch`, `gh pr create/merge/close/edit/reopen/review`, `gh issue *`, `gh api …/issues|pulls PATCH`. Add new mutation patterns to `UPSTREAM_MUTATING_RE` in that hook.
 - **DO**: Prefer `gh api` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits.
 - **Hook installation**: `swiz install` writes dispatch entries. `sessionstart-self-heal` re-installs if missing. Run `swiz install` after hook changes; verify with `swiz doctor`.
 ## Settings Configuration
@@ -205,9 +205,9 @@ alwaysApply: false
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
 ## Issue Management
-- Close via `Fixes #N` in commits (not CLI). Read all comments first. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into the body — don't `gh issue comment` on your own issues. Pick highest priority autonomously.
+- Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
 ## Testing
-- DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure (run failing file in isolation first).
+- DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure.
 - Biome: break `expect()` chains after `.toBe(`, not `expect(`. Wrong: `expect(\n  longCall()\n).toBe(x)`. Correct: `expect(longCall()).toBe(\n  x\n)`.
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
