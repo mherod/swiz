@@ -366,7 +366,7 @@ describe("stop-required-skills", () => {
     const now = Date.now()
     await writeFile(
       transcriptPath,
-      [
+      `${[
         JSON.stringify({
           timestamp: new Date(now - 5000).toISOString(),
           type: "assistant",
@@ -382,7 +382,7 @@ describe("stop-required-skills", () => {
             content: [{ type: "tool_use", name: "Bash", input: { command: "echo test" } }],
           },
         }),
-      ].join("\n") + "\n"
+      ].join("\n")}\n`
     )
 
     const result = await runHook(dir, transcriptPath)
@@ -399,7 +399,7 @@ describe("stop-required-skills", () => {
       const recent = Date.now() - 1000
       await writeFile(
         transcriptPath,
-        [
+        `${[
           JSON.stringify({
             timestamp: new Date(old).toISOString(),
             type: "assistant",
@@ -415,7 +415,7 @@ describe("stop-required-skills", () => {
               content: [{ type: "tool_use", name: "Bash", input: { command: bashCommand } }],
             },
           }),
-        ].join("\n") + "\n"
+        ].join("\n")}\n`
       )
       return transcriptPath
     }
