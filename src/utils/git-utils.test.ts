@@ -378,6 +378,13 @@ describe("READ_CMD_RE", () => {
     expect(READ_CMD_RE.test("rg pattern")).toBe(true)
     expect(READ_CMD_RE.test("grep -r foo")).toBe(true)
   })
+  test("matches curl and wget", () => {
+    expect(READ_CMD_RE.test("curl -sIL https://example.com")).toBe(true)
+    expect(READ_CMD_RE.test('curl -sIL --max-redirs 20 "https://plugg.in/en-GB/onboarding"')).toBe(
+      true
+    )
+    expect(READ_CMD_RE.test("wget https://example.com")).toBe(true)
+  })
 })
 
 describe("RECOVERY_CMD_RE", () => {

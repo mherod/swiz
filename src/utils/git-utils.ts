@@ -537,8 +537,8 @@ export const FORCE_PUSH_RE = new RegExp(
   `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\b.*(?:--force(?:-with-lease(?:=[^\\s]+)?|-if-includes)?(?!\\S)|-[a-zA-Z]*f)`
 )
 
-/** Matches `ls`, `rg`, or `grep` — pure read commands. */
-export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
+/** Matches `ls`, `rg`, `grep`, `curl`, or `wget` — pure read commands. */
+export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep|curl|wget)\\b")
 
 /** Matches diagnostic/cleanup commands recommended by other hooks (e.g., index-lock recovery). */
 export const RECOVERY_CMD_RE = shellStatementCommandRe("(ps|lsof|trash|wc)\\b")

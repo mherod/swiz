@@ -1143,6 +1143,19 @@ describe("isTaskTrackingExemptShellCommand — swiz command exemption", () => {
   it("exempts 'bun test'", () => {
     expect(isTaskTrackingExemptShellCommand("bun test")).toBe(true)
   })
+
+  it("exempts 'curl' network fetches", () => {
+    expect(isTaskTrackingExemptShellCommand("curl -sIL https://example.com")).toBe(true)
+    expect(
+      isTaskTrackingExemptShellCommand(
+        'curl -sIL --max-redirs 20 "https://plugg.in/en-GB/onboarding"'
+      )
+    ).toBe(true)
+  })
+
+  it("exempts 'wget' network fetches", () => {
+    expect(isTaskTrackingExemptShellCommand("wget https://example.com")).toBe(true)
+  })
 })
 
 // ─── isTaskTrackingExemptShellCommand — setup/build commands ────────────────
