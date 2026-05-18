@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-05-18
+
+### Features
+
+- **File truncation guard** — Swiz now detects when a post-tool edit leaves
+  a source file empty or almost empty, then stops the session with repair
+  guidance before accidental data loss is missed.
+
+- **PR feedback workflow gates** — Sessions now get stronger guidance around
+  pull requests with unresolved change requests, including PR comment-read
+  checks, checkout protection for branches under review, and clearer context
+  before implementation continues.
+
+- **Tasks directory write protection** — Edit, Write, and NotebookEdit calls
+  targeting task-store files are now blocked, extending the existing read and
+  shell protections so task state stays managed through the task tools.
+
+### Improvements
+
+- **Settings source visibility** — `swiz settings` now shows audit-strictness
+  source labels alongside the rest of the effective settings, making project
+  versus global policy easier to inspect.
+
+- **Stop-flow CI escape hatch** — CI failure blockers can now point to a
+  tracking issue when a failure needs follow-up outside the current session,
+  keeping stop guidance explicit without hiding the unresolved work.
+
+### Fixes
+
+- **Git index lock cleanup** — Git lock recovery now uses the dispatching
+  directory's actual git directory and retries stale lock cleanup for up to
+  10 seconds before blocking, including worktree-safe handling.
+
+- **Auto-memory hook compatibility** — Automatic memory writes are now exempt
+  from sandboxed-edit and update-memory enforcement paths, avoiding false
+  blocks when Swiz is applying its own memory updates.
+
 ## 2026-05-17
 
 ### Features
