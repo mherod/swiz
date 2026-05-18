@@ -60,8 +60,10 @@ async function runSwiz(
     env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
   void proc.stdin.end()
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   const settingsPath = getSwizSettingsPath(home)
   if (settingsPath) invalidateSettingsCache(settingsPath)
