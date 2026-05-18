@@ -612,7 +612,10 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
       stderr: "pipe",
       env: { ...process.env, HOME: fakeHome },
     })
-    const stdout = await new Response(proc.stdout).text()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     expect(stdout).toContain("alpha-val")
     expect(stdout).toContain("beta-val")
