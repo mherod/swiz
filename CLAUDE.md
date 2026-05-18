@@ -20,7 +20,7 @@ alwaysApply: false
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude; **DON'T** spawn `claude` CLI.
 - Extract helpers; consolidate duplicate utilities into a canonical module (e.g., `agent-paths.ts`) and re-export.
 ## Agent Detection
-- `src/agents.ts` owns agent metadata (`envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`). Add signals there first.
+- `src/agents.ts` owns agent metadata (`envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`).
 - Runtime detection in `src/agent-paths.ts` (re-exported by `src/detect.ts`): `detectCurrentAgentFromEnv(env)` checks `envVars` in `AGENTS` order; `detectCurrentAgent()` falls back to parent `processPattern`; `isRunningInAgent()` is shell/shim-only (non-TTY stdin, `CURSOR_TRACE_ID`, `CLAUDECODE`).
 - Translation is metadata-driven (`translateMatcher`, `translateEvent`, `toolNameForCurrentAgent`, `resolveTranslationAgent`). Never hard-code agent tool/event names. Precedence: explicit → env+aliases → unique observed tools → `detectCurrentAgent()`.
 - Daemon dispatch preserves origin env via `_env` (set by `swiz dispatch`, applied by `applyDispatchEnv()`); daemon hooks use `_env` + `detectCurrentAgentFromEnv()`, not launchd env.
@@ -40,7 +40,7 @@ alwaysApply: false
 - Never duplicate preToolUse matcher strings (`manifest.find()` returns first) — add to existing group. Never add sync hooks to unmatched preToolUse groups. Never hard-code agent-specific event/tool names in hook scripts.
 - `classifyHookOutput` validates stdout against `hookOutputSchema`; `"invalid-schema"` on failure. Requires `systemMessage`/`reason`/`stopReason`/`additionalContext`; `{}` valid. Stop normalized via `stopHookOutputSchema`.
 - `lefthook.yml` requires `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` (omitting triggers global-link check). Hooks scanning staged diffs must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` (hook source self-triggers).
-- **Inline SwizHook**: Use `preToolUseAllow()`/`preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`; `if (import.meta.main) await runSwizHookAsMain(hook)` — never also `Bun.stdin.json()` (double-read = silent exit 0). Safe imports: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/{edit-projection,inline-hook-helpers,package-detection}`, `hooks/schemas`. Avoid `hook-utils.ts`/`git-utils.ts` (circular).
+- **Inline SwizHook**: Use `preToolUseAllow()`/`preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`. Never also `Bun.stdin.json()` (double-read). Safe: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/`, `hooks/schemas`. Avoid `hook-utils.ts`/`git-utils.ts` (circular).
 - **Debt marker**: `//` comments with keywords trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` or `"TO" + "DO"` regex.
 - **Phase 2 extraction**: 6 modules (types→context→validators→action-plan→evaluate→wrapper). Export from core, import by orchestrator only; delete re-export wrappers. Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
 ## Branch Change Detection
@@ -163,12 +163,11 @@ alwaysApply: false
 - `src/debug-logging.test.ts` allowlists `console.*`; elsewhere use `debugLog` from `./debug.ts`. Allowlist edits need a justification comment.
 ## Conventions
 - No top-level `await` in `src/`; use lazy async (`let cache; async load() {...}`). Hooks exempt.
-- DON'T embed ESC (0x1b) in regex literals; construct at runtime — see `hooks/posttooluse-task-output.ts` `ANSI_RE`.
-- Bun test output parse: `/\bRan \d+ tests? across \d+ files?\./`; absent → emit "unknown number of". Strip ANSI before matching.
+- DON'T embed ESC (0x1b) in regex; construct at runtime. Bun test output: `/\bRan \d+ tests? across \d+ files?\./`; strip ANSI before match.
 - **CRITICAL self-ref PreToolUse**: edit import before usage. Reversed order deadlocks — recover via `git checkout -- <file>`. Rename declaration + all usages atomically; DON'T add unrequested renames. Remove fn + all usages atomically.
 - DO: Read every file in full before editing — snippets miss conflicts.
 - ANSI escape codes direct; no color libraries.
-- `Bun.spawn`: use `["sh", "-c", cmd]` for shell; drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
+- `Bun.spawn`: use `["sh", "-c", cmd]` for shell. **Critical**: drain stdout/stderr **concurrently** via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`. **Why**: Sequential awaiting (`await stdout; await stderr`) causes pipe buffer overflow when stderr fills while stdout is still draining, triggering timeouts under CI load (issue #655). For reusable pattern, use `spawnAndCapture()` from `src/test-utils/subprocess-helper.ts`.
 - DON'T pass multi-param functions to `.flatMap()`/`.map()` — injected `(value, index, array)` args corrupt optional positionals. Wrap: `.flatMap((b) => fn(b))`.
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
@@ -177,7 +176,7 @@ alwaysApply: false
 - On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md`, resolve immediately.
 - Unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` / `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
-- DO: Own every diagnostic — investigate before completing tasks. Parser misses → dump 15-30 live entries with all attrs in one pass. Empty recency: print timestamps vs cutoff first.
+- DO: Investigate before completing tasks. Parser misses → dump entries with attrs. Empty recency → print timestamps vs cutoff.
 - DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action.
 - DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry the same command after a hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
