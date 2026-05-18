@@ -9,8 +9,9 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { unlink } from "node:fs/promises"
+import { join } from "node:path"
 import { compact } from "lodash-es"
-import { GIT_DIR_NAME, GIT_INDEX_LOCK, git, joinGitPath } from "../src/git-helpers.ts"
+import { GIT_DIR_NAME, GIT_INDEX_LOCK, git } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
@@ -26,19 +27,18 @@ import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const LOCK_RELATIVE_PATH = `${GIT_DIR_NAME}/${GIT_INDEX_LOCK}`
-const WAIT_TIMEOUT_MS = 8000
 const WAIT_INTERVAL_MS = 200
+const LOCK_RELEASE_TIMEOUT_MS = 10_000
 const LSOF_TIMEOUT_MS = 500
 const MAX_ANCESTRY_DEPTH = 20
-const REMOVE_MAX_RETRIES = 5
-const REMOVE_RETRY_DELAY_MS = 100
+const REMOVE_RETRY_DELAY_MS = 200
 const STALE_LOCK_AGE_MS = 10_000
 
 // ── Validation & resolution ─────────────────────────────────────────────────
 
 async function validateMainInputs(
   input: ShellHookInput
-): Promise<{ cwd: string; repoRoot: string; lockPath: string } | null> {
+): Promise<{ repoRoot: string; lockPath: string } | null> {
   // Only applies to shell tools running git commands.
   if (!isShellTool(input.tool_name ?? "")) return null
 
@@ -51,31 +51,39 @@ async function validateMainInputs(
   const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
   if (!repoRoot) return null // Not in a git repo; let git itself report the error.
 
-  const lockPath = joinGitPath(repoRoot, GIT_INDEX_LOCK)
+  const gitDir = await git(["rev-parse", "--absolute-git-dir"], cwd)
+  if (!gitDir) return null
+  const lockPath = join(gitDir, GIT_INDEX_LOCK)
 
   // Quick exit if no lock exists
   if (!(await Bun.file(lockPath).exists())) return null
 
-  return { cwd, repoRoot, lockPath }
+  return { repoRoot, lockPath }
 }
 
 async function handleLockResolution(lockPath: string, repoRoot: string): Promise<SwizHookOutput> {
+  const releaseDeadlineMs = Date.now() + LOCK_RELEASE_TIMEOUT_MS
+
   // Wait for lock to resolve or git process to finish
-  const { lockExists, gitActive } = await waitForLockResolution(lockPath, repoRoot)
+  const { lockExists, gitActive } = await waitForLockResolution(
+    lockPath,
+    repoRoot,
+    releaseDeadlineMs
+  )
 
   if (!lockExists) {
     return preToolUseAllow(`\`${LOCK_RELATIVE_PATH}\` resolved automatically — proceeding.`)
   }
 
   if (!gitActive) {
-    return await autoRemoveStaleLock(lockPath)
+    return await autoRemoveStaleLock(lockPath, releaseDeadlineMs)
   }
 
   // Git process appears active, but the lock may be stale if it's old enough.
   // Attempt removal for aged locks — pgrep false-positives are common.
   const lockAge = await getLockAgeMs(lockPath)
   if (lockAge >= STALE_LOCK_AGE_MS) {
-    return await autoRemoveStaleLock(lockPath)
+    return await autoRemoveStaleLock(lockPath, releaseDeadlineMs)
   }
 
   // A relevant git process IS active and lock is recent — block to prevent corruption.
@@ -98,9 +106,16 @@ async function handleLockResolution(lockPath: string, repoRoot: string): Promise
   )
 }
 
-async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
-  // Retry removal up to REMOVE_MAX_RETRIES times to handle transient failures.
-  for (let attempt = 1; attempt <= REMOVE_MAX_RETRIES; attempt++) {
+async function autoRemoveStaleLock(
+  lockPath: string,
+  releaseDeadlineMs: number
+): Promise<SwizHookOutput> {
+  let attempt = 0
+
+  // Retry until the shared release deadline to handle transient permissions,
+  // racing cleanup, and short-lived lock recreation.
+  while (attempt === 0 || Date.now() < releaseDeadlineMs) {
+    attempt++
     try {
       // Lock may have already been removed by another process or a prior attempt.
       if (!(await Bun.file(lockPath).exists())) {
@@ -127,9 +142,9 @@ async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
       // Permission error or similar — retry if attempts remain.
     }
 
-    if (attempt < REMOVE_MAX_RETRIES) {
-      await new Promise((resolve) => setTimeout(resolve, REMOVE_RETRY_DELAY_MS))
-    }
+    const remainingMs = releaseDeadlineMs - Date.now()
+    if (remainingMs <= 0) break
+    await sleep(Math.min(REMOVE_RETRY_DELAY_MS, remainingMs))
   }
 
   // All retries exhausted — do NOT let the git command through if the lock still exists.
@@ -139,7 +154,7 @@ async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
 
   return preToolUseDeny(
     [
-      `\`${LOCK_RELATIVE_PATH}\` still present after ${REMOVE_MAX_RETRIES} removal attempts.`,
+      `\`${LOCK_RELATIVE_PATH}\` still present after retrying for up to ${LOCK_RELEASE_TIMEOUT_MS / 1000}s.`,
       "",
       "This lock will cause your git command to fail with:",
       `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
@@ -156,22 +171,30 @@ async function autoRemoveStaleLock(lockPath: string): Promise<SwizHookOutput> {
   )
 }
 
-async function waitForLockResolution(lockPath: string, repoRoot: string) {
-  const start = Date.now()
+async function waitForLockResolution(
+  lockPath: string,
+  repoRoot: string,
+  releaseDeadlineMs: number
+) {
   let gitActive = true
   let lockExists = true
 
-  while (Date.now() - start < WAIT_TIMEOUT_MS) {
+  while (Date.now() < releaseDeadlineMs) {
     lockExists = await Bun.file(lockPath).exists()
     if (!lockExists) break
 
     gitActive = await isGitProcessActiveForRepo(repoRoot)
     if (!gitActive) break
 
-    await new Promise((resolve) => setTimeout(resolve, WAIT_INTERVAL_MS))
+    await sleep(Math.min(WAIT_INTERVAL_MS, releaseDeadlineMs - Date.now()))
   }
 
   return { lockExists, gitActive }
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return
+  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function getLockAgeMs(lockPath: string): Promise<number> {
@@ -277,7 +300,7 @@ const pretooluseGitIndexLock: SwizShellHook = {
   name: "pretooluse-git-index-lock",
   event: "preToolUse",
   matcher: "Bash",
-  timeout: 5,
+  timeout: 12,
 
   async run(input) {
     try {

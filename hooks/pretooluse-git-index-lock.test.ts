@@ -17,19 +17,63 @@ let REPO_WITHOUT_LOCK = ""
 async function createLockedRepo(name: string): Promise<string> {
   const rawDir = join(TMP, name)
   mkdirSync(rawDir, { recursive: true })
-  const proc = Bun.spawn(["git", "init"], { cwd: rawDir, stdout: "pipe", stderr: "pipe" })
-  await proc.exited
+  await runCommandOutput(["git", "init"], rawDir)
   const resolved = realpathSync(rawDir)
   await Bun.write(joinGitPath(resolved, GIT_INDEX_LOCK), "")
   return resolved
+}
+
+async function runCommandOutput(args: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn(args, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: neutralAgentEnv(),
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) {
+    throw new Error(`${args.join(" ")} failed: ${stderr}`)
+  }
+  return stdout.trim()
+}
+
+async function createLockedWorktree(name: string): Promise<{ worktree: string; lockPath: string }> {
+  const mainRaw = join(TMP, `${name}-main`)
+  const worktreeRaw = join(TMP, `${name}-worktree`)
+  mkdirSync(mainRaw, { recursive: true })
+  await runCommandOutput(["git", "init"], mainRaw)
+  await runCommandOutput(
+    [
+      "git",
+      "-c",
+      "user.name=Swiz Test",
+      "-c",
+      "user.email=swiz-test@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "init",
+    ],
+    mainRaw
+  )
+  await runCommandOutput(["git", "worktree", "add", worktreeRaw], mainRaw)
+
+  const worktree = realpathSync(worktreeRaw)
+  const gitDir = await runCommandOutput(["git", "rev-parse", "--absolute-git-dir"], worktree)
+  const lockPath = join(gitDir, GIT_INDEX_LOCK)
+  await Bun.write(lockPath, "")
+  return { worktree, lockPath }
 }
 
 beforeAll(async () => {
   const rawTmp = join(tmpdir(), `swiz-git-lock-test-${process.pid}`)
   const rawClean = join(rawTmp, "repo-clean")
   mkdirSync(rawClean, { recursive: true })
-  const cleanProc = Bun.spawn(["git", "init"], { cwd: rawClean, stdout: "pipe", stderr: "pipe" })
-  await cleanProc.exited
+  await runCommandOutput(["git", "init"], rawClean)
   TMP = realpathSync(rawTmp)
   REPO_WITHOUT_LOCK = realpathSync(rawClean)
 })
@@ -139,9 +183,51 @@ describe("pretooluse-git-index-lock", () => {
       },
       { timeout: 30_000 }
     )
+
+    test(
+      "worktree lock is resolved from the dispatching directory git dir",
+      async () => {
+        const { worktree, lockPath } = await createLockedWorktree("auto-resolve-worktree")
+        const result = await runHook("git status", worktree)
+        expect(result.decision).toBe("allow")
+        expect(await Bun.file(lockPath).exists()).toBe(false)
+      },
+      { timeout: 30_000 }
+    )
   })
 
   describe("denies when lock cannot be removed", () => {
+    test(
+      "git command is allowed when transient permissions release before deadline",
+      async () => {
+        const repo = await createLockedRepo("transient-permission-release")
+        const gitDir = join(repo, ".git")
+        Bun.spawnSync(["chmod", "500", gitDir])
+        const restoreProc = Bun.spawn(
+          [
+            "bun",
+            "-e",
+            `await Bun.sleep(900); Bun.spawnSync(["chmod", "755", ${JSON.stringify(gitDir)}]);`,
+          ],
+          {
+            stdout: "ignore",
+            stderr: "ignore",
+            env: neutralAgentEnv(),
+          }
+        )
+
+        try {
+          const result = await runHook("git status", repo)
+          expect(result.decision).toBe("allow")
+          expect(result.reason).toContain("Auto-removed")
+        } finally {
+          Bun.spawnSync(["chmod", "755", gitDir])
+          await restoreProc.exited
+        }
+      },
+      { timeout: 30_000 }
+    )
+
     test(
       "git command is denied after retries on an immutable lock",
       async () => {
@@ -164,7 +250,7 @@ describe("pretooluse-git-index-lock", () => {
         const result = await runHook("git status", repo)
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("index.lock")
-        expect(result.reason).toContain("removal attempts")
+        expect(result.reason).toContain("retrying for up to 10s")
         // Restore permissions so cleanup can remove the repo.
         try {
           Bun.spawnSync(["chflags", "nouchg", lockPath])
