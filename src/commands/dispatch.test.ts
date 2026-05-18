@@ -160,8 +160,10 @@ describe("dispatch routing", () => {
     })
 
     // Intentionally do not write or close stdin.
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
@@ -186,8 +188,10 @@ describe("dispatch routing", () => {
     await proc.stdin.write("{")
     await proc.stdin.end()
 
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
@@ -218,8 +222,10 @@ describe("dispatch routing", () => {
     )
     await proc.stdin.end()
 
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
@@ -243,7 +249,10 @@ describe("dispatch routing", () => {
     await proc.stdin.write("{")
     await proc.stdin.end()
 
-    const stdout = await new Response(proc.stdout).text()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
@@ -270,7 +279,10 @@ describe("dispatch routing", () => {
     await proc.stdin.write("{")
     await proc.stdin.end()
 
-    const stdout = await new Response(proc.stdout).text()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
@@ -417,8 +429,10 @@ describe("dispatch replay", () => {
     })
     await proc.stdin.write(JSON.stringify(payload))
     await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode }
   }
@@ -484,8 +498,10 @@ describe("dispatch replay", () => {
       stderr: "pipe",
     })
     void proc.stdin.end()
-    await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [_stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     expect(proc.exitCode).not.toBe(0)
     expect(stderr).toContain("replay <event>")
@@ -499,8 +515,10 @@ describe("dispatch replay", () => {
     })
 
     // Intentionally do not write or close stdin.
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     expect(proc.exitCode).toBe(1)

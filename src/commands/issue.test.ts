@@ -55,8 +55,10 @@ async function runCli(args: string[], binDir: string): Promise<RunResult> {
     stderr: "pipe",
     env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
   })
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   return { exitCode: proc.exitCode, stdout, stderr }
 }
