@@ -145,11 +145,28 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(hso?.permissionDecision).toBe("allow")
   })
 
-  test("blocks memory directory writes with /update-memory redirect guidance", async () => {
+  test("allows auto-memory .md writes to ~/.claude/projects/*/memory/ directory", async () => {
     const cwd = await createTempDir()
     const fakeHome = await createTempDir()
-    const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
+    const memoryPath = join(
+      fakeHome,
+      ".claude",
+      "projects",
+      "test-project",
+      "memory",
+      "feedback_testing.md"
+    )
     const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
+  })
+
+  test("blocks non-markdown writes to memory directory with /update-memory redirect guidance", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const nonMdPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "data.json")
+    const result = await runHook(cwd, "Write", nonMdPath, { fakeHomeOverride: fakeHome })
     expect(result.exitCode).toBe(0)
     const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
     expect(hso?.permissionDecision).toBe("deny")

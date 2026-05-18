@@ -20,6 +20,11 @@ import {
   preToolUseAllowWithContext,
   preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
+
+// Matches individual auto-memory entries under ~/.claude/projects/<key>/memory/<slug>.md.
+// These are written by the built-in auto-memory system, exempt from sandboxed-edits restrictions.
+const AUTO_MEMORY_PATH_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\][^/\\]+\.md$/i
+
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
 import {
   isHiddenTopLevelHomePath,
@@ -223,6 +228,14 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     // operates in a uniform canonical namespace — no mix of logical and real paths.
     const cwd = await resolveCanonical(hookCwd)
     const target = await resolveCanonical(filePath)
+
+    // 3a. Auto-memory writes are always allowed — outside cwd but owned by the agent.
+    if (AUTO_MEMORY_PATH_RE.test(target.replace(/\\/g, "/"))) {
+      return preToolUseAllowWithContext(
+        "Auto-memory write allowed: within agent memory directory.",
+        SAFE_READ_ONLY_INSPECTION_HINT
+      )
+    }
 
     // 3. Check for blocked hidden home-directory paths before broad sandbox roots.
     const hiddenHomePathResult = await checkHiddenHomePath(target, cwd)
