@@ -5,6 +5,15 @@
 // as `_transcriptSummary`. Extracted from hooks/hook-utils.ts (issue #84).
 
 import { normalizeCommand } from "./command-utils.ts"
+import {
+  extractPathValuesFromToolInput,
+  extractSkillNameFromSlashPrompt,
+  extractSkillNameFromToolInput,
+  extractSkillNamesFromPathValues,
+  extractSkillNamesFromShellSkillReadCommand,
+  extractSkillNamesFromUserText,
+  stripUserQueryWrapper,
+} from "./skill-usage.ts"
 import { isShellTool, isTaskTool, READ_TOOLS } from "./tool-matchers.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
@@ -274,40 +283,14 @@ function accumulateShellCommand(block: ToolBlock, name: string, acc: SummaryAccu
   if (!acc.hasGitPush && GIT_PUSH_PATTERN.test(cmd)) acc.hasGitPush = true
 }
 
-const SKILL_MD_DIRECTORY_PATH_RE =
-  /(?:^|[\\/])\.?skills[\\/](?:[^\\/\s"'`]+[\\/])*([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
-const SKILL_MD_BASENAME_PATH_RE = /(?:^|[\\/])([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/gi
-
-const SKILL_MD_SHELL_READ_RE = /^(?:(?:cat|bat|less|more|head|tail|nl|grep|rg)\b|sed\s+-n\b)/i
-
-function extractSkillsFromSkillMdPathText(text: string, allowBasenamePath = false): string[] {
-  const skills: string[] = []
-  for (const match of text.matchAll(SKILL_MD_DIRECTORY_PATH_RE)) {
-    if (match[1] && !skills.includes(match[1])) skills.push(match[1])
-  }
-  if (!allowBasenamePath) return skills
-  for (const match of text.matchAll(SKILL_MD_BASENAME_PATH_RE)) {
-    if (match[1] && !skills.includes(match[1])) skills.push(match[1])
-  }
-  return skills
-}
-
-function extractPathValues(input: ToolBlock["input"]): string[] {
-  if (!input) return []
-  const paths = [input.file_path, input.path].filter((value): value is string => Boolean(value))
-  if (Array.isArray(input.paths)) paths.push(...input.paths.filter(Boolean))
-  return paths
-}
-
 function extractDirectSkillReadInvocations(block: ToolBlock, name: string): string[] {
   if (READ_TOOLS.has(name)) {
-    return extractPathValues(block.input).flatMap((path) => extractSkillsFromSkillMdPathText(path))
+    return extractSkillNamesFromPathValues(extractPathValuesFromToolInput(block.input))
   }
 
   if (!isShellTool(name)) return []
   const command = normalizeCommand(extractShellCommand(block, name)).trim()
-  if (!SKILL_MD_SHELL_READ_RE.test(command)) return []
-  return extractSkillsFromSkillMdPathText(command, true)
+  return extractSkillNamesFromShellSkillReadCommand(command)
 }
 
 function appendSkillInvocations(skills: string[], acc: SummaryAccumulator): void {
@@ -323,7 +306,7 @@ function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   acc.toolNames.push(name)
   accumulateShellCommand(block, name, acc)
   if (name === "Skill") {
-    const skill = block?.input?.skill ?? ""
+    const skill = extractSkillNameFromToolInput(block.input)
     if (skill) acc.skillInvocations.push(skill)
   }
   appendSkillInvocations(extractDirectSkillReadInvocations(block, name), acc)
@@ -355,7 +338,7 @@ function collectSkillUsageEventsFromBlock(
 ): CurrentSessionUsageEvent[] {
   const skills = new Set<string>()
   if (name === "Skill") {
-    const skill = block?.input?.skill ?? ""
+    const skill = extractSkillNameFromToolInput(block.input)
     if (skill) skills.add(skill)
   }
   for (const skill of extractDirectSkillReadInvocations(block, name)) skills.add(skill)
@@ -375,45 +358,6 @@ function collectToolUsageEventsFromBlock(
   events.push(...collectShellCommandUsageEvents(block, name, turnIndex, timestamp))
   events.push(...collectSkillUsageEventsFromBlock(block, name, turnIndex, timestamp))
   return events
-}
-
-/** Match `<command-name>skill-name</command-name>` tags in user messages (legacy skill expansion). */
-const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
-
-/** Match a leading skill prompt at the start of queued/user text (`/skill ...` or `$skill ...`). */
-const QUEUED_SKILL_PROMPT_RE = /^\s*[/$]([a-z][a-z0-9-]*)\b/
-
-/**
- * Match the skill activation banner emitted by Claude Code when a slash-command
- * skill is loaded into the conversation. The banner appears in user messages as
- * `Base directory for this skill: <abs-path>/skills/<skill-name>` (followed by
- * the SKILL.md content). This is the most reliable post-load marker because it
- * only fires once the skill content is actually injected into the agent.
- */
-const SKILL_DIR_BANNER_RE = /Base directory for this skill:\s*\S*?\/skills\/([a-z][a-z0-9-]*)\b/g
-
-function extractSkillsFromLegacyCommandTags(text: string): string[] {
-  if (!text) return []
-  const skills: string[] = []
-  for (const match of text.matchAll(COMMAND_NAME_RE)) {
-    if (match[1]) skills.push(match[1])
-  }
-  return skills
-}
-
-function extractSkillsFromActivationBanner(text: string): string[] {
-  if (!text) return []
-  const skills: string[] = []
-  for (const match of text.matchAll(SKILL_DIR_BANNER_RE)) {
-    if (match[1]) skills.push(match[1])
-  }
-  return skills
-}
-
-function extractSkillFromSlashPrompt(text: string | undefined | null): string | null {
-  if (!text) return null
-  const match = QUEUED_SKILL_PROMPT_RE.exec(text)
-  return match?.[1] ?? null
 }
 
 interface UserMessageContentBlock {
@@ -447,11 +391,6 @@ function extractTextFromUserMessage(
   )
 }
 
-function stripUserQueryWrapper(text: string): string {
-  const match = text.match(/^\s*<user_query>\s*([\s\S]*?)\s*<\/user_query>\s*$/)
-  return match?.[1]?.trim() ?? text
-}
-
 function extractUserEntryText(entry: ParsedTranscriptEntry): string {
   const texts = [
     extractTextFromUserMessage(entry.message?.content),
@@ -468,20 +407,20 @@ function extractUserSkillExpansions(line: string): string[] {
   // entries with a leading-slash prompt in their content field.
   if (entry.type === "queue-operation" && entry.operation === "enqueue") {
     const text = extractTextFromUserMessage(entry.content)
-    const skill = extractSkillFromSlashPrompt(text)
+    const skill = extractSkillNameFromSlashPrompt(text)
     return skill ? [skill] : []
   }
 
   // The same prompt is also persisted as an attachment of type queued_command.
   if (entry.type === "attachment" && entry.attachment?.type === "queued_command") {
-    const skill = extractSkillFromSlashPrompt(entry.attachment.prompt)
+    const skill = extractSkillNameFromSlashPrompt(entry.attachment.prompt)
     return skill ? [skill] : []
   }
 
   if (entry.type === "response_item" && entry.payload?.type === "message") {
     if (entry.payload.role !== "user") return []
     const text = extractTextFromUserMessage(entry.payload.content)
-    const skill = extractSkillFromSlashPrompt(text)
+    const skill = extractSkillNameFromSlashPrompt(text)
     return skill ? [skill] : []
   }
 
@@ -490,11 +429,7 @@ function extractUserSkillExpansions(line: string): string[] {
   // Claude Code versions). Detect both so the gate works across formats.
   if (entry.type === "user" || entry.type === "human") {
     const text = extractUserEntryText(entry)
-    const skills = extractSkillsFromActivationBanner(text)
-    skills.push(...extractSkillsFromLegacyCommandTags(text))
-    const promptedSkill = extractSkillFromSlashPrompt(text)
-    if (promptedSkill) skills.push(promptedSkill)
-    return skills
+    return extractSkillNamesFromUserText(text)
   }
 
   return []

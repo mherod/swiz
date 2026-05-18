@@ -1,6 +1,12 @@
 import { format } from "date-fns"
 import type { DisplayTurn } from "../scripts/transcript/monitor-state.ts"
 import {
+  extractSkillInvocationPreamble,
+  extractSkillNameFromSkillMdPathText,
+  extractSkillNamesFromShellSkillReadCommand,
+  startsWithSkillInvocationPreamble,
+} from "./skill-usage.ts"
+import {
   type ContentBlock,
   extractText,
   extractTextFromUnknownContent,
@@ -12,16 +18,6 @@ import {
 } from "./transcript-utils.ts"
 
 // ─── Tool-use label formatting ────────────────────────────────────────────────
-
-const SKILL_MD_SHELL_READ_RE = /^(?:cat|bat|less|more|head|tail|nl|grep|rg)\b|^sed\s+-n\b/i
-const SKILL_MD_PATH_RE =
-  /(?:^|[\\/])\.?skills[\\/](?:[^\\/\s"'`]+[\\/])*([a-z][a-z0-9-]*)[\\/]SKILL\.md\b/i
-
-function tryExtractSkillFromSkillMd(value: string, commandMode = false): string | null {
-  if (commandMode && !SKILL_MD_SHELL_READ_RE.test(value)) return null
-  const match = value.match(SKILL_MD_PATH_RE)
-  return match?.[1] ?? null
-}
 
 const TOOL_KEY_PARAM: Record<string, string> = {
   Read: "file_path",
@@ -53,12 +49,12 @@ export function formatToolUse(name: string, input: NonNullable<ToolUseBlock["inp
   if (param && input[param] !== undefined) {
     const val = String(input[param])
     if (param === "command") {
-      const skill = tryExtractSkillFromSkillMd(val, true)
+      const skill = extractSkillNamesFromShellSkillReadCommand(val)[0]
       if (skill) return `skill(${skill})`
       return `${name}(${val})`
     }
     if (param === "file_path") {
-      const skill = tryExtractSkillFromSkillMd(val)
+      const skill = extractSkillNameFromSkillMdPathText(val)
       if (skill) return `skill(${skill})`
     }
     return `${name}(${truncateLabel(val)})`
@@ -75,39 +71,9 @@ const COMMAND_TAG_RE =
   /<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)>([\s\S]*?)<\/\1>/gi
 const SYSTEM_TAG_START_RE =
   /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)>/i
-const SKILL_BASE_DIR_RE = /^Base directory for this skill:\s*(.+)$/im
-const SKILL_BASE_DIR_START_RE = /^\s*Base directory for this skill:/i
-const SKILL_CONTENT_HEAD_RE = /^SKILL CONTENT\s+(\S+)/im
-const SKILL_CONTENT_START_RE = /^\s*SKILL CONTENT\s+\S+/i
 
 function stripAnsiLike(text: string): string {
   return text.replace(ANSI_STRIP_RE, "").replace(/\[\d+(?:;\d+)*m/g, "")
-}
-
-interface SkillInvocation {
-  /** Inferred skill name (without leading slash). */
-  name: string | null
-  /** Text remaining after the skill body is stripped. */
-  rest: string
-}
-
-/**
- * Detect the "Base directory for this skill: …" or "SKILL CONTENT …" preamble
- * that the runtime injects when a skill is invoked. When found, the entire
- * skill body is treated as boilerplate and removed from the display string.
- */
-function extractSkillInvocation(text: string): SkillInvocation | null {
-  const baseMatch = SKILL_BASE_DIR_RE.exec(text)
-  if (baseMatch) {
-    const path = baseMatch[1]!.trim()
-    const name = path.split("/").filter(Boolean).pop() ?? null
-    return { name, rest: text.slice(0, baseMatch.index).trim() }
-  }
-  const headMatch = SKILL_CONTENT_HEAD_RE.exec(text)
-  if (headMatch) {
-    return { name: headMatch[1]!.trim() || null, rest: text.slice(0, headMatch.index).trim() }
-  }
-  return null
 }
 
 export interface PrettyUserMessage {
@@ -127,11 +93,11 @@ export interface PrettyUserMessage {
  */
 export function prettifyUserMessageText(raw: string): PrettyUserMessage | undefined {
   const startsWithSystemTag = SYSTEM_TAG_START_RE.test(raw)
-  const startsWithBareSkill = SKILL_BASE_DIR_START_RE.test(raw) || SKILL_CONTENT_START_RE.test(raw)
+  const startsWithBareSkill = startsWithSkillInvocationPreamble(raw)
   if (!startsWithSystemTag && !startsWithBareSkill) return undefined
 
   if (!startsWithSystemTag && startsWithBareSkill) {
-    const skill = extractSkillInvocation(raw)
+    const skill = extractSkillInvocationPreamble(raw)
     if (skill) {
       const slash = skill.name ? `/${skill.name}` : "(skill body)"
       const label = skill.rest ? `${slash}\n${skill.rest}` : slash
@@ -153,7 +119,7 @@ export function prettifyUserMessageText(raw: string): PrettyUserMessage | undefi
   if (Object.keys(tags).length === 0) return undefined
   remainder = (remainder + raw.slice(lastEnd)).trim()
 
-  const skill = extractSkillInvocation(remainder)
+  const skill = extractSkillInvocationPreamble(remainder)
   if (skill) remainder = skill.rest
 
   if ("command-name" in tags) {

@@ -36,7 +36,7 @@ function makeInput(filePath: string, cwd: string, toolName = "Edit") {
 }
 
 function lines(n: number): string {
-  return Array.from({ length: n }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n") + "\n"
+  return `${Array.from({ length: n }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n")}\n`
 }
 
 describe("posttooluse-file-truncation-guard", () => {

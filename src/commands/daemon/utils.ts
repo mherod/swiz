@@ -8,6 +8,11 @@ import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./type
 export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
 
 import { projectKeyFromCwd } from "../../project-key.ts"
+import {
+  extractSkillNameFromCapturedSkillDetail,
+  extractSkillNameFromToolInput,
+  formatSkillToolInputDetail,
+} from "../../skill-usage.ts"
 import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
 import { extractText } from "../../transcript-utils.ts"
 
@@ -118,9 +123,8 @@ function extractPathValue(input: Record<string, any>): string | undefined {
 }
 
 function summarizeFileOrCommandInput(input: Record<string, any>): string | null {
-  if (typeof input.skill === "string") {
-    return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
-  }
+  const skillDetail = formatSkillToolInputDetail(input)
+  if (skillDetail) return skillDetail
   const pathVal = extractPathValue(input)
   if (pathVal !== undefined) return pathVal
   if (typeof input.command === "string") return truncate(input.command, 80)
@@ -220,20 +224,13 @@ export function mergeCapturedToolCalls(...sources: CapturedToolCall[][]): Captur
     : merged
 }
 
-function recoverSkillInvocation(detail: string): string | null {
-  const trimmed = detail.trim()
-  if (!trimmed) return null
-  const [skill] = trimmed.split(/\s+/, 1)
-  return skill || null
-}
-
 function usageEventsFromCapturedCalls(calls: CapturedToolCall[]): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
   for (let index = 0; index < calls.length; index++) {
     const call = calls[index]!
     events.push({ kind: "tool", value: call.name, turnIndex: index, timestamp: call.timestamp })
     if (call.name === "Skill") {
-      const skill = recoverSkillInvocation(call.detail)
+      const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
       if (skill)
         events.push({ kind: "skill", value: skill, turnIndex: index, timestamp: call.timestamp })
     }
@@ -248,7 +245,7 @@ export function buildSessionToolUsageStateFromCapturedCalls(
   const skillInvocations: string[] = []
   for (const call of calls) {
     if (call.name !== "Skill") continue
-    const skill = recoverSkillInvocation(call.detail)
+    const skill = extractSkillNameFromCapturedSkillDetail(call.detail)
     if (skill) skillInvocations.push(skill)
   }
 
@@ -302,9 +299,10 @@ export function captureSessionToolUsage(
   const timestamp = new Date(nowMs).toISOString()
   entry.toolNames.push(toolName)
   entry.events?.push({ kind: "tool", value: toolName, turnIndex, timestamp })
-  if (toolName === "Skill" && typeof toolInput?.skill === "string" && toolInput.skill) {
-    entry.skillInvocations.push(toolInput.skill)
-    entry.events?.push({ kind: "skill", value: toolInput.skill, turnIndex, timestamp })
+  const skill = toolName === "Skill" ? extractSkillNameFromToolInput(toolInput) : null
+  if (skill) {
+    entry.skillInvocations.push(skill)
+    entry.events?.push({ kind: "skill", value: skill, turnIndex, timestamp })
   }
   sessionToolUsage.set(sessionId, entry)
   return entry
