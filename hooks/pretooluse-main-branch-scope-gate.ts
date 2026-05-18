@@ -9,6 +9,7 @@
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
 import { ghJsonViaDaemon } from "../src/git-helpers.ts"
+import { getIssueStoreReader } from "../src/issue-store.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
@@ -197,21 +198,55 @@ async function getPrMergeability(
   const repoSlug = await getRepoSlug(cwd)
   if (!repoSlug) return { mergeable: false, statusContext: "Could not determine repository" }
 
+  // Cache fast-path: definite blocks (conflicts, CHANGES_REQUESTED) can be
+  // decided without a live API round-trip. Only the "looks good" path needs
+  // REST accuracy for branch-protection/required-CI checks via mergeStateStatus.
+  try {
+    const reader = getIssueStoreReader()
+    const cachedPr = await reader.getPullRequest<{ headRefName?: string }>(
+      repoSlug,
+      Number(prNumber)
+    )
+    if (cachedPr?.headRefName) {
+      const detail = await reader.getPrBranchDetail<{
+        reviewDecision?: string
+        mergeable?: string
+      }>(repoSlug, cachedPr.headRefName)
+      if (detail) {
+        const reviewDecision = detail.reviewDecision ?? ""
+        const mergeableStatus = detail.mergeable ?? "UNKNOWN"
+        if (mergeableStatus === "CONFLICTING") {
+          return {
+            mergeable: false,
+            statusContext: `CONFLICTING, review: ${reviewDecision || "none"}`,
+          }
+        }
+        if (reviewDecision === "CHANGES_REQUESTED") {
+          return {
+            mergeable: false,
+            statusContext: `${mergeableStatus}, review: changes requested`,
+          }
+        }
+      }
+    }
+  } catch {
+    // fall through to live API
+  }
+
+  // Live REST API for accurate mergeStateStatus (required CI, branch protection)
   try {
     const result = await ghJsonViaDaemon<{
       mergeStateStatus?: string
       mergeable?: boolean | null
       reviewDecision?: string
-      statusCheckRollup?: Array<{ conclusion?: string }>
     }>(["api", `repos/${repoSlug}/pulls/${prNumber}`], cwd)
 
     const mergeStateStatus = result?.mergeStateStatus ?? "UNKNOWN"
-    const mergeable = result?.mergeable !== false
+    const isMergeable = result?.mergeable !== false
     const reviewDecision = result?.reviewDecision ?? "PENDING"
 
-    // Check common merge-blocking states
     const canMerge =
-      mergeable !== false &&
+      isMergeable &&
       mergeStateStatus === "MERGEABLE" &&
       (reviewDecision === "APPROVED" || reviewDecision === "REVIEW_REQUIRED")
 
