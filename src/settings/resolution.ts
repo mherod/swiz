@@ -172,6 +172,7 @@ function buildBaseSettings(
     pushCooldownMinutes: settings.pushCooldownMinutes,
     skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
+    ignoreMcpTools: settings.ignoreMcpTools,
     autoSteer: settings.autoSteer,
     swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,

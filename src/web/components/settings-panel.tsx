@@ -29,6 +29,7 @@ interface GlobalSettingsForm {
   memoryUpdateReminder: boolean
   qualityChecksGate: boolean
   skipSecretScan: boolean
+  ignoreMcpTools: boolean
   autoTransition: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
@@ -69,6 +70,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   memoryUpdateReminder: false,
   qualityChecksGate: true,
   skipSecretScan: false,
+  ignoreMcpTools: true,
   autoTransition: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
@@ -172,6 +174,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     memoryUpdateReminder: !!settings.memoryUpdateReminder,
     qualityChecksGate: settings.qualityChecksGate !== false,
     skipSecretScan: !!settings.skipSecretScan,
+    ignoreMcpTools: settings.ignoreMcpTools !== false,
     autoTransition: settings.autoTransition !== false,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
@@ -420,6 +423,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "skipSecretScan",
     label: "Skip secret scan",
     desc: "Disable credential/secret pattern detection in the push-checks-gate hook.",
+  },
+  {
+    key: "ignoreMcpTools",
+    label: "Ignore MCP tools",
+    desc: "Skip hook execution for MCP tool calls (tool names starting with mcp__).",
   },
   {
     key: "autoTransition",

@@ -73,6 +73,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "ignoreMcpTools",
+    aliases: ["ignore-mcp-tools", "ignoremcptools", "ignore_mcp_tools", "skip-mcp-tools"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description: "Skip hook execution for MCP tool calls (tool names starting with mcp__)",
+      effectExplanation:
+        "When enabled, PreToolUse/PostToolUse hooks never match against MCP tool invocations — dispatch short-circuits with an allow before loading the manifest. Disable to apply hooks (e.g. task governance, planning buffers) to MCP tools too.",
+      enableDescription: "Skip hook execution for mcp__* tool invocations",
+      disableDescription: "Run hooks for mcp__* tool invocations like any other tool",
+    },
+  },
+  {
     key: "sandboxedEdits",
     aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
     kind: "boolean",

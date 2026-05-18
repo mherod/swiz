@@ -255,6 +255,11 @@ export interface SwizSettings {
   enforceMorningStandup: boolean
   /** When true, the SessionStart hook suggests /weekly-retro on the first session of each ISO week (opt-in). */
   enforceWeeklyRetro: boolean
+  /**
+   * When true, dispatch short-circuits hook execution for MCP tools (tool_name starting with "mcp__"),
+   * so PreToolUse/PostToolUse hooks never match against MCP tool invocations. Defaults to true.
+   */
+  ignoreMcpTools: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>

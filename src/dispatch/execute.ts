@@ -587,6 +587,19 @@ function assertDispatchResponseMatchesWire(
  * Build the minimal response for dispatch paths that run no hooks (non-git dir,
  * no matching groups). Stop-like events still need a normalized allow envelope.
  */
+/**
+ * MCP tool names follow the convention `mcp__<server>__<tool>`. When the
+ * `ignoreMcpTools` setting is enabled (default), dispatch returns an allow
+ * envelope without loading the manifest or running any hooks for these calls.
+ * Only events that carry a tool_name (preToolUse/postToolUse) are short-circuited.
+ */
+async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean> {
+  if (!ctx.toolName?.startsWith("mcp__")) return false
+  if (TOOL_NAME_OPTIONAL_EVENTS.has(ctx.canonicalEvent)) return false
+  const settings = await readSwizSettings()
+  return settings.ignoreMcpTools !== false
+}
+
 function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
   const response: Record<string, any> = {}
   if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
@@ -604,6 +617,13 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
+    const response = buildSkipResponse(ctx, req.daemonContext)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+    return { response }
+  }
+
+  if (await shouldSkipMcpToolDispatch(ctx)) {
+    log(`   ⏭ ignoreMcpTools enabled, skipping dispatch for ${ctx.toolName}`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return { response }

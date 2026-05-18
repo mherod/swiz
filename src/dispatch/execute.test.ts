@@ -311,6 +311,86 @@ describe("dispatch execute integration", () => {
     })
   })
 
+  describe("ignoreMcpTools short-circuit", () => {
+    it("skips dispatch for mcp__* tool names with default settings", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "mcp-skip-session",
+          tool_name: "mcp__claude_ai_Vercel__deploy_to_vercel",
+          tool_input: {},
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      const result = await executeDispatch(req)
+      expect(providerCalled).toBe(false)
+      expect(result.response).toEqual({})
+    })
+
+    it("runs dispatch normally for non-mcp tool names", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "non-mcp-session",
+          tool_name: "Bash",
+          tool_input: { command: "echo hi" },
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
+    it("runs dispatch for mcp__* tool names when ignoreMcpTools is disabled", async () => {
+      const { writeSwizSettings, invalidateSettingsCache, getSwizSettingsPath, readSwizSettings } =
+        await import("../settings.ts")
+      const tempHome = `/tmp/swiz-mcp-toggle-${Date.now()}-${crypto.randomUUID()}`
+      const originalHome = process.env.HOME
+      process.env.HOME = tempHome
+      try {
+        const defaults = await readSwizSettings({ home: tempHome })
+        await writeSwizSettings({ ...defaults, ignoreMcpTools: false }, { home: tempHome })
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+
+        let providerCalled = false
+        const req: DispatchRequest = {
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: "mcp-toggle-session",
+            tool_name: "mcp__some_server__some_tool",
+            tool_input: {},
+          }),
+          manifestProvider: async () => {
+            providerCalled = true
+            return []
+          },
+        }
+        await executeDispatch(req)
+        expect(providerCalled).toBe(true)
+      } finally {
+        if (originalHome === undefined) delete process.env.HOME
+        else process.env.HOME = originalHome
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+      }
+    })
+  })
+
   describe("transcriptSummaryProvider", () => {
     it("uses cached provider instead of reading file when provided", async () => {
       let providerCalled = false
