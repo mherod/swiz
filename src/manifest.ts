@@ -7,6 +7,7 @@
 import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import notificationSpeak from "../hooks/notification-speak.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
+import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
@@ -445,6 +446,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseTestPairing },
       { hook: posttooluseTaskAdvisor },
       { hook: posttooluseMemorySize },
+      { hook: posttooluseFileTruncationGuard },
       { hook: posttoolusePrettierTs },
       { hook: posttoolusMidSessionPrompt },
     ],
