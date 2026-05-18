@@ -1,4 +1,5 @@
 import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.ts"
+import { getDefaultBranch } from "./utils/git-utils.ts"
 
 // ─── Upstream sync ─────────────────────────────────────────────────────────
 
@@ -380,9 +381,12 @@ function syncMilestones(
 }
 
 /** Collect unique branch names: default branch + branches from open PRs. */
-function collectSyncBranches(prs: { headRefName?: string }[] | null): string[] {
+function collectSyncBranches(
+  prs: { headRefName?: string }[] | null,
+  defaultBranch: string
+): string[] {
   const branches = new Set<string>()
-  branches.add("main")
+  branches.add(defaultBranch)
   if (prs) {
     for (const pr of prs) {
       if (pr.headRefName) branches.add(pr.headRefName)
@@ -458,7 +462,8 @@ async function syncBranchData(
 ): Promise<void> {
   // Always sync the default branch CI and protection (cheap, changes frequently).
   // Only sync PR-specific branches when PRs have changed.
-  const branches = prsChanged ? collectSyncBranches(prs) : ["main"] // minimal: just the default branch
+  const defaultBranch = await getDefaultBranch(ctx.cwd)
+  const branches = prsChanged ? collectSyncBranches(prs, defaultBranch) : [defaultBranch]
 
   const [branchRunResults, branchProtectionResults] = await Promise.all([
     Promise.all(branches.map((branch) => ctx.client.listBranchWorkflowRuns(ctx.cwd, branch))),
@@ -475,7 +480,11 @@ async function syncBranchData(
       ctx.client.listIssueComments(ctx.cwd, pr.number),
       ctx.client.listPullRequestReviews(ctx.cwd, pr.number),
     ])
-    const prData = pr as { reviewDecision?: string; requestedReviewers?: Array<{ login: string }> }
+    const prData = pr as {
+      reviewDecision?: string
+      requestedReviewers?: Array<{ login: string }>
+      mergeable?: string
+    }
     const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
     const changesRequestedReviews = (reviews ?? [])
       .filter((r) => r.state === "CHANGES_REQUESTED")
@@ -486,6 +495,7 @@ async function syncBranchData(
       requestedReviewers: reviewerLogins,
       commentCount: comments?.length ?? 0,
       changesRequestedReviews,
+      mergeable: prData.mergeable ?? "UNKNOWN",
     }
     const newJson = JSON.stringify(detail)
     const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)

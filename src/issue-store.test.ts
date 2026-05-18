@@ -1852,15 +1852,32 @@ describe("DaemonBackedIssueStore", () => {
   test("getPrBranchDetail maps reviewDecision and comment count", async () => {
     const fetchMock = (async () =>
       Response.json({
-        value: [{ reviewDecision: "APPROVED", comments: [{ id: 1 }, { id: 2 }] }],
+        value: [
+          {
+            reviewDecision: "APPROVED",
+            comments: [{ id: 1 }, { id: 2 }],
+            requestedReviewers: [{ login: "alice" }],
+            reviews: [{ state: "APPROVED", author: { login: "bob" }, body: "lgtm" }],
+            mergeable: "MERGEABLE",
+          },
+        ],
         hit: false,
       })) as unknown as typeof fetch
     const store = new DaemonBackedIssueStore(fetchMock)
-    const d = await store.getPrBranchDetail<{ reviewDecision: string; commentCount: number }>(
-      "owner/repo",
-      "feature/foo"
-    )
-    expect(d).toEqual({ reviewDecision: "APPROVED", commentCount: 2 })
+    const d = await store.getPrBranchDetail<{
+      reviewDecision: string
+      requestedReviewers: string[]
+      commentCount: number
+      changesRequestedReviews: Array<{ login: string; body: string }>
+      mergeable: string
+    }>("owner/repo", "feature/foo")
+    expect(d).toEqual({
+      reviewDecision: "APPROVED",
+      requestedReviewers: ["alice"],
+      commentCount: 2,
+      changesRequestedReviews: [],
+      mergeable: "MERGEABLE",
+    })
   })
 
   test("returns null from read helpers when gh-query value is null", async () => {

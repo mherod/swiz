@@ -143,7 +143,7 @@ export interface GitHubPullRequestRecord {
   headRefName?: string
   author?: unknown
   reviewDecision?: string
-  statusCheckRollup?: unknown
+  statusCheckRollup?: GitHubStatusCheckRecord[]
   mergeable?: string
   requestedReviewers?: Array<{ login: string }>
   url?: string
@@ -185,6 +185,16 @@ export interface GitHubCiRunRecord {
   status: string
   conclusion: string
   url: string
+}
+
+/** Individual status check entry from `statusCheckRollup`. */
+export interface GitHubStatusCheckRecord {
+  name?: string
+  status?: string
+  conclusion?: string
+  startedAt?: string
+  completedAt?: string
+  detailsUrl?: string
 }
 
 /** Raw label shape returned by GitHub list APIs. */

@@ -71,7 +71,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
       "--state",
       "open",
       "--json",
-      "number,title,url,reviewDecision,mergeable,requestedReviewers,baseRefName,createdAt,author",
+      "number,title,state,headRefName,baseRefName,author,reviewDecision,statusCheckRollup,mergeable,requestedReviewers,url,createdAt,updatedAt",
     ])
     return result ?? []
   }
@@ -152,20 +152,34 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
   }
 
   async getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null> {
-    const raw = await this.query<{ reviewDecision?: string; comments?: unknown[] } | null>([
+    const raw = await this.query<{
+      reviewDecision?: string
+      requestedReviewers?: Array<{ login?: string }>
+      comments?: unknown[]
+      reviews?: Array<{ state?: string; author?: { login?: string }; body?: string }>
+      mergeable?: string
+    } | null>([
       "pr",
       "view",
       branch,
       "--repo",
       repo,
       "--json",
-      "reviewDecision,comments",
+      "reviewDecision,requestedReviewers,comments,reviews,mergeable",
     ])
     const fresh = unwrapGhViewJson(raw)
     if (!fresh) return null
     const detail = {
       reviewDecision: fresh.reviewDecision ?? "",
+      requestedReviewers: (fresh.requestedReviewers ?? [])
+        .map((r) => r.login)
+        .filter((l): l is string => typeof l === "string"),
       commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
+      changesRequestedReviews: (fresh.reviews ?? [])
+        .filter((r) => r.state === "CHANGES_REQUESTED")
+        .map((r) => ({ login: r.author?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
+        .filter((r) => r.login),
+      mergeable: fresh.mergeable ?? "UNKNOWN",
     }
     return detail as T
   }

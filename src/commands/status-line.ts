@@ -450,7 +450,10 @@ function joinGroups(groups: Array<string | null | undefined>): string {
 
 interface PrBranchDetail {
   reviewDecision: string
+  requestedReviewers: string[]
   commentCount: number
+  changesRequestedReviews: Array<{ login: string; body: string }>
+  mergeable: string
 }
 
 /** 1 hour — serve stale data rather than showing nothing when API is down. */
