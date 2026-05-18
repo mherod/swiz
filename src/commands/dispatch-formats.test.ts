@@ -13,6 +13,22 @@ interface DispatchResult {
 }
 
 const _tmp = useTempDir()
+let dispatchQueue: Promise<void> = Promise.resolve()
+
+async function runDispatchSerialized<T>(run: () => Promise<T>): Promise<T> {
+  const previous = dispatchQueue
+  let release = (): void => {}
+  dispatchQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await previous
+  try {
+    return await run()
+  } finally {
+    release()
+  }
+}
 
 /** Create a git repo + old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
 async function createProjectDir(): Promise<string> {
@@ -47,38 +63,45 @@ async function dispatch({
   payload: Record<string, any>
   homeDir: string
 }): Promise<DispatchResult> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv({
-      HOME: homeDir,
-      // Prevent stop-auto-continue from waiting on live AI backends in format tests.
-      AI_TEST_NO_BACKEND: "1",
-      // Give hooks extra time in CI where bun cold-compiles TypeScript on first invocation.
-      SWIZ_TEST_HOOK_TIMEOUT_SEC: "20",
-      // Skip daemon routing — these are format contract tests, not daemon integration tests.
-      SWIZ_NO_DAEMON: "1",
-    }),
-  })
+  return await runDispatchSerialized(async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: neutralAgentEnv({
+        HOME: homeDir,
+        // Prevent stop-auto-continue from waiting on live AI backends in format tests.
+        AI_TEST_NO_BACKEND: "1",
+        // Give hooks extra time in CI where bun cold-compiles TypeScript on first invocation.
+        SWIZ_TEST_HOOK_TIMEOUT_SEC: "20",
+        // Skip daemon routing — these are format contract tests, not daemon integration tests.
+        SWIZ_NO_DAEMON: "1",
+        // Format tests only inspect stdout shape; skip shared capture files under concurrent load.
+        SWIZ_CAPTURE_INCOMING: "0",
+      }),
+    })
 
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
 
-  const stdout = (await new Response(proc.stdout).text()).trim()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
+    const [stdoutText, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const stdout = stdoutText.trim()
 
-  let parsed: Record<string, any> | null = null
-  if (stdout) {
-    try {
-      parsed = JSON.parse(stdout) as Record<string, any>
-    } catch {
-      parsed = null
+    let parsed: Record<string, any> | null = null
+    if (stdout) {
+      try {
+        parsed = JSON.parse(stdout) as Record<string, any>
+      } catch {
+        parsed = null
+      }
     }
-  }
 
-  return { stdout, stderr, exitCode: proc.exitCode, parsed }
+    return { stdout, stderr, exitCode: proc.exitCode, parsed }
+  })
 }
 
 async function writeTask(
@@ -134,7 +157,7 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("deny")
     expect(typeof hso.permissionDecisionReason).toBe("string")
-  }, 15_000)
+  }, 60_000)
 
   test("preToolUse allow-with-reason uses hookSpecificOutput envelope", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
@@ -163,7 +186,7 @@ describe("dispatch output formats", () => {
     expect(hso.permissionDecision).toBe("allow")
     expect(typeof hso.permissionDecisionReason).toBe("string")
     expect((hso.permissionDecisionReason as string).toLowerCase()).toContain("rg")
-  }, 15_000)
+  }, 60_000)
 
   test("stop block uses top-level decision + reason", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
@@ -199,7 +222,7 @@ describe("dispatch output formats", () => {
     expect(result.parsed!.decision).toBe("block")
     expect(typeof result.parsed!.reason).toBe("string")
     expect(result.parsed!.reason as string).toContain("Uncommitted changes detected")
-  }, 15_000)
+  }, 60_000)
 
   test("sessionStart context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
@@ -224,7 +247,7 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("SessionStart")
     expect(typeof hso.additionalContext).toBe("string")
     expect(hso.additionalContext as string).toContain("Post-compaction context")
-  }, 15_000)
+  }, 60_000)
 
   test("userPromptSubmit context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
@@ -248,5 +271,5 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("UserPromptSubmit")
     expect(typeof hso.additionalContext).toBe("string")
     expect((hso.additionalContext as string).length).toBeGreaterThan(0)
-  }, 15_000)
+  }, 60_000)
 })

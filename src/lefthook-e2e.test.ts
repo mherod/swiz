@@ -52,8 +52,10 @@ async function runLefthook(
     stdout: "pipe",
     stderr: "pipe",
   })
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   return { exitCode: proc.exitCode ?? 1, output: stdout + stderr }
 }

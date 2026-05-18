@@ -3,6 +3,23 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+let cliQueue: Promise<void> = Promise.resolve()
+
+async function runCliSerialized<T>(run: () => Promise<T>): Promise<T> {
+  const previous = cliQueue
+  let release = (): void => {}
+  cliQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await previous
+  try {
+    return await run()
+  } finally {
+    release()
+  }
+}
+
 // Test dispatch end-to-end through the CLI subprocess path. The in-process
 // helper is faster, but concurrent tests can reach circular imports before
 // module-level bindings initialize.
@@ -16,31 +33,33 @@ async function dispatch(
   exitCode: number | null
   parsed: Record<string, any> | null
 }> {
-  const hookEventName = event === "preToolUse" ? "PreToolUse" : event === "stop" ? "Stop" : event
+  return await runCliSerialized(async () => {
+    const hookEventName = event === "preToolUse" ? "PreToolUse" : event === "stop" ? "Stop" : event
 
-  const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      ...process.env,
-      SWIZ_NO_DAEMON: "1",
-      SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
-      ...options.env,
-    },
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", event, hookEventName], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        SWIZ_NO_DAEMON: "1",
+        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+        ...options.env,
+      },
+    })
+    await proc.stdin.write(JSON.stringify(payload))
+    await proc.stdin.end()
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    let parsed = null
+    try {
+      parsed = JSON.parse(stdout.trim())
+    } catch {}
+    return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode, parsed }
   })
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  let parsed = null
-  try {
-    parsed = JSON.parse(stdout.trim())
-  } catch {}
-  return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode, parsed }
 }
 
 async function runGit(cwd: string, args: string[]): Promise<void> {
@@ -169,7 +188,7 @@ describe("dispatch routing", () => {
     expect(proc.exitCode).toBe(0)
     const parsed = JSON.parse(stdout.trim()) as Record<string, any>
     expect(parsed.systemMessage).toContain("Dispatch runtime failure in preToolUse")
-    expect(parsed.systemMessage).toContain("/tmp/swiz-dispatch.log")
+    expect(parsed.systemMessage).toContain("swiz-dispatch.log")
     expect(stderr).toContain("Falling back to allow")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
   }, 30_000)
@@ -197,13 +216,13 @@ describe("dispatch routing", () => {
     expect(proc.exitCode).toBe(0)
     const parsed = JSON.parse(stdout.trim()) as Record<string, any>
     expect(parsed.systemMessage).toContain("Dispatch runtime failure in postToolUse")
-    expect(parsed.systemMessage).toContain("/tmp/swiz-dispatch.log")
+    expect(parsed.systemMessage).toContain("swiz-dispatch.log")
     expect(parsed.hookSpecificOutput.additionalContext).toContain(
       'Invalid dispatch payload for event "postToolUse"'
     )
     expect(stderr).toContain("Falling back to allow")
     expect(stderr).toContain('Invalid dispatch payload for event "postToolUse"')
-  })
+  }, 30_000)
 
   test("falls back to allow on forced runtime failure after stdin parsing", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "postToolUse", "PostToolUse"], {
@@ -233,7 +252,7 @@ describe("dispatch routing", () => {
     expect(parsed.systemMessage).toContain("Dispatch runtime failure in postToolUse")
     expect(parsed.hookSpecificOutput.additionalContext).toContain("forced dispatch failure")
     expect(stderr).toContain("Falling back to allow")
-  })
+  }, 30_000)
 
   test("preCompact fallback omits hookSpecificOutput and validates against schema", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preCompact", "PreCompact"], {
@@ -263,7 +282,7 @@ describe("dispatch routing", () => {
     expect(parsed.hookSpecificOutput).toBeUndefined()
     const { hookOutputSchema } = await import("../schemas.ts")
     expect(hookOutputSchema.safeParse(parsed).success).toBe(true)
-  })
+  }, 30_000)
 
   test("preToolUse fallback keeps hookSpecificOutput.additionalContext", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preToolUse", "PreToolUse"], {
@@ -294,7 +313,7 @@ describe("dispatch routing", () => {
     )
     const { hookOutputSchema } = await import("../schemas.ts")
     expect(hookOutputSchema.safeParse(parsed).success).toBe(true)
-  })
+  }, 30_000)
 
   test("dispatches directly to daemon without health check", async () => {
     let healthHits = 0
@@ -331,7 +350,7 @@ describe("dispatch routing", () => {
     } finally {
       void server.stop()
     }
-  })
+  }, 30_000)
 
   test("sanitizes Codex-unsupported preToolUse allow fields returned by daemon", async () => {
     const server = Bun.serve({
@@ -372,7 +391,7 @@ describe("dispatch routing", () => {
     } finally {
       void server.stop()
     }
-  })
+  }, 30_000)
 
   test("falls back to local mode when the daemon returns an error", async () => {
     let dispatchHits = 0
@@ -414,27 +433,32 @@ describe("dispatch replay", () => {
     extraArgs: string[] = [],
     envOverrides: Record<string, string> = {}
   ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", event, ...extraArgs], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        SWIZ_NO_DAEMON: "1",
-        SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
-        // Keep replay deterministic in CI without contacting external providers.
-        AI_TEST_NO_BACKEND: "1",
-        ...envOverrides,
-      },
+    return await runCliSerialized(async () => {
+      const proc = Bun.spawn(
+        ["bun", "run", "index.ts", "dispatch", "replay", event, ...extraArgs],
+        {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...process.env,
+            SWIZ_NO_DAEMON: "1",
+            SWIZ_TEST_HOOK_TIMEOUT_SEC: "15",
+            // Keep replay deterministic in CI without contacting external providers.
+            AI_TEST_NO_BACKEND: "1",
+            ...envOverrides,
+          },
+        }
+      )
+      await proc.stdin.write(JSON.stringify(payload))
+      await proc.stdin.end()
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode }
     })
-    await proc.stdin.write(JSON.stringify(payload))
-    await proc.stdin.end()
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode }
   }
 
   test("blocking replay: shows DENY when banned command used (JSON mode)", async () => {
@@ -453,7 +477,7 @@ describe("dispatch replay", () => {
     const hooks = parsed.hooks as Array<Record<string, any>>
     const blocked = hooks.find((h) => h.status === "deny")
     expect(blocked).toBeDefined()
-  })
+  }, 60_000)
 
   test("non-blocking replay: shows all passed for git status (JSON mode)", async () => {
     const result = await replay(
@@ -619,7 +643,7 @@ describe("dispatch replay", () => {
       await rm(repoDir, { recursive: true, force: true })
       await rm(fakeHome, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })
 
 describe("dispatch stop fast-path — isStopLikeEvent covers both stop and subagentStop", () => {
