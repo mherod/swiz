@@ -96,7 +96,7 @@ alwaysApply: false
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
 - Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; use lazy `await import(...)` in `hook-utils.ts` (circular avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
-- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking. Auto-memory writes (`~/.claude/projects/*/memory/*.md`) are exempt via `AUTO_MEMORY_PATH_RE` + `isAutoMemoryPath()`. **DO**: When exempting a path from a two-phase gate, add the exemption in BOTH the early-return (block path) AND the `toolWritesMarkdown` check (satisfy-requirement path) — exempt paths must not bypass OR satisfy the gate.
+- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking. Auto-memory writes (`~/.claude/projects/*/memory/*.md`) exempt via `AUTO_MEMORY_PATH_RE`+`isAutoMemoryPath()`. **DO**: Two-phase gate exemptions: add in BOTH early-return AND `toolWritesMarkdown` — exempt paths must neither block nor satisfy the gate. `pretooluse-sandboxed-edits.ts` has independent `MEMORY_DIR_RE` guard — `rg "MEMORY_DIR_RE" hooks/` finds all independent guards when fixing any one.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
 - **DO**: When extracting from a shared module, re-export all types downstream consumers import.
 ## Task Data
