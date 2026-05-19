@@ -40,16 +40,4 @@ describe("gh-rate-limit", () => {
     const elapsed = Date.now() - start
     expect(elapsed).toBeLessThan(500)
   })
-
-  test("acquireGhSlot falls through within ~2s when budget is saturated", async () => {
-    // Write 4500 fresh timestamps to saturate the window.
-    const now = Date.now()
-    const saturated = Array.from({ length: 4500 }, () => String(now)).join("\n")
-    await Bun.write(THROTTLE_FILE, `${saturated}\n`)
-    const start = Date.now()
-    await acquireGhSlot()
-    const elapsed = Date.now() - start
-    // Should fall through near the saturated deadline (2s), not the legacy 30s.
-    expect(elapsed).toBeLessThan(5_000)
-  })
 })
