@@ -35,7 +35,10 @@ async function runStatus(envOverrides: Record<string, string | undefined>): Prom
     stderr: "pipe",
     env: { ...base, SWIZ_STATUS_SKIP_CI: "1" },
   })
-  const output = await new Response(proc.stdout).text()
+  const [output] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   return output
 }

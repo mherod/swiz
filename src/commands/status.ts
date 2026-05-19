@@ -69,14 +69,14 @@ function parseCiStatus(raw: string): { status: string | null; conclusion: string
   return { status: status ?? null, conclusion: conclusion ?? null }
 }
 
-function printAgentBinary(agent: AgentDef): void {
+function formatAgentBinary(agent: AgentDef): string[] {
   const binaryPath = Bun.which(agent.binary)
-  console.log(`  ${BOLD}${agent.name}${RESET}`)
-  console.log(
+  return [
+    `  ${BOLD}${agent.name}${RESET}`,
     binaryPath
       ? `    Binary:   ${GREEN}✓${RESET} ${binaryPath}`
-      : `    Binary:   ${DIM}not found${RESET}`
-  )
+      : `    Binary:   ${DIM}not found${RESET}`,
+  ]
 }
 
 async function readAgentSettings(
@@ -98,8 +98,8 @@ async function readAgentSettings(
   }
 }
 
-async function checkAgent(agent: AgentDef) {
-  printAgentBinary(agent)
+async function collectAgentStatus(agent: AgentDef): Promise<string[]> {
+  const lines = formatAgentBinary(agent)
 
   const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
   const settingsPaths = getAgentSettingsSearchPaths(agentId)
@@ -116,32 +116,32 @@ async function checkAgent(agent: AgentDef) {
   }
 
   if (foundPaths.length === 0) {
-    console.log(`    Settings: ${DIM}${agent.settingsPath} (not found)${RESET}`)
-    console.log(`    Hooks:    ${RED}not installed${RESET}`)
-    console.log()
-    return
+    lines.push(`    Settings: ${DIM}${agent.settingsPath} (not found)${RESET}`)
+    lines.push(`    Hooks:    ${RED}not installed${RESET}`)
+    lines.push("")
+    return lines
   }
 
-  console.log(`    Settings: ${GREEN}✓${RESET} ${foundPaths.join(", ")}`)
+  lines.push(`    Settings: ${GREEN}✓${RESET} ${foundPaths.join(", ")}`)
 
   if (!agent.hooksConfigurable) {
-    console.log(`    Hooks:    ${YELLOW}not yet user-configurable${RESET} (tool mappings tracked)`)
-    console.log()
-    return
+    lines.push(`    Hooks:    ${YELLOW}not yet user-configurable${RESET} (tool mappings tracked)`)
+    lines.push("")
+    return lines
   }
 
   if (allHooks.size === 0) {
-    console.log(`    Hooks:    ${YELLOW}no hooks configured${RESET}`)
-    console.log()
-    return
+    lines.push(`    Hooks:    ${YELLOW}no hooks configured${RESET}`)
+    lines.push("")
+    return lines
   }
 
-  printAgentHooksInfo(allHooks)
-
-  console.log()
+  lines.push(...formatAgentHooksInfo(allHooks))
+  lines.push("")
+  return lines
 }
 
-function printAgentHooksInfo(allHooks: Map<string, Record<string, any>>): void {
+function formatAgentHooksInfo(allHooks: Map<string, Record<string, any>>): string[] {
   let totalHooks = 0
   const allSwizCmds = new Set<string>()
   const allEvents = new Set<string>()
@@ -160,14 +160,13 @@ function printAgentHooksInfo(allHooks: Map<string, Record<string, any>>): void {
   const otherCount = totalHooks - swizCount
 
   if (swizCount > 0) {
-    console.log(
+    return [
       `    Hooks:    ${GREEN}✓ ${swizCount} swiz hook(s)${RESET}` +
-        (otherCount > 0 ? ` + ${CYAN}${otherCount} other${RESET}` : "")
-    )
-    console.log(`    Events:   ${[...allEvents].join(", ")}`)
-  } else {
-    console.log(`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`)
+        (otherCount > 0 ? ` + ${CYAN}${otherCount} other${RESET}` : ""),
+      `    Events:   ${[...allEvents].join(", ")}`,
+    ]
   }
+  return [`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`]
 }
 
 // ─── Project Health Panel ─────────────────────────────────────────────────────
@@ -182,6 +181,17 @@ interface ProjectHealth {
   openTasks: number | null
   ciStatus: string | null
   ciConclusion: string | null
+}
+
+interface ProjectHealthOptions {
+  refreshCi?: boolean
+}
+
+interface CachedCiRun {
+  databaseId?: number
+  status?: string | null
+  conclusion?: string | null
+  createdAt?: string | null
 }
 
 async function spawnLine(cmd: string[], options: { timeoutMs?: number } = {}): Promise<string> {
@@ -199,6 +209,65 @@ async function spawnLine(cmd: string[], options: { timeoutMs?: number } = {}): P
   clearTimeout(killTimer)
   if (timedOut) return ""
   return out.trim()
+}
+
+function ciRunSortValue(run: CachedCiRun): number {
+  const createdAtMs = run.createdAt ? Date.parse(run.createdAt) : Number.NaN
+  if (Number.isFinite(createdAtMs)) return createdAtMs
+  return typeof run.databaseId === "number" && Number.isFinite(run.databaseId) ? run.databaseId : 0
+}
+
+function latestCiRun(runs: CachedCiRun[] | null): CachedCiRun | null {
+  if (!runs || runs.length === 0) return null
+  return runs.reduce((latest, run) => (ciRunSortValue(run) > ciRunSortValue(latest) ? run : latest))
+}
+
+async function getCachedCiStatus(
+  cwd: string,
+  branch: string
+): Promise<{ status: string | null; conclusion: string | null }> {
+  try {
+    const [{ getRepoSlug }, { getIssueStoreReader }] = await Promise.all([
+      import("../git-helpers.ts"),
+      import("../issue-store.ts"),
+    ])
+    const repo = await getRepoSlug(cwd)
+    if (!repo) return { status: null, conclusion: null }
+    const runs = await getIssueStoreReader().getCiBranchRuns<CachedCiRun>(repo, branch)
+    const run = latestCiRun(runs)
+    return {
+      status: run?.status ?? null,
+      conclusion: run?.conclusion ?? null,
+    }
+  } catch {
+    return { status: null, conclusion: null }
+  }
+}
+
+async function getLiveCiStatus(
+  branch: string
+): Promise<{ status: string | null; conclusion: string | null }> {
+  try {
+    const ciOut = await spawnLine(
+      [
+        "gh",
+        "run",
+        "list",
+        "--branch",
+        branch,
+        "--limit",
+        "1",
+        "--json",
+        "status,conclusion",
+        "--jq",
+        '.[0] | .status + "|" + .conclusion',
+      ],
+      { timeoutMs: STATUS_CI_TIMEOUT_MS }
+    )
+    return parseCiStatus(ciOut)
+  } catch {
+    return { status: null, conclusion: null }
+  }
 }
 
 type ReadSessionMeta = typeof import("../tasks/task-repository.ts").readSessionMeta
@@ -219,15 +288,18 @@ async function countOpenTasksForSession(
   } catch {
     return 0
   }
-  let open = 0
-  for (const file of files) {
-    if (!file.endsWith(".json") || file.startsWith(".")) continue
-    try {
-      const task = (await Bun.file(join(sessionDir, file)).json()) as { status?: string }
-      if (isIncompleteTaskStatus(task.status ?? "")) open++
-    } catch {}
-  }
-  return open
+  const taskFiles = files.filter((file) => file.endsWith(".json") && !file.startsWith("."))
+  const counts = await Promise.all(
+    taskFiles.map(async (file): Promise<number> => {
+      try {
+        const task = (await Bun.file(join(sessionDir, file)).json()) as { status?: string }
+        return isIncompleteTaskStatus(task.status ?? "") ? 1 : 0
+      } catch {
+        return 0
+      }
+    })
+  )
+  return counts.reduce((sum, count) => sum + count, 0)
 }
 
 async function collectIndexedSessionIds(projectsRoot: string, key: string): Promise<Set<string>> {
@@ -241,6 +313,26 @@ async function collectIndexedSessionIds(projectsRoot: string, key: string): Prom
   return ids
 }
 
+async function collectSessionIdsByMetaCwd(
+  cwd: string,
+  tasksRoot: string,
+  readSessionMeta: ReadSessionMeta
+): Promise<Set<string>> {
+  let taskDirEntries: string[]
+  try {
+    taskDirEntries = await readdir(tasksRoot)
+  } catch {
+    return new Set()
+  }
+  const matches = await Promise.all(
+    taskDirEntries.map(async (sessionId) => {
+      const meta = await readSessionMeta(sessionId, tasksRoot)
+      return meta?.cwd === cwd ? sessionId : null
+    })
+  )
+  return new Set(matches.filter((sessionId): sessionId is string => sessionId !== null))
+}
+
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
     const home = getHomeDir()
@@ -250,19 +342,11 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
 
     const indexedSessionIds = await collectIndexedSessionIds(projectsRoot, key)
 
-    let taskDirEntries: string[]
-    try {
-      taskDirEntries = await readdir(tasksRoot)
-    } catch {
-      taskDirEntries = []
-    }
-    const sessionIds = new Set(indexedSessionIds)
     const { readSessionMeta: readMeta } = await import("../tasks/task-repository.ts")
-    for (const s of taskDirEntries) {
-      const meta = await readMeta(s, tasksRoot)
-      if (meta?.cwd !== cwd) continue
-      sessionIds.add(s)
-    }
+    const sessionIds =
+      indexedSessionIds.size > 0
+        ? indexedSessionIds
+        : await collectSessionIdsByMetaCwd(cwd, tasksRoot, readMeta)
 
     if (sessionIds.size === 0) return null
     const counts = await Promise.all(
@@ -274,7 +358,10 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
   }
 }
 
-async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
+async function getProjectHealth(
+  cwd: string,
+  options: ProjectHealthOptions = {}
+): Promise<ProjectHealth> {
   const [stateData, branch, statusOut, aheadBehind, openTasks] = await Promise.all([
     readStateData(cwd).catch(() => null),
     spawnLine(["git", "-C", cwd, "branch", "--show-current"], {
@@ -296,27 +383,11 @@ async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
   let ciStatus: string | null = null
   let ciConclusion: string | null = null
   if (branch && process.env.SWIZ_STATUS_SKIP_CI !== "1") {
-    try {
-      const ciOut = await spawnLine(
-        [
-          "gh",
-          "run",
-          "list",
-          "--branch",
-          branch,
-          "--limit",
-          "1",
-          "--json",
-          "status,conclusion",
-          "--jq",
-          '.[0] | .status + "|" + .conclusion',
-        ],
-        { timeoutMs: STATUS_CI_TIMEOUT_MS }
-      )
-      const ci = parseCiStatus(ciOut)
-      ciStatus = ci.status
-      ciConclusion = ci.conclusion
-    } catch {}
+    const ci = options.refreshCi
+      ? await getLiveCiStatus(branch)
+      : await getCachedCiStatus(cwd, branch)
+    ciStatus = ci.status
+    ciConclusion = ci.conclusion
   }
 
   const state = stateData?.state ?? null
@@ -393,18 +464,23 @@ function renderHealthPanel(health: ProjectHealth): void {
 export const statusCommand: Command = {
   name: "status",
   description: "Show swiz installation status across agents",
-  usage: "swiz status [--json] [--no-health]",
+  usage: "swiz status [--json] [--no-health] [--refresh-ci]",
   options: [
     { flags: "--json", description: "Output project health as JSON" },
     { flags: "--no-health", description: "Skip project health checks" },
+    {
+      flags: "--refresh-ci",
+      description: "Refresh CI status from GitHub instead of cached sync data",
+    },
   ],
   async run(args) {
     const cwd = process.cwd()
     const jsonMode = args.includes("--json")
     const noHealth = args.includes("--no-health")
+    const refreshCi = args.includes("--refresh-ci")
 
     if (jsonMode) {
-      const health = await getProjectHealth(cwd)
+      const health = await getProjectHealth(cwd, { refreshCi })
       console.log(JSON.stringify(health, null, 2))
       return
     }
@@ -418,12 +494,13 @@ export const statusCommand: Command = {
 
     console.log(`  Hooks directory: ${HOOKS_DIR}\n`)
 
-    for (const agent of AGENTS) {
-      await checkAgent(agent)
+    const agentStatuses = await Promise.all(AGENTS.map((agent) => collectAgentStatus(agent)))
+    for (const lines of agentStatuses) {
+      for (const line of lines) console.log(line)
     }
 
     if (!noHealth) {
-      renderHealthPanel(await getProjectHealth(cwd))
+      renderHealthPanel(await getProjectHealth(cwd, { refreshCi }))
     }
   },
 }

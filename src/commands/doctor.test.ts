@@ -374,10 +374,16 @@ describe("swiz doctor", () => {
     await createSkill(home, ".codex/skills", skillName)
 
     const result = await runDoctor(home)
-    expect(result.stdout).toContain(`Skill conflict: ${skillName}`)
-    expect(result.stdout).toContain(`~/.gemini/skills/${skillName}/SKILL.md`)
-    expect(result.stdout).toContain(`~/.codex/skills/${skillName}/SKILL.md`)
-    expect(result.stdout).toContain("precedence=")
+    expect(result.stdout).toContain("Skill conflicts")
+    expect(result.stdout).toContain("1 duplicate skill name")
+    expect(result.stdout).toContain("show details: swiz doctor --verbose")
+    expect(result.stdout).not.toContain(`Skill conflict: ${skillName}`)
+
+    const verbose = await runDoctor(home, ["--verbose"])
+    expect(verbose.stdout).toContain(`Skill conflict: ${skillName}`)
+    expect(verbose.stdout).toContain(`~/.gemini/skills/${skillName}/SKILL.md`)
+    expect(verbose.stdout).toContain(`~/.codex/skills/${skillName}/SKILL.md`)
+    expect(verbose.stdout).toContain("precedence=")
   }, 60_000)
 
   // ── Skill validation: concurrent batch of read-only checks ──────────

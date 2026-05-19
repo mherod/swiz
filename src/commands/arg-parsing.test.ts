@@ -270,6 +270,12 @@ describe("parseCleanupArgs", () => {
     expect(result.olderThanLabel).toBe("48 hours")
   })
 
+  test("parses --older-than=value form", () => {
+    const result = parseCleanupArgs(["--older-than=2h"])
+    expect(result.olderThanMs).toBe(2 * HOUR_MS)
+    expect(result.olderThanLabel).toBe("2 hours")
+  })
+
   test("uses singular label for 1 day", () => {
     const result = parseCleanupArgs(["--older-than", "1"])
     expect(result.olderThanLabel).toBe("1 day")
@@ -312,6 +318,13 @@ describe("parseCleanupArgs", () => {
     const result = parseCleanupArgs(["--task-older-than", "72h"])
     expect(result.taskOlderThanMs).toBe(72 * HOUR_MS)
     expect(result.taskOlderThanLabel).toBe("72 hours")
+  })
+
+  test("parses cleanup value flags with equals", () => {
+    const result = parseCleanupArgs(["--task-older-than=12h", "--project=my-project"])
+    expect(result.taskOlderThanMs).toBe(12 * HOUR_MS)
+    expect(result.taskOlderThanLabel).toBe("12 hours")
+    expect(result.projectFilter).toBe("my-project")
   })
 
   test("ignores --project without value", () => {

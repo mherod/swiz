@@ -938,6 +938,54 @@ describe("native task recovery paths (#271)", () => {
   })
 })
 
+describe("recovered task output", () => {
+  it("explains recovered sessions when task files have no matching transcript", async () => {
+    await serial(async () => {
+      const home = join(TMP, "recovered-task-output-home")
+      const repoCwd = join(TMP, "recovered-task-output-repo")
+      const sessionId = "88888888-aaaa-bbbb-cccc-000000000001"
+
+      await mkdir(repoCwd, { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "tasks", sessionId, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: "Recovered list task",
+          description: "desc",
+          status: "pending",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+
+      const logs: string[] = []
+      const origLog = console.log
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "))
+
+      try {
+        await tasksCommand.run(["--all-sessions"])
+      } finally {
+        console.log = origLog
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
+
+      const output = logs.join("\n")
+      expect(output).toContain("[recovered]")
+      expect(output).toContain(
+        "Recovered from task files without a matching project session transcript."
+      )
+    })
+  })
+})
+
 // ─── printPreviousSessionIncompleteHint — native tool hint (#290) ────────────
 
 describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {

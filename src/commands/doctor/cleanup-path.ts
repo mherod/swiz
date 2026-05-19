@@ -112,30 +112,38 @@ interface CleanupFlagState {
   skipTrash: boolean
 }
 
+function splitFlagAssignment(arg: string): { flag: string; value: string | undefined } {
+  const idx = arg.indexOf("=")
+  if (idx === -1) return { flag: arg, value: undefined }
+  return { flag: arg.slice(0, idx), value: arg.slice(idx + 1) }
+}
+
 function consumeCleanupFlag(
   arg: string,
   next: string | undefined,
   state: CleanupFlagState
 ): boolean {
-  if (arg === "--dry-run") {
+  const { flag, value } = splitFlagAssignment(arg)
+  const assignedOrNext = value ?? next
+  if (flag === "--dry-run") {
     state.dryRun = true
     return false
   }
-  if (arg === "--skip-trash") {
+  if (flag === "--skip-trash") {
     state.skipTrash = true
     return false
   }
-  if (arg === "--older-than" && next) {
-    state.olderThan = parseOlderThan(next)
-    return true
+  if (flag === "--older-than" && assignedOrNext) {
+    state.olderThan = parseOlderThan(assignedOrNext)
+    return value === undefined
   }
-  if (arg === "--task-older-than" && next) {
-    state.taskOlderThan = parseOlderThan(next)
-    return true
+  if (flag === "--task-older-than" && assignedOrNext) {
+    state.taskOlderThan = parseOlderThan(assignedOrNext)
+    return value === undefined
   }
-  if (arg === "--project" && next) {
-    state.projectFilter = next
-    return true
+  if (flag === "--project" && assignedOrNext) {
+    state.projectFilter = assignedOrNext
+    return value === undefined
   }
   return false
 }

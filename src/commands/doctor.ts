@@ -210,9 +210,11 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 export const doctorCommand: Command = {
   name: "doctor",
   description: "Check environment health, fix issues, and clean up old session data",
-  usage: "swiz doctor [--fix] | swiz doctor clean [--older-than <time>] [--dry-run]",
+  usage: "swiz doctor [--fix] [--verbose] | swiz doctor clean [--older-than <time>] [--dry-run]",
   options: [
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
+    { flags: "--verbose", description: "Show every diagnostic row instead of grouped summaries" },
+    { flags: "--clean", description: "Alias for swiz doctor clean" },
     {
       flags: "clean",
       description: "Remove old Claude Code session data and Gemini backup artifacts",
@@ -227,7 +229,7 @@ export const doctorCommand: Command = {
     },
   ],
   async run(args) {
-    if (args[0] === "clean") {
+    if (args[0] === "clean" || args[0] === "--clean") {
       await runCleanupCommand(args.slice(1))
       return
     }

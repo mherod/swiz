@@ -798,18 +798,32 @@ async function printProjectTable(results: ProjectResult[]): Promise<ProjectTotal
   return { totalOldCount, totalOldBytes, totalOldTaskDirs }
 }
 
-function printTaskSection(
+function printTaskCleanupSection(
+  totals: ProjectTotals,
   oldTaskFiles: Array<{ path: string; sizeBytes: number }>,
   oldTaskBytes: number,
-  taskLabel: string
+  cleanupArgs: CleanupArgs,
+  taskCutoffMs: number | null
 ): void {
-  console.log(`  ${BOLD}~/.claude/tasks/ (old task files)${RESET}`)
+  console.log(`  ${BOLD}Task cleanup${RESET}`)
+  const dirLabel = totals.totalOldTaskDirs === 1 ? "dir" : "dirs"
+  console.log(
+    `    Session task dirs: cleaned with trashable sessions (${totals.totalOldTaskDirs} ${dirLabel} selected)`
+  )
+
+  if (taskCutoffMs === null) {
+    console.log(`    Old task files: ${DIM}disabled; use --task-older-than=24h${RESET}`)
+    console.log()
+    return
+  }
+
+  const taskLabel = cleanupArgs.taskOlderThanLabel ?? "specified window"
   const taskCountLabel = oldTaskFiles.length === 1 ? "file" : "files"
   const taskPart =
     oldTaskFiles.length > 0
-      ? `${YELLOW}${oldTaskFiles.length} task ${taskCountLabel}${RESET} (${formatBytes(oldTaskBytes)})`
+      ? `${YELLOW}${oldTaskFiles.length} old task ${taskCountLabel}${RESET} (${formatBytes(oldTaskBytes)})`
       : `${DIM}0 task files${RESET}`
-  console.log(`    ${taskPart} older than ${taskLabel}`)
+  console.log(`    Old task files: ${taskPart} older than ${taskLabel}`)
   console.log()
 }
 
@@ -854,13 +868,9 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
   const totals = await printProjectTable(results)
 
   console.log()
+  printTaskCleanupSection(totals, oldTaskFiles, oldTaskBytes, cleanupArgs, taskCutoffMs)
   printBackupSection("claude", claudeBackups)
   printBackupSection("gemini", geminiBackups)
-
-  if (taskCutoffMs !== null) {
-    const taskLabel = cleanupArgs.taskOlderThanLabel ?? "specified window"
-    printTaskSection(oldTaskFiles, oldTaskBytes, taskLabel)
-  }
 
   const totalBytes =
     totals.totalOldBytes + oldTaskBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
@@ -871,8 +881,10 @@ async function printCleanupReport(opts: CleanupReportOpts): Promise<CleanupTotal
     geminiBackups.fileCount === 0
 
   if (nothingToTrash) {
+    const taskPhrase =
+      taskCutoffMs === null ? "old task file cleanup disabled" : "no old task files"
     console.log(
-      `  ${GREEN}No sessions older than ${cleanupArgs.olderThanLabel}, no old task files, and no Claude or Gemini backups found.${RESET}`
+      `  ${GREEN}No sessions older than ${cleanupArgs.olderThanLabel}, ${taskPhrase}, and no Claude or Gemini backups found.${RESET}`
     )
     return { ...totals, totalBytes, nothingToTrash: true }
   }

@@ -269,6 +269,13 @@ describe("cleanup --dry-run output", () => {
     expect(output).toMatch(/\d+ kept \(\d+/)
   })
 
+  test("explains default task cleanup behavior", async () => {
+    const output = await runCleanup()
+    expect(output).toMatch(/Task cleanup/)
+    expect(output).toMatch(/Session task dirs: cleaned with trashable sessions/)
+    expect(output).toMatch(/Old task files: .*disabled; use --task-older-than=24h/)
+  })
+
   test("shows decoded ~/... paths (not raw encoded names)", async () => {
     const output = await runCleanup()
     expect(output).toMatch(/~\/Development\/my-project/)
@@ -283,6 +290,25 @@ describe("cleanup --dry-run output", () => {
     const output = await runCleanup(["--older-than", "48h"])
     expect(output).toMatch(/Total: .*1 sessions/)
     expect(output).toMatch(/1 trashable/)
+  })
+
+  test("accepts top-level doctor --clean alias with equals-style age", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "doctor", "--clean", "--dry-run", "--older-than=48h"],
+      {
+        cwd: SWIZ_ROOT,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    )
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    expect(proc.exitCode).toBe(0)
+    expect(stdout + stderr).toMatch(/Agent Sessions/)
   })
 })
 
@@ -826,6 +852,8 @@ describe("cleanup old task files", () => {
     expect(proc.exitCode).toBe(0)
     expect(output).toMatch(/old task files/)
     expect(output).toMatch(/4 old task files/)
+    expect(output).toMatch(/Task cleanup/)
+    expect(output).toMatch(/Old task files: .*4 old task files.*older than 30 days/)
   })
 })
 

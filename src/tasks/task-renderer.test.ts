@@ -35,4 +35,33 @@ describe("renderTask", () => {
     expect(lines[0]).toContain("(12m)")
     expect(lines[0]).toContain("Verify CI passes")
   })
+
+  test("does not render stale completion metadata for incomplete tasks", () => {
+    const lines: string[] = []
+    console.log = (...args: unknown[]) => {
+      lines.push(args.join(" "))
+    }
+
+    renderTask(
+      {
+        id: "2",
+        subject: "Push branch to remote",
+        description: "",
+        status: "pending",
+        blocks: [],
+        blockedBy: [],
+        statusChangedAt: new Date().toISOString(),
+        elapsedMs: 9 * 60_000,
+        completedAt: Date.now() - 60_000,
+        completionTimestamp: new Date(Date.now() - 60_000).toISOString(),
+        completionEvidence: "test: stale",
+      },
+      undefined,
+      "absolute"
+    )
+
+    expect(lines.join("\n")).not.toContain("Completed:")
+    expect(lines.join("\n")).not.toContain("Evidence:")
+    expect(lines.join("\n")).not.toContain("elapsed")
+  })
 })

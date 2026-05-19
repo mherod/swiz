@@ -31,10 +31,11 @@ export function collectUnknownOptionWarnings(
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!
     if (/^-\d/.test(arg)) continue
-    if (!arg.startsWith("-") || knownFlags.has(arg)) continue
+    const flagName = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg
+    if (!arg.startsWith("-") || knownFlags.has(flagName)) continue
     // Skip if the preceding token was a known flag — this arg is its value, not a flag itself
     if (i > 0 && knownFlags.has(rest[i - 1]!)) continue
-    const hint = suggest(arg, knownFlags)
+    const hint = suggest(flagName, knownFlags)
     warnings.push(
       `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""} — run: swiz help ${commandName}`
     )

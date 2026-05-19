@@ -79,6 +79,15 @@ describe("CLI flag suggestions", () => {
     expect(warnings.length).toBe(0)
   })
 
+  test("no warning for a valid --flag=value token", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["clean", "--older-than=2h"],
+      [{ flags: "--older-than <time>", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
+
   test("no warning for valid short alias -l on session command", () => {
     const warnings = collectUnknownOptionWarnings(
       "session",

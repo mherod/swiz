@@ -37,10 +37,10 @@ function renderTaskTiming(task: Task, dateFormat: DateFormat): void {
   if (task.statusChangedAt) {
     console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
   }
-  if (task.status !== "in_progress" && (task.elapsedMs ?? 0) > 0) {
+  if ((task.status === "completed" || task.status === "cancelled") && (task.elapsedMs ?? 0) > 0) {
     console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
   }
-  const completedAtMs = getTaskCompletedAtMs(task)
+  const completedAtMs = task.status === "completed" ? getTaskCompletedAtMs(task) : null
   if (completedAtMs !== null) {
     console.log(
       `     ${DIM}✓ Completed: ${formatDate(new Date(completedAtMs), dateFormat)}${RESET}`
@@ -49,7 +49,7 @@ function renderTaskTiming(task: Task, dateFormat: DateFormat): void {
 }
 
 function renderTaskRelations(task: Task): void {
-  if (task.completionEvidence)
+  if (task.status === "completed" && task.completionEvidence)
     console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
   if (task.blockedBy.length)
     console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
@@ -60,6 +60,12 @@ function renderTaskMetadata(task: Task, dateFormat: DateFormat): void {
   renderTaskDescription(task)
   renderTaskTiming(task, dateFormat)
   renderTaskRelations(task)
+}
+
+function renderRecoveredHint(): void {
+  console.log(
+    `  ${DIM}Recovered from task files without a matching project session transcript.${RESET}`
+  )
 }
 
 export function renderTask(
@@ -123,6 +129,10 @@ export async function listTasks(
   console.log(
     `\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}${recoveredTag}\n`
   )
+  if (recovered) {
+    renderRecoveredHint()
+    console.log()
+  }
 
   if (tasks.length === 0) {
     console.log("  No tasks found.\n")
@@ -147,6 +157,10 @@ async function renderSessionTasks(
   const shortId = sessionId.slice(0, 8)
   const recoveredTag = orphanIds.has(sessionId) ? ` ${YELLOW}[recovered]${RESET}` : ""
   console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}${recoveredTag}\n`)
+  if (orphanIds.has(sessionId)) {
+    renderRecoveredHint()
+    console.log()
+  }
   renderGroupedTasks(tasks, shortId, dateFormat)
 
   const stats = countTaskStats(tasks)

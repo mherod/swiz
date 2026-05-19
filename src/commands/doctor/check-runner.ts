@@ -8,12 +8,18 @@
  */
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../../ansi.ts"
-import type { InvalidSkillEntry, PluginCacheInfo, SkillConflict } from "../doctor/fix.ts"
+import {
+  displayPath,
+  type InvalidSkillEntry,
+  type PluginCacheInfo,
+  type SkillConflict,
+} from "../doctor/fix.ts"
 import type { CheckResult, DiagnosticCheck, DiagnosticContext } from "../doctor/types.ts"
 
 const PASS = `${GREEN}✓${RESET}`
 const FAIL = `${RED}✗${RESET}`
 const WARN = `${YELLOW}!${RESET}`
+const SKILL_CONFLICT_PREFIX = "Skill conflict: "
 
 export interface DoctorCheckResults {
   results: CheckResult[]
@@ -66,27 +72,93 @@ function printResult(result: CheckResult): void {
   console.log(`  ${icon} ${BOLD}${result.name}${RESET}  ${detailColor}${result.detail}${RESET}`)
 }
 
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b))
+}
+
+function buildSkillConflictSummary(conflicts: SkillConflict[]): CheckResult {
+  const activeRoots = uniqueSorted(conflicts.map((conflict) => displayPath(conflict.active.dir)))
+  const overriddenRoots = uniqueSorted(
+    conflicts.flatMap((conflict) => conflict.overridden.map((entry) => displayPath(entry.dir)))
+  )
+  const overriddenCount = conflicts.reduce((sum, conflict) => sum + conflict.overridden.length, 0)
+  const skillLabel = conflicts.length === 1 ? "skill name" : "skill names"
+  const entryLabel = overriddenCount === 1 ? "entry" : "entries"
+  return {
+    name: "Skill conflicts",
+    status: "warn",
+    detail:
+      `${conflicts.length} duplicate ${skillLabel}; active roots=${activeRoots.join(", ")}; ` +
+      `overridden roots=${overriddenRoots.join(", ")}; ${overriddenCount} shadowed ${entryLabel} ` +
+      "— run: swiz doctor --fix; show details: swiz doctor --verbose",
+  }
+}
+
+function isSkillConflictWarning(result: CheckResult): boolean {
+  return result.status === "warn" && result.name.startsWith(SKILL_CONFLICT_PREFIX)
+}
+
+function prepareResultsForDisplay(
+  results: CheckResult[],
+  skillConflicts: SkillConflict[],
+  verbose: boolean
+): CheckResult[] {
+  if (verbose || skillConflicts.length === 0) return results
+
+  const displayResults: CheckResult[] = []
+  let insertedSummary = false
+  for (const result of results) {
+    if (!isSkillConflictWarning(result)) {
+      displayResults.push(result)
+      continue
+    }
+    if (!insertedSummary) {
+      displayResults.push(buildSkillConflictSummary(skillConflicts))
+      insertedSummary = true
+    }
+  }
+  return displayResults
+}
+
+function formatSummaryCounts(
+  results: CheckResult[],
+  displayResults: CheckResult[],
+  verbose: boolean
+): string {
+  const failures = results.filter((r) => r.status === "fail")
+  const warnings = results.filter((r) => r.status === "warn")
+  const passes = results.filter((r) => r.status === "pass")
+  const displayedWarnings = displayResults.filter((r) => r.status === "warn")
+  const hiddenWarningDetails = Math.max(0, warnings.length - displayedWarnings.length)
+  const detail =
+    !verbose && hiddenWarningDetails > 0
+      ? ` (${displayedWarnings.length} shown; use --verbose for details)`
+      : ""
+
+  return (
+    `  ${GREEN}${passes.length} passed${RESET}` +
+    (warnings.length > 0 ? `, ${YELLOW}${warnings.length} warnings${RESET}${detail}` : "") +
+    (failures.length > 0 ? `, ${RED}${failures.length} failed${RESET}` : "")
+  )
+}
+
 export async function runDoctorChecks(args: string[], deps: DoctorCheckRunnerDeps): Promise<void> {
   const fix = args.includes("--fix")
+  const verbose = args.includes("--verbose")
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
   const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } =
     await collectDoctorChecks(fix, deps.allChecks)
 
-  for (const result of results) {
+  const displayResults = prepareResultsForDisplay(results, skillConflicts, verbose)
+  for (const result of displayResults) {
     printResult(result)
   }
 
   const failures = results.filter((r) => r.status === "fail")
-  const warnings = results.filter((r) => r.status === "warn")
-  const passes = results.filter((r) => r.status === "pass")
 
   console.log()
-  console.log(
-    `  ${GREEN}${passes.length} passed${RESET}` +
-      (warnings.length > 0 ? `, ${YELLOW}${warnings.length} warnings${RESET}` : "") +
-      (failures.length > 0 ? `, ${RED}${failures.length} failed${RESET}` : "")
-  )
+  console.log(formatSummaryCounts(results, displayResults, verbose))
   console.log()
 
   await deps.handleAutoFixes({

@@ -517,6 +517,11 @@ function applyTaskTimestamps(
   if (task.startedAt === undefined) task.startedAt = null
   if (task.completedAt === undefined) task.completedAt = null
   if (newStatus === "in_progress") task.startedAt = nowMs
+  if (newStatus !== "completed") {
+    task.completedAt = null
+    task.completionTimestamp = undefined
+    task.completionEvidence = undefined
+  }
   if (newStatus === "completed") {
     task.completedAt = nowMs
     if (!task.completionTimestamp) task.completionTimestamp = nowIso

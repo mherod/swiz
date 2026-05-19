@@ -100,6 +100,37 @@ describe("codex-update-plan", () => {
     ])
   })
 
+  it("clears completion metadata when a Codex plan item becomes incomplete again", async () => {
+    const tempRoot = join(tmpdir(), `swiz-codex-plan-reopen-${crypto.randomUUID()}`)
+    const tasksDir = join(tempRoot, "tasks")
+    const sessionId = "codex-plan-sync"
+
+    await syncCodexUpdatePlanSnapshot(
+      sessionId,
+      {
+        plan: [{ step: "Push branch to remote", status: "completed" }],
+      },
+      { cwd: process.cwd(), tasksDir }
+    )
+
+    let tasks = await readTasks(sessionId, tasksDir)
+    expect(tasks[0]?.completionTimestamp).toBeTruthy()
+
+    await syncCodexUpdatePlanSnapshot(
+      sessionId,
+      {
+        plan: [{ step: "Push branch to remote", status: "pending" }],
+      },
+      { cwd: process.cwd(), tasksDir }
+    )
+
+    tasks = await readTasks(sessionId, tasksDir)
+    expect(tasks[0]?.status).toBe("pending")
+    expect(tasks[0]?.completedAt).toBeNull()
+    expect(tasks[0]?.completionTimestamp).toBeUndefined()
+    expect(tasks[0]?.completionEvidence).toBeUndefined()
+  })
+
   it("syncs from a transcript summary for Codex payloads", async () => {
     const originalHome = process.env.HOME
     const tempHome = join(tmpdir(), `swiz-codex-home-${crypto.randomUUID()}`)

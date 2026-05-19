@@ -160,6 +160,11 @@ function buildPlanDescription(index: number): string {
 function applyStatusTiming(task: Task, oldStatus: TaskStatus | null, newStatus: TaskStatus): void {
   const nowMs = Date.now()
   const nowIso = new Date(nowMs).toISOString()
+  if (newStatus !== "completed") {
+    task.completedAt = null
+    task.completionTimestamp = undefined
+    task.completionEvidence = undefined
+  }
   if (oldStatus === newStatus && task.statusChangedAt) return
 
   if (oldStatus === "in_progress" && task.statusChangedAt) {
@@ -211,7 +216,10 @@ function hasTaskChanged(existing: Task | undefined, next: Task): boolean {
     existing.subject !== next.subject ||
     existing.description !== next.description ||
     existing.status !== next.status ||
-    existing.activeForm !== next.activeForm
+    existing.activeForm !== next.activeForm ||
+    existing.completedAt !== next.completedAt ||
+    existing.completionTimestamp !== next.completionTimestamp ||
+    existing.completionEvidence !== next.completionEvidence
   )
 }
 
