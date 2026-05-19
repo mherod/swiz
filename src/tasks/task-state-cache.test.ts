@@ -48,6 +48,26 @@ describe("TaskStateCache", () => {
     cache.close()
   })
 
+  it("rewatches a session when the task directory changes", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    const base = await tmp.create()
+    const claudeDir = await createSessionDir(join(base, "claude"), "same-session")
+    const codexDir = await createSessionDir(join(base, "codex"), "same-session")
+
+    await writeTaskFile(claudeDir, makeTask("1", "completed", "Old provider task"))
+    cache.watchSession("same-session", claudeDir)
+    expect((await cache.getTasks("same-session", claudeDir)).map((task) => task.subject)).toEqual([
+      "Old provider task",
+    ])
+
+    await writeTaskFile(codexDir, makeTask("codex-1", "in_progress", "Codex plan task"))
+    cache.watchSession("same-session", codexDir)
+    expect((await cache.getTasks("same-session", codexDir)).map((task) => task.subject)).toEqual([
+      "Codex plan task",
+    ])
+    cache.close()
+  })
+
   it("loads all tasks on first access (cold miss)", async () => {
     const cache = new TaskStateCache({ maxEntries: 10 })
     const base = await tmp.create()

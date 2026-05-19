@@ -25,6 +25,7 @@ import {
   readSwizSettings,
   resolveProjectHooks,
 } from "../settings.ts"
+import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
 import {
   type CurrentSessionToolUsage,
   computeTranscriptSummary,
@@ -237,7 +238,22 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     log(`   [warn] transcript summary unavailable (fallback disabled, no provider)`)
   }
 
+  await syncCodexUpdatePlanForHooks(payload, summary)
+
   return JSON.stringify(assertEnrichedDispatchPayloadRecord(payload))
+}
+
+async function syncCodexUpdatePlanForHooks(
+  payload: Record<string, any>,
+  summary: TranscriptSummary | null
+): Promise<void> {
+  const codexPlanSync = await syncCodexUpdatePlanFromTranscriptSummary(payload, summary)
+  if (!codexPlanSync || codexPlanSync.snapshots === 0) return
+
+  log(
+    `   codex update_plan sync: ${codexPlanSync.created} created, ` +
+      `${codexPlanSync.updated} updated, ${codexPlanSync.cancelled} cancelled`
+  )
 }
 
 async function resolveTranscriptSummary(

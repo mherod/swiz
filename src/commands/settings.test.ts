@@ -939,6 +939,7 @@ describe("SETTINGS_REGISTRY", () => {
       "memoryUpdateReminder",
       "qualityChecksGate",
       "skipSecretScan",
+      "ignoreMcpTools",
       "prAgeGateMinutes",
       "pushCooldownMinutes",
       "taskDurationWarningMinutes",

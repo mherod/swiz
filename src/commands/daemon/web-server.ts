@@ -26,6 +26,7 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../../settings.ts"
+import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../../task-roots.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
@@ -656,8 +657,7 @@ async function handleDispatchRoute(
     parsedPayload = JSON.parse(payloadStr) as Record<string, unknown>
     const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
     if (sessionId && ctx.taskStateCache) {
-      const { createDefaultTaskStore } = await import("../../task-roots.ts")
-      const { tasksDir } = createDefaultTaskStore()
+      const { tasksDir } = createTaskStoreForHookPayload(parsedPayload)
       const sessionTasksDir = join(tasksDir, sessionId)
       ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
@@ -1367,8 +1367,7 @@ function buildSessionRoutesContext(ctx: DaemonWebServerContext) {
     getSessionData: (cwd: string, sessionId: string, limit: number) =>
       getSessionData(cwd, sessionId, limit, ctx.sessionToolCalls),
     getSessionTasks: async (sessionId: string, limit: number) => {
-      const { createDefaultTaskStore } = await import("../../task-roots.ts")
-      const { tasksDir } = createDefaultTaskStore()
+      const { tasksDir } = findTaskStoreForSession(sessionId)
       const tasks = await ctx.taskStateCache.getTasks(sessionId, join(tasksDir, sessionId))
       return buildSessionTasksView(tasks, limit)
     },
@@ -1419,8 +1418,7 @@ async function resolveTaskCountsFromCache(
 ): Promise<TaskCounts | null> {
   if (!sessionId) return null
   try {
-    const { createDefaultTaskStore } = await import("../../task-roots.ts")
-    const { tasksDir } = createDefaultTaskStore()
+    const { tasksDir } = findTaskStoreForSession(sessionId)
     const state = await cache.getState(sessionId, join(tasksDir, sessionId))
     stderrLog(
       "daemon task cache diagnostics",

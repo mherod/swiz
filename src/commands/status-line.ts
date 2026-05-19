@@ -21,7 +21,9 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../settings.ts"
-import { isIncompleteTaskStatus, readSessionTasks } from "../tasks/task-recovery.ts"
+import { findTaskStoreForSession } from "../task-roots.ts"
+import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
+import { readTasks } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -706,7 +708,7 @@ export async function computeWarmStatusLineSnapshot(
     readSwizSettings().catch(() => null),
     readProjectSettings(cwd).catch(() => null),
     detectCiProviders(cwd).catch(() => new Set()),
-    sessionId ? readSessionTasks(sessionId).catch(() => []) : Promise.resolve([]),
+    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
   ])
 
   const effective = swizSettings
@@ -733,6 +735,11 @@ async function readWarmSnapshotFromDaemon(
     }
   )
   return payload?.snapshot ?? null
+}
+
+async function readStatusLineSessionTasks(sessionId: string) {
+  const { tasksDir } = findTaskStoreForSession(sessionId)
+  return readTasks(sessionId, tasksDir).catch(() => [])
 }
 
 async function readDaemonJson<T>(
@@ -1007,7 +1014,7 @@ export const statusLineCommand: Command = {
         readWarmSnapshotFromDaemon(cwd, sessionId),
         readProjectMetricsFromDaemon(cwd),
         resolveStatusLineRenderSettings(cwd, sessionId),
-        sessionId ? readSessionTasks(sessionId).catch(() => []) : Promise.resolve([]),
+        sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
       ]
     )
     const snapshot = applyRenderSettingsToSnapshot(

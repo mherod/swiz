@@ -333,7 +333,11 @@ export class TaskStateCache {
    * Call once per active session; safe to call repeatedly (idempotent).
    */
   watchSession(sessionId: string, tasksDir: string): void {
-    if (this.watchers.has(sessionId)) return
+    const existingDir = this.tasksDirs.get(sessionId)
+    if (existingDir === tasksDir && this.watchers.has(sessionId)) return
+    if (existingDir && existingDir !== tasksDir) {
+      this.unwatchSession(sessionId)
+    }
     this.tasksDirs.set(sessionId, tasksDir)
     try {
       const watcher = watch(tasksDir, { recursive: false }, () => {
