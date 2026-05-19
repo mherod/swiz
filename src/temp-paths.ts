@@ -23,6 +23,10 @@ export function swizPushCooldownSentinelPath(repoKey: string): string {
   return `${TMP_ROOT}/swiz-push-cooldown-${repoKey}.timestamp`
 }
 
+export function swizUpstreamSyncDriftCooldownPath(repoKey: string): string {
+  return `${TMP_ROOT}/swiz-upstream-sync-drift-${repoKey}.timestamp`
+}
+
 export function taskListSyncSentinelPath(sessionId: string): string {
   return `${TMP_ROOT}/swiz-tasklist-sync-${sessionId}.timestamp`
 }
