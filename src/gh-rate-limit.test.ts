@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   acquireGhSlot,
   getGhRateLimitStats,
@@ -13,9 +13,49 @@ function includeResponse(headers: Record<string, string>, body = '{"ok":true}'):
 }
 
 describe("gh-rate-limit", () => {
+  let restoreSpawn = (): void => {}
+
+  afterEach(() => {
+    restoreSpawn()
+  })
+
   beforeEach(() => {
     resetGhRateLimitStateForTests()
+    restoreSpawn = () => {}
   })
+
+  function createMockSpawn(
+    stdout = "",
+    stderr = "",
+    exitCode = 0,
+    onSpawn?: (command: string[]) => void
+  ): () => void {
+    const previous = Bun.spawn
+
+    Bun.spawn = ((command: string[]) => {
+      onSpawn?.(command)
+      return {
+        exited: Promise.resolve(),
+        exitCode,
+        stdout: new ReadableStream({
+          start(controller) {
+            if (stdout) controller.enqueue(new TextEncoder().encode(stdout))
+            controller.close()
+          },
+        }),
+        stderr: new ReadableStream({
+          start(controller) {
+            if (stderr) controller.enqueue(new TextEncoder().encode(stderr))
+            controller.close()
+          },
+        }),
+      } as unknown as ReturnType<typeof Bun.spawn>
+    }) as typeof Bun.spawn
+
+    return () => {
+      Bun.spawn = previous
+    }
+  }
 
   test("parses gh api --include headers and body", () => {
     const parsed = parseGhApiIncludeOutput(
@@ -50,9 +90,27 @@ describe("gh-rate-limit", () => {
   })
 
   test("acquireGhSlot uses an in-memory budget on cold start", async () => {
+    const calls: string[][] = []
+    restoreSpawn = createMockSpawn(
+      includeResponse(
+        {
+          "X-RateLimit-Limit": "5000",
+          "X-RateLimit-Remaining": "5000",
+          "X-RateLimit-Reset": "2000000000",
+        },
+        "{}"
+      ),
+      "",
+      0,
+      (command) => calls.push(command)
+    )
+
     await acquireGhSlot()
 
     const stats = await getGhRateLimitStats()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]![0]).toBe("gh")
+    expect(calls[0]).toContain("rate_limit")
     expect(stats.limit).toBe(5000)
     expect(stats.used).toBe(1)
     expect(stats.remaining).toBe(4999)
@@ -72,5 +130,25 @@ describe("gh-rate-limit", () => {
     await acquireGhSlot()
 
     expect(await getGhRateLimitStats()).toEqual({ used: 5000, limit: 5000, remaining: 0 })
+  })
+
+  test("falls back to optimistic budget when bootstrap headers are unavailable", async () => {
+    restoreSpawn = createMockSpawn("{}", "", 0)
+
+    await acquireGhSlot()
+    const stats = await getGhRateLimitStats()
+
+    expect(stats).toEqual({ used: 1, limit: 5000, remaining: 4999 })
+  })
+
+  test("does not call /rate_limit repeatedly while budget is valid", async () => {
+    let calls = 0
+    restoreSpawn = createMockSpawn(includeResponse({}, "{}"), "", 0, () => {
+      calls += 1
+    })
+
+    await acquireGhSlot()
+    await acquireGhSlot()
+    expect(calls).toBe(1)
   })
 })

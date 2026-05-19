@@ -3,12 +3,14 @@
  *
  * GitHub is the authority for the per-token budget. We keep an in-memory view
  * fresh from `X-RateLimit-*` headers observed on the real `gh api --include`
- * calls Swiz already makes. Cold starts use an optimistic default budget so the
- * rate limiter never creates extra GitHub subprocesses of its own.
+ * calls Swiz already makes. Cold starts fetch `/rate_limit` once so we use real
+ * per-token budget data before falling back.
  */
 
 const DEFAULT_LIMIT = 5000
 const DEFAULT_RESET_WINDOW_MS = 60 * 60 * 1000
+const GH_RATE_LIMIT_ENDPOINT = "rate_limit"
+const GH_RATE_LIMIT_JQ_QUERY = ".resources.core"
 
 interface RateLimitBudget {
   limit: number
@@ -32,6 +34,13 @@ export interface ParsedGhApiIncludeOutput {
 
 let budget: RateLimitBudget | null = null
 let retryAfterUntil = 0
+let bootstrapInProgress: Promise<void> | null = null
+
+function currentEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
+  )
+}
 
 function parseInteger(value: string | undefined): number | null {
   if (!value) return null
@@ -89,6 +98,33 @@ function setFallbackBudget(now = Date.now()): void {
   }
 }
 
+async function bootstrapBudget(): Promise<void> {
+  try {
+    const proc = Bun.spawn(
+      ["gh", "api", "--include", GH_RATE_LIMIT_ENDPOINT, "--jq", GH_RATE_LIMIT_JQ_QUERY],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: currentEnv(),
+      }
+    )
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) {
+      return
+    }
+    observeGhApiIncludeOutput(stdout)
+    if (!budget) {
+      setFallbackBudget()
+    }
+  } catch {
+    return
+  }
+}
+
 function parseRateLimitHeaders(
   headers: Record<string, string>,
   now: number
@@ -143,8 +179,19 @@ export function observeGhApiIncludeOutput(output: string): string {
   return parsed.body
 }
 
-function ensureBudget(now = Date.now()): void {
-  if (!budget || budget.resetAt <= now) {
+async function ensureBudget(now = Date.now()): Promise<void> {
+  if (budget && budget.resetAt > now) {
+    return
+  }
+
+  if (!bootstrapInProgress) {
+    bootstrapInProgress = bootstrapBudget().finally(() => {
+      bootstrapInProgress = null
+    })
+  }
+  await bootstrapInProgress
+
+  if (!budget) {
     setFallbackBudget(now)
   }
 }
@@ -169,18 +216,18 @@ function consumeBudgetSlot(): void {
  * and lets GitHub remain the final authority for the request.
  */
 export async function acquireGhSlot(): Promise<void> {
-  ensureBudget()
+  await ensureBudget()
 
   const now = Date.now()
   if (retryAfterUntil > now) {
     await Bun.sleep(retryAfterUntil - now)
     retryAfterUntil = 0
-    ensureBudget()
+    await ensureBudget()
   }
 
   if (budget && budget.remaining <= 0 && budget.resetAt > Date.now()) {
     await Bun.sleep(budget.resetAt - Date.now())
-    ensureBudget()
+    await ensureBudget()
   }
 
   consumeBudgetSlot()
@@ -192,7 +239,7 @@ export async function getGhRateLimitStats(): Promise<{
   limit: number
   remaining: number
 }> {
-  ensureBudget()
+  await ensureBudget()
   const current = budget ?? {
     limit: DEFAULT_LIMIT,
     remaining: DEFAULT_LIMIT,
@@ -210,4 +257,5 @@ export async function getGhRateLimitStats(): Promise<{
 export function resetGhRateLimitStateForTests(): void {
   budget = null
   retryAfterUntil = 0
+  bootstrapInProgress = null
 }

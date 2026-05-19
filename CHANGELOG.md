@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-19
+
+### Improvements
+
+- **GitHub rate-limit bootstrap** — `src/gh-rate-limit.ts` now seeds per-process
+  budget state from `gh api rate_limit` on cold start and when budget resets,
+  using `X-RateLimit-*` response headers instead of file-based local estimation.
+  `src/gh-rate-limit.test.ts` was rewritten for cold-start bootstrap,
+  header propagation, and retry-after behavior.
+
 ## 2026-05-18
 
 ### Features

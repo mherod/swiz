@@ -96,7 +96,6 @@ alwaysApply: false
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
 - Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; use lazy `await import(...)` in `hook-utils.ts` (circular avoidance).
 - Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
-- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking. Auto-memory writes (`~/.claude/projects/*/memory/*.md`) exempt via `AUTO_MEMORY_PATH_RE`+`isAutoMemoryPath()`. **DO**: Two-phase gate exemptions: add in BOTH early-return AND `toolWritesMarkdown` — exempt paths must neither block nor satisfy the gate. `pretooluse-sandboxed-edits.ts` has independent `MEMORY_DIR_RE` guard — `rg "MEMORY_DIR_RE" hooks/` finds all independent guards when fixing any one.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
 - **DO**: When extracting from a shared module, re-export all types downstream consumers import.
 ## Task Data
@@ -115,7 +114,6 @@ alwaysApply: false
 - Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2 completions/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips task enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
-- **Deferred tasks** (`Follow-up:`, `Consider `, `Future:` prefix): non-blocking for stop, count toward buffer. ≤1 remaining → stop steers back; ≥2 → stop allowed. **DON'T** complete them — leave ≥2 `Follow-up:` pending. **DO** invoke `/end-of-day`, `/farm-out-issues`, `/continue-with-tasks`, `/reflect-on-session-mistakes` at closeout; 20-min windows expire if invoked early. **DON'T** use `Follow-up: consider/revisit X` — `isTaskSubjectWorkDeferral` blocks these. Use `Consider issue #N: <topic>` or `Follow-up: <concrete verb> X`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
@@ -167,7 +165,6 @@ alwaysApply: false
 - **CRITICAL self-ref PreToolUse**: edit import before usage. Reversed order deadlocks — recover via `git checkout -- <file>`. Rename declaration + all usages atomically; DON'T add unrequested renames. Remove fn + all usages atomically.
 - DO: Read every file in full before editing — snippets miss conflicts.
 - ANSI escape codes direct; no color libraries.
-- `Bun.spawn`: use `["sh", "-c", cmd]` for shell. **Critical**: drain stdout/stderr **concurrently** via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`. **Why**: Sequential awaiting (`await stdout; await stderr`) causes pipe buffer overflow when stderr fills while stdout is still draining, triggering timeouts under CI load (issue #655). For reusable pattern, use `spawnAndCapture()` from `src/test-utils/subprocess-helper.ts`.
 - DON'T pass multi-param functions to `.flatMap()`/`.map()` — injected `(value, index, array)` args corrupt optional positionals. Wrap: `.flatMap((b) => fn(b))`.
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
@@ -206,9 +203,7 @@ alwaysApply: false
 ## Testing
 - DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure.
 - **MANDATORY performance rule**: unit tests must not spawn hook subprocesses. Use `runHookInProcess()`, `runBashHook()`, `runFileEditHook()`, `dispatchInProcess()`, or exported `evaluate*()` functions. `Bun.spawn(["bun", "hooks/..."])` is allowed only in explicit standalone-contract tests such as malformed stdin, executable smoke tests, env-isolation behavior, or process-exit compatibility. Every exception needs a comment naming the subprocess-only behavior under test.
-- **MANDATORY git mocking rule**: tests must not create real git repositories, commits, clones, remotes, or branches just to answer `isGitRepo`, current branch, remote URL, diff, log, or status questions. Use `GitClient`/`MockGitClient`, `withGitClient()`, and lightweight fixtures such as `createMockTestRepo()`. Real git setup belongs only in narrow integration tests that verify git porcelain behavior itself.
 - **MANDATORY heavy-work rule**: mock `gh`, daemon HTTP, filesystem watchers, timers, sleeps, CLI cold starts, and large file contents unless the behavior under test is the external boundary. Prefer injected settings (`_effectiveSettings`), injected state (`_projectState`), temp paths, and direct command/hook function calls over process-wide env mutation.
-- **Performance budget**: adding tests that each cost 100ms+ is a design smell. A hook unit suite should usually run in milliseconds; if it needs seconds, split out one integration smoke test and keep the matrix in-process. `--concurrent` is required; `--parallel=N` is only acceptable after tests are proven isolated from shared tmp paths, HOME, globals, daemon ports, watcher timing, and process-level caches.
 - **Regression guard**: when touching hook tests, grep for `Bun.spawn(["bun", "hooks/` and replace legacy runners with shared in-process helpers before adding cases. Do not paper over timeouts by raising `setDefaultTimeout`; remove the subprocess/heavy fixture cause.
 - In hook/unit test edits, run this audit command and keep only intentional exceptions:  
   `rg --line-number "Bun\\.spawn\\(\\[\"bun\",\\s*\"hooks/|Bun\\.spawn\\(\\[\"bun\",\\s*\"run\", \"index\\.ts\""`  
