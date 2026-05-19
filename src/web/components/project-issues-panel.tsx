@@ -90,28 +90,36 @@ function IssuesHero({
   repo,
   loading,
   issueCount,
+  variant,
 }: {
   repo: string | null
   loading: boolean
   issueCount: number
+  variant: "compact" | "full"
 }) {
   const repoParts = splitRepo(repo)
   return (
     <div className="project-issues-hero">
       <div>
-        <p className="project-issues-kicker">GitHub cache</p>
+        <p className="project-issues-kicker">
+          {variant === "full" ? "Issue workbench" : "GitHub cache"}
+        </p>
         <div className="project-issues-title-row">
           <h2 id="project-issues-title" className="section-title">
-            Issues
+            {variant === "full" ? "GitHub Issues" : "Issues"}
           </h2>
           <span className="project-issues-count-pill">
             {loading ? "Loading" : formatIssueCount(issueCount)}
           </span>
         </div>
         <p className="project-issues-summary">
-          {repo
-            ? `Cached open issues for ${repo}.`
-            : "Repository issue state for the selected project."}
+          {variant === "full"
+            ? repo
+              ? `Focused view of cached open issues for ${repo}.`
+              : "Focused issue cache for the selected project."
+            : repo
+              ? `Cached open issues for ${repo}.`
+              : "Repository issue state for the selected project."}
         </p>
       </div>
       <div className="project-issues-controls">
@@ -243,7 +251,7 @@ function IssuesPanelContent({ error, loading, repo, issues, emptyState }: Issues
   )
 }
 
-export function ProjectIssuesPanel({ cwd }: { cwd: string | null }): ReactElement {
+function useProjectIssues(cwd: string | null) {
   const [repo, setRepo] = useState<string | null>(null)
   const [issues, setIssues] = useState<ProjectIssue[]>([])
   const [loading, setLoading] = useState(false)
@@ -289,11 +297,25 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }): ReactElemen
     }
   }, [cwd])
 
+  return { repo, issues, loading, error }
+}
+
+export function ProjectIssuesPanel({
+  cwd,
+  variant = "compact",
+}: {
+  cwd: string | null
+  variant?: "compact" | "full"
+}): ReactElement {
+  const { repo, issues, loading, error } = useProjectIssues(cwd)
   const emptyState = emptyStateContent(cwd, repo)
 
   return (
-    <section className="card project-issues-card" aria-labelledby="project-issues-title">
-      <IssuesHero repo={repo} loading={loading} issueCount={issues.length} />
+    <section
+      className={`card project-issues-card${variant === "full" ? " project-issues-card-full" : ""}`}
+      aria-labelledby="project-issues-title"
+    >
+      <IssuesHero repo={repo} loading={loading} issueCount={issues.length} variant={variant} />
       <IssuesPanelContent
         error={error}
         loading={loading}

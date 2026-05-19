@@ -116,7 +116,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
       deps.onAgentProcesses(ap.providers ?? {})
       deps.onActiveDispatches(ad.active ?? [])
       deps.onError("")
-      deps.onLastUpdated(new Date().toLocaleTimeString())
+      deps.onLastUpdated(new Date().toISOString())
 
       if (!initialLoadDone.current) {
         initialLoadDone.current = true

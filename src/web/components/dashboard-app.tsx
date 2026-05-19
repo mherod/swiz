@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from "motion/react"
 import type { ReactElement } from "react"
 import { cn } from "../lib/cn.ts"
 import { msgKey } from "../lib/dashboard-helpers.ts"
@@ -48,20 +47,25 @@ function buildMessagesProps(state: DashboardState) {
 }
 
 function DashboardDock({ state }: { state: DashboardState }) {
+  const activeProjectName = state.activeProject?.name
   return (
     <Dock className="dock-fixed" iconSize={36} iconMagnification={54} iconDistance={140}>
-      {state.activeProject?.name ? (
-        <DockIcon disableMagnification className="dock-icon-project">
-          <span className="dock-icon-label">{state.activeProject.name}</span>
-        </DockIcon>
+      {activeProjectName ? (
+        <span className="dock-project-label" title={`Current project: ${activeProjectName}`}>
+          {activeProjectName}
+        </span>
       ) : null}
       {TAB_LABELS.map(({ view, label, icon }) => (
         <DockIcon
           key={view}
           onClick={() => state.setActiveView(view)}
+          aria-label={`Show ${label} view`}
+          aria-current={state.activeView === view ? "page" : undefined}
           className={cn(state.activeView === view && "dock-icon-active")}
         >
-          <span className="dock-icon-glyph">{icon}</span>
+          <span className="dock-icon-glyph" aria-hidden="true">
+            {icon}
+          </span>
           <span className="dock-icon-label">{label}</span>
         </DockIcon>
       ))}
@@ -73,11 +77,7 @@ function DashboardContent({ state }: { state: DashboardState }) {
   const { activeView, optimisticProjectCwd } = state
 
   if (activeView === "settings") {
-    return (
-      <div className="bento-settings-page">
-        <SettingsPanel cwd={optimisticProjectCwd} />
-      </div>
-    )
+    return <SettingsPanel cwd={optimisticProjectCwd} className="bento-settings-page" />
   }
   if (activeView === "issues") return <IssuesView cwd={optimisticProjectCwd} />
   if (activeView === "logs") return <LogsView />
@@ -138,18 +138,7 @@ export function DashboardApp(): ReactElement {
         onKillAgentPid={state.handleKillAgentPid}
         onDeleteSession={state.handleDeleteSession}
       />
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={state.activeView}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
-          style={{ display: "contents" }}
-        >
-          <DashboardContent state={state} />
-        </motion.div>
-      </AnimatePresence>
+      <DashboardContent state={state} />
       <DashboardDock state={state} />
     </div>
   )

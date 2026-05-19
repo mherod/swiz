@@ -33,10 +33,10 @@ export function Dock({
       return React.cloneElement(child, {
         ...child.props,
         mouseX,
-        size: iconSize,
-        magnification: iconMagnification,
-        disableMagnification,
-        distance: iconDistance,
+        size: child.props.size ?? iconSize,
+        magnification: child.props.magnification ?? iconMagnification,
+        disableMagnification: child.props.disableMagnification ?? disableMagnification,
+        distance: child.props.distance ?? iconDistance,
       })
     }
     return child
@@ -46,18 +46,19 @@ export function Dock({
     direction === "top" ? "dock-top" : direction === "bottom" ? "dock-bottom" : ""
 
   return (
-    <motion.div
+    <motion.nav
+      aria-label="Dashboard views"
       onMouseMove={(e) => mouseX.set(e.pageX)}
       onMouseLeave={() => mouseX.set(Infinity)}
       className={cn("dock", directionClass, className)}
     >
       {rendered}
-    </motion.div>
+    </motion.nav>
   )
 }
 
 export interface DockIconProps
-  extends Omit<MotionProps & React.HTMLAttributes<HTMLDivElement>, "children"> {
+  extends Omit<MotionProps & React.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   size?: number
   magnification?: number
   disableMagnification?: boolean
@@ -78,7 +79,7 @@ export function DockIcon({
   children,
   ...props
 }: DockIconProps): ReactElement {
-  const ref = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLButtonElement>(null)
   const padding = Math.max(6, size * 0.2)
   const defaultMouseX = useMotionValue(Infinity)
 
@@ -97,13 +98,14 @@ export function DockIcon({
   const scaleSize = useSpring(sizeTransform, { mass: 0.1, stiffness: 150, damping: 12 })
 
   return (
-    <motion.div
+    <motion.button
       ref={ref}
+      type="button"
       style={{ width: scaleSize, height: scaleSize, padding }}
       className={cn("dock-icon", className)}
       {...props}
     >
       <div>{children}</div>
-    </motion.div>
+    </motion.button>
   )
 }

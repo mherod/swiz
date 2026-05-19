@@ -58,7 +58,9 @@ export function SessionTasksSection({
       {loading ? (
         <p className="empty">Loading tasks...</p>
       ) : tasks.length === 0 ? (
-        <p className="empty">No tasks recorded for this session.</p>
+        <p className="empty">
+          No tasks recorded for this session. Tasks appear once an agent starts work.
+        </p>
       ) : (
         <>
           {openTasks.length > 0 ? (
@@ -188,9 +190,11 @@ function ProjectTaskListControls({
 
 function ProjectTaskEmptyState({ visibility }: { visibility: "open" | "all" }) {
   return visibility === "open" ? (
-    <p className="empty">No open tasks in this project.</p>
+    <p className="empty">No open tasks in this project. New agent tasks will appear here.</p>
   ) : (
-    <p className="empty">No tasks recorded for this project.</p>
+    <p className="empty">
+      No tasks recorded for this project. Project history appears after task activity.
+    </p>
   )
 }
 

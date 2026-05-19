@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useEffect, useState } from "react"
+import { type KeyboardEvent, type ReactElement, useCallback, useEffect, useState } from "react"
 import type { HookLogEntry } from "../../../hook-log.ts"
 
 const STATUS_COLORS: Record<string, string> = {
@@ -15,6 +15,37 @@ const STATUS_COLORS: Record<string, string> = {
   slow: "log-status-warn",
 }
 
+const STATUS_ICONS: Record<string, string> = {
+  ok: "✓",
+  "allow-with-reason": "✓",
+  skipped: "○",
+  "no-output": "○",
+  "no-hooks": "○",
+  slow: "⚠",
+  timeout: "⚠",
+  deny: "×",
+  block: "×",
+  error: "×",
+  "invalid-json": "×",
+}
+
+type SortDirection = "asc" | "desc"
+type LogSortKey = "time" | "event" | "hook" | "status" | "duration" | "tool"
+
+interface LogSort {
+  key: LogSortKey
+  direction: SortDirection
+}
+
+const LOG_COLUMNS: Array<{ key: LogSortKey; label: string }> = [
+  { key: "time", label: "Time" },
+  { key: "event", label: "Event" },
+  { key: "status", label: "Status" },
+  { key: "duration", label: "Duration" },
+  { key: "hook", label: "Hook" },
+  { key: "tool", label: "Tool" },
+]
+
 function formatTime(ts: string): string {
   try {
     return new Date(ts).toLocaleTimeString(undefined, { hour12: false })
@@ -30,6 +61,28 @@ function formatDuration(ms: number): string {
 function hookBasename(hook: string): string {
   const parts = hook.split("/")
   return parts[parts.length - 1] ?? hook
+}
+
+function statusLabel(status: string): string {
+  const icon = STATUS_ICONS[status]
+  return icon ? `${icon} ${status}` : status
+}
+
+function sortValue(entry: HookLogEntry, key: LogSortKey): string | number {
+  if (key === "time") return Date.parse(entry.ts) || 0
+  if (key === "duration") return entry.durationMs
+  if (key === "tool") return entry.toolName ?? ""
+  return entry[key]
+}
+
+function sortEntries(entries: HookLogEntry[], sort: LogSort): HookLogEntry[] {
+  const direction = sort.direction === "asc" ? 1 : -1
+  return [...entries].sort((a, b) => {
+    const av = sortValue(a, sort.key)
+    const bv = sortValue(b, sort.key)
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * direction
+    return String(av).localeCompare(String(bv)) * direction
+  })
 }
 
 function LogDetailContent({ entry }: { entry: HookLogEntry }) {
@@ -82,12 +135,28 @@ function LogRow({
 }) {
   const isDispatch = entry.kind === "dispatch"
   const rowClass = isDispatch ? "log-row log-row-dispatch" : "log-row"
+  const handleKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    onToggle()
+  }
   return (
     <>
-      <tr className={rowClass} onClick={onToggle}>
+      <tr
+        className={rowClass}
+        onClick={onToggle}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        aria-expanded={expanded}
+      >
         <td className="log-cell log-cell-time">{formatTime(entry.ts)}</td>
         <td className="log-cell log-cell-event">{entry.event}</td>
-        <td className="log-cell log-cell-hook" title={entry.hook}>
+        <td className={`log-cell log-cell-status ${STATUS_COLORS[entry.status] ?? ""}`}>
+          {statusLabel(entry.status)}
+          {entry.skipReason ? <span className="log-skip-reason"> ({entry.skipReason})</span> : null}
+        </td>
+        <td className="log-cell log-cell-duration">{formatDuration(entry.durationMs)}</td>
+        <td className="log-cell log-cell-hook" title={entry.hook} aria-label={`Hook ${entry.hook}`}>
           {isDispatch ? (
             <span className="log-dispatch-label">
               dispatch
@@ -102,11 +171,6 @@ function LogRow({
             hookBasename(entry.hook)
           )}
         </td>
-        <td className={`log-cell log-cell-status ${STATUS_COLORS[entry.status] ?? ""}`}>
-          {entry.status}
-          {entry.skipReason ? <span className="log-skip-reason"> ({entry.skipReason})</span> : null}
-        </td>
-        <td className="log-cell log-cell-duration">{formatDuration(entry.durationMs)}</td>
         <td className="log-cell log-cell-tool">{entry.toolName ?? ""}</td>
       </tr>
       {expanded ? (
@@ -124,22 +188,43 @@ function LogTable({
   entries,
   expandedIdx,
   onToggle,
+  sort,
+  onSort,
 }: {
   entries: HookLogEntry[]
   expandedIdx: number | null
   onToggle: (i: number) => void
+  sort: LogSort
+  onSort: (key: LogSortKey) => void
 }) {
   return (
     <div className="logs-table-wrap">
       <table className="logs-table">
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Event</th>
-            <th>Hook</th>
-            <th>Status</th>
-            <th>Duration</th>
-            <th>Tool</th>
+            {LOG_COLUMNS.map((column) => {
+              const active = sort.key === column.key
+              return (
+                <th
+                  key={column.key}
+                  aria-sort={
+                    active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"
+                  }
+                >
+                  <button
+                    type="button"
+                    className="log-sort-button"
+                    onClick={() => onSort(column.key)}
+                    aria-label={`Sort logs by ${column.label}`}
+                  >
+                    <span>{column.label}</span>
+                    <span aria-hidden="true" className="log-sort-indicator">
+                      {active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}
+                    </span>
+                  </button>
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
@@ -208,8 +293,19 @@ export function LogsView(): ReactElement {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const [filter, setFilter] = useState("")
   const [hideSkipped, setHideSkipped] = useState(true)
+  const [sort, setSort] = useState<LogSort>({ key: "time", direction: "desc" })
 
   const filtered = filterEntries(entries, filter, hideSkipped)
+  const sorted = sortEntries(filtered, sort)
+
+  const handleSort = (key: LogSortKey) => {
+    setExpandedIdx(null)
+    setSort((current) =>
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: key === "duration" ? "desc" : "asc" }
+    )
+  }
 
   return (
     <div className="bento-full-page">
@@ -237,13 +333,15 @@ export function LogsView(): ReactElement {
         </div>
         {loading ? (
           <p className="logs-loading">Loading logs\u2026</p>
-        ) : filtered.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <p className="logs-empty">No log entries{filter ? " matching filter" : ""}.</p>
         ) : (
           <LogTable
-            entries={filtered}
+            entries={sorted}
             expandedIdx={expandedIdx}
             onToggle={(i) => setExpandedIdx(expandedIdx === i ? null : i)}
+            sort={sort}
+            onSort={handleSort}
           />
         )}
       </section>

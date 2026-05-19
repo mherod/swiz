@@ -1,4 +1,5 @@
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "../lib/cn.ts"
 import { postJson } from "../lib/http.ts"
 import { Select } from "./select.tsx"
 
@@ -145,45 +146,75 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   skillRecencyMaxAgeMinutes: "",
 }
 
+function readBooleanSetting(settings: Record<string, unknown>, key: string, defaultValue = false) {
+  return defaultValue ? settings[key] !== false : !!settings[key]
+}
+
+function readNumberSetting(settings: Record<string, unknown>, key: string, fallback: number) {
+  return Number(settings[key]) || fallback
+}
+
+function readStringSetting<T extends string>(
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: T
+) {
+  return (settings[key] as T) ?? fallback
+}
+
 function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettingsForm {
   return {
-    autoContinue: !!settings.autoContinue,
-    critiquesEnabled: !!settings.critiquesEnabled,
-    prMergeMode: settings.prMergeMode !== false,
-    pushGate: settings.pushGate !== false,
-    sandboxedEdits: settings.sandboxedEdits !== false,
-    speak: !!settings.speak,
-    autoSteer: !!settings.autoSteer,
-    swizNotifyHooks: !!settings.swizNotifyHooks,
-    autoSteerTranscriptWatching: !!settings.autoSteerTranscriptWatching,
-    gitStatusGate: settings.gitStatusGate !== false,
-    ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
-    auditStrictness:
-      (settings.auditStrictness as GlobalSettingsForm["auditStrictness"]) ?? "strict",
-    memoryWordThreshold: Number(settings.memoryWordThreshold) || DEFAULT_MEMORY_WORD_THRESHOLD,
-    memoryLineThreshold: Number(settings.memoryLineThreshold) || 1000,
-    pushCooldownMinutes: Number(settings.pushCooldownMinutes) || 10,
-    prAgeGateMinutes: Number(settings.prAgeGateMinutes) || 15,
-    updateMemoryFooter: settings.updateMemoryFooter !== false,
-    nonDefaultBranchGate: settings.nonDefaultBranchGate !== false,
-    ignoreCi: !!settings.ignoreCi,
-    githubCiGate: settings.githubCiGate !== false,
-    changesRequestedGate: settings.changesRequestedGate !== false,
-    personalRepoIssuesGate: settings.personalRepoIssuesGate !== false,
-    issueCloseGate: !!settings.issueCloseGate,
-    memoryUpdateReminder: !!settings.memoryUpdateReminder,
-    qualityChecksGate: settings.qualityChecksGate !== false,
-    skipSecretScan: !!settings.skipSecretScan,
-    ignoreMcpTools: settings.ignoreMcpTools !== false,
-    autoTransition: settings.autoTransition !== false,
-    taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
-    largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
-    largeFileSizeBlockKb: Number(settings.largeFileSizeBlockKb) || 5120,
-    transcriptMonitorMaxConcurrentDispatches:
-      Number(settings.transcriptMonitorMaxConcurrentDispatches) || 0,
-    enforceEndOfDay: settings.enforceEndOfDay !== false,
-    enforceUnblockMyself: settings.enforceUnblockMyself !== false,
-    enforceMidSessionCheckin: !!settings.enforceMidSessionCheckin,
+    autoContinue: readBooleanSetting(settings, "autoContinue"),
+    critiquesEnabled: readBooleanSetting(settings, "critiquesEnabled"),
+    prMergeMode: readBooleanSetting(settings, "prMergeMode", true),
+    pushGate: readBooleanSetting(settings, "pushGate", true),
+    sandboxedEdits: readBooleanSetting(settings, "sandboxedEdits", true),
+    speak: readBooleanSetting(settings, "speak"),
+    autoSteer: readBooleanSetting(settings, "autoSteer"),
+    swizNotifyHooks: readBooleanSetting(settings, "swizNotifyHooks"),
+    autoSteerTranscriptWatching: readBooleanSetting(settings, "autoSteerTranscriptWatching"),
+    gitStatusGate: readBooleanSetting(settings, "gitStatusGate", true),
+    ambitionMode: readStringSetting<GlobalSettingsForm["ambitionMode"]>(
+      settings,
+      "ambitionMode",
+      "standard"
+    ),
+    auditStrictness: readStringSetting<GlobalSettingsForm["auditStrictness"]>(
+      settings,
+      "auditStrictness",
+      "strict"
+    ),
+    memoryWordThreshold: readNumberSetting(
+      settings,
+      "memoryWordThreshold",
+      DEFAULT_MEMORY_WORD_THRESHOLD
+    ),
+    memoryLineThreshold: readNumberSetting(settings, "memoryLineThreshold", 1000),
+    pushCooldownMinutes: readNumberSetting(settings, "pushCooldownMinutes", 10),
+    prAgeGateMinutes: readNumberSetting(settings, "prAgeGateMinutes", 15),
+    updateMemoryFooter: readBooleanSetting(settings, "updateMemoryFooter", true),
+    nonDefaultBranchGate: readBooleanSetting(settings, "nonDefaultBranchGate", true),
+    ignoreCi: readBooleanSetting(settings, "ignoreCi"),
+    githubCiGate: readBooleanSetting(settings, "githubCiGate", true),
+    changesRequestedGate: readBooleanSetting(settings, "changesRequestedGate", true),
+    personalRepoIssuesGate: readBooleanSetting(settings, "personalRepoIssuesGate", true),
+    issueCloseGate: readBooleanSetting(settings, "issueCloseGate"),
+    memoryUpdateReminder: readBooleanSetting(settings, "memoryUpdateReminder"),
+    qualityChecksGate: readBooleanSetting(settings, "qualityChecksGate", true),
+    skipSecretScan: readBooleanSetting(settings, "skipSecretScan"),
+    ignoreMcpTools: readBooleanSetting(settings, "ignoreMcpTools", true),
+    autoTransition: readBooleanSetting(settings, "autoTransition", true),
+    taskDurationWarningMinutes: readNumberSetting(settings, "taskDurationWarningMinutes", 45),
+    largeFileSizeKb: readNumberSetting(settings, "largeFileSizeKb", 200),
+    largeFileSizeBlockKb: readNumberSetting(settings, "largeFileSizeBlockKb", 5120),
+    transcriptMonitorMaxConcurrentDispatches: readNumberSetting(
+      settings,
+      "transcriptMonitorMaxConcurrentDispatches",
+      0
+    ),
+    enforceEndOfDay: readBooleanSetting(settings, "enforceEndOfDay", true),
+    enforceUnblockMyself: readBooleanSetting(settings, "enforceUnblockMyself", true),
+    enforceMidSessionCheckin: readBooleanSetting(settings, "enforceMidSessionCheckin"),
   }
 }
 
@@ -246,25 +277,79 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
 
 // --- Shared field components ---
 
+function SettingsRiskConfirmation({
+  id,
+  action,
+  onApply,
+  onCancel,
+}: {
+  id: string
+  action: string
+  onApply: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div id={`${id}-confirm`} className="settings-risk-confirm" role="alert">
+      <span>{action}?</span>
+      <button type="button" className="settings-risk-confirm-apply" onClick={onApply}>
+        Apply
+      </button>
+      <button type="button" className="settings-risk-confirm-cancel" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 function CheckboxField(props: {
+  id: string
   checked: boolean
   onChange: (v: boolean) => void
   label: string
   desc: string
+  risk?: boolean
 }) {
+  const [pendingValue, setPendingValue] = useState<boolean | null>(null)
+  const pendingAction =
+    pendingValue === null ? null : pendingValue ? `Enable ${props.label}` : `Disable ${props.label}`
+  const describedBy = pendingAction ? `${props.id}-desc ${props.id}-confirm` : `${props.id}-desc`
+
+  const handleChange = (next: boolean) => {
+    if (props.risk) {
+      setPendingValue(next)
+      return
+    }
+    props.onChange(next)
+  }
+
   return (
-    <div>
-      <label className="inline-flex items-center gap-[7px] text-[#c4d3ef] text-[0.76rem] [&_input]:accent-[#77b7ff]">
+    <div className={props.risk ? "settings-toggle settings-toggle-risk" : "settings-toggle"}>
+      <label className="settings-toggle-row" htmlFor={props.id}>
         <input
+          id={props.id}
           type="checkbox"
           checked={props.checked}
-          onChange={(e) => props.onChange(e.target.checked)}
+          onChange={(e) => handleChange(e.target.checked)}
+          aria-describedby={describedBy}
         />
-        <span>{props.label}</span>
+        <span className="settings-toggle-label">{props.label}</span>
+        {props.risk ? <span className="settings-risk-badge">High impact</span> : null}
       </label>
-      <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+      <p id={`${props.id}-desc`} className="settings-toggle-desc">
         {props.desc}
       </p>
+      {pendingAction ? (
+        <SettingsRiskConfirmation
+          id={props.id}
+          action={pendingAction}
+          onApply={() => {
+            if (pendingValue === null) return
+            props.onChange(pendingValue)
+            setPendingValue(null)
+          }}
+          onCancel={() => setPendingValue(null)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -274,17 +359,66 @@ function CheckboxField(props: {
 const GLOBAL_NUMBER_FIELDS: Array<{
   key: keyof GlobalSettingsForm
   label: string
+  helper: string
+  min: number
+  max?: number
+  step?: number
 }> = [
-  { key: "memoryLineThreshold", label: "Memory line threshold" },
-  { key: "memoryWordThreshold", label: "Memory word threshold" },
-  { key: "taskDurationWarningMinutes", label: "Task duration warning (min)" },
-  { key: "largeFileSizeKb", label: "Large file size (KB)" },
-  { key: "largeFileSizeBlockKb", label: "Large file size block (KB)" },
-  { key: "pushCooldownMinutes", label: "Push cooldown (min)" },
-  { key: "prAgeGateMinutes", label: "PR age gate (min)" },
+  {
+    key: "memoryLineThreshold",
+    label: "Memory line threshold",
+    helper: "Lines before memory review.",
+    min: 50,
+    max: 100_000,
+  },
+  {
+    key: "memoryWordThreshold",
+    label: "Memory word threshold",
+    helper: "Words before memory review.",
+    min: 100,
+    max: 250_000,
+  },
+  {
+    key: "taskDurationWarningMinutes",
+    label: "Task duration warning",
+    helper: "Minutes before a task is considered long-running.",
+    min: 1,
+    max: 1_440,
+  },
+  {
+    key: "largeFileSizeKb",
+    label: "Large file warning",
+    helper: "KB threshold for large-file warnings.",
+    min: 1,
+    max: 1_048_576,
+  },
+  {
+    key: "largeFileSizeBlockKb",
+    label: "Large file block",
+    helper: "KB threshold for blocking file edits.",
+    min: 1,
+    max: 1_048_576,
+  },
+  {
+    key: "pushCooldownMinutes",
+    label: "Push cooldown",
+    helper: "Minutes to suppress repeated push prompts.",
+    min: 0,
+    max: 1_440,
+  },
+  {
+    key: "prAgeGateMinutes",
+    label: "PR age gate",
+    helper: "Minutes before PR-age checks apply.",
+    min: 0,
+    max: 10_080,
+  },
   {
     key: "transcriptMonitorMaxConcurrentDispatches",
-    label: "Transcript monitor max concurrent dispatches (0=unlimited)",
+    label: "Transcript dispatch cap",
+    helper: "Maximum concurrent transcript dispatches. 0 means unlimited.",
+    min: 0,
+    max: 256,
   },
 ]
 
@@ -451,6 +585,71 @@ const GLOBAL_TOGGLES: Array<{
   },
 ]
 
+const RISKY_GLOBAL_TOGGLES = new Set<keyof GlobalSettingsForm>([
+  "autoContinue",
+  "autoSteer",
+  "autoSteerTranscriptWatching",
+  "ignoreCi",
+  "issueCloseGate",
+  "skipSecretScan",
+])
+
+const GLOBAL_TOGGLE_GROUPS: Array<{
+  title: string
+  keys: Array<keyof GlobalSettingsForm>
+}> = [
+  {
+    title: "Agent Behavior",
+    keys: [
+      "autoContinue",
+      "critiquesEnabled",
+      "speak",
+      "autoSteer",
+      "swizNotifyHooks",
+      "autoSteerTranscriptWatching",
+      "autoTransition",
+      "ignoreMcpTools",
+    ],
+  },
+  {
+    title: "Git & Push",
+    keys: [
+      "prMergeMode",
+      "pushGate",
+      "gitStatusGate",
+      "nonDefaultBranchGate",
+      "githubCiGate",
+      "changesRequestedGate",
+      "ignoreCi",
+    ],
+  },
+  {
+    title: "Tasks & Memory",
+    keys: [
+      "updateMemoryFooter",
+      "memoryUpdateReminder",
+      "qualityChecksGate",
+      "personalRepoIssuesGate",
+      "issueCloseGate",
+      "enforceEndOfDay",
+      "enforceUnblockMyself",
+      "enforceMidSessionCheckin",
+    ],
+  },
+  {
+    title: "Security",
+    keys: ["sandboxedEdits", "skipSecretScan"],
+  },
+]
+
+const GLOBAL_TOGGLE_BY_KEY = new Map(GLOBAL_TOGGLES.map((toggle) => [toggle.key, toggle]))
+
+function matchesSettingsSearch(query: string, ...parts: string[]): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return parts.some((part) => part.toLowerCase().includes(q))
+}
+
 // --- Save logic (extracted to stay within per-function complexity limits) ---
 
 async function saveSettingsToServer(opts: {
@@ -611,22 +810,32 @@ function useSettingsFetch(cwd: string | null) {
 }
 
 function NumberField(props: {
+  id: string
   label: string
   value: number | string
   onChange: (e: { target: { value: string } }) => void
   placeholder?: string
   type?: string
+  helper?: string
+  min?: number
+  max?: number
+  step?: number
 }) {
   return (
-    <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]">
-      <span>{props.label}</span>
+    <label className="settings-field" htmlFor={props.id}>
+      <span className="settings-field-label">{props.label}</span>
       <input
+        id={props.id}
         type={props.type ?? "number"}
-        className="w-full border border-[rgba(109,136,196,0.42)] rounded-lg bg-[rgba(29,34,44,0.72)] text-[#dfe8fb] px-2 py-[7px] text-[0.8rem] focus-visible:outline-none focus-visible:border-[rgba(126,170,255,0.72)] focus-visible:shadow-[0_0_0_2px_rgba(97,144,240,0.2)]"
+        className="settings-input"
         value={props.value}
         onChange={props.onChange}
         placeholder={props.placeholder}
+        min={props.min}
+        max={props.max}
+        step={props.step}
       />
+      {props.helper ? <span className="settings-field-helper">{props.helper}</span> : null}
     </label>
   )
 }
@@ -634,21 +843,28 @@ function NumberField(props: {
 function GlobalNumberFieldsGrid({
   form,
   num,
+  fields = GLOBAL_NUMBER_FIELDS,
 }: {
   form: GlobalSettingsForm
   num: (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) => void
+  fields?: typeof GLOBAL_NUMBER_FIELDS
 }) {
   return (
     <div className="grid grid-cols-2 gap-4">
-      {GLOBAL_NUMBER_FIELDS.map(({ key, label }) => (
-        <label key={key} className="grid gap-1 text-[0.75rem] text-[#b8c8ea]">
-          <span>{label}</span>
+      {fields.map(({ key, label, helper, min, max, step }) => (
+        <label key={key} className="settings-field" htmlFor={`global-${key}`}>
+          <span className="settings-field-label">{label}</span>
           <input
+            id={`global-${key}`}
             type="number"
-            className="w-full border border-[rgba(109,136,196,0.42)] rounded-lg bg-[rgba(29,34,44,0.72)] text-[#dfe8fb] px-2 py-[7px] text-[0.8rem] focus-visible:outline-none focus-visible:border-[rgba(126,170,255,0.72)] focus-visible:shadow-[0_0_0_2px_rgba(97,144,240,0.2)]"
+            className="settings-input"
             value={form[key] as number}
             onChange={num(key)}
+            min={min}
+            max={max}
+            step={step}
           />
+          <span className="settings-field-helper">{helper}</span>
         </label>
       ))}
     </div>
@@ -665,15 +881,9 @@ function ProjectSelectFieldsGrid({
   return (
     <>
       {PROJECT_SELECT_FIELDS.map(({ key, label, desc, options }) => (
-        <label
-          key={key}
-          className="grid gap-1 text-[0.75rem] text-[#b8c8ea]"
-          htmlFor={`project-${key}`}
-        >
-          <span>{label}</span>
-          <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
-            {desc}
-          </p>
+        <label key={key} className="settings-field" htmlFor={`project-${key}`}>
+          <span className="settings-field-label">{label}</span>
+          <p className="settings-field-helper">{desc}</p>
           <Select
             id={`project-${key}`}
             value={form[key]}
@@ -684,6 +894,127 @@ function ProjectSelectFieldsGrid({
       ))}
     </>
   )
+}
+
+const PROJECT_NUMBER_FIELDS: Array<{
+  key: keyof ProjectSettingsForm
+  id: string
+  label: string
+  helper?: string
+  min?: number
+  max?: number
+  placeholder?: string
+  type?: "number" | "text"
+  optional?: boolean
+}> = [
+  {
+    key: "defaultBranch",
+    id: "project-default-branch",
+    label: "Default branch",
+    type: "text",
+  },
+  {
+    key: "taskDurationWarningMinutes",
+    id: "project-task-duration-warning",
+    label: "Task duration warning",
+    helper: "Minutes before task duration warnings apply.",
+    min: 1,
+    max: 1_440,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "trivialMaxFiles",
+    id: "project-trivial-max-files",
+    label: "Trivial max files",
+    helper: "Maximum files for trivial-change classification.",
+    min: 0,
+    max: 100,
+  },
+  {
+    key: "trivialMaxLines",
+    id: "project-trivial-max-lines",
+    label: "Trivial max lines",
+    helper: "Maximum changed lines for trivial-change classification.",
+    min: 0,
+    max: 10_000,
+  },
+  {
+    key: "memoryLineThreshold",
+    id: "project-memory-line-threshold",
+    label: "Memory line threshold",
+    helper: "Lines before memory review.",
+    min: 50,
+    max: 100_000,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "memoryWordThreshold",
+    id: "project-memory-word-threshold",
+    label: "Memory word threshold",
+    helper: "Words before memory review.",
+    min: 100,
+    max: 250_000,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "largeFileSizeKb",
+    id: "project-large-file-size",
+    label: "Large file size (KB)",
+    helper: "KB threshold for large-file warnings.",
+    min: 1,
+    max: 1_048_576,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "transcriptMonitorMaxConcurrentDispatches",
+    id: "project-transcript-dispatch-cap",
+    label: "Transcript monitor dispatch cap",
+    helper: "0 means unlimited.",
+    min: 0,
+    max: 256,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "skillRecencyMaxTurns",
+    id: "project-skill-recency-turns",
+    label: "Skill recency max turns",
+    helper: "Turns before a skill mention stops counting as recent.",
+    min: 0,
+    max: 10_000,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+  {
+    key: "skillRecencyMaxAgeMinutes",
+    id: "project-skill-recency-age",
+    label: "Skill recency max age (min)",
+    helper: "Minutes before a skill mention stops counting as recent.",
+    min: 0,
+    max: 10_080,
+    placeholder: "Inherit global",
+    optional: true,
+  },
+]
+
+function projectFieldChangeHandler({
+  field,
+  set,
+  optNum,
+}: {
+  field: (typeof PROJECT_NUMBER_FIELDS)[number]
+  set: (patch: Partial<ProjectSettingsForm>) => void
+  optNum: (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) => void
+}) {
+  if (field.optional) return optNum(field.key)
+  if (field.type === "text") {
+    return (e: { target: { value: string } }) => set({ [field.key]: e.target.value })
+  }
+  return (e: { target: { value: string } }) => set({ [field.key]: Number(e.target.value) })
 }
 
 function ProjectFieldsGrid({
@@ -697,64 +1028,20 @@ function ProjectFieldsGrid({
 }) {
   return (
     <div className="grid grid-cols-2 gap-4">
-      <NumberField
-        label="Default branch"
-        value={form.defaultBranch as string}
-        type="text"
-        onChange={(e) => set({ defaultBranch: e.target.value })}
-      />
-      <NumberField
-        label="Task duration warning (min)"
-        value={form.taskDurationWarningMinutes}
-        onChange={optNum("taskDurationWarningMinutes")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Trivial max files"
-        value={form.trivialMaxFiles}
-        onChange={(e) => set({ trivialMaxFiles: Number(e.target.value) })}
-      />
-      <NumberField
-        label="Trivial max lines"
-        value={form.trivialMaxLines}
-        onChange={(e) => set({ trivialMaxLines: Number(e.target.value) })}
-      />
-      <NumberField
-        label="Memory line threshold"
-        value={form.memoryLineThreshold}
-        onChange={optNum("memoryLineThreshold")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Memory word threshold"
-        value={form.memoryWordThreshold}
-        onChange={optNum("memoryWordThreshold")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Large file size (KB)"
-        value={form.largeFileSizeKb}
-        onChange={optNum("largeFileSizeKb")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Transcript monitor dispatch cap"
-        value={form.transcriptMonitorMaxConcurrentDispatches}
-        onChange={optNum("transcriptMonitorMaxConcurrentDispatches")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Skill recency max turns"
-        value={form.skillRecencyMaxTurns}
-        onChange={optNum("skillRecencyMaxTurns")}
-        placeholder="Inherit global"
-      />
-      <NumberField
-        label="Skill recency max age (min)"
-        value={form.skillRecencyMaxAgeMinutes}
-        onChange={optNum("skillRecencyMaxAgeMinutes")}
-        placeholder="Inherit global"
-      />
+      {PROJECT_NUMBER_FIELDS.map((field) => (
+        <NumberField
+          key={field.key}
+          id={field.id}
+          label={field.label}
+          value={form[field.key] as number | string}
+          type={field.type}
+          onChange={projectFieldChangeHandler({ field, set, optNum })}
+          placeholder={field.placeholder}
+          helper={field.helper}
+          min={field.min}
+          max={field.max}
+        />
+      ))}
     </div>
   )
 }
@@ -770,9 +1057,9 @@ function GlobalSelectFields({
 }) {
   return (
     <>
-      <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="global-ambition-mode">
-        <span>Ambition mode</span>
-        <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+      <label className="settings-field" htmlFor="global-ambition-mode">
+        <span className="settings-field-label">Ambition mode</span>
+        <p className="settings-field-helper">
           Agent's operational tempo. "standard" focuses on prompt completion. "aggressive" acts
           autonomously. "creative" focuses on exploratory design. "reflective" prioritizes analysis.
         </p>
@@ -790,9 +1077,9 @@ function GlobalSelectFields({
           ]}
         />
       </label>
-      <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="global-audit-strictness">
-        <span>Audit strictness</span>
-        <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+      <label className="settings-field" htmlFor="global-audit-strictness">
+        <span className="settings-field-label">Audit strictness</span>
+        <p className="settings-field-helper">
           Control task/evidence governance enforcement. "strict" always enforces. "relaxed" relaxes
           for exploratory sessions. "local-dev" relaxes locally but enforces for push/CI.
         </p>
@@ -813,37 +1100,292 @@ function GlobalSelectFields({
   )
 }
 
+type GlobalFormSetter = (patch: Partial<GlobalSettingsForm>) => void
+type ProjectFormSetter = (patch: Partial<ProjectSettingsForm>) => void
+
+function globalSectionVisibility(searchQuery: string) {
+  const showModes = matchesSettingsSearch(searchQuery, "Modes", "Ambition mode", "Audit strictness")
+  const visibleNumberFields = GLOBAL_NUMBER_FIELDS.filter(({ label, helper }) =>
+    matchesSettingsSearch(searchQuery, "Thresholds", label, helper)
+  )
+  const visibleToggleGroups = GLOBAL_TOGGLE_GROUPS.map((group) => ({
+    ...group,
+    keys: group.keys.filter((key) => {
+      const toggle = GLOBAL_TOGGLE_BY_KEY.get(key)
+      return toggle
+        ? matchesSettingsSearch(searchQuery, group.title, toggle.label, toggle.desc)
+        : false
+    }),
+  })).filter((group) => group.keys.length > 0)
+
+  return {
+    showModes,
+    visibleNumberFields,
+    visibleToggleGroups,
+    hasResults: showModes || visibleNumberFields.length > 0 || visibleToggleGroups.length > 0,
+  }
+}
+
+function GlobalToggleGroupSection({
+  group,
+  form,
+  set,
+}: {
+  group: (typeof GLOBAL_TOGGLE_GROUPS)[number]
+  form: GlobalSettingsForm
+  set: GlobalFormSetter
+}) {
+  return (
+    <section className="settings-group">
+      <h4>{group.title}</h4>
+      <div className="settings-toggle-list">
+        {group.keys.map((key) => {
+          const toggle = GLOBAL_TOGGLE_BY_KEY.get(key)
+          if (!toggle) return null
+          return (
+            <CheckboxField
+              id={`global-${key}`}
+              key={key}
+              checked={form[key] as boolean}
+              onChange={(v) => set({ [key]: v })}
+              label={toggle.label}
+              desc={toggle.desc}
+              risk={RISKY_GLOBAL_TOGGLES.has(key)}
+            />
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function GlobalSettingsColumn({
   form,
   setForm,
   error,
+  searchQuery,
 }: {
   form: GlobalSettingsForm
   setForm: (fn: GlobalSettingsForm | ((prev: GlobalSettingsForm) => GlobalSettingsForm)) => void
   error: string
+  searchQuery: string
 }) {
   const set = (patch: Partial<GlobalSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
   const num = (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) =>
     set({ [key]: Number(e.target.value) })
+  const sections = globalSectionVisibility(searchQuery)
 
   return (
-    <div className="grid gap-4 mb-4">
-      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
-        Global Settings
-      </h3>
+    <div className="settings-column">
+      <h3 className="settings-column-title">Global Settings</h3>
       {error && <p className="text-[#ff7e7e]">{error}</p>}
-      <GlobalSelectFields form={form} set={set} />
-      <GlobalNumberFieldsGrid form={form} num={num} />
-      {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
-        <CheckboxField
-          key={key}
-          checked={form[key] as boolean}
-          onChange={(v) => set({ [key]: v })}
-          label={label}
-          desc={desc}
-        />
+      {!sections.hasResults ? <p className="empty">No global settings match this search.</p> : null}
+      {sections.showModes ? (
+        <section className="settings-group">
+          <h4>Modes</h4>
+          <GlobalSelectFields form={form} set={set} />
+        </section>
+      ) : null}
+      {sections.visibleNumberFields.length > 0 ? (
+        <section className="settings-group">
+          <h4>Thresholds</h4>
+          <GlobalNumberFieldsGrid form={form} num={num} fields={sections.visibleNumberFields} />
+        </section>
+      ) : null}
+      {sections.visibleToggleGroups.map((group) => (
+        <GlobalToggleGroupSection key={group.title} group={group} form={form} set={set} />
       ))}
     </div>
+  )
+}
+
+function projectSectionVisibility(searchQuery: string) {
+  const showModes = matchesSettingsSearch(searchQuery, "Modes", "Ambition", "Collaboration")
+  const showThresholds = matchesSettingsSearch(
+    searchQuery,
+    "Thresholds",
+    "Default branch",
+    "Task duration",
+    "Trivial",
+    "Memory",
+    "Large file",
+    "Transcript",
+    "Skill recency"
+  )
+  const showGit = matchesSettingsSearch(
+    searchQuery,
+    "Git & Push",
+    "PR merge mode",
+    "Strict merge",
+    "Trunk mode"
+  )
+  const showAgent = matchesSettingsSearch(
+    searchQuery,
+    "Agent Behavior",
+    "Auto-steer transcript watching",
+    "Speak override"
+  )
+  return {
+    showModes,
+    showThresholds,
+    showGit,
+    showAgent,
+    hasResults: showModes || showThresholds || showGit || showAgent,
+  }
+}
+
+function renderProjectSettingsState({
+  cwd,
+  loading,
+  loaded,
+  error,
+}: {
+  cwd: string | null
+  loading: boolean
+  loaded: boolean
+  error: string
+}): ReactElement | null {
+  if (!cwd) {
+    return <p className="metric-note mt-4">Select a project to edit project-specific settings.</p>
+  }
+  if (loading && !loaded) return <p className="metric-note mt-4">Loading project settings...</p>
+  if (error && !loaded) return <p className="text-[#ff7e7e] mt-4">{error}</p>
+  return null
+}
+
+function ProjectGitSettings({ form, set }: { form: ProjectSettingsForm; set: ProjectFormSetter }) {
+  return (
+    <section className="settings-group">
+      <h4>Git & Push</h4>
+      <div className="settings-toggle-list">
+        <CheckboxField
+          id="project-pr-merge-mode"
+          checked={form.prMergeMode}
+          onChange={(v) => set({ prMergeMode: v })}
+          label="PR merge mode (Global fallback)"
+          desc={
+            'When Collaboration Mode is set to "Auto", this global toggle determines if pull requests are required.'
+          }
+        />
+        <CheckboxField
+          id="project-strict-no-direct-main"
+          checked={form.strictNoDirectMain}
+          onChange={(v) => set({ strictNoDirectMain: v })}
+          label="Strict merge to main mode"
+          desc="Enforces feature-branch workflows by blocking direct pushes to the main branch locally, even in solo repositories."
+          risk
+        />
+        <CheckboxField
+          id="project-trunk-mode"
+          checked={form.trunkMode}
+          onChange={(v) => set({ trunkMode: v })}
+          label="Trunk mode"
+          desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks. Blocks checkout/switch to other branches, gh pr checkout, and gh pr create."
+          risk
+        />
+      </div>
+    </section>
+  )
+}
+
+function ProjectAgentSettings({
+  form,
+  set,
+}: {
+  form: ProjectSettingsForm
+  set: ProjectFormSetter
+}) {
+  return (
+    <section className="settings-group">
+      <h4>Agent Behavior</h4>
+      <ProjectBooleanOverrideField
+        id="project-autoSteerTranscriptWatching"
+        label="Auto-steer transcript watching override"
+        desc={
+          'Project-specific override for daemon-driven auto-steering. "inherit" uses the global setting.'
+        }
+        value={form.autoSteerTranscriptWatching}
+        onChange={(value) => set({ autoSteerTranscriptWatching: value })}
+      />
+      <ProjectBooleanOverrideField
+        id="project-speak"
+        label="Speak override"
+        desc={
+          'Project-specific override for text-to-speech narration. "inherit" uses the global setting.'
+        }
+        value={form.speak}
+        onChange={(value) => set({ speak: value })}
+      />
+    </section>
+  )
+}
+
+function ProjectBooleanOverrideField({
+  id,
+  label,
+  desc,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  desc: string
+  value: boolean | "inherit"
+  onChange: (value: boolean | "inherit") => void
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span className="settings-field-label">{label}</span>
+      <p className="settings-field-helper">{desc}</p>
+      <Select
+        id={id}
+        value={String(value)}
+        onChange={(e) => {
+          const val = e.target.value
+          onChange(val === "inherit" ? "inherit" : val === "true")
+        }}
+        options={[
+          { label: "inherit (global)", value: "inherit" },
+          { label: "enabled", value: "true" },
+          { label: "disabled", value: "false" },
+        ]}
+      />
+    </label>
+  )
+}
+
+function ProjectSettingsSections({
+  form,
+  set,
+  optNum,
+  searchQuery,
+}: {
+  form: ProjectSettingsForm
+  set: ProjectFormSetter
+  optNum: (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) => void
+  searchQuery: string
+}) {
+  const sections = projectSectionVisibility(searchQuery)
+  return (
+    <>
+      {!sections.hasResults ? (
+        <p className="empty">No project settings match this search.</p>
+      ) : null}
+      {sections.showModes ? (
+        <section className="settings-group">
+          <h4>Modes</h4>
+          <ProjectSelectFieldsGrid form={form} set={set} />
+        </section>
+      ) : null}
+      {sections.showThresholds ? (
+        <section className="settings-group">
+          <h4>Thresholds</h4>
+          <ProjectFieldsGrid form={form} set={set} optNum={optNum} />
+        </section>
+      ) : null}
+      {sections.showGit ? <ProjectGitSettings form={form} set={set} /> : null}
+      {sections.showAgent ? <ProjectAgentSettings form={form} set={set} /> : null}
+    </>
   )
 }
 
@@ -854,6 +1396,7 @@ function ProjectSettingsColumn({
   loading,
   loaded,
   error,
+  searchQuery,
 }: {
   cwd: string | null
   form: ProjectSettingsForm
@@ -861,98 +1404,20 @@ function ProjectSettingsColumn({
   loading: boolean
   loaded: boolean
   error: string
+  searchQuery: string
 }) {
   const set = (patch: Partial<ProjectSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
   const optNum = (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) =>
     set({ [key]: e.target.value === "" ? "" : Number(e.target.value) })
+  const stateMessage = renderProjectSettingsState({ cwd, loading, loaded, error })
 
   return (
-    <div>
-      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
-        Project Settings
-      </h3>
-
-      {!cwd ? (
-        <p className="metric-note mt-4">Select a project to edit project-specific settings.</p>
-      ) : loading && !loaded ? (
-        <p className="metric-note mt-4">Loading project settings...</p>
-      ) : error && !loaded ? (
-        <p className="text-[#ff7e7e] mt-4">{error}</p>
+    <div className="settings-column">
+      <h3 className="settings-column-title">Project Settings</h3>
+      {stateMessage ? (
+        stateMessage
       ) : (
-        <>
-          <ProjectSelectFieldsGrid form={form} set={set} />
-          <ProjectFieldsGrid form={form} set={set} optNum={optNum} />
-
-          <CheckboxField
-            checked={form.prMergeMode}
-            onChange={(v) => set({ prMergeMode: v })}
-            label="PR merge mode (Global fallback)"
-            desc={
-              'When Collaboration Mode is set to "Auto", this global toggle determines if pull requests are required.'
-            }
-          />
-          <CheckboxField
-            checked={form.strictNoDirectMain}
-            onChange={(v) => set({ strictNoDirectMain: v })}
-            label="Strict merge to main mode"
-            desc="Enforces feature-branch workflows by blocking direct pushes to the main branch locally, even in solo repositories."
-          />
-          <CheckboxField
-            checked={form.trunkMode}
-            onChange={(v) => set({ trunkMode: v })}
-            label="Trunk mode"
-            desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks. Blocks checkout/switch to other branches, gh pr checkout, and gh pr create."
-          />
-          <div className="mt-4">
-            <label
-              className="grid gap-1 text-[0.75rem] text-[#b8c8ea]"
-              htmlFor="project-autoSteerTranscriptWatching"
-            >
-              <span>Auto-steer transcript watching override</span>
-              <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
-                Project-specific override for daemon-driven auto-steering. "inherit" uses the global
-                setting.
-              </p>
-              <Select
-                id="project-autoSteerTranscriptWatching"
-                value={String(form.autoSteerTranscriptWatching)}
-                onChange={(e) => {
-                  const val = e.target.value
-                  set({
-                    autoSteerTranscriptWatching: val === "inherit" ? "inherit" : val === "true",
-                  })
-                }}
-                options={[
-                  { label: "inherit (global)", value: "inherit" },
-                  { label: "enabled", value: "true" },
-                  { label: "disabled", value: "false" },
-                ]}
-              />
-            </label>
-          </div>
-          <div className="mt-4">
-            <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="project-speak">
-              <span>Speak override</span>
-              <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
-                Project-specific override for text-to-speech narration. "inherit" uses the global
-                setting.
-              </p>
-              <Select
-                id="project-speak"
-                value={String(form.speak)}
-                onChange={(e) => {
-                  const val = e.target.value
-                  set({ speak: val === "inherit" ? "inherit" : val === "true" })
-                }}
-                options={[
-                  { label: "inherit (global)", value: "inherit" },
-                  { label: "enabled", value: "true" },
-                  { label: "disabled", value: "false" },
-                ]}
-              />
-            </label>
-          </div>
-        </>
+        <ProjectSettingsSections form={form} set={set} optNum={optNum} searchQuery={searchQuery} />
       )}
     </div>
   )
@@ -1108,53 +1573,130 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
 
 // --- Main panel (composed from extracted hooks + columns) ---
 
-export function SettingsPanel({ cwd }: { cwd: string | null }): ReactElement {
+function SettingsPanelHeader({
+  isSaving,
+  statusText,
+}: {
+  isSaving: boolean
+  statusText: string | null
+}) {
+  return (
+    <header className="settings-panel-header">
+      <div>
+        <h2 className="section-title">Settings</h2>
+        <p className="section-subtitle">
+          Manage global behavior and project-specific overrides. Changes auto-save after editing.
+        </p>
+      </div>
+      <output
+        className={
+          isSaving ? "settings-save-status settings-save-status-saving" : "settings-save-status"
+        }
+        aria-live="polite"
+      >
+        {statusText ?? "Auto-save on"}
+      </output>
+    </header>
+  )
+}
+
+function SettingsSearchField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="settings-search" htmlFor="settings-search">
+      <span className="sr-only">Search settings</span>
+      <input
+        id="settings-search"
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search settings..."
+        aria-label="Search settings"
+      />
+    </label>
+  )
+}
+
+function SettingsColumns({
+  cwd,
+  data,
+  searchQuery,
+}: {
+  cwd: string | null
+  data: ReturnType<typeof useSettingsFetch>
+  searchQuery: string
+}) {
+  return (
+    <div className="settings-grid">
+      <GlobalSettingsColumn
+        form={data.globalForm}
+        setForm={data.setGlobalForm}
+        error={data.globalError}
+        searchQuery={searchQuery}
+      />
+      <ProjectSettingsColumn
+        cwd={cwd}
+        form={data.projectForm}
+        setForm={data.setProjectForm}
+        loading={data.projectLoading}
+        loaded={data.projectLoaded}
+        error={data.projectError}
+        searchQuery={searchQuery}
+      />
+    </div>
+  )
+}
+
+function SettingsPanelMessage({
+  className,
+  title,
+  message,
+}: {
+  className?: string
+  title?: string
+  message: string
+}) {
+  return (
+    <section className={cn("card gap-2 settings-panel", className)}>
+      {title ? <h2 className="section-title">{title}</h2> : null}
+      <p className={title ? "text-[#ff7e7e]" : undefined}>{message}</p>
+    </section>
+  )
+}
+
+export function SettingsPanel({
+  cwd,
+  className,
+}: {
+  cwd: string | null
+  className?: string
+}): ReactElement {
   const data = useSettingsFetch(cwd)
   const { isSaving, status } = useAutoSave(cwd, data)
-  const { globalForm, setGlobalForm, globalLoading, globalLoaded, globalError } = data
-  const { projectForm, setProjectForm, projectLoading, projectLoaded, projectError } = data
+  const [settingsSearch, setSettingsSearch] = useState("")
 
   const statusText = isSaving ? "Saving..." : status || null
 
-  if (globalLoading && !globalLoaded) {
-    return (
-      <div className="card gap-2">
-        <p>Loading settings...</p>
-      </div>
-    )
+  if (data.globalLoading && !data.globalLoaded) {
+    return <SettingsPanelMessage className={className} message="Loading settings..." />
   }
 
-  if (globalError && !globalLoaded) {
+  if (data.globalError && !data.globalLoaded) {
     return (
-      <div className="card gap-2">
-        <h2 className="section-title">Settings</h2>
-        <p className="text-[#ff7e7e]">{globalError}</p>
-      </div>
+      <SettingsPanelMessage className={className} title="Settings" message={data.globalError} />
     )
   }
 
   return (
-    <section className="card gap-2 overflow-y-auto">
-      <header className="flex items-center justify-between">
-        <h2 className="section-title">Settings</h2>
-        {statusText ? (
-          <span className={isSaving ? "text-[#90a4c8] animate-pulse" : "text-[#8ae28a]"}>
-            {statusText}
-          </span>
-        ) : null}
-      </header>
-      <p className="section-subtitle">Manage global behavior and project-specific overrides</p>
-      <div className="grid gap-8 content-start md:grid-cols-2">
-        <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} error={globalError} />
-        <ProjectSettingsColumn
-          cwd={cwd}
-          form={projectForm}
-          setForm={setProjectForm}
-          loading={projectLoading}
-          loaded={projectLoaded}
-          error={projectError}
-        />
-      </div>
+    <section className={cn("card settings-panel", className)}>
+      <SettingsPanelHeader isSaving={isSaving} statusText={statusText} />
+      <SettingsSearchField value={settingsSearch} onChange={setSettingsSearch} />
+      <SettingsColumns cwd={cwd} data={data} searchQuery={settingsSearch} />
     </section>
   )
 }

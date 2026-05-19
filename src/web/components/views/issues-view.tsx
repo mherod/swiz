@@ -3,8 +3,8 @@ import { ProjectIssuesPanel } from "../project-issues-panel.tsx"
 
 export function IssuesView({ cwd }: { cwd: string | null }): ReactElement {
   return (
-    <div className="bento-full-page">
-      <ProjectIssuesPanel cwd={cwd} />
+    <div className="bento-full-page issues-view-page">
+      <ProjectIssuesPanel cwd={cwd} variant="full" />
     </div>
   )
 }
