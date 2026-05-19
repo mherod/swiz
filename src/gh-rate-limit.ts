@@ -15,6 +15,13 @@ const WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const MAX_REQUESTS_PER_WINDOW = 4500 // leave 500 buffer below GitHub's 5000
 const COMPACTION_THRESHOLD = 10_000 // compact file when line count exceeds this
 const RETRY_DELAY_MS = 1_000
+// The local throttle log is shared by every swiz process (daemon, hooks,
+// status-line, CLI). It can saturate locally even while GitHub's real per-token
+// budget is fine, so an over-budget wait should fall through quickly rather
+// than block each gh call for 30s. 2s lets one entry age out and otherwise
+// proceeds — protection against runaway usage stays, but no-op `swiz issue
+// sync` no longer compounds to 90s wall time.
+const SATURATED_DEADLINE_MS = 2_000
 
 // In-process write queue to serialize read-modify-write cycles and prevent
 // concurrent acquireGhSlot() calls within the same process from racing.
@@ -78,11 +85,12 @@ function recordRequest(): Promise<void> {
 
 /**
  * Acquire a slot in the rate-limit window before making a `gh` API call.
- * Returns immediately if under budget. Waits with 1s retries if at capacity.
- * Times out after 30s to avoid indefinite blocking.
+ * Returns immediately if under budget. Waits briefly if at capacity, then
+ * falls through — the local file is an over-conservative estimate and the
+ * real GitHub budget is enforced server-side.
  */
 export async function acquireGhSlot(): Promise<void> {
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + SATURATED_DEADLINE_MS
   while (Date.now() < deadline) {
     const recent = await readRecentTimestamps()
     if (recent.length < MAX_REQUESTS_PER_WINDOW) {
