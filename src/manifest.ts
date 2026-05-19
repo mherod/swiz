@@ -61,6 +61,7 @@ import pretooluseMainBranchScopeGate from "../hooks/pretooluse-main-branch-scope
 import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
 import pretooluseNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
+import pretooluseNoGitChecks from "../hooks/pretooluse-no-git-checks.ts"
 import pretooluseNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
 import pretooluseNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
@@ -339,6 +340,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseGitIndexLock },
       { hook: pretooluseGitFlowIntegrationBaseGate },
       { hook: pretooluseNoNpm },
+      { hook: pretooluseNoGitChecks },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
       { hook: pretoolusePprotectStrictMain },
