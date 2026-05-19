@@ -65,15 +65,28 @@ describe("pretooluse-skill-invocation-gate", () => {
     }
   }
 
+  async function runGit(dir: string, args: string[]): Promise<void> {
+    const proc = Bun.spawn(["git", ...args], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+    await proc.exited
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed`)
+  }
+
   async function runGateSubprocess(
     skillName: string,
-    payload: object
+    payload: object,
+    setupProject?: (projectDir: string) => Promise<void>
   ): Promise<Record<string, any>> {
     const projectDir = await mkdtemp(join(tmpdir(), "gate-subprocess-"))
     try {
       const skillDir = join(projectDir, ".skills", skillName)
       await mkdir(skillDir, { recursive: true })
       await writeFile(join(skillDir, "SKILL.md"), `# ${skillName}\n`)
+      await setupProject?.(projectDir)
 
       const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
         string,
@@ -147,6 +160,56 @@ describe("pretooluse-skill-invocation-gate", () => {
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision
     ).toBe("allow")
+  })
+
+  it("blocks git commit when git config identity is a placeholder", async () => {
+    const sessionLines = [
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),
+      assistantLine([{ type: "tool_use", name: "TaskList" }]),
+    ]
+
+    const result = await runGateSubprocess(
+      "commit",
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m 'test'" },
+        transcript_path: "fake-transcript.json",
+        _transcriptSummary: {
+          ...summaryFromLines(sessionLines),
+          toolNames: ["TaskList"],
+        },
+      },
+      async (projectDir) => {
+        await runGit(projectDir, ["init"])
+        await runGit(projectDir, ["config", "user.name", "Test"])
+        await runGit(projectDir, ["config", "user.email", "test@test.com"])
+      }
+    )
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain(
+      "git commit author identity is not valid"
+    )
+  })
+
+  it("blocks git commit when command overrides user.name or user.email", async () => {
+    const result = await runGateSubprocess("commit", {
+      tool_name: "Bash",
+      tool_input: { command: "git -c user.name=Test commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines([]),
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain(
+      "git commit cannot override user.name or user.email"
+    )
   })
 
   it("allows gh pr create only when pr-open was used within the recency window", async () => {

@@ -8,7 +8,14 @@
   budget state from `gh api rate_limit` on cold start and when budget resets,
   using `X-RateLimit-*` response headers instead of file-based local estimation.
   `src/gh-rate-limit.test.ts` was rewritten for cold-start bootstrap,
-  header propagation, and retry-after behavior.
+  header propagation, and retry-after behavior. (#661)
+
+### Fixes
+
+- **Commit author safeguards** — `git commit` now blocks placeholder author
+  identities and per-command identity overrides before the commit runs, then
+  verifies the landed commit before push so incorrect metadata is caught
+  immediately.
 
 ## 2026-05-18
 

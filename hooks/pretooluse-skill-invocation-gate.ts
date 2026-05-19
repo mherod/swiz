@@ -28,6 +28,7 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { checkGitIdentity } from "../src/git-identity.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import {
@@ -249,6 +250,46 @@ function requiresTaskListCheck(skill: string, input: Record<string, unknown>): b
   return skill === "commit" && agentHasTaskToolsForHookPayload(input)
 }
 
+function getShellCommand(rawInput: Record<string, any>): string {
+  const toolInput = (rawInput.tool_input as Record<string, any>) ?? {}
+  return ((toolInput.command as string) ?? (toolInput.cmd as string)) || ""
+}
+
+function hasGitCommitIdentityOverride(command: string): boolean {
+  return GIT_COMMIT_RE.test(command) && /\s-c\s+user\.(?:name|email)=/i.test(command)
+}
+
+async function checkCommitIdentityPreflight(
+  input: Record<string, any>,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  const command = getShellCommand(input)
+  if (hasGitCommitIdentityOverride(command)) {
+    return preToolUseDeny(
+      "BLOCKED: git commit cannot override user.name or user.email with `git -c`.\n\n" +
+        "Use the repository or global git config identity for commits, then retry without per-command author overrides."
+    )
+  }
+
+  const result = await checkGitIdentity(cwd)
+  if (!result.isGitRepo || result.ok) return null
+
+  return preToolUseDeny(
+    "BLOCKED: git commit author identity is not valid.\n\n" +
+      `Problems:\n${result.problems.map((problem) => `  - ${problem}`).join("\n")}\n\n` +
+      "Fix the repository or global git config user.name/user.email, then retry the commit."
+  )
+}
+
+async function checkSkillSpecificPreflight(
+  skill: string,
+  input: Record<string, any>,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  if (skill !== "commit") return null
+  return await checkCommitIdentityPreflight(input, cwd)
+}
+
 async function checkTaskListRequirement(
   skill: string,
   input: Record<string, any>,
@@ -275,6 +316,11 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const { requiredSkill } = ctx
 
     const cwd: string = (rawInput.cwd as string) ?? process.cwd()
+    const preflightBlock = await checkSkillSpecificPreflight(requiredSkill, rawInput, cwd)
+    if (preflightBlock) return preflightBlock
+
+    if (!skillExistsForHookPayload(requiredSkill, rawInput)) return {}
+
     const [maxTurns, maxAgeMinutes] = await Promise.all([
       resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
       resolveNumericSetting(

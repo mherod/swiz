@@ -7,6 +7,7 @@
 import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import notificationSpeak from "../hooks/notification-speak.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
+import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-author-verification.ts"
 import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
@@ -436,6 +437,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseGitTaskAutocomplete },
       { hook: posttoolusePostPushCooldown },
       { hook: posttoolusVerifyPush },
+      { hook: posttooluseCommitAuthorVerification },
       { hook: posttooluseStateTransition },
       { hook: posttoolusUpstreamSyncOnPush },
     ],
