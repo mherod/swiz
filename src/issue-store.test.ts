@@ -1473,6 +1473,72 @@ describe("syncUpstreamState with labels, milestones, and branch data", () => {
     }
   })
 
+  test("syncs PR branch detail fetches in parallel for multiple changed PRs", async () => {
+    const store = createStore()
+    const callLog: string[] = []
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 40))
+
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async (_cwd, state) => {
+        if (state === "open") {
+          return [
+            { number: 11, title: "PR 11", headRefName: "feat/three" },
+            {
+              number: 22,
+              title: "PR 22",
+              headRefName: "feat/two",
+              requestedReviewers: [{ login: "alice" }],
+            },
+            { number: 33, title: "PR 33", headRefName: "feat/one" },
+          ]
+        }
+        return []
+      },
+      listWorkflowRuns: async () => [],
+      listIssueComments: async (_cwd, issueNumber) => {
+        callLog.push(`comment-start:${issueNumber}`)
+        await wait()
+        callLog.push(`comment-end:${issueNumber}`)
+        return [{ id: 1 }]
+      },
+      listLabels: async () => [],
+      listMilestones: async () => [],
+      listBranchWorkflowRuns: async () => [],
+      getBranchProtection: async () => null,
+      listIssueEventsSince: async () => null,
+      listPullRequestReviews: async (_cwd, prNumber) => {
+        callLog.push(`review-start:${prNumber}`)
+        await wait()
+        callLog.push(`review-end:${prNumber}`)
+        return []
+      },
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
+      const firstFetchEnd = Math.min(
+        callLog.indexOf("comment-end:11"),
+        callLog.indexOf("review-end:11"),
+        callLog.indexOf("comment-end:22"),
+        callLog.indexOf("review-end:22")
+      )
+
+      expect(result.prBranchDetail.upserted).toBe(3)
+      expect(result.prBranchDetail.changes.map((change) => change.key)).toEqual([
+        "feat/three",
+        "feat/two",
+        "feat/one",
+      ])
+      expect(callLog.indexOf("comment-start:22")).toBeLessThan(firstFetchEnd)
+      expect(callLog.indexOf("review-start:22")).toBeLessThan(firstFetchEnd)
+      expect(callLog.indexOf("comment-start:33")).toBeLessThan(firstFetchEnd)
+      expect(callLog.indexOf("review-start:33")).toBeLessThan(firstFetchEnd)
+    } finally {
+      store.close()
+    }
+  })
+
   test("null labels/milestones are handled gracefully", async () => {
     const store = createStore()
     const client: GitHubClient = {

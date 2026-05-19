@@ -474,37 +474,45 @@ async function syncBranchData(
 
   // Sync PR branch detail only for PRs that actually changed
   if (!prs || !prsChanged) return
-  for (const pr of prs) {
-    if (!pr.headRefName) continue
-    const [comments, reviews] = await Promise.all([
-      ctx.client.listIssueComments(ctx.cwd, pr.number),
-      ctx.client.listPullRequestReviews(ctx.cwd, pr.number),
-    ])
-    const prData = pr as {
-      reviewDecision?: string
-      requestedReviewers?: Array<{ login: string }>
-      mergeable?: string
-    }
-    const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
-    const changesRequestedReviews = (reviews ?? [])
-      .filter((r) => r.state === "CHANGES_REQUESTED")
-      .map((r) => ({ login: r.user?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
-      .filter((r) => r.login)
-    const detail = {
-      reviewDecision: prData.reviewDecision ?? "",
-      requestedReviewers: reviewerLogins,
-      commentCount: comments?.length ?? 0,
-      changesRequestedReviews,
-      mergeable: prData.mergeable ?? "UNKNOWN",
-    }
-    const newJson = JSON.stringify(detail)
-    const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
-    if (existingJson === newJson) continue
-    ctx.store.upsertPrBranchDetail(ctx.repo, pr.headRefName, detail)
+  const prSyncTasks = prs
+    .filter((pr): pr is { number: number; headRefName: string } => Boolean(pr.headRefName))
+    .map(async (pr) => {
+      const [comments, reviews] = await Promise.all([
+        ctx.client.listIssueComments(ctx.cwd, pr.number),
+        ctx.client.listPullRequestReviews(ctx.cwd, pr.number),
+      ])
+      const prData = pr as {
+        reviewDecision?: string
+        requestedReviewers?: Array<{ login: string }>
+        mergeable?: string
+      }
+      const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
+      const changesRequestedReviews = (reviews ?? [])
+        .filter((r) => r.state === "CHANGES_REQUESTED")
+        .map((r) => ({ login: r.user?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
+        .filter((r) => r.login)
+      const detail = {
+        reviewDecision: prData.reviewDecision ?? "",
+        requestedReviewers: reviewerLogins,
+        commentCount: comments?.length ?? 0,
+        changesRequestedReviews,
+        mergeable: prData.mergeable ?? "UNKNOWN",
+      }
+      const newJson = JSON.stringify(detail)
+      const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
+      if (existingJson === newJson) return null
+      return { headRefName: pr.headRefName, pr, detail, newJson, existingJson }
+    })
+
+  const resolvedPrDetails = await Promise.all(prSyncTasks)
+  for (const resolved of resolvedPrDetails) {
+    if (!resolved) continue
+    const { headRefName, pr, detail, newJson, existingJson } = resolved
+    ctx.store.upsertPrBranchDetail(ctx.repo, headRefName, detail)
     ctx.result.prBranchDetail.upserted++
     ctx.result.prBranchDetail.changes.push({
       kind: existingJson === null ? "new" : "updated",
-      key: pr.headRefName,
+      key: headRefName,
       reason:
         existingJson === null
           ? `PR #${pr.number}`
