@@ -26,7 +26,7 @@ import {
   getSessionTasksDir,
   readSessionTasks,
 } from "../src/tasks/task-recovery.ts"
-import { writeAudit } from "../src/tasks/task-repository.ts"
+import { atomicWriteJson, writeAudit } from "../src/tasks/task-repository.ts"
 import { validateTransition } from "../src/tasks/task-service.ts"
 import {
   autoTransitionForComplete,
@@ -68,7 +68,7 @@ async function completeTasks(
       continue
     }
     task.status = "completed"
-    await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
+    await atomicWriteJson(join(tasksDir, `${task.id}.json`), task)
     // Sync to event state, audit log, and cache so downstream hooks see the completion
     applyTaskUpdateEvent(sessionId, task.id, { status: "completed" })
     await writeAudit(sessionId, {

@@ -160,7 +160,7 @@ async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Tas
  * in-progress JSON.stringify lands halfway and silently drops the task
  * from cache reads.
  */
-async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
+export async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random()
     .toString(36)
     .slice(2, 10)}.tmp`

@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -12,6 +11,7 @@ import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
 import {
+  atomicWriteJson,
   compareTaskIds,
   isIncompleteTaskStatus,
   parseTaskId,
@@ -554,7 +554,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
           blocks: [],
           blockedBy: [],
         }
-        await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(task, null, 2))
+        await atomicWriteJson(join(sessionDir, `${taskId}.json`), task)
       }
       actions.push({
         taskId,
@@ -571,7 +571,7 @@ async function runRepairTasks(rest: string[]): Promise<void> {
       const oldStatus = fileTask.status
       if (!dryRun) {
         fileTask.status = auditState.status as Task["status"]
-        await writeFile(join(sessionDir, `${taskId}.json`), JSON.stringify(fileTask, null, 2))
+        await atomicWriteJson(join(sessionDir, `${taskId}.json`), fileTask)
       }
       actions.push({
         taskId,
