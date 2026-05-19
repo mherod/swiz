@@ -76,13 +76,32 @@ describe("swiz plugins", () => {
         "beta@custom": [{ installPath: join(home, ".claude/plugins/cache/beta") }],
       },
     })
+    // Seed enabledPlugins map so the uninstall path strips it too.
+    const settingsPath = join(home, ".claude", "settings.json")
+    await Bun.write(
+      settingsPath,
+      `${JSON.stringify(
+        {
+          enabledPlugins: {
+            "alpha@claude-plugins-official": true,
+            "beta@custom": true,
+          },
+          unrelatedKey: "must-survive",
+        },
+        null,
+        2
+      )}\n`
+    )
 
     const { messages, opts } = captureOutput()
     await pluginsCommand.run(
       ["uninstall", "alpha@claude-plugins-official", "--plugins-dir", pluginsDir],
       opts
     )
-    expect(messages.join("\n")).toContain("Uninstalled Claude plugin")
+    const output = messages.join("\n")
+    expect(output).toContain("Uninstalled Claude plugin")
+    expect(output).toContain("Removed enabledPlugins entry from settings.json")
+    expect(output).toContain("running sessions keep the plugin loaded until restarted")
 
     const installedPath = join(home, ".claude", "plugins", "installed_plugins.json")
     const payload = (await Bun.file(installedPath).json()) as {
@@ -96,6 +115,40 @@ describe("swiz plugins", () => {
     ).resolves.toBeDefined()
     expect(stat(installPath)).rejects.toBeDefined()
     expect(stat(dataPath)).rejects.toBeDefined()
+
+    // settings.json: target key gone, siblings preserved, .bak written.
+    const settings = (await Bun.file(settingsPath).json()) as {
+      enabledPlugins: Record<string, unknown>
+      unrelatedKey: string
+    }
+    expect(settings.enabledPlugins["alpha@claude-plugins-official"]).toBeUndefined()
+    expect(settings.enabledPlugins["beta@custom"]).toBe(true)
+    expect(settings.unrelatedKey).toBe("must-survive")
+    expect(stat(`${settingsPath}.bak`)).resolves.toBeDefined()
+  })
+
+  test("uninstall is a no-op for settings.json when the file is missing", async () => {
+    // Fresh Claude installs (or users who never enabled the plugin from the
+    // marketplace UI) may not have an `enabledPlugins` map. Uninstall must
+    // still succeed without erroring on the missing settings file.
+    const home = await createTempDir()
+    const pluginsDir = join(home, ".claude", "plugins")
+    const installPath = join(home, ".claude/plugins/cache/gamma")
+    await mkdir(installPath, { recursive: true })
+    await writeInstalledPlugins(home, {
+      version: 1,
+      plugins: {
+        "gamma@custom": [{ installPath }],
+      },
+    })
+    // Deliberately do NOT write settings.json.
+
+    const { messages, opts } = captureOutput()
+    await pluginsCommand.run(["uninstall", "gamma@custom", "--plugins-dir", pluginsDir], opts)
+    const output = messages.join("\n")
+    expect(output).toContain("Uninstalled Claude plugin: gamma@custom")
+    // No settings.json → no enabledPlugins notice.
+    expect(output).not.toContain("Removed enabledPlugins entry")
   })
 
   test("uninstall removes prefixed data directories when marketplace is unknown", async () => {

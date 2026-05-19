@@ -45,6 +45,47 @@ function installedPluginsPath(pluginsDirOverride?: string): string {
   return join(pluginDir(pluginsDirOverride), "installed_plugins.json")
 }
 
+/**
+ * `~/.claude/settings.json` lives alongside the plugins dir, not inside it.
+ * Derived from `pluginsDirOverride` (which points at `<root>/.claude/plugins`)
+ * so tests can redirect both files via the same `--plugins-dir` flag.
+ */
+function enabledPluginsSettingsPath(pluginsDirOverride?: string): string {
+  return join(pluginDir(pluginsDirOverride), "..", "settings.json")
+}
+
+/**
+ * Strip `<pluginKey>` from the `enabledPlugins` map in `~/.claude/settings.json`.
+ *
+ * Returns true when a change was written. No-op (returns false) when the
+ * file is missing, has no `enabledPlugins` map, or the key is already absent.
+ * Fails open on malformed JSON — leaves the original file untouched and lets
+ * the caller continue with the rest of the uninstall.
+ */
+async function removeFromEnabledPlugins(
+  pluginKey: string,
+  pluginsDirOverride?: string
+): Promise<boolean> {
+  const path = enabledPluginsSettingsPath(pluginsDirOverride)
+  const file = Bun.file(path)
+  if (!(await file.exists())) return false
+  let settings: Record<string, unknown>
+  try {
+    settings = (await file.json()) as Record<string, unknown>
+  } catch {
+    return false
+  }
+  const enabled = settings.enabledPlugins
+  if (!enabled || typeof enabled !== "object" || Array.isArray(enabled)) return false
+  const enabledMap = enabled as Record<string, unknown>
+  if (!(pluginKey in enabledMap)) return false
+  const previous = await file.text()
+  await Bun.write(`${path}.bak`, previous)
+  delete enabledMap[pluginKey]
+  await Bun.write(path, `${JSON.stringify(settings, null, 2)}\n`)
+  return true
+}
+
 async function readInstalledPlugins(pluginsDirOverride?: string): Promise<InstalledPlugins> {
   const path = installedPluginsPath(pluginsDirOverride)
   const file = Bun.file(path)
@@ -224,7 +265,13 @@ async function handleUninstall(
   delete nextPlugins[record.key]
   await writeInstalledPlugins({ ...installed, plugins: nextPlugins }, pluginsDirOverride)
 
+  const settingsUpdated = await removeFromEnabledPlugins(record.key, pluginsDirOverride)
+
   write(`  Uninstalled Claude plugin: ${record.key}`)
+  if (settingsUpdated) {
+    write(`  Removed enabledPlugins entry from settings.json.`)
+  }
+  write(`  Note: running sessions keep the plugin loaded until restarted.`)
 }
 
 export const pluginsCommand: Command<PluginsRunOptions> = {
