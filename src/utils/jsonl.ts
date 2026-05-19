@@ -14,6 +14,7 @@ const NEWLINE_BYTE = 0x0a
 
 type JsonlBuffer = Uint8Array<ArrayBufferLike>
 const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
+export const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
 
 // ── Streaming / parsed-object reading ────────────────────────────────────────
 
@@ -95,6 +96,37 @@ export async function* streamJsonlEntries(path: string): AsyncIterableIterator<u
       yield value
     }
   }
+}
+
+export async function* streamJsonlLinesFromFile(file: Bun.BunFile): AsyncIterableIterator<string> {
+  if (!(await file.exists())) return
+
+  const reader = file.stream().getReader()
+  const decoder = new TextDecoder()
+  let remaining = ""
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const { lines, remainder } = splitJsonlChunk(remaining + chunk)
+      remaining = remainder
+      for (const line of lines) {
+        yield line
+      }
+    }
+
+    const final = remaining + decoder.decode()
+    if (final) yield final
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export async function* streamJsonlLines(path: string): AsyncIterableIterator<string> {
+  yield* streamJsonlLinesFromFile(Bun.file(path))
 }
 
 /**
@@ -270,6 +302,72 @@ export function parseJsonlTailUntyped(text: string, n: number): unknown[] {
   return parseJsonlUntyped(tail.join("\n"))
 }
 
+export interface JsonlTailTextMeta {
+  reachedStart: boolean
+  bytesRead: number
+  fileSize: number
+}
+
+export interface JsonlTailTextResult extends JsonlTailTextMeta {
+  text: string
+}
+
+export interface JsonlTailTextOptions {
+  initialBytes?: number
+  maxBytes?: number
+  isEnough?: (text: string, meta: JsonlTailTextMeta) => boolean
+}
+
+function completeJsonlTailText(raw: string, reachedStart: boolean): string {
+  if (reachedStart) return raw
+  if (raw.charCodeAt(0) === NEWLINE_BYTE) return raw.slice(1)
+  const firstNewline = raw.indexOf("\n")
+  return firstNewline === -1 ? "" : raw.slice(firstNewline + 1)
+}
+
+export async function readJsonlTailTextFromFile(
+  file: Bun.BunFile,
+  fileSize: number,
+  options: JsonlTailTextOptions = {}
+): Promise<JsonlTailTextResult> {
+  const maxBytes = Math.max(1, Math.min(fileSize + 1, options.maxBytes ?? fileSize + 1))
+  const initialBytes = Math.max(1, options.initialBytes ?? DEFAULT_JSONL_TAIL_INITIAL_BYTES)
+  let byteLimit = Math.min(maxBytes, initialBytes)
+
+  while (true) {
+    const rawStart = Math.max(0, fileSize - byteLimit)
+    const readStart = rawStart > 0 ? rawStart - 1 : 0
+    const raw = await file.slice(readStart).text()
+    const reachedStart = rawStart === 0
+    const bytesRead = fileSize - readStart
+    const text = completeJsonlTailText(raw, reachedStart)
+    const meta = { reachedStart, bytesRead, fileSize }
+
+    const enough = options.isEnough ? options.isEnough(text, meta) : true
+    if (enough || reachedStart || byteLimit >= maxBytes) {
+      return { ...meta, text }
+    }
+
+    const nextByteLimit = Math.min(maxBytes, byteLimit * 2)
+    if (nextByteLimit === byteLimit) return { ...meta, text }
+    byteLimit = nextByteLimit
+  }
+}
+
+export async function readJsonlTailText(
+  path: string,
+  options: JsonlTailTextOptions = {}
+): Promise<JsonlTailTextResult | null> {
+  try {
+    const file = Bun.file(path)
+    if (!(await file.exists())) return null
+    const stat = await file.stat()
+    return await readJsonlTailTextFromFile(file, stat.size, options)
+  } catch {
+    return null
+  }
+}
+
 // ── File reading ─────────────────────────────────────────────────────────────
 
 /**
@@ -326,6 +424,10 @@ export async function readJsonlFileUntyped(path: string): Promise<unknown[]> {
   }
 }
 
+function hasAtLeastJsonlLines(count: number): JsonlTailTextOptions["isEnough"] {
+  return (text) => splitJsonlLines(text).length >= count
+}
+
 /**
  * Read the last `n` validated entries from a JSONL file.
  * Slices raw lines before parsing for efficiency on large log files.
@@ -335,13 +437,13 @@ export async function readJsonlFileTail<T>(
   schema: ZodType<T>,
   n: number
 ): Promise<T[]> {
-  try {
-    const file = Bun.file(path)
-    if (!(await file.exists())) return []
-    return parseJsonlTail(await file.text(), schema, n)
-  } catch {
-    return []
-  }
+  const result = await readJsonlTailText(path, { isEnough: hasAtLeastJsonlLines(n) })
+  return result ? parseJsonlTail(result.text, schema, n) : []
+}
+
+export async function readJsonlFileTailUntyped(path: string, n: number): Promise<unknown[]> {
+  const result = await readJsonlTailText(path, { isEnough: hasAtLeastJsonlLines(n) })
+  return result ? parseJsonlTailUntyped(result.text, n) : []
 }
 
 function buildJsonlTempPath(path: string): string {

@@ -52,16 +52,15 @@ export async function findAllProviderSessions(
     antigravitySessions,
     codexSessions,
   ] = await Promise.all([
-    findSessions(claudeProjectDir),
-    findGeminiSessions(targetDir, effectiveHome),
-    findCursorSessions(targetDir, effectiveHome),
-    findCursorAgentTranscriptSessions(targetDir, effectiveHome),
-    findAntigravitySessions(targetDir, effectiveHome),
-    findCodexSessions(targetDir, effectiveHome),
+    findSessions(claudeProjectDir, limit),
+    findGeminiSessions(targetDir, effectiveHome, limit),
+    findCursorSessions(targetDir, effectiveHome, limit),
+    findCursorAgentTranscriptSessions(targetDir, effectiveHome, limit),
+    findAntigravitySessions(targetDir, effectiveHome, limit),
+    findCodexSessions(targetDir, effectiveHome, limit),
   ])
 
-  // Merge all provider results, sort deterministically, then truncate to limit.
-  // For limit===1, a fast path above avoids the full sort.
+  // Merge already-limited provider results, sort deterministically, then truncate to limit.
   const providerArrays: Session[][] = [
     claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     geminiSessions,

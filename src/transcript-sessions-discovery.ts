@@ -23,7 +23,20 @@ export function sortSessionsDeterministic(sessions: Session[]): Session[] {
   )
 }
 
-export async function findSessions(projectDir: string): Promise<Session[]> {
+function limitSessionList(sessions: Session[], limit?: number): Session[] {
+  const sorted = sortSessionsDeterministic(sessions)
+  return limit === undefined ? sorted : sorted.slice(0, Math.max(0, limit))
+}
+
+function pushLimitedSession(sessions: Session[], session: Session, limit?: number): void {
+  if (limit !== undefined && limit <= 0) return
+  sessions.push(session)
+  if (limit === undefined || sessions.length <= limit) return
+  limitSessionList(sessions, limit)
+  sessions.length = limit
+}
+
+export async function findSessions(projectDir: string, limit?: number): Promise<Session[]> {
   let entries: string[]
   try {
     entries = await readdir(projectDir)
@@ -38,11 +51,11 @@ export async function findSessions(projectDir: string): Promise<Session[]> {
     const filePath = join(projectDir, entry)
     try {
       const s = await stat(filePath)
-      sessions.push({ id, path: filePath, mtime: s.mtimeMs })
+      pushLimitedSession(sessions, { id, path: filePath, mtime: s.mtimeMs }, limit)
     } catch {}
   }
 
-  return sortSessionsDeterministic(sessions)
+  return limitSessionList(sessions, limit)
 }
 
 async function readProjectRoot(path: string): Promise<string | null> {
@@ -66,7 +79,11 @@ async function readGeminiSessionId(sessionPath: string): Promise<string | null> 
   return null
 }
 
-async function collectGeminiChatSessions(chatsDir: string, sessions: Session[]): Promise<void> {
+async function collectGeminiChatSessions(
+  chatsDir: string,
+  sessions: Session[],
+  limit?: number
+): Promise<void> {
   let chatEntries: import("node:fs").Dirent[]
   try {
     chatEntries = await readdir(chatsDir, { withFileTypes: true })
@@ -80,13 +97,17 @@ async function collectGeminiChatSessions(chatsDir: string, sessions: Session[]):
     try {
       const s = await stat(sessionPath)
       const id = (await readGeminiSessionId(sessionPath)) ?? chatEntry.name.replace(/\.json$/, "")
-      sessions.push({
-        id,
-        path: sessionPath,
-        mtime: s.mtimeMs,
-        provider: "gemini",
-        format: "gemini-json",
-      })
+      pushLimitedSession(
+        sessions,
+        {
+          id,
+          path: sessionPath,
+          mtime: s.mtimeMs,
+          provider: "gemini",
+          format: "gemini-json",
+        },
+        limit
+      )
     } catch {}
   }
 }
@@ -106,7 +127,11 @@ async function matchesBucketTarget(
   return roots.size > 0 ? [...roots].some((root) => root === target) : bucketName === fallbackName
 }
 
-export async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {
+export async function findGeminiSessions(
+  targetDir: string,
+  home?: string,
+  limit?: number
+): Promise<Session[]> {
   home = home ?? getHomeDir()
   const geminiTmp = join(home, ".gemini", "tmp")
   const geminiHistory = join(home, ".gemini", "history")
@@ -131,10 +156,10 @@ export async function findGeminiSessions(targetDir: string, home?: string): Prom
       basename(target)
     )
     if (!matches) continue
-    await collectGeminiChatSessions(join(bucketDir, "chats"), sessions)
+    await collectGeminiChatSessions(join(bucketDir, "chats"), sessions, limit)
   }
 
-  return sessions
+  return limitSessionList(sessions, limit)
 }
 
 const CODEX_SESSION_HEADER_BYTES = 38_000
@@ -194,23 +219,32 @@ async function processCodexFileEntry(
   entryPath: string,
   entryName: string,
   targetPath: string,
-  sessions: Session[]
+  sessions: Session[],
+  limit?: number
 ): Promise<void> {
   const { id: parsedId, cwd } = await readCodexSessionMeta(entryPath)
   if (!cwd || resolve(cwd) !== targetPath) return
   try {
     const s = await stat(entryPath)
-    sessions.push({
-      id: parsedId ?? parseCodexIdFromFilename(entryName),
-      path: entryPath,
-      mtime: s.mtimeMs,
-      provider: "codex",
-      format: "codex-jsonl",
-    })
+    pushLimitedSession(
+      sessions,
+      {
+        id: parsedId ?? parseCodexIdFromFilename(entryName),
+        path: entryPath,
+        mtime: s.mtimeMs,
+        provider: "codex",
+        format: "codex-jsonl",
+      },
+      limit
+    )
   } catch {}
 }
 
-export async function findCodexSessions(targetDir: string, home?: string): Promise<Session[]> {
+export async function findCodexSessions(
+  targetDir: string,
+  home?: string,
+  limit?: number
+): Promise<Session[]> {
   home = home ?? getHomeDir()
   const codexRoot = join(home, ".codex", "sessions")
   const targetPath = resolve(targetDir)
@@ -233,11 +267,11 @@ export async function findCodexSessions(targetDir: string, home?: string): Promi
         continue
       }
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
-      await processCodexFileEntry(entryPath, entry.name, targetPath, sessions)
+      await processCodexFileEntry(entryPath, entry.name, targetPath, sessions, limit)
     }
   }
 
-  return sessions
+  return limitSessionList(sessions, limit)
 }
 
 async function cursorSessionMatchesTarget(
@@ -258,7 +292,8 @@ async function processCursorSessionEntry(
   sessionEntry: import("node:fs").Dirent,
   workspaceDir: string,
   targetDir: string,
-  sessions: Session[]
+  sessions: Session[],
+  limit?: number
 ): Promise<void> {
   if (!sessionEntry.isDirectory()) return
   const sessionDir = join(workspaceDir, sessionEntry.name)
@@ -272,17 +307,25 @@ async function processCursorSessionEntry(
   if (!(await cursorSessionMatchesTarget(sessionPath, targetDir))) return
   try {
     const s = await stat(sessionPath)
-    sessions.push({
-      id: sessionEntry.name,
-      path: sessionPath,
-      mtime: s.mtimeMs,
-      provider: "cursor",
-      format: "cursor-sqlite",
-    })
+    pushLimitedSession(
+      sessions,
+      {
+        id: sessionEntry.name,
+        path: sessionPath,
+        mtime: s.mtimeMs,
+        provider: "cursor",
+        format: "cursor-sqlite",
+      },
+      limit
+    )
   } catch {}
 }
 
-export async function findCursorSessions(targetDir: string, home?: string): Promise<Session[]> {
+export async function findCursorSessions(
+  targetDir: string,
+  home?: string,
+  limit?: number
+): Promise<Session[]> {
   home = home ?? getHomeDir()
   const chatsRoot = join(home, ".cursor", "chats")
   const sessions: Session[] = []
@@ -304,11 +347,11 @@ export async function findCursorSessions(targetDir: string, home?: string): Prom
       continue
     }
     for (const sessionEntry of sessionEntries) {
-      await processCursorSessionEntry(sessionEntry, workspaceDir, targetDir, sessions)
+      await processCursorSessionEntry(sessionEntry, workspaceDir, targetDir, sessions, limit)
     }
   }
 
-  return sessions
+  return limitSessionList(sessions, limit)
 }
 
 function cursorProjectKeyCandidates(targetDir: string): Set<string> {
@@ -317,7 +360,11 @@ function cursorProjectKeyCandidates(targetDir: string): Set<string> {
   return new Set([key, withoutLeadingDashes])
 }
 
-async function collectCursorSessionFiles(sessionDir: string, sessions: Session[]): Promise<void> {
+async function collectCursorSessionFiles(
+  sessionDir: string,
+  sessions: Session[],
+  limit?: number
+): Promise<void> {
   let files: import("node:fs").Dirent[]
   try {
     files = await readdir(sessionDir, { withFileTypes: true })
@@ -329,20 +376,25 @@ async function collectCursorSessionFiles(sessionDir: string, sessions: Session[]
     const sessionPath = join(sessionDir, file.name)
     try {
       const s = await stat(sessionPath)
-      sessions.push({
-        id: file.name.replace(/\.jsonl$/, ""),
-        path: sessionPath,
-        mtime: s.mtimeMs,
-        provider: "cursor",
-        format: "cursor-agent-jsonl",
-      })
+      pushLimitedSession(
+        sessions,
+        {
+          id: file.name.replace(/\.jsonl$/, ""),
+          path: sessionPath,
+          mtime: s.mtimeMs,
+          provider: "cursor",
+          format: "cursor-agent-jsonl",
+        },
+        limit
+      )
     } catch {}
   }
 }
 
 async function collectCursorTranscriptSessions(
   transcriptRoot: string,
-  sessions: Session[]
+  sessions: Session[],
+  limit?: number
 ): Promise<void> {
   let transcriptEntries: import("node:fs").Dirent[]
   try {
@@ -352,13 +404,14 @@ async function collectCursorTranscriptSessions(
   }
   for (const entry of transcriptEntries) {
     if (!entry.isDirectory()) continue
-    await collectCursorSessionFiles(join(transcriptRoot, entry.name), sessions)
+    await collectCursorSessionFiles(join(transcriptRoot, entry.name), sessions, limit)
   }
 }
 
 export async function findCursorAgentTranscriptSessions(
   targetDir: string,
-  home?: string
+  home?: string,
+  limit?: number
 ): Promise<Session[]> {
   home = home ?? getHomeDir()
   const projectsRoot = join(home, ".cursor", "projects")
@@ -376,10 +429,10 @@ export async function findCursorAgentTranscriptSessions(
     if (!projectEntry.isDirectory()) continue
     if (!keyCandidates.has(projectEntry.name)) continue
     const transcriptRoot = join(projectsRoot, projectEntry.name, "agent-transcripts")
-    await collectCursorTranscriptSessions(transcriptRoot, sessions)
+    await collectCursorTranscriptSessions(transcriptRoot, sessions, limit)
   }
 
-  return sessions
+  return limitSessionList(sessions, limit)
 }
 
 const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
@@ -435,7 +488,8 @@ async function antigravitySessionMatchesTarget(
 
 export async function findAntigravitySessions(
   targetDir: string,
-  home?: string
+  home?: string,
+  limit?: number
 ): Promise<Session[]> {
   home = home ?? getHomeDir()
   const antigravityRoot = join(home, ".gemini", "antigravity")
@@ -462,15 +516,19 @@ export async function findAntigravitySessions(
 
     try {
       const s = await stat(sessionPath)
-      sessions.push({
-        id,
-        path: sessionPath,
-        mtime: s.mtimeMs,
-        provider: "antigravity",
-        format: "antigravity-pb",
-      })
+      pushLimitedSession(
+        sessions,
+        {
+          id,
+          path: sessionPath,
+          mtime: s.mtimeMs,
+          provider: "antigravity",
+          format: "antigravity-pb",
+        },
+        limit
+      )
     } catch {}
   }
 
-  return sessions
+  return limitSessionList(sessions, limit)
 }

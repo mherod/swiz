@@ -67,4 +67,29 @@ describe("file-watcher-registry exclusion", () => {
       safeRemove(base)
     }
   })
+
+  test("debounces burst invalidations", async () => {
+    const base = join("/tmp/swiz-watcher-test-debounce", `run-${Date.now()}`)
+    mkdirSync(base, { recursive: true })
+    const registry = new FileWatcherRegistry()
+    let invalidations = 0
+    try {
+      registry.register(join(base, "/"), "test-debounce", () => {
+        invalidations += 1
+      })
+      await registry.start()
+
+      const watchedFile = join(base, "watched.txt")
+      await Bun.write(watchedFile, "one")
+      await Bun.write(watchedFile, "two")
+      await Bun.write(watchedFile, "three")
+      await Bun.sleep(200)
+
+      expect(invalidations).toBe(1)
+      expect(registry.status()[0]?.invalidationCount).toBe(1)
+    } finally {
+      registry.close()
+      safeRemove(base)
+    }
+  })
 })

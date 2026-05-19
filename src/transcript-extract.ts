@@ -1,6 +1,6 @@
 import type { ContentBlock, PlainTurn, TextBlock } from "./transcript-schemas.ts"
 import { isTextBlockWithText } from "./transcript-schemas.ts"
-import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
+import { streamJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 // ─── Text extraction ─────────────────────────────────────────────────────────
 
@@ -94,8 +94,11 @@ export function extractLastAssistantText(lines: string[]): string {
 export async function readTranscriptLines(transcriptPath: string): Promise<string[]> {
   if (!transcriptPath) return []
   try {
-    const text = await Bun.file(transcriptPath).text()
-    return splitJsonlLines(text)
+    const lines: string[] = []
+    for await (const line of streamJsonlLines(transcriptPath)) {
+      if (line.trim()) lines.push(line)
+    }
+    return lines
   } catch {
     return []
   }

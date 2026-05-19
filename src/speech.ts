@@ -8,7 +8,7 @@ import { dirname, join } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "./settings.ts"
 import { speakCooldownPath, speakLockPath, speakPositionPath } from "./temp-paths.ts"
 import { withFileLock } from "./utils/file-lock.ts"
-import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
+import { streamJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 const DEFAULT_COOLDOWN_SECONDS = 10
 
@@ -64,15 +64,13 @@ export async function narrateSession(payload: {
       // Corrupted pos file — start from 0
     }
 
-    const lines = splitJsonlLines(await Bun.file(transcriptPath).text())
-    const totalLines = lines.length
-
-    if (totalLines <= lastPos) return
-
-    const newLines = lines.slice(lastPos)
     const texts: string[] = []
+    let totalLines = 0
 
-    for (const line of newLines) {
+    for await (const line of streamJsonlLines(transcriptPath)) {
+      if (!line.trim()) continue
+      totalLines++
+      if (totalLines <= lastPos) continue
       const entry = tryParseJsonLine(line) as
         | {
             type?: string
@@ -86,6 +84,8 @@ export async function narrateSession(payload: {
         }
       }
     }
+
+    if (totalLines <= lastPos) return
 
     await Bun.write(posFile, String(totalLines))
     newText = texts.join(" ").replace(/\s+/g, " ").trim()

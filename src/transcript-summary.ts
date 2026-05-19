@@ -15,7 +15,7 @@ import {
   stripUserQueryWrapper,
 } from "./skill-usage.ts"
 import { isShellTool, isTaskTool, READ_TOOLS } from "./tool-matchers.ts"
-import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
+import { readJsonlTailText, splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 import { gitSubcommandRe } from "./utils/shell-patterns.ts"
 
 /**
@@ -165,13 +165,13 @@ function classifySessionScope(bashCommands: string[]): SessionScope {
  */
 export function extractSessionLines(jsonlText: string): string[] {
   const allLines = splitJsonlLines(jsonlText)
-  return filterSessionLines(allLines)
+  return filterSessionLines(allLines).sessionLines
 }
 
 /**
  * Filter an array of JSONL lines to return only those after the last compaction boundary.
  */
-function filterSessionLines(allLines: string[]): string[] {
+function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSystem: boolean } {
   let sessionStartIdx = 0
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
@@ -182,7 +182,22 @@ function filterSessionLines(allLines: string[]): string[] {
       break
     }
   }
-  return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
+  return {
+    sessionLines: sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines,
+    sawSystem: sessionStartIdx > 0,
+  }
+}
+
+export async function readCurrentSessionLines(transcriptPath: string): Promise<string[] | null> {
+  let sessionLines: string[] = []
+  const result = await readJsonlTailText(transcriptPath, {
+    isEnough: (text, meta) => {
+      const filtered = filterSessionLines(splitJsonlLines(text))
+      sessionLines = filtered.sessionLines
+      return filtered.sawSystem || meta.reachedStart
+    },
+  })
+  return result ? sessionLines : null
 }
 
 /**
@@ -550,10 +565,9 @@ async function tryReadRecentSessionUsage(
   options?: CurrentSessionUsageRecencyOptions
 ): Promise<RecentCurrentSessionUsage | null> {
   try {
-    const text = await Bun.file(transcriptPath).text()
-    return usageFromEvents(
-      filterRecentCurrentSessionUsageEvents(extractSessionLines(text), options)
-    )
+    const sessionLines = await readCurrentSessionLines(transcriptPath)
+    if (!sessionLines) return null
+    return usageFromEvents(filterRecentCurrentSessionUsageEvents(sessionLines, options))
   } catch {
     return null
   }
@@ -561,8 +575,8 @@ async function tryReadRecentSessionUsage(
 
 async function readSessionToolUsage(transcriptPath: string): Promise<SummaryAccumulator> {
   try {
-    const text = await Bun.file(transcriptPath).text()
-    return collectSessionToolUsage(extractSessionLines(text))
+    const sessionLines = await readCurrentSessionLines(transcriptPath)
+    return sessionLines ? collectSessionToolUsage(sessionLines) : createEmptySummaryAccumulator()
   } catch {
     return createEmptySummaryAccumulator()
   }
@@ -815,8 +829,8 @@ export async function computeTranscriptSummary(
   transcriptPath: string
 ): Promise<TranscriptSummary | null> {
   try {
-    const text = await Bun.file(transcriptPath).text()
-    return parseTranscriptSummary(text)
+    const sessionLines = await readCurrentSessionLines(transcriptPath)
+    return sessionLines ? computeSummaryFromSessionLines(sessionLines) : null
   } catch {
     return null
   }

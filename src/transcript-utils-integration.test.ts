@@ -99,6 +99,41 @@ describe("transcript-utils integration", () => {
       await rm(testDir, { recursive: true, force: true })
     })
 
+    it("limits sessions after mtime ordering", async () => {
+      const { findSessions } = await import("./transcript-utils.ts")
+      const testDir = await makeTmpDir("transcript-test")
+
+      const oldSession = join(testDir, "old-session.jsonl")
+      const midSession = join(testDir, "mid-session.jsonl")
+      const newSession = join(testDir, "new-session.jsonl")
+      await Promise.all([
+        writeFile(oldSession, ""),
+        writeFile(midSession, ""),
+        writeFile(newSession, ""),
+      ])
+      await Promise.all([
+        utimes(
+          oldSession,
+          new Date("2026-01-01T00:00:00.000Z"),
+          new Date("2026-01-01T00:00:00.000Z")
+        ),
+        utimes(
+          midSession,
+          new Date("2026-01-02T00:00:00.000Z"),
+          new Date("2026-01-02T00:00:00.000Z")
+        ),
+        utimes(
+          newSession,
+          new Date("2026-01-03T00:00:00.000Z"),
+          new Date("2026-01-03T00:00:00.000Z")
+        ),
+      ])
+
+      const result = await findSessions(testDir, 2)
+      expect(result.map((session) => session.id)).toEqual(["new-session", "mid-session"])
+      await rm(testDir, { recursive: true, force: true })
+    })
+
     it("handles directories with no session files", async () => {
       const { findSessions } = await import("./transcript-utils.ts")
       const testDir = await makeTmpDir("transcript-test")

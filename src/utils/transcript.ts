@@ -2,10 +2,10 @@
 // Reads Claude Code JSONL transcripts to extract tool calls, commands, and session boundaries.
 
 import {
-  extractSessionLines,
   getBashCommandsUsedForCurrentSession,
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
+  readCurrentSessionLines,
 } from "../transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../transcript-utils.ts"
 import { splitJsonlLines, tryParseJsonLine } from "./jsonl.ts"
@@ -143,7 +143,7 @@ export function collectBlockedToolUseIds(lines: string[]): Set<string> {
  */
 export async function readSessionLines(transcriptPath: string): Promise<string[]> {
   try {
-    return extractSessionLines(await Bun.file(transcriptPath).text())
+    return (await readCurrentSessionLines(transcriptPath)) ?? []
   } catch {
     return []
   }

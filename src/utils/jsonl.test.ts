@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { TMP_ROOT } from "../temp-paths.ts"
-import { parseJsonlUntyped, streamJsonlEntries, tryParseJsonLine } from "./jsonl.ts"
+import {
+  parseJsonlUntyped,
+  readJsonlFileTailUntyped,
+  readJsonlTailText,
+  splitJsonlLines,
+  streamJsonlEntries,
+  tryParseJsonLine,
+} from "./jsonl.ts"
 
 const TEST_DIR = join(TMP_ROOT, "swiz-jsonl-tests")
 
@@ -50,5 +57,33 @@ describe("jsonl utilities", () => {
       { id: 2, name: "Bob" },
       { id: 3, name: "Charlie" },
     ])
+  })
+
+  it("readJsonlTailText returns complete records from the suffix", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "tail.jsonl")
+    const first = JSON.stringify({ id: 1, payload: "x".repeat(1000) })
+    const second = JSON.stringify({ id: 2 })
+    const third = JSON.stringify({ id: 3 })
+    await Bun.write(path, [first, second, third].join("\n"))
+
+    const result = await readJsonlTailText(path, {
+      initialBytes: 20,
+      isEnough: (text) => splitJsonlLines(text).length >= 2,
+    })
+
+    expect(result?.reachedStart).toBe(false)
+    expect(splitJsonlLines(result?.text ?? "")).toEqual([second, third])
+  })
+
+  it("readJsonlFileTailUntyped parses only the recent tail entries", async () => {
+    await resetTestDir()
+    const path = join(TEST_DIR, "tail-untyped.jsonl")
+    await Bun.write(
+      path,
+      Array.from({ length: 5 }, (_, index) => JSON.stringify({ id: index + 1 })).join("\n")
+    )
+
+    await expect(readJsonlFileTailUntyped(path, 2)).resolves.toEqual([{ id: 4 }, { id: 5 }])
   })
 })

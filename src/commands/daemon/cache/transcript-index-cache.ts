@@ -4,7 +4,11 @@ import {
   computeSummaryFromSessionLines,
   type TranscriptSummary,
 } from "../../../transcript-summary.ts"
-import { splitJsonlChunk, splitJsonlLines, tryParseJsonLine } from "../../../utils/jsonl.ts"
+import {
+  readJsonlTailTextFromFile,
+  splitJsonlLines,
+  tryParseJsonLine,
+} from "../../../utils/jsonl.ts"
 
 export interface TranscriptIndex {
   summary: TranscriptSummary
@@ -60,8 +64,25 @@ function extractBlockedToolUseIds(sessionLines: string[]): string[] {
   return blockedIds
 }
 
+function splitSessionLinesAfterLatestSystem(text: string): {
+  sessionLines: string[]
+  sawSystem: boolean
+} {
+  const lines = splitJsonlLines(text)
+  let latestSystemIndex = -1
+  for (let index = 0; index < lines.length; index++) {
+    const parsed = tryParseJsonLine(lines[index]!) as { type?: string } | undefined
+    if (parsed?.type === "system") latestSystemIndex = index
+  }
+  return {
+    sessionLines: latestSystemIndex === -1 ? lines : lines.slice(latestSystemIndex + 1),
+    sawSystem: latestSystemIndex !== -1,
+  }
+}
+
 export class TranscriptIndexCache {
   private entries = new LRUCache<string, TranscriptIndex>({ max: 50 })
+  private inFlight = new Map<string, Promise<TranscriptIndex | null>>()
   private _hits = 0
   private _misses = 0
 
@@ -76,53 +97,48 @@ export class TranscriptIndexCache {
         this._hits++
         return cached
       }
-      this._misses++
 
-      // Use a two-pass approach to avoid loading the entire file into memory.
-      // 1. Stream the file to find the byte offset of the last "system" entry.
-      // 2. Read only from that offset to EOF.
       if (!(await transcriptFile.exists())) return null
 
-      let lastSystemByteOffset = 0
-      let currentByteOffset = 0
+      const inFlightKey = `${transcriptPath}\0${mtimeMs}`
+      const existing = this.inFlight.get(inFlightKey)
+      if (existing) return await existing
 
-      const stream = transcriptFile.stream()
-      const reader = stream.getReader()
-      const decoder = new TextDecoder()
-      let remaining = ""
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          const chunk = decoder.decode(value, { stream: true })
-          const { lines, remainder } = splitJsonlChunk(remaining + chunk)
-
-          for (const line of lines) {
-            const lineByteLength = Buffer.byteLength(`${line}\n`)
-            const parsed = tryParseJsonLine(line) as { type?: string } | undefined
-            if (parsed?.type === "system") {
-              lastSystemByteOffset = currentByteOffset + lineByteLength
-            }
-            currentByteOffset += lineByteLength
+      this._misses++
+      let computation: Promise<TranscriptIndex | null>
+      computation = this.buildIndex(transcriptFile, stat.size, mtimeMs)
+        .then((index) => {
+          if (index && this.inFlight.get(inFlightKey) === computation) {
+            this.entries.set(transcriptPath, index)
           }
-          remaining = remainder
-        }
+          return index
+        })
+        .finally(() => {
+          if (this.inFlight.get(inFlightKey) === computation) {
+            this.inFlight.delete(inFlightKey)
+          }
+        })
+      this.inFlight.set(inFlightKey, computation)
+      return await computation
+    } catch {
+      return null
+    }
+  }
 
-        const final = remaining + decoder.decode()
-        const parsed = tryParseJsonLine(final) as { type?: string } | undefined
-        if (parsed?.type === "system") {
-          lastSystemByteOffset = currentByteOffset + Buffer.byteLength(final)
-        }
-      } finally {
-        reader.releaseLock()
-      }
-
-      // 2. Read from lastSystemByteOffset to EOF.
-      const sessionFile = transcriptFile.slice(lastSystemByteOffset)
-      const sessionText = await sessionFile.text()
-      const sessionLines = splitJsonlLines(sessionText)
+  private async buildIndex(
+    transcriptFile: Bun.BunFile,
+    fileSize: number,
+    mtimeMs: number
+  ): Promise<TranscriptIndex | null> {
+    try {
+      let sessionLines: string[] = []
+      await readJsonlTailTextFromFile(transcriptFile, fileSize, {
+        isEnough: (text, meta) => {
+          const result = splitSessionLinesAfterLatestSystem(text)
+          sessionLines = result.sessionLines
+          return result.sawSystem || meta.reachedStart
+        },
+      })
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)
 
@@ -136,7 +152,6 @@ export class TranscriptIndexCache {
         mtimeMs,
         computedAt: Date.now(),
       }
-      this.entries.set(transcriptPath, index)
       return index
     } catch {
       return null
@@ -149,10 +164,14 @@ export class TranscriptIndexCache {
     for (const key of this.entries.keys()) {
       if (key.includes(projectKey)) this.entries.delete(key)
     }
+    for (const key of this.inFlight.keys()) {
+      if (key.includes(projectKey)) this.inFlight.delete(key)
+    }
   }
 
   invalidateAll(): void {
     this.entries.clear()
+    this.inFlight.clear()
   }
 
   get size(): number {

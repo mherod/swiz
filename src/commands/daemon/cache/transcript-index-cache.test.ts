@@ -87,6 +87,39 @@ describe("TranscriptIndexCache", () => {
     expect(index).toBeNull()
   })
 
+  test("shares in-flight index builds for concurrent callers", async () => {
+    const lines = [
+      JSON.stringify({ type: "system", content: "Compacted" }),
+      JSON.stringify({ type: "user", message: { content: "Next" } }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }],
+        },
+      }),
+    ]
+    const testPath = testTranscript("concurrent")
+    await Bun.write(testPath, lines.join("\n"))
+
+    const cache = new TranscriptIndexCache()
+    const [first, second, third] = await Promise.all([
+      cache.get(testPath),
+      cache.get(testPath),
+      cache.get(testPath),
+    ])
+
+    expect(first).not.toBeNull()
+    expect(second).toBe(first)
+    expect(third).toBe(first)
+    expect(cache.misses).toBe(1)
+
+    const cached = await cache.get(testPath)
+    expect(cached).toBe(first)
+    expect(cache.hits).toBe(1)
+
+    void rm(testPath, { force: true }).catch(() => {})
+  })
+
   test("does not store pre-boundary lines in memory", async () => {
     // This is a behavioral test to ensure we only have post-boundary lines
     const lines = [

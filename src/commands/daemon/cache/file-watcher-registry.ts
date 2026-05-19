@@ -5,11 +5,14 @@ export interface WatchEntry {
   label: string
   callbacks: Set<() => void>
   watchers: FSWatcher[]
+  debounceTimer: ReturnType<typeof setTimeout> | null
   lastInvalidation: number | null
   invalidationCount: number
   recursive?: boolean
   depth?: number
 }
+
+const WATCH_INVALIDATION_DEBOUNCE_MS = 50
 
 /**
  * Registry of file-system watchers that trigger cache invalidation callbacks.
@@ -42,6 +45,7 @@ export class BaseFileWatcherRegistry {
         label,
         callbacks: new Set(),
         watchers: [],
+        debounceTimer: null,
         lastInvalidation: null,
         invalidationCount: 0,
         recursive: options?.recursive ?? path.endsWith("/"),
@@ -56,7 +60,8 @@ export class BaseFileWatcherRegistry {
     for (const entry of this.entries.values()) {
       if (entry.watchers.length > 0) continue
 
-      const fire = () => {
+      const flush = () => {
+        entry.debounceTimer = null
         entry.lastInvalidation = Date.now()
         entry.invalidationCount += 1
         for (const cb of entry.callbacks) {
@@ -66,6 +71,10 @@ export class BaseFileWatcherRegistry {
             // ignore callback errors
           }
         }
+      }
+      const fire = () => {
+        if (entry.debounceTimer) return
+        entry.debounceTimer = setTimeout(flush, WATCH_INVALIDATION_DEBOUNCE_MS)
       }
 
       if (entry.recursive && entry.depth !== 0) {
@@ -125,6 +134,10 @@ export class BaseFileWatcherRegistry {
     let removed = 0
     for (const [path, entry] of this.entries) {
       if (entry.label.endsWith(suffix)) {
+        if (entry.debounceTimer) {
+          clearTimeout(entry.debounceTimer)
+          entry.debounceTimer = null
+        }
         for (const w of entry.watchers) {
           w.close()
         }
@@ -138,6 +151,10 @@ export class BaseFileWatcherRegistry {
 
   close(): void {
     for (const entry of this.entries.values()) {
+      if (entry.debounceTimer) {
+        clearTimeout(entry.debounceTimer)
+        entry.debounceTimer = null
+      }
       for (const w of entry.watchers) {
         w.close()
       }

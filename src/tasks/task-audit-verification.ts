@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { parseJsonlTailUntyped } from "../utils/jsonl.ts"
+import { readJsonlFileTailUntyped } from "../utils/jsonl.ts"
 import { type AuditEntry, type TaskMutationAction, writeAudit } from "./task-repository.ts"
 
 const AUDIT_LOG_FILENAME = ".audit-log.jsonl"
@@ -34,7 +34,7 @@ export async function readAuditLog(
 
 /**
  * Read the N most recent audit entries for a session.
- * Uses `parseJsonlTailUntyped` for efficient tail reading.
+ * Uses byte-level JSONL tail reading so large audit logs are not loaded whole.
  */
 export async function readRecentAuditEntries(
   sessionId: string,
@@ -43,8 +43,7 @@ export async function readRecentAuditEntries(
 ): Promise<AuditEntry[]> {
   try {
     const logPath = join(tasksDir, sessionId, AUDIT_LOG_FILENAME)
-    const content = await readFile(logPath, "utf-8")
-    return parseJsonlTailUntyped(content, count) as AuditEntry[]
+    return (await readJsonlFileTailUntyped(logPath, count)) as AuditEntry[]
   } catch {
     return []
   }

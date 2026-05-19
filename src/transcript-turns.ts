@@ -22,6 +22,7 @@ import {
   type Session,
   type TranscriptEntry,
 } from "./transcript-utils.ts"
+import { readJsonlTailTextFromFile, streamJsonlLinesFromFile } from "./utils/jsonl.ts"
 import { stripAnsi } from "./utils/transcript.ts"
 
 // ─── Turn cache ──────────────────────────────────────────────────────────────
@@ -51,6 +52,23 @@ export function invalidateTurnsCache(cwd: string): void {
 export interface Turn {
   entry: TranscriptEntry
   role: "user" | "assistant"
+}
+
+type JsonlTranscriptFormat = Extract<
+  Session["format"],
+  "jsonl" | "cursor-agent-jsonl" | "codex-jsonl"
+>
+
+function getJsonlFormatHint(session: Session): JsonlTranscriptFormat | null {
+  if (
+    session.format === "jsonl" ||
+    session.format === "cursor-agent-jsonl" ||
+    session.format === "codex-jsonl"
+  ) {
+    return session.format
+  }
+  if (!session.format && session.path.endsWith(".jsonl")) return "jsonl"
+  return null
 }
 
 // ─── Turn collection ────────────────────────────────────────────────────────
@@ -108,6 +126,93 @@ function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
   return turns
 }
 
+function collectTurnsFromJsonlText(
+  text: string,
+  formatHint: JsonlTranscriptFormat,
+  userOnly: boolean
+): Turn[] {
+  return collectTurns(parseTranscriptEntries(text, formatHint), userOnly)
+}
+
+function turnMatchesTimeRange(turn: Turn, timeRange: TimeRange | undefined): boolean {
+  if (!timeRange) return true
+  const ts = turn.entry.timestamp
+  if (!ts) return false
+  const ms = new Date(ts).getTime()
+  if (!Number.isFinite(ms)) return false
+  if (timeRange.from !== undefined && ms < timeRange.from) return false
+  if (timeRange.to !== undefined && ms > timeRange.to) return false
+  return true
+}
+
+function appendFilteredTurns(
+  output: Turn[],
+  turns: Turn[],
+  timeRange: TimeRange | undefined,
+  limit: number | undefined
+): boolean {
+  for (const turn of turns) {
+    if (!turnMatchesTimeRange(turn, timeRange)) continue
+    output.push(turn)
+    if (limit !== undefined && output.length >= limit) return true
+  }
+  return false
+}
+
+async function loadJsonlTurnsForward(
+  file: Bun.BunFile,
+  formatHint: JsonlTranscriptFormat,
+  userOnly: boolean,
+  timeRange?: TimeRange,
+  limit?: number
+): Promise<Turn[]> {
+  if (limit !== undefined && limit <= 0) return []
+
+  const turns: Turn[] = []
+  for await (const line of streamJsonlLinesFromFile(file)) {
+    if (!line.trim()) continue
+    const parsedTurns = collectTurnsFromJsonlText(line, formatHint, userOnly)
+    if (appendFilteredTurns(turns, parsedTurns, timeRange, limit)) return turns
+  }
+
+  return turns
+}
+
+function hasReachedTimeFloor(turns: Turn[], timeRange: TimeRange | undefined): boolean {
+  if (timeRange?.from === undefined) return false
+  return turns.some((turn) => {
+    const ts = turn.entry.timestamp
+    if (!ts) return false
+    const ms = new Date(ts).getTime()
+    return Number.isFinite(ms) && ms < timeRange.from!
+  })
+}
+
+async function loadJsonlTurnsTail(
+  file: Bun.BunFile,
+  fileSize: number,
+  formatHint: JsonlTranscriptFormat,
+  userOnly: boolean,
+  tailCount: number,
+  timeRange?: TimeRange
+): Promise<Turn[]> {
+  if (tailCount <= 0) return []
+
+  let selectedTurns: Turn[] = []
+  await readJsonlTailTextFromFile(file, fileSize, {
+    isEnough: (text, meta) => {
+      if (!text.trim()) {
+        selectedTurns = []
+        return meta.reachedStart
+      }
+      const turns = text.trim() ? collectTurnsFromJsonlText(text, formatHint, userOnly) : []
+      selectedTurns = timeRange ? filterTurnsByTime(turns, timeRange) : turns
+      return selectedTurns.length >= tailCount || hasReachedTimeFloor(turns, timeRange)
+    },
+  })
+  return selectedTurns.slice(-tailCount)
+}
+
 // ─── Turn loading ───────────────────────────────────────────────────────────
 
 export async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
@@ -130,10 +235,50 @@ export async function loadTurns(session: Session, userOnly = false): Promise<Tur
   }
 
   _turnsCacheMisses++
+  const jsonlFormatHint = getJsonlFormatHint(session)
+  if (jsonlFormatHint) {
+    const turns = await loadJsonlTurnsForward(file, jsonlFormatHint, userOnly)
+    turnsCache.set(cacheKey, { turns, mtimeMs })
+    return turns
+  }
+
   const text = await file.text()
   const turns = collectTurns(parseTranscriptEntries(text, session.format), userOnly)
   turnsCache.set(cacheKey, { turns, mtimeMs })
   return turns
+}
+
+async function loadWindowedJsonlTurns(
+  session: Session,
+  parsed: TranscriptArgs,
+  timeRange: TimeRange | undefined
+): Promise<Turn[] | null> {
+  const formatHint = getJsonlFormatHint(session)
+  if (!formatHint) return null
+  if (isUnsupportedTranscriptFormat(session.format)) {
+    throw new Error(getUnsupportedTranscriptFormatMessage(session))
+  }
+
+  const file = Bun.file(session.path)
+  if (!(await file.exists())) {
+    throw new Error(`Transcript not found: ${session.path}`)
+  }
+
+  const stat = await file.stat()
+  if (parsed.tailCount !== undefined) {
+    return loadJsonlTurnsTail(
+      file,
+      stat.size,
+      formatHint,
+      parsed.userOnly,
+      parsed.tailCount,
+      timeRange
+    )
+  }
+  if (parsed.headCount !== undefined) {
+    return loadJsonlTurnsForward(file, formatHint, parsed.userOnly, timeRange, parsed.headCount)
+  }
+  return null
 }
 
 // ─── Utility ────────────────────────────────────────────────────────────────
@@ -245,9 +390,19 @@ export async function loadSessionContent(
   hasTimeFilter: boolean,
   onDebugNotFound?: (sessionId: string) => void
 ): Promise<{ turns: Turn[]; debugEvents: DebugEvent[] | undefined }> {
-  let allTurns = await loadTurns(session, parsed.userOnly)
-  if (hasTimeFilter) allTurns = filterTurnsByTime(allTurns, timeRange)
-  const turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
+  const windowedTurns = await loadWindowedJsonlTurns(
+    session,
+    parsed,
+    hasTimeFilter ? timeRange : undefined
+  )
+  let turns: Turn[]
+  if (windowedTurns) {
+    turns = windowedTurns
+  } else {
+    let allTurns = await loadTurns(session, parsed.userOnly)
+    if (hasTimeFilter) allTurns = filterTurnsByTime(allTurns, timeRange)
+    turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
+  }
   let debugEvents = await loadOptionalDebug(session, parsed, onDebugNotFound)
   if (debugEvents && hasTimeFilter) debugEvents = filterDebugEventsByTime(debugEvents, timeRange)
   return { turns, debugEvents }

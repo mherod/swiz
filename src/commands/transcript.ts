@@ -80,10 +80,8 @@ async function runAutoReplyMode(
   try {
     const allReplies: Turn[] = []
     const cwd = process.cwd()
-    let passNumber = 0
 
-    while (true) {
-      passNumber++
+    for (let passNumber = 1; passNumber <= AUTO_REPLY_MAX_PASSES; passNumber++) {
       const flipRoles = passNumber % 2 === 0
       monitor.setPhase(`streaming-pass-${passNumber}`)
       const allTurns = turns.concat(allReplies)
@@ -97,19 +95,20 @@ async function runAutoReplyMode(
         passNumber,
       })
 
-      if (replies.length) {
-        allReplies.push(...replies)
-        monitor.updateStats({
-          currentPass: passNumber,
-          repliesGenerated: allReplies.length,
-        })
+      if (replies.length === 0) {
+        monitor.pushEvent(`Pass ${passNumber} produced no replies; stopping.`)
+        break
+      }
 
-        const replyDisplayTurns = turnsToDisplayTurns(replies).displayTurns
-        for (const t of replyDisplayTurns) {
-          monitor.pushTurn(t)
-        }
+      allReplies.push(...replies)
+      monitor.updateStats({
+        currentPass: passNumber,
+        repliesGenerated: allReplies.length,
+      })
 
-        if (flipRoles) break
+      const replyDisplayTurns = turnsToDisplayTurns(replies).displayTurns
+      for (const t of replyDisplayTurns) {
+        monitor.pushTurn(t)
       }
     }
 
@@ -159,28 +158,41 @@ async function runAutoReplyMode(
 
 // ─── Auto-reply streaming ───────────────────────────────────────────────────
 
-function buildAutoReplyMessages(turns: Turn[], flipRoles: boolean): ModelMessage[] {
-  const messages: ModelMessage[] = []
-  for (const { entry, role } of turns) {
-    if (role === "user") {
-      const text = extractText(entry.message?.content).trim()
-      if (text) {
-        messages.push({
-          role: flipRoles ? "assistant" : "user",
-          content: text,
-        })
-      }
-    } else {
-      const blocks = toContentBlocks(entry.message?.content)
-      const textParts = blocks.filter(isVisibleTextBlock).map((b) => b.text.trim())
-      if (textParts.length > 0) {
-        messages.push({
-          role: flipRoles ? "user" : "assistant",
-          content: textParts.join("\n"),
-        })
-      }
+const AUTO_REPLY_CONTEXT_MESSAGE_LIMIT = 20
+const AUTO_REPLY_MAX_PASSES = 2
+
+function turnToAutoReplyMessage({ entry, role }: Turn, flipRoles: boolean): ModelMessage | null {
+  if (role === "user") {
+    const text = extractText(entry.message?.content).trim()
+    if (!text) return null
+    return {
+      role: flipRoles ? "assistant" : "user",
+      content: text,
     }
   }
+
+  const blocks = toContentBlocks(entry.message?.content)
+  const textParts: string[] = []
+  for (const block of blocks) {
+    if (!isVisibleTextBlock(block)) continue
+    const text = block.text.trim()
+    if (text) textParts.push(text)
+  }
+  if (textParts.length === 0) return null
+  return {
+    role: flipRoles ? "user" : "assistant",
+    content: textParts.join("\n"),
+  }
+}
+
+export function buildAutoReplyMessages(turns: Turn[], flipRoles: boolean): ModelMessage[] {
+  const contextLimit = AUTO_REPLY_CONTEXT_MESSAGE_LIMIT - 1
+  const messages: ModelMessage[] = []
+  for (let i = turns.length - 1; i >= 0 && messages.length < contextLimit; i--) {
+    const message = turnToAutoReplyMessage(turns[i]!, flipRoles)
+    if (message) messages.push(message)
+  }
+  messages.reverse()
   messages.push({
     role: "user",
     content: "Continue - the session is NOT ready to finish.",
@@ -253,7 +265,7 @@ async function streamAutoReply(
   const provider = createOpenRouter()
   const { response, fullStream } = streamText({
     model: provider.languageModel("openrouter/free"),
-    messages: messages.slice(-20),
+    messages,
     system: AUTO_REPLY_SYSTEM,
     // Allow multi-step: model can call Read/Grep, get results,
     // then produce the final text reply

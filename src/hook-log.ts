@@ -10,7 +10,7 @@
 import { appendFile, mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "./home.ts"
-import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
+import { readJsonlTailText, splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 export interface HookLogEntry {
   ts: string
@@ -65,12 +65,11 @@ export async function readHookLogs(limit = 200): Promise<HookLogEntry[]> {
   const logPath = getLogPath()
   if (!logPath) return []
   try {
-    const file = Bun.file(logPath)
-    if (!(await file.exists())) return []
-    const text = await file.text()
-    // Slice raw lines before parsing to avoid JSON.parse on discarded lines
-    const lines = splitJsonlLines(text)
-    const recent = lines.slice(-limit).join("\n")
+    const result = await readJsonlTailText(logPath, {
+      isEnough: (text) => splitJsonlLines(text).length >= limit,
+    })
+    if (!result) return []
+    const recent = splitJsonlLines(result.text).slice(-limit).join("\n")
     const entries: HookLogEntry[] = []
     for (const line of splitJsonlLines(recent)) {
       const parsed = tryParseJsonLine(line) as HookLogEntry | undefined
@@ -86,11 +85,11 @@ export async function pruneHookLogs(): Promise<void> {
   const logPath = getLogPath()
   if (!logPath) return
   try {
-    const file = Bun.file(logPath)
-    if (!(await file.exists())) return
-    const text = await file.text()
-    const lines = splitJsonlLines(text)
-    if (lines.length <= MAX_LOG_LINES) return
+    const result = await readJsonlTailText(logPath, {
+      isEnough: (text) => splitJsonlLines(text).length > MAX_LOG_LINES,
+    })
+    if (!result || result.reachedStart) return
+    const lines = splitJsonlLines(result.text)
     const trimmed = lines.slice(-MAX_LOG_LINES)
     await Bun.write(logPath, `${trimmed.join("\n")}\n`)
   } catch {
