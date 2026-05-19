@@ -233,8 +233,8 @@ describe("pretooluseTaskGovernance context", () => {
       const context = additionalContext(result) ?? ""
       expect(permissionDecision(result)).toBe("allow")
       expect(context).toContain("Deferral tactic detected")
-      expect(context).toContain("completed in this session, not some next session")
-      expect(context).toContain("That behavior is wrong")
+      expect(context).toContain("All work is to be completed in this session")
+      expect(context).toContain("There is no follow-up session")
       expect(context.toLowerCase()).not.toContain("consider issue")
       expect(context).not.toContain("#633")
     } finally {

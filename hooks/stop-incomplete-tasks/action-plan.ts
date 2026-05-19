@@ -19,9 +19,8 @@ export function buildIncompleteBlockOutput(
 export function buildSoleDeferralSteeringOutput(realWork: string): SwizHookOutput {
   const reason = [
     "The last remaining task was parked under a deferral label instead of completed.",
+    "All work is to be completed in this session. There is no follow-up session.",
     `Do the work now: ${realWork}`,
-    "",
-    "If this is genuinely next-session work, add a second Follow-up: or Consider task so there are two deferred items — stop is allowed when two or more deferred tasks remain.",
   ].join("\n")
   return blockStopObj(reason)
 }

@@ -1543,7 +1543,7 @@ function buildDeferralTaskContext(
   const verb = deferralTaskCount === 1 ? "uses" : "use"
   return (
     `Deferral tactic detected: ${deferralTaskCount} active ${subjectText} ${verb} deferral framing. ` +
-    "That behavior is wrong. The task should be completed in this session, not some next session. " +
+    "All work is to be completed in this session. There is no follow-up session. " +
     "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
   )
 }
