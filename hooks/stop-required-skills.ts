@@ -7,6 +7,7 @@
 // that has not been invoked blocks stop. Add new skills to the ordered list
 // below instead of creating more one-off stop hooks.
 
+import { git } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
@@ -182,12 +183,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
       }
 
       // Signal 1: Unpushed commits
-      const proc = Bun.spawnSync(["git", "-C", cwd, "rev-list", "--count", "@{upstream}..HEAD"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const ahead =
-        proc.exitCode === 0 ? parseInt(new TextDecoder().decode(proc.stdout).trim(), 10) : 0
+      const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
       if (!Number.isNaN(ahead) && ahead > 0) {
         if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${ahead} commits ahead`)
         ctx.ahead = ahead

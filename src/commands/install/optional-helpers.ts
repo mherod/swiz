@@ -1,5 +1,6 @@
 import { AGENTS } from "../../agents.ts"
 import { DIM, GREEN, RED, RESET } from "../../ansi.ts"
+import { getGitClient } from "../../git/client.ts"
 import { formatUnifiedDiff } from "../../utils/diff-utils.ts"
 import { readFileText, readJsonFile } from "../../utils/file-utils.ts"
 import { writeWithBackup } from "./file-helpers.ts"
@@ -98,7 +99,7 @@ export async function installMergeTool(dryRun: boolean): Promise<void> {
 
   for (const [key, value] of configs) {
     if (!key || !value) continue
-    const proc = Bun.spawnSync(["git", "config", "--global", key, value])
+    const proc = getGitClient().runSync(["config", "--global", key, value])
     if (proc.exitCode !== 0) {
       throw new Error(`Failed to set git config ${key}`)
     }
@@ -111,12 +112,10 @@ export async function installMergeTool(dryRun: boolean): Promise<void> {
 }
 
 export async function uninstallMergeTool(dryRun: boolean): Promise<void> {
-  const getProc = Bun.spawnSync(["git", "config", "--global", "--get", "merge.tool"])
-  const mergeTool =
-    getProc.exitCode === 0 ? String(new TextDecoder().decode(getProc.stdout)).trim() : ""
-  const cmdProc = Bun.spawnSync(["git", "config", "--global", "--get", "mergetool.swiz.cmd"])
-  const swizCmd =
-    cmdProc.exitCode === 0 ? String(new TextDecoder().decode(cmdProc.stdout)).trim() : ""
+  const getProc = getGitClient().runSync(["config", "--global", "--get", "merge.tool"])
+  const mergeTool = getProc.exitCode === 0 ? getProc.stdout.trim() : ""
+  const cmdProc = getGitClient().runSync(["config", "--global", "--get", "mergetool.swiz.cmd"])
+  const swizCmd = cmdProc.exitCode === 0 ? cmdProc.stdout.trim() : ""
 
   const mergeToolIsSwiz = mergeTool === "swiz"
   const swizCmdMatchesInstall = swizCmd === MERGETOOL_SWIZ_CMD
@@ -144,12 +143,12 @@ export async function uninstallMergeTool(dryRun: boolean): Promise<void> {
   }
 
   if (mergeToolIsSwiz) {
-    Bun.spawnSync(["git", "config", "--global", "--unset", "merge.tool"])
-    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.cmd"])
-    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
+    getGitClient().runSync(["config", "--global", "--unset", "merge.tool"])
+    getGitClient().runSync(["config", "--global", "--unset", "mergetool.swiz.cmd"])
+    getGitClient().runSync(["config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
   } else {
-    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.cmd"])
-    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
+    getGitClient().runSync(["config", "--global", "--unset", "mergetool.swiz.cmd"])
+    getGitClient().runSync(["config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
   }
 
   console.log(`  ${GREEN}✓${RESET} Git mergetool swiz entries removed (global)\n`)

@@ -9,6 +9,7 @@ import {
 } from "../ai-providers.ts"
 import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
 import { extractJsonCandidate } from "../extract-json-candidate.ts"
+import { getGitClient } from "../git/client.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import type { Command } from "../types.ts"
 
@@ -177,15 +178,11 @@ function truncate(text: string, maxChars: number): string {
 
 function readRecentCommitMessages(targetDir: string, count: number): string[] {
   try {
-    const proc = Bun.spawnSync(
-      ["git", "-C", targetDir, "log", `--max-count=${count}`, "--pretty=%s"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    )
+    const proc = getGitClient().runSync(["log", `--max-count=${count}`, "--pretty=%s"], {
+      cwd: targetDir,
+    })
     if (proc.exitCode !== 0) return []
-    const stdout = new TextDecoder().decode(proc.stdout).trim()
+    const stdout = proc.stdout.trim()
     if (!stdout) return []
     return stdout
       .split("\n")

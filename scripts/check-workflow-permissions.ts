@@ -14,6 +14,8 @@
  *   1 — permission changes found (prints details to stderr)
  */
 
+import { getGitClient } from "../src/git/client.ts"
+
 /** Match added lines containing a `permissions:` YAML key. */
 const PERMISSIONS_RE = /^\s*permissions\s*:/
 
@@ -67,20 +69,17 @@ if (import.meta.main) {
   if (baseIdx !== -1 && args[baseIdx + 1]) {
     // Generate diff from git
     const base = args[baseIdx + 1]!
-    const proc = Bun.spawn(["git", "diff", `${base}...HEAD`, "--", ".github/workflows/*.yml"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+    const proc = await getGitClient().run([
+      "diff",
+      `${base}...HEAD`,
+      "--",
+      ".github/workflows/*.yml",
     ])
-    await proc.exited
     if (proc.exitCode !== 0) {
-      console.error(`git diff failed: ${stderr.trim()}`)
+      console.error(`git diff failed: ${proc.stderr.trim()}`)
       process.exit(1)
     }
-    diff = stdout
+    diff = proc.stdout
   } else {
     // Read diff from stdin
     diff = await new Response(Bun.stdin.stream()).text()

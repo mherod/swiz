@@ -6,7 +6,7 @@
 // Opt-in via enforceMidSessionCheckin setting (default: false).
 
 import { stat } from "node:fs/promises"
-import { ghJson } from "../src/git-helpers.ts"
+import { ghJson, git } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
@@ -31,22 +31,13 @@ async function getSessionStartMs(transcriptPath: string, override?: number): Pro
   }
 }
 
-function gitStatusLines(cwd: string): string[] {
-  const proc = Bun.spawnSync(["git", "-C", cwd, "status", "--porcelain"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  if (proc.exitCode !== 0) return []
-  return new TextDecoder().decode(proc.stdout).trim().split("\n").filter(Boolean)
+async function gitStatusLines(cwd: string): Promise<string[]> {
+  const out = await git(["status", "--porcelain"], cwd)
+  return out.split("\n").filter(Boolean)
 }
 
-function getLastCommitAgeMs(cwd: string): number | null {
-  const proc = Bun.spawnSync(["git", "-C", cwd, "log", "-1", "--format=%ct"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  if (proc.exitCode !== 0) return null
-  const ts = parseInt(new TextDecoder().decode(proc.stdout).trim(), 10)
+async function getLastCommitAgeMs(cwd: string): Promise<number | null> {
+  const ts = parseInt(await git(["log", "-1", "--format=%ct"], cwd), 10)
   if (Number.isNaN(ts)) return null
   return Date.now() - ts * 1000
 }
@@ -76,13 +67,13 @@ async function detectPrSignal(cwd: string, safeSession: string): Promise<string 
 }
 
 async function detectDriftSignal(cwd: string, safeSession: string): Promise<string | null> {
-  const statusLines = gitStatusLines(cwd)
+  const statusLines = await gitStatusLines(cwd)
 
   if (statusLines.length > UNCOMMITTED_FILES_THRESHOLD) {
     return `${statusLines.length} uncommitted files`
   }
 
-  const lastCommitAge = getLastCommitAgeMs(cwd)
+  const lastCommitAge = await getLastCommitAgeMs(cwd)
   if (lastCommitAge !== null && lastCommitAge > TWO_HOURS_MS && statusLines.length > 0) {
     const totalMins = Math.floor(lastCommitAge / 60000)
     const hours = Math.floor(totalMins / 60)

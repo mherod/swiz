@@ -2,6 +2,7 @@ import { afterAll } from "bun:test"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { getGitClient } from "../git/client.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
 import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
@@ -312,8 +313,7 @@ export async function runHook(
  */
 export async function createEnforcementProjectDir(makeDir: () => Promise<string>): Promise<string> {
   const dir = await makeDir()
-  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  await init.exited
+  await getGitClient().run(["init"], { cwd: dir })
   const claudeMd = join(dir, "CLAUDE.md")
   await writeFile(claudeMd, "# Guide\n")
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
@@ -528,10 +528,8 @@ export function makeWorkflowHookRunner(
 
 /** Run a git command in a directory; returns stdout trimmed. */
 export async function runGit(dir: string, args: string[]): Promise<string> {
-  const p = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(p.stdout).text()
-  await p.exited
-  return out.trim()
+  const p = await getGitClient().run(args, { cwd: dir })
+  return p.stdout.trim()
 }
 
 /**
@@ -584,19 +582,18 @@ export async function createTestRepo(
   opts: { featureBranch?: string } = {}
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "swiz-test-repo-"))
-  const run = (args: string[]) =>
-    Bun.spawnSync(args, { cwd: dir, stdout: "pipe", stderr: "pipe", env: process.env })
-  run(["git", "init"])
-  run(["git", "config", "user.email", "test@example.com"])
-  run(["git", "config", "user.name", "Test User"])
+  const run = (args: string[]) => getGitClient().runSync(args, { cwd: dir, env: process.env })
+  run(["init"])
+  run(["config", "user.email", "test@example.com"])
+  run(["config", "user.name", "Test User"])
   await writeFile(join(dir, "README.md"), "hello\n")
-  run(["git", "add", "README.md"])
-  run(["git", "commit", "-m", "init"])
-  run(["git", "branch", "-M", "main"])
+  run(["add", "README.md"])
+  run(["commit", "-m", "init"])
+  run(["branch", "-M", "main"])
   if (opts.featureBranch) {
-    run(["git", "checkout", "-b", opts.featureBranch])
+    run(["checkout", "-b", opts.featureBranch])
   }
-  run(["git", "remote", "add", "origin", remoteUrl])
+  run(["remote", "add", "origin", remoteUrl])
   return dir
 }
 

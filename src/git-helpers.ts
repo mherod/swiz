@@ -9,24 +9,23 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
+import { getGitClient } from "./git/client.ts"
 import { getHomeDirOrNull } from "./home.ts"
 
 export const GIT_DIR_NAME = ".git"
 export const GIT_INDEX_LOCK = "index.lock"
 
-// Capture the real Bun.spawn / Bun.spawnSync at module-load time. Some tests
+// Capture the real Bun.spawn at module-load time. Some tests
 // (issue-store.test.ts et al.) monkey-patch the global `Bun.spawn` inside a
-// test-local mutex to simulate subprocess failures. In `bun test --concurrent`
-// those mocks leak across files for the duration of the test body, so any
-// concurrent call to `git()` / `gh()` in an unrelated file was picking up
-// fake response shapes (returning `null`, objects, wrong booleans). Binding
-// the original references here makes git-helpers immune to runtime patches
-// while still letting tests mock the global for their own callers.
+// test-local mutex to simulate subprocess failures. Git itself is isolated
+// behind `GitClient`; gh keeps this real spawn binding until it has the same
+// client abstraction.
 const spawnOriginal = Bun.spawn.bind(Bun)
-const spawnSyncOriginal = Bun.spawnSync.bind(Bun)
 
-function getRealSpawnSync(): typeof Bun.spawnSync {
-  return spawnSyncOriginal
+function currentEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
+  )
 }
 
 /** Join a path under `<repoRoot>/.git/...`. */
@@ -37,20 +36,8 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
-    const effectiveCwd = resolveSpawnCwd(cwd)
-    // Strip GIT_* env vars (GIT_DIR, GIT_QUARANTINE_PATH, etc.) set by
-    // lefthook/git hooks so spawned git uses the provided cwd correctly.
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))
-    )
-    const proc = spawnSyncOriginal(["git", ...args], {
-      cwd: effectiveCwd,
-      stdout: "pipe",
-      stderr: "pipe",
-      env,
-    })
-    const output = new TextDecoder().decode(proc.stdout)
-    return proc.exitCode === 0 ? output.trim() : ""
+    const proc = getGitClient().runSync(args, { cwd })
+    return proc.exitCode === 0 ? proc.stdout.trim() : ""
   } catch {
     return ""
   }
@@ -106,6 +93,7 @@ export async function gh(args: string[], cwd: string): Promise<string> {
       cwd: effectiveCwd,
       stdout: "pipe",
       stderr: "pipe",
+      env: currentEnv(),
     })
     let killed = false
     const killTimer = setTimeout(() => {
@@ -346,7 +334,7 @@ export async function detectForkTopology(cwd: string): Promise<ForkTopology | nu
     await acquireGhSlot()
     const proc = spawnOriginal(
       ["gh", "api", "--include", `repos/${originSlug}`, "--jq", "{fork,parent:.parent.full_name}"],
-      { cwd, stdout: "pipe", stderr: "pipe" }
+      { cwd, stdout: "pipe", stderr: "pipe", env: currentEnv() }
     )
     const [output] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -585,13 +573,9 @@ function parseStatusV2Lines(out: string): StatusCounts {
 
 function gitSpawnSyncLines(args: string[], workTree: string): string {
   try {
-    const proc = getRealSpawnSync()(["git", ...args], {
-      cwd: workTree,
-      stdout: "pipe",
-      stderr: "ignore",
-    })
+    const proc = getGitClient().runSync(args, { cwd: workTree, stderr: "ignore" })
     if (proc.exitCode !== 0) return ""
-    return new TextDecoder().decode(proc.stdout).trim()
+    return proc.stdout.trim()
   } catch {
     return ""
   }

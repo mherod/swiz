@@ -8,6 +8,7 @@
 import { requiresPeerReview } from "../collaboration-policy.ts"
 import { stderrLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
+import { getGitClient } from "../git/client.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
@@ -91,24 +92,20 @@ export const pushCiCommand: Command = {
     // Resolve branch if not provided
     let targetBranch = branch
     if (!targetBranch) {
-      const proc = Bun.spawnSync(["git", "branch", "--show-current"], {
+      const proc = getGitClient().runSync(["branch", "--show-current"], {
         cwd,
-        stdout: "pipe",
-        stderr: "pipe",
       })
-      targetBranch = new TextDecoder().decode(proc.stdout).trim()
+      targetBranch = proc.stdout.trim()
       if (!targetBranch) {
         throw new Error("Could not determine current branch (detached HEAD?)")
       }
     }
 
     // Capture HEAD SHA before push — the commit is already local
-    const shaProc = Bun.spawnSync(["git", "rev-parse", "HEAD"], {
+    const shaProc = getGitClient().runSync(["rev-parse", "HEAD"], {
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const commitSha = new TextDecoder().decode(shaProc.stdout).trim()
+    const commitSha = shaProc.stdout.trim()
     if (!commitSha) {
       throw new Error("Could not determine HEAD SHA")
     }
@@ -122,12 +119,11 @@ export const pushCiCommand: Command = {
     // 2. Push
     const pushArgs = ["push", remote, targetBranch]
     console.log(`→ git ${pushArgs.join(" ")}`)
-    const pushProc = Bun.spawn(["git", ...pushArgs], {
+    const pushProc = await getGitClient().run(pushArgs, {
       cwd,
       stdout: "inherit",
       stderr: "inherit",
     })
-    await pushProc.exited
     if (pushProc.exitCode !== 0) {
       throw new Error(`git push failed with exit code ${pushProc.exitCode}`)
     }

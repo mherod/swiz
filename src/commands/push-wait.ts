@@ -1,4 +1,5 @@
 import { acquireGhSlot } from "../gh-rate-limit.ts"
+import { getGitClient } from "../git/client.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
 import {
   type EffectiveSwizSettings,
@@ -127,23 +128,19 @@ export async function pollUntilAllJobsSuccess(
 // ─── Cooldown utilities ──────────────────────────────────────────────────
 
 export function getSentinelPath(cwd: string): string {
-  const proc = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+  const proc = getGitClient().runSync(["rev-parse", "--show-toplevel"], {
     cwd,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const repoRoot = new TextDecoder().decode(proc.stdout).trim() || cwd
+  const repoRoot = proc.stdout.trim() || cwd
   const repoKey = getCanonicalPathHash(repoRoot)
   return swizPushCooldownSentinelPath(repoKey)
 }
 
 export function getRepoKey(cwd: string): string {
-  const proc = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+  const proc = getGitClient().runSync(["rev-parse", "--show-toplevel"], {
     cwd,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const repoRoot = new TextDecoder().decode(proc.stdout).trim() || cwd
+  const repoRoot = proc.stdout.trim() || cwd
   return getCanonicalPathHash(repoRoot)
 }
 
@@ -376,23 +373,19 @@ export const pushWaitCommand: Command = {
     // Resolve branch from git if not provided
     let targetBranch = branch
     if (!targetBranch) {
-      const proc = Bun.spawnSync(["git", "branch", "--show-current"], {
+      const proc = getGitClient().runSync(["branch", "--show-current"], {
         cwd,
-        stdout: "pipe",
-        stderr: "pipe",
       })
-      targetBranch = new TextDecoder().decode(proc.stdout).trim()
+      targetBranch = proc.stdout.trim()
       if (!targetBranch) {
         throw new Error("Could not determine current branch (detached HEAD?)")
       }
     }
 
-    const headProc = Bun.spawnSync(["git", "rev-parse", "HEAD"], {
+    const headProc = getGitClient().runSync(["rev-parse", "HEAD"], {
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const commitSha = new TextDecoder().decode(headProc.stdout).trim()
+    const commitSha = headProc.stdout.trim()
     if (!commitSha) {
       throw new Error("Could not determine HEAD SHA")
     }
@@ -407,12 +400,11 @@ export const pushWaitCommand: Command = {
     const pushArgs = ["push", ...extraArgs, remote, targetBranch]
     console.log(`→ git ${pushArgs.join(" ")}`)
 
-    const proc = Bun.spawn(["git", ...pushArgs], {
+    const proc = await getGitClient().run(pushArgs, {
       cwd,
       stdout: "inherit",
       stderr: "inherit",
     })
-    await proc.exited
 
     if (proc.exitCode !== 0) {
       await writePushResult(repoKey, {

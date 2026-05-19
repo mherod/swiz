@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from "node:path"
 import { detectBestAgentCli, promptBestAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { stderrLog } from "../debug.ts"
+import { getGitClient } from "../git/client.ts"
 import type { Command } from "../types.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -78,18 +79,11 @@ export function validatePaths(args: MergetoolArgs): void {
 // ─── Repo context ─────────────────────────────────────────────────────────────
 
 async function getRepoRoot(cwd: string): Promise<string | null> {
-  const proc = Bun.spawn(["git", "rev-parse", "--show-toplevel"], {
+  const proc = await getGitClient().run(["rev-parse", "--show-toplevel"], {
     cwd,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const [output] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
   if (proc.exitCode !== 0) return null
-  return output.trim()
+  return proc.stdout.trim()
 }
 
 function getRepoRelativePath(repoRoot: string, path: string): string {
@@ -98,16 +92,12 @@ function getRepoRelativePath(repoRoot: string, path: string): string {
 }
 
 async function listSiblingTrackedFiles(repoRoot: string, relativePath: string): Promise<string[]> {
-  const dirProc = Bun.spawn(["git", "ls-files", "--", dirname(relativePath)], {
+  const dirProc = await getGitClient().run(["ls-files", "--", dirname(relativePath)], {
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
   })
-  const dirOutput = await new Response(dirProc.stdout).text()
-  await dirProc.exited
   if (dirProc.exitCode !== 0) return []
 
-  return dirOutput
+  return dirProc.stdout
     .trim()
     .split("\n")
     .filter((path) => path && path !== relativePath)

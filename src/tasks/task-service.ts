@@ -4,6 +4,7 @@ import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
 import { DIM, GREEN, RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
+import { getGitClient } from "../git/client.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -392,14 +393,12 @@ export { validateTransition }
  */
 export function isGitWorkingTreeClean(cwd?: string): boolean {
   try {
-    const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
+    const proc = getGitClient().runSync(["status", "--porcelain"], {
       cwd: cwd ?? process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
     })
     // Non-zero exit = not a git repo or git unavailable → treat as clean
     if (proc.exitCode !== 0) return true
-    return proc.stdout.toString().trim() === ""
+    return proc.stdout.trim() === ""
   } catch {
     return true
   }

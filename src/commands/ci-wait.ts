@@ -1,4 +1,5 @@
 import { stderrLog } from "../debug.ts"
+import { git } from "../git-helpers.ts"
 import { readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -50,13 +51,7 @@ export async function startCiWatchViaDaemon(
 export async function expandSha(sha: string): Promise<string> {
   if (sha.length === 40) return sha
   try {
-    const proc = Bun.spawn(["git", "rev-parse", sha], { stdout: "pipe", stderr: "pipe" })
-    const [output] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    const full = output.trim()
+    const full = await git(["rev-parse", sha], process.cwd())
     return full.length === 40 ? full : sha
   } catch {
     return sha
