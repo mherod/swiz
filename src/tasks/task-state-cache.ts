@@ -46,8 +46,24 @@ export interface SessionTaskState {
   stale: boolean
 }
 
-/** Number of most-recent task files to re-read on incremental refresh. */
-const INCREMENTAL_FILE_LIMIT = 3
+/**
+ * Default number of most-recent task files to re-read on incremental refresh.
+ * Was 3 — bumped to 10 because a single dispatch routinely modifies more than
+ * 3 task files (TaskList reconcile re-stamps every task's mtime, batch updates,
+ * etc.). When more than this many files have mtimes newer than the cached
+ * `loadedAtMs`, the read escalates to a full reload so updates can't slip past.
+ */
+const INCREMENTAL_FILE_LIMIT = 10
+
+/**
+ * Time-based staleness ceiling: even when fs.watch hasn't flagged the entry
+ * stale, force a refresh if the cached snapshot is older than this. Protects
+ * against macOS `fs.watch` occasionally dropping events under load and against
+ * the daemon caching a value indefinitely when no writes flow through swiz
+ * (e.g., Claude's native TaskUpdate writes directly to disk before swiz's
+ * write-through helpers see them).
+ */
+const DEFAULT_STALE_CEILING_MS = 5_000
 
 /**
  * Fire-and-forget disk revert for an invalid transition that landed on disk.
@@ -250,9 +266,10 @@ async function loadAllTasks(dir: string): Promise<{ tasks: SessionTask[]; maxMti
 async function incrementalRefresh(
   dir: string,
   existing: SessionTask[],
-  limit: number
+  limit: number,
+  preFetched?: FileWithMtime[]
 ): Promise<{ tasks: SessionTask[]; maxMtimeMs: number }> {
-  const fileEntries = await listTaskFiles(dir)
+  const fileEntries = preFetched ?? (await listTaskFiles(dir))
   if (fileEntries.length === 0) return { tasks: [], maxMtimeMs: 0 }
 
   // Sort by mtime descending to pick the N most recent
@@ -296,9 +313,17 @@ export class TaskStateCache {
   private watchers = new Map<string, FSWatcher>()
   private tasksDirs = new Map<string, string>()
   private readonly maxEntries: number
+  private readonly staleCeilingMs: number
+  private readonly incrementalFileLimit: number
 
-  constructor(options?: { maxEntries?: number }) {
+  constructor(options?: {
+    maxEntries?: number
+    staleCeilingMs?: number
+    incrementalFileLimit?: number
+  }) {
     this.maxEntries = options?.maxEntries ?? MAX_CACHED_SESSIONS
+    this.staleCeilingMs = options?.staleCeilingMs ?? DEFAULT_STALE_CEILING_MS
+    this.incrementalFileLimit = options?.incrementalFileLimit ?? INCREMENTAL_FILE_LIMIT
   }
 
   // ─── Watch management ───────────────────────────────────────────────────
@@ -356,24 +381,48 @@ export class TaskStateCache {
    */
   async getState(sessionId: string, tasksDir: string): Promise<SessionTaskState> {
     const existing = this.entries.get(sessionId)
+    const now = Date.now()
 
     // Cache hit — fresh, but zero incomplete tasks is a logical gap: the task
     // governance system enforces ≥2 incomplete at all times, so an empty count
-    // means native writes were missed. Force a full reload to re-sync.
-    if (existing && !existing.stale && existing.openCount > 0) {
+    // means native writes were missed. Force a full reload to re-sync. Also
+    // refresh when the cached snapshot exceeds the time-based staleness
+    // ceiling — fs.watch is best-effort on macOS APFS and can silently drop
+    // events under load.
+    if (
+      existing &&
+      !existing.stale &&
+      existing.openCount > 0 &&
+      now - existing.syncedAtMs <= this.staleCeilingMs
+    ) {
       this.touchAccessOrder(sessionId)
       return existing
     }
 
-    // Cache hit — stale (incremental refresh: read only 3 most recent files)
+    // Cache hit — stale. Try incremental refresh (read only the N most recent
+    // files), but escalate to a full reload when the count of files changed
+    // since the last full load exceeds the incremental limit. Without this
+    // escalation, bursts (TaskList sync, multi-step audits) can leave older
+    // updates with only their cached copy when their files fall outside the
+    // top-N most-recently-modified window.
     if (existing?.stale) {
+      const fileEntries = await listTaskFiles(tasksDir)
+      const changedCount =
+        existing.loadedAtMs > 0
+          ? fileEntries.filter((e) => e.mtimeMs > existing.loadedAtMs).length
+          : fileEntries.length
+
+      if (changedCount > this.incrementalFileLimit) {
+        return this.fullLoad(sessionId, tasksDir)
+      }
+
       const { tasks, maxMtimeMs } = await incrementalRefresh(
         tasksDir,
         existing.tasks,
-        INCREMENTAL_FILE_LIMIT
+        this.incrementalFileLimit,
+        fileEntries
       )
       const counts = computeCounts(tasks)
-      const now = Date.now()
       const state: SessionTaskState = {
         tasks,
         ...counts,

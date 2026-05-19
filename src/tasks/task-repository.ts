@@ -4,7 +4,7 @@
  *       ID utilities (parseTaskId, compareTaskIds), and STATUS_STYLE.
  */
 
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { debugLog } from "../debug.ts"
@@ -150,6 +150,33 @@ async function recoverTaskFromAuditLog(dir: string, taskId: string): Promise<Tas
   }
 }
 
+// ─── Atomic file write ──────────────────────────────────────────────────────
+
+/**
+ * Write JSON to `filePath` atomically: write to a sibling temp file then
+ * `rename()` it into place. POSIX rename is atomic, so concurrent readers
+ * (Bun.file().json(), readSessionTasks, fs.watch-driven cache refresh) never
+ * observe a partial or truncated file. Eliminates the window where an
+ * in-progress JSON.stringify lands halfway and silently drops the task
+ * from cache reads.
+ */
+async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random()
+    .toString(36)
+    .slice(2, 10)}.tmp`
+  await writeFile(tempPath, JSON.stringify(data, null, 2))
+  try {
+    await rename(tempPath, filePath)
+  } catch (err) {
+    try {
+      await rm(tempPath, { force: true })
+    } catch {
+      // best-effort cleanup
+    }
+    throw err
+  }
+}
+
 // ─── Task I/O ────────────────────────────────────────────────────────────────
 
 export async function readTasks(
@@ -289,7 +316,7 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
       updatedAt: new Date().toISOString(),
       ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
     }
-    await writeFile(join(dir, SESSION_META_FILE), JSON.stringify(meta))
+    await atomicWriteJson(join(dir, SESSION_META_FILE), meta)
   } catch (e) {
     debugLog(`updateSessionMeta: failed to write session metadata to ${dir}:`, e)
   }
@@ -336,7 +363,7 @@ export async function writeTask(
 ): Promise<void> {
   const dir = join(tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
+  await atomicWriteJson(join(dir, `${task.id}.json`), task)
   // Update lightweight index so status.ts can read openCount without scanning every task file.
   await updateSessionMeta(dir, cwd)
   // Invalidate in-process cache so subsequent reads reflect the write.
@@ -386,7 +413,7 @@ export async function revertTaskStatusOnDisk(
   task.status = targetStatus
   task.statusChangedAt = new Date().toISOString()
   try {
-    await writeFile(filePath, JSON.stringify(task, null, 2))
+    await atomicWriteJson(filePath, task)
   } catch (e) {
     debugLog(`revertTaskStatusOnDisk: cannot write ${filePath}:`, e)
     return false

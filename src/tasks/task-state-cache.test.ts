@@ -649,4 +649,119 @@ describe("TaskStateCache", () => {
       expect(getSessionEventState("s-close-evt")).toBeNull()
     })
   })
+
+  describe("burst escalation", () => {
+    it("escalates a stale refresh to a full reload when changes exceed the incremental limit", async () => {
+      // Repro for the "task updates slip right past" symptom: when a burst of
+      // writes lands inside one dispatch (TaskList re-stamps every file,
+      // multi-step audits, etc.), the cap-bounded top-N incremental refresh
+      // can keep stale cached copies of the files outside the top-N window.
+      const cache = new TaskStateCache({ maxEntries: 10, incrementalFileLimit: 2 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-burst")
+
+      for (let i = 1; i <= 5; i++) {
+        await writeTaskFile(sessionDir, makeTask(String(i), "pending"))
+      }
+      await cache.getState("session-burst", sessionDir)
+
+      // Bump mtimes deterministically: rewrite 3 tasks (> incrementalFileLimit=2)
+      // and ensure the on-disk mtimes are clearly newer than loadedAtMs.
+      await Bun.sleep(20)
+      await writeTaskFile(sessionDir, makeTask("1", "completed"))
+      await writeTaskFile(sessionDir, makeTask("2", "completed"))
+      await writeTaskFile(sessionDir, makeTask("3", "in_progress"))
+
+      // Force the stale path without dropping the cached entry
+      ;(cache as unknown as { markStale: (s: string) => void }).markStale("session-burst")
+
+      const refreshed = await cache.getState("session-burst", sessionDir)
+
+      // All three updates must be visible — none of them silently slipped past.
+      expect(refreshed.tasks.find((t) => t.id === "1")?.status).toBe("completed")
+      expect(refreshed.tasks.find((t) => t.id === "2")?.status).toBe("completed")
+      expect(refreshed.tasks.find((t) => t.id === "3")?.status).toBe("in_progress")
+      expect(refreshed.tasks.find((t) => t.id === "4")?.status).toBe("pending")
+      expect(refreshed.tasks.find((t) => t.id === "5")?.status).toBe("pending")
+      expect(refreshed.completedCount).toBe(2)
+      expect(refreshed.inProgressCount).toBe(1)
+      expect(refreshed.pendingCount).toBe(2)
+      cache.close()
+    })
+
+    it("keeps using the incremental refresh when the change count stays within the limit", async () => {
+      // Sanity check: the escalation logic must not regress the fast path
+      // when only a small number of files have changed since the last load.
+      const cache = new TaskStateCache({ maxEntries: 10, incrementalFileLimit: 5 })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-noburst")
+
+      for (let i = 1; i <= 4; i++) {
+        await writeTaskFile(sessionDir, makeTask(String(i), "pending"))
+      }
+      await cache.getState("session-noburst", sessionDir)
+
+      await Bun.sleep(20)
+      await writeTaskFile(sessionDir, makeTask("1", "completed"))
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+      ;(cache as unknown as { markStale: (s: string) => void }).markStale("session-noburst")
+
+      const refreshed = await cache.getState("session-noburst", sessionDir)
+      expect(refreshed.tasks.find((t) => t.id === "1")?.status).toBe("completed")
+      expect(refreshed.tasks.find((t) => t.id === "2")?.status).toBe("in_progress")
+      cache.close()
+    })
+  })
+
+  describe("staleCeilingMs", () => {
+    it("forces a refresh when the cached snapshot is older than the ceiling", async () => {
+      // Repro for the "fs.watch missed an event" failure mode: when watch
+      // callbacks are dropped (common on macOS APFS under load), the cache
+      // would otherwise serve indefinitely-stale data. The time-based ceiling
+      // guarantees the cache catches up within a bounded window.
+      const cache = new TaskStateCache({
+        maxEntries: 10,
+        staleCeilingMs: 30,
+        incrementalFileLimit: 10,
+      })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-ceiling")
+
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      const first = await cache.getState("session-ceiling", sessionDir)
+      expect(first.tasks).toHaveLength(1)
+
+      // Write a new task directly to disk — fs.watch is intentionally NOT used.
+      // Without the ceiling, the cache would keep returning the 1-task view.
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+
+      // Wait past the ceiling so the next read must re-check disk.
+      await Bun.sleep(50)
+      const second = await cache.getState("session-ceiling", sessionDir)
+      expect(second.tasks).toHaveLength(2)
+      expect(second.tasks.find((t) => t.id === "2")?.status).toBe("in_progress")
+      cache.close()
+    })
+
+    it("does not refresh when reads stay inside the ceiling window", async () => {
+      const cache = new TaskStateCache({
+        maxEntries: 10,
+        staleCeilingMs: 5_000,
+        incrementalFileLimit: 10,
+      })
+      const base = await tmp.create()
+      const sessionDir = await createSessionDir(base, "session-ceiling-fast")
+
+      await writeTaskFile(sessionDir, makeTask("1", "pending"))
+      const first = await cache.getState("session-ceiling-fast", sessionDir)
+      expect(first.tasks).toHaveLength(1)
+
+      // Write a new task to disk WITHOUT triggering staleness.
+      await writeTaskFile(sessionDir, makeTask("2", "in_progress"))
+      const second = await cache.getState("session-ceiling-fast", sessionDir)
+      // Cached view is returned — disk write is not visible yet.
+      expect(second.tasks).toHaveLength(1)
+      cache.close()
+    })
+  })
 })
