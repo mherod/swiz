@@ -63,10 +63,11 @@ export const issueCommand: Command = {
         "Clear cached issue/PR/CI data. Defaults to current repo; omit --repo to clear all.",
     },
     {
-      flags: "sync [<repo>]",
+      flags: "sync [<repo>] [--force]",
       description:
         "Manually sync upstream GitHub state (issues, PRs, CI, labels) into the local store. " +
-        "Defaults to current repo.",
+        "Defaults to current repo. Skips network sync when last_synced is under 30s old; " +
+        "pass --force to bypass.",
     },
     {
       flags: "list [<repo>] [--mine]",

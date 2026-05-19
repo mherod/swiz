@@ -99,33 +99,47 @@ export function printOpenItems(repo: string, assigneeFilter?: string): void {
   }
 }
 
+const FRESH_SYNC_WINDOW_MS = 30_000
+
 export async function handleSync(args: string[]): Promise<void> {
   const cwd = process.cwd()
-  let repo: string | null = args[1] ?? null
+  const force = args.includes("--force") || args.includes("-f")
+  const positionals = args.filter((a) => !a.startsWith("-"))
+  let repo: string | null = positionals[1] ?? null
   if (!repo) {
     repo = await getRepoSlug(cwd)
   }
   if (!repo) {
     throw new Error(
-      `Repo required. Usage: swiz issue sync [<repo>]\nOr run this in a git repo with an origin.`
+      `Repo required. Usage: swiz issue sync [<repo>] [--force]\nOr run this in a git repo with an origin.`
     )
   }
 
   let syncAge = ""
+  let lastSyncedMs: number | null = null
   try {
     const lastSynced = getIssueStore().getSyncCursor(repo, "last_synced")
     if (lastSynced) {
-      const ageMs = Date.now() - new Date(lastSynced).getTime()
-      if (ageMs < 60_000) syncAge = ` (last synced <1m ago)`
-      else if (ageMs < 3_600_000) syncAge = ` (last synced ${Math.floor(ageMs / 60_000)}m ago)`
-      else if (ageMs < 86_400_000) syncAge = ` (last synced ${Math.floor(ageMs / 3_600_000)}h ago)`
-      else syncAge = ` (last synced ${Math.floor(ageMs / 86_400_000)}d ago)`
+      lastSyncedMs = Date.now() - new Date(lastSynced).getTime()
+      if (lastSyncedMs < 60_000) syncAge = ` (last synced <1m ago)`
+      else if (lastSyncedMs < 3_600_000)
+        syncAge = ` (last synced ${Math.floor(lastSyncedMs / 60_000)}m ago)`
+      else if (lastSyncedMs < 86_400_000)
+        syncAge = ` (last synced ${Math.floor(lastSyncedMs / 3_600_000)}h ago)`
+      else syncAge = ` (last synced ${Math.floor(lastSyncedMs / 86_400_000)}d ago)`
     } else {
       syncAge = " (first sync)"
     }
   } catch {
     syncAge = " (first sync)"
   }
+
+  if (!force && lastSyncedMs !== null && lastSyncedMs < FRESH_SYNC_WINDOW_MS) {
+    console.log(`✅ Up to date${syncAge} — skipping network sync. Use --force to refresh.`)
+    printOpenItems(repo)
+    return
+  }
+
   console.log(`🔄 Syncing upstream state for ${repo}${syncAge}...`)
   const result = await syncUpstreamState(repo, cwd)
 
