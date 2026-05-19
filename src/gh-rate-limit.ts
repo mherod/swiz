@@ -1,107 +1,189 @@
 /**
- * Cross-process GitHub API rate-limit throttle.
+ * GitHub API rate-limit budget tracker.
  *
- * Uses a shared file to track request timestamps across all swiz processes
- * (hooks, daemon, CLI commands). Before each `gh` CLI call, callers should
- * `await acquireGhSlot()` to ensure the rolling 1-hour window stays under
- * the GitHub API limit (5000 req/hr authenticated).
- *
- * The throttle file is append-only with periodic compaction. Each line is
- * a Unix-ms timestamp. On read, entries older than 1 hour are ignored.
+ * GitHub is the authority for the per-token budget. We keep an in-memory view
+ * fresh from `X-RateLimit-*` headers observed on the real `gh api --include`
+ * calls Swiz already makes. Cold starts use an optimistic default budget so the
+ * rate limiter never creates extra GitHub subprocesses of its own.
  */
 
-const THROTTLE_FILE = "/tmp/swiz-gh-rate-limit.log"
-const WINDOW_MS = 60 * 60 * 1000 // 1 hour
-const MAX_REQUESTS_PER_WINDOW = 4500 // leave 500 buffer below GitHub's 5000
-const COMPACTION_THRESHOLD = 10_000 // compact file when line count exceeds this
-const RETRY_DELAY_MS = 1_000
-// The local throttle log is shared by every swiz process (daemon, hooks,
-// status-line, CLI). It can saturate locally even while GitHub's real per-token
-// budget is fine, so an over-budget wait should fall through quickly rather
-// than block each gh call for 30s. 2s lets one entry age out and otherwise
-// proceeds — protection against runaway usage stays, but no-op `swiz issue
-// sync` no longer compounds to 90s wall time.
-const SATURATED_DEADLINE_MS = 2_000
+const DEFAULT_LIMIT = 5000
+const DEFAULT_RESET_WINDOW_MS = 60 * 60 * 1000
 
-// In-process write queue to serialize read-modify-write cycles and prevent
-// concurrent acquireGhSlot() calls within the same process from racing.
-let writeQueue: Promise<void> = Promise.resolve()
+interface RateLimitBudget {
+  limit: number
+  remaining: number
+  resetAt: number
+  updatedAt: number
+}
 
-/** Read recent timestamps from the throttle file (within the last hour). */
-async function readRecentTimestamps(): Promise<number[]> {
-  const cutoff = Date.now() - WINDOW_MS
-  try {
-    const file = Bun.file(THROTTLE_FILE)
-    if (!(await file.exists())) return []
-    const raw = await file.text()
-    const recent: number[] = []
-    for (const line of raw.split("\n")) {
-      const ts = Number(line)
-      if (ts > cutoff) recent.push(ts)
-    }
-    return recent
-  } catch {
-    return []
+interface ParsedRateLimitHeaders {
+  limit: number | null
+  remaining: number | null
+  resetAt: number | null
+  retryAfterUntil: number | null
+}
+
+export interface ParsedGhApiIncludeOutput {
+  status: number | null
+  headers: Record<string, string>
+  body: string
+}
+
+let budget: RateLimitBudget | null = null
+let retryAfterUntil = 0
+
+function parseInteger(value: string | undefined): number | null {
+  if (!value) return null
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseRetryAfter(value: string | undefined, now: number): number | null {
+  if (!value) return null
+  const seconds = parseInteger(value)
+  if (seconds !== null) return now + Math.max(0, seconds) * 1000
+  const asDate = Date.parse(value)
+  return Number.isFinite(asDate) ? asDate : null
+}
+
+function lastHttpHeaderStart(output: string): number {
+  let lastIndex = -1
+  for (const match of output.matchAll(/^HTTP\/\S+\s+\d{3}.*$/gm)) {
+    lastIndex = match.index ?? -1
+  }
+  return lastIndex
+}
+
+export function parseGhApiIncludeOutput(output: string): ParsedGhApiIncludeOutput {
+  const normalized = output.replace(/\r\n/g, "\n")
+  const headerStart = lastHttpHeaderStart(normalized)
+  if (headerStart < 0) return { status: null, headers: {}, body: output }
+
+  const headerEnd = normalized.indexOf("\n\n", headerStart)
+  if (headerEnd < 0) return { status: null, headers: {}, body: output }
+
+  const headerBlock = normalized.slice(headerStart, headerEnd)
+  const body = normalized.slice(headerEnd + 2)
+  const [statusLine = "", ...headerLines] = headerBlock.split("\n")
+  const status = parseInteger(statusLine.match(/^HTTP\/\S+\s+(\d{3})/)?.[1])
+  const headers: Record<string, string> = {}
+
+  for (const line of headerLines) {
+    const separator = line.indexOf(":")
+    if (separator < 0) continue
+    const name = line.slice(0, separator).trim().toLowerCase()
+    const value = line.slice(separator + 1).trim()
+    if (name) headers[name] = value
+  }
+
+  return { status, headers, body }
+}
+
+function setFallbackBudget(now = Date.now()): void {
+  budget = {
+    limit: DEFAULT_LIMIT,
+    remaining: DEFAULT_LIMIT,
+    resetAt: now + DEFAULT_RESET_WINDOW_MS,
+    updatedAt: now,
   }
 }
 
-/** Append a timestamp to the throttle file. Compacts when file grows too large. */
-async function recordRequestInner(): Promise<void> {
-  const now = String(Date.now())
-  try {
-    const file = Bun.file(THROTTLE_FILE)
-    const existing = (await file.exists()) ? await file.text() : ""
-    await Bun.write(THROTTLE_FILE, `${existing}${now}\n`)
-  } catch {
-    try {
-      await Bun.write(THROTTLE_FILE, `${now}\n`)
-    } catch {
-      // Best-effort
-    }
-  }
-
-  // Periodic compaction: rewrite file with only recent entries
-  try {
-    const raw = await Bun.file(THROTTLE_FILE).text()
-    const lineCount = raw.split("\n").length
-    if (lineCount > COMPACTION_THRESHOLD) {
-      const cutoff = Date.now() - WINDOW_MS
-      const recent = raw
-        .split("\n")
-        .filter((l) => Number(l) > cutoff)
-        .join("\n")
-      await Bun.write(THROTTLE_FILE, recent ? `${recent}\n` : "")
-    }
-  } catch {
-    // Compaction is best-effort
+function parseRateLimitHeaders(
+  headers: Record<string, string>,
+  now: number
+): ParsedRateLimitHeaders {
+  const resetSeconds = parseInteger(headers["x-ratelimit-reset"])
+  return {
+    limit: parseInteger(headers["x-ratelimit-limit"]),
+    remaining: parseInteger(headers["x-ratelimit-remaining"]),
+    resetAt: resetSeconds === null ? null : resetSeconds * 1000,
+    retryAfterUntil: parseRetryAfter(headers["retry-after"], now),
   }
 }
 
-/** Serialized record — prevents in-process write races. */
-function recordRequest(): Promise<void> {
-  writeQueue = writeQueue.then(recordRequestInner, recordRequestInner)
-  return writeQueue
+function hasBudgetHeaders(parsed: ParsedRateLimitHeaders): boolean {
+  return parsed.limit !== null || parsed.remaining !== null || parsed.resetAt !== null
+}
+
+function applyRetryAfter(nextRetryAfterUntil: number | null): void {
+  if (nextRetryAfterUntil === null) return
+  retryAfterUntil = Math.max(retryAfterUntil, nextRetryAfterUntil)
+}
+
+function nextBudgetFromHeaders(parsed: ParsedRateLimitHeaders, now: number): RateLimitBudget {
+  const nextLimit = Math.max(1, parsed.limit ?? budget?.limit ?? DEFAULT_LIMIT)
+  const nextRemaining = Math.max(0, parsed.remaining ?? budget?.remaining ?? nextLimit)
+  return {
+    limit: nextLimit,
+    remaining: Math.min(nextLimit, nextRemaining),
+    resetAt: parsed.resetAt ?? budget?.resetAt ?? now + DEFAULT_RESET_WINDOW_MS,
+    updatedAt: now,
+  }
+}
+
+function applyHeaders(headers: Record<string, string>, now = Date.now()): void {
+  const parsed = parseRateLimitHeaders(headers, now)
+  applyRetryAfter(parsed.retryAfterUntil)
+  if (!hasBudgetHeaders(parsed)) return
+  budget = nextBudgetFromHeaders(parsed, now)
+}
+
+export function observeGhRateLimitHeaders(headers: Record<string, string>): void {
+  const normalized: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    normalized[name.toLowerCase()] = value
+  }
+  applyHeaders(normalized)
+}
+
+export function observeGhApiIncludeOutput(output: string): string {
+  const parsed = parseGhApiIncludeOutput(output)
+  applyHeaders(parsed.headers)
+  return parsed.body
+}
+
+function ensureBudget(now = Date.now()): void {
+  if (!budget || budget.resetAt <= now) {
+    setFallbackBudget(now)
+  }
+}
+
+function consumeBudgetSlot(): void {
+  const now = Date.now()
+  if (!budget) setFallbackBudget(now)
+  if (!budget) return
+
+  budget = {
+    ...budget,
+    remaining: Math.max(0, budget.remaining - 1),
+    updatedAt: now,
+  }
 }
 
 /**
- * Acquire a slot in the rate-limit window before making a `gh` API call.
- * Returns immediately if under budget. Waits briefly if at capacity, then
- * falls through — the local file is an over-conservative estimate and the
- * real GitHub budget is enforced server-side.
+ * Acquire a slot before making a GitHub CLI call.
+ *
+ * The call waits only when GitHub's real headers say the token is exhausted or
+ * asked us to respect `Retry-After`. Otherwise it consumes one in-memory slot
+ * and lets GitHub remain the final authority for the request.
  */
 export async function acquireGhSlot(): Promise<void> {
-  const deadline = Date.now() + SATURATED_DEADLINE_MS
-  while (Date.now() < deadline) {
-    const recent = await readRecentTimestamps()
-    if (recent.length < MAX_REQUESTS_PER_WINDOW) {
-      await recordRequest()
-      return
-    }
-    // At capacity — wait for oldest entry to age out
-    await Bun.sleep(RETRY_DELAY_MS)
+  ensureBudget()
+
+  const now = Date.now()
+  if (retryAfterUntil > now) {
+    await Bun.sleep(retryAfterUntil - now)
+    retryAfterUntil = 0
+    ensureBudget()
   }
-  // Timed out waiting — proceed anyway to avoid blocking indefinitely
-  await recordRequest()
+
+  if (budget && budget.remaining <= 0 && budget.resetAt > Date.now()) {
+    await Bun.sleep(budget.resetAt - Date.now())
+    ensureBudget()
+  }
+
+  consumeBudgetSlot()
 }
 
 /** Get current usage stats for diagnostics. */
@@ -110,10 +192,22 @@ export async function getGhRateLimitStats(): Promise<{
   limit: number
   remaining: number
 }> {
-  const recent = await readRecentTimestamps()
-  return {
-    used: recent.length,
-    limit: MAX_REQUESTS_PER_WINDOW,
-    remaining: Math.max(0, MAX_REQUESTS_PER_WINDOW - recent.length),
+  ensureBudget()
+  const current = budget ?? {
+    limit: DEFAULT_LIMIT,
+    remaining: DEFAULT_LIMIT,
+    resetAt: Date.now() + DEFAULT_RESET_WINDOW_MS,
+    updatedAt: Date.now(),
   }
+
+  return {
+    used: Math.max(0, current.limit - current.remaining),
+    limit: current.limit,
+    remaining: current.remaining,
+  }
+}
+
+export function resetGhRateLimitStateForTests(): void {
+  budget = null
+  retryAfterUntil = 0
 }

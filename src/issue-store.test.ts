@@ -695,7 +695,7 @@ describe("syncUpstreamState", () => {
         return createMockSpawnResult("", "unexpected non-REST command", 1)
       }
 
-      const endpoint = args[2] ?? ""
+      const endpoint = args.find((arg, index) => index > 1 && !arg.startsWith("-")) ?? ""
       if (endpoint.startsWith("repos/{owner}/{repo}/issues?state=open")) {
         return createMockSpawnResult(
           JSON.stringify([

@@ -12,6 +12,7 @@ import {
   parseRemoteUrl,
   resolveGitPaths,
   withApiCache,
+  withApiInclude,
 } from "./git-helpers.ts"
 
 // ─── isReadOnlyGhApiArgs ─────────────────────────────────────────────────────
@@ -77,6 +78,22 @@ describe("withApiCache", () => {
     const result = withApiCache(["api", "user"])
     expect(result[2]).toBe("20s")
     process.env.GH_API_CACHE_DURATION = original
+  })
+})
+
+describe("withApiInclude", () => {
+  test("injects --include for api calls", () => {
+    expect(withApiInclude(["api", "user"])).toEqual(["api", "--include", "user"])
+  })
+
+  test("does not inject --include twice", () => {
+    const args = ["api", "--include", "user"]
+    expect(withApiInclude(args)).toBe(args)
+  })
+
+  test("passes through non-api commands unchanged", () => {
+    const args = ["pr", "list"]
+    expect(withApiInclude(args)).toBe(args)
   })
 })
 

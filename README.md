@@ -326,6 +326,7 @@ Show installation state for every agent — binary location, settings file, hook
 
 ```bash
 swiz status
+swiz status --no-health      # skip project health checks
 ```
 
 ### `swiz settings [show | enable | disable]`

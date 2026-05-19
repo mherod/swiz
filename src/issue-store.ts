@@ -14,7 +14,7 @@ import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { debugLog } from "./debug.ts"
-import { acquireGhSlot } from "./gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import { getHomeDirWithFallback } from "./home.ts"
 import {
   asRecord as asRecordImpl,
@@ -1238,7 +1238,11 @@ export async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | n
   }
 
   await acquireGhSlot()
-  const proc = Bun.spawn(["gh", ...args], {
+  const effectiveArgs =
+    args[0] === "api" && !args.includes("--include") && !args.includes("-i")
+      ? ["api", "--include", ...args.slice(1)]
+      : args
+  const proc = Bun.spawn(["gh", ...effectiveArgs], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -1256,9 +1260,10 @@ export async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | n
     )
     return null
   }
+  const output = effectiveArgs[0] === "api" ? observeGhApiIncludeOutput(stdout) : stdout
   let parsed: T | null = null
   try {
-    parsed = JSON.parse(stdout) as T
+    parsed = JSON.parse(output) as T
   } catch {
     return null
   }

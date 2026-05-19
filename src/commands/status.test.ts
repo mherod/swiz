@@ -30,10 +30,10 @@ async function runStatus(envOverrides: Record<string, string | undefined>): Prom
     }
   }
 
-  const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, "status"], {
+  const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, "status", "--no-health"], {
     stdout: "pipe",
     stderr: "pipe",
-    env: base,
+    env: { ...base, SWIZ_STATUS_SKIP_CI: "1" },
   })
   const output = await new Response(proc.stdout).text()
   await proc.exited

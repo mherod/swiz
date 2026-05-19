@@ -1,5 +1,5 @@
 import { debugLog } from "./debug.ts"
-import { acquireGhSlot } from "./gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import type { MutationPayload } from "./issue-store.ts"
 
 // ─── GraphQL rate-limit classifier ─────────────────────────────────────────
@@ -442,7 +442,7 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 /** Fetch via REST API for a mapped gh list command. */
 async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
   await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "api", endpoint], {
+  const proc = Bun.spawn(["gh", "api", "--include", endpoint], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -452,9 +452,10 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
     new Response(proc.stderr).text(),
   ])
   await proc.exited
+  const body = stdout.trim() ? observeGhApiIncludeOutput(stdout) : stdout
   if (proc.exitCode !== 0) return null
   try {
-    return JSON.parse(stdout)
+    return JSON.parse(body)
   } catch {
     return null
   }
@@ -486,14 +487,18 @@ async function executeMutationCommand(
   stdin?: Response
 ): Promise<boolean> {
   await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "api", ...args], {
+  const proc = Bun.spawn(["gh", "api", "--include", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     ...(stdin && { stdin }),
   })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+  if (stdout.trim()) observeGhApiIncludeOutput(stdout)
   return proc.exitCode === 0
 }
 

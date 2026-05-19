@@ -1,5 +1,5 @@
 import { debugLog } from "../../debug.ts"
-import { acquireGhSlot } from "../../gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "../../gh-rate-limit.ts"
 import { getRepoSlug, issueState } from "../../git-helpers.ts"
 import { getIssueStore, isGraphQLRateLimited } from "../../issue-store.ts"
 import { syncUpstreamState } from "../../issue-store-sync.ts"
@@ -19,11 +19,24 @@ export async function ensureFreshData(repo: string, cwd: string): Promise<void> 
 async function closeIssueViaRest(slug: string, number: string, cwd: string): Promise<boolean> {
   debugLog(`[swiz] REST_FALLBACK closing issue #${number} on ${slug}`)
   const proc = Bun.spawn(
-    ["gh", "api", `repos/${slug}/issues/${number}`, "-X", "PATCH", "-f", "state=closed"],
+    [
+      "gh",
+      "api",
+      "--include",
+      `repos/${slug}/issues/${number}`,
+      "-X",
+      "PATCH",
+      "-f",
+      "state=closed",
+    ],
     { cwd, stdout: "pipe", stderr: "pipe" }
   )
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+  if (stdout.trim()) observeGhApiIncludeOutput(stdout)
   return proc.exitCode === 0
 }
 
@@ -36,11 +49,15 @@ async function commentViaRest(
 ): Promise<boolean> {
   debugLog(`[swiz] REST_FALLBACK commenting on issue #${number} on ${slug}`)
   const proc = Bun.spawn(
-    ["gh", "api", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
+    ["gh", "api", "--include", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
     { cwd, stdout: "pipe", stderr: "pipe" }
   )
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+  if (stdout.trim()) observeGhApiIncludeOutput(stdout)
   return proc.exitCode === 0
 }
 

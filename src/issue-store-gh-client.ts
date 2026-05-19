@@ -5,7 +5,7 @@
  * Extracted from issue-store.ts (issue #423).
  */
 
-import { acquireGhSlot } from "./gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import type {
   GitHubBranchProtectionRecord,
   GitHubCiRunRecord,
@@ -123,7 +123,12 @@ export class GhCliGitHubClient implements GitHubClient {
   ): Promise<GitHubBranchProtectionRecord | null> {
     await acquireGhSlot()
     const proc = Bun.spawn(
-      ["gh", "api", `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`],
+      [
+        "gh",
+        "api",
+        "--include",
+        `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`,
+      ],
       { cwd, stdout: "pipe", stderr: "pipe" }
     )
     const [stdout, stderr] = await Promise.all([
@@ -133,11 +138,12 @@ export class GhCliGitHubClient implements GitHubClient {
     await proc.exited
     if (proc.exitCode !== 0) {
       // 404 = no protection rules configured; 403 = insufficient permissions
+      if (stdout.trim()) observeGhApiIncludeOutput(stdout)
       void stderr
       return null
     }
     try {
-      const raw = JSON.parse(stdout) as Record<string, any>
+      const raw = JSON.parse(observeGhApiIncludeOutput(stdout)) as Record<string, any>
       return normalizeBranchProtection(branch, raw)
     } catch {
       return null
@@ -162,7 +168,7 @@ export class GhCliGitHubClient implements GitHubClient {
     sinceIso: string | null
   ): Promise<GitHubIssueEventRecord[] | null> {
     await acquireGhSlot()
-    const proc = Bun.spawn(["gh", "api", `repos/${repo}/issues/events?per_page=100`], {
+    const proc = Bun.spawn(["gh", "api", "--include", `repos/${repo}/issues/events?per_page=100`], {
       cwd: process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
@@ -173,11 +179,12 @@ export class GhCliGitHubClient implements GitHubClient {
     ])
     await proc.exited
     if (proc.exitCode !== 0) {
+      if (stdout.trim()) observeGhApiIncludeOutput(stdout)
       void stderr
       return null
     }
     try {
-      const events = JSON.parse(stdout) as GitHubIssueEventRecord[]
+      const events = JSON.parse(observeGhApiIncludeOutput(stdout)) as GitHubIssueEventRecord[]
       if (!Array.isArray(events)) return null
       if (!sinceIso) return events
       return events.filter((e) => typeof e.created_at === "string" && e.created_at > sinceIso)

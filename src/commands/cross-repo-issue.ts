@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { acquireGhSlot } from "../gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "../gh-rate-limit.ts"
 import { getIssueStore, isGraphQLRateLimited } from "../issue-store.ts"
 import type { Command } from "../types.ts"
 
@@ -158,21 +158,25 @@ async function tryRestFallbackCreate(
   body: string,
   cwd: string
 ): Promise<string | false> {
-  const restProc = Bun.spawn(["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: new Response(JSON.stringify({ title, body })),
-  })
+  const restProc = Bun.spawn(
+    ["gh", "api", "--include", `repos/${repo}/issues`, "-X", "POST", "--input", "-"],
+    {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: new Response(JSON.stringify({ title, body })),
+    }
+  )
   const [restOut] = await Promise.all([
     new Response(restProc.stdout).text(),
     new Response(restProc.stderr).text(),
   ])
   await restProc.exited
   if (restProc.exitCode !== 0) return false
+  const restBody = observeGhApiIncludeOutput(restOut)
   try {
-    const parsed = JSON.parse(restOut) as { html_url?: string }
-    return parsed.html_url ?? restOut.trim()
+    const parsed = JSON.parse(restBody) as { html_url?: string }
+    return parsed.html_url ?? restBody.trim()
   } catch {
     return false
   }

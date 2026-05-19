@@ -1,43 +1,76 @@
-import { beforeAll, describe, expect, test } from "bun:test"
-import { acquireGhSlot, getGhRateLimitStats } from "./gh-rate-limit.ts"
+import { beforeEach, describe, expect, test } from "bun:test"
+import {
+  acquireGhSlot,
+  getGhRateLimitStats,
+  observeGhApiIncludeOutput,
+  parseGhApiIncludeOutput,
+  resetGhRateLimitStateForTests,
+} from "./gh-rate-limit.ts"
 
-const THROTTLE_FILE = "/tmp/swiz-gh-rate-limit.log"
+function includeResponse(headers: Record<string, string>, body = '{"ok":true}'): string {
+  const headerLines = Object.entries(headers).map(([name, value]) => `${name}: ${value}`)
+  return ["HTTP/2 200 OK", ...headerLines, "", body].join("\r\n")
+}
 
 describe("gh-rate-limit", () => {
-  beforeAll(async () => {
-    await Bun.write(THROTTLE_FILE, "")
+  beforeEach(() => {
+    resetGhRateLimitStateForTests()
   })
 
-  test("acquireGhSlot records a request timestamp", async () => {
-    const before = await getGhRateLimitStats()
-    await acquireGhSlot()
-    const after = await getGhRateLimitStats()
-    expect(after.used).toBeGreaterThanOrEqual(before.used + 1)
+  test("parses gh api --include headers and body", () => {
+    const parsed = parseGhApiIncludeOutput(
+      includeResponse(
+        {
+          "X-RateLimit-Limit": "5000",
+          "X-RateLimit-Remaining": "4998",
+          "X-RateLimit-Reset": "2000000000",
+        },
+        '{"login":"mherod"}'
+      )
+    )
+
+    expect(parsed.status).toBe(200)
+    expect(parsed.headers["x-ratelimit-limit"]).toBe("5000")
+    expect(parsed.headers["x-ratelimit-remaining"]).toBe("4998")
+    expect(parsed.body).toBe('{"login":"mherod"}')
   })
 
-  test("getGhRateLimitStats reports correct budget structure", async () => {
-    await acquireGhSlot()
+  test("observeGhApiIncludeOutput updates stats from real GitHub headers", async () => {
+    const body = observeGhApiIncludeOutput(
+      includeResponse({
+        "X-RateLimit-Limit": "5000",
+        "X-RateLimit-Remaining": "4321",
+        "X-RateLimit-Reset": "2000000000",
+      })
+    )
+
+    expect(body).toBe('{"ok":true}')
     const stats = await getGhRateLimitStats()
-    expect(stats.limit).toBe(4500)
-    expect(stats.remaining).toBe(stats.limit - stats.used)
-    expect(stats.used).toBeGreaterThan(0)
-    expect(stats.remaining).toBeLessThan(4500)
+    expect(stats).toEqual({ used: 679, limit: 5000, remaining: 4321 })
   })
 
-  test("expired timestamps are excluded from usage count", async () => {
-    // Write a file with only an old timestamp, then check stats
-    const oldTs = Date.now() - 2 * 60 * 60 * 1000
-    await Bun.write(THROTTLE_FILE, `${oldTs}\n`)
+  test("acquireGhSlot uses an in-memory budget on cold start", async () => {
+    await acquireGhSlot()
 
     const stats = await getGhRateLimitStats()
-    expect(stats.used).toBe(0)
-    expect(stats.remaining).toBe(4500)
+    expect(stats.limit).toBe(5000)
+    expect(stats.used).toBe(1)
+    expect(stats.remaining).toBe(4999)
   })
 
-  test("acquireGhSlot returns immediately when under budget", async () => {
-    const start = Date.now()
+  test("honors short Retry-After before consuming the next slot", async () => {
+    const reset = Math.ceil((Date.now() + 1000) / 1000)
+    observeGhApiIncludeOutput(
+      includeResponse({
+        "Retry-After": "0",
+        "X-RateLimit-Limit": "5000",
+        "X-RateLimit-Remaining": "1",
+        "X-RateLimit-Reset": String(reset),
+      })
+    )
+
     await acquireGhSlot()
-    const elapsed = Date.now() - start
-    expect(elapsed).toBeLessThan(500)
+
+    expect(await getGhRateLimitStats()).toEqual({ used: 5000, limit: 5000, remaining: 0 })
   })
 })

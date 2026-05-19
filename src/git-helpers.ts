@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
-import { acquireGhSlot } from "./gh-rate-limit.ts"
+import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import { getHomeDirOrNull } from "./home.ts"
 
 export const GIT_DIR_NAME = ".git"
@@ -87,12 +87,19 @@ export function withApiCache(args: string[]): string[] {
   return ["api", "--cache", GH_API_CACHE_DURATION, ...args.slice(1)]
 }
 
+export function withApiInclude(args: string[]): string[] {
+  if (args[0] !== "api") return args
+  if (args.includes("--include") || args.includes("-i")) return args
+  return ["api", "--include", ...args.slice(1)]
+}
+
 /** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s).
  *  Read-only `gh api` calls automatically use `--cache` for built-in HTTP caching. */
 export async function gh(args: string[], cwd: string): Promise<string> {
   await acquireGhSlot()
   const effectiveCwd = resolveSpawnCwd(cwd)
-  const effectiveArgs = args[0] === "api" ? withApiCache(args) : args
+  const cachedArgs = args[0] === "api" ? withApiCache(args) : args
+  const effectiveArgs = cachedArgs[0] === "api" ? withApiInclude(cachedArgs) : cachedArgs
 
   try {
     const proc = spawnOriginal(["gh", ...effectiveArgs], {
@@ -105,13 +112,14 @@ export async function gh(args: string[], cwd: string): Promise<string> {
       killed = true
       proc.kill()
     }, 3000)
-    const [output] = await Promise.all([
+    const [stdout] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ])
     await proc.exited
     clearTimeout(killTimer)
     if (!killed && proc.exitCode === 0) {
+      const output = effectiveArgs[0] === "api" ? observeGhApiIncludeOutput(stdout) : stdout
       return output.trim()
     }
     return ""
@@ -337,7 +345,7 @@ export async function detectForkTopology(cwd: string): Promise<ForkTopology | nu
   try {
     await acquireGhSlot()
     const proc = spawnOriginal(
-      ["gh", "api", `repos/${originSlug}`, "--jq", "{fork,parent:.parent.full_name}"],
+      ["gh", "api", "--include", `repos/${originSlug}`, "--jq", "{fork,parent:.parent.full_name}"],
       { cwd, stdout: "pipe", stderr: "pipe" }
     )
     const [output] = await Promise.all([
@@ -346,7 +354,8 @@ export async function detectForkTopology(cwd: string): Promise<ForkTopology | nu
     ])
     await proc.exited
     if (proc.exitCode === 0 && output.trim()) {
-      const info = JSON.parse(output.trim()) as { fork: boolean; parent: string | null }
+      const body = observeGhApiIncludeOutput(output).trim()
+      const info = JSON.parse(body) as { fork: boolean; parent: string | null }
       if (info.fork && info.parent) {
         return { originSlug, upstreamSlug: info.parent, hasUpstreamRemote: false }
       }

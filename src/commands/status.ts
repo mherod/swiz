@@ -11,6 +11,10 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import { isIncompleteTaskStatus } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
 
+const STATUS_GIT_TIMEOUT_MS = 800
+const STATUS_CI_TIMEOUT_MS = 1_000
+const STATUS_DEFAULT_SPAWN_TIMEOUT_MS = 1_000
+
 function forEachHookEntry(
   hooks: Record<string, any>,
   visit: (event: string, entry: Record<string, any>) => void
@@ -66,15 +70,32 @@ function parseCiStatus(raw: string): { status: string | null; conclusion: string
 }
 
 function printAgentBinary(agent: AgentDef): void {
-  const binaryProc = Bun.spawnSync(["which", agent.binary])
-  const binaryPath =
-    binaryProc.exitCode === 0 ? new TextDecoder().decode(binaryProc.stdout).trim() : null
+  const binaryPath = Bun.which(agent.binary)
   console.log(`  ${BOLD}${agent.name}${RESET}`)
   console.log(
     binaryPath
       ? `    Binary:   ${GREEN}✓${RESET} ${binaryPath}`
       : `    Binary:   ${DIM}not found${RESET}`
   )
+}
+
+async function readAgentSettings(
+  agent: AgentDef,
+  path: string
+): Promise<{ path: string; hooks: Record<string, any> | null } | null> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+
+  try {
+    const json = await file.json()
+    const hooks = json[agent.hooksKey] ?? json.hooks
+    return {
+      path,
+      hooks: hooks && typeof hooks === "object" ? (hooks as Record<string, any>) : null,
+    }
+  } catch {
+    return { path, hooks: null }
+  }
 }
 
 async function checkAgent(agent: AgentDef) {
@@ -85,19 +106,13 @@ async function checkAgent(agent: AgentDef) {
   const foundPaths: string[] = []
   const allHooks = new Map<string, Record<string, any>>()
 
-  for (const path of settingsPaths) {
-    const file = Bun.file(path)
-    if (!(await file.exists())) continue
-    foundPaths.push(path)
-    try {
-      const json = await file.json()
-      const hooks = json[agent.hooksKey] ?? json.hooks
-      if (hooks && typeof hooks === "object") {
-        allHooks.set(path, hooks as Record<string, any>)
-      }
-    } catch {
-      // Ignore parse errors, continue to next path
-    }
+  const settingsResults = await Promise.all(
+    settingsPaths.map((path) => readAgentSettings(agent, path))
+  )
+  for (const result of settingsResults) {
+    if (!result) continue
+    foundPaths.push(result.path)
+    if (result.hooks) allHooks.set(result.path, result.hooks)
   }
 
   if (foundPaths.length === 0) {
@@ -169,18 +184,30 @@ interface ProjectHealth {
   ciConclusion: string | null
 }
 
-async function spawnLine(cmd: string[]): Promise<string> {
+async function spawnLine(cmd: string[], options: { timeoutMs?: number } = {}): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+  let timedOut = false
+  const killTimer = setTimeout(() => {
+    timedOut = true
+    proc.kill()
+  }, options.timeoutMs ?? STATUS_DEFAULT_SPAWN_TIMEOUT_MS)
   const [out] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
   await proc.exited
+  clearTimeout(killTimer)
+  if (timedOut) return ""
   return out.trim()
 }
 
-async function countOpenTasksForSession(sessionId: string, tasksRoot: string): Promise<number> {
-  const { readSessionMeta } = await import("../tasks/task-repository.ts")
+type ReadSessionMeta = typeof import("../tasks/task-repository.ts").readSessionMeta
+
+async function countOpenTasksForSession(
+  sessionId: string,
+  tasksRoot: string,
+  readSessionMeta: ReadSessionMeta
+): Promise<number> {
   // Fast path: read the lightweight .session-meta.json index written by writeTask.
   const meta = await readSessionMeta(sessionId, tasksRoot)
   if (meta !== null) return meta.openCount
@@ -214,18 +241,6 @@ async function collectIndexedSessionIds(projectsRoot: string, key: string): Prom
   return ids
 }
 
-async function collectAllProjectSessionIds(projectsRoot: string): Promise<Set<string>> {
-  const ids = new Set<string>()
-  const projectDirs = await readdir(projectsRoot).catch(() => [] as string[])
-  for (const projectDir of projectDirs) {
-    const files = await readdir(join(projectsRoot, projectDir)).catch(() => [] as string[])
-    for (const f of files) {
-      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
-    }
-  }
-  return ids
-}
-
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
     const home = getHomeDir()
@@ -234,7 +249,6 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     const key = projectKeyFromCwd(cwd)
 
     const indexedSessionIds = await collectIndexedSessionIds(projectsRoot, key)
-    const allProjectSessionIds = await collectAllProjectSessionIds(projectsRoot)
 
     let taskDirEntries: string[]
     try {
@@ -245,62 +259,60 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     const sessionIds = new Set(indexedSessionIds)
     const { readSessionMeta: readMeta } = await import("../tasks/task-repository.ts")
     for (const s of taskDirEntries) {
-      if (allProjectSessionIds.has(s)) continue
       const meta = await readMeta(s, tasksRoot)
-      if (meta?.cwd !== undefined && meta.cwd !== cwd) continue
+      if (meta?.cwd !== cwd) continue
       sessionIds.add(s)
     }
 
     if (sessionIds.size === 0) return null
-    let open = 0
-    for (const sessionId of sessionIds) {
-      open += await countOpenTasksForSession(sessionId, tasksRoot)
-    }
-    return open
+    const counts = await Promise.all(
+      [...sessionIds].map((sessionId) => countOpenTasksForSession(sessionId, tasksRoot, readMeta))
+    )
+    return counts.reduce((sum, count) => sum + count, 0)
   } catch {
     return null
   }
 }
 
 async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
-  const [stateData, branch, statusOut, aheadBehind] = await Promise.all([
+  const [stateData, branch, statusOut, aheadBehind, openTasks] = await Promise.all([
     readStateData(cwd).catch(() => null),
-    spawnLine(["git", "-C", cwd, "branch", "--show-current"]).catch(() => null),
-    spawnLine(["git", "-C", cwd, "status", "--porcelain"]).catch(() => null),
-    spawnLine([
-      "git",
-      "-C",
-      cwd,
-      "rev-list",
-      "--left-right",
-      "--count",
-      "@{upstream}...HEAD",
-    ]).catch(() => null),
+    spawnLine(["git", "-C", cwd, "branch", "--show-current"], {
+      timeoutMs: STATUS_GIT_TIMEOUT_MS,
+    }).catch(() => null),
+    spawnLine(["git", "-C", cwd, "status", "--porcelain"], {
+      timeoutMs: STATUS_GIT_TIMEOUT_MS,
+    }).catch(() => null),
+    spawnLine(["git", "-C", cwd, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"], {
+      timeoutMs: STATUS_GIT_TIMEOUT_MS,
+    }).catch(() => null),
+    getOpenTaskCount(cwd),
   ])
 
   const uncommittedFiles = statusOut ? statusOut.split("\n").filter(Boolean).length : 0
   const aheadBehindResult = parseAheadBehind(aheadBehind)
 
-  const openTasks = await getOpenTaskCount(cwd)
-
   // CI: get latest run on this branch (best-effort, no block on failure)
   let ciStatus: string | null = null
   let ciConclusion: string | null = null
-  if (branch) {
+  if (branch && process.env.SWIZ_STATUS_SKIP_CI !== "1") {
     try {
-      const ciOut = await spawnLine([
-        "gh",
-        "run",
-        "list",
-        "--branch",
-        branch,
-        "--limit",
-        "1",
-        "--json",
-        "status,conclusion",
-        "--jq",
-        '.[0] | .status + "|" + .conclusion',
-      ])
+      const ciOut = await spawnLine(
+        [
+          "gh",
+          "run",
+          "list",
+          "--branch",
+          branch,
+          "--limit",
+          "1",
+          "--json",
+          "status,conclusion",
+          "--jq",
+          '.[0] | .status + "|" + .conclusion',
+        ],
+        { timeoutMs: STATUS_CI_TIMEOUT_MS }
+      )
       const ci = parseCiStatus(ciOut)
       ciStatus = ci.status
       ciConclusion = ci.conclusion
@@ -381,11 +393,15 @@ function renderHealthPanel(health: ProjectHealth): void {
 export const statusCommand: Command = {
   name: "status",
   description: "Show swiz installation status across agents",
-  usage: "swiz status [--json]",
-  options: [{ flags: "--json", description: "Output project health as JSON" }],
+  usage: "swiz status [--json] [--no-health]",
+  options: [
+    { flags: "--json", description: "Output project health as JSON" },
+    { flags: "--no-health", description: "Skip project health checks" },
+  ],
   async run(args) {
     const cwd = process.cwd()
     const jsonMode = args.includes("--json")
+    const noHealth = args.includes("--no-health")
 
     if (jsonMode) {
       const health = await getProjectHealth(cwd)
@@ -406,6 +422,8 @@ export const statusCommand: Command = {
       await checkAgent(agent)
     }
 
-    renderHealthPanel(await getProjectHealth(cwd))
+    if (!noHealth) {
+      renderHealthPanel(await getProjectHealth(cwd))
+    }
   },
 }
