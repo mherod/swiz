@@ -1,26 +1,45 @@
 import { describe, expect, test } from "bun:test"
-import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils.ts"
+import { withGitClient } from "../src/git/client.ts"
+import { MockGitClient } from "../src/git/mock-client.ts"
+import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Git repo helpers ─────────────────────────────────────────────────────────
 
 const tmp = useTempDir("swiz-secret-scanner-")
+const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+const mockDiffs = new Map<string, string>()
+let nextRepoId = 0
 
-async function makeRepo(): Promise<string> {
-  return await makeTempGitRepo(tmp, { seedCommits: 0 })
+function makeRepo(): string {
+  const cwd = `/mock/swiz-secret-scanner-${++nextRepoId}`
+  mockDiffs.set(cwd, "")
+  return cwd
+}
+
+function commitFile(dir: string, relPath: string, content: string): void {
+  const lines = [`diff --git a/${relPath} b/${relPath}`, `+++ b/${relPath}`]
+  for (const line of content.split("\n")) lines.push(`+${line}`)
+  mockDiffs.set(dir, lines.join("\n"))
 }
 
 async function runHook(dir: string): Promise<{ blocked: boolean; reason?: string; raw: string }> {
-  const payload = JSON.stringify({ cwd: dir, session_id: "test-session" })
-  const proc = Bun.spawn(["bun", "hooks/stop-secret-scanner.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: process.cwd(),
+  const diff = mockDiffs.get(dir)
+  const client = new MockGitClient((args) => {
+    if (args[0] === "rev-parse" && args[1] === "--git-dir") {
+      return diff === undefined ? { exitCode: 1 } : ".git\n"
+    }
+    if (args[0] === "rev-parse" && args[1] === "--verify" && args[2] === "HEAD~10") {
+      return { exitCode: 1 }
+    }
+    if (args[0] === "diff" && args[1] === `${GIT_EMPTY_TREE}..HEAD`) {
+      return diff ?? { exitCode: 1 }
+    }
+    return { exitCode: 1 }
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const raw = await new Response(proc.stdout).text()
-  await proc.exited
+  const result = await withGitClient(client, () =>
+    runHookInProcess("hooks/stop-secret-scanner.ts", { cwd: dir, session_id: "test-session" })
+  )
+  const raw = result.stdout
 
   const trimmed = raw.trim()
   if (!trimmed) return { blocked: false, raw: trimmed }

@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 import { neutralAgentEnv } from "../src/utils/test-utils.ts"
 
-const HOOK = "hooks/pretooluse-git-index-lock.ts"
+const REPO_ROOT = resolve(import.meta.dir, "..")
+const HOOK = join(REPO_ROOT, "hooks", "pretooluse-git-index-lock.ts")
 
 // Create isolated temp git repos for testing.
 // Use realpathSync after creation to resolve macOS /var → /private/var symlink
@@ -108,6 +109,7 @@ async function runHook(
     stdout: "pipe",
     stderr: "pipe",
     env: neutralAgentEnv(),
+    cwd: REPO_ROOT,
   })
   await proc.stdin.write(payload)
   await proc.stdin.end()
@@ -310,6 +312,7 @@ describe("pretooluse-git-index-lock", () => {
         stdout: "pipe",
         stderr: "pipe",
         env: neutralAgentEnv(),
+        cwd: REPO_ROOT,
       })
       await proc.stdin.write(payload)
       await proc.stdin.end()

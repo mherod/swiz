@@ -2,12 +2,15 @@ import { afterAll } from "bun:test"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { getGitClient } from "../git/client.ts"
+import { getGitClient, withGitClient } from "../git/client.ts"
+import { MockGitClient } from "../git/mock-client.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
 import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
+
+const REPO_ROOT = resolve(import.meta.dir, "../..")
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, any>
@@ -218,12 +221,13 @@ export function neutralAgentEnv(
  * overrides — mutating `process.env` under `--concurrent` would leak across
  * test files. Use `runHook` (subprocess) when either condition fails.
  */
+// eslint-disable-next-line complexity
 export async function runHookInProcess(
   script: string,
   stdinPayload: Record<string, any>
 ): Promise<HookResult> {
   const { withInlineSwizHookRun, SwizHookExit } = await import("../inline-hook-context.ts")
-  const absPath = resolve(process.cwd(), script)
+  const absPath = resolve(REPO_ROOT, script)
   const mod = (await import(absPath)) as { default?: { run?: (input: any) => Promise<any> } }
   const hook = mod.default
   if (!hook || typeof hook.run !== "function") {
@@ -270,10 +274,15 @@ export async function runHook(
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
+  if (Object.keys(envOverrides).length === 0) {
+    return await runHookInProcess(script, stdinPayload)
+  }
+
   const payload = JSON.stringify(stdinPayload)
   const env = neutralAgentEnv(envOverrides)
+  const absPath = resolve(REPO_ROOT, script)
 
-  const proc = Bun.spawn(["bun", script], {
+  const proc = Bun.spawn(["bun", absPath], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -331,7 +340,8 @@ export type BashHookRunOpts = {
 function bashHookPayloadJson(command: string, opts: BashHookRunOpts): string {
   return JSON.stringify({
     tool_name: opts.toolName ?? "Bash",
-    tool_input: { command },
+    tool_input: { command, ...(opts.cwd !== undefined && { cwd: opts.cwd }) },
+    ...(opts.cwd !== undefined && { cwd: opts.cwd }),
     ...(opts.transcript_path !== undefined && { transcript_path: opts.transcript_path }),
     ...(opts.session_id !== undefined && { session_id: opts.session_id }),
   })
@@ -368,20 +378,9 @@ export async function runBashHook(
   command: string,
   opts: BashHookRunOpts = {}
 ): Promise<{ decision?: string; reason?: string; stdout: string }> {
-  const payload = bashHookPayloadJson(command, opts)
-  const proc = Bun.spawn(["bun", resolve(script)], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: opts.cwd,
-    env: neutralAgentEnv({ SWIZ_DAEMON_PORT: "19999" }),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const stdout = out.trim()
+  const payload = JSON.parse(bashHookPayloadJson(command, opts)) as Record<string, any>
+  const result = await runHookInProcess(script, payload)
+  const stdout = result.stdout.trim()
   const parsed = parsePreToolUseHookStdout(stdout)
   if (!stdout || !parsed) return { stdout }
   return { ...parsed, stdout }
@@ -407,7 +406,7 @@ export async function runFileEditHook(
     toolName?: string
   }
 ): Promise<FileEditHookResult> {
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: opts.toolName ?? "Edit",
     tool_input: {
       file_path: opts.filePath ?? "src/app.ts",
@@ -415,20 +414,9 @@ export async function runFileEditHook(
       new_string: opts.newString,
       content: opts.content,
     },
-  })
+  }
 
-  const proc = Bun.spawn(["bun", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
+  const rawOutput = (await runHookInProcess(script, payload)).stdout
   if (!rawOutput.trim()) return { rawOutput }
   try {
     const parsed = JSON.parse(rawOutput.trim()) as Record<string, any>
@@ -478,6 +466,24 @@ export interface WorkflowHookResult {
   raw: string
 }
 
+interface MockTestRepoState {
+  branch: string
+  remoteUrl: string
+}
+
+const mockTestRepos = new Map<string, MockTestRepoState>()
+
+function mockGitClientForTestRepo(cwd: string): MockGitClient | null {
+  const state = mockTestRepos.get(cwd)
+  if (!state) return null
+  return new MockGitClient((args) => {
+    if (args[0] === "rev-parse" && args[1] === "--git-dir") return ".git\n"
+    if (args[0] === "branch" && args[1] === "--show-current") return `${state.branch}\n`
+    if (args[0] === "remote" && args[1] === "get-url") return `${state.remoteUrl}\n`
+    return { exitCode: 0 }
+  })
+}
+
 export function makeWorkflowHookRunner(
   hookScript: string
 ): (opts: {
@@ -487,33 +493,23 @@ export function makeWorkflowHookRunner(
   filePath?: string
   transcriptPath?: string
 }) => Promise<WorkflowHookResult> {
-  const BUN_EXE = Bun.which("bun") ?? "bun"
-  const WORKSPACE_ROOT = process.cwd()
+  // eslint-disable-next-line complexity
   return async (opts) => {
     const toolInput: Record<string, any> =
       opts.toolName === "Bash"
         ? { command: opts.command ?? "echo hello", cwd: opts.cwd }
         : { file_path: opts.filePath ?? join(opts.cwd, "file.ts"), new_string: "x" }
-    const payload = JSON.stringify({
+    const payload = {
       tool_name: opts.toolName,
       tool_input: toolInput,
       cwd: opts.cwd,
       transcript_path: opts.transcriptPath ?? "",
-    })
-    const proc = Bun.spawn([BUN_EXE, hookScript], {
-      cwd: WORKSPACE_ROOT,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const [raw] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    const trimmed = raw.trim()
+    }
+    const client = mockGitClientForTestRepo(opts.cwd)
+    const result = client
+      ? await withGitClient(client, () => runHookInProcess(hookScript, payload))
+      : await runHookInProcess(hookScript, payload)
+    const trimmed = result.stdout.trim()
     if (!trimmed) return { raw: trimmed }
     const parsed = JSON.parse(trimmed) as Record<string, any>
     const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
@@ -525,6 +521,26 @@ export function makeWorkflowHookRunner(
 }
 
 // ─── Git repo fixtures for stop-hook integration tests ──────────────────────
+
+/**
+ * Create a lightweight git-shaped project for workflow hook tests.
+ *
+ * The returned directory is not a real git repository. `makeWorkflowHookRunner`
+ * supplies a mock GitClient for it, covering the branch/repo queries those
+ * hooks need without spending several git subprocesses per assertion.
+ */
+export async function createMockTestRepo(
+  remoteUrl: string,
+  opts: { featureBranch?: string } = {}
+): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "swiz-test-repo-"))
+  await writeFile(join(dir, "README.md"), "hello\n")
+  mockTestRepos.set(dir, {
+    branch: opts.featureBranch ?? "main",
+    remoteUrl,
+  })
+  return dir
+}
 
 /** Run a git command in a directory; returns stdout trimmed. */
 export async function runGit(dir: string, args: string[]): Promise<string> {

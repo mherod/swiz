@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
@@ -17,7 +17,8 @@ interface HookResult {
   reason?: string
 }
 
-const PROJECT_ROOT = process.cwd()
+const PROJECT_ROOT = resolve(import.meta.dir, "..")
+const HOOK = join(PROJECT_ROOT, "hooks", "pretooluse-require-tasks.ts")
 
 function hookResultFromOutput(parsed: Record<string, any>): HookResult {
   const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
@@ -82,10 +83,11 @@ async function runHook({
   if (seedFreshTaskListSync && sessionId) {
     await writeTaskListSyncSentinel(sessionId)
   }
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-require-tasks.ts"], {
+  const proc = Bun.spawn(["bun", HOOK], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    cwd: PROJECT_ROOT,
     env: { ...env, ...envOverrides },
   })
   await proc.stdin.write(payload)

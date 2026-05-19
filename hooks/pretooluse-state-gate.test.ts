@@ -1,8 +1,6 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
-import { useTempDir, writeState } from "../src/utils/test-utils.ts"
-
-setDefaultTimeout(20_000)
+import { runHookInProcess, useTempDir, writeState } from "../src/utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-state-gate.ts")
 
@@ -12,23 +10,13 @@ async function runHook(
   toolName: string,
   opts: { command?: string; cwd?: string } = {}
 ): Promise<{ decision?: string; reason?: string; stdout: string }> {
-  const payload = JSON.stringify({
+  const result = await runHookInProcess(HOOK_PATH, {
     tool_name: toolName,
     tool_input: opts.command ? { command: opts.command } : {},
     cwd: opts.cwd,
   })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: opts.cwd ?? process.cwd(),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
 
-  const stdout = out.trim()
+  const stdout = result.stdout.trim()
   if (!stdout) return { stdout }
   const parsed = JSON.parse(stdout)
   const hso = parsed.hookSpecificOutput

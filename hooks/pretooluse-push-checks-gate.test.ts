@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type AdvisoryHookResult, neutralAgentEnv } from "../src/utils/test-utils.ts"
+import {
+  type AdvisoryHookResult,
+  buildEffectiveTestSettings,
+  runHookInProcess,
+} from "../src/utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,8 @@ async function runHook(opts: {
   command: string
   transcriptContent?: string
   transcriptPath?: string
+  cwd?: string
+  effectiveSettings?: Record<string, unknown>
 }): Promise<AdvisoryHookResult> {
   let tPath = opts.transcriptPath ?? ""
 
@@ -59,24 +65,16 @@ async function runHook(opts: {
     await Bun.write(tPath, opts.transcriptContent)
   }
 
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: "Bash",
     tool_input: { command: opts.command },
     transcript_path: tPath,
     session_id: "test",
-    cwd: "/tmp",
-  })
+    cwd: opts.cwd ?? "/tmp",
+    _effectiveSettings: buildEffectiveTestSettings(opts.effectiveSettings ?? {}),
+  }
 
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
+  const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
 
   if (!out.trim()) return { blocked: false, reason: "", advisory: false }
   const parsed = JSON.parse(out.trim())
@@ -421,24 +419,14 @@ describe("CI check advisory — prHooksActive modes", () => {
     const transcript = makeTranscript(...transcriptCommands)
     const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
     await Bun.write(tPath, transcript)
-    const payload = JSON.stringify({
+    const payload = {
       tool_name: "Bash",
       tool_input: { command: "git push origin main", cwd: projectDir },
       transcript_path: tPath,
       session_id: "test",
-    })
-    // Isolate HOME so global ~/.swiz/settings.json (e.g. ignoreCi: true) doesn't leak
-    const fakeHome = await mkdtemp(join(tmpDir, `home-${mode}-`))
-    const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: neutralAgentEnv({ HOME: fakeHome }),
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const out = await new Response(proc.stdout).text()
-    await proc.exited
+      _effectiveSettings: buildEffectiveTestSettings({ collaborationMode: mode, ignoreCi: false }),
+    }
+    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
     if (!out.trim()) return { blocked: false, reason: "", advisory: false }
     const parsed = JSON.parse(out.trim())
     const hso = parsed?.hookSpecificOutput
@@ -493,9 +481,6 @@ describe("CI check advisory — prHooksActive modes", () => {
   })
 
   test("ignore-ci skips CI advisory for team mode", async () => {
-    const home = await mkdtemp(join(tmpDir, "ignore-ci-home-"))
-    await mkdir(join(home, ".swiz"), { recursive: true })
-    await Bun.write(join(home, ".swiz", "settings.json"), JSON.stringify({ ignoreCi: true }))
     const projectDir = await mkdtemp(join(tmpDir, "team-ignore-ci-"))
     const swizDir = join(projectDir, ".swiz")
     await mkdir(swizDir, { recursive: true })
@@ -506,22 +491,17 @@ describe("CI check advisory — prHooksActive modes", () => {
     )
     const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
     await Bun.write(tPath, transcript)
-    const payload = JSON.stringify({
+    const payload = {
       tool_name: "Bash",
       tool_input: { command: "git push origin main", cwd: projectDir },
       transcript_path: tPath,
       session_id: "test",
-    })
-    const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: neutralAgentEnv({ HOME: home }),
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const out = await new Response(proc.stdout).text()
-    await proc.exited
+      _effectiveSettings: buildEffectiveTestSettings({
+        collaborationMode: "team",
+        ignoreCi: true,
+      }),
+    }
+    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
     expect(out.trim()).toBeTruthy()
     const parsed = JSON.parse(out.trim())
     const reason = parsed?.hookSpecificOutput?.permissionDecisionReason ?? ""
@@ -686,23 +666,14 @@ async function runHookInRepo(opts: {
 }): Promise<AdvisoryHookResult> {
   const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
   await Bun.write(tPath, opts.transcriptContent ?? "")
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: "Bash",
     tool_input: { command: opts.command, cwd: opts.repoDir },
     transcript_path: tPath,
     session_id: "test",
-  })
-  const fakeHome = await mkdtemp(join(tmpDir, "home-lf-"))
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv({ HOME: fakeHome }),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
+    _effectiveSettings: buildEffectiveTestSettings({ ignoreCi: false }),
+  }
+  const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
   if (!out.trim()) return { blocked: false, reason: "", advisory: false }
   const parsed = JSON.parse(out.trim())
   const hso = parsed?.hookSpecificOutput

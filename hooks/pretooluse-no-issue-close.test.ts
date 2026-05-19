@@ -82,23 +82,13 @@ describe("pretooluse-no-issue-close", () => {
 
   describe("passthrough for non-shell tools", () => {
     test("non-Bash tool exits cleanly", async () => {
-      const payload = JSON.stringify({
+      const result = await runHookScript(HOOK_PATH, {
         tool_name: "Edit",
         tool_input: { command: "gh issue close 1" },
         session_id: "test",
         cwd: "/tmp",
       })
-      const proc = Bun.spawn(["bun", HOOK_PATH], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-      const out = await new Response(proc.stdout).text()
-      await proc.exited
-      // Non-shell tool should exit without output (process.exit(0))
-      expect(out.trim()).toBe("")
+      expect(result.stdout.trim()).toBe("")
     })
   })
 })

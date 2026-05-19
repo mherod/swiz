@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
+import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 // Use absolute path so the script is found regardless of spawn CWD.
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
@@ -19,20 +19,13 @@ async function makeTempDir(suffix = ""): Promise<string> {
 async function npmDecisionInDir(
   dir: string
 ): Promise<{ decision: string | undefined; reason: string | undefined }> {
-  const payload = JSON.stringify({ tool_name: "Bash", tool_input: { command: "npm install" } })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(HOOK_PATH, {
+    tool_name: "Bash",
+    tool_input: { command: "npm install", cwd: dir },
     cwd: dir,
-    env: neutralAgentEnv(),
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (!out.trim()) return { decision: undefined, reason: undefined }
-  const parsed = JSON.parse(out.trim())
+  if (!result.stdout.trim()) return { decision: undefined, reason: undefined }
+  const parsed = JSON.parse(result.stdout.trim())
   const hso = parsed.hookSpecificOutput
   return {
     decision: hso?.permissionDecision ?? parsed.decision,
@@ -42,20 +35,13 @@ async function npmDecisionInDir(
 
 /** Same but for `pnpm install` — used to confirm PM detection without relying on deny message text. */
 async function pnpmDecisionInDir(dir: string): Promise<string | undefined> {
-  const payload = JSON.stringify({ tool_name: "Bash", tool_input: { command: "pnpm install" } })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(HOOK_PATH, {
+    tool_name: "Bash",
+    tool_input: { command: "pnpm install", cwd: dir },
     cwd: dir,
-    env: neutralAgentEnv(),
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (!out.trim()) return undefined
-  const parsed = JSON.parse(out.trim())
+  if (!result.stdout.trim()) return undefined
+  const parsed = JSON.parse(result.stdout.trim())
   return parsed.hookSpecificOutput?.permissionDecision ?? parsed.decision
 }
 

@@ -100,24 +100,13 @@ describe("posttooluse-pr-context: checkout detection (\\s*git checkout)", () => 
   })
 
   test("non-shell tool exits silently (tool_name filtering)", async () => {
-    const payload = JSON.stringify({
+    const result = await runHookScript("hooks/posttooluse-pr-context.ts", {
       tool_name: "Read",
       tool_input: { command: "git checkout main" },
       cwd: "/tmp",
     })
 
-    const proc = Bun.spawn(["bun", "hooks/posttooluse-pr-context.ts"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-
-    const rawOutput = await new Response(proc.stdout).text()
-    await proc.exited
-
-    expect(rawOutput.trim()).toBe("")
-    expect(proc.exitCode).toBe(0)
+    expect(result.stdout.trim()).toBe("")
+    expect(result.exitCode).toBe(0)
   })
 })

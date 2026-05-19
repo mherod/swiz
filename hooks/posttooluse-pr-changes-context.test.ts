@@ -76,24 +76,13 @@ describe("posttooluse-pr-changes-context: checkout commands (no PR environment)"
 
 describe("posttooluse-pr-changes-context: tool filtering", () => {
   test("non-shell tool exits silently", async () => {
-    const payload = JSON.stringify({
+    const result = await runHookScript("hooks/posttooluse-pr-changes-context.ts", {
       tool_name: "Read",
       tool_input: { command: "git checkout feature-branch" },
       cwd: "/tmp",
     })
 
-    const proc = Bun.spawn(["bun", "hooks/posttooluse-pr-changes-context.ts"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-
-    const rawOutput = await new Response(proc.stdout).text()
-    await proc.exited
-
-    expect(rawOutput.trim()).toBe("")
-    expect(proc.exitCode).toBe(0)
+    expect(result.stdout.trim()).toBe("")
+    expect(result.exitCode).toBe(0)
   })
 })

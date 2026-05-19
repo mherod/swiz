@@ -3,7 +3,7 @@
  * Tests all supported file formats to prevent regressions on the regex.
  */
 import { describe, expect, test } from "bun:test"
-import { neutralAgentEnv } from "../src/utils/test-utils.ts"
+import { neutralAgentEnv, runHookInProcess } from "../src/utils/test-utils.ts"
 import { countEnforcements, isEslintConfigFile } from "./pretooluse-eslint-config-strength.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -216,19 +216,8 @@ async function invokeHook(input: {
     new_string?: string
   }
 }): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-eslint-config-strength.ts"], {
-    cwd: process.cwd(),
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  await proc.stdin.write(JSON.stringify(input))
-  await proc.stdin.end()
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
+  const result = await runHookInProcess("hooks/pretooluse-eslint-config-strength.ts", input)
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode }
 }
 
 describe("pretooluse-eslint-config-strength: hook handler logic", () => {

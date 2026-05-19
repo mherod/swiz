@@ -167,7 +167,9 @@ function buildImplausibleDeny(parsed: ParsedInvocation, pm: PackageManager): Swi
 async function evaluate(input: ShellHookInput) {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
-  const pm = await detectPackageManager()
+  const cwd =
+    input.cwd ?? (typeof input.tool_input?.cwd === "string" ? input.tool_input.cwd : undefined)
+  const pm = await detectPackageManager(cwd)
   if (!pm) return {}
 
   const command: string = input.tool_input?.command ?? ""

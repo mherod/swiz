@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 import pretooluseStuckState from "./pretooluse-stuck-state.ts"
 
 const HOOK = join(import.meta.dir, "pretooluse-stuck-state.ts")
@@ -59,34 +60,19 @@ async function runHook(
   input: Record<string, any>,
   effectiveSettings: Record<string, any> = { enforceUnblockMyself: true }
 ): Promise<HookResult> {
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(HOOK, {
     cwd: process.cwd(),
-    env: { ...process.env },
+    session_id: "stuck-state-test",
+    transcript_path: transcriptPath,
+    _testNowMs: NOW_MS,
+    _effectiveSettings: effectiveSettings,
+    ...input,
   })
-  await proc.stdin.write(
-    JSON.stringify({
-      cwd: process.cwd(),
-      session_id: "stuck-state-test",
-      transcript_path: transcriptPath,
-      _testNowMs: NOW_MS,
-      _effectiveSettings: effectiveSettings,
-      ...input,
-    })
-  )
-  await proc.stdin.end()
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
 
-  const trimmed = stdout.trim()
+  const trimmed = result.stdout.trim()
   const parsed = trimmed ? (JSON.parse(trimmed) as Record<string, any>) : {}
   return {
-    exitCode: proc.exitCode,
+    exitCode: result.exitCode,
     stdout: trimmed,
     reason: String(parsed.hookSpecificOutput?.permissionDecisionReason ?? ""),
   }

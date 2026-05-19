@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import {
-  createTestRepo,
+  createMockTestRepo,
   makeWorkflowHookRunner,
   skillLine,
   textLine,
@@ -15,7 +15,7 @@ const runHook = makeWorkflowHookRunner("hooks/pretooluse-pr-head-checkout-gate.t
 const cleanupDirs: string[] = []
 
 async function makeRepo(opts: { branch?: string } = {}): Promise<string> {
-  const repo = await createTestRepo("https://github.com/test/repo.git", {
+  const repo = await createMockTestRepo("https://github.com/test/repo.git", {
     featureBranch: opts.branch,
   })
   cleanupDirs.push(repo)

@@ -1,10 +1,8 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
-
-setDefaultTimeout(30_000)
+import { describe, expect, test } from "bun:test"
 
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-no-direct-deps.ts"
 const { create: createTempDir } = useTempDir("swiz-nodeps-")
@@ -17,25 +15,9 @@ interface HookResult {
   reason: string
 }
 
-async function runHook(
-  stdinPayload: Record<string, any>,
-  envOverrides: Record<string, string | undefined> = {}
-): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
-
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
+async function runHook(stdinPayload: Record<string, any>): Promise<HookResult> {
+  const result = await runHookInProcess(HOOK, stdinPayload)
+  const { stdout, stderr } = result
 
   let denied = false
   let reason = ""
@@ -50,7 +32,7 @@ async function runHook(
     // no JSON output
   }
 
-  return { exitCode: proc.exitCode, stdout, stderr, denied, reason }
+  return { exitCode: result.exitCode, stdout, stderr, denied, reason }
 }
 
 const REALISTIC_PKG = {

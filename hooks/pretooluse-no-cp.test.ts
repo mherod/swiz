@@ -1,26 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { neutralAgentEnv } from "../src/utils/test-utils.ts"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 
 async function runHook(
   command: string,
   toolName = "Bash"
 ): Promise<{ stdout: string; decision?: string; reason?: string }> {
-  const payload = JSON.stringify({
+  const result = await runHookInProcess("hooks/pretooluse-no-cp.ts", {
     tool_name: toolName,
     tool_input: { command },
   })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-cp.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
 
-  const stdout = out.trim()
+  const stdout = result.stdout.trim()
   if (!stdout) return { stdout }
   const parsed = JSON.parse(stdout)
   const hso = parsed.hookSpecificOutput

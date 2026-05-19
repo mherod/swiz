@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { withGitClient } from "./git/client.ts"
+import { MockGitClient } from "./git/mock-client.ts"
+import { runHookInProcess } from "./utils/test-utils.ts"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-workflow-permissions-gate.ts")
 const IS_CODEX = Boolean(process.env.CODEX_MANAGED_BY_NPM || process.env.CODEX_THREAD_ID)
@@ -13,24 +16,13 @@ interface HookResult {
 }
 
 async function runHook(payload: Record<string, any>): Promise<HookResult> {
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: process.cwd(),
-  })
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  const result = await runHookInProcess(HOOK_PATH, payload)
+  const stdout = result.stdout
   let parsed = null
   try {
     parsed = JSON.parse(stdout.trim())
   } catch {}
-  return { stdout: stdout.trim(), exitCode: proc.exitCode, parsed }
+  return { stdout: stdout.trim(), exitCode: result.exitCode, parsed }
 }
 
 describe("pretooluse-workflow-permissions-gate", () => {
@@ -68,22 +60,26 @@ describe("pretooluse-workflow-permissions-gate", () => {
   })
 
   test("allows workflow permission edits on default branch (main)", async () => {
-    // Create a temp git repo on 'main' to test branch-independent of current checkout
+    // Keep this assertion isolated without creating a real git repo.
     const tmpDir = await mkdtemp(join(tmpdir(), "swiz-workflow-gate-"))
     try {
-      const init = Bun.spawn(["git", "init", "-b", "main", tmpDir], {
-        stdout: "ignore",
-        stderr: "ignore",
+      const mockGit = new MockGitClient((args) => {
+        if (args[0] === "branch" && args[1] === "--show-current") return "main\n"
+        if (args[0] === "remote" && args[1] === "get-url" && args[2] === "origin") {
+          return "https://github.com/mherod/swiz.git\n"
+        }
+        return { exitCode: 1 }
       })
-      await init.exited
-      const result = await runHook({
-        tool_name: "Write",
-        tool_input: {
-          file_path: ".github/workflows/ci.yml",
-          content: "permissions:\n  contents: read\n  pull-requests: write",
-        },
-        cwd: tmpDir,
-      })
+      const result = await withGitClient(mockGit, () =>
+        runHook({
+          tool_name: "Write",
+          tool_input: {
+            file_path: ".github/workflows/ci.yml",
+            content: "permissions:\n  contents: read\n  pull-requests: write",
+          },
+          cwd: tmpDir,
+        })
+      )
       expect(result.exitCode).toBe(0)
       const hso = result.parsed?.hookSpecificOutput as Record<string, any> | undefined
       if (IS_CODEX) {

@@ -14,9 +14,8 @@
  */
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
-import { join } from "node:path"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
-import type { HookResult } from "../src/utils/test-utils.ts"
+import { type HookResult, runHookInProcess } from "../src/utils/test-utils.ts"
 
 // ─── Output-file recovery helpers ────────────────────────────────────────────
 
@@ -42,22 +41,8 @@ async function writeOutputFile(cwd: string, taskId: string, content: string): Pr
 }
 
 async function runHook(stdinPayload: Record<string, any>): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
-
-  const proc = Bun.spawn(["bun", "hooks/posttooluse-task-output.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: join(import.meta.dir, ".."),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  const result = await runHookInProcess("hooks/posttooluse-task-output.ts", stdinPayload)
+  const { stdout, stderr } = result
 
   let decision: string | undefined
   let reason: string | undefined
@@ -70,7 +55,7 @@ async function runHook(stdinPayload: Record<string, any>): Promise<HookResult> {
     } catch {}
   }
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, decision, reason }
+  return { exitCode: result.exitCode, stdout: stdout.trim(), stderr, decision, reason }
 }
 
 function makePayload(output: string, exitCode: number, status = "completed") {

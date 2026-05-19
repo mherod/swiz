@@ -2,13 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { DEFAULT_LARGE_FILE_SIZE_KB } from "../src/settings.ts"
-import { useTempDir } from "./utils/test-utils.ts"
+import { runHookInProcess, useTempDir } from "./utils/test-utils.ts"
 
 // Re-export the internal isLfsTracked via dynamic import to test it
 // (it's not exported from the hook — test via the SIZE_LIMIT_KB boundary indirectly,
 // and the LFS logic via a subprocess invocation of the hook itself)
 
-const BUN_EXE = Bun.which("bun") ?? "bun"
 const HOOK_PATH = "hooks/pretooluse-large-files.ts"
 const IS_CODEX = Boolean(process.env.CODEX_MANAGED_BY_NPM || process.env.CODEX_THREAD_ID)
 const { create: createTempDir } = useTempDir("swiz-large-files-test-")
@@ -21,7 +20,7 @@ async function runHook(opts: {
   oldString?: string
   newString?: string
 }): Promise<{ stdout: string; exitCode: number }> {
-  const payload = JSON.stringify({
+  const result = await runHookInProcess(HOOK_PATH, {
     tool_name: opts.toolName,
     tool_input: {
       file_path: opts.filePath,
@@ -31,19 +30,7 @@ async function runHook(opts: {
     },
     cwd: opts.cwd,
   })
-
-  const proc = Bun.spawn([BUN_EXE, HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: process.cwd(),
-    env: { ...process.env },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  return { stdout, exitCode: proc.exitCode ?? 0 }
+  return { stdout: result.stdout, exitCode: result.exitCode ?? 0 }
 }
 
 function makeLargeContent(sizeKb: number): string {
@@ -186,18 +173,7 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
       tool_input: { command: "echo hello" },
       cwd: dir,
     })
-    const proc = Bun.spawn([BUN_EXE, HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: process.cwd(),
-      env: { ...process.env },
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    const parsed = JSON.parse(stdout)
+    const parsed = JSON.parse((await runHookInProcess(HOOK_PATH, JSON.parse(payload))).stdout)
     expectAllowedPreToolUse(parsed)
   })
 
@@ -208,18 +184,7 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
       tool_input: { file_path: join(dir, "notebook.ipynb"), content: makeLargeContent(501) },
       cwd: dir,
     })
-    const proc = Bun.spawn([BUN_EXE, HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: process.cwd(),
-      env: { ...process.env },
-    })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    const parsed = JSON.parse(stdout)
+    const parsed = JSON.parse((await runHookInProcess(HOOK_PATH, JSON.parse(payload))).stdout)
     expectAllowedPreToolUse(parsed)
   })
 })

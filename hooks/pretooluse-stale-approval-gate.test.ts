@@ -65,49 +65,27 @@ describe("pretooluse-stale-approval-gate", () => {
 
   describe("non-shell tool is ignored", () => {
     test("Edit tool with git commit in content passes through", async () => {
-      const payload = JSON.stringify({
+      const result = await runHookScript("hooks/pretooluse-stale-approval-gate.ts", {
         tool_name: "Edit",
         tool_input: { command: 'git commit -m "test"' },
         cwd: "/tmp",
       })
 
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-stale-approval-gate.ts"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-
-      const rawOutput = await new Response(proc.stdout).text()
-      await proc.exited
-
-      expect(rawOutput.trim()).toBe("")
-      expect(proc.exitCode).toBe(0)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.exitCode).toBe(0)
     })
   })
 
   describe("fail-open on missing environment", () => {
     test("empty cwd exits cleanly", async () => {
-      const payload = JSON.stringify({
+      const result = await runHookScript("hooks/pretooluse-stale-approval-gate.ts", {
         tool_name: "Bash",
         tool_input: { command: 'git commit -m "test"' },
         cwd: "",
       })
 
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-stale-approval-gate.ts"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-
-      const rawOutput = await new Response(proc.stdout).text()
-      await proc.exited
-
-      expect(rawOutput.trim()).toBe("")
-      expect(proc.exitCode).toBe(0)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.exitCode).toBe(0)
     })
 
     test("non-git directory exits cleanly", async () => {

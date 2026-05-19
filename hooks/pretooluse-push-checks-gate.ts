@@ -18,6 +18,7 @@
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import type { EffectiveSwizSettings } from "../src/settings/types.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   BRANCH_CHECK_RE,
@@ -38,6 +39,7 @@ import {
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
+// eslint-disable-next-line complexity
 export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
   if (!isShellTool(hookInput.tool_name ?? "")) return {}
@@ -80,7 +82,10 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
       readProjectSettings(cwd),
     ])
 
-  const eff = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  const eff =
+    ((hookInput as Record<string, unknown>)._effectiveSettings as
+      | EffectiveSwizSettings
+      | undefined) ?? getEffectiveSwizSettings(globalSettings, null, projectSettings)
 
   const secretBlock = checkSecretsInDiff(diffResult, eff.skipSecretScan)
   if (secretBlock) return secretBlock
