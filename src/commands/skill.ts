@@ -170,8 +170,9 @@ function resolveAgentPair(
 ): { fromAgent: AgentEntry; toAgent: AgentEntry } {
   // --convert and --to-command apply tool-name remapping using the agent's
   // toolAliases, so pseudo-agents (e.g. "agents") aren't valid here. For
-  // copy-only sync to the ~/.agents directory use --sync, which routes
+  // copy-only sync to the HOME/.agents directory use --sync, which routes
   // through resolveForSync() and accepts the agents pseudo-target.
+  // (Resolution for #662 and the migrated duplicate #663.)
   const fromAgent = getAgent(from)
   const toAgent = getAgent(to)
   const ids = AGENTS.map((a) => a.id).join(", ")
