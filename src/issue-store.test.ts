@@ -1143,6 +1143,87 @@ describe("ghListToRestFallback", () => {
   })
 })
 
+describe("tryRestFallback ETag / 304 Caching", () => {
+  test("stores ETag and payload from 200 response, then executes subsequent calls with If-None-Match header and returns cached payload on 304 status", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    const calls: string[][] = []
+
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = (args: string[]) => {
+      calls.push(args)
+
+      const ifNoneMatch = args.indexOf("-H") !== -1 ? args[args.indexOf("-H") + 1] : null
+
+      if (ifNoneMatch && ifNoneMatch.includes('If-None-Match: "etag-12345"')) {
+        // Return 304 Not Modified status line and headers
+        const stdoutWithHeaders = ["HTTP/1.1 304 Not Modified", 'ETag: "etag-12345"', "", ""].join(
+          "\r\n"
+        )
+        return createMockSpawnResult(stdoutWithHeaders)
+      } else {
+        // Return 200 OK success status line and headers with the mock data
+        const payload = JSON.stringify([
+          {
+            number: 101,
+            title: "Mock Issue",
+            state: "open",
+            updated_at: "2024-06-01T00:00:00Z",
+            user: { login: "alice" },
+            assignees: [],
+            labels: [],
+          },
+        ])
+        const stdoutWithHeaders = [
+          "HTTP/1.1 200 OK",
+          'ETag: "etag-12345"',
+          "Content-Type: application/json",
+          "",
+          payload,
+        ].join("\r\n")
+        return createMockSpawnResult(stdoutWithHeaders)
+      }
+    }
+
+    try {
+      const { tryRestFallback } = await import("./issue-store-rest-fallback.ts")
+
+      // First call: Should perform query and cache ETags
+      const res1 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store)
+      expect(res1).not.toBeNull()
+      expect(res1![0]!.number).toBe(101)
+      expect(res1![0]!.title).toBe("Mock Issue")
+
+      // Verify that Bun.spawn was invoked without a "-H" and "If-None-Match" header
+      const firstCall = calls[0]!
+      expect(firstCall.join(" ")).not.toContain("If-None-Match")
+
+      // We should have cached it in our store now
+      const { getRepoSlug } = await import("./git-helpers.ts")
+      const repo = (await getRepoSlug("/tmp")) ?? "unknown"
+      const cached = store.getHttpCache(repo, "repos/{owner}/{repo}/issues?state=open&per_page=100")
+      expect(cached).not.toBeNull()
+      expect(cached!.etag).toBe('"etag-12345"')
+
+      // Second call: Should send If-None-Match header and get 304 hit, returning cached data
+      const res2 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store)
+      expect(res2).not.toBeNull()
+      expect(res2![0]!.number).toBe(101)
+      expect(res2![0]!.title).toBe("Mock Issue")
+
+      // Verify that Bun.spawn DID indeed send the If-None-Match header
+      const secondCall = calls[1]!
+      expect(secondCall.join(" ")).toContain("If-None-Match")
+      expect(secondCall.join(" ")).toContain('"etag-12345"')
+    } finally {
+      Bun.spawn = originalSpawn
+      store.close()
+      releaseMutex()
+    }
+  })
+})
+
 describe("syncUpstreamState with mock GitHubClient", () => {
   test("uses injected GitHubClient instead of gh CLI", async () => {
     const store = createStore()

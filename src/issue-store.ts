@@ -459,6 +459,16 @@ export class IssueStore {
         PRIMARY KEY (repo, kind)
       )
     `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS http_cache (
+        repo TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        etag TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, endpoint)
+      )
+    `)
   }
 
   // ─── Sync snapshot (change-detection) ────────────────────────────────────
@@ -1077,6 +1087,23 @@ export class IssueStore {
       .all() as { repo: string; cwd: string }[]
   }
 
+  /** Read cached HTTP response ETag and payload. */
+  getHttpCache(repo: string, endpoint: string): { etag: string; data: string } | null {
+    const row = this.db
+      .query("SELECT etag, data FROM http_cache WHERE repo = ? AND endpoint = ?")
+      .get(repo, endpoint) as { etag: string; data: string } | undefined
+    return row ?? null
+  }
+
+  /** Upsert cached HTTP response ETag and payload. */
+  setHttpCache(repo: string, endpoint: string, etag: string, data: string): void {
+    this.db
+      .query(
+        "INSERT OR REPLACE INTO http_cache (repo, endpoint, etag, data, updated_at) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(repo, endpoint, etag, data, Date.now())
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
   /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection, event log, sync cursors) for a repo. Preserves pending mutations. */
@@ -1092,6 +1119,7 @@ export class IssueStore {
     this.db.query("DELETE FROM branch_protection WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM issue_events WHERE repo = ?").run(repo)
     this.db.query("DELETE FROM sync_cursors WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM http_cache WHERE repo = ?").run(repo)
   }
 
   /** Clear ALL cached data across all repos. Preserves pending mutations. */
@@ -1107,6 +1135,7 @@ export class IssueStore {
     this.db.query("DELETE FROM branch_protection").run()
     this.db.query("DELETE FROM issue_events").run()
     this.db.query("DELETE FROM sync_cursors").run()
+    this.db.query("DELETE FROM http_cache").run()
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -1220,8 +1249,12 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
  *
  * Exported for unit testing.
  */
-export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
-  return await tryRestFallbackImpl<T>(args, cwd)
+export async function tryRestFallback<T>(
+  args: string[],
+  cwd: string,
+  store?: IssueStore
+): Promise<T | null> {
+  return await tryRestFallbackImpl<T>(args, cwd, store)
 }
 
 /** Run a gh subcommand and parse JSON output. Returns null on failure.

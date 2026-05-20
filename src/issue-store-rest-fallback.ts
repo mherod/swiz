@@ -1,6 +1,10 @@
 import { debugLog } from "./debug.ts"
-import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
-import type { MutationPayload } from "./issue-store.ts"
+import {
+  acquireGhSlot,
+  observeGhApiIncludeOutput,
+  parseGhApiIncludeOutput,
+} from "./gh-rate-limit.ts"
+import type { IssueStore, MutationPayload } from "./issue-store.ts"
 
 // ─── GraphQL rate-limit classifier ─────────────────────────────────────────
 
@@ -440,9 +444,17 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 }
 
 /** Fetch via REST API for a mapped gh list command. */
-async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
+async function fetchViaRest(
+  endpoint: string,
+  cwd: string,
+  etagValue?: string | null
+): Promise<{ status: number | null; headers: Record<string, string>; body: string } | null> {
   await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "api", "--include", endpoint], {
+  const args = ["api", "--include", endpoint]
+  if (etagValue) {
+    args.push("-H", `If-None-Match: ${etagValue}`)
+  }
+  const proc = Bun.spawn(["gh", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -452,13 +464,20 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
     new Response(proc.stderr).text(),
   ])
   await proc.exited
-  const body = stdout.trim() ? observeGhApiIncludeOutput(stdout) : stdout
-  if (proc.exitCode !== 0) return null
-  try {
-    return JSON.parse(body)
-  } catch {
-    return null
+
+  const parsed = parseGhApiIncludeOutput(stdout)
+  if (parsed.headers["etag"]) {
+    // Call observeGhApiIncludeOutput to update rate limit state from headers
+    observeGhApiIncludeOutput(stdout)
   }
+  if (parsed.status === 304) {
+    return { status: 304, headers: parsed.headers, body: "" }
+  }
+  if (proc.exitCode !== 0) return null
+  if (parsed.status === null) {
+    return { status: 200, headers: {}, body: parsed.body }
+  }
+  return parsed
 }
 
 /**
@@ -467,16 +486,55 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
  *
  * Exported for unit testing.
  */
-export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
+export async function tryRestFallback<T>(
+  args: string[],
+  cwd: string,
+  store?: IssueStore
+): Promise<T | null> {
   const mapping = ghListToRestFallback(args)
   if (!mapping) {
     debugLog(`[swiz] NO_REST_FALLBACK for ${args.join(" ")} — no REST endpoint mapping registered`)
     return null
   }
-  debugLog(`[swiz] REST_QUERY for ${args.join(" ")}`)
-  const raw = await fetchViaRest(mapping.endpoint, cwd)
-  if (raw === null) return null
-  return (mapping.normalize ? mapping.normalize(raw) : raw) as T
+
+  const { getRepoSlug } = await import("./git-helpers.ts")
+  const repo = (await getRepoSlug(cwd)) ?? "unknown"
+
+  const { getIssueStore } = await import("./issue-store.ts")
+  const s = store ?? getIssueStore()
+
+  const endpoint = mapping.endpoint
+  const cached = s.getHttpCache(repo, endpoint)
+
+  debugLog(`[swiz] REST_QUERY for ${args.join(" ")} (cached etag: ${cached?.etag})`)
+  const result = await fetchViaRest(endpoint, cwd, cached?.etag)
+  if (result === null) return null
+
+  if (result.status === 304 && cached) {
+    debugLog(`[swiz] REST_CACHE_HIT (304 Not Modified) for ${endpoint}`)
+    try {
+      const bodyObj = JSON.parse(cached.data)
+      return (mapping.normalize ? mapping.normalize(bodyObj) : bodyObj) as T
+    } catch {
+      return null
+    }
+  }
+
+  if (result.status && result.status >= 200 && result.status < 300) {
+    const etag = result.headers["etag"]
+    if (etag) {
+      debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${endpoint}`)
+      s.setHttpCache(repo, endpoint, etag, result.body)
+    }
+    try {
+      const bodyObj = JSON.parse(result.body)
+      return (mapping.normalize ? mapping.normalize(bodyObj) : bodyObj) as T
+    } catch {
+      return null
+    }
+  }
+
+  return null
 }
 
 // ─── Mutation REST fallback (used when GraphQL is rate-limited) ───────────
