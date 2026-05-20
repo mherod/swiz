@@ -45,6 +45,7 @@ import {
   isBlockedTaskFilePath,
   SWIZ_TASKS_CLI_DENY_MESSAGE,
 } from "../src/tasks/task-cli-governance.ts"
+import { getCurrentComplianceEntry } from "../src/tasks/task-compliance-history.ts"
 import {
   applyTaskUpdateEvent,
   needsReconciliation,
@@ -1936,6 +1937,28 @@ async function buildTraceContext(rawInput: unknown): Promise<string> {
   }
 }
 
+export const COMPLIANCE_SUPPRESS_THRESHOLD_MS = 30_000
+
+/** Pure check: returns true when the given entry represents 30+ seconds of healthy compliance. */
+export function isComplianceSuppressible(
+  entry: { state: string; at: number } | null,
+  now = Date.now()
+): boolean {
+  if (!entry || entry.state !== "healthy") return false
+  return now - entry.at >= COMPLIANCE_SUPPRESS_THRESHOLD_MS
+}
+
+async function shouldSuppressGovernanceTrace(input: Record<string, any>): Promise<boolean> {
+  const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
+  if (!sessionId) return false
+  try {
+    const entry = await getCurrentComplianceEntry(sessionId)
+    return isComplianceSuppressible(entry)
+  } catch {
+    return false
+  }
+}
+
 const pretooluseTaskGovernance: SwizToolHook = {
   name: "pretooluse-task-governance",
   event: "preToolUse",
@@ -1945,10 +1968,8 @@ const pretooluseTaskGovernance: SwizToolHook = {
     try {
       const result = await evaluatePretooluseTaskGovernance(input)
       if (isDenyOutput(result)) return result
+      if (await shouldSuppressGovernanceTrace(input as Record<string, any>)) return {}
       const trace = await buildTraceContext(input)
-      // Always emit task governance context — never suppress.
-      // This ensures the agent always sees its task state and
-      // makes governance enforcement visible and auditable.
       return {
         systemMessage: trace,
         hookSpecificOutput: hookSpecificOutputSchema.parse({
