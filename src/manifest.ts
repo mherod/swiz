@@ -37,6 +37,7 @@ import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
 import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
+import pretooluseApplyRscGate from "../hooks/pretooluse-apply-rsc-gate.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
 import pretooluseBlockPreexistingDismissals from "../hooks/pretooluse-block-preexisting-dismissals.ts"
@@ -311,6 +312,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
+      { hook: pretooluseApplyRscGate },
       { hook: pretooluseSandboxedEdits },
       { hook: pretooluseSandboxGuidanceConsolidation },
       { hook: pretoolusJsonValidation },
