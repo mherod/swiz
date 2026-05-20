@@ -16,10 +16,30 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
+import { recordComplianceState } from "../src/tasks/task-compliance-history.ts"
 import { buildCountSummary, buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
+
+function recordComplianceFromTasks(
+  sessionId: string,
+  tasks: ReadonlyArray<{ id: string; status: string }>
+): Promise<boolean> {
+  let pending = 0
+  let inProgress = 0
+  let incomplete = 0
+  for (const t of tasks) {
+    if (t.status === "pending") {
+      pending++
+      incomplete++
+    } else if (t.status === "in_progress") {
+      inProgress++
+      incomplete++
+    }
+  }
+  return recordComplianceState(sessionId, { pending, inProgress, incomplete })
+}
 
 export { buildCountSummary, buildCountSummaryFromTasks }
 
@@ -69,6 +89,7 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   const eventState = getSessionEventState(sessionId)
   if (eventState && eventState.length > 0) {
     const hints = await hintsPromise
+    recordComplianceFromTasks(sessionId, eventState).catch(() => {})
     return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(eventState, hints))
   }
 
@@ -90,6 +111,7 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   if (tasks.length === 0) return {}
 
   const hints = await hintsPromise
+  recordComplianceFromTasks(sessionId, tasks).catch(() => {})
   return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(tasks, hints))
 }
 

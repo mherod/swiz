@@ -255,6 +255,10 @@ export interface DaemonWebServerContext {
   prReviewMonitor: PrReviewMonitor
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
   recentHookAllowMessages: CappedMap<string, string>
+  sessionComplianceState: CappedMap<
+    string,
+    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+  >
 }
 
 /** Hard request-level timeout for daemon dispatch (ms).
@@ -1449,7 +1453,57 @@ async function handleStatusLineSnapshot(
     ctx.resolveSnapshot(body.cwd, sessionId),
     resolveTaskCountsFromCache(sessionId, ctx.taskStateCache),
   ])
-  return Response.json({ snapshot: { ...snapshot, taskCounts } })
+  const complianceDurationLabel = sessionId
+    ? resolveComplianceDurationLabel(sessionId, ctx.sessionComplianceState)
+    : null
+  return Response.json({ snapshot: { ...snapshot, taskCounts, complianceDurationLabel } })
+}
+
+export function resolveComplianceDurationLabel(
+  sessionId: string,
+  store: DaemonWebServerContext["sessionComplianceState"]
+): string | null {
+  const entry = store.get(sessionId)
+  if (!entry?.current) return null
+  const ms = Date.now() - entry.current.at
+  const secs = Math.floor(ms / 1000)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m`
+  return `${Math.floor(mins / 60)}h`
+}
+
+async function handleComplianceRecord(
+  req: Request,
+  ctx: DaemonWebServerContext
+): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    sessionId?: string
+    state?: string
+    at?: number
+  } | null
+  if (typeof body?.sessionId !== "string" || !body.sessionId || typeof body?.state !== "string") {
+    return Response.json({ error: "Missing required fields: sessionId, state" }, { status: 400 })
+  }
+  const at = typeof body.at === "number" ? body.at : Date.now()
+  const entry = { state: body.state, at }
+  const existing = ctx.sessionComplianceState.get(body.sessionId)
+  const transitioned = existing?.current?.state !== body.state
+  if (transitioned) {
+    const transitions = existing?.transitions ?? []
+    transitions.push(entry)
+    ctx.sessionComplianceState.set(body.sessionId, { current: entry, transitions })
+  }
+  return Response.json({ transitioned })
+}
+
+function handleComplianceCurrent(url: URL, ctx: DaemonWebServerContext): Response {
+  const sessionId = url.searchParams.get("sessionId")
+  if (!sessionId) {
+    return Response.json({ error: "Missing required query param: sessionId" }, { status: 400 })
+  }
+  const entry = ctx.sessionComplianceState.get(sessionId)
+  return Response.json({ current: entry?.current ?? null })
 }
 
 type TopRouteHandler = (
@@ -1483,6 +1537,8 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /projects/sync-now": (req, _url, ctx) => handleProjectSyncNow(req, ctx),
   "GET /cache/status": (_req, _url, ctx) => handleCacheStatus(ctx),
   "POST /status-line/snapshot": (req, _url, ctx) => handleStatusLineSnapshot(req, ctx),
+  "POST /compliance/record": (req, _url, ctx) => handleComplianceRecord(req, ctx),
+  "GET /compliance/current": (_req, url, ctx) => handleComplianceCurrent(url, ctx),
 }
 
 async function handleTopLevelRoutes(

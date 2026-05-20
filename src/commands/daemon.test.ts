@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import type { Session } from "../transcript-utils.ts"
+import { CappedMap } from "./daemon/cache/capped-map.ts"
 import { CiWatchRegistry, verifyWebhookSignature } from "./daemon/ci-watch-registry.ts"
 import {
   CooldownRegistry,
@@ -20,6 +21,7 @@ import {
 } from "./daemon/runtime-cache.ts"
 import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
 import type { CapturedToolCall, SessionToolUsageState } from "./daemon/utils.ts"
+import { resolveComplianceDurationLabel } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import { hydratePersistedSessionToolState } from "./daemon.ts"
 
@@ -1160,5 +1162,54 @@ describe("CiWatchRegistry.handleWebhookConclusion", () => {
     expect(registry.listActive()).toHaveLength(1)
     expect(notifications).toHaveLength(0)
     registry.close()
+  })
+})
+
+describe("compliance daemon routes", () => {
+  type ComplianceStore = CappedMap<
+    string,
+    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+  >
+
+  function makeStore(): ComplianceStore {
+    return new CappedMap(100)
+  }
+
+  it("resolveComplianceDurationLabel returns null for unknown session", () => {
+    const store = makeStore()
+    expect(resolveComplianceDurationLabel("unknown-session", store)).toBeNull()
+  })
+
+  it("resolveComplianceDurationLabel returns null when current is null", () => {
+    const store = makeStore()
+    store.set("sess1", { current: null, transitions: [] })
+    expect(resolveComplianceDurationLabel("sess1", store)).toBeNull()
+  })
+
+  it("resolveComplianceDurationLabel returns seconds label for recent entry", () => {
+    const store = makeStore()
+    store.set("sess1", { current: { state: "healthy", at: Date.now() - 30_000 }, transitions: [] })
+    const label = resolveComplianceDurationLabel("sess1", store)
+    expect(label).toMatch(/^\d+s$/)
+  })
+
+  it("resolveComplianceDurationLabel returns minutes label for older entry", () => {
+    const store = makeStore()
+    store.set("sess1", {
+      current: { state: "unhealthy", at: Date.now() - 3 * 60_000 },
+      transitions: [],
+    })
+    const label = resolveComplianceDurationLabel("sess1", store)
+    expect(label).toMatch(/^\d+m$/)
+  })
+
+  it("resolveComplianceDurationLabel returns hours label for very old entry", () => {
+    const store = makeStore()
+    store.set("sess1", {
+      current: { state: "healthy", at: Date.now() - 2 * 60 * 60_000 },
+      transitions: [],
+    })
+    const label = resolveComplianceDurationLabel("sess1", store)
+    expect(label).toMatch(/^\d+h$/)
   })
 })

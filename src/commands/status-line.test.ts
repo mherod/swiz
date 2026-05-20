@@ -443,6 +443,25 @@ describe("formatTaskCountSegment", () => {
     expect(seg).not.toContain("👎")
   })
 
+  it("appends duration label after governance indicator when provided", () => {
+    const counts = { total: 5, incomplete: 3, pending: 2, inProgress: 1 }
+    const seg = formatTaskCountSegment(counts, "5m")
+    expect(seg).toContain("👍")
+    expect(seg).toContain("5m")
+    const segDown = formatTaskCountSegment(
+      { total: 1, incomplete: 1, pending: 0, inProgress: 1 },
+      "12s"
+    )
+    expect(segDown).toContain("👎")
+    expect(segDown).toContain("12s")
+  })
+
+  it("shows indicator without duration when label is null", () => {
+    const seg = formatTaskCountSegment({ total: 5, incomplete: 3, pending: 2, inProgress: 1 }, null)
+    expect(seg).toContain("👍")
+    expect(seg).not.toContain("null")
+  })
+
   it("builds counts from task array", () => {
     const tasks = [
       { status: "in_progress" },

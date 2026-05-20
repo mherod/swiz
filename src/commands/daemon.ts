@@ -98,6 +98,10 @@ function createDaemonState() {
   const sessionToolUsage = new CappedMap<string, SessionToolUsageState>(30)
   const activeHookDispatches = new CappedMap<string, ActiveHookDispatch>(10)
   const recentHookAllowMessages = new CappedMap<string, string>(128)
+  const sessionComplianceState = new CappedMap<
+    string,
+    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+  >(200)
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {
     let m = projectMetrics.get(cwd)
@@ -120,6 +124,7 @@ function createDaemonState() {
     sessionToolUsage,
     activeHookDispatches,
     recentHookAllowMessages,
+    sessionComplianceState,
     getProjectMetrics,
     touchProject,
   }
@@ -551,6 +556,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     sessionToolUsage: state.sessionToolUsage,
     activeHookDispatches: state.activeHookDispatches,
     recentHookAllowMessages: state.recentHookAllowMessages,
+    sessionComplianceState: state.sessionComplianceState,
     projectMetrics: state.projectMetrics,
     ghCache: caches.ghCache,
     eligibilityCache: caches.eligibilityCache,
