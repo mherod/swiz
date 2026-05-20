@@ -36,7 +36,14 @@ async function gitStatusLines(cwd: string): Promise<string[]> {
   return out.split("\n").filter(Boolean)
 }
 
-async function getLastCommitAgeMs(cwd: string): Promise<number | null> {
+async function getLastCommitAgeMs(cwd: string, sessionId: string): Promise<number | null> {
+  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
+    import("../src/issue-store.ts"),
+    import("../src/project-key.ts"),
+  ])
+  const recordedCommitAt = getIssueStore().getLastSessionCommitAt(projectKeyFromCwd(cwd), sessionId)
+  if (recordedCommitAt !== null) return Date.now() - recordedCommitAt
+
   const ts = parseInt(await git(["log", "-1", "--format=%ct"], cwd), 10)
   if (Number.isNaN(ts)) return null
   return Date.now() - ts * 1000
@@ -73,7 +80,7 @@ async function detectDriftSignal(cwd: string, safeSession: string): Promise<stri
     return `${statusLines.length} uncommitted files`
   }
 
-  const lastCommitAge = await getLastCommitAgeMs(cwd)
+  const lastCommitAge = await getLastCommitAgeMs(cwd, safeSession)
   if (lastCommitAge !== null && lastCommitAge > TWO_HOURS_MS && statusLines.length > 0) {
     const totalMins = Math.floor(lastCommitAge / 60000)
     const hours = Math.floor(totalMins / 60)

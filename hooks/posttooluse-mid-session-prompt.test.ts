@@ -4,6 +4,8 @@ setDefaultTimeout(30_000)
 
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { IssueStore } from "../src/issue-store.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = join(import.meta.dir, "posttooluse-mid-session-prompt.ts")
@@ -24,14 +26,15 @@ interface HookResult {
 async function runHook(
   cwd: string,
   transcriptPath: string,
-  extraInput: Record<string, unknown> = {}
+  extraInput: Record<string, unknown> = {},
+  envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const proc = Bun.spawn(["bun", HOOK], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     cwd,
-    env: { ...process.env },
+    env: { ...process.env, ...envOverrides },
   })
   await proc.stdin.write(
     JSON.stringify({
@@ -214,6 +217,35 @@ describe("posttooluse-mid-session-prompt", () => {
     expect(result.additionalContext).toBeDefined()
     expect(result.additionalContext).toContain("ago with dirty tree")
     expect(result.additionalContext).toContain("mid-session-checkin")
+  })
+
+  test("recent session commit record suppresses stale git-log signal", async () => {
+    const dir = await tmp.create()
+    const home = await tmp.create()
+    await initGitRepo(dir)
+    await makeCommit(dir, "init.txt")
+    for (let i = 0; i < 3; i++) {
+      await writeFile(join(dir, `dirty-${i}.txt`), "x")
+    }
+    const store = new IssueStore(join(home, ".swiz", "issues.db"))
+    try {
+      store.recordSessionCommit(projectKeyFromCwd(dir), "test-session", Date.now())
+    } finally {
+      store.close()
+    }
+    const transcriptPath = await createTranscript(dir)
+
+    const result = await runHook(
+      dir,
+      transcriptPath,
+      {
+        _testSessionStartMs: OLD_START,
+      },
+      { HOME: home }
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+    expect(result.additionalContext).toBeUndefined()
   })
 
   test("(h) enforceMidSessionCheckin false → no suggestion", async () => {

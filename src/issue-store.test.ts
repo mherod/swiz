@@ -456,6 +456,49 @@ describe("Cross-repo isolation", () => {
   })
 })
 
+describe("Session commit tracking", () => {
+  test("records the latest commit timestamp for a project/session pair", () => {
+    const store = createStore()
+    try {
+      const projectKey = "-Users-me-work-repo"
+      const sessionId = "session-a"
+
+      expect(store.getLastSessionCommitAt(projectKey, sessionId)).toBeNull()
+
+      store.recordSessionCommit(projectKey, sessionId, 1000)
+      expect(store.getLastSessionCommitAt(projectKey, sessionId)).toBe(1000)
+
+      const record = store.getSessionCommitRecord(projectKey, sessionId)
+      expect(record).not.toBeNull()
+      expect(record).toMatchObject({
+        project_key: projectKey,
+        session_id: sessionId,
+        last_commit_at: 1000,
+      })
+      expect(record!.updated_at).toBeGreaterThanOrEqual(1000)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("keeps the latest timestamp and isolates projects and sessions", () => {
+    const store = createStore()
+    try {
+      store.recordSessionCommit("project-a", "session-a", 2000)
+      store.recordSessionCommit("project-a", "session-a", 1500)
+      store.recordSessionCommit("project-a", "session-b", 3000)
+      store.recordSessionCommit("project-b", "session-a", 4000)
+
+      expect(store.getLastSessionCommitAt("project-a", "session-a")).toBe(2000)
+      expect(store.getLastSessionCommitAt("project-a", "session-b")).toBe(3000)
+      expect(store.getLastSessionCommitAt("project-b", "session-a")).toBe(4000)
+      expect(store.getLastSessionCommitAt("project-b", "session-b")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+})
+
 describe("replayPendingMutations", () => {
   test("discards mutations that exceed max attempts", async () => {
     const store = createStore()

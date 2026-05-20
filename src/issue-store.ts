@@ -7,6 +7,7 @@
  * - `pull_requests`: TTL-cached PR read store
  * - `ci_status`: TTL-cached CI run status per commit SHA
  * - `pending_mutations`: Queued outbound mutations for offline replay
+ * - `session_commits`: Last commit timestamp per project key + session
  */
 
 import { Database, type Statement } from "bun:sqlite"
@@ -62,6 +63,13 @@ export interface CachedComment {
   comment_id: number
   data: string // JSON blob matching gh issue comment output
   synced_at: number
+}
+
+export interface SessionCommitRecord {
+  project_key: string
+  session_id: string
+  last_commit_at: number
+  updated_at: number
 }
 
 export type MutationType =
@@ -468,6 +476,19 @@ export class IssueStore {
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (repo, endpoint)
       )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS session_commits (
+        project_key TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        last_commit_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (project_key, session_id)
+      )
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_session_commits_project_last_commit
+      ON session_commits (project_key, last_commit_at)
     `)
   }
 
@@ -1104,6 +1125,35 @@ export class IssueStore {
       .run(repo, endpoint, etag, data, Date.now())
   }
 
+  // ─── Session commit tracking ───────────────────────────────────────────
+
+  /** Record the latest commit performed by a session within a project. */
+  recordSessionCommit(projectKey: string, sessionId: string, committedAt = Date.now()): void {
+    this.db
+      .query(
+        "INSERT INTO session_commits (project_key, session_id, last_commit_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(project_key, session_id) DO UPDATE SET last_commit_at = MAX(session_commits.last_commit_at, excluded.last_commit_at), updated_at = excluded.updated_at"
+      )
+      .run(projectKey, sessionId, committedAt, Date.now())
+  }
+
+  /** Return the latest commit timestamp for a project/session pair, or null when absent. */
+  getLastSessionCommitAt(projectKey: string, sessionId: string): number | null {
+    const row = this.db
+      .query("SELECT last_commit_at FROM session_commits WHERE project_key = ? AND session_id = ?")
+      .get(projectKey, sessionId) as { last_commit_at: number } | undefined
+    return row?.last_commit_at ?? null
+  }
+
+  /** Return the full persisted commit-tracking row for debugging or tests. */
+  getSessionCommitRecord(projectKey: string, sessionId: string): SessionCommitRecord | null {
+    const row = this.db
+      .query(
+        "SELECT project_key, session_id, last_commit_at, updated_at FROM session_commits WHERE project_key = ? AND session_id = ?"
+      )
+      .get(projectKey, sessionId) as SessionCommitRecord | undefined
+    return row ?? null
+  }
+
   // ─── Cache management ───────────────────────────────────────────────────
 
   /** Clear all cached data (issues, PRs, CI, labels, milestones, branch protection, event log, sync cursors) for a repo. Preserves pending mutations. */
@@ -1360,6 +1410,8 @@ function createNoOpStore(): IssueStore {
     "getCiStatus",
     "getCiBranchRuns",
     "getPrBranchDetail",
+    "getLastSessionCommitAt",
+    "getSessionCommitRecord",
   ])
 
   const warnOnFirstRead = (method: string | symbol) => {

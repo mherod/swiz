@@ -112,6 +112,14 @@ function resolveGitOp(
   return { sessionId, isCommit, isPush }
 }
 
+async function recordCommitForSession(sessionId: string, cwd: string): Promise<void> {
+  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
+    import("../src/issue-store.ts"),
+    import("../src/project-key.ts"),
+  ])
+  getIssueStore().recordSessionCommit(projectKeyFromCwd(cwd), sessionId)
+}
+
 export async function evaluatePosttooluseGitTaskAutocomplete(
   input: unknown
 ): Promise<SwizHookOutput> {
@@ -120,6 +128,11 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
   const hookInput = toolHookInputSchema.parse(input)
   const op = resolveGitOp(hookInput)
   if (!op) return {}
+  const cwd = hookInput.cwd ?? process.cwd()
+
+  if (op.isCommit) {
+    await recordCommitForSession(op.sessionId, cwd)
+  }
 
   const home = homedir()
   const tasksDir = getSessionTasksDir(op.sessionId, home)
@@ -135,7 +148,6 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
   )
 
   if (op.isPush) {
-    const cwd = hookInput.cwd ?? process.cwd()
     return buildContextHookOutput("PostToolUse", await buildPushContext(op.sessionId, cwd))
   }
   return {}

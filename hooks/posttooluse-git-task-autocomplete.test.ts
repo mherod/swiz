@@ -3,6 +3,8 @@ import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import { IssueStore } from "../src/issue-store.ts"
+import { projectKeyFromCwd } from "../src/project-key.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -204,6 +206,41 @@ describe("posttooluse-git-task-autocomplete: git commit exits silently", () => {
     const result = await runHook('git commit -m "feat: something"')
     expect(result.exitedCleanly).toBe(true)
     expect(result.rawOutput.trim()).toBe("")
+  })
+
+  test("git commit records the last commit timestamp for project and session", async () => {
+    const home = await createTempHomeWithSettings({})
+    const cwd = await isolatedProjectCwd()
+    const sessionId = "commit-session-id"
+
+    try {
+      const before = Date.now()
+      const result = await runHook(
+        'git commit -m "feat: something"',
+        "Bash",
+        sessionId,
+        { HOME: home },
+        cwd
+      )
+      const after = Date.now()
+
+      expect(result.exitedCleanly).toBe(true)
+      expect(result.rawOutput.trim()).toBe("")
+
+      const store = new IssueStore(join(home, ".swiz", "issues.db"))
+      try {
+        const recorded = store.getLastSessionCommitAt(projectKeyFromCwd(cwd), sessionId)
+        expect(recorded).not.toBeNull()
+        expect(recorded!).toBeGreaterThanOrEqual(before)
+        expect(recorded!).toBeLessThanOrEqual(after)
+        expect(store.getLastSessionCommitAt(projectKeyFromCwd(cwd), "other-session")).toBeNull()
+      } finally {
+        store.close()
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
+    }
   })
 
   test("git commit --amend exits silently", async () => {
