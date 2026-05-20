@@ -2,9 +2,16 @@ import { getDaemonPort } from "../commands/daemon/daemon-admin.ts"
 
 export type ComplianceState = "healthy" | "unhealthy"
 
+export interface TaskActivityDuration {
+  id: string
+  status: string
+  durationMs: number
+}
+
 export interface ComplianceEntry {
   state: ComplianceState
   at: number
+  taskDurations?: TaskActivityDuration[]
 }
 
 interface ComplianceCounts {
@@ -30,7 +37,8 @@ export function formatComplianceDuration(entry: ComplianceEntry): string {
 /** Fire-and-forget POST to daemon to record compliance state. Silent on failure. */
 export async function recordComplianceState(
   sessionId: string,
-  counts: ComplianceCounts
+  counts: ComplianceCounts,
+  taskDurations?: TaskActivityDuration[]
 ): Promise<boolean> {
   const state = computeComplianceState(counts)
   const port = getDaemonPort()
@@ -38,7 +46,7 @@ export async function recordComplianceState(
     const res = await fetch(`http://127.0.0.1:${port}/compliance/record`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, state, at: Date.now() }),
+      body: JSON.stringify({ sessionId, state, at: Date.now(), taskDurations }),
       signal: AbortSignal.timeout(500),
     })
     if (!res.ok) return false

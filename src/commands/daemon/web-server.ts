@@ -257,7 +257,18 @@ export interface DaemonWebServerContext {
   recentHookAllowMessages: CappedMap<string, string>
   sessionComplianceState: CappedMap<
     string,
-    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+    {
+      current: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      } | null
+      transitions: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      }[]
+    }
   >
 }
 
@@ -1481,18 +1492,23 @@ async function handleComplianceRecord(
     sessionId?: string
     state?: string
     at?: number
+    taskDurations?: Array<{ id: string; status: string; durationMs: number }>
   } | null
   if (typeof body?.sessionId !== "string" || !body.sessionId || typeof body?.state !== "string") {
     return Response.json({ error: "Missing required fields: sessionId, state" }, { status: 400 })
   }
   const at = typeof body.at === "number" ? body.at : Date.now()
-  const entry = { state: body.state, at }
+  const taskDurations = Array.isArray(body.taskDurations) ? body.taskDurations : undefined
   const existing = ctx.sessionComplianceState.get(body.sessionId)
   const transitioned = existing?.current?.state !== body.state
   if (transitioned) {
     const transitions = existing?.transitions ?? []
+    const entry = { state: body.state, at, taskDurations }
     transitions.push(entry)
     ctx.sessionComplianceState.set(body.sessionId, { current: entry, transitions })
+  } else if (existing?.current && taskDurations) {
+    // Refresh task durations on the current entry without resetting `at`.
+    existing.current.taskDurations = taskDurations
   }
   return Response.json({ transitioned })
 }

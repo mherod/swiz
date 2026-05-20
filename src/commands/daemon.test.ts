@@ -1168,7 +1168,18 @@ describe("CiWatchRegistry.handleWebhookConclusion", () => {
 describe("compliance daemon routes", () => {
   type ComplianceStore = CappedMap<
     string,
-    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+    {
+      current: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      } | null
+      transitions: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      }[]
+    }
   >
 
   function makeStore(): ComplianceStore {
@@ -1211,5 +1222,37 @@ describe("compliance daemon routes", () => {
     })
     const label = resolveComplianceDurationLabel("sess1", store)
     expect(label).toMatch(/^\d+h$/)
+  })
+
+  it("stores task activity durations on compliance entry", () => {
+    const store = makeStore()
+    const taskDurations = [
+      { id: "1", status: "in_progress", durationMs: 600_000 },
+      { id: "2", status: "pending", durationMs: 120_000 },
+    ]
+    store.set("sess1", {
+      current: { state: "unhealthy", at: Date.now() - 60_000, taskDurations },
+      transitions: [{ state: "unhealthy", at: Date.now() - 60_000, taskDurations }],
+    })
+    const entry = store.get("sess1")
+    expect(entry?.current?.taskDurations).toHaveLength(2)
+    expect(entry?.current?.taskDurations?.[0]).toMatchObject({
+      id: "1",
+      status: "in_progress",
+      durationMs: 600_000,
+    })
+  })
+
+  it("duration label is independent of taskDurations payload", () => {
+    const store = makeStore()
+    store.set("sess1", {
+      current: {
+        state: "unhealthy",
+        at: Date.now() - 90_000,
+        taskDurations: [{ id: "1", status: "in_progress", durationMs: 90_000 }],
+      },
+      transitions: [],
+    })
+    expect(resolveComplianceDurationLabel("sess1", store)).toMatch(/^1m$/)
   })
 })

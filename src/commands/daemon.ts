@@ -100,7 +100,18 @@ function createDaemonState() {
   const recentHookAllowMessages = new CappedMap<string, string>(128)
   const sessionComplianceState = new CappedMap<
     string,
-    { current: { state: string; at: number } | null; transitions: { state: string; at: number }[] }
+    {
+      current: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      } | null
+      transitions: {
+        state: string
+        at: number
+        taskDurations?: Array<{ id: string; status: string; durationMs: number }>
+      }[]
+    }
   >(200)
 
   const getProjectMetrics = (cwd: string): DaemonMetrics => {

@@ -16,15 +16,28 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
-import { recordComplianceState } from "../src/tasks/task-compliance-history.ts"
+import {
+  recordComplianceState,
+  type TaskActivityDuration,
+} from "../src/tasks/task-compliance-history.ts"
 import { buildCountSummary, buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import { getSessionEventState } from "../src/tasks/task-event-state.ts"
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
+import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+
+type TimedTask = {
+  id: string
+  status: string
+  startedAt?: number | null
+  elapsedMs?: number | null
+  statusChangedAt?: string | null
+}
 
 function recordComplianceFromTasks(
   sessionId: string,
-  tasks: ReadonlyArray<{ id: string; status: string }>
+  tasks: ReadonlyArray<{ id: string; status: string }>,
+  timedTasks?: ReadonlyArray<TimedTask>
 ): Promise<boolean> {
   let pending = 0
   let inProgress = 0
@@ -38,7 +51,14 @@ function recordComplianceFromTasks(
       incomplete++
     }
   }
-  return recordComplianceState(sessionId, { pending, inProgress, incomplete })
+  const taskDurations: TaskActivityDuration[] | undefined = timedTasks
+    ?.filter((t) => t.status === "in_progress" || t.status === "pending")
+    .map((t) => ({
+      id: t.id,
+      status: t.status,
+      durationMs: getTaskCurrentDurationMs(t),
+    }))
+  return recordComplianceState(sessionId, { pending, inProgress, incomplete }, taskDurations)
 }
 
 export { buildCountSummary, buildCountSummaryFromTasks }
@@ -111,7 +131,7 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   if (tasks.length === 0) return {}
 
   const hints = await hintsPromise
-  recordComplianceFromTasks(sessionId, tasks).catch(() => {})
+  recordComplianceFromTasks(sessionId, tasks, diskTasks).catch(() => {})
   return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(tasks, hints))
 }
 
