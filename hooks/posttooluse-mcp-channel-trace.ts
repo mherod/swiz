@@ -41,9 +41,16 @@ function agentNameForTrace(raw: Record<string, unknown>): string {
   return formatTraceValue(detectCurrentAgentFromHookPayload(raw)?.name ?? "unknown")
 }
 
+function areMcpChannelsEnabled(raw: Record<string, unknown>): boolean {
+  const settings = raw._effectiveSettings
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return false
+  return (settings as Record<string, unknown>).mcpChannels === true
+}
+
 export function buildMcpChannelTrace(input: unknown): string | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
+  if (!areMcpChannelsEnabled(raw)) return null
   const parsed = toolHookInputSchema.parse(raw)
   const cwd = parsed.cwd
   const availability = getMcpChannelAvailability(cwd)
@@ -87,6 +94,7 @@ const posttooluseMcpChannelTrace: SwizHook<Record<string, unknown>> = {
   name: "posttooluse-mcp-channel-trace",
   event: "postToolUse",
   timeout: 2,
+  requiredSettings: ["mcpChannels"],
   run(input) {
     return evaluatePosttooluseMcpChannelTrace(input)
   },

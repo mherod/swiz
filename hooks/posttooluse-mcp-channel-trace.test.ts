@@ -49,6 +49,32 @@ afterEach(async () => {
 })
 
 describe("posttooluse-mcp-channel-trace", () => {
+  test("does not emit when MCP channels are disabled or missing", async () => {
+    const cwd = await makeCwd()
+    await writeLiveStatus(cwd)
+
+    expect(
+      buildMcpChannelTrace({
+        session_id: "session",
+        cwd,
+        tool_name: "Bash",
+        tool_input: {},
+        _terminal: { app: "iterm2", name: "iTerm2" },
+        _effectiveSettings: { mcpChannels: false },
+      })
+    ).toBeNull()
+
+    expect(
+      buildMcpChannelTrace({
+        session_id: "session",
+        cwd,
+        tool_name: "Bash",
+        tool_input: {},
+        _terminal: { app: "iterm2", name: "iTerm2" },
+      })
+    ).toBeNull()
+  })
+
   test("reports AppleScript transport even when the channel is missing", () => {
     const trace = buildMcpChannelTrace({
       session_id: "session",
@@ -56,6 +82,7 @@ describe("posttooluse-mcp-channel-trace", () => {
       tool_name: "Bash",
       tool_input: {},
       _terminal: { app: "apple-terminal", name: "Terminal.app" },
+      _effectiveSettings: { mcpChannels: true },
     })
 
     expect(trace).toContain("transport=applescript")
@@ -71,6 +98,7 @@ describe("posttooluse-mcp-channel-trace", () => {
       tool_input: {},
       _env: { CODEX_THREAD_ID: "thread" },
       _terminal: { app: "unknown", name: "Unknown" },
+      _effectiveSettings: { mcpChannels: true },
     })
 
     expect(trace).toContain("agent=Codex-CLI")
@@ -86,6 +114,7 @@ describe("posttooluse-mcp-channel-trace", () => {
       tool_name: "Read",
       tool_input: {},
       _terminal: { app: "cursor", name: "Cursor" },
+      _effectiveSettings: { mcpChannels: true },
     })
 
     expect(trace).toContain("transport=mcp-channel")
@@ -103,6 +132,7 @@ describe("posttooluse-mcp-channel-trace", () => {
       tool_name: "Edit",
       tool_input: {},
       _terminal: { app: "unknown", name: "Unknown" },
+      _effectiveSettings: { mcpChannels: true },
     })
 
     expect("hookSpecificOutput" in output).toBe(true)
