@@ -1448,6 +1448,8 @@ async function resolveTaskCountsFromCache(
   }
 }
 
+const STALE_SYNC_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
+
 async function handleStatusLineSnapshot(
   req: Request,
   ctx: DaemonWebServerContext
@@ -1467,7 +1469,13 @@ async function handleStatusLineSnapshot(
   const complianceDurationLabel = sessionId
     ? resolveComplianceDurationLabel(sessionId, ctx.sessionComplianceState)
     : null
-  return Response.json({ snapshot: { ...snapshot, taskCounts, complianceDurationLabel } })
+  const syncEntry = ctx.upstreamSyncRegistry.listActive().find((e) => e.cwd === body.cwd)
+  const issueSyncStale = syncEntry
+    ? syncEntry.lastSyncAt === null || Date.now() - syncEntry.lastSyncAt > STALE_SYNC_THRESHOLD_MS
+    : null
+  return Response.json({
+    snapshot: { ...snapshot, taskCounts, complianceDurationLabel, issueSyncStale },
+  })
 }
 
 export function resolveComplianceDurationLabel(

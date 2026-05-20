@@ -63,6 +63,8 @@ export interface WarmStatusLineSnapshot {
   taskCounts?: TaskCounts | null
   complianceDurationLabel?: string | null
   activeSkills?: string[] | null
+  /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
+  issueSyncStale?: boolean | null
 }
 
 export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -841,6 +843,7 @@ function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
   const liveness = LIVENESS_EMOJI[snapshot.fetchStatus] ?? ""
   if (snapshot.fetchStatus === "error") return `${liveness} ${DIM}no data${R}`
   const staleMark = snapshot.fetchStatus === "stale" ? ` ${DIM}(stale)${R}` : ""
+  const syncStaleMark = snapshot.issueSyncStale ? ` \x1b[93m⚠ sync${R}` : ""
   const issueSeg =
     snapshot.issueCount !== null
       ? formatCountSegment(snapshot.issueCount, "issue", "issues", 10, 25)
@@ -851,7 +854,9 @@ function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
     snapshot.issueCount !== null || snapshot.prCount !== null
       ? [issueSeg, prSeg].filter(Boolean).join("  ")
       : ""
-  return counts ? `${liveness} ${counts}${staleMark}` : liveness
+  return counts
+    ? `${liveness} ${counts}${staleMark}${syncStaleMark}`
+    : `${liveness}${syncStaleMark}`
 }
 
 function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {

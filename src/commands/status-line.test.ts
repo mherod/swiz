@@ -557,3 +557,69 @@ describe("active skills rendering", () => {
     expect(out).not.toContain("/fix-tests")
   })
 })
+
+describe("issueSyncStale warning in backlog segment", () => {
+  const baseSnap = {
+    shortCwd: "swiz",
+    gitInfo: "✦ main",
+    gitBranch: "main",
+    activeSegments: [] as string[],
+    ciState: "none" as const,
+    ciLabel: "",
+    issueCount: 3,
+    prCount: 1,
+    fetchStatus: "ok" as const,
+    reviewDecision: "",
+    commentCount: 0,
+    projectState: null,
+    settingsParts: [],
+  }
+
+  it("shows sync warning in backlog when issueSyncStale is true", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, issueSyncStale: true },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("⚠ sync")
+  })
+
+  it("omits sync warning when issueSyncStale is false", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, issueSyncStale: false },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("⚠ sync")
+  })
+
+  it("omits sync warning when issueSyncStale is null (non-daemon path)", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, issueSyncStale: null },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("⚠ sync")
+  })
+
+  it("shows sync warning even when issue/PR counts are zero", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, issueCount: 0, prCount: 0, issueSyncStale: true },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("⚠ sync")
+  })
+})
