@@ -10,6 +10,7 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type UserPromptSubmitHookInput, userPromptSubmitHookInputSchema } from "../src/schemas.ts"
+import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
 import {
   buildUserPromptTaskContext,
   getTaskToolName,
@@ -29,8 +30,11 @@ export async function evaluateUserpromptsubmitTaskAdvisor(input: unknown): Promi
   const tasks = await readSessionTasks(sessionId, home)
   const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
+  const countContext = buildCountSummaryFromTasks(tasks)
   const taskCreateName = getTaskToolName("TaskCreate")
-  const additionalContext = buildUserPromptTaskContext(pendingCount, taskCreateName)
+  const advisorContext = buildUserPromptTaskContext(pendingCount, taskCreateName)
+
+  const additionalContext = [countContext, advisorContext].filter(Boolean).join("\n\n")
 
   return buildContextHookOutput("UserPromptSubmit", additionalContext)
 }
