@@ -71,10 +71,17 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
     return buildContextHookOutput("UserPromptSubmit", combineContext(line, behavior.context))
   }
 
-  return buildContextHookOutput(
-    "UserPromptSubmit",
-    combineContext(buildGitContextLine(gitStatus, behavior.gitOptions), behavior.context)
-  )
+  let gitLine = buildGitContextLine(gitStatus, behavior.gitOptions)
+  if (gitStatus.total > 0 && gitStatus.lines && gitStatus.lines.length > 0) {
+    const maxFiles = 30
+    const visibleFiles = gitStatus.lines.slice(0, maxFiles)
+    const fileList = visibleFiles.map((file) => `  - ${file}`).join("\n")
+    const remainingCount = gitStatus.lines.length - maxFiles
+    const remainingSuffix = remainingCount > 0 ? `\n  ... and ${remainingCount} more file(s)` : ""
+    gitLine += `\nUncommitted files:\n${fileList}${remainingSuffix}`
+  }
+
+  return buildContextHookOutput("UserPromptSubmit", combineContext(gitLine, behavior.context))
 }
 
 const userpromptsubmitGitContext: SwizHook<Record<string, any>> = {
