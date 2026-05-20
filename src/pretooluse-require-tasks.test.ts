@@ -68,14 +68,27 @@ describe("pretooluse-require-tasks hook", () => {
     expect(result.parsed).toBeNull()
   })
 
-  test("allows exempt shell commands (git status)", async () => {
-    const result = await runHook({
-      tool_name: "Bash",
-      tool_input: { command: "git status" },
-      session_id: `test-exempt-${Date.now()}`,
-    })
-    expect(result.exitCode).toBe(0)
-    expect(result.parsed).toBeNull()
+  test("denies shell commands when task buffer is missing, even for read-only git", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-shell-governance-"))
+    const sessionId = `test-exempt-${Date.now()}`
+    await Bun.write(taskListSyncSentinelPath(sessionId), String(Date.now()))
+    try {
+      const result = await runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "git status" },
+          session_id: sessionId,
+        },
+        { HOME: tmpHome }
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed?.hookSpecificOutput?.permissionDecision).toBe("deny")
+      expect(String(result.parsed?.hookSpecificOutput?.permissionDecisionReason ?? "")).toContain(
+        "needs tasks in place first"
+      )
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+    }
   })
 
   test("allows CLAUDE.md edits without tasks", async () => {

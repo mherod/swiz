@@ -672,131 +672,70 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  describe("read-only git exemption", () => {
-    test("allows git status without any tasks", async () => {
+  describe("shell task governance", () => {
+    const blockedShellCommands = [
+      ["git status", "read-only git"],
+      ["git push origin main", "git sync"],
+      ['git commit -m "wip"', "git commit"],
+      ["bun test --concurrent", "test command"],
+      ["bun run lint", "lint command"],
+      ["ls -la", "read command"],
+      ["rg 'some pattern' src/", "search command"],
+      ["cat some-file.txt", "generic command"],
+    ] as const
+
+    for (const [command, label] of blockedShellCommands) {
+      test(`denies ${label} when task buffer is missing`, async () => {
+        const homeDir = await createTempHome()
+        const result = await runHook({ homeDir, command })
+        expect(result.decision).toBe("deny")
+        expect(result.reason).toContain("needs tasks in place first")
+      })
+    }
+
+    test("allows shell commands after task governance is satisfied", async () => {
       const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git status" })
+      const sessionId = "session-shell-governance-satisfied"
+      await writeTask(homeDir, sessionId, {
+        id: "1",
+        subject: "Active task",
+        status: "in_progress",
+      })
+      await writeTask(homeDir, sessionId, {
+        id: "2",
+        subject: "Next step",
+        status: "pending",
+      })
+
+      const result = await runHook({
+        homeDir,
+        sessionId,
+        command: "bun test --concurrent",
+      })
       expect(result.decision).toBeUndefined()
     })
 
-    test("allows git log without any tasks", async () => {
+    test("allows shell commands when the originating agent lacks task tools", async () => {
       const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git log --oneline -10" })
+      const result = await runHook({
+        homeDir,
+        toolName: "run_shell_command",
+        command: "bun test --concurrent",
+        payloadEnv: { GEMINI_CLI: "1" },
+      })
       expect(result.decision).toBeUndefined()
     })
 
-    test("allows git diff without any tasks", async () => {
+    test("denies Codex functions.exec_command when task buffer is missing", async () => {
       const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git diff HEAD~1" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git show without any tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git show HEAD" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git branch without any tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git branch --show-current" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git rev-parse without any tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git rev-parse --abbrev-ref HEAD" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git reflog without any tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git reflog --limit 5" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git status with leading pwd prefix", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "pwd && git status" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git commit without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: 'git commit -m "wip"' })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git push without tasks (push/pull/fetch are exempt)", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git push origin main" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git checkout without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git checkout -b new-branch" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows git switch without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "git switch feature-branch" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows bun test without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "bun test --concurrent" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows pnpm test without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "pnpm test" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows bun run lint without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "bun run lint" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("still denies non-exempt commands without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "cat some-file.txt" })
+      const result = await runHook({
+        homeDir,
+        toolName: "functions.exec_command",
+        command: "bun test --concurrent",
+        payloadEnv: { CODEX_THREAD_ID: "thread-123" },
+      })
       expect(result.decision).toBe("deny")
-    })
-
-    test("allows ls without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "ls -la" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows ls with path without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "ls src/" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows rg without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "rg 'some pattern' src/" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows grep without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "grep -r 'TODO' hooks/" })
-      expect(result.decision).toBeUndefined()
-    })
-
-    test("allows ls chained after pwd without tasks", async () => {
-      const homeDir = await createTempHome()
-      const result = await runHook({ homeDir, command: "pwd && ls -la" })
-      expect(result.decision).toBeUndefined()
+      expect(result.reason).toContain("needs tasks in place first")
     })
   })
 

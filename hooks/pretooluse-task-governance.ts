@@ -100,7 +100,6 @@ import {
   isShellTool,
   isTaskCreateTool,
   isTaskListTool,
-  isTaskTrackingExemptShellCommand,
   isTerminalTaskStatus,
   isWriteTool,
   mergeActionPlanIntoTasks,
@@ -620,11 +619,6 @@ interface ParsedInput {
 }
 
 function isExemptToolCall(input: Record<string, any>, toolName: string): boolean {
-  if (isShellTool(toolName)) {
-    const toolInput = input?.tool_input as Record<string, any> | undefined
-    const command = String(toolInput?.command ?? "")
-    if (isTaskTrackingExemptShellCommand(command)) return true
-  }
   return isMemoryMarkdownEdit(input, toolName)
 }
 
