@@ -897,8 +897,17 @@ function isTaskGovernanceHealthy(counts: TaskCounts): boolean {
   return counts.inProgress >= 1 && counts.pending >= 1 && counts.incomplete >= 2
 }
 
-/** Max completed ✔ ticks rendered before collapsing into an overflow indicator. */
-export const MAX_DONE_TICKS = 10
+/** Max glyphs rendered in any single task-tick group before collapsing into an overflow indicator. */
+export const MAX_TASK_TICKS = 10
+/** @deprecated Use MAX_TASK_TICKS. */
+export const MAX_DONE_TICKS = MAX_TASK_TICKS
+
+function renderCappedTicks(count: number, glyph: string, color: string): string {
+  if (count <= 0) return ""
+  if (count <= MAX_TASK_TICKS) return `${color}${glyph.repeat(count)}${R}`
+  const overflow = count - MAX_TASK_TICKS
+  return `${color}${glyph.repeat(MAX_TASK_TICKS)}${R}${DIM}⋯${R}${color}+${overflow}${R}`
+}
 
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
@@ -908,16 +917,12 @@ export function formatTaskCountSegment(
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
   const done = counts.total - counts.incomplete
-  if (done > 0) {
-    if (done <= MAX_DONE_TICKS) {
-      parts.push(`\x1b[92m${"✔".repeat(done)}${R}`)
-    } else {
-      const overflow = done - MAX_DONE_TICKS
-      parts.push(`\x1b[92m${"✔".repeat(MAX_DONE_TICKS)}${R}${DIM}⋯${R}\x1b[92m+${overflow}${R}`)
-    }
-  }
-  if (counts.inProgress > 0) parts.push(`\x1b[93m${"◼".repeat(counts.inProgress)}${R}`)
-  if (counts.pending > 0) parts.push(`\x1b[96m${"◻".repeat(counts.pending)}${R}`)
+  const doneSeg = renderCappedTicks(done, "✔", "\x1b[92m")
+  if (doneSeg) parts.push(doneSeg)
+  const inProgressSeg = renderCappedTicks(counts.inProgress, "◼", "\x1b[93m")
+  if (inProgressSeg) parts.push(inProgressSeg)
+  const pendingSeg = renderCappedTicks(counts.pending, "◻", "\x1b[96m")
+  if (pendingSeg) parts.push(pendingSeg)
   if (counts.incomplete > 0) {
     let indicator: string
     if (isTaskGovernanceHealthy(counts)) {
@@ -960,10 +965,19 @@ function buildModeSeg(
   return [agentTag, vimTag].filter(Boolean).join(" ")
 }
 
+/** Max distinct skills printed inline before collapsing into an overflow indicator. */
+export const MAX_ACTIVE_SKILLS = 6
+
 export function formatActiveSkillsSegment(skills: string[] | null | undefined): string {
   if (!skills || skills.length === 0) return ""
   const uniqueSkills = [...new Set(skills)]
-  return uniqueSkills.map((s) => `\x1b[95m/${s}${R}`).join(" ")
+  if (uniqueSkills.length <= MAX_ACTIVE_SKILLS) {
+    return uniqueSkills.map((s) => `\x1b[95m/${s}${R}`).join(" ")
+  }
+  const shown = uniqueSkills.slice(0, MAX_ACTIVE_SKILLS)
+  const overflow = uniqueSkills.length - MAX_ACTIVE_SKILLS
+  const shownStr = shown.map((s) => `\x1b[95m/${s}${R}`).join(" ")
+  return `${shownStr} ${DIM}⋯${R}\x1b[95m+${overflow}${R}`
 }
 
 function buildLine3(

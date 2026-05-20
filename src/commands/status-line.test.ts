@@ -504,6 +504,22 @@ describe("formatTaskCountSegment", () => {
     expect(seg).toContain("👍")
   })
 
+  it("caps ◼ in_progress ticks at 10 with overflow indicator", () => {
+    const seg = formatTaskCountSegment({ total: 14, incomplete: 14, pending: 0, inProgress: 14 })
+    const tickCount = (seg.match(/◼/g) ?? []).length
+    expect(tickCount).toBe(10)
+    expect(seg).toContain("⋯")
+    expect(seg).toContain("+4")
+  })
+
+  it("caps ◻ pending ticks at 10 with overflow indicator", () => {
+    const seg = formatTaskCountSegment({ total: 13, incomplete: 13, pending: 12, inProgress: 1 })
+    const tickCount = (seg.match(/◻/g) ?? []).length
+    expect(tickCount).toBe(10)
+    expect(seg).toContain("⋯")
+    expect(seg).toContain("+2")
+  })
+
   it("builds counts from task array", () => {
     const tasks = [
       { status: "in_progress" },
@@ -545,6 +561,19 @@ describe("formatActiveSkillsSegment", () => {
     const occurrencesOfCompact = (seg.match(/\/compact-memory/g) || []).length
     expect(occurrencesOfCommit).toBe(1)
     expect(occurrencesOfCompact).toBe(1)
+  })
+
+  it("caps to 6 distinct skills and appends ⋯+N overflow indicator", () => {
+    const skills = ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+    const seg = formatActiveSkillsSegment(skills)
+    const slashCount = (seg.match(/\//g) ?? []).length
+    expect(slashCount).toBe(6)
+    expect(seg).toContain("/one")
+    expect(seg).toContain("/six")
+    expect(seg).not.toContain("/seven")
+    expect(seg).not.toContain("/eight")
+    expect(seg).toContain("⋯")
+    expect(seg).toContain("+2")
   })
 })
 
