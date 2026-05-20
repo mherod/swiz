@@ -1156,7 +1156,7 @@ describe("tryRestFallback ETag / 304 Caching", () => {
 
       const ifNoneMatch = args.indexOf("-H") !== -1 ? args[args.indexOf("-H") + 1] : null
 
-      if (ifNoneMatch && ifNoneMatch.includes('If-None-Match: "etag-12345"')) {
+      if (ifNoneMatch?.includes('If-None-Match: "etag-12345"')) {
         // Return 304 Not Modified status line and headers
         const stdoutWithHeaders = ["HTTP/1.1 304 Not Modified", 'ETag: "etag-12345"', "", ""].join(
           "\r\n"

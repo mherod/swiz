@@ -466,7 +466,7 @@ async function fetchViaRest(
   await proc.exited
 
   const parsed = parseGhApiIncludeOutput(stdout)
-  if (parsed.headers["etag"]) {
+  if (parsed.headers.etag) {
     // Call observeGhApiIncludeOutput to update rate limit state from headers
     observeGhApiIncludeOutput(stdout)
   }
@@ -521,7 +521,7 @@ export async function tryRestFallback<T>(
   }
 
   if (result.status && result.status >= 200 && result.status < 300) {
-    const etag = result.headers["etag"]
+    const etag = result.headers.etag
     if (etag) {
       debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${endpoint}`)
       s.setHttpCache(repo, endpoint, etag, result.body)
