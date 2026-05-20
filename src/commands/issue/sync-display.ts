@@ -158,6 +158,10 @@ export async function handleSync(args: string[]): Promise<void> {
     result.pullRequests.skipped +
     result.labels.skipped +
     result.milestones.skipped
+  const cacheSummary =
+    result.restCache.notModified > 0
+      ? `; ${result.restCache.notModified} REST 304 cache hit${result.restCache.notModified === 1 ? "" : "s"}`
+      : ""
 
   if (allChanges.length === 0 && totalUnchanged > 0) {
     const parts: string[] = []
@@ -172,10 +176,11 @@ export async function handleSync(args: string[]): Promise<void> {
         `${result.milestones.skipped} milestone${result.milestones.skipped === 1 ? "" : "s"}`
       )
     const breakdown = parts.length > 0 ? parts.join(", ") : `${totalUnchanged} entities`
-    console.log(`✅ Already up to date (${breakdown} unchanged)`)
+    console.log(`✅ Already up to date (${breakdown} unchanged${cacheSummary})`)
   } else {
     console.log("✅ Sync complete:\n")
     printSyncSummary(result)
+    if (cacheSummary) console.log(`  REST cache  ${cacheSummary.slice(2)}`)
   }
 
   printOpenItems(repo)

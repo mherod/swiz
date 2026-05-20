@@ -21,6 +21,12 @@ export interface RestFallbackMapping {
   normalize?: (raw: unknown) => unknown
 }
 
+export interface RestFallbackStats {
+  requests: number
+  notModified: number
+  writes: number
+}
+
 export function asRecord(value: unknown): Record<string, any> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, any>) : null
 }
@@ -489,7 +495,8 @@ async function fetchViaRest(
 export async function tryRestFallback<T>(
   args: string[],
   cwd: string,
-  store?: IssueStore
+  store?: IssueStore,
+  stats?: RestFallbackStats
 ): Promise<T | null> {
   const mapping = ghListToRestFallback(args)
   if (!mapping) {
@@ -507,10 +514,12 @@ export async function tryRestFallback<T>(
   const cached = s.getHttpCache(repo, endpoint)
 
   debugLog(`[swiz] REST_QUERY for ${args.join(" ")} (cached etag: ${cached?.etag})`)
+  if (stats) stats.requests++
   const result = await fetchViaRest(endpoint, cwd, cached?.etag)
   if (result === null) return null
 
   if (result.status === 304 && cached) {
+    if (stats) stats.notModified++
     debugLog(`[swiz] REST_CACHE_HIT (304 Not Modified) for ${endpoint}`)
     try {
       const bodyObj = JSON.parse(cached.data)
@@ -523,6 +532,7 @@ export async function tryRestFallback<T>(
   if (result.status && result.status >= 200 && result.status < 300) {
     const etag = result.headers.etag
     if (etag) {
+      if (stats) stats.writes++
       debugLog(`[swiz] REST_CACHE_WRITE etag=${etag} for ${endpoint}`)
       s.setHttpCache(repo, endpoint, etag, result.body)
     }

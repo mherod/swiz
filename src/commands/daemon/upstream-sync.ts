@@ -198,6 +198,7 @@ export class UpstreamSyncRegistry {
           prBranchDetail: emptyTracked(),
           branchProtection: emptyTracked(),
           events: { inserted: 0, cursor: null },
+          restCache: { requests: 0, notModified: 0, writes: 0 },
         }
       )
     } finally {

@@ -22,6 +22,7 @@ import {
   ghListToRestFallback as ghListToRestFallbackImpl,
   isGraphQLRateLimited as isGraphQLRateLimitedImpl,
   type RestFallbackMapping,
+  type RestFallbackStats,
   tryRestFallback as tryRestFallbackImpl,
 } from "./issue-store-rest-fallback.ts"
 
@@ -1302,17 +1303,22 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 export async function tryRestFallback<T>(
   args: string[],
   cwd: string,
-  store?: IssueStore
+  store?: IssueStore,
+  stats?: RestFallbackStats
 ): Promise<T | null> {
-  return await tryRestFallbackImpl<T>(args, cwd, store)
+  return await tryRestFallbackImpl<T>(args, cwd, store, stats)
 }
 
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
  *  Prefers REST API for mapped list commands and falls back to gh subcommands only when REST fails. */
-export async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
+export async function fetchGhJson<T>(
+  args: string[],
+  cwd: string,
+  restStats?: RestFallbackStats
+): Promise<T | null> {
   const hasRestMapping = ghListToRestFallback(args) !== null
   if (hasRestMapping) {
-    const restResult = await tryRestFallback<T>(args, cwd)
+    const restResult = await tryRestFallback<T>(args, cwd, undefined, restStats)
     if (restResult !== null) {
       debugLog(`[swiz] REST_PRIMARY for ${args.join(" ")}`)
       return restResult

@@ -1192,6 +1192,7 @@ describe("tryRestFallback ETag / 304 Caching", () => {
     const releaseMutex = await lockBunSpawn()
     const originalSpawn = Bun.spawn
     const calls: string[][] = []
+    const stats = { requests: 0, notModified: 0, writes: 0 }
 
     // @ts-expect-error - Mocking Bun.spawn
     Bun.spawn = (args: string[]) => {
@@ -1233,7 +1234,7 @@ describe("tryRestFallback ETag / 304 Caching", () => {
       const { tryRestFallback } = await import("./issue-store-rest-fallback.ts")
 
       // First call: Should perform query and cache ETags
-      const res1 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store)
+      const res1 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store, stats)
       expect(res1).not.toBeNull()
       expect(res1![0]!.number).toBe(101)
       expect(res1![0]!.title).toBe("Mock Issue")
@@ -1250,7 +1251,7 @@ describe("tryRestFallback ETag / 304 Caching", () => {
       expect(cached!.etag).toBe('"etag-12345"')
 
       // Second call: Should send If-None-Match header and get 304 hit, returning cached data
-      const res2 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store)
+      const res2 = await tryRestFallback<any[]>(["issue", "list"], "/tmp", store, stats)
       expect(res2).not.toBeNull()
       expect(res2![0]!.number).toBe(101)
       expect(res2![0]!.title).toBe("Mock Issue")
@@ -1259,6 +1260,7 @@ describe("tryRestFallback ETag / 304 Caching", () => {
       const secondCall = calls[1]!
       expect(secondCall.join(" ")).toContain("If-None-Match")
       expect(secondCall.join(" ")).toContain('"etag-12345"')
+      expect(stats).toEqual({ requests: 2, notModified: 1, writes: 1 })
     } finally {
       Bun.spawn = originalSpawn
       store.close()

@@ -185,6 +185,8 @@ export interface UpstreamSyncResult {
   branchProtection: { upserted: number; changes: SyncChange[] }
   /** Event-sourced sync (#521): rows appended to the issue_events log and the cursor advanced to. */
   events: { inserted: number; cursor: string | null }
+  /** REST list-endpoint cache counters for ETag / 304 visibility. */
+  restCache: { requests: number; notModified: number; writes: number }
 }
 
 /** Extract the maximum `updatedAt` ISO string from a list of entities. */
@@ -577,7 +579,6 @@ export async function syncUpstreamState(
 ): Promise<UpstreamSyncResult> {
   const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
   const s = opts?.store ?? getIssueStore()
-  const gh = opts?.client ?? new GhCliGitHubClient()
 
   const bucket = (): SyncBucket => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
   const tracked = () => ({ upserted: 0, changes: [] as SyncChange[] })
@@ -592,7 +593,9 @@ export async function syncUpstreamState(
     prBranchDetail: tracked(),
     branchProtection: tracked(),
     events: { inserted: 0, cursor: null },
+    restCache: { requests: 0, notModified: 0, writes: 0 },
   }
+  const gh = opts?.client ?? new GhCliGitHubClient(result.restCache)
 
   // ─── Snapshot existing state for fast-path decisions ────────────────────
   const issueSnap = s.getIssueSnapshot(repo)
@@ -606,6 +609,7 @@ export async function syncUpstreamState(
     gh.listLabels(cwd),
     gh.listMilestones(cwd),
   ])
+  const primaryListCacheHits = result.restCache.notModified
 
   // ─── Determine whether closed fetch is needed ──────────────────────────
   // If the open count matches the stored count AND max updatedAt matches,
@@ -654,19 +658,35 @@ export async function syncUpstreamState(
 
   const ctx: SyncContext = { store: s, client: gh, repo, cwd, result }
 
+  const allPrimaryListsCached =
+    primaryListCacheHits >= 5 &&
+    issues !== null &&
+    prs !== null &&
+    runs !== null &&
+    labels !== null &&
+    milestones !== null &&
+    !issuesChanged &&
+    !prsChanged
+
   // ─── Branch-level sync ──────────────────────────────────────────────────
   // Sync CI runs and PR detail for branches with open PRs, plus the default branch.
-  await syncBranchData(ctx, prs, prsChanged)
+  if (!allPrimaryListsCached) {
+    await syncBranchData(ctx, prs, prsChanged)
+  }
 
   // ─── Comment sync ───────────────────────────────────────────────────────
   // Sync comments for blocked/stalled issues AND recently-updated issues
-  await syncComments(ctx, issues, issuesChanged)
+  if (!allPrimaryListsCached) {
+    await syncComments(ctx, issues, issuesChanged)
+  }
 
   // ─── Event-sourced sync (#521) ──────────────────────────────────────────
   // Append new issue events to the append-only log so intermediate
   // transitions (open→closed→reopened, label churn, review_requested) are
   // captured even when they don't alter the snapshot state we just diffed.
-  await syncIssueEvents(s, gh, repo, result)
+  if (!allPrimaryListsCached) {
+    await syncIssueEvents(s, gh, repo, result)
+  }
 
   s.setSyncCursor(repo, "last_synced", new Date().toISOString())
   s.setSyncCursor(repo, "cwd", cwd)

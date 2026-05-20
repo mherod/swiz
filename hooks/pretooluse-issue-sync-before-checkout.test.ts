@@ -29,6 +29,7 @@ function makeSyncResult(issueChanges: SyncChange[] = []): UpstreamSyncResult {
     prBranchDetail: { upserted: 0, changes: [] },
     branchProtection: { upserted: 0, changes: [] },
     events: { inserted: 0, cursor: null },
+    restCache: { requests: 0, notModified: 0, writes: 0 },
   }
 }
 

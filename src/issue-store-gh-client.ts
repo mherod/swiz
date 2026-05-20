@@ -19,8 +19,11 @@ import type {
   GitHubReviewRecord,
 } from "./issue-store.ts"
 import { fetchGhJson } from "./issue-store.ts"
+import type { RestFallbackStats } from "./issue-store-rest-fallback.ts"
 
 export class GhCliGitHubClient implements GitHubClient {
+  constructor(private readonly restStats?: RestFallbackStats) {}
+
   /**
    * List issues via `gh issue list`. When `state` is `"closed"`, only the
    * `number` field is populated (minimal fetch for stale-row purging in
@@ -32,7 +35,8 @@ export class GhCliGitHubClient implements GitHubClient {
       state === "closed" ? "number" : "number,title,state,labels,author,assignees,updatedAt"
     return fetchGhJson<GitHubIssueRecord[]>(
       ["issue", "list", "--state", state, "--json", fields, "--limit", limit],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
@@ -52,14 +56,16 @@ export class GhCliGitHubClient implements GitHubClient {
         : "number,title,state,headRefName,baseRefName,author,reviewDecision,statusCheckRollup,mergeable,requestedReviewers,url,createdAt,updatedAt"
     return fetchGhJson<GitHubPullRequestRecord[]>(
       ["pr", "list", "--state", state, "--json", fields, "--limit", limit],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
   async listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null> {
     return fetchGhJson<GitHubCiRunRecord[]>(
       ["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
@@ -83,7 +89,8 @@ export class GhCliGitHubClient implements GitHubClient {
   async listLabels(cwd: string): Promise<GitHubLabelRecord[] | null> {
     return fetchGhJson<GitHubLabelRecord[]>(
       ["label", "list", "--json", "name,color,description", "--limit", "100"],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
@@ -97,7 +104,8 @@ export class GhCliGitHubClient implements GitHubClient {
         "--limit",
         "100",
       ],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
@@ -113,7 +121,8 @@ export class GhCliGitHubClient implements GitHubClient {
         "--limit",
         "10",
       ],
-      cwd
+      cwd,
+      this.restStats
     )
   }
 
