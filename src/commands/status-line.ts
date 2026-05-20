@@ -885,6 +885,10 @@ export function buildTaskCountsFromTasks(tasks: ReadonlyArray<{ status: string }
   return { total: tasks.length, incomplete, pending, inProgress }
 }
 
+function isTaskGovernanceHealthy(counts: TaskCounts): boolean {
+  return counts.inProgress >= 1 && counts.pending >= 1 && counts.incomplete >= 2
+}
+
 export function formatTaskCountSegment(counts: TaskCounts | null | undefined): string {
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
@@ -892,6 +896,9 @@ export function formatTaskCountSegment(counts: TaskCounts | null | undefined): s
   if (done > 0) parts.push(`\x1b[92m${"✔".repeat(done)}${R}`)
   if (counts.inProgress > 0) parts.push(`\x1b[93m${"◼".repeat(counts.inProgress)}${R}`)
   if (counts.pending > 0) parts.push(`\x1b[96m${"◻".repeat(counts.pending)}${R}`)
+  if (counts.incomplete > 0) {
+    parts.push(isTaskGovernanceHealthy(counts) ? "👍" : "👎")
+  }
   return parts.join(" ")
 }
 

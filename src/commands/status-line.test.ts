@@ -427,6 +427,20 @@ describe("formatTaskCountSegment", () => {
     expect(seg).toContain("✔✔") // 2 completed
     expect(seg).toContain("◼") // 1 in_progress
     expect(seg).toContain("◻◻") // 2 pending
+    expect(seg).toContain("👍") // governance healthy: ≥1 inProgress, ≥1 pending, ≥2 incomplete
+  })
+
+  it("shows thumbs-down when governance thresholds not met", () => {
+    // only in_progress tasks, no pending buffer
+    const seg = formatTaskCountSegment({ total: 1, incomplete: 1, pending: 0, inProgress: 1 })
+    expect(seg).toContain("👎")
+    expect(seg).not.toContain("👍")
+  })
+
+  it("shows no indicator when all tasks are done", () => {
+    const seg = formatTaskCountSegment({ total: 2, incomplete: 0, pending: 0, inProgress: 0 })
+    expect(seg).not.toContain("👍")
+    expect(seg).not.toContain("👎")
   })
 
   it("builds counts from task array", () => {
