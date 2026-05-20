@@ -1116,6 +1116,61 @@ describe("collaborationMode settings", () => {
     expect(settings.statusLineSegments).toEqual([...ALL_STATUS_LINE_SEGMENTS])
   })
 
+  test("upgrades pre-tasks default statusLineSegments to include tasks", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({
+        statusLineSegments: [
+          "repo",
+          "git",
+          "pr",
+          "model",
+          "ctx",
+          "state",
+          "backlog",
+          "metrics",
+          "mode",
+          "flags",
+          "time",
+        ],
+      })
+    )
+
+    const settings = await readSwizSettings({ home })
+    expect(settings.statusLineSegments).toEqual([...ALL_STATUS_LINE_SEGMENTS])
+  })
+
+  test("upgrades pre-skills default statusLineSegments to include skills", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({
+        statusLineSegments: [
+          "repo",
+          "git",
+          "pr",
+          "model",
+          "ctx",
+          "state",
+          "tasks",
+          "backlog",
+          "metrics",
+          "mode",
+          "flags",
+          "time",
+        ],
+      })
+    )
+
+    const settings = await readSwizSettings({ home })
+    expect(settings.statusLineSegments).toEqual([...ALL_STATUS_LINE_SEGMENTS])
+  })
+
   test("preserves custom statusLineSegments without forced state", async () => {
     const home = await createTempHome()
     const configDir = join(home, ".swiz")

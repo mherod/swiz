@@ -20,29 +20,29 @@ alwaysApply: false
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude; **DON'T** spawn `claude` CLI.
 - Extract helpers; consolidate duplicate utilities into a canonical module (e.g., `agent-paths.ts`) and re-export.
 ## Agent Detection
-- `src/agents.ts` owns agent metadata (`envVars`, `processPattern`, `binary`, `settingsPath`, `toolAliases`, `eventMap`, `tasksEnabled`, `hooksConfigurable`, `additionalDispatchEntries`).
+- `src/agents.ts` owns agent metadata.
 - Runtime detection in `src/agent-paths.ts` (re-exported by `src/detect.ts`): `detectCurrentAgentFromEnv(env)` checks `envVars` in `AGENTS` order; `detectCurrentAgent()` falls back to parent `processPattern`; `isRunningInAgent()` is shell/shim-only (non-TTY stdin, `CURSOR_TRACE_ID`, `CLAUDECODE`).
 - Translation is metadata-driven (`translateMatcher`, `translateEvent`, `toolNameForCurrentAgent`, `resolveTranslationAgent`). Never hard-code agent tool/event names. Precedence: explicit → env+aliases → unique observed tools → `detectCurrentAgent()`.
 - Daemon dispatch preserves origin env via `_env` (set by `swiz dispatch`, applied by `applyDispatchEnv()`); daemon hooks use `_env` + `detectCurrentAgentFromEnv()`, not launchd env.
-- Keep installed/current/backend detection separate: `detectInstalledAgents()` checks `PATH`/settings; `detectAgentCli()`/`detectBestAgentCli()` find Cursor's `agent` binary for fallback. Never use either for hook-agent detection.
-- Task governance pivots on `AgentDef.tasksEnabled` (default true). `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false; `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements. Codex has `tasksEnabled=false` (uses `update_plan`).
-- Cross-agent task names live in `src/tool-matchers.ts` + `toolAliases`. `shouldInspectShellInput()` prefers `_env` → process env → Claude. Stop validators skip task checks when tools unavailable; `stop-incomplete-tasks` exempts gemini. `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots — apply `_env` in daemon dispatch or tasks use the wrong root.
+- Keep installed, current, and backend detection separate: `detectInstalledAgents()` checks `PATH` and settings; `detectAgentCli()` and `detectBestAgentCli()` find Cursor's `agent` binary for fallback. Never use either for hook-agent detection.
+- Task governance pivots on `AgentDef.tasksEnabled` (default true). `buildManifest()` strips `TASK_HOOK_IDENTIFIERS` when false; `pretooluse-task-governance.ts` skips Edit/Write/Bash requirements. Codex features `tasksEnabled=false` (uses `update_plan`).
+- Cross-agent task names live in `src/tool-matchers.ts` and `toolAliases`. `shouldInspectShellInput()` prefers `_env` → process env → Claude. Stop validators skip task checks when tools unavailable; `stop-incomplete-tasks` exempts gemini. `createDefaultTaskStore()` uses `detectCurrentAgent()` provider roots — apply `_env` in daemon dispatch or tasks use the wrong root.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
 ## Hook System
-- Hooks live in `hooks/`; canonical manifest is `manifest` in `src/manifest.ts`.
-- Canonical events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
-- Translation: `EVENT_MAP` (canonical→agent events), `TOOL_ALIASES` (per-agent tool names). Claude uses nested matchers; Cursor uses flat list.
-- Agent hook flow: add `hooks/<name>.ts` → add `manifest` entry → for new events update `DISPATCH_ROUTES` in `src/dispatch/index.ts` + agent `eventMap` in `src/agents.ts` → `swiz install --dry-run` → `swiz install`.
-- Scheduled hooks (`preCommit`, `prePush`): add hook + `manifest` entry with `scheduled: true` + `DISPATCH_ROUTES`/`TOOL_NAME_OPTIONAL_EVENTS`/`DISPATCH_TIMEOUTS`; wire `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
-- Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` in sync. `validateDispatchRoutes()` must pass from both `swiz dispatch` and `swiz install`. Keep `src/dispatch-routing.test.ts` green.
-- Never duplicate preToolUse matcher strings (`manifest.find()` returns first) — add to existing group. Never add sync hooks to unmatched preToolUse groups. Never hard-code agent-specific event/tool names in hook scripts.
-- `classifyHookOutput` validates stdout against `hookOutputSchema`; `"invalid-schema"` on failure. Requires `systemMessage`/`reason`/`stopReason`/`additionalContext`; `{}` valid. Stop normalized via `stopHookOutputSchema`.
-- `lefthook.yml` requires `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` (omitting triggers global-link check). Hooks scanning staged diffs must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` (hook source self-triggers).
-- **Inline SwizHook**: Use `preToolUseAllow()`/`preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`. Never also `Bun.stdin.json()` (double-read). Safe: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/`, `hooks/schemas`. Avoid `hook-utils.ts`/`git-utils.ts` (circular).
+- Hooks live in `hooks/`; manifest is `manifest` in `src/manifest.ts`.
+- Events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
+- Translation: `EVENT_MAP` (canonical→agent), `TOOL_ALIASES` (per-agent tools). Claude uses nested matchers; Cursor uses flat list.
+- Agent hook flow: add `hooks/<name>.ts` → add `manifest` entry → update `DISPATCH_ROUTES` in `src/dispatch/index.ts` + agent `eventMap` in `src/agents.ts` → `swiz install`.
+- Scheduled hooks (`preCommit`, `prePush`): add manifest entry with `scheduled: true`, updating `DISPATCH_ROUTES`/`TOOL_NAME_OPTIONAL_EVENTS`/`DISPATCH_TIMEOUTS`; wire `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
+- Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` in sync. `validateDispatchRoutes()` must pass from `swiz dispatch` and `swiz install`. Keep `src/dispatch-routing.test.ts` green.
+- Never duplicate preToolUse matcher strings — add to existing group. Never add sync hooks to unmatched preToolUse groups. Never hard-code agent-specific event/tool names.
+- `classifyHookOutput` validates stdout against `hookOutputSchema`. Requires `systemMessage`/`reason`/`stopReason`/`additionalContext`; `{}` valid. Stop normalized via `stopHookOutputSchema`.
+- `lefthook.yml` requires `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` (omitting triggers global-link check). Exclude `hooks/` and tests via `FOCUSED_TEST_EXCLUDE_RE` in staged scans.
+- **Inline SwizHook**: Use `preToolUseAllow()` / `preToolUseDeny()` + `runSwizHookAsMain()` from `SwizHook.ts`. DO NOT use `Bun.stdin.json()` (double-read). Safe imports: `tool-matchers`, `git-helpers`, `shell-patterns`, `skill-utils`, `node-modules-path`, `command-utils`, `utils/`, `hooks/schemas`. Avoid `hook-utils.ts` / `git-utils.ts` (circular).
 - **Debt marker**: `//` comments with keywords trigger `pretooluse-todo-tracker`. Use JSDoc `/** */` or `"TO" + "DO"` regex.
-- **Phase 2 extraction**: 6 modules (types→context→validators→action-plan→evaluate→wrapper). Export from core, import by orchestrator only; delete re-export wrappers. Reference: `PHASE_2_EXTRACTION_PATTERN.md`.
+- **Phase 2 extraction**: 6 modules (types→context→validators→action-plan→evaluate→wrapper). Export from core, import by orchestrator; delete re-export wrappers. Ref: `PHASE_2_EXTRACTION_PATTERN.md`.
 ## Branch Change Detection
 - Canonical (import; never redefine): `src/utils/git-utils.ts` exports `BRANCH_CHECK_RE`, `GIT_CHECKOUT_RE`, `GIT_SWITCH_RE`, `GH_PR_CHECKOUT_RE`, `GIT_CHECKOUT_NEW_BRANCH_RE`, `getDefaultBranch(cwd)` (project setting → upstream → remote → main/master). Equality via `src/git-helpers.ts::isDefaultBranch()` — never `=== "main"`.
 - Consumers of `git branch --show-current`: all pretooluse branch gates, posttooluse-{pr-context,state-transition}, and push/status commands. Never redefine branch regexes — always import from `src/utils/git-utils.ts`.
@@ -195,6 +195,7 @@ alwaysApply: false
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
 - DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (update subject via `TaskUpdate`); hedge ("trivial"/"just"/"likely") before investigating; use compliance-gaming phrases ("satisfies the gate"/"unblocks the hook"); re-implement without inspecting first. Use Claude Agent SDK in-process.
+- DO: Always answer user questions directly and execute requested actions immediately (e.g. invoking a /skill) instead of running unrelated diagnostic or active exploration loops. Stop ongoing loops instantly when explicitly corrected by the user.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.

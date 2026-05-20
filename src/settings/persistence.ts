@@ -60,6 +60,21 @@ const PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
   "time",
 ]
 
+const PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
+  "repo",
+  "git",
+  "pr",
+  "model",
+  "ctx",
+  "state",
+  "tasks",
+  "backlog",
+  "metrics",
+  "mode",
+  "flags",
+  "time",
+]
+
 /**
  * DEFAULT_SETTINGS is derived from SETTINGS_REGISTRY defaults.
  * Non-registry fields (statusLineSegments, sessions) are added here.
@@ -135,7 +150,11 @@ function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
     segments.length === PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
     PRE_TASKS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
 
-  if (isLegacyDefault || isPreMetricsDefault || isPreTasksDefault)
+  const isPreSkillsDefault =
+    segments.length === PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS.length &&
+    PRE_SKILLS_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
+
+  if (isLegacyDefault || isPreMetricsDefault || isPreTasksDefault || isPreSkillsDefault)
     return [...ALL_STATUS_LINE_SEGMENTS]
   return segments
 }

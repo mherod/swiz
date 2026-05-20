@@ -7,6 +7,7 @@ import {
   buildSettingsFlags,
   buildTaskCountsFromTasks,
   computeWarmStatusLineSnapshot,
+  formatActiveSkillsSegment,
   formatCountSegment,
   formatGitHubCiSegment,
   formatProjectState,
@@ -447,5 +448,79 @@ describe("formatGitHubCiSegment", () => {
 
   it("renders a passing CI badge", () => {
     expect(formatGitHubCiSegment("success", "passing")).toContain("passing")
+  })
+})
+
+describe("formatActiveSkillsSegment", () => {
+  it("returns empty string when skills are null, undefined or empty", () => {
+    expect(formatActiveSkillsSegment(null)).toBe("")
+    expect(formatActiveSkillsSegment(undefined)).toBe("")
+    expect(formatActiveSkillsSegment([])).toBe("")
+  })
+
+  it("renders skills with leading slash and ANSI color formatting", () => {
+    const seg = formatActiveSkillsSegment(["commit", "fix-tests"])
+    expect(seg).toContain("/commit")
+    expect(seg).toContain("/fix-tests")
+  })
+
+  it("deduplicates redundant skills", () => {
+    const seg = formatActiveSkillsSegment(["commit", "commit", "compact-memory", "compact-memory"])
+    const occurrencesOfCommit = (seg.match(/\/commit/g) || []).length
+    const occurrencesOfCompact = (seg.match(/\/compact-memory/g) || []).length
+    expect(occurrencesOfCommit).toBe(1)
+    expect(occurrencesOfCompact).toBe(1)
+  })
+})
+
+describe("active skills rendering", () => {
+  const baseSnapshotForSkills = {
+    shortCwd: "swiz",
+    gitInfo: "✦ main",
+    gitBranch: "main",
+    activeSegments: [],
+    ciState: "none" as const,
+    ciLabel: "",
+    issueCount: 2,
+    prCount: 1,
+    fetchStatus: "ok" as const,
+    reviewDecision: "",
+    commentCount: 0,
+    projectState: "developing" as const,
+    settingsParts: [],
+  }
+
+  it("renders active skills when specified in snap and segment is active", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: {
+        ...baseSnapshotForSkills,
+        activeSegments: ["skills"],
+        activeSkills: ["commit", "fix-tests"],
+      },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("/commit")
+    expect(out).toContain("/fix-tests")
+  })
+
+  it("suppresses skills when segment is disabled", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: {
+        ...baseSnapshotForSkills,
+        activeSegments: ["tasks"],
+        activeSkills: ["commit", "fix-tests"],
+      },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("/commit")
+    expect(out).not.toContain("/fix-tests")
   })
 })

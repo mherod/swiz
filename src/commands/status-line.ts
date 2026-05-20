@@ -21,9 +21,11 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../settings.ts"
+import { getRecentlyInvokedSkillsForCurrentSession } from "../skill-utils.ts"
 import { findTaskStoreForSession } from "../task-roots.ts"
 import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
 import { readTasks } from "../tasks/task-repository.ts"
+import { findAllProviderSessions } from "../transcript-sessions.ts"
 import type { Command } from "../types.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -59,6 +61,7 @@ export interface WarmStatusLineSnapshot {
   projectState: ProjectState | null
   settingsParts: string[]
   taskCounts?: TaskCounts | null
+  activeSkills?: string[] | null
 }
 
 export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -678,7 +681,8 @@ function assembleSnapshot(
   activeSegments: string[],
   gh: GhFetchResults,
   effective: EffectiveSwizSettings | null,
-  taskCounts: TaskCounts | null
+  taskCounts: TaskCounts | null,
+  activeSkills: string[] | null
 ): WarmStatusLineSnapshot {
   const suppressCi = Boolean(effective?.ignoreCi)
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
@@ -695,6 +699,7 @@ function assembleSnapshot(
     projectState: gh.projectState ?? null,
     settingsParts: buildSettingsFlags(effective),
     taskCounts,
+    activeSkills,
   }
 }
 
@@ -703,13 +708,26 @@ export async function computeWarmStatusLineSnapshot(
   sessionId: string | null | undefined
 ): Promise<WarmStatusLineSnapshot> {
   const shortCwd = shortenPath(cwd)
-  const [gitResult, swizSettings, projectSettings, ciProviders, sessionTasks] = await Promise.all([
-    getGitBranchAndInfo(cwd),
-    readSwizSettings().catch(() => null),
-    readProjectSettings(cwd).catch(() => null),
-    detectCiProviders(cwd).catch(() => new Set()),
-    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
-  ])
+  const [gitResult, swizSettings, projectSettings, ciProviders, sessionTasks, activeSkills] =
+    await Promise.all([
+      getGitBranchAndInfo(cwd),
+      readSwizSettings().catch(() => null),
+      readProjectSettings(cwd).catch(() => null),
+      detectCiProviders(cwd).catch(() => new Set()),
+      sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
+      (async () => {
+        try {
+          const sessions = await findAllProviderSessions(cwd)
+          const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
+          if (session?.path) {
+            return await getRecentlyInvokedSkillsForCurrentSession(session.path)
+          }
+        } catch {
+          // Fall back to null
+        }
+        return null
+      })(),
+    ])
 
   const effective = swizSettings
     ? getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
@@ -720,7 +738,15 @@ export async function computeWarmStatusLineSnapshot(
   if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   const taskCounts = sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null
-  return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective, taskCounts)
+  return assembleSnapshot(
+    shortCwd,
+    gitResult,
+    activeSegments,
+    gh,
+    effective,
+    taskCounts,
+    activeSkills
+  )
 }
 
 async function readWarmSnapshotFromDaemon(
@@ -899,6 +925,12 @@ function buildModeSeg(
   return [agentTag, vimTag].filter(Boolean).join(" ")
 }
 
+export function formatActiveSkillsSegment(skills: string[] | null | undefined): string {
+  if (!skills || skills.length === 0) return ""
+  const uniqueSkills = [...new Set(skills)]
+  return uniqueSkills.map((s) => `\x1b[95m/${s}${R}`).join(" ")
+}
+
 function buildLine3(
   seg: SegChecker,
   snapshot: WarmStatusLineSnapshot,
@@ -906,18 +938,21 @@ function buildLine3(
   a4: string,
   agentName: string | undefined,
   vimMode: string | undefined,
-  taskCounts: TaskCounts | null | undefined
+  taskCounts: TaskCounts | null | undefined,
+  activeSkills: string[] | null | undefined
 ): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
   const daemonMetricsSeg = buildDaemonMetricsSegment(daemonMetrics)
   const taskSeg = formatTaskCountSegment(taskCounts)
+  const skillsSeg = formatActiveSkillsSegment(activeSkills)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
     seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
     seg("tasks") && taskSeg ? `${lbl("tasks")} ${taskSeg}` : "",
+    seg("skills") && skillsSeg ? `${lbl("skills")} ${skillsSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
     seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
     seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
@@ -948,6 +983,7 @@ export function renderStatusLineFromSnapshot(opts: {
   snapshot: WarmStatusLineSnapshot
   daemonMetrics?: StatusLineDaemonMetrics | null
   taskCounts?: TaskCounts | null
+  activeSkills?: string[] | null
   ctxPct: number
   ctxTokens: number
   ctxStats: ContextStats | null
@@ -958,12 +994,14 @@ export function renderStatusLineFromSnapshot(opts: {
     snapshot,
     daemonMetrics = null,
     taskCounts: explicitTaskCounts,
+    activeSkills: explicitActiveSkills,
     ctxPct,
     ctxTokens,
     ctxStats,
     timeOffset,
   } = opts
   const taskCounts = explicitTaskCounts ?? snapshot.taskCounts ?? null
+  const activeSkills = explicitActiveSkills ?? snapshot.activeSkills ?? null
   const activeSegmentSet =
     snapshot.activeSegments.length > 0 ? new Set(snapshot.activeSegments) : null
   const seg: SegChecker = (name) => activeSegmentSet?.has(name) ?? true
@@ -982,7 +1020,8 @@ export function renderStatusLineFromSnapshot(opts: {
     a4,
     input.agent?.name,
     input.vim?.mode,
-    taskCounts
+    taskCounts,
+    activeSkills
   )
 
   const fill = `${DIM}─${R}`
@@ -1027,12 +1066,28 @@ export const statusLineCommand: Command = {
       snapshot.taskCounts ??
       (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
 
+    // Fallback: if the daemon snapshot doesn't include activeSkills (old daemon),
+    // compute from the locally-read session transcript.
+    let activeSkills = snapshot.activeSkills
+    if (activeSkills === undefined || activeSkills === null) {
+      try {
+        const sessions = await findAllProviderSessions(cwd)
+        const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
+        if (session?.path) {
+          activeSkills = await getRecentlyInvokedSkillsForCurrentSession(session.path)
+        }
+      } catch {
+        // Fall back to null
+      }
+    }
+
     console.log(
       renderStatusLineFromSnapshot({
         input,
         snapshot,
         daemonMetrics,
         taskCounts,
+        activeSkills,
         ctxPct,
         ctxTokens,
         ctxStats,
