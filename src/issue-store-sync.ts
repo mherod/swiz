@@ -474,6 +474,7 @@ async function syncBranchData(
 
   // Sync PR branch detail only for PRs that actually changed
   if (!prs || !prsChanged) return
+  // Start all per-PR detail fetches together, then apply results in PR order.
   const prSyncTasks = prs
     .filter((pr): pr is { number: number; headRefName: string } => Boolean(pr.headRefName))
     .map(async (pr) => {
