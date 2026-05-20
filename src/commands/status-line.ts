@@ -897,6 +897,9 @@ function isTaskGovernanceHealthy(counts: TaskCounts): boolean {
   return counts.inProgress >= 1 && counts.pending >= 1 && counts.incomplete >= 2
 }
 
+/** Max completed ✔ ticks rendered before collapsing into an overflow indicator. */
+export const MAX_DONE_TICKS = 10
+
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
   durationLabel?: string | null,
@@ -905,7 +908,14 @@ export function formatTaskCountSegment(
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
   const done = counts.total - counts.incomplete
-  if (done > 0) parts.push(`\x1b[92m${"✔".repeat(done)}${R}`)
+  if (done > 0) {
+    if (done <= MAX_DONE_TICKS) {
+      parts.push(`\x1b[92m${"✔".repeat(done)}${R}`)
+    } else {
+      const overflow = done - MAX_DONE_TICKS
+      parts.push(`\x1b[92m${"✔".repeat(MAX_DONE_TICKS)}${R}${DIM}⋯${R}\x1b[92m+${overflow}${R}`)
+    }
+  }
   if (counts.inProgress > 0) parts.push(`\x1b[93m${"◼".repeat(counts.inProgress)}${R}`)
   if (counts.pending > 0) parts.push(`\x1b[96m${"◻".repeat(counts.pending)}${R}`)
   if (counts.incomplete > 0) {

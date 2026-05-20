@@ -478,6 +478,32 @@ describe("formatTaskCountSegment", () => {
     expect(seg).not.toContain("null")
   })
 
+  it("renders all ✔ ticks when done count is at the cap", () => {
+    const seg = formatTaskCountSegment({ total: 10, incomplete: 0, pending: 0, inProgress: 0 })
+    const tickCount = (seg.match(/✔/g) ?? []).length
+    expect(tickCount).toBe(10)
+    expect(seg).not.toContain("⋯")
+    expect(seg).not.toContain("+")
+  })
+
+  it("truncates ✔ ticks to 10 with overflow indicator when done > 10", () => {
+    const seg = formatTaskCountSegment({ total: 15, incomplete: 0, pending: 0, inProgress: 0 })
+    const tickCount = (seg.match(/✔/g) ?? []).length
+    expect(tickCount).toBe(10)
+    expect(seg).toContain("⋯")
+    expect(seg).toContain("+5")
+  })
+
+  it("preserves overflow indicator alongside other counters", () => {
+    const seg = formatTaskCountSegment({ total: 14, incomplete: 3, pending: 2, inProgress: 1 })
+    const tickCount = (seg.match(/✔/g) ?? []).length
+    expect(tickCount).toBe(10)
+    expect(seg).toContain("+1") // 11 done → 1 overflow
+    expect(seg).toContain("◼")
+    expect(seg).toContain("◻◻")
+    expect(seg).toContain("👍")
+  })
+
   it("builds counts from task array", () => {
     const tasks = [
       { status: "in_progress" },
