@@ -31,7 +31,7 @@ importers:
         specifier: 1.27.1
         version: 1.27.1(zod@4.3.6)
       '@openrouter/ai-sdk-provider':
-        specifier: ^2.3.1
+        specifier: ^2.3.3
         version: 2.3.3(ai@6.0.141(zod@4.3.6))(zod@4.3.6)
       agent-hook-schemas:
         specifier: 0.3.1
@@ -61,7 +61,7 @@ importers:
         specifier: ^11.2.6
         version: 11.2.6
       motion:
-        specifier: ^12.36.0
+        specifier: ^12.38.0
         version: 12.38.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^19.2.4
@@ -86,7 +86,7 @@ importers:
         version: 4.3.6
     devDependencies:
       '@biomejs/biome':
-        specifier: ^2.4.4
+        specifier: ^2.4.6
         version: 2.4.6
       '@commitlint/cli':
         specifier: ^20.5.0
@@ -122,13 +122,13 @@ importers:
         specifier: ^17.4.0
         version: 17.4.0
       lefthook:
-        specifier: ^2.1.1
+        specifier: ^2.1.3
         version: 2.1.3
       lint-staged:
-        specifier: ^16.2.7
+        specifier: ^16.3.2
         version: 16.3.2
       typescript-eslint:
-        specifier: ^8.57.0
+        specifier: ^8.57.1
         version: 8.57.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)
       vitest:
         specifier: ^4.0.18
@@ -3487,8 +3487,8 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.19.0:
-    resolution: {integrity: sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg==}
+  ws@8.20.1:
+    resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -4046,7 +4046,7 @@ snapshots:
       tree-sitter-bash: 0.25.1
       undici: 7.25.0
       web-tree-sitter: 0.25.10
-      ws: 8.19.0
+      ws: 8.20.1
       zod: 3.25.76
     optionalDependencies:
       '@lydell/node-pty': 1.1.0
@@ -4072,7 +4072,7 @@ snapshots:
   '@google/genai@1.30.0(@modelcontextprotocol/sdk@1.27.1(zod@4.3.6))':
     dependencies:
       google-auth-library: 10.6.1
-      ws: 8.19.0
+      ws: 8.20.1
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.27.1(zod@4.3.6)
     transitivePeerDependencies:
@@ -6011,7 +6011,7 @@ snapshots:
       type-fest: 5.5.0
       widest-line: 6.0.0
       wrap-ansi: 9.0.2
-      ws: 8.19.0
+      ws: 8.20.1
       yoga-layout: 3.2.1
     optionalDependencies:
       '@types/react': 19.2.14
@@ -7086,7 +7086,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.19.0: {}
+  ws@8.20.1: {}
 
   wsl-utils@0.1.0:
     dependencies:
