@@ -1296,6 +1296,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       expect(result.issues.upserted).toBe(1)
       expect(result.pullRequests.upserted).toBe(1)
       expect(result.ciStatuses.upserted).toBe(0)
+      expect(result.restCache).toEqual({ requests: 0, notModified: 0, writes: 0 })
       expect(store.getIssue<{ title: string }>("test/repo", 1)?.title).toBe("Mock issue")
       expect(store.getPullRequest<{ title: string }>("test/repo", 10)?.title).toBe("Mock PR")
     } finally {
