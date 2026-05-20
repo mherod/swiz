@@ -9,7 +9,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.2.87",
         "@modelcontextprotocol/sdk": "1.27.1",
         "@openrouter/ai-sdk-provider": "^2.3.1",
-        "agent-hook-schemas": "0.2.0",
+        "agent-hook-schemas": "0.3.1",
         "ai": "^6.0.141",
         "ai-sdk-provider-claude-code": "^3.4.4",
         "ai-sdk-provider-gemini-cli": "^2.0.1",
@@ -52,6 +52,7 @@
   "overrides": {
     "@hono/node-server": ">=1.19.13",
     "brace-expansion": ">=5.0.5",
+    "fast-uri": ">=3.1.2",
     "fast-xml-parser": ">=5.5.6",
     "flatted": ">=3.4.2",
     "hono": ">=4.12.14",
@@ -535,7 +536,7 @@
 
     "agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
 
-    "agent-hook-schemas": ["agent-hook-schemas@0.2.0", "", { "dependencies": { "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-tG70WcpX8s+Hss9k27ZZd3c32ZmvIsOTik02tZ8JtGPwBaVxy85x/BZV8DWe/uPZG0d9dJOpRqx2UrvTo7UjHQ=="],
+    "agent-hook-schemas": ["agent-hook-schemas@0.3.1", "", { "dependencies": { "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-KGoV//Db1GsYFhdbDNDi+KnJQQ+hYDjOto7Zxw7Vt0aq1Tu6zvVipLtwi+AB+dKRkDIKyjJlwugYle+pfRj5eA=="],
 
     "ai": ["ai@6.0.141", "", { "dependencies": { "@ai-sdk/gateway": "3.0.83", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.21", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "4.3.6" } }, "sha512-+GomGQWaId3xN0wcugUW/H7xMMaFkID2PiS7K/Wugj45G3efv0BXhQ3psRZoQVoRbOpdNoUqcK/KTB+FR4h6qg=="],
 
@@ -793,7 +794,7 @@
 
     "fast-levenshtein": ["fast-levenshtein@2.0.6", "", {}, "sha512-DCXu6Ifhqcks7TZKY3Hxp3y6qphY5SJZmrWMDrKcERSOXWQdMhU9Ig/PYrzyw/ul9jOIyh0N4M0tbC5hodg8dw=="],
 
-    "fast-uri": ["fast-uri@3.1.0", "", {}, "sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA=="],
+    "fast-uri": ["fast-uri@3.1.2", "", {}, "sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ=="],
 
     "fast-xml-builder": ["fast-xml-builder@1.1.5", "", { "dependencies": { "path-expression-matcher": "^1.1.3" } }, "sha512-4TJn/8FKLeslLAH3dnohXqE3QSoxkhvaMzepOIZytwJXZO69Bfz0HBdDHzOTOon6G59Zrk6VQ2bEiv1t61rfkA=="],
 
