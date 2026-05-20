@@ -37,6 +37,36 @@ import {
 } from "../src/utils/hook-utils.ts"
 import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"
 
+export interface MainBranchScopeGateDeps {
+  detectProjectCollaborationPolicy: typeof detectProjectCollaborationPolicy
+  getEffectiveSwizSettings: typeof getEffectiveSwizSettings
+  getDefaultBranch: typeof getDefaultBranch
+  getIssueStoreReader: typeof getIssueStoreReader
+  getRepoSlug: typeof getRepoSlug
+  ghJsonViaDaemon: typeof ghJsonViaDaemon
+  git: typeof git
+  readProjectSettings: typeof readProjectSettings
+  readSwizSettings: typeof readSwizSettings
+  resolvePolicy: typeof resolvePolicy
+}
+
+const DEFAULT_DEPS: MainBranchScopeGateDeps = {
+  detectProjectCollaborationPolicy,
+  getEffectiveSwizSettings,
+  getDefaultBranch,
+  getIssueStoreReader,
+  getRepoSlug,
+  ghJsonViaDaemon,
+  git,
+  readProjectSettings,
+  readSwizSettings,
+  resolvePolicy,
+}
+
+function mergeDeps(overrides: Partial<MainBranchScopeGateDeps> = {}): MainBranchScopeGateDeps {
+  return { ...DEFAULT_DEPS, ...overrides }
+}
+
 function buildRepoContext(isCollaborative: boolean, signals: string[]): string {
   return isCollaborative
     ? `a collaborative repository.\n\nCollaboration signals:\n${signals.map((s) => `  - ${s}`).join("\n")}`
@@ -112,26 +142,30 @@ function checkScopeAndPolicy(args: ScopePolicyArgs): SwizHookOutput | null {
   return null
 }
 
-async function resolveDiffRange(cwd: string, remoteRef: string): Promise<string> {
-  const isShallow = await git(["rev-parse", "--is-shallow-repository"], cwd)
+async function resolveDiffRange(
+  cwd: string,
+  remoteRef: string,
+  deps: MainBranchScopeGateDeps
+): Promise<string> {
+  const isShallow = await deps.git(["rev-parse", "--is-shallow-repository"], cwd)
   if (isShallow === "true") {
-    await git(["fetch", "--unshallow", "origin"], cwd)
+    await deps.git(["fetch", "--unshallow", "origin"], cwd)
   }
 
-  if ((await git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
+  if ((await deps.git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
     return `${remoteRef}..HEAD`
   }
 
-  const mergeBase = await git(["merge-base", remoteRef, "HEAD"], cwd)
+  const mergeBase = await deps.git(["merge-base", remoteRef, "HEAD"], cwd)
   if (mergeBase) {
     return `${mergeBase}..HEAD`
   }
 
-  if ((await git(["rev-parse", "--verify", "HEAD~1"], cwd)) !== "") {
+  if ((await deps.git(["rev-parse", "--verify", "HEAD~1"], cwd)) !== "") {
     return "HEAD~1..HEAD"
   }
 
-  const countStr = await git(["rev-list", "--count", "HEAD"], cwd)
+  const countStr = await deps.git(["rev-list", "--count", "HEAD"], cwd)
   const count = parseInt(countStr, 10)
   if (count > 1) {
     return `HEAD~${count - 1}..HEAD`
@@ -162,14 +196,20 @@ function isIntegrationBranch(branch: string): boolean {
 }
 
 /** Returns the PR's base (target) branch, or empty string on failure. */
-async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string | null> {
+async function getPrBaseBranch(
+  prNumber: string,
+  cwd: string,
+  deps: MainBranchScopeGateDeps
+): Promise<string | null> {
   // Try IssueStore cache first (synced via issue-store-sync, includes baseRefName)
   try {
-    const { getIssueStore } = await import("../src/issue-store.ts")
-    const repoSlug = await getRepoSlug(cwd)
+    const repoSlug = await deps.getRepoSlug(cwd)
     if (repoSlug) {
-      const store = getIssueStore()
-      const pr = store.getPullRequest<{ baseRefName?: string }>(repoSlug, parseInt(prNumber, 10))
+      const reader = deps.getIssueStoreReader()
+      const pr = await reader.getPullRequest<{ baseRefName?: string }>(
+        repoSlug,
+        parseInt(prNumber, 10)
+      )
       if (pr?.baseRefName) return pr.baseRefName
     }
   } catch {
@@ -177,10 +217,10 @@ async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string | 
   }
 
   // Fallback: query the GitHub API directly
-  const repoSlug = await getRepoSlug(cwd)
+  const repoSlug = await deps.getRepoSlug(cwd)
   if (!repoSlug) return null
   try {
-    const result = await ghJsonViaDaemon<{ base?: { ref?: string } }>(
+    const result = await deps.ghJsonViaDaemon<{ base?: { ref?: string } }>(
       ["api", `repos/${repoSlug}/pulls/${prNumber}`],
       cwd
     )
@@ -193,16 +233,17 @@ async function getPrBaseBranch(prNumber: string, cwd: string): Promise<string | 
 /** Returns the PR's mergeable status and required review state. */
 async function getPrMergeability(
   prNumber: string,
-  cwd: string
+  cwd: string,
+  deps: MainBranchScopeGateDeps
 ): Promise<{ mergeable: boolean; statusContext: string }> {
-  const repoSlug = await getRepoSlug(cwd)
+  const repoSlug = await deps.getRepoSlug(cwd)
   if (!repoSlug) return { mergeable: false, statusContext: "Could not determine repository" }
 
   // Cache fast-path: definite blocks (conflicts, CHANGES_REQUESTED) can be
   // decided without a live API round-trip. Only the "looks good" path needs
   // REST accuracy for branch-protection/required-CI checks via mergeStateStatus.
   try {
-    const reader = getIssueStoreReader()
+    const reader = deps.getIssueStoreReader()
     const cachedPr = await reader.getPullRequest<{ headRefName?: string }>(
       repoSlug,
       Number(prNumber)
@@ -235,7 +276,7 @@ async function getPrMergeability(
 
   // Live REST API for accurate mergeStateStatus (required CI, branch protection)
   try {
-    const result = await ghJsonViaDaemon<{
+    const result = await deps.ghJsonViaDaemon<{
       mergeStateStatus?: string
       mergeable?: boolean | null
       reviewDecision?: string
@@ -261,18 +302,19 @@ async function getPrMergeability(
 async function handlePrMerge(
   command: string,
   cwd: string,
-  defaultBranch: string
+  defaultBranch: string,
+  deps: MainBranchScopeGateDeps
 ): Promise<SwizHookOutput | null> {
-  const collaboration = await detectProjectCollaborationPolicy(cwd)
+  const collaboration = await deps.detectProjectCollaborationPolicy(cwd)
   const owner = collaboration.repoOwner
   const repo = collaboration.repoName
   if (!owner || !repo) return null
   const isCollaborative = collaboration.isCollaborative
-  const globalSettings = await readSwizSettings()
-  const effectiveSettings = getEffectiveSwizSettings(
+  const globalSettings = await deps.readSwizSettings()
+  const effectiveSettings = deps.getEffectiveSwizSettings(
     globalSettings,
     null,
-    await readProjectSettings(cwd)
+    await deps.readProjectSettings(cwd)
   )
   const strictMode = effectiveSettings.strictNoDirectMain
 
@@ -281,7 +323,7 @@ async function handlePrMerge(
   const prNumber = extractPrNumber(command)
   if (!prNumber) return null
 
-  const baseBranch = await getPrBaseBranch(prNumber, cwd)
+  const baseBranch = await getPrBaseBranch(prNumber, cwd, deps)
 
   if (baseBranch === null) {
     return preToolUseDeny(`
@@ -307,7 +349,7 @@ Please verify the PR number and your network connection, then try again.
   }
 
   // If we are merging into a production branch, check if the PR is approved/ready.
-  const prStatus = await getPrMergeability(prNumber, cwd)
+  const prStatus = await getPrMergeability(prNumber, cwd, deps)
 
   if (prStatus.mergeable) {
     return preToolUseAllow(
@@ -336,15 +378,16 @@ Repository: ${owner}/${repo}
 async function handlePushMatch(
   pushMatch: RegExpMatchArray,
   cwd: string,
-  defaultBranch: string
+  defaultBranch: string,
+  deps: MainBranchScopeGateDeps
 ): Promise<SwizHookOutput | null> {
-  const checkedOutBranch = await git(["branch", "--show-current"], cwd)
+  const checkedOutBranch = await deps.git(["branch", "--show-current"], cwd)
   const currentBranch = checkedOutBranch || pushMatch[1]!
 
   if (!isDefaultBranch(currentBranch, defaultBranch)) return null
 
   const remoteRef = `origin/${currentBranch}`
-  const diffRange = await resolveDiffRange(cwd, remoteRef)
+  const diffRange = await resolveDiffRange(cwd, remoteRef, deps)
   const fork = await detectForkTopology(cwd)
 
   if (!diffRange) {
@@ -362,12 +405,12 @@ Remediation:
 `)
   }
 
-  const diffStat = await git(["diff", diffRange, "--stat"], cwd)
-  const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
+  const diffStat = await deps.git(["diff", diffRange, "--stat"], cwd)
+  const diffFiles = await deps.git(["diff", "--name-only", diffRange], cwd)
   const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
-  const projectSettings = await readProjectSettings(cwd)
-  const policy = resolvePolicy(projectSettings)
+  const projectSettings = await deps.readProjectSettings(cwd)
+  const policy = deps.resolvePolicy(projectSettings)
 
   const {
     statParsingFailed,
@@ -381,14 +424,14 @@ Remediation:
     trivialMaxLines: policy.trivialMaxLines,
   })
 
-  const collaboration = await detectProjectCollaborationPolicy(cwd)
+  const collaboration = await deps.detectProjectCollaborationPolicy(cwd)
   const owner = collaboration.repoOwner
   const repo = collaboration.repoName
   if (!owner || !repo) return null
   const isCollaborative = collaboration.isCollaborative
 
-  const globalSettings = await readSwizSettings()
-  const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+  const globalSettings = await deps.readSwizSettings()
+  const effectiveSettings = deps.getEffectiveSwizSettings(globalSettings, null, projectSettings)
   const strictMode = effectiveSettings.strictNoDirectMain
 
   const policyResult = checkScopeAndPolicy({
@@ -438,21 +481,23 @@ Remediation:
 }
 
 export async function evaluatePretooluseMainBranchScopeGate(
-  input: unknown
+  input: unknown,
+  depsOverride: Partial<MainBranchScopeGateDeps> = {}
 ): Promise<SwizHookOutput> {
+  const deps = mergeDeps(depsOverride)
   const hookInput = toolHookInputSchema.parse(input) as ToolHookInput
   if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return {}
 
   const { command, cwd } = getCommandAndCwd(hookInput)
 
-  const trunkModeSettings = await readProjectSettings(cwd)
+  const trunkModeSettings = await deps.readProjectSettings(cwd)
   if (trunkModeSettings?.trunkMode) {
     return preToolUseAllow(
       "Continue in trunk-mode push policy: direct pushes to the default branch are allowed."
     )
   }
 
-  const defaultBranch = await getDefaultBranch(cwd)
+  const defaultBranch = await deps.getDefaultBranch(cwd)
 
   const pushToDefaultRe = new RegExp(
     `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\s+(?:-\\w+\\s+)*origin\\s+(${escapeRegex(defaultBranch)})\\b`
@@ -460,13 +505,13 @@ export async function evaluatePretooluseMainBranchScopeGate(
 
   const pushMatch = command.match(pushToDefaultRe)
   if (pushMatch) {
-    const result = await handlePushMatch(pushMatch, cwd, defaultBranch)
+    const result = await handlePushMatch(pushMatch, cwd, defaultBranch, deps)
     if (result) return result
   }
 
   const prMergeMatch = GH_PR_MERGE_RE.test(command)
   if (prMergeMatch) {
-    const result = await handlePrMerge(command, cwd, defaultBranch)
+    const result = await handlePrMerge(command, cwd, defaultBranch, deps)
     if (result) return result
   }
 

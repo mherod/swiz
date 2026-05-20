@@ -1,55 +1,15 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  evaluatePretooluseMainBranchScopeGate,
+  type MainBranchScopeGateDeps,
+} from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import { getIssueStore, resetIssueStore } from "./issue-store.ts"
-import type { SwizHookOutput } from "./SwizHook.ts"
 import { hookOutputSchema } from "./schemas.ts"
+import { DEFAULT_SETTINGS, getEffectiveSwizSettings } from "./settings.ts"
 import { extractPrNumber, GH_PR_MERGE_RE } from "./utils/hook-utils.ts"
-
-// ── Mocks ────────────────────────────────────────────────────────────────────
-
-void mock.module("../src/git-helpers.ts", () => ({
-  ghJsonViaDaemon: async (args: string[]) => {
-    if (args.join(" ").includes("pulls/101")) {
-      return {
-        base: {
-          ref: "main",
-        },
-        mergeStateStatus: "MERGEABLE",
-        mergeable: true,
-        reviewDecision: "APPROVED",
-      }
-    }
-    return null
-  },
-  getRepoSlug: async () => "mherod/swiz",
-}))
-
-void mock.module("../src/collaboration-policy.ts", () => ({
-  detectProjectCollaborationPolicy: async () => ({
-    isCollaborative: true,
-    repoOwner: "mherod",
-    repoName: "swiz",
-    signals: ["mock-signal"],
-  }),
-}))
-
-void mock.module("../src/settings.ts", () => ({
-  getEffectiveSwizSettings: () => ({
-    strictNoDirectMain: true,
-  }),
-  readProjectSettings: async () => ({
-    trunkMode: false,
-  }),
-  readSwizSettings: async () => ({}),
-  resolvePolicy: () => ({
-    trivialMaxFiles: 3,
-    trivialMaxLines: 50,
-  }),
-}))
-
-let evaluatePretooluseMainBranchScopeGate: (input: unknown) => Promise<SwizHookOutput>
 
 // ── gh pr merge command detection ────────────────────────────────────────────
 // These tests verify the regex and helper used by the scope gate hook to
@@ -121,13 +81,53 @@ describe("GH_PR_MERGE_RE (scope gate — allowed commands)", () => {
 })
 
 describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transitions)", () => {
+  const TEST_REPO_OWNER = "mherod"
   const TEST_REPO = "mherod/swiz"
   let testStore: ReturnType<typeof getIssueStore>
   let tempDbDir: string
 
-  beforeAll(async () => {
-    const hookModule = await import("../hooks/pretooluse-main-branch-scope-gate.ts")
-    evaluatePretooluseMainBranchScopeGate = hookModule.evaluatePretooluseMainBranchScopeGate
+  function testDeps(): Partial<MainBranchScopeGateDeps> {
+    return {
+      detectProjectCollaborationPolicy: async () => ({
+        currentUser: "mherod",
+        isCollaborative: true,
+        isOrgRepo: false,
+        isPersonalRepo: true,
+        openPullRequestCount: 0,
+        otherContributors: [],
+        repoName: "swiz",
+        repoOwner: TEST_REPO_OWNER,
+        repoSlug: TEST_REPO,
+        resolved: true,
+        signals: ["mock-signal"],
+      }),
+      getDefaultBranch: async () => "main",
+      getEffectiveSwizSettings,
+      getIssueStoreReader: () => testStore.asReader(),
+      getRepoSlug: async () => TEST_REPO,
+      ghJsonViaDaemon: async <T>(args: string[]): Promise<T | null> => {
+        if (!args.join(" ").includes("pulls/101")) return null
+        return {
+          base: {
+            ref: "main",
+          },
+          mergeStateStatus: "MERGEABLE",
+          mergeable: true,
+          reviewDecision: "APPROVED",
+        } as T
+      },
+      readProjectSettings: async () => ({
+        trunkMode: false,
+      }),
+      readSwizSettings: async () => ({
+        ...DEFAULT_SETTINGS,
+        sessions: {},
+        strictNoDirectMain: true,
+      }),
+    }
+  }
+
+  beforeAll(() => {
     tempDbDir = join(
       tmpdir(),
       `swiz-scope-gate-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -169,15 +169,18 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       commentCount: 5,
     })
 
-    const result = await evaluatePretooluseMainBranchScopeGate({
-      tool_name: "Bash",
-      tool_input: {
-        command: `gh pr merge ${prNumber} --squash`,
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: `gh pr merge ${prNumber} --squash`,
+          cwd: process.cwd(),
+        },
         cwd: process.cwd(),
+        transcript_path: "mock-transcript.jsonl",
       },
-      cwd: process.cwd(),
-      transcript_path: "mock-transcript.jsonl",
-    })
+      testDeps()
+    )
     const parsed = hookOutputSchema.parse(result)
 
     expect(parsed.hookSpecificOutput?.permissionDecision).toBe("deny")
@@ -205,15 +208,18 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       commentCount: 2,
     })
 
-    const result = await evaluatePretooluseMainBranchScopeGate({
-      tool_name: "Bash",
-      tool_input: {
-        command: `gh pr merge ${prNumber} --merge`,
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: `gh pr merge ${prNumber} --merge`,
+          cwd: process.cwd(),
+        },
         cwd: process.cwd(),
+        transcript_path: "mock-transcript.jsonl",
       },
-      cwd: process.cwd(),
-      transcript_path: "mock-transcript.jsonl",
-    })
+      testDeps()
+    )
     const parsed = hookOutputSchema.parse(result)
 
     expect(parsed.hookSpecificOutput?.permissionDecision).toBe("deny")
@@ -241,15 +247,18 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       commentCount: 1,
     })
 
-    const staleResult = await evaluatePretooluseMainBranchScopeGate({
-      tool_name: "Bash",
-      tool_input: {
-        command: `gh pr merge ${prNumber} --squash`,
+    const staleResult = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: `gh pr merge ${prNumber} --squash`,
+          cwd: process.cwd(),
+        },
         cwd: process.cwd(),
+        transcript_path: "mock-transcript.jsonl",
       },
-      cwd: process.cwd(),
-      transcript_path: "mock-transcript.jsonl",
-    })
+      testDeps()
+    )
     const staleParsed = hookOutputSchema.parse(staleResult)
 
     expect(staleParsed.hookSpecificOutput?.permissionDecision).toBe("deny")
@@ -261,15 +270,18 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       commentCount: 1,
     })
 
-    const result = await evaluatePretooluseMainBranchScopeGate({
-      tool_name: "Bash",
-      tool_input: {
-        command: `gh pr merge ${prNumber} --squash`,
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: `gh pr merge ${prNumber} --squash`,
+          cwd: process.cwd(),
+        },
         cwd: process.cwd(),
+        transcript_path: "mock-transcript.jsonl",
       },
-      cwd: process.cwd(),
-      transcript_path: "mock-transcript.jsonl",
-    })
+      testDeps()
+    )
     const parsed = hookOutputSchema.parse(result)
 
     expect(parsed.hookSpecificOutput?.permissionDecision).toBe("allow")

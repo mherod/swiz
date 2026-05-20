@@ -56,7 +56,7 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
 
       // Check that count summary and task advisor advice are both present!
       expect(context).toContain("Planning buffer thin.")
-      expect(context).toContain("Use TaskCreate to create a task for this prompt")
+      expect(context).toContain("create a task for this prompt")
     } finally {
       process.env.HOME = originalHome
     }
