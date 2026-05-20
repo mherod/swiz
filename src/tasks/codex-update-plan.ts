@@ -10,8 +10,8 @@ import { applyTaskListEvent } from "./task-event-state.ts"
 import { applyCacheTaskListSnapshot } from "./task-recovery.ts"
 import { readTasks, type Task, type TaskStatus, writeAudit, writeTask } from "./task-repository.ts"
 
-const CODEX_UPDATE_PLAN_TOOL_NAMES = new Set(["update_plan", "functions.update_plan"])
-const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
+export const CODEX_UPDATE_PLAN_TOOL_NAMES = new Set(["update_plan", "functions.update_plan"])
+export const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
 
 const codexPlanStatusSchema = z.enum(["pending", "in_progress", "completed", "cancelled"])
 const codexPlanArgumentsSchema = z.looseObject({
@@ -56,7 +56,7 @@ interface CodexFunctionCallLine {
   payload: CodexFunctionCallPayload
 }
 
-function isCodexPlanTaskId(taskId: string): boolean {
+export function isCodexPlanTaskId(taskId: string): boolean {
   if (!taskId.startsWith(CODEX_PLAN_TASK_ID_PREFIX)) return false
   const seq = Number.parseInt(taskId.slice(CODEX_PLAN_TASK_ID_PREFIX.length), 10)
   return Number.isFinite(seq) && seq > 0
@@ -149,7 +149,7 @@ export function extractCodexUpdatePlanSnapshots(jsonlText: string): CodexUpdateP
   return extractCodexUpdatePlanSnapshotsFromLines(extractSessionLines(jsonlText))
 }
 
-function planTaskId(index: number): string {
+export function codexPlanTaskId(index: number): string {
   return `${CODEX_PLAN_TASK_ID_PREFIX}${index + 1}`
 }
 
@@ -279,7 +279,7 @@ async function syncVisiblePlanTasks(ctx: PlanSyncContext): Promise<void> {
   for (let index = 0; index < ctx.snapshot.plan.length; index++) {
     const item = ctx.snapshot.plan[index]
     if (!item) continue
-    const id = planTaskId(index)
+    const id = codexPlanTaskId(index)
     ctx.seenPlanIds.add(id)
     const existing = ctx.existingById.get(id)
     const task = buildPlanTask(existing, id, item, index)

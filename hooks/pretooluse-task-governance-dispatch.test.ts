@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { type Task, writeTask as writeRepositoryTask } from "../src/tasks/task-repository.ts"
 import { writeTask } from "../src/utils/test-utils.ts"
 import pretooluseTaskGovernance, {
   evaluateBlockedTaskFilesPrecheck,
@@ -18,6 +19,7 @@ const TASK_HOME = join(
     .toString(36)
     .slice(2)}`
 )
+const CODEX_TASKS_DIR = join(TASK_HOME, ".codex", "tasks")
 
 afterAll(async () => {
   await rm(TASK_HOME, { recursive: true, force: true })
@@ -49,6 +51,40 @@ async function seedPendingTasks(sessionId: string, count: number): Promise<void>
 
 async function cleanupSession(sessionId: string): Promise<void> {
   await rm(join(TASK_HOME, ".claude", "tasks", sessionId), { recursive: true, force: true })
+  await rm(join(CODEX_TASKS_DIR, sessionId), { recursive: true, force: true })
+}
+
+function codexTask(task: { id: string; subject: string; status: Task["status"] }): Task {
+  return {
+    id: task.id,
+    subject: task.subject,
+    description: "",
+    status: task.status,
+    blocks: [],
+    blockedBy: [],
+  }
+}
+
+async function seedCodexTask(
+  sessionId: string,
+  task: { id: string; subject: string; status: Task["status"] }
+): Promise<void> {
+  await writeRepositoryTask(sessionId, codexTask(task), process.cwd(), CODEX_TASKS_DIR)
+}
+
+function updatePlanInput(
+  sessionId: string,
+  plan: Array<{ step: string; status: string }>,
+  extraToolInput: Record<string, unknown> = {}
+) {
+  const toolInput = { ...extraToolInput, plan }
+  return {
+    session_id: sessionId,
+    tool_name: "update_plan",
+    tool_input: toolInput,
+    _taskHome: TASK_HOME,
+    _env: { CODEX_THREAD_ID: "test-codex-thread" },
+  }
 }
 
 function uniqueSessionId(prefix: string): string {
@@ -134,6 +170,165 @@ describe("evaluateNativeTaskUpdatePath", () => {
     const reason = decisionReason(result) ?? ""
     expect(reason).toContain("foo")
     expect(reason).toContain("bar")
+  })
+
+  test("denies update_plan when toolInput has an unsupported field", async () => {
+    const sessionId = uniqueSessionId("update-plan-unsupported")
+    try {
+      await cleanupSession(sessionId)
+      const input = updatePlanInput(sessionId, [], { taskId: "1" })
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("taskId")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when the projected final plan drops the pending buffer", async () => {
+    const sessionId = uniqueSessionId("update-plan-buffer")
+    try {
+      await cleanupSession(sessionId)
+      await seedCodexTask(sessionId, {
+        id: "codex-1",
+        subject: "Implement projection",
+        status: "in_progress",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-2",
+        subject: "Verify projection",
+        status: "pending",
+      })
+
+      const input = updatePlanInput(sessionId, [
+        { step: "Implement projection", status: "in_progress" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("at least 1 pending")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when a pending plan item jumps directly to completed", async () => {
+    const sessionId = uniqueSessionId("update-plan-pending-complete")
+    try {
+      await cleanupSession(sessionId)
+      await seedCodexTask(sessionId, {
+        id: "codex-1",
+        subject: "Write regression",
+        status: "pending",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-2",
+        subject: "Run regression",
+        status: "pending",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-3",
+        subject: "Implement fix",
+        status: "in_progress",
+      })
+
+      const input = updatePlanInput(sessionId, [
+        { step: "Write regression", status: "completed" },
+        { step: "Run regression", status: "pending" },
+        { step: "Implement fix", status: "in_progress" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("still pending")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("allows update_plan when projected completion preserves two pending tasks", async () => {
+    const sessionId = uniqueSessionId("update-plan-valid-completion")
+    try {
+      await cleanupSession(sessionId)
+      await seedCodexTask(sessionId, {
+        id: "codex-1",
+        subject: "Implement projection",
+        status: "in_progress",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-2",
+        subject: "Verify projection",
+        status: "pending",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-3",
+        subject: "Commit projection",
+        status: "pending",
+      })
+
+      const input = updatePlanInput(sessionId, [
+        { step: "Implement projection", status: "completed" },
+        { step: "Verify projection", status: "pending" },
+        { step: "Commit projection", status: "pending" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when the projected final plan exceeds the in-progress cap", async () => {
+    const sessionId = uniqueSessionId("update-plan-cap")
+    try {
+      await cleanupSession(sessionId)
+      for (let i = 1; i <= getInProgressCap(); i++) {
+        await seedCodexTask(sessionId, {
+          id: `codex-${i}`,
+          subject: `Active task ${i}`,
+          status: "in_progress",
+        })
+      }
+      await seedCodexTask(sessionId, {
+        id: `codex-${getInProgressCap() + 1}`,
+        subject: "Pending overflow",
+        status: "pending",
+      })
+
+      const input = updatePlanInput(sessionId, [
+        ...Array.from({ length: getInProgressCap() }, (_, index) => ({
+          step: `Active task ${index + 1}`,
+          status: "in_progress",
+        })),
+        { step: "Pending overflow", status: "in_progress" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain(String(getInProgressCap()))
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when the projected final plan has duplicate active subjects", async () => {
+    const sessionId = uniqueSessionId("update-plan-duplicates")
+    try {
+      await cleanupSession(sessionId)
+      const input = updatePlanInput(sessionId, [
+        { step: "Implement projection", status: "in_progress" },
+        { step: "Implement projection", status: "pending" },
+        { step: "Verify projection", status: "pending" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("Duplicate task subjects")
+    } finally {
+      await cleanupSession(sessionId)
+    }
   })
 })
 
