@@ -173,6 +173,7 @@ function buildBaseSettings(
     skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
     ignoreMcpTools: settings.ignoreMcpTools,
+    mcpChannels: settings.mcpChannels,
     autoSteer: settings.autoSteer,
     swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,

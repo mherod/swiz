@@ -277,6 +277,12 @@ async function isAutoSteerSettingEnabled(sessionId: string): Promise<boolean> {
   return settings.autoSteer
 }
 
+async function isMcpChannelsSettingEnabled(sessionId: string): Promise<boolean> {
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../settings.ts")
+  const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
+  return settings.mcpChannels
+}
+
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
   return !!cwd && MCP_CHANNEL_TRIGGERS.has(trigger) && isMcpChannelLiveForCwd(cwd)
 }
@@ -401,6 +407,7 @@ export async function scheduleAutoSteer(
     return true
   }
 
+  if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
   const enqueued = store.enqueue(safeSession, message, resolvedTrigger, { cwd })
@@ -418,8 +425,8 @@ export async function scheduleAutoSteer(
  *
  * Returns true if enqueued, false if the channel is not currently live, the
  * store de-duplicated it, or the session id could not be sanitized. The
- * `autoSteer` setting is still respected — channel delivery is a transport,
- * not a bypass of policy.
+ * `autoSteer` setting is still respected, and `mcpChannels` must also be
+ * enabled because channel delivery is a transport, not a bypass of policy.
  */
 export async function scheduleAutoSteerViaChannel(
   sessionId: string,
@@ -429,6 +436,7 @@ export async function scheduleAutoSteerViaChannel(
   opts?: { ttlMs?: number }
 ): Promise<boolean> {
   if (!(await isAutoSteerSettingEnabled(sessionId))) return false
+  if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(trigger, cwd)) return false
 
   const safeSession = await sanitizeSessionOrReturnNull(sessionId)

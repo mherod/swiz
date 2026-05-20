@@ -146,6 +146,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("sandboxedEdits")
     expect(parsed).toHaveProperty("speak")
     expect(parsed).toHaveProperty("swizNotifyHooks")
+    expect(parsed).toHaveProperty("mcpChannels")
     expect(parsed).toHaveProperty("gitStatusGate")
     expect(parsed).toHaveProperty("ignoreCi")
     expect(parsed).toHaveProperty("memoryLineThreshold")
@@ -185,6 +186,7 @@ describe("swiz settings", () => {
       { args: ["disable", "auto-continue"], key: "autoContinue", expected: false },
       { args: ["disable", "pr-merge-mode"], key: "prMergeMode", expected: false },
       { args: ["disable", "changes-requested-gate"], key: "changesRequestedGate", expected: false },
+      { args: ["enable", "mcp-channels"], key: "mcpChannels", expected: true },
       { args: ["disable", "pr-review-gate"], key: "changesRequestedGate", expected: false },
       {
         args: ["disable", "personal-repo-issues-gate"],
@@ -940,6 +942,7 @@ describe("SETTINGS_REGISTRY", () => {
       "qualityChecksGate",
       "skipSecretScan",
       "ignoreMcpTools",
+      "mcpChannels",
       "prAgeGateMinutes",
       "pushCooldownMinutes",
       "taskDurationWarningMinutes",
@@ -1218,6 +1221,14 @@ describe("collaborationMode settings", () => {
     const effective = getEffectiveSwizSettings(settings, null, { githubCiGate: true })
     expect(effective.ignoreCi).toBe(true)
     expect(effective.githubCiGate).toBe(false)
+  })
+
+  test("mcpChannels defaults to false and propagates to effective settings", async () => {
+    const home = await createTempHome()
+    const settings = await readSwizSettings({ home })
+    const effective = getEffectiveSwizSettings(settings)
+    expect(settings.mcpChannels).toBe(false)
+    expect(effective.mcpChannels).toBe(false)
   })
 
   test("session collaborationMode overrides global", () => {

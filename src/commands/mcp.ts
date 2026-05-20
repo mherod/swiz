@@ -5,6 +5,7 @@ import { dirname } from "node:path"
 import { z } from "zod"
 import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { readSwizSettings } from "../settings.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import { readTasks } from "../tasks/task-repository.ts"
 import {
@@ -38,17 +39,40 @@ import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 const SERVER_NAME = "swiz"
 const SERVER_VERSION = "0.2.0"
 
-const INSTRUCTIONS = [
+const CHANNEL_INSTRUCTIONS = [
   'Events from swiz arrive as <channel source="swiz" trigger="..." session_id="...">.',
   'When trigger="next_turn" the content is an auto-steer: a directive from',
   "the swiz task system telling you what to do next (e.g. complete a",
   "specific task, push a commit, address a hook block). Read the content and",
   'act on it as if the user had just typed it. Triggers "after_commit" and',
   '"after_all_tasks_complete" forward post-action steers the same way.',
+]
+
+const BASE_INSTRUCTIONS = [
   "To send a message back through swiz (log, iMessage bridge, etc.) call the",
   '"reply" tool with { content, kind? }. No chat_id is required — swiz tags',
   "the entry with the project key automatically.",
-].join(" ")
+]
+
+export function buildMcpInstructions(mcpChannels: boolean): string {
+  return [...(mcpChannels ? CHANNEL_INSTRUCTIONS : []), ...BASE_INSTRUCTIONS].join(" ")
+}
+
+type McpServerCapabilities = {
+  experimental?: Record<string, Record<string, never>>
+  tools: Record<string, never>
+}
+
+export function buildMcpCapabilities(mcpChannels: boolean): McpServerCapabilities {
+  const capabilities: McpServerCapabilities = { tools: {} }
+  if (mcpChannels) {
+    capabilities.experimental = {
+      "claude/channel": {},
+      "claude/channel/permission": {},
+    }
+  }
+  return capabilities
+}
 
 interface ChannelEvent {
   content: string
@@ -591,18 +615,14 @@ async function serve(): Promise<void> {
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js")
 
   const cwd = process.cwd()
+  const settings = await readSwizSettings()
+  const mcpChannels = settings.mcpChannels
 
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
-      capabilities: {
-        experimental: {
-          "claude/channel": {},
-          "claude/channel/permission": {},
-        },
-        tools: {},
-      },
-      instructions: INSTRUCTIONS,
+      capabilities: buildMcpCapabilities(mcpChannels),
+      instructions: buildMcpInstructions(mcpChannels),
     }
   )
 
@@ -855,17 +875,22 @@ async function serve(): Promise<void> {
   activeServer = server as unknown as typeof activeServer
 
   const lowLevel = (server as unknown as { server: McpLowLevelServer }).server
-  try {
-    registerPermissionRelay(lowLevel, cwd)
-  } catch (err) {
-    process.stderr.write(`swiz mcp: failed to register permission relay: ${String(err)}\n`)
+  if (mcpChannels) {
+    try {
+      registerPermissionRelay(lowLevel, cwd)
+    } catch (err) {
+      process.stderr.write(`swiz mcp: failed to register permission relay: ${String(err)}\n`)
+    }
   }
 
+  const enabledFeatures = mcpChannels
+    ? "channel + permission + reply + task-tools"
+    : "reply + task-tools"
   process.stderr.write(
-    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — channel + permission + reply + task-tools enabled\n`
+    `swiz mcp server ready (${SERVER_NAME} ${SERVER_VERSION}) — ${enabledFeatures} enabled\n`
   )
 
-  const stopDrain = startAutoSteerDrainLoop(cwd)
+  const stopDrain = mcpChannels ? startAutoSteerDrainLoop(cwd) : () => {}
   const cleanup = (): void => {
     stopDrain()
     activeServer = null
@@ -877,7 +902,7 @@ async function serve(): Promise<void> {
 
 export const mcpCommand: Command = {
   name: "mcp",
-  description: "Run swiz as a Model Context Protocol (MCP) stdio server (with channel support)",
+  description: "Run swiz as a Model Context Protocol (MCP) stdio server",
   usage: "swiz mcp",
   async run() {
     await serve()

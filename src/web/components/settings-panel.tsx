@@ -31,6 +31,7 @@ interface GlobalSettingsForm {
   qualityChecksGate: boolean
   skipSecretScan: boolean
   ignoreMcpTools: boolean
+  mcpChannels: boolean
   autoTransition: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
@@ -72,6 +73,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   qualityChecksGate: true,
   skipSecretScan: false,
   ignoreMcpTools: true,
+  mcpChannels: false,
   autoTransition: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
@@ -203,6 +205,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     qualityChecksGate: readBooleanSetting(settings, "qualityChecksGate", true),
     skipSecretScan: readBooleanSetting(settings, "skipSecretScan"),
     ignoreMcpTools: readBooleanSetting(settings, "ignoreMcpTools", true),
+    mcpChannels: readBooleanSetting(settings, "mcpChannels"),
     autoTransition: readBooleanSetting(settings, "autoTransition", true),
     taskDurationWarningMinutes: readNumberSetting(settings, "taskDurationWarningMinutes", 45),
     largeFileSizeKb: readNumberSetting(settings, "largeFileSizeKb", 200),
@@ -564,6 +567,11 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Skip hook execution for MCP tool calls (tool names starting with mcp__).",
   },
   {
+    key: "mcpChannels",
+    label: "MCP channels",
+    desc: "Expose Claude MCP channel and permission capabilities. Auto-steer remains controlled separately.",
+  },
+  {
     key: "autoTransition",
     label: "Auto-transition status",
     desc: "Allow multi-step task status transitions (e.g. completing a pending task auto-transitions through in_progress).",
@@ -608,8 +616,11 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "autoTransition",
-      "ignoreMcpTools",
     ],
+  },
+  {
+    title: "MCP",
+    keys: ["ignoreMcpTools", "mcpChannels"],
   },
   {
     title: "Git & Push",

@@ -2,7 +2,29 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { appendReplyToSink, evaluatePermissionPolicy, loadPermissionPolicy } from "./mcp.ts"
+import {
+  appendReplyToSink,
+  buildMcpCapabilities,
+  buildMcpInstructions,
+  evaluatePermissionPolicy,
+  loadPermissionPolicy,
+} from "./mcp.ts"
+
+describe("MCP channel setting helpers", () => {
+  it("omits channel capabilities when MCP channels are disabled", () => {
+    expect(buildMcpCapabilities(false)).toEqual({ tools: {} })
+    expect(buildMcpInstructions(false)).not.toContain("<channel")
+    expect(buildMcpInstructions(false)).toContain("reply")
+  })
+
+  it("includes channel capabilities when MCP channels are enabled", () => {
+    expect(buildMcpCapabilities(true).experimental).toEqual({
+      "claude/channel": {},
+      "claude/channel/permission": {},
+    })
+    expect(buildMcpInstructions(true)).toContain("<channel")
+  })
+})
 
 async function writeRawPolicy(cwd: string, content: string): Promise<string> {
   const policyPath = join(cwd, ".swiz", "permission-policy.json")

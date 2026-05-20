@@ -261,6 +261,8 @@ export interface SwizSettings {
    * so PreToolUse/PostToolUse hooks never match against MCP tool invocations. Defaults to true.
    */
   ignoreMcpTools: boolean
+  /** When true, `swiz mcp` advertises Claude channel capabilities and runs channel delivery. Defaults to false. */
+  mcpChannels: boolean
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>

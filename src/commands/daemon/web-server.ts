@@ -1200,6 +1200,7 @@ async function handleGlobalSettingsUpdate(req: Request): Promise<Response> {
     "sandboxedEdits",
     "speak",
     "swizNotifyHooks",
+    "mcpChannels",
     "gitStatusGate",
     "ambitionMode",
     "memoryWordThreshold",

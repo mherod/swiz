@@ -87,6 +87,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "mcpChannels",
+    aliases: ["mcp-channels", "mcp-channel", "mcpchannels", "mcp_channels"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: false,
+    docs: {
+      description: "Enable Claude MCP channel capabilities in the swiz MCP server",
+      effectExplanation:
+        "When enabled, `swiz mcp` advertises Claude channel and permission capabilities and starts the MCP channel transport. This does not enable auto-steer; auto-steer remains controlled by the separate auto-steer setting. Disabled by default; reply and task tools remain available.",
+      enableDescription: "Enable Claude channel and permission capabilities for swiz mcp",
+      disableDescription: "Disable MCP channel capabilities; keep reply and task tools only",
+    },
+  },
+  {
     key: "sandboxedEdits",
     aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
     kind: "boolean",

@@ -68,12 +68,15 @@ function restoreTerminalEnv(): void {
   originalEnv.clear()
 }
 
-async function setupAutoSteerHome(): Promise<string> {
+async function setupAutoSteerHome(settings: Record<string, unknown> = {}): Promise<string> {
   const home = mkdtempSync(join(tmpdir(), "swiz-autosteer-home-"))
   tmpDirs.push(home)
   process.env.HOME = home
   mkdirSync(join(home, ".swiz"), { recursive: true })
-  await Bun.write(join(home, ".swiz", "settings.json"), `${JSON.stringify({ autoSteer: true })}\n`)
+  await Bun.write(
+    join(home, ".swiz", "settings.json"),
+    `${JSON.stringify({ autoSteer: true, mcpChannels: true, ...settings })}\n`
+  )
   return home
 }
 
@@ -155,6 +158,22 @@ describe("auto-steer helpers", () => {
     tmpFiles.push(swizMcpChannelNotifyPath(projectKey))
 
     const scheduled = await scheduleAutoSteerViaChannel("session-closed", "Take the next task", cwd)
+
+    expect(scheduled).toBe(false)
+    expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
+  })
+
+  test("scheduleAutoSteerViaChannel returns false when MCP channels are disabled", async () => {
+    const home = await setupAutoSteerHome({ mcpChannels: false })
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    await writeLiveChannelStatus(cwd)
+
+    const scheduled = await scheduleAutoSteerViaChannel(
+      "session-disabled",
+      "Take the next task",
+      cwd
+    )
 
     expect(scheduled).toBe(false)
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
