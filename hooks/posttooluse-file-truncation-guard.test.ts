@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluateFileTruncationGuard } from "./posttooluse-file-truncation-guard.ts"
@@ -25,7 +24,7 @@ async function createRepoWithFile(
   await gitExec(["config", "user.email", "test@test.com"], cwd)
   await gitExec(["config", "user.name", "Test"], cwd)
   const filePath = join(cwd, filename)
-  await writeFile(filePath, content)
+  await Bun.write(filePath, content)
   await gitExec(["add", filename], cwd)
   await gitExec(["commit", "-m", "initial"], cwd)
   return { cwd, filePath }
@@ -33,6 +32,10 @@ async function createRepoWithFile(
 
 function makeInput(filePath: string, cwd: string, toolName = "Edit") {
   return { tool_name: toolName, tool_input: { file_path: filePath }, cwd, session_id: "test" }
+}
+
+function makeApplyPatchInput(command: string, cwd: string) {
+  return { tool_name: "apply_patch", tool_input: { command }, cwd, session_id: "test" }
 }
 
 function lines(n: number): string {
@@ -63,28 +66,28 @@ describe("posttooluse-file-truncation-guard", () => {
     await gitExec(["config", "user.name", "Test"], cwd)
     await gitExec(["commit", "--allow-empty", "-m", "init"], cwd)
     const filePath = join(cwd, "new.ts")
-    await writeFile(filePath, lines(200))
+    await Bun.write(filePath, lines(200))
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd))
     expect(result).toEqual({})
   })
 
   test("returns {} when loss is below the 50-line threshold", async () => {
     const { cwd, filePath } = await createRepoWithFile(lines(100))
-    await writeFile(filePath, lines(80))
+    await Bun.write(filePath, lines(80))
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd))
     expect(result).toEqual({})
   })
 
   test("returns {} when loss exceeds 50 lines but is below 50% of original", async () => {
     const { cwd, filePath } = await createRepoWithFile(lines(500))
-    await writeFile(filePath, lines(440))
+    await Bun.write(filePath, lines(440))
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd))
     expect(result).toEqual({})
   })
 
   test("injects additionalContext when file shrinks by ≥50 lines and ≥50%", async () => {
     const { cwd, filePath } = await createRepoWithFile(lines(200))
-    await writeFile(filePath, "// truncated\n")
+    await Bun.write(filePath, "// truncated\n")
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd))
     const hso = (result as Record<string, any>).hookSpecificOutput as Record<string, any>
     expect(hso?.additionalContext).toContain("lost")
@@ -94,15 +97,32 @@ describe("posttooluse-file-truncation-guard", () => {
 
   test("Write tool also triggers warning on truncation", async () => {
     const { cwd, filePath } = await createRepoWithFile(lines(200))
-    await writeFile(filePath, "// rewritten small\n")
+    await Bun.write(filePath, "// rewritten small\n")
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd, "Write"))
     const hso = (result as Record<string, any>).hookSpecificOutput as Record<string, any>
     expect(hso?.additionalContext).toContain("lost")
   })
 
+  test("apply_patch command extracts updated file path and triggers warning", async () => {
+    const { cwd, filePath } = await createRepoWithFile(lines(200))
+    await Bun.write(filePath, "// truncated by patch\n")
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: target.ts",
+      "@@",
+      "-const line1 = 1;",
+      "+// truncated by patch",
+      "*** End Patch",
+    ].join("\n")
+    const result = await evaluateFileTruncationGuard(makeApplyPatchInput(patch, cwd))
+    const hso = (result as Record<string, any>).hookSpecificOutput as Record<string, any>
+    expect(hso?.additionalContext).toContain("lost")
+    expect(hso?.additionalContext).toContain("target.ts")
+  })
+
   test("no warning when file grows larger than HEAD", async () => {
     const { cwd, filePath } = await createRepoWithFile(lines(10))
-    await writeFile(filePath, lines(300))
+    await Bun.write(filePath, lines(300))
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd))
     expect(result).toEqual({})
   })
