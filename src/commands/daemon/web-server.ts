@@ -1469,12 +1469,21 @@ async function handleStatusLineSnapshot(
   const complianceDurationLabel = sessionId
     ? resolveComplianceDurationLabel(sessionId, ctx.sessionComplianceState)
     : null
+  const complianceDurationSeconds = sessionId
+    ? resolveComplianceDurationSeconds(sessionId, ctx.sessionComplianceState)
+    : null
   const syncEntry = ctx.upstreamSyncRegistry.listActive().find((e) => e.cwd === body.cwd)
   const issueSyncStale = syncEntry
     ? syncEntry.lastSyncAt === null || Date.now() - syncEntry.lastSyncAt > STALE_SYNC_THRESHOLD_MS
     : null
   return Response.json({
-    snapshot: { ...snapshot, taskCounts, complianceDurationLabel, issueSyncStale },
+    snapshot: {
+      ...snapshot,
+      taskCounts,
+      complianceDurationLabel,
+      complianceDurationSeconds,
+      issueSyncStale,
+    },
   })
 }
 
@@ -1490,6 +1499,15 @@ export function resolveComplianceDurationLabel(
   const mins = Math.floor(secs / 60)
   if (mins < 60) return `${mins}m`
   return `${Math.floor(mins / 60)}h`
+}
+
+export function resolveComplianceDurationSeconds(
+  sessionId: string,
+  store: DaemonWebServerContext["sessionComplianceState"]
+): number | null {
+  const entry = store.get(sessionId)
+  if (!entry?.current) return null
+  return Math.floor((Date.now() - entry.current.at) / 1000)
 }
 
 async function handleComplianceRecord(

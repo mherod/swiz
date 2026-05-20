@@ -430,11 +430,12 @@ describe("formatTaskCountSegment", () => {
     expect(seg).toContain("👍") // governance healthy: ≥1 inProgress, ≥1 pending, ≥2 incomplete
   })
 
-  it("shows thumbs-down when governance thresholds not met", () => {
+  it("shows warning when governance thresholds not met", () => {
     // only in_progress tasks, no pending buffer
     const seg = formatTaskCountSegment({ total: 1, incomplete: 1, pending: 0, inProgress: 1 })
-    expect(seg).toContain("👎")
+    expect(seg).toContain("⚠️")
     expect(seg).not.toContain("👍")
+    expect(seg).not.toContain("👎")
   })
 
   it("shows no indicator when all tasks are done", () => {
@@ -452,8 +453,23 @@ describe("formatTaskCountSegment", () => {
       { total: 1, incomplete: 1, pending: 0, inProgress: 1 },
       "12s"
     )
-    expect(segDown).toContain("👎")
+    expect(segDown).toContain("⚠️")
     expect(segDown).toContain("12s")
+  })
+
+  it("upgrades to clapping emoji when good compliance has been held for ≥2 minutes", () => {
+    const counts = { total: 5, incomplete: 3, pending: 2, inProgress: 1 }
+    const seg = formatTaskCountSegment(counts, "2m", 120)
+    expect(seg).toContain("👏")
+    expect(seg).not.toContain("👍")
+    expect(seg).toContain("2m")
+  })
+
+  it("keeps thumbs-up when good compliance is under 2 minutes", () => {
+    const counts = { total: 5, incomplete: 3, pending: 2, inProgress: 1 }
+    const seg = formatTaskCountSegment(counts, "1m", 119)
+    expect(seg).toContain("👍")
+    expect(seg).not.toContain("👏")
   })
 
   it("shows indicator without duration when label is null", () => {

@@ -62,6 +62,8 @@ export interface WarmStatusLineSnapshot {
   settingsParts: string[]
   taskCounts?: TaskCounts | null
   complianceDurationLabel?: string | null
+  /** Raw seconds the current compliance state has been maintained. Used to upgrade 👍→👏 after 2 minutes. */
+  complianceDurationSeconds?: number | null
   activeSkills?: string[] | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
@@ -897,7 +899,8 @@ function isTaskGovernanceHealthy(counts: TaskCounts): boolean {
 
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
-  durationLabel?: string | null
+  durationLabel?: string | null,
+  durationSeconds?: number | null
 ): string {
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
@@ -906,7 +909,12 @@ export function formatTaskCountSegment(
   if (counts.inProgress > 0) parts.push(`\x1b[93m${"◼".repeat(counts.inProgress)}${R}`)
   if (counts.pending > 0) parts.push(`\x1b[96m${"◻".repeat(counts.pending)}${R}`)
   if (counts.incomplete > 0) {
-    const indicator = isTaskGovernanceHealthy(counts) ? "👍" : "👎"
+    let indicator: string
+    if (isTaskGovernanceHealthy(counts)) {
+      indicator = typeof durationSeconds === "number" && durationSeconds >= 120 ? "👏" : "👍"
+    } else {
+      indicator = "⚠️"
+    }
     parts.push(durationLabel ? `${indicator} ${DIM}${durationLabel}${R}` : indicator)
   }
   return parts.join(" ")
@@ -962,7 +970,11 @@ function buildLine3(
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
   const daemonMetricsSeg = buildDaemonMetricsSegment(daemonMetrics)
-  const taskSeg = formatTaskCountSegment(taskCounts, snapshot.complianceDurationLabel)
+  const taskSeg = formatTaskCountSegment(
+    taskCounts,
+    snapshot.complianceDurationLabel,
+    snapshot.complianceDurationSeconds
+  )
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
