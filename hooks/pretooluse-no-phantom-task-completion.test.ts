@@ -32,10 +32,11 @@ async function runHook(
   home: string,
   sessionId: string,
   toolInput: any,
-  transcriptPath?: string
+  transcriptPath?: string,
+  toolName = "TaskUpdate"
 ): Promise<{ decision?: string; reason?: string }> {
   const payload = JSON.stringify({
-    tool_name: "TaskUpdate",
+    tool_name: toolName,
     tool_input: toolInput,
     cwd,
     session_id: sessionId,
@@ -166,5 +167,21 @@ describe("pretooluse-no-phantom-task-completion", () => {
 
     expect(result.decision).toBe("allow")
     expect(result.reason).toContain("work tool call(s) after in_progress")
+  })
+
+  test("ignores update_plan as a whole-plan mutation, not a one-task completion", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-update-plan-"))
+    const home = await mkdtemp(join(tmpdir(), "swiz-phantom-gate-update-plan-home-"))
+    await initGitRepo(dir)
+    const sessionId = "session-update-plan"
+    const transcriptPath = join(dir, "transcript.jsonl")
+    await writeFile(transcriptPath, "")
+
+    const toolInput = {
+      plan: [{ step: "Implement model", status: "completed" }],
+    }
+    const result = await runHook(dir, home, sessionId, toolInput, transcriptPath, "update_plan")
+
+    expect(result).toEqual({})
   })
 })

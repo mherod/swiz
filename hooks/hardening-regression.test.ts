@@ -410,17 +410,17 @@ describe("lefthook.yml hook-order and invariant guards", () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Category: codex prompt-advisor exemption (#572)
+// Category: codex prompt-advisor planning context
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("PostToolUse task hooks — codex exemption (#574)", () => {
+describe("PostToolUse task hooks — codex transcript compatibility", () => {
   test.each([
     "hooks/posttooluse-task-sync.ts",
     "hooks/posttooluse-task-count-context.ts",
     "hooks/posttooluse-task-output.ts",
     "hooks/posttooluse-task-advisor.ts",
     "hooks/posttooluse-git-task-autocomplete.ts",
-  ])("%s emits no output for codex transcript_path payload", async (hookPath) => {
+  ])("%s emits no post-tool context for codex transcript_path payload", async (hookPath) => {
     const homeDir = await createTempHome()
     const result = await runHook(
       hookPath,
@@ -435,31 +435,30 @@ describe("PostToolUse task hooks — codex exemption (#574)", () => {
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
     expect(result.exitCode).toBe(0)
-    // Each task posttool hook returns {} (empty stdout) for codex payloads.
+    // PostToolUse task hooks rely on task-file events; Codex planning context is
+    // handled by userPromptSubmit/update_plan paths instead.
     expect((result.stdout ?? "").trim()).toBe("")
   })
 })
 
-describe("userpromptsubmit-task-advisor — codex exemption (#572)", () => {
-  test("codex transcript_path produces no advisor context (no ambient codex env)", async () => {
+describe("userpromptsubmit-task-advisor — codex planning context", () => {
+  test("codex transcript_path produces advisor context", async () => {
     const homeDir = await createTempHome()
-    // Pre-seed a 'no pending tasks' state so the advisor would normally fire.
     const result = await runHook(
       "hooks/userpromptsubmit-task-advisor.ts",
       {
         session_id: "codex-prompt-advisor-session",
         transcript_path: `${homeDir}/.codex/sessions/abc123.jsonl`,
       },
-      // No CODEX_THREAD_ID / CODEX_MANAGED_BY_NPM in env — the exemption
-      // must rely on the transcript path fingerprint alone.
+      // No CODEX_THREAD_ID / CODEX_MANAGED_BY_NPM in env; detection relies on
+      // the transcript path fingerprint.
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
     expect(result.exitCode).toBe(0)
-    // Empty stdout (or empty hookSpecificOutput) indicates no advisor context emitted.
-    expect((result.stdout ?? "").trim()).toBe("")
+    expect(result.json?.hookSpecificOutput?.additionalContext).toContain("Task")
   })
 
-  test("codex payload _env produces no advisor context", async () => {
+  test("codex payload _env produces advisor context", async () => {
     const homeDir = await createTempHome()
     const result = await runHook(
       "hooks/userpromptsubmit-task-advisor.ts",
@@ -470,6 +469,6 @@ describe("userpromptsubmit-task-advisor — codex exemption (#572)", () => {
       { HOME: homeDir, CODEX_THREAD_ID: undefined, CODEX_MANAGED_BY_NPM: undefined }
     )
     expect(result.exitCode).toBe(0)
-    expect((result.stdout ?? "").trim()).toBe("")
+    expect(result.json?.hookSpecificOutput?.additionalContext).toContain("Task")
   })
 })

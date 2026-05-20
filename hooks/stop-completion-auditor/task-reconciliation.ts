@@ -8,6 +8,7 @@
  * - Preparing context for all validators
  */
 
+import { agentHasTaskListToolForHookPayload } from "../../src/agent-paths.ts"
 import { isIncompleteTaskStatus } from "../../src/tasks/task-recovery.ts"
 import { isTaskListTool } from "../../src/tool-matchers.ts"
 import {
@@ -21,9 +22,14 @@ import type { CompletionAuditContext, ValidationResult } from "./types.ts"
  * Verify all tasks are synced by requiring TaskList to have been called.
  * Prevents stale task cache from blocking stop with incorrect information.
  */
-export function requireTaskListSync(ctx: CompletionAuditContext): ValidationResult | null {
+export function requireTaskListSync(
+  ctx: CompletionAuditContext,
+  input?: Record<string, any>
+): ValidationResult | null {
   // Skip if no tasks exist yet
   if (ctx.allTasks.length === 0) return null
+  // Skip if the originating agent cannot call TaskList.
+  if (!agentHasTaskListToolForHookPayload(input)) return null
 
   // Skip if TaskList was called recently in the current session.
   if (ctx.recentObservedToolNames.some((n) => isTaskListTool(n))) return null

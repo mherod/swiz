@@ -309,7 +309,7 @@ describe("pretooluse-require-tasks", () => {
 
   test("denies Bash with direct repair guidance when active task subjects are duplicated", async () => {
     const homeDir = await createTempHome()
-    const sessionId = "session-duplicate-subjects"
+    const sessionId = `session-duplicate-subjects-${Date.now()}-${Math.random().toString(16).slice(2)}`
     await writeTask(homeDir, sessionId, {
       id: "1",
       subject: "Resolve task state",
@@ -321,7 +321,14 @@ describe("pretooluse-require-tasks", () => {
       status: "pending",
     })
 
-    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    const result = await runStandaloneRequireTasks({
+      tool_name: "Bash",
+      session_id: sessionId,
+      transcript_path: "",
+      cwd: process.cwd(),
+      _taskHome: homeDir,
+      tool_input: { command: "bun run dev" },
+    })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("Duplicate task subjects found")
     expect(result.reason).toContain("Pick the duplicate entry")
@@ -487,6 +494,24 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
+  test("allows update_plan even when TaskList is stale", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-stale-update-plan"
+    // Write a stale sentinel (11 minutes ago)
+    const staleTime = Date.now() - 11 * 60 * 1000
+    await writeTaskListSyncSentinel(sessionId, staleTime)
+
+    const result = await runHook({
+      homeDir,
+      toolName: "update_plan",
+      sessionId,
+      envOverrides: { CODEX_THREAD_ID: "test-codex-stale" },
+      seedFreshTaskListSync: false, // Use our stale one
+    })
+    // update_plan itself should be allowed
+    expect(result.decision).toBeUndefined()
+  })
+
   test("denies when canonical TaskList sync is missing", async () => {
     const homeDir = await createTempHome()
     const sessionId = `session-missing-tasklist-sync-${Date.now()}`
@@ -513,6 +538,31 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).not.toContain("Swiz")
     expect(result.reason).not.toContain("drift")
     expect(result.reason).not.toContain("recent context")
+  })
+
+  test("allows Codex when canonical TaskList sync is missing because TaskList is unavailable", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = `session-codex-no-tasklist-sync-${Date.now()}`
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "shell_command",
+      command: "bun test",
+      sessionId,
+      payloadEnv: { CODEX_THREAD_ID: "codex-no-tasklist-sync" },
+      seedFreshTaskListSync: false,
+    })
+    expect(result.decision).toBeUndefined()
   })
 
   test("still denies Bash when canonical TaskList sync is missing and tasks are healthy", async () => {
@@ -801,8 +851,7 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBe("deny")
     })
 
-    test("allows Edit when running in an agent without task tools (e.g. codex)", async () => {
-      // Agents where tasksEnabled=false cannot create tasks — skip enforcement entirely
+    test("enforces task checks for Codex when memory markdown exemption applies", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({
         homeDir,
@@ -810,7 +859,8 @@ describe("pretooluse-require-tasks", () => {
         filePath: "/Users/test/project/src/index.ts",
         payloadEnv: { CODEX_THREAD_ID: "thread-123" },
       })
-      expect(result.decision).toBeUndefined()
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("needs tasks in place first")
     })
   })
 

@@ -237,7 +237,7 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).not.toContain("Consider extracting helper")
   })
 
-  test("allows stop for Codex transcript path even with incomplete tasks (issue #573)", async () => {
+  test("blocks Codex stop on incomplete tasks without requiring TaskList", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-codex-transcript"
     await writeTask(homeDir, sessionId, {
@@ -249,10 +249,12 @@ describe("stop-incomplete-tasks", () => {
     const result = await runHook({
       homeDir,
       sessionId,
+      envOverrides: { CODEX_MANAGED_BY_NPM: "1" },
       transcriptPath: `${homeDir}/.codex/sessions/abc123.jsonl`,
     })
-    // Codex transcript path → agentHasTaskToolsForHookPayload returns false → exempt
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Codex work")
+    expect(result.reason).not.toContain("Run TaskList")
   })
 
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {

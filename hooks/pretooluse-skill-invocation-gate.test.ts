@@ -162,6 +162,24 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("allow")
   })
 
+  it("blocks Claude git commit when commit skill was used but TaskList was not synced", async () => {
+    const sessionLines = [
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),
+    ]
+    const result = await runGateSubprocess("commit", {
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'test'" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("requires TaskList")
+  })
+
   it("blocks git commit when git config identity is a placeholder", async () => {
     const sessionLines = [
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),

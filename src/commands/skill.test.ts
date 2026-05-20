@@ -483,8 +483,8 @@ describe("convertSkillContent", () => {
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    // Codex has tasksEnabled=false and no Task* aliases (#570) — there is no
-    // native target to rewrite to, so canonical names pass through.
+    // Codex has update_plan as a broad planning surface, but no exact TaskList
+    // or TaskGet aliases, so canonical names pass through.
     expect(result).toContain("TaskList")
     expect(result).toContain("TaskGet")
   })
@@ -505,7 +505,7 @@ describe("convertSkillContent", () => {
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    // Codex has no Task* aliases (#570) — Task* canonical names pass through.
+    // Codex has no exact Task* aliases; canonical Task* entries pass through.
     expect(result).toContain('"TaskCreate"')
     expect(result).toContain('"TaskList"')
     expect(result).toContain('"TaskGet"')

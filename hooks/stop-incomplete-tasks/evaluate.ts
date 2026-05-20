@@ -4,7 +4,11 @@
  * Resolves context, runs validators, and returns blocking output or empty object.
  */
 
-import { agentHasTaskToolsForHookPayload, isCurrentAgent } from "../../src/agent-paths.ts"
+import {
+  agentHasTaskListToolForHookPayload,
+  agentHasTaskToolsForHookPayload,
+  isCurrentAgent,
+} from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { promoteNextTaskFromIssues } from "../../src/tasks/task-service.ts"
@@ -44,6 +48,7 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   // Gemini agent exemption
   if (isCurrentAgent("gemini")) return {}
+  const taskListAvailable = agentHasTaskListToolForHookPayload(input as Record<string, any>)
 
   // Deduplicate stale tasks against completed ones
   const completedTasks = ctx.allTasks.filter((t) => t.status === "completed")
@@ -67,9 +72,14 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     const cwd = typeof cwdInput === "string" ? cwdInput : undefined
     const promoted = await promoteNextTaskFromIssues(ctx.sessionId, cwd)
     if (promoted) {
-      return buildIncompleteBlockOutput([
-        "Auto-promoted task created — zero incomplete tasks is a governance violation. Run TaskList to see the promoted task.",
-      ])
+      const promotedMessage = taskListAvailable
+        ? "Auto-promoted task created — zero incomplete tasks is a governance violation. Run TaskList to see the promoted task."
+        : "Auto-promoted task created — zero incomplete tasks is a governance violation. Use the current planning surface to adopt the promoted task before continuing."
+      return buildIncompleteBlockOutput([promotedMessage], {
+        tasksDir: ctx.tasksDir,
+        sessionId: ctx.sessionId,
+        taskListAvailable,
+      })
     }
     // Promotion failed (no issue candidates, no fallback) — allow stop as last resort
     return {}
@@ -101,5 +111,6 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   return buildIncompleteBlockOutput(taskDetails, {
     tasksDir: ctx.tasksDir,
     sessionId: ctx.sessionId,
+    taskListAvailable,
   })
 }

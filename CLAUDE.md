@@ -136,6 +136,7 @@ alwaysApply: false
 - DON'T: `TaskUpdate`/`TaskList` after push starts; stop with unpushed commits; push `main`/`master` without collab guard; run branch/collab/PR checks after push.
 - `swiz settings` CI tests flaky (20–30s), pre-existing, dep bumps not at fault. No branch protection: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
 - Never add `Co-Authored-By` trailers. Never use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
+- Commit preservation: on `/commit`, `$commit`, or "commit everything", commit each `git status --short` entry unless the user requests scope. Never label files unrelated/pre-existing; after a scoped commit, commit remaining worktree before reporting done.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
 - `src/commands/daemon.ts`: `Bun.serve` on port 7943; multi-project — scope state by `cwd`.
@@ -143,8 +144,8 @@ alwaysApply: false
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - `src/web/**`: browser-resolvable imports only (`./`, `../`, `/web/...`) — no bare package imports. After changes restart: `lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) for issues/PRs/CI. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
-- **IssueStore TTL**: 5 min max (`DEFAULT_TTL_MS = 300_000`). `pr_branch_detail` stores `{ reviewDecision, requestedReviewers, commentCount, changesRequestedReviews }`; refreshed by `syncBranchData` when PRs change. **DO**: Use `getPrBranchDetail` in hooks instead of direct `gh api .../reviews` calls. Stale rows return `null` → fall through to API. **DON'T** exceed the 5-min cap on any cache.
-- **IssueStore refresh**: `posttooluse-upstream-sync-on-push` POSTs `/projects/sync-now` after `git push/pull/fetch`, `gh pr create/merge/close/edit/reopen/review`, `gh issue *`, `gh api …/issues|pulls PATCH`. Add new mutation patterns to `UPSTREAM_MUTATING_RE` in that hook.
+- **IssueStore TTL**: 5 min max (`DEFAULT_TTL_MS = 300_000`). `pr_branch_detail` stores `{ reviewDecision, requestedReviewers, commentCount, changesRequestedReviews }`; `syncBranchData` refreshes on PR changes. **DO**: Use `getPrBranchDetail` in hooks, not direct `gh api .../reviews`. Stale rows return `null` → API fallback. **DON'T** exceed the cap.
+- **IssueStore refresh**: `posttooluse-upstream-sync-on-push` POSTs `/projects/sync-now` after `git push/pull/fetch`, `gh pr create/merge/close/edit/reopen/review`, `gh issue *`, `gh api …/issues|pulls PATCH`. Add mutation patterns to `UPSTREAM_MUTATING_RE`.
 - **DO**: Prefer `gh api` (REST) over `gh issue view`/`gh pr list` (GraphQL) — higher rate limits.
 - **Hook installation**: `swiz install` writes dispatch entries. `sessionstart-self-heal` re-installs if missing. Run `swiz install` after hook changes; verify with `swiz doctor`.
 ## Settings Configuration
@@ -178,7 +179,7 @@ alwaysApply: false
 - DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry the same command after a hook block — instrument the hook's detection logic against the current transcript_path before the next attempt.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
-- Bun test: `--reporter=dots`. `--concurrent` multi-file only; single-file rejected. Run once — piped re-runs trigger repeated-test hook.
+- Bun test: `--reporter=dots`. Multi-file runs require `--concurrent`; single-file rejects it. Run once; piped re-runs trigger repeated-test hook.
 - DO: Edit a file between `bun run format` and `bun run lint` — hook detects no-change consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file`, `awk > file` blocked; read-only pipelines OK. Use `bun -e` or `jq` (not `python`). Use `trash` (not `rm`).
@@ -194,8 +195,8 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
-- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (update subject via `TaskUpdate`); hedge ("trivial"/"just"/"likely") before investigating; use compliance-gaming phrases ("satisfies the gate"/"unblocks the hook"); re-implement without inspecting first. Use Claude Agent SDK in-process.
-- DO: Always answer user questions directly and execute requested actions immediately (e.g. invoking a /skill) instead of running unrelated diagnostic or active exploration loops. Stop ongoing loops instantly when explicitly corrected by the user.
+- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (use `TaskUpdate`); hedge before investigating; say "satisfies the gate"/"unblocks the hook"; re-implement without inspecting first. Use Claude Agent SDK in-process.
+- DO: Answer user questions directly and execute requested actions (e.g. /skill) before diagnostics; stop active loops when corrected.
 ## Output & Shell
 - Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.

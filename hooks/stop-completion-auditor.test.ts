@@ -215,6 +215,7 @@ async function runAuditor(
     cwd: process.cwd(),
     session_id: SESSION_ID,
     transcript_path: transcriptPath,
+    ...(Object.keys(envOverrides).length > 0 ? { _env: envOverrides } : {}),
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: home }
   for (const agent of AGENTS) {
@@ -255,7 +256,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when agent lacks task tools (Codex)", async () => {
+  it("keeps Codex in task-auditor flow when planning tools are available", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "create", taskId: "1" },
@@ -264,7 +265,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-thread",
     })
-    // Codex has tasksEnabled=false → skip enforcement → allow
+    // Codex now has task tools enabled through update_plan; no agent-level bypass.
     expect(result.blocked).toBe(false)
   })
 
@@ -294,7 +295,7 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-thread",
     })
-    // Codex has tasksEnabled=false → skip enforcement → allow
+    // Codex is task-enabled; this path is allowed because the transcript already has task activity.
     expect(result.blocked).toBe(false)
   })
 
@@ -311,16 +312,16 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when audit log missing and agent lacks task tools", async () => {
+  it("allows stop when Codex audit log is missing but task activity exists", async () => {
     const { home, transcriptPath } = await createFixture()
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Codex has tasksEnabled=false → skip enforcement → allow
+    // The transcript fixture includes TaskList, so task activity is already recorded.
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when audit log has no create entries and agent lacks task tools", async () => {
+  it("allows stop when Codex audit log has no create entries but task activity exists", async () => {
     const { home, tasksDir, transcriptPath } = await createFixture()
     await writeAuditLog(tasksDir, [
       { action: "status_change", taskId: "1", newStatus: "completed" },
@@ -328,19 +329,18 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Codex has tasksEnabled=false → skip enforcement → allow
+    // The transcript fixture includes TaskList, so task activity is already recorded.
     expect(result.blocked).toBe(false)
   })
 
-  it("allows stop when agent lacks task tools despite many tool calls", async () => {
+  it("blocks stop for Codex when many non-task tool calls were made", async () => {
     const { home, transcriptPath } = await createFixtureWithTools(
       Array.from({ length: 12 }, () => "shell_command")
     )
     const result = await runAuditor(home, transcriptPath, {
       CODEX_THREAD_ID: "test-codex-thread",
     })
-    // Codex has tasksEnabled=false → skip enforcement → allow
-    expect(result.blocked).toBe(false)
+    expect(result.blocked).toBe(true)
   })
 
   it("recognises update_plan as task activity and does not block when tasks were used", async () => {
@@ -373,6 +373,26 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain("TaskList was not called recently")
     expect(result.reason).toContain("last 30 turns and last 20 minutes")
+  })
+
+  it("does not require TaskList sync for Codex because TaskList is unavailable", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithTools(["shell_command"])
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Completed task",
+        status: "completed",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    const result = await runAuditor(home, transcriptPath, {
+      CODEX_THREAD_ID: "codex-stop-no-tasklist",
+    })
+
+    expect(result.blocked).toBe(false)
   })
 })
 

@@ -10,7 +10,7 @@ export { formatIncompleteReason } from "../../src/tasks/task-governance-messages
 
 export function buildIncompleteBlockOutput(
   taskDetails: string[],
-  sourceCtx?: { tasksDir: string | null; sessionId: string }
+  sourceCtx?: { tasksDir: string | null; sessionId: string; taskListAvailable?: boolean }
 ): SwizHookOutput {
   const reason = formatIncompleteReason(taskDetails, sourceCtx)
   return blockStopObj(reason)

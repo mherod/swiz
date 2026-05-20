@@ -56,20 +56,18 @@ interface RawInputFields {
   safeSessionId: string | undefined
 }
 
-/** True when block is a TaskUpdate/update_plan setting this task to in_progress. */
+/** True when block is a TaskUpdate setting this task to in_progress. */
 function isInProgressTransition(block: Record<string, any>, taskId: string): boolean {
   const name = String(block.name ?? "")
   const inp = (block.input ?? {}) as Record<string, any>
-  const isTaskUpdateName = name === "TaskUpdate" || name === "update_plan"
-  if (!isTaskUpdateName) return false
+  if (name !== "TaskUpdate") return false
   const matchesTask = String(inp.taskId ?? "") === taskId
   return matchesTask && String(inp.status ?? "") === "in_progress"
 }
 
-/** True when this call targets completing a task (TaskUpdate/update_plan, status=completed). */
+/** True when this call targets completing one task via TaskUpdate. */
 function isCompletionCall(toolName: string, toolInput: Record<string, any>): boolean {
-  const isTaskUpdateName = toolName === "TaskUpdate" || toolName === "update_plan"
-  if (!isTaskUpdateName) return false
+  if (toolName !== "TaskUpdate") return false
   return String(toolInput.status ?? "") === "completed"
 }
 

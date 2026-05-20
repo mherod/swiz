@@ -750,7 +750,7 @@ function appendHygieneFeedback(
 
 export function formatIncompleteReason(
   taskDetails: string[],
-  sourceCtx?: { tasksDir: string | null; sessionId: string }
+  sourceCtx?: { tasksDir: string | null; sessionId: string; taskListAvailable?: boolean }
 ): string {
   if (taskDetails.length === 0) return ""
 
@@ -759,7 +759,11 @@ export function formatIncompleteReason(
   const sourceNote = sourceCtx
     ? `\n\nTask files: ${sourceCtx.tasksDir ?? `~/.claude/tasks/${sourceCtx.sessionId}`}`
     : ""
-  const footer = `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
+  const stabilityStep =
+    sourceCtx?.taskListAvailable === false
+      ? "Use the current planning surface to refresh task state."
+      : TASKLIST_STABILITY_STEP
+  const footer = `\n\nComplete these tasks before stopping. ${stabilityStep} Then update each task only when the work is done and the completion has evidence.`
 
   return header + taskList + sourceNote + footer
 }

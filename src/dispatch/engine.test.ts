@@ -290,7 +290,7 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("TaskCreate", "TodoWrite")).toBe(true)
       expect(toolMatchesToken("TodoWrite", "TaskCreate")).toBe(true)
       expect(toolMatchesToken("TaskCreate", "write_todos")).toBe(true)
-      // Codex update_plan intentionally excluded — see #570 / tasksEnabled=false
+      // update_plan is a broad planning surface, not the exact TaskCreate tool.
       expect(toolMatchesToken("TaskCreate", "update_plan")).toBe(false)
     })
 
@@ -309,6 +309,7 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("TaskList", "Task")).toBe(true)
       expect(toolMatchesToken("TaskGet", "Task")).toBe(true)
       expect(toolMatchesToken("TodoWrite", "Task")).toBe(true)
+      expect(toolMatchesToken("update_plan", "Task")).toBe(true)
     })
 
     it("'Task' toolName matches all task tokens", () => {
@@ -316,6 +317,7 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("Task", "TaskUpdate")).toBe(true)
       expect(toolMatchesToken("Task", "TaskList")).toBe(true)
       expect(toolMatchesToken("Task", "TaskGet")).toBe(true)
+      expect(toolMatchesToken("Task", "update_plan")).toBe(true)
     })
   })
 

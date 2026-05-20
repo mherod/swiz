@@ -28,6 +28,7 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { agentHasTaskListToolForHookPayload } from "../src/agent-paths.ts"
 import { checkGitIdentity } from "../src/git-identity.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
@@ -37,7 +38,6 @@ import {
   resolveNumericSetting,
 } from "../src/settings/resolution.ts"
 import {
-  agentHasTaskToolsForHookPayload,
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
@@ -247,7 +247,7 @@ function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | n
 }
 
 function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
-  return skill === "commit" && agentHasTaskToolsForHookPayload(input)
+  return skill === "commit" && agentHasTaskListToolForHookPayload(input)
 }
 
 function getShellCommand(rawInput: Record<string, any>): string {

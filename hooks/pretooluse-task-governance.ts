@@ -11,7 +11,10 @@
 // Each hook is exported as a named export for manifest registration.
 // Original files are thin wrappers for standalone subprocess execution.
 
-import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
+import {
+  agentHasTaskListToolForHookPayload,
+  agentHasTaskToolsForHookPayload,
+} from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
@@ -552,9 +555,13 @@ async function checkTaskStaleness(
 async function checkCanonicalTaskListSync(
   toolName: string,
   sessionId: string,
-  allTasks: Array<{ id: string; status: string; subject: string }>
+  allTasks: Array<{ id: string; status: string; subject: string }>,
+  input: Record<string, any>
 ): Promise<SwizHookOutput | undefined> {
-  if (isTaskListTool(toolName) || isTaskCreateTool(toolName)) return undefined
+  if (isTaskListTool(toolName) || isTaskCreateTool(toolName) || isUpdatePlanTool(toolName)) {
+    return undefined
+  }
+  if (!agentHasTaskListToolForHookPayload(input)) return undefined
 
   const lastSyncAtMs = await readCanonicalTaskListSyncAtMs(sessionId)
   const ageMs = lastSyncAtMs === null ? null : Date.now() - lastSyncAtMs
@@ -843,7 +850,7 @@ async function runTaskStateChecks(
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
 
-  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, allTasks)
+  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, allTasks, input)
   if (taskListSyncOutcome) return taskListSyncOutcome
 
   const pendingOverflowOutcome = checkPendingOverflow(toolName, allTasks)
@@ -918,7 +925,10 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
     // Settings read failure → use strict thresholds as default
   }
 
-  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+  const allTasks = overlayEventState(
+    await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
+    sessionId
+  )
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
@@ -1796,11 +1806,12 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const parsed = toolHookInputSchema.parse(rawInput)
   const input = parsed as unknown as Record<string, any>
   const toolName = String(input.tool_name ?? "")
-  if (!hasTaskGovernanceSurface(input, toolName)) return {}
   const toolInput: Record<string, any> = (input.tool_input as Record<string, any>) ?? {}
 
   const blockedTaskFiles = evaluateBlockedTaskFilesPrecheck(input, toolName, toolInput)
   if (blockedTaskFiles) return blockedTaskFiles
+
+  if (!hasTaskGovernanceSurface(input, toolName)) return {}
 
   const overflow = await evaluatePendingOverflowGuard(input, toolName)
   if (overflow) return overflow

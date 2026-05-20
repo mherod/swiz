@@ -638,14 +638,12 @@ describe("tool classification with edge-case inputs", () => {
 })
 
 // ─── update_plan / TaskList / TaskGet mapping regressions ───────────────────
-// After #570: Codex tasksEnabled=false has no Task* aliases and update_plan
-// is not a member of TASK_TOOLS / TASK_CREATE_TOOLS. update_plan stays in
-// codex.toolAliases as a self-alias only so inferAgentFromToolNames still
-// fingerprints it as a Codex tool.
+// Codex exposes task planning through update_plan. It is part of the broad task
+// family, but it is not treated as the exact TaskCreate command.
 
-describe("isTaskTool — update_plan exclusion (post-#570)", () => {
-  it("does not recognise update_plan as a task tool (Codex planning UI is not a task surface)", () => {
-    expect(isTaskTool("update_plan")).toBe(false)
+describe("isTaskTool — update_plan planning surface", () => {
+  it("recognises update_plan as a task planning tool", () => {
+    expect(isTaskTool("update_plan")).toBe(true)
   })
 
   it("does not recognise update_plan as a task-create tool", () => {
@@ -720,9 +718,9 @@ describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => 
 // answer, then asserts the live implementation gives the right answer.
 // If anyone reverts the alias change, these fail — that's the point.
 
-describe("mutation guards — TASK_TOOLS set membership (post-#570)", () => {
-  it("TASK_TOOLS does not contain update_plan (Codex planning UI is not a task tool)", () => {
-    expect(TASK_TOOLS.has("update_plan")).toBe(false)
+describe("mutation guards — TASK_TOOLS set membership", () => {
+  it("TASK_TOOLS contains update_plan as Codex's task planning surface", () => {
+    expect(TASK_TOOLS.has("update_plan")).toBe(true)
   })
 
   it("TASK_TOOLS does not contain spawn_agent", () => {
@@ -741,9 +739,8 @@ describe("mutation guards — TASK_TOOLS set membership (post-#570)", () => {
 describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
   // Authoritative record of every Codex alias. Any addition, removal, or
   // value change breaks this test intentionally — that's the point.
-  // update_plan is a self-alias only — kept so inferAgentFromToolNames still
-  // fingerprints Codex sessions that emit it. No Task* canonical translates
-  // to it any more (#570).
+  // update_plan is a self-alias for Codex's planning surface. No Task*
+  // canonical translates to it directly.
   const EXPECTED_CODEX_ALIASES: Record<string, string> = {
     Bash: "shell_command",
     exec_command: "exec_command",
@@ -778,7 +775,7 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
     expect(Object.values(codex.toolAliases)).not.toContain("spawn_agent")
   })
 
-  it("only update_plan self-aliases to update_plan; no Task* canonical maps to it (post-#570)", async () => {
+  it("only update_plan self-aliases to update_plan; no Task* canonical maps to it", async () => {
     const { getAgent } = await import("../agents.ts")
     const codex = getAgent("codex")!
     const mappedToUpdatePlan = Object.entries(codex.toolAliases)
@@ -797,7 +794,7 @@ describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
 })
 
 describe("mutation guards — Codex toolAliases translateMatcher", () => {
-  it("TaskCreate passes through for Codex; injecting any Task* alias would change output (post-#570)", async () => {
+  it("TaskCreate passes through for Codex; injecting any Task* alias would change output", async () => {
     const { translateMatcher, getAgent } = await import("../agents.ts")
     const realCodex = getAgent("codex")!
 

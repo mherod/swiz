@@ -6,7 +6,7 @@ import { evaluateUserpromptsubmitTaskAdvisor } from "./userpromptsubmit-task-adv
 describe("userpromptsubmit-task-advisor inline validation", () => {
   const tmp = useTempDir("task-advisor-test-")
 
-  test("returns empty if agent has no task tools in payload (e.g., codex)", async () => {
+  test("injects advisory context for codex/update_plan-style planning agents", async () => {
     const homeDir = await tmp.create()
     const originalHome = process.env.HOME
     try {
@@ -17,7 +17,11 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
           CODEX_THREAD_ID: "via-test",
         },
       })
-      expect(result).toEqual({})
+      expect(result).toMatchObject({
+        hookSpecificOutput: {
+          additionalContext: expect.stringContaining("Task"),
+        },
+      })
     } finally {
       process.env.HOME = originalHome
     }

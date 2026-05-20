@@ -263,6 +263,26 @@ describe("agents.ts", () => {
       const cursor = getAgent("cursor")!
       expect(agentSupportsTool(cursor, "NonExistentTool")).toBe(false)
     })
+
+    it("models exact task surface support by agent", () => {
+      const claude = getAgent("claude")!
+      const codex = getAgent("codex")!
+      const cursor = getAgent("cursor")!
+      const gemini = getAgent("gemini")!
+
+      expect(claude.tasksEnabled).toBe(true)
+      expect(agentSupportsTool(claude, "TaskList")).toBe(true)
+      expect(agentSupportsTool(claude, "TaskUpdate")).toBe(true)
+
+      expect(codex.tasksEnabled).toBe(true)
+      expect(agentSupportsTool(codex, "update_plan")).toBe(true)
+      expect(agentSupportsTool(codex, "functions.update_plan")).toBe(true)
+      expect(agentSupportsTool(codex, "TaskList")).toBe(false)
+      expect(agentSupportsTool(codex, "TaskUpdate")).toBe(false)
+
+      expect(cursor.tasksEnabled).toBe(false)
+      expect(gemini.tasksEnabled).toBe(false)
+    })
   })
 
   describe("translateEvent", () => {
@@ -416,7 +436,7 @@ describe("agents.ts", () => {
       expect(codex.toolAliases.Bash).toBe("shell_command")
     })
 
-    it("codex does not alias TaskCreate (tasksEnabled=false; update_plan is planning UI, not task surface)", () => {
+    it("codex does not alias TaskCreate (tasksEnabled is true but TaskCreate is not a Codex surface)", () => {
       const codex = getAgent("codex")!
       expect(codex.toolAliases.TaskCreate).toBeUndefined()
     })

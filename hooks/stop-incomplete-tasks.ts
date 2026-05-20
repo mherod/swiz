@@ -9,7 +9,10 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
-import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
+import {
+  agentHasTaskListToolForHookPayload,
+  agentHasTaskToolsForHookPayload,
+} from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { StopHookInput } from "../src/schemas.ts"
@@ -28,7 +31,7 @@ export async function evaluateStopIncompleteTasksHook(
   // Require TaskList before stop when the session has used task tools.
   // This ensures the task-state-cache is synced via posttooluse-task-list-sync.
   const transcriptSource = (input as Record<string, any>) ?? parsed.transcript_path ?? ""
-  if (transcriptSource) {
+  if (transcriptSource && agentHasTaskListToolForHookPayload(input as Record<string, any>)) {
     const toolNames = await getRecentlyUsedToolsForCurrentSession(transcriptSource)
     const hasTaskActivity = toolNames.some((n) => isTaskTool(n))
     const hasTaskList = toolNames.some((n) => isTaskListTool(n))

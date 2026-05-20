@@ -2,6 +2,7 @@ import { join } from "node:path"
 import {
   AGENTS,
   type AgentDef,
+  agentSupportsTool,
   getAgent,
   inferAgentFromToolNames,
   translateMatcher,
@@ -148,14 +149,23 @@ export function detectCurrentAgentFromHookPayload(input: HookPayload | undefined
 }
 
 /**
- * Check whether the hook payload's originating agent has native task tools.
- * Codex must always return false here: `update_plan` is planning UI, not the
- * TaskCreate/TaskUpdate governance surface.
+ * Check whether the hook payload's originating agent has task tools.
+ * Codex is modeled as task-enabled through its `update_plan` planning surface.
  */
 export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined): boolean {
   const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent) return true
   return agent.tasksEnabled
+}
+
+/**
+ * Check whether the hook payload's originating agent has a TaskList-capable
+ * surface. Unknown callers default to true to preserve Claude-style behavior.
+ */
+export function agentHasTaskListToolForHookPayload(input: HookPayload | undefined): boolean {
+  const agent = detectCurrentAgentFromHookPayload(input)
+  if (!agent) return true
+  return agentSupportsTool(agent, "TaskList")
 }
 
 /**

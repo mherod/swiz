@@ -13,7 +13,7 @@
 //   Grep         | Grep         | grep_search        | grep_search
 //   Glob         | Glob         | glob               | glob
 //   NotebookEdit | EditNotebook | —                  | —
-//   TaskCreate   | TodoWrite    | write_todos        | update_plan
+//   Task/planning| TodoWrite    | update_plan        | write_todos
 
 export const SHELL_TOOLS = new Set([
   "Bash",
@@ -28,8 +28,8 @@ export const EDIT_TOOLS = new Set(["Edit", "StrReplace", "replace", "apply_patch
 export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch"])
 export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files"])
 export const NOTEBOOK_TOOLS = new Set(["NotebookEdit", "EditNotebook", "apply_patch"])
-// Codex `update_plan` is intentionally excluded: Codex has tasksEnabled=false
-// and its planning UI is not the TaskCreate/TaskUpdate governance surface.
+// Codex has a planning surface via `update_plan`, which is now treated as a task
+// surface in agent capability modeling.
 export const TASK_TOOLS = new Set([
   "Task",
   "TaskCreate",
@@ -38,6 +38,8 @@ export const TASK_TOOLS = new Set([
   "TaskGet",
   "TodoWrite",
   "write_todos",
+  "update_plan",
+  "functions.update_plan",
 ])
 export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos"])
 export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate"])

@@ -545,7 +545,7 @@ const TASK_HOOK_IDENTIFIERS = new Set([
 ])
 
 /**
- * Filter the bundled manifest for a target with `tasksEnabled=false` (e.g. Codex).
+ * Filter the bundled manifest for a target with `tasksEnabled=false`.
  * Drops every entry in TASK_HOOK_IDENTIFIERS plus any group whose matcher is
  * exclusively for task tool names.
  */

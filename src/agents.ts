@@ -158,7 +158,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     wrapsHooks: { version: 1 },
     configStyle: "flat",
     binary: "cursor",
-    tasksEnabled: true,
+    tasksEnabled: false,
     hooksConfigurable: true,
     processPattern: /__CURSOR_SANDBOX_ENV_RESTORE/,
     toolAliases: {
@@ -198,7 +198,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "gemini",
-    tasksEnabled: true,
+    tasksEnabled: false,
     hooksConfigurable: true,
     // GEMINI_CLI=1 is injected by shellExecutionService; GEMINI_PROJECT_DIR by hookRunner
     envVars: ["GEMINI_CLI", "GEMINI_PROJECT_DIR"],
@@ -233,14 +233,11 @@ export const AGENTS: AgentDef[] = registerAgents([
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
-    tasksEnabled: false,
+    tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
-    // Codex deliberately has no Task/TaskCreate/TaskUpdate aliases —
-    // tasksEnabled=false and update_plan is planning UI, not a task surface
-    // (see #570). The self-alias for update_plan keeps it in the emitted-tool
-    // set for inferAgentFromToolNames without translating any canonical
-    // task tool to it.
+    // Codex exposes update_plan as its planning surface. Task* canonical names
+    // intentionally remain unaliased because there is no exact Codex equivalent.
     toolAliases: {
       Bash: "shell_command",
       exec_command: "exec_command",

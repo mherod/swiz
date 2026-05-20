@@ -44,7 +44,7 @@ export async function evaluateStopCompletionAuditor(input: StopHookInput): Promi
   }
 
   // Check: Require TaskList sync before stop if tasks exist
-  const syncCheck = requireTaskListSync(ctx)
+  const syncCheck = requireTaskListSync(ctx, raw)
   if (syncCheck) {
     return blockStopObj(syncCheck.reason ?? "")
   }

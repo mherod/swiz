@@ -375,7 +375,7 @@ describe("manifest.ts", () => {
 
   describe("buildManifestForAgent — target-aware manifest (#571)", () => {
     // Subset of TASK_HOOK_IDENTIFIERS — hooks that should be stripped for
-    // agents with tasksEnabled=false (Codex).
+    // agents with tasksEnabled=false.
     const TASK_HOOK_PATTERNS = [
       "stop-incomplete-tasks",
       "pretooluse-require-tasks",
@@ -397,18 +397,18 @@ describe("manifest.ts", () => {
       expect(hasTaskHook).toBe(true)
     })
 
-    it("agent.tasksEnabled=false (Codex) strips every TASK_HOOK_IDENTIFIERS entry", () => {
-      const codexManifest = buildManifestForAgent({ tasksEnabled: false })
-      const remainingTaskHooks = codexManifest.flatMap((g) =>
+    it("agent.tasksEnabled=false strips every TASK_HOOK_IDENTIFIERS entry", () => {
+      const tasklessManifest = buildManifestForAgent({ tasksEnabled: false })
+      const remainingTaskHooks = tasklessManifest.flatMap((g) =>
         g.hooks.filter((h) => TASK_HOOK_PATTERNS.some((p) => hookIdentifier(h).includes(p)))
       )
       expect(remainingTaskHooks).toEqual([])
     })
 
     it("agent.tasksEnabled=false strips groups whose matcher is task-tool-only", () => {
-      const codexManifest = buildManifestForAgent({ tasksEnabled: false })
+      const tasklessManifest = buildManifestForAgent({ tasksEnabled: false })
       // The TaskCreate|TaskUpdate matcher group should have no hooks
-      const taskMatcherGroups = codexManifest.filter(
+      const taskMatcherGroups = tasklessManifest.filter(
         (g) => g.matcher && /Task|TodoWrite|update_plan/.test(g.matcher)
       )
       for (const g of taskMatcherGroups) {

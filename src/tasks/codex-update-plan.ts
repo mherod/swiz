@@ -9,6 +9,7 @@ import { splitJsonlLines, tryParseJsonLine } from "../utils/jsonl.ts"
 import { applyTaskListEvent } from "./task-event-state.ts"
 import { applyCacheTaskListSnapshot } from "./task-recovery.ts"
 import { readTasks, type Task, type TaskStatus, writeAudit, writeTask } from "./task-repository.ts"
+import { writeCanonicalTaskListSyncSentinel } from "./task-state-cache.ts"
 
 export const CODEX_UPDATE_PLAN_TOOL_NAMES = new Set(["update_plan", "functions.update_plan"])
 export const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
@@ -345,6 +346,8 @@ export async function syncCodexUpdatePlanSnapshot(
 
   await syncVisiblePlanTasks(ctx)
   await cancelOmittedPlanTasks(ctx, existingTasks)
+
+  await writeCanonicalTaskListSyncSentinel(sessionId)
 
   const finalTasks = [...finalById.values()].sort((left, right) => left.id.localeCompare(right.id))
   applyPlanSnapshotToEventState(sessionId, finalTasks)

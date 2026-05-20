@@ -667,17 +667,14 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   repair: (rest) => runRepairTasks(rest),
 }
 
-// ─── Native-tool guard (Claude/Codex) ────────────────────────────────────────
+// ─── Native-tool guard (task-aware agents) ────────────────────────────────────────
 
 function enforceNativeTaskTools(subcommand: string | undefined): void {
   const agent = detectCurrentAgent()
   if (!agent) return
-  // Only enforce for agents that actually have a native task surface.
-  // Codex (tasksEnabled=false) has no TaskCreate/TaskUpdate equivalent —
-  // after #570 it does not even alias Task* — so redirecting it here would
-  // suggest a tool that does not exist. See #575.
+  // Only enforce for agents that actually have a native task or planning surface.
+  // Agents with `tasksEnabled=false` do not expose task-capable command surfaces.
   if (!agent.tasksEnabled) return
-  if (agent.id !== "claude") return
 
   if (!isBlockedSwizTasksSubcommand(subcommand)) return
 
