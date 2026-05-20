@@ -425,6 +425,17 @@ describe("swiz skill --sync --to agents", () => {
     expect(stdout).toContain(`skipped ${skillName}`)
     expect(await Bun.file(targetPath).text()).toContain("Existing agents target")
   })
+
+  test("--convert --to agents emits a helpful error pointing to --sync", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr, exitCode } = await runSkillCli(
+      ["--convert", "--from", "claude", "--to", "agents"],
+      fakeHome
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain('do not support the "agents" target')
+    expect(stderr).toContain("Use --sync")
+  })
 })
 
 // ─── convertSkillContent unit tests ──────────────────────────────────────────

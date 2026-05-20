@@ -168,11 +168,22 @@ function resolveAgentPair(
   from: string,
   to: string
 ): { fromAgent: AgentEntry; toAgent: AgentEntry } {
+  // --convert and --to-command apply tool-name remapping using the agent's
+  // toolAliases, so pseudo-agents (e.g. "agents") aren't valid here. For
+  // copy-only sync to the ~/.agents directory use --sync, which routes
+  // through resolveForSync() and accepts the agents pseudo-target.
   const fromAgent = getAgent(from)
   const toAgent = getAgent(to)
   const ids = AGENTS.map((a) => a.id).join(", ")
   if (!fromAgent) throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
-  if (!toAgent) throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
+  if (!toAgent) {
+    if (PSEUDO_AGENTS[to]) {
+      throw new Error(
+        `--convert and --to-command do not support the "${to}" target (no tool aliases). Use --sync to copy skills to that location.`
+      )
+    }
+    throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
+  }
   return { fromAgent, toAgent }
 }
 
