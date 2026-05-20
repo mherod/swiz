@@ -173,15 +173,6 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     expect(result.reason).toContain(FOOTER_MARKER)
   })
 
-  test("pretooluse-task-subject-validation: compound subject denial includes footer", async () => {
-    const result = await runHook("pretooluse-task-subject-validation.ts", {
-      tool_name: "TaskCreate",
-      tool_input: { subject: "Fix the authentication bug and update the user schema" },
-    })
-    expect(result.denied).toBe(true)
-    expect(result.reason).toContain(FOOTER_MARKER)
-  })
-
   test("pretooluse-no-direct-deps: writing package.json deps denial includes footer", async () => {
     const result = await runHook("pretooluse-no-direct-deps.ts", {
       tool_name: "Write",

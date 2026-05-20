@@ -319,13 +319,14 @@ describe("pretooluse-task-subject-validation", () => {
     expect(r.stdout).not.toContain('"deny"')
   })
 
-  test("compound subject with 'and' is denied", async () => {
+  test("compound subject with 'and' emits advisory (never deny)", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",
       tool_input: { subject: "Fix authentication and update tests and deploy" },
     })
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toContain("deny")
+    expect(r.stdout).not.toContain('"deny"')
+    expect(r.stdout).toContain("compound")
   })
 
   test("compound subject is allowed when session has 2+ pending tasks", async () => {
@@ -354,7 +355,7 @@ describe("pretooluse-task-subject-validation", () => {
     expect(r.stdout).not.toContain('"deny"')
   })
 
-  test("compound subject is denied when session has only an in_progress task", async () => {
+  test("compound subject emits advisory when session has only an in_progress task", async () => {
     const home = await createTempDir()
     const sessionId = "compound-deny-inprogress"
     const sessionDir = join(home, ".claude", "tasks", sessionId)
@@ -375,10 +376,11 @@ describe("pretooluse-task-subject-validation", () => {
       { HOME: home, CLAUDECODE: "1" }
     )
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toContain('"deny"')
+    expect(r.stdout).not.toContain('"deny"')
+    expect(r.stdout).toContain("compound")
   })
 
-  test("duplicate active subject is denied with direct repair guidance", async () => {
+  test("duplicate active subject emits advisory with repair guidance", async () => {
     const home = await createTempDir()
     const sessionId = "duplicate-create-block"
     const sessionDir = join(home, ".claude", "tasks", sessionId)
@@ -399,9 +401,8 @@ describe("pretooluse-task-subject-validation", () => {
       { HOME: home, CLAUDECODE: "1" }
     )
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toContain("deny")
+    expect(r.stdout).not.toContain('"deny"')
     expect(r.stdout).toContain("already covers")
-    expect(r.stdout).toContain("TaskUpdate")
   })
 
   test("empty subject exits cleanly", async () => {

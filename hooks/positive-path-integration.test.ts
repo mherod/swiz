@@ -311,7 +311,7 @@ describe("pretooluse-no-task-delegation: positive paths", () => {
 describe("pretooluse-task-subject-validation: positive paths", () => {
   const HOOK = "hooks/pretooluse-task-subject-validation.ts"
 
-  test("compound subject with two action verbs emits deny with suggestions", async () => {
+  test("compound subject with two action verbs emits advisory with suggestions (never deny)", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",
       tool_input: { subject: "Fix authentication and update deploy pipeline" },
@@ -319,22 +319,22 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.hookEventName).toBe("PreToolUse")
-    expect(hso?.permissionDecision).toBe("deny")
-    expect(typeof hso?.permissionDecisionReason).toBe("string")
-    const reason = hso?.permissionDecisionReason as string
+    expect(hso?.permissionDecision).toBe("allow")
+    expect(typeof hso?.additionalContext).toBe("string")
+    const reason = hso?.additionalContext as string
     expect(reason).toContain("compound")
     expect(reason).toContain("Fix authentication")
   })
 
-  test("subject with multiple issue refs emits deny with per-issue split", async () => {
+  test("subject with multiple issue refs emits advisory with per-issue split (never deny)", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",
       tool_input: { subject: "Fix #12 and #34" },
     })
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
-    expect(hso?.permissionDecision).toBe("deny")
-    const reason = hso?.permissionDecisionReason as string
+    expect(hso?.permissionDecision).toBe("allow")
+    const reason = hso?.additionalContext as string
     expect(reason).toContain("#12")
     expect(reason).toContain("#34")
   })

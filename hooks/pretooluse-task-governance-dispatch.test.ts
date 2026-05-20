@@ -247,8 +247,8 @@ describe("evaluateNativeTaskUpdatePath", () => {
     }
   })
 
-  test("allows update_plan when projected completion preserves two pending tasks", async () => {
-    const sessionId = uniqueSessionId("update-plan-valid-completion")
+  test("denies update_plan when projected completion leaves no active task", async () => {
+    const sessionId = uniqueSessionId("update-plan-no-active-completion")
     try {
       await cleanupSession(sessionId)
       await seedCodexTask(sessionId, {
@@ -274,7 +274,65 @@ describe("evaluateNativeTaskUpdatePath", () => {
       ])
       const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
       const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("in_progress")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("allows update_plan when projected completion preserves active and pending tasks", async () => {
+    const sessionId = uniqueSessionId("update-plan-valid-completion")
+    try {
+      await cleanupSession(sessionId)
+      await seedCodexTask(sessionId, {
+        id: "codex-1",
+        subject: "Implement projection",
+        status: "in_progress",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-2",
+        subject: "Verify projection",
+        status: "pending",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-3",
+        subject: "Commit projection",
+        status: "pending",
+      })
+      await seedCodexTask(sessionId, {
+        id: "codex-4",
+        subject: "Ship projection",
+        status: "pending",
+      })
+
+      const input = updatePlanInput(sessionId, [
+        { step: "Implement projection", status: "completed" },
+        { step: "Verify projection", status: "in_progress" },
+        { step: "Commit projection", status: "pending" },
+        { step: "Ship projection", status: "pending" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
       expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when a replacement plan has only pending tasks", async () => {
+    const sessionId = uniqueSessionId("update-plan-only-pending")
+    try {
+      await cleanupSession(sessionId)
+
+      const input = updatePlanInput(sessionId, [
+        { step: "Implement projection", status: "pending" },
+        { step: "Verify projection", status: "pending" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("in_progress")
     } finally {
       await cleanupSession(sessionId)
     }

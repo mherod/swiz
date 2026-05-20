@@ -118,12 +118,13 @@ import {
 interface GovernanceThresholds {
   minIncomplete: number
   minPending: number
+  minInProgress: number
 }
 
 const GOVERNANCE_THRESHOLDS = {
-  strict: { minIncomplete: 2, minPending: 1 },
-  relaxed: { minIncomplete: 1, minPending: 0 },
-  "local-dev": { minIncomplete: 1, minPending: 0 },
+  strict: { minIncomplete: 2, minPending: 1, minInProgress: 1 },
+  relaxed: { minIncomplete: 1, minPending: 0, minInProgress: 0 },
+  "local-dev": { minIncomplete: 1, minPending: 0, minInProgress: 0 },
 } as const
 
 function taskUpdateToolName(): string {
@@ -205,14 +206,22 @@ export const taskSubjectValidationHook: SwizToolHook = {
     const subject: string = (toolInput?.subject as string) ?? ""
 
     const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
-    if (duplicateOutcome) return duplicateOutcome
+    if (duplicateOutcome) {
+      // TaskCreate is never hard-denied — downgrade to advisory
+      const preview =
+        (duplicateOutcome as { systemMessage?: string }).systemMessage ??
+        "Duplicate subject — consider using a unique subject."
+      return preToolUseAllowWithContext(preview, preview)
+    }
 
     const result = detect(subject)
     if (!result.matched) return preToolUseAllow()
 
     if (await sessionHasHealthyPendingTaskBuffer(input)) return allowCompoundSubjectWithBuffer()
 
-    return preToolUseDeny(formatMessage(result))
+    // Advisory only — TaskCreate never blocks, it can only improve task state
+    const msg = formatMessage(result)
+    return preToolUseAllowWithContext(msg, msg)
   },
 }
 
@@ -400,7 +409,8 @@ function checkTaskMinimums(
   summary: ReturnType<typeof buildIncompleteTaskSummary>,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | undefined {
-  const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
+  const { incompleteTasks, inProgressTasks, pendingTasks, allTasksDone, incompleteTaskList } =
+    summary
   if (allTasksDone) {
     return preToolUseDeny(
       buildTaskGovernanceMessage({ kind: "all-tasks-completed", toolName, thresholds })
@@ -408,6 +418,7 @@ function checkTaskMinimums(
   }
   if (
     incompleteTasks.length >= thresholds.minIncomplete &&
+    inProgressTasks.length >= thresholds.minInProgress &&
     pendingTasks.length >= thresholds.minPending
   )
     return undefined

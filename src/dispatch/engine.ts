@@ -14,6 +14,7 @@ import { SwizHookExit, withInlineSwizHookRun } from "../inline-hook-context.ts"
 import { evalCondition, type HookGroup, hookIdentifier, isInlineHookDef } from "../manifest.ts"
 import type { SwizHook } from "../SwizHook.ts"
 import { hookBaseSchema, hookOutputSchema } from "../schemas.ts"
+import { CODEX_UPDATE_PLAN_TOOL_NAMES } from "../tasks/codex-update-plan.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
   isEditTool,
@@ -216,7 +217,13 @@ export function logSlowHookSummary(executions: HookExecution[]): void {
 
 // ─── Cross-agent matcher ────────────────────────────────────────────────────
 
+function isCodexUpdatePlanMatcherPair(toolName: string, token: string): boolean {
+  return CODEX_UPDATE_PLAN_TOOL_NAMES.has(toolName) && CODEX_UPDATE_PLAN_TOOL_NAMES.has(token)
+}
+
 export function toolMatchesToken(toolName: string, token: string): boolean {
+  if (isCodexUpdatePlanMatcherPair(toolName, token)) return true
+
   const toolMatchers = [
     isShellTool,
     isEditTool,
