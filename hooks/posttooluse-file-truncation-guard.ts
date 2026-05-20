@@ -108,7 +108,7 @@ async function buildTruncationContext(filePath: string, cwd: string): Promise<st
   const pctStr = Math.round(lineLoss.pctLoss * 100)
   return [
     `${basename(filePath)} lost ${lineLoss.netLoss} lines after this edit (${pctStr}% reduction: ${lineLoss.headLines} → ${currentLines} lines).`,
-    `This matches the Edit tool silent truncation pattern. Verify the file is complete before committing.`,
+    `This matches the file-edit silent truncation pattern. Verify the file is complete before committing.`,
     `Run: \`wc -l "${absolutePath}"\` and compare against the expected size.`,
     `If the file was unintentionally truncated, recover with: \`git checkout HEAD -- "${absolutePath}"\` and re-apply the intended change.`,
   ].join("\n")
