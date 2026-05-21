@@ -3,6 +3,7 @@ import type { SessionPreview } from "./session-data.ts"
 import {
   type AgentProcessSnapshot,
   annotateSessionsWithLiveness,
+  handleSessionRoutes,
   hasLiveAgentForProject,
   type SessionRoutesContext,
   type SessionWithLiveness,
@@ -127,12 +128,65 @@ describe("SessionRoutesContext DTO shapes", () => {
     expect(data.toolStats).toEqual([])
 
     const sessionTasks = await ctx.getSessionTasks("sid", 5)
-    expect(sessionTasks.tasks).toEqual([])
-    expect(sessionTasks.summary.total).toBe(0)
+    expect(sessionTasks).not.toBeNull()
+    expect(sessionTasks?.tasks).toEqual([])
+    expect(sessionTasks?.summary.total).toBe(0)
 
     const projectTasks = await ctx.getProjectTasks("/tmp", 10)
     expect(projectTasks.tasks).toEqual([])
     expect(projectTasks.summary.cancelled).toBe(0)
+  })
+})
+
+describe("handleSessionTasks unknown session", () => {
+  function makeCtx(
+    getSessionTasksImpl: SessionRoutesContext["getSessionTasks"]
+  ): SessionRoutesContext {
+    return {
+      touchProject: () => {},
+      getKnownProjects: () => [],
+      getProjectLastSeen: () => 0,
+      getProjectStatusLine: async () => "",
+      listProjectSessions: async () => ({ sessionCount: 0, sessions: [] }),
+      getSessionData: async () => ({ messages: [], toolStats: [] }),
+      getSessionTasks: getSessionTasksImpl,
+      getProjectTasks: async () => ({
+        tasks: [],
+        summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+      }),
+      getAgentProcessSnapshot: async () => ({ providers: {}, pidCwds: {} }),
+    }
+  }
+
+  test("returns 404 with tasks:null when session is unknown", async () => {
+    const ctx = makeCtx(async () => null)
+    const req = new Request("http://localhost/sessions/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/tmp", sessionId: "nonexistent-session" }),
+    })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res).not.toBeNull()
+    expect(res!.status).toBe(404)
+    const body = await res!.json()
+    expect(body.tasks).toBeNull()
+  })
+
+  test("returns tasks when session is known", async () => {
+    const ctx = makeCtx(async () => ({
+      tasks: [],
+      summary: { total: 0, open: 0, completed: 0, cancelled: 0 },
+    }))
+    const req = new Request("http://localhost/sessions/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/tmp", sessionId: "known-session" }),
+    })
+    const res = await handleSessionRoutes(req, new URL(req.url), ctx)
+    expect(res).not.toBeNull()
+    expect(res!.status).toBe(200)
+    const body = await res!.json()
+    expect(body.tasks).toEqual([])
   })
 })
 

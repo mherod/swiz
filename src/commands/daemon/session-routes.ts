@@ -49,7 +49,10 @@ export interface SessionRoutesContext {
     sessionId: string,
     limit: number
   ) => Promise<SessionRoutesMessagesResult>
-  getSessionTasks: (sessionId: string, limit: number) => Promise<SessionRoutesSessionTasksResult>
+  getSessionTasks: (
+    sessionId: string,
+    limit: number
+  ) => Promise<SessionRoutesSessionTasksResult | null>
   getProjectTasks: (cwd: string, limit: number) => Promise<SessionRoutesProjectTasksResult>
   getAgentProcessSnapshot: () => Promise<AgentProcessSnapshot>
 }
@@ -206,6 +209,9 @@ async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Prom
   ctx.touchProject(cwd)
   const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
   const data = await ctx.getSessionTasks(sessionId, limit)
+  if (data === null) {
+    return Response.json({ tasks: null }, { status: 404 })
+  }
   return Response.json(data)
 }
 

@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises"
 import { dirname, extname, join } from "node:path"
 import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
@@ -1384,7 +1385,13 @@ function buildSessionRoutesContext(ctx: DaemonWebServerContext) {
       getSessionData(cwd, sessionId, limit, ctx.sessionToolCalls),
     getSessionTasks: async (sessionId: string, limit: number) => {
       const { tasksDir } = findTaskStoreForSession(sessionId)
-      const tasks = await ctx.taskStateCache.getTasks(sessionId, join(tasksDir, sessionId))
+      const sessionDir = join(tasksDir, sessionId)
+      try {
+        await stat(sessionDir)
+      } catch {
+        return null
+      }
+      const tasks = await ctx.taskStateCache.getTasks(sessionId, sessionDir)
       return buildSessionTasksView(tasks, limit)
     },
     getProjectTasks,
