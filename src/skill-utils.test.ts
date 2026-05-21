@@ -15,6 +15,7 @@ import {
   SKILL_DIRS,
   skillAdvice,
   skillExists,
+  skillExistsForHookPayload,
   stripFrontmatter,
 } from "./skill-utils.ts"
 import { useTempDir } from "./utils/test-utils.ts"
@@ -116,6 +117,44 @@ describe("skillExists", () => {
       }
       clearSkillCache()
     }
+  })
+})
+
+// ─── skillExistsForHookPayload ────────────────────────────────────────────────
+
+describe("skillExistsForHookPayload", () => {
+  test("returns false for nonexistent skill regardless of payload", () => {
+    // No _env → agent is null → uses skillFileExists → still false for unknown skill
+    expect(skillExistsForHookPayload("this-skill-does-not-exist-xyz-999", {})).toBe(false)
+  })
+
+  test("uses skillFileExists when agent cannot be determined from payload (daemon case)", async () => {
+    // Simulate daemon dispatch: no _env, no agent signals in the payload.
+    // The skill gate must not be silently skipped — it should check the file.
+    const tmpDir = await createTempDir()
+    const skillDir = join(tmpDir, ".skills", "my-test-skill-daemon")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# my-test-skill-daemon\n")
+
+    // Temporarily add the temp dir to skill search path by setting cwd
+    const originalCwd = process.cwd()
+    try {
+      process.chdir(tmpDir)
+      clearSkillCache()
+      // payload has no _env — agent cannot be determined (daemon dispatch case)
+      const result = skillExistsForHookPayload("my-test-skill-daemon", {})
+      expect(result).toBe(true)
+    } finally {
+      process.chdir(originalCwd)
+      clearSkillCache()
+    }
+  })
+
+  test("returns false for nonexistent skill when agent cannot be determined", () => {
+    // agent null + skill not installed → false (gate correctly skipped)
+    clearSkillCache()
+    expect(skillExistsForHookPayload("skill-that-does-not-exist-xyz-daemon", {})).toBe(false)
+    clearSkillCache()
   })
 })
 
