@@ -127,6 +127,18 @@ describe("isRscGatedFile", () => {
     test("deeply nested layout.tsx", () => {
       expect(isRscGatedFile("src/app/(auth)/login/layout.tsx")).toBe(true)
     })
+
+    test("app/dashboard/widget-client.tsx", () => {
+      expect(isRscGatedFile("app/dashboard/widget-client.tsx")).toBe(true)
+    })
+
+    test("src/app/(marketing)/hero-client.tsx", () => {
+      expect(isRscGatedFile("src/app/(marketing)/hero-client.tsx")).toBe(true)
+    })
+
+    test("absolute: /project/app/users/avatar-client.tsx", () => {
+      expect(isRscGatedFile("/project/app/users/avatar-client.tsx")).toBe(true)
+    })
   })
 
   describe("ungated paths", () => {
@@ -156,6 +168,18 @@ describe("isRscGatedFile", () => {
 
     test("app/api/route.ts", () => {
       expect(isRscGatedFile("app/api/route.ts")).toBe(false)
+    })
+
+    test("-client.tsx outside app/", () => {
+      expect(isRscGatedFile("src/components/hero-client.tsx")).toBe(false)
+    })
+
+    test("client.tsx without -client suffix", () => {
+      expect(isRscGatedFile("app/dashboard/client.tsx")).toBe(false)
+    })
+
+    test("non-tsx -client file", () => {
+      expect(isRscGatedFile("app/dashboard/widget-client.ts")).toBe(false)
     })
   })
 })
@@ -249,6 +273,15 @@ describe("pretooluse-apply-rsc-gate (with skill installed)", () => {
   it("blocks edit to layout.tsx when apply-rsc not recently invoked", async () => {
     // subprocess-only: CLAUDECODE env isolation required for skill detection
     const result = await runWithSkillInstalled("app/dashboard/layout.tsx", [])
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+  })
+
+  it("blocks edit to app/**/*-client.tsx when apply-rsc not recently invoked", async () => {
+    // subprocess-only: CLAUDECODE env isolation required for skill detection
+    const result = await runWithSkillInstalled("app/dashboard/widget-client.tsx", [])
     expect(
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision

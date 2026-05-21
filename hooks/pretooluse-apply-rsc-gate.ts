@@ -3,8 +3,9 @@
 // PreToolUse hook: require /apply-rsc skill before editing Next.js RSC page/layout files.
 //
 // Gates edits to files matching:
-//   **/app/**/page.tsx  — Next.js App Router page components
-//   **/layout.tsx       — any layout component
+//   **/app/**/page.tsx          — Next.js App Router page components
+//   **/layout.tsx               — any layout component
+//   **/app/**/*-client.tsx      — colocated Client Component files under app/
 //
 // When the apply-rsc skill is not installed on this machine, the gate is skipped
 // (fail-open). When the skill has been invoked recently in the current session,
@@ -30,12 +31,14 @@ import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const SKILL_NAME = "apply-rsc"
 
-// Matches **/app/**/page.tsx (Next.js App Router pages) and **/layout.tsx (any layout file).
+// Matches **/app/**/page.tsx (Next.js App Router pages), **/layout.tsx (any
+// layout file), and **/app/**/*-client.tsx (colocated Client Component files).
 const RSC_PAGE_RE = /(?:^|[/\\])app[/\\].+[/\\]page\.tsx$/
 const LAYOUT_RE = /(?:^|[/\\])layout\.tsx$/
+const APP_CLIENT_RE = /(?:^|[/\\])app[/\\].+-client\.tsx$/
 
 export function isRscGatedFile(filePath: string): boolean {
-  return RSC_PAGE_RE.test(filePath) || LAYOUT_RE.test(filePath)
+  return RSC_PAGE_RE.test(filePath) || LAYOUT_RE.test(filePath) || APP_CLIENT_RE.test(filePath)
 }
 
 const pretooluseApplyRscGate: SwizFileEditHook = {
@@ -79,7 +82,7 @@ const pretooluseApplyRscGate: SwizFileEditHook = {
         `Skills used recently (${window}): ${
           invokedSkills.length === 0 ? "(none)" : invokedSkills.map((s) => `/${s}`).join(", ")
         }\n\n` +
-        `Invoke ${skillRef} before editing RSC page or layout files. ` +
+        `Invoke ${skillRef} before editing RSC page, layout, or client component files. ` +
         `The skill enforces correct Server/Client Component boundaries and import conventions.`
     )
   },
