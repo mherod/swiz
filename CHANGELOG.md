@@ -1,5 +1,124 @@
 # Changelog
 
+## 2026-05-21
+
+### Features
+
+- **Dispatch `--agent` install wiring** — `swiz install` now injects
+  `--agent <id>` into every generated dispatch hook command. Installed hooks
+  pass the agent identity directly in the payload so the daemon can skip
+  environment scanning entirely at runtime, and the doctor's `agent-config-sync`
+  check now flags existing entries that lack the flag as outdated and directs
+  the user to re-run `swiz install`. Closes #667.
+
+- **Dispatch `--agent` fast path** — `swiz dispatch` accepts a new
+  `--agent <id>` flag. When set, `detectCurrentAgentFromHookPayload` reads
+  `payload._agent` first and skips the full environment scan, cutting dispatch
+  latency for daemon-side hook invocations.
+
+- **Inline-script write gate** — A new `pretooluse-inline-script-write-gate`
+  hook blocks shell commands that pass file-write operations as inline
+  eval strings (`node -e`, `bun -e`, `python -c`, `perl -e`, `ruby -e`,
+  `deno eval`, `php -r`, `pwsh -Command`, `lua -e`). Covers `writeFile`,
+  `fs.promises.write`, `open(…, "w")`, `File.write`, `IO.write`, and
+  equivalent patterns across all supported runtimes.
+
+- **RSC gate** — `pretooluse-apply-rsc-gate` blocks `apply_patch` and related
+  tool calls when review-requested or changes-requested state is detected,
+  surfacing PR feedback before implementation continues.
+
+- **PR workflow skill gates** — `pretooluse-skill-invocation-gate` now
+  requires `/pr-qa-and-merge` before `gh pr merge` and `/pr-comments-address`
+  before `gh pr checkout`, ensuring the structured review workflow runs before
+  merges and branch switches during active reviews.
+
+- **Task-subject skill gate** — The issue-workflow PreToolUse hook now blocks
+  tool calls when the active task subject matches an issue-workflow pattern
+  (e.g. `work-on-issue`, `resolve #N`) but no issue-workflow skill has been
+  invoked in the current session, directing the agent to run the correct skill
+  before proceeding.
+
+### Improvements
+
+- **Status-line overflow caps** — Completed task tick marks are now capped at
+  10 with a `+N` overflow suffix. The same cap applies to in-progress, pending,
+  and active-skills segments so the status line stays readable during long
+  sessions.
+
+### Fixes
+
+- **Daemon unknown-session null response** — `/sessions/tasks` now returns
+  HTTP 404 with `{ tasks: null }` when the session ID is not recognised instead
+  of an empty-array response, allowing callers to distinguish "no tasks yet"
+  from "session not known to daemon".
+
+- **Skill gates in daemon dispatch** — Skill-existence checks that ran inside
+  daemon-dispatched hooks had no `_env` context and always resolved to the
+  wrong agent, causing gates to silently pass. `skillExistsForHookPayload` now
+  falls back to `skillFileExists()` when `_agent` is absent from the payload.
+
+## 2026-05-20
+
+### Features
+
+- **Task governance compliance tracking** — The daemon now records per-session
+  task governance compliance in memory, including task activity durations.
+  Compliance history survives across hook invocations so the status line and
+  stop checks can surface trends rather than just snapshot state.
+
+- **Session commit tracking** — The issue store now records commits made during
+  the session alongside PR and issue data, giving stop checks and CI evidence
+  validators a durable list of landed SHAs to cross-reference.
+
+- **MCP channels toggle** — A new `mcpChannels` boolean setting controls
+  whether MCP-sourced context channels are active. Toggling it off suppresses
+  the associated trace log entries without requiring a daemon restart.
+
+- **Active skills status segment** — The status line now includes a
+  deduplicated list of skills invoked in the current session window, surfacing
+  which workflow tools have been used without requiring a transcript scan.
+
+- **Uncommitted files in git context** — `userpromptsubmit-git-context` now
+  includes the list of uncommitted files alongside branch and PR state, giving
+  the agent immediate visibility into pending changes at the start of each turn.
+
+- **Task state in task advisor** — `userpromptsubmit-task-advisor` now
+  includes the full current task state in its context block so the agent enters
+  each turn with an accurate view of in-progress and pending work.
+
+### Improvements
+
+- **Status-line health indicators** — The tasks segment now shows a governance
+  health indicator whose emoji upgrades from cautionary to confident as the
+  session maintains compliance over time. A stale-sync warning fires when the
+  issue store has not refreshed in more than 10 minutes, and compliance-trace
+  output is suppressed when governance has been healthy for 30 seconds or more.
+
+- **REST cache hit surfacing** — Issue-store sync now reports ETag-matched
+  cache hits alongside fresh fetches, making it easier to confirm that
+  conditional HTTP requests are working as expected.
+
+### Performance
+
+- **ETag caching for issue-store list endpoints** — The issue-store sync path
+  now sends `If-None-Match` headers for list endpoints and short-circuits on
+  304 responses, reducing GitHub API usage during frequent syncs.
+
+### Fixes
+
+- **Truncation detection for `apply_patch`** — The file-truncation guard hook
+  now detects `apply_patch` operations that leave files empty or near-empty and
+  blocks the session with repair guidance before the data loss is committed.
+
+- **Task governance hardening** — Shell commands now require a minimum task
+  buffer (at least one pending task) before executing. `TaskCreate` advisory
+  output is capped and `update_plan` minimum entry requirements are enforced
+  to reduce spurious governance traces.
+
+- **Skill `--convert` redirect** — Passing `--convert` to the agents skill now
+  surfaces a clear message directing users to `--sync`, which superseded the
+  convert flow.
+
 ## 2026-05-19
 
 ### Improvements
