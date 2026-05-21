@@ -118,6 +118,13 @@ const DENO_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /\bDeno\.writeTextFile\s*\(/, label: "Deno.writeTextFile" },
 ]
 
+// PHP write patterns — safe as literals
+const PHP_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  { re: /\bfile_put_contents\s*\(/, label: "file_put_contents" },
+  { re: /\bfwrite\s*\(/, label: "fwrite" },
+  { re: /\bfputs\s*\(/, label: "fputs" },
+]
+
 // Perl write patterns — safe as literals
 const PERL_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   {
@@ -167,6 +174,12 @@ export const RUNTIME_DEFS: ReadonlyArray<RuntimeDef> = [
     segmentRe: /\b(?:python3?)\b[^|;&\n]*?\s+-c\s/,
     extractBody: (seg) => extractBodyAfterFlag(seg, "-c"),
     writeOps: PYTHON_WRITE_OPS,
+  },
+  {
+    name: "php",
+    segmentRe: /\bphp\b[^|;&\n]*?\s+-r\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-r"),
+    writeOps: PHP_WRITE_OPS,
   },
   {
     name: "deno",

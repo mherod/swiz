@@ -284,6 +284,36 @@ describe("findInlineScriptWrites – Python", () => {
   })
 })
 
+describe("findInlineScriptWrites – PHP", () => {
+  test("blocks php -r with file_put_contents", () => {
+    const cmd = `php -r "file_put_contents('out.txt', 'data');"`
+    expect(findInlineScriptWrites(cmd)).toContain("file_put_contents")
+  })
+
+  test("blocks php -r with fwrite", () => {
+    const cmd = `php -r "$fh = fopen('out.txt', 'w'); fwrite($fh, 'data'); fclose($fh);"`
+    expect(findInlineScriptWrites(cmd)).toContain("fwrite")
+  })
+
+  test("blocks php -r with fputs", () => {
+    const cmd = `php -r "$fh = fopen('out.txt', 'w'); fputs($fh, 'data'); fclose($fh);"`
+    expect(findInlineScriptWrites(cmd)).toContain("fputs")
+  })
+
+  test("does not block php -r with only echo", () => {
+    expect(findInlineScriptWrites(`php -r "echo 'hello';"`)).toEqual([])
+  })
+
+  test("does not block php -r with file_get_contents (read-only)", () => {
+    const cmd = `php -r "echo file_get_contents('in.txt');"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block php script file execution (no -r flag)", () => {
+    expect(findInlineScriptWrites("php script.php")).toEqual([])
+  })
+})
+
 describe("extractDenoEvalBody", () => {
   test("extracts single-quoted body after deno eval", () => {
     expect(extractDenoEvalBody(`deno eval 'console.log(1)'`)).toBe("console.log(1)")
