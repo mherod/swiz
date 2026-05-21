@@ -526,6 +526,40 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toMatchObject({ permissionDecision: "deny" })
   })
 
+  async function runTasksCompleteGateSubprocess(
+    sessionLines: string[]
+  ): Promise<Record<string, any>> {
+    return await runGateSubprocess("swiz-task-governance", {
+      tool_name: "Bash",
+      tool_input: { command: "swiz tasks complete abc123" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
+  }
+
+  it("blocks swiz tasks complete when swiz-task-governance skill was not used", async () => {
+    const result = await runTasksCompleteGateSubprocess([])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+  })
+
+  it("allows swiz tasks complete when swiz-task-governance was used recently", async () => {
+    const result = await runTasksCompleteGateSubprocess([
+      assistantLine([
+        { type: "tool_use", name: "Skill", input: { skill: "swiz-task-governance" } },
+      ]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
   it("does not repeat the same missing-skill denial within two minutes", async () => {
     const sessionId = `skill-cooldown-${Date.now()}`
     const payload = {
