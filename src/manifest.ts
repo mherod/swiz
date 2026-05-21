@@ -54,6 +54,7 @@ import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretooluseGitFlowIntegrationBaseGate from "../hooks/pretooluse-gitflow-integration-base-gate.ts"
+import pretooluseInlineScriptWriteGate from "../hooks/pretooluse-inline-script-write-gate.ts"
 import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
 import pretooluseIssueWorkflowGate from "../hooks/pretooluse-issue-workflow-gate.ts"
 import pretoolusJsonValidation from "../hooks/pretooluse-json-validation.ts"
@@ -338,6 +339,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseNoMixedToolCalls },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseBannedCommands },
+      { hook: pretooluseInlineScriptWriteGate },
       { hook: pretooluseNoMergeConflictComments },
       { hook: pretooluseNoCp },
       { hook: pretooluseGitIndexLock },
