@@ -118,6 +118,28 @@ const DENO_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /\bDeno\.writeTextFile\s*\(/, label: "Deno.writeTextFile" },
 ]
 
+// Lua write patterns — safe as literals
+const LUA_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  {
+    // io.open(path, 'w') / io.open(path, 'a') / io.open(path, 'wb') etc.
+    re: /\bio\.open\s*\([^)]*,\s*['"][wa]/,
+    label: "io.open (write mode)",
+  },
+  {
+    // io.output(path) — redirects global output to a named file
+    re: /\bio\.output\s*\(\s*['"]/,
+    label: "io.output",
+  },
+]
+
+// PowerShell write patterns — safe as literals
+const POWERSHELL_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  { re: /\bSet-Content\b/, label: "Set-Content" },
+  { re: /\bAdd-Content\b/, label: "Add-Content" },
+  { re: /\bOut-File\b/, label: "Out-File" },
+  { re: /\[IO\.File\]::WriteAll/, label: "[IO.File]::WriteAll" },
+]
+
 // PHP write patterns — safe as literals
 const PHP_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   { re: /\bfile_put_contents\s*\(/, label: "file_put_contents" },
@@ -174,6 +196,18 @@ export const RUNTIME_DEFS: ReadonlyArray<RuntimeDef> = [
     segmentRe: /\b(?:python3?)\b[^|;&\n]*?\s+-c\s/,
     extractBody: (seg) => extractBodyAfterFlag(seg, "-c"),
     writeOps: PYTHON_WRITE_OPS,
+  },
+  {
+    name: "lua",
+    segmentRe: /\blua\b[^|;&\n]*?\s+-e\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-e"),
+    writeOps: LUA_WRITE_OPS,
+  },
+  {
+    name: "powershell",
+    segmentRe: /\b(?:pwsh|powershell)\b[^|;&\n]*?\s+(?:-Command|-c)\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-Command|-c"),
+    writeOps: POWERSHELL_WRITE_OPS,
   },
   {
     name: "php",

@@ -284,6 +284,71 @@ describe("findInlineScriptWrites – Python", () => {
   })
 })
 
+describe("findInlineScriptWrites – Lua", () => {
+  test("blocks lua -e with io.open write mode", () => {
+    const cmd = `lua -e "f = io.open('out.txt', 'w'); f:write('data'); f:close()"`
+    expect(findInlineScriptWrites(cmd)).toContain("io.open (write mode)")
+  })
+
+  test("blocks lua -e with io.open append mode", () => {
+    const cmd = `lua -e "f = io.open('log.txt', 'a'); f:write('line'); f:close()"`
+    expect(findInlineScriptWrites(cmd)).toContain("io.open (write mode)")
+  })
+
+  test("blocks lua -e with io.output to named file", () => {
+    const cmd = `lua -e "io.output('out.txt'); io.write('data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("io.output")
+  })
+
+  test("does not block lua -e with io.open read mode", () => {
+    const cmd = `lua -e "f = io.open('in.txt', 'r'); print(f:read()); f:close()"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block lua -e with only print", () => {
+    expect(findInlineScriptWrites(`lua -e "print('hello')"`)).toEqual([])
+  })
+
+  test("does not block lua script file execution (no -e flag)", () => {
+    expect(findInlineScriptWrites("lua script.lua")).toEqual([])
+  })
+})
+
+describe("findInlineScriptWrites – PowerShell", () => {
+  test("blocks pwsh -Command with Set-Content", () => {
+    const cmd = `pwsh -Command "Set-Content -Path 'out.txt' -Value 'data'"`
+    expect(findInlineScriptWrites(cmd)).toContain("Set-Content")
+  })
+
+  test("blocks pwsh -c with Add-Content", () => {
+    const cmd = `pwsh -c "Add-Content -Path 'log.txt' -Value 'line'"`
+    expect(findInlineScriptWrites(cmd)).toContain("Add-Content")
+  })
+
+  test("blocks pwsh -Command with Out-File", () => {
+    const cmd = `pwsh -Command "Get-Process | Out-File -FilePath 'procs.txt'"`
+    expect(findInlineScriptWrites(cmd)).toContain("Out-File")
+  })
+
+  test("blocks pwsh -Command with [IO.File]::WriteAllText", () => {
+    const cmd = `pwsh -Command "[IO.File]::WriteAllText('out.txt', 'data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("[IO.File]::WriteAll")
+  })
+
+  test("does not block pwsh -Command with only Write-Host", () => {
+    expect(findInlineScriptWrites(`pwsh -Command "Write-Host 'hello'"`)).toEqual([])
+  })
+
+  test("does not block pwsh -Command with Get-Content (read-only)", () => {
+    const cmd = `pwsh -Command "Get-Content 'in.txt'"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block powershell script file execution (no -Command flag)", () => {
+    expect(findInlineScriptWrites("pwsh script.ps1")).toEqual([])
+  })
+})
+
 describe("findInlineScriptWrites – PHP", () => {
   test("blocks php -r with file_put_contents", () => {
     const cmd = `php -r "file_put_contents('out.txt', 'data');"`
