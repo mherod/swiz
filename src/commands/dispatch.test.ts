@@ -424,6 +424,51 @@ describe("dispatch routing", () => {
       void server.stop()
     }
   }, 30_000)
+
+  test("--agent flag injects _agent into daemon-forwarded payload", async () => {
+    let capturedBody: Record<string, any> | null = null
+
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url)
+        if (url.pathname === "/dispatch" && req.method === "POST") {
+          capturedBody = (await req.json()) as Record<string, any>
+          return Response.json({})
+        }
+        return new Response("Not Found", { status: 404 })
+      },
+    })
+
+    try {
+      await runCliSerialized(async () => {
+        const proc = Bun.spawn(
+          ["bun", "run", "index.ts", "dispatch", "--agent", "claude", "preToolUse", "PreToolUse"],
+          {
+            stdin: "pipe",
+            stdout: "pipe",
+            stderr: "pipe",
+            env: {
+              ...process.env,
+              SWIZ_NO_DAEMON: undefined,
+              SWIZ_DAEMON_PORT: String(server.port),
+            },
+          }
+        )
+        await proc.stdin.write(
+          JSON.stringify({ tool_name: "Bash", tool_input: { command: "echo hi" } })
+        )
+        await proc.stdin.end()
+        await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+        await proc.exited
+      })
+
+      expect(capturedBody).not.toBeNull()
+      expect(capturedBody!._agent).toBe("claude")
+    } finally {
+      void server.stop()
+    }
+  }, 30_000)
 })
 
 describe("dispatch replay", () => {
