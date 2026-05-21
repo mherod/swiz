@@ -199,14 +199,27 @@ describe("pretooluse-apply-rsc-gate (in-process)", () => {
   })
 
   it("passes through when skill is not installed (no agent detected)", async () => {
-    // No CLAUDECODE env → no agent detected → skillExistsForHookPayload returns false
-    const result = await runHookInProcess(HOOK_SCRIPT, {
-      tool_name: "Edit",
-      tool_input: { file_path: "app/dashboard/page.tsx" },
-      transcript_path: "fake.json",
-      _transcriptSummary: makeSummary(),
-    })
-    expect(result.decision).toBeUndefined()
+    // No CLAUDECODE env → no agent detected → skillExistsForHookPayload falls back to
+    // skillFileExists(). Use a temp HOME so the globally-installed apply-rsc skill is
+    // not found, simulating an environment where the skill is absent.
+    const fakeHome = await mkdtemp(join(tmpdir(), "rsc-gate-noskill-"))
+    const savedHome = process.env.HOME
+    process.env.HOME = fakeHome
+    clearSkillCache()
+    try {
+      const result = await runHookInProcess(HOOK_SCRIPT, {
+        tool_name: "Edit",
+        tool_input: { file_path: "app/dashboard/page.tsx" },
+        transcript_path: "fake.json",
+        _transcriptSummary: makeSummary(),
+      })
+      expect(result.decision).toBeUndefined()
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME
+      else process.env.HOME = savedHome
+      clearSkillCache()
+      await rm(fakeHome, { recursive: true, force: true })
+    }
   })
 
   it("passes through when transcript_path is empty", async () => {
