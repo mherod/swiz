@@ -52,7 +52,7 @@ function buildExpectedHooks() {
         hooks: [
           {
             type: "command",
-            command: `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${event} ${agentEvent}`,
+            command: `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${claudeAgent.id} ${event} ${agentEvent}`,
           },
         ],
       },
@@ -354,14 +354,14 @@ describe("swiz doctor", () => {
 
     // Missing dispatch entries
     expect(missingDispatch.stdout).toContain("Claude Code config sync")
-    expect(missingDispatch.stdout).toContain("missing dispatch")
+    expect(missingDispatch.stdout).toContain("missing:")
 
     // Dispatch entries in sync
     expect(sync.stdout).toContain("Claude Code config sync")
     expect(sync.stdout).toContain("dispatch entries in sync")
 
     // Stale config with fix hint
-    expect(stale.stdout).toContain("missing dispatch")
+    expect(stale.stdout).toContain("missing:")
     expect(stale.stdout).toContain("swiz install")
   }, 60_000)
 

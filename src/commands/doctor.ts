@@ -76,7 +76,9 @@ interface AutoFixContext {
 async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
   const staleConfigs = results.filter(
     (r) =>
-      r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
+      r.name.endsWith("config sync") &&
+      r.status === "warn" &&
+      (r.detail.includes(" missing:") || r.detail.includes("outdated (no --agent)"))
   )
   if (staleConfigs.length === 0) return
   console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
@@ -134,7 +136,9 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
   const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
   const hasStaleConfigs = results.some(
     (r) =>
-      r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
+      r.name.endsWith("config sync") &&
+      r.status === "warn" &&
+      (r.detail.includes(" missing:") || r.detail.includes("outdated (no --agent)"))
   )
   if (fix) {
     await fixStaleConfigs(results)
