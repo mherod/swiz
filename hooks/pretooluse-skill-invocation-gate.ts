@@ -15,6 +15,9 @@
 //   gh issue create                           →  NOT gated (label arg is --label,
 //     not --add-label; creation is not a label change on an existing issue)
 //   gh pr create                              →  requires /pr-open skill
+//   gh pr merge                               →  requires /pr-qa-and-merge skill
+//   gh pr checkout                            →  requires any of /pr-qa-and-merge,
+//     /pr-comments-address, or /work-on-issue
 //   gh pr review … --dismiss                  →  requires /pr-comments-address skill
 //
 // If the skill is not installed (checked via the same SKILL_DIRS lookup used
@@ -51,7 +54,9 @@ import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
   GH_ISSUE_LABEL_CHANGE_RE,
+  GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
+  GH_PR_MERGE_RE,
   GH_PR_REVIEW_DISMISS_RE,
   GIT_COMMIT_RE,
   GIT_PUSH_DELETE_RE,
@@ -141,23 +146,48 @@ function formatSessionSkillsForReason(
   return `Skills used recently (${window}): ${skills.length === 0 ? "(none)" : skills.map((s) => `/${s}`).join(", ")}`
 }
 
+interface SkillRequirement {
+  /** Stable key used for deny config lookup, cooldown file, and preflight dispatch. */
+  primary: string
+  /** Any one of these satisfies the gate. Single-skill rules have one element. */
+  anyOf: string[]
+}
+
 /**
- * Classify which skill is required for the given shell command.
+ * Classify which skill(s) are required for the given shell command.
  * Returns null when no skill gate applies (command is not gated or is exempt).
  */
-function classifyRequiredSkill(command: string, cleanedCommand: string): string | null {
-  if (GIT_COMMIT_RE.test(command)) return "commit"
+function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRequirement | null {
+  if (GIT_COMMIT_RE.test(command)) return { primary: "commit", anyOf: ["commit"] }
   if (GIT_PUSH_RE.test(command)) {
     if (GIT_PUSH_DELETE_RE.test(command)) return null // branch deletion is not a code push
-    return "push"
+    return { primary: "push", anyOf: ["push"] }
   }
-  if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) return "triage-issues"
+  if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command))
+    return { primary: "triage-issues", anyOf: ["triage-issues"] }
   if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
-    return allLabelsAreReadinessOnly(extractChangedLabels(command)) ? null : "refine-issue"
+    if (allLabelsAreReadinessOnly(extractChangedLabels(command))) return null
+    return { primary: "refine-issue", anyOf: ["refine-issue"] }
   }
-  if (GH_PR_CREATE_RE.test(cleanedCommand)) return "pr-open"
-  if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) return "pr-comments-address"
+  if (GH_PR_CHECKOUT_RE.test(cleanedCommand))
+    return {
+      primary: "pr-checkout",
+      anyOf: ["pr-qa-and-merge", "pr-comments-address", "work-on-issue"],
+    }
+  if (GH_PR_MERGE_RE.test(cleanedCommand))
+    return { primary: "pr-qa-and-merge", anyOf: ["pr-qa-and-merge"] }
+  if (GH_PR_CREATE_RE.test(cleanedCommand)) return { primary: "pr-open", anyOf: ["pr-open"] }
+  if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand))
+    return { primary: "pr-comments-address", anyOf: ["pr-comments-address"] }
   return null
+}
+
+/** Format a human-readable skill reference for one or more acceptable skills. */
+function formatAnyOfSkillRef(anyOfSkills: string[]): string {
+  if (anyOfSkills.length === 1) return formatSkillReferenceForAgent(anyOfSkills[0] ?? "")
+  const refs = anyOfSkills.map((s) => formatSkillReferenceForAgent(s))
+  const last = refs.at(-1) ?? ""
+  return `one of ${refs.slice(0, -1).join(", ")}, or ${last}`
 }
 
 /** Per-skill deny message configuration (action phrase, plan step, why-matters). */
@@ -178,6 +208,20 @@ const SKILL_DENY_CONFIGS: Record<
     whyMatters:
       `the ${ref} skill validates label changes against issue state. ` +
       `Modifying labels directly skips these safeguards.`,
+  }),
+  "pr-checkout": (ref) => ({
+    action: "checking out a pull request branch",
+    planStep: `Invoke ${ref} before running \`gh pr checkout\`.`,
+    whyMatters:
+      `checking out a PR branch without a workflow skill skips PR context loading, ` +
+      `review state awareness, and task setup. Use ${ref} to enter the correct workflow.`,
+  }),
+  "pr-qa-and-merge": (ref) => ({
+    action: "merging a pull request",
+    planStep: `Invoke the ${ref} skill before running \`gh pr merge\`.`,
+    whyMatters:
+      `the ${ref} skill enforces the complete merge workflow (CI status, review sign-off, linked issue closure). ` +
+      `Running \`gh pr merge\` directly skips these safeguards.`,
   }),
   "pr-open": (ref) => ({
     action: "opening a new pull request",
@@ -211,39 +255,43 @@ const SKILL_DENY_CONFIGS: Record<
   }),
 }
 
-function buildDenyMessage(
-  requiredSkill: string,
-  reason: string,
-  skillReferenceForAgent: string
-): SwizHookOutput {
-  const configFactory = SKILL_DENY_CONFIGS[requiredSkill]
-  const { action, planStep, whyMatters } = configFactory?.(skillReferenceForAgent) ?? {
-    action: `using ${requiredSkill}`,
-    planStep: `Invoke the ${skillReferenceForAgent} skill before continuing.`,
-    whyMatters: `the ${skillReferenceForAgent} skill enforces the required workflow. Bypassing it skips these safeguards.`,
+function buildDenyMessage(primary: string, anyOfSkills: string[], reason: string): SwizHookOutput {
+  const ref = formatAnyOfSkillRef(anyOfSkills)
+  const isMulti = anyOfSkills.length > 1
+  const configFactory = SKILL_DENY_CONFIGS[primary]
+  const { action, planStep, whyMatters } = configFactory?.(ref) ?? {
+    action: `using ${primary}`,
+    planStep: `Invoke ${ref} before continuing.`,
+    whyMatters: `${ref} enforces the required workflow. Bypassing it skips these safeguards.`,
   }
+  const blockedLine = isMulti
+    ? `BLOCKED: ${action} requires ${ref} to have been invoked first.`
+    : `BLOCKED: ${action} requires the ${ref} skill to be used first.`
+  const planHeader = isMulti
+    ? "None of the required skills have been invoked recently:"
+    : `The ${ref} skill has not been invoked recently:`
   return preToolUseDeny(
-    `BLOCKED: ${action} requires the ${skillReferenceForAgent} skill to be used first.\n\n` +
+    `${blockedLine}\n\n` +
       `${reason}\n\n` +
-      formatActionPlan([planStep], {
-        header: `The ${skillReferenceForAgent} skill has not been invoked recently:`,
-      }) +
+      formatActionPlan([planStep], { header: planHeader }) +
       `\nWhy this matters: ${whyMatters}`
   )
 }
 
 interface GatedCommandCtx {
-  requiredSkill: string
+  primary: string
+  anyOfSkills: string[]
 }
 
 function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | null {
   if (!isShellTool(String((rawInput.tool_name as string | undefined) ?? ""))) return null
   const toolInput = (rawInput.tool_input as Record<string, any>) ?? {}
   const command: string = ((toolInput.command as string) ?? (toolInput.cmd as string)) || ""
-  const requiredSkill = classifyRequiredSkill(command, stripQuotedShellStrings(command))
-  if (!requiredSkill) return null
-  if (!skillExistsForHookPayload(requiredSkill, rawInput)) return null
-  return { requiredSkill }
+  const classified = classifyRequiredSkill(command, stripQuotedShellStrings(command))
+  if (!classified) return null
+  const { primary, anyOf } = classified
+  if (!anyOf.some((s) => skillExistsForHookPayload(s, rawInput))) return null
+  return { primary, anyOfSkills: anyOf }
 }
 
 function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
@@ -313,13 +361,11 @@ const pretoolusSkillInvocationGate: SwizHook = {
   run: async (rawInput: Record<string, any>): Promise<SwizHookOutput> => {
     const ctx = resolveGatedCommand(rawInput)
     if (!ctx) return {}
-    const { requiredSkill } = ctx
+    const { primary, anyOfSkills } = ctx
 
     const cwd: string = (rawInput.cwd as string) ?? process.cwd()
-    const preflightBlock = await checkSkillSpecificPreflight(requiredSkill, rawInput, cwd)
+    const preflightBlock = await checkSkillSpecificPreflight(primary, rawInput, cwd)
     if (preflightBlock) return preflightBlock
-
-    if (!skillExistsForHookPayload(requiredSkill, rawInput)) return {}
 
     const [maxTurns, maxAgeMinutes] = await Promise.all([
       resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
@@ -339,17 +385,17 @@ const pretoolusSkillInvocationGate: SwizHook = {
 
     const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
     const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
-    const skillReferenceForAgent = formatSkillReferenceForAgent(requiredSkill)
 
-    if (invokedSkills.includes(requiredSkill)) {
-      const blocked = await checkTaskListRequirement(requiredSkill, rawInput, recencyOptions)
+    if (anyOfSkills.some((s) => invokedSkills.includes(s))) {
+      const blocked = await checkTaskListRequirement(primary, rawInput, recencyOptions)
       if (blocked) return blocked
-      return preToolUseAllow(`${skillReferenceForAgent} skill was invoked recently.\n${reason}`)
+      const ref = formatAnyOfSkillRef(anyOfSkills)
+      return preToolUseAllow(`${ref} skill was invoked recently.\n${reason}`)
     }
 
-    if (await isSkillRequirementOnCooldown(rawInput, requiredSkill)) return {}
-    await markSkillRequirementCooldown(rawInput, requiredSkill)
-    return buildDenyMessage(requiredSkill, reason, skillReferenceForAgent)
+    if (await isSkillRequirementOnCooldown(rawInput, primary)) return {}
+    await markSkillRequirementCooldown(rawInput, primary)
+    return buildDenyMessage(primary, anyOfSkills, reason)
   },
 }
 

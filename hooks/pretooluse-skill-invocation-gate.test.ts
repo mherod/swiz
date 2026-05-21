@@ -279,6 +279,104 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("deny")
   })
 
+  async function runPrMergeGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
+    return await runGateSubprocess("pr-qa-and-merge", {
+      tool_name: "Bash",
+      tool_input: { command: "gh pr merge 42 --squash" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
+  }
+
+  it("blocks gh pr merge when pr-merge skill was not used recently", async () => {
+    const result = await runPrMergeGateSubprocess([])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+  })
+
+  it("allows gh pr merge when pr-merge skill was used recently", async () => {
+    const result = await runPrMergeGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-qa-and-merge" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("blocks gh pr merge when pr-merge skill was used more than twenty minutes ago", async () => {
+    const old = Date.now() - 21 * 60 * 1000
+
+    const result = await runPrMergeGateSubprocess([
+      assistantLine(
+        [{ type: "tool_use", name: "Skill", input: { skill: "pr-qa-and-merge" } }],
+        old
+      ),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+  })
+
+  async function runPrCheckoutGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
+    return await runGateSubprocess("pr-qa-and-merge", {
+      tool_name: "Bash",
+      tool_input: { command: "gh pr checkout 42" },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
+  }
+
+  it("blocks gh pr checkout when no qualifying skill was used recently", async () => {
+    const result = await runPrCheckoutGateSubprocess([])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+  })
+
+  it("allows gh pr checkout when pr-qa-and-merge was used recently", async () => {
+    const result = await runPrCheckoutGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-qa-and-merge" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("allows gh pr checkout when pr-comments-address was used recently", async () => {
+    const result = await runPrCheckoutGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-comments-address" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("allows gh pr checkout when work-on-issue was used recently", async () => {
+    const result = await runPrCheckoutGateSubprocess([
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "work-on-issue" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
   async function runLabelGateSubprocess(
     command: string,
     sessionLines: string[] = []
