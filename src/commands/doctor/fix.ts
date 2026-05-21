@@ -6,6 +6,7 @@ import { listProviderAdapters } from "../../provider-adapters.ts"
 import { defaultTrashPath } from "../../session-data-delete.ts"
 import {
   findSkillConflicts,
+  isSkillCandidateDir,
   parseFrontmatterField,
   SKILL_PRECEDENCE,
   type SkillConflict,
@@ -129,7 +130,7 @@ async function validateSkillEntry(
   entry: import("node:fs").Dirent,
   skillDir: string
 ): Promise<InvalidSkillEntry[]> {
-  if (!entry.isDirectory() || entry.name.startsWith(".")) return []
+  if (!isSkillCandidateDir(entry)) return []
   const entryDir = join(skillDir, entry.name)
   const skillPath = join(entryDir, "SKILL.md")
   const base = { name: entry.name, skillDir, entryDir }
@@ -436,7 +437,7 @@ export async function removeInvalidCategoryFields(): Promise<{
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue
+      if (!isSkillCandidateDir(entry)) continue
       const skillPath = join(skillDir, entry.name, "SKILL.md")
       try {
         const file = Bun.file(skillPath)

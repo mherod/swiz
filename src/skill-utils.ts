@@ -34,6 +34,18 @@ export const SKILL_DIRS = getSkillDirs()
 // Deterministic precedence for duplicate names: first directory wins.
 export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 
+// Directory names that should never be treated as skill candidates even when
+// they appear directly under a skill root (e.g. stray bun install artefacts).
+const NON_SKILL_DIR_NAMES = new Set(["node_modules"])
+
+/** Return true when a directory entry should be scanned as a skill candidate. */
+export function isSkillCandidateDir(entry: import("node:fs").Dirent): boolean {
+  if (!entry.isDirectory()) return false
+  if (entry.name.startsWith(".")) return false
+  if (NON_SKILL_DIR_NAMES.has(entry.name)) return false
+  return true
+}
+
 // ─── Skill existence (sync, cached) ─────────────────────────────────────────
 
 const _skillCache = new Map<string, boolean>()
@@ -619,7 +631,7 @@ export async function findSkills(): Promise<SkillInfo[]> {
       continue
     }
 
-    const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    const directoryNames = entries.filter(isSkillCandidateDir).map((entry) => entry.name)
     const orderedDirectoryNames = orderBy(directoryNames, [(name) => name], ["asc"])
 
     for (const name of orderedDirectoryNames) {
@@ -652,7 +664,7 @@ async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[
   } catch {
     return
   }
-  const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  const directoryNames = entries.filter(isSkillCandidateDir).map((entry) => entry.name)
   for (const name of orderBy(directoryNames, [(n) => n], ["asc"])) {
     const skillPath = join(dir, name, "SKILL.md")
     if (!(await Bun.file(skillPath).exists())) continue

@@ -550,6 +550,20 @@ describe("swiz doctor", () => {
     expect(dotdir.stdout).toContain("no invalid skill entries found")
   }, 60_000)
 
+  test("node_modules under skills dir is ignored (stray bun install artefact)", async () => {
+    const home = await createTempHome()
+    const nodeModulesDir = join(home, ".claude", "skills", "node_modules")
+    await mkdir(nodeModulesDir, { recursive: true })
+    await writeFile(
+      join(nodeModulesDir, "SKILL.md"),
+      "---\nname: node_modules\ndescription: Add a description for this skill.\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).not.toContain("Invalid skill: node_modules")
+    expect(result.stdout).toContain("no invalid skill entries found")
+  }, 60_000)
+
   // ── Skill --fix tests ─────────────────────────────────────────────────
 
   test("doctor --fix creates stub for missing config script", async () => {

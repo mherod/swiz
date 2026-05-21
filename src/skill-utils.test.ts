@@ -450,6 +450,23 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(out).not.toContain("empty-dir-xyz")
   })
 
+  test("node_modules directory is not treated as a skill candidate", async () => {
+    const fakeHome = await createTempDir()
+    const base = join(fakeHome, ".claude", "skills")
+    // Simulate a stray `bun install` artefact under the skill root.
+    await mkdir(join(base, "node_modules"), { recursive: true })
+    await writeFile(
+      join(base, "node_modules", "SKILL.md"),
+      "---\nname: node_modules\ndescription: Add a description for this skill.\n---\n"
+    )
+    await mkdir(join(base, "real-skill-zzz"), { recursive: true })
+    await writeFile(join(base, "real-skill-zzz", "SKILL.md"), "---\ndescription: Real\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("real-skill-zzz")
+    expect(out).not.toContain("node_modules")
+  })
+
   test("discovers skills that exist only in ~/.gemini/skills", async () => {
     const fakeHome = await createTempDir()
     const skillDir = join(fakeHome, ".gemini", "skills", "gemini-only-skill-xyz")
