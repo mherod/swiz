@@ -43,7 +43,7 @@ export function buildDispatchEntry(
   const timeoutScale = agent.id === "gemini" ? 1000 : 1
   const timeout = (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) * timeoutScale
   const eventName = translateEvent(canonicalEvent, agent)
-  const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${canonicalEvent} ${eventName}`
+  const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agent.id} ${canonicalEvent} ${eventName}`
   return { eventName, timeout, cmd }
 }
 
@@ -57,7 +57,7 @@ export function addAdditionalDispatchEntries(
   for (const [agentEventName, canonicalEvent] of Object.entries(agent.additionalDispatchEntries)) {
     if (!seenEvents.has(canonicalEvent)) continue
     const timeout = DISPATCH_TIMEOUTS[canonicalEvent] ?? 30
-    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${canonicalEvent} ${agentEventName}`
+    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agent.id} ${canonicalEvent} ${agentEventName}`
     if (!merged[agentEventName]) merged[agentEventName] = []
     merged[agentEventName]!.push(wrapEntry(cmd, timeout))
   }

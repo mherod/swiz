@@ -1,6 +1,9 @@
 import { type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../../../agents.ts"
 import { manifest } from "../../../manifest.ts"
-import { extractDispatchEvents } from "../../../utils/config-commands.ts"
+import {
+  extractDispatchEvents,
+  extractDispatchEventsWithoutAgent,
+} from "../../../utils/config-commands.ts"
 import type { CheckResult, DiagnosticCheck } from "../types.ts"
 
 /** Get the set of canonical events the manifest expects to be dispatched via agent configs.
@@ -70,27 +73,36 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
 
   const installed = extractDispatchEvents(hooks)
   const expected = getExpectedCanonicalEvents()
+  const withoutAgent = extractDispatchEventsWithoutAgent(hooks)
 
   const missing: string[] = []
+  const outdated: string[] = []
   for (const event of expected) {
     if (agent.unsupportedEvents?.includes(event)) continue
     if (!installed.has(event)) {
       const agentEvent = translateEvent(event, agent)
       missing.push(`${event} (${agentEvent})`)
+    } else if (withoutAgent.has(event)) {
+      const agentEvent = translateEvent(event, agent)
+      outdated.push(`${event} (${agentEvent})`)
     }
   }
 
-  if (missing.length === 0) {
+  if (missing.length === 0 && outdated.length === 0) {
     return {
       name: `${agent.name} config sync`,
       status: "pass",
       detail: `${installed.size} dispatch entries in sync with manifest`,
     }
   }
+  const parts: string[] = []
+  if (missing.length > 0) parts.push(`${missing.length} missing: ${missing.join(", ")}`)
+  if (outdated.length > 0)
+    parts.push(`${outdated.length} outdated (no --agent): ${outdated.join(", ")}`)
   return {
     name: `${agent.name} config sync`,
     status: "warn",
-    detail: `${missing.length} missing dispatch: ${missing.join(", ")} — run: swiz install`,
+    detail: `${parts.join("; ")} — run: swiz install`,
   }
 }
 

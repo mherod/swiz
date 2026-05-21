@@ -70,13 +70,26 @@ export function extractScriptPaths(command: string): string[] {
   return paths
 }
 
-/** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
+/** Extract canonical event names from `swiz dispatch [--agent <id>] <event> ...` commands in a config. */
 export function extractDispatchEvents(hooks: Record<string, unknown>): Set<string> {
   const events = new Set<string>()
-  const dispatchRe = /swiz dispatch (\S+)/
+  // Skip optional --agent <id> before capturing the canonical event name.
+  const dispatchRe = /swiz dispatch (?:--agent\s+\S+\s+)?(\S+)/
   for (const cmd of collectCommandStrings(hooks)) {
     const m = cmd.match(dispatchRe)
-    if (m?.[1]) events.add(m[1])
+    if (m?.[1] && !m[1].startsWith("-")) events.add(m[1])
+  }
+  return events
+}
+
+/** Extract canonical event names from dispatch commands that lack the `--agent` flag. */
+export function extractDispatchEventsWithoutAgent(hooks: Record<string, unknown>): Set<string> {
+  const events = new Set<string>()
+  // Matches `swiz dispatch <event>` only when --agent is absent (negative lookahead).
+  const withoutAgentRe = /swiz dispatch (?!--agent\s)(\S+)/
+  for (const cmd of collectCommandStrings(hooks)) {
+    const m = cmd.match(withoutAgentRe)
+    if (m?.[1] && !m[1].startsWith("-")) events.add(m[1])
   }
   return events
 }

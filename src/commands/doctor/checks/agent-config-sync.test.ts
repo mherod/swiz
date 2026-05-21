@@ -13,8 +13,27 @@ function expectedCanonicalEvents(): string[] {
   ]
 }
 
-/** Build a settings.hooks object with one dispatch command per event. */
-function buildHooks(events: string[]): Record<string, unknown> {
+/** Build a settings.hooks object with new-style dispatch commands (includes --agent). */
+function buildHooks(events: string[], agentId = "claude"): Record<string, unknown> {
+  const hooks: Record<string, unknown> = {}
+  for (const event of events) {
+    const agentEvent = event.charAt(0).toUpperCase() + event.slice(1)
+    hooks[agentEvent] = [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch --agent ${agentId} ${event} ${agentEvent}`,
+          },
+        ],
+      },
+    ]
+  }
+  return hooks
+}
+
+/** Build a settings.hooks object with old-style dispatch commands (no --agent). */
+function buildOldStyleHooks(events: string[]): Record<string, unknown> {
   const hooks: Record<string, unknown> = {}
   for (const event of events) {
     const agentEvent = event.charAt(0).toUpperCase() + event.slice(1)
@@ -130,6 +149,43 @@ describe("checkAgentConfigSync", () => {
       expect(result.status).toBe("warn")
       expect(result.detail).toContain("stop")
       expect(result.detail).not.toContain("preCompact")
+    })
+  })
+
+  test("warns when all events present but dispatch commands lack --agent flag", async () => {
+    await withTmpDir(async (dir) => {
+      const events = expectedCanonicalEvents()
+      const settingsPath = join(dir, "settings.json")
+      await writeFile(settingsPath, JSON.stringify({ hooks: buildOldStyleHooks(events) }))
+      const result = await checkAgentConfigSync(makeAgent(settingsPath))
+      expect(result.status).toBe("warn")
+      expect(result.detail).toContain("outdated")
+      expect(result.detail).toContain("--agent")
+      expect(result.detail).toContain("swiz install")
+    })
+  })
+
+  test("passes when all events have --agent in dispatch commands", async () => {
+    await withTmpDir(async (dir) => {
+      const events = expectedCanonicalEvents()
+      const settingsPath = join(dir, "settings.json")
+      await writeFile(settingsPath, JSON.stringify({ hooks: buildHooks(events, "claude") }))
+      const result = await checkAgentConfigSync(makeAgent(settingsPath))
+      expect(result.status).toBe("pass")
+    })
+  })
+
+  test("unsupportedEvents are not flagged as outdated", async () => {
+    await withTmpDir(async (dir) => {
+      const unsupportedEvents = ["preCompact", "notification"]
+      const events = expectedCanonicalEvents().filter((e) => !unsupportedEvents.includes(e))
+      // All supported events have --agent; unsupported ones use old style (should not matter)
+      const settingsPath = join(dir, "settings.json")
+      await writeFile(settingsPath, JSON.stringify({ hooks: buildHooks(events) }))
+      const result = await checkAgentConfigSync(makeAgent(settingsPath, { unsupportedEvents }))
+      expect(result.status).toBe("pass")
+      expect(result.detail).not.toContain("preCompact")
+      expect(result.detail).not.toContain("notification")
     })
   })
 })
