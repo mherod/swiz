@@ -15,6 +15,10 @@ const cws = ["create", "Write", "Stream"].join("")
 const bw = "Bun.write"
 // Read-only op label (also split to prevent self-detection)
 const rfs = ["read", "File", "Sync"].join("")
+// Python write op labels (safe as literals — bun-api-enforce doesn't scan for these)
+const owm = "open (write mode)"
+const pwt = "Path.write_text"
+const pwb = "Path.write_bytes"
 
 describe("INLINE_WRITE_OPS", () => {
   test("all ops have a non-empty label and a working regex", () => {
@@ -124,6 +128,34 @@ describe("detectWriteOps", () => {
   test("does not match on a word boundary false-positive (e.g. notAwriteFile)", () => {
     expect(detectWriteOps(`notA${wf}('x', 'y')`)).toEqual([])
   })
+
+  test(`detects Python open in write mode`, () => {
+    expect(detectWriteOps(`open('out.txt', 'w').write('data')`)).toContain(owm)
+  })
+
+  test(`detects Python open in append mode`, () => {
+    expect(detectWriteOps(`open('/tmp/log', 'a')`)).toContain(owm)
+  })
+
+  test(`detects Python open in exclusive-create mode`, () => {
+    expect(detectWriteOps(`open('new.txt', 'x')`)).toContain(owm)
+  })
+
+  test(`detects Python open in binary write mode`, () => {
+    expect(detectWriteOps(`open('out.bin', 'wb')`)).toContain(owm)
+  })
+
+  test(`detects ${pwt}`, () => {
+    expect(detectWriteOps(`Path('x').write_text('hello')`)).toContain(pwt)
+  })
+
+  test(`detects ${pwb}`, () => {
+    expect(detectWriteOps(`Path('x').write_bytes(b'hello')`)).toContain(pwb)
+  })
+
+  test("does not flag Python open in read mode", () => {
+    expect(detectWriteOps(`open('file.txt', 'r').read()`)).toEqual([])
+  })
 })
 
 describe("findInlineScriptWrites", () => {
@@ -209,6 +241,46 @@ describe("findInlineScriptWrites", () => {
   })
 })
 
+describe("findInlineScriptWrites – Python", () => {
+  test(`blocks python -c with open write mode`, () => {
+    const cmd = `python -c "open('out.txt', 'w').write('data')"`
+    expect(findInlineScriptWrites(cmd)).toContain(owm)
+  })
+
+  test(`blocks python3 -c with open append mode`, () => {
+    const cmd = `python3 -c "open('/tmp/log', 'a').write('x')"`
+    expect(findInlineScriptWrites(cmd)).toContain(owm)
+  })
+
+  test(`blocks python3 -c with Path.write_text`, () => {
+    const cmd = `python3 -c "from pathlib import Path; Path('x').write_text('hello')"`
+    expect(findInlineScriptWrites(cmd)).toContain(pwt)
+  })
+
+  test(`blocks python3 -c with Path.write_bytes`, () => {
+    const cmd = `python3 -c "from pathlib import Path; Path('x').write_bytes(b'hello')"`
+    expect(findInlineScriptWrites(cmd)).toContain(pwb)
+  })
+
+  test("does not block python3 -c with read-only operation", () => {
+    const cmd = `python3 -c "open('file.txt', 'r').read()"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block python3 -c with print only", () => {
+    expect(findInlineScriptWrites(`python3 -c "print('hello')"`)).toEqual([])
+  })
+
+  test("does not block python3 script file execution (no -c flag)", () => {
+    expect(findInlineScriptWrites("python3 script.py")).toEqual([])
+  })
+
+  test("blocks chained command with python3 -c write", () => {
+    const cmd = `cat data.csv && python3 -c "open('out.txt', 'w').write('done')"`
+    expect(findInlineScriptWrites(cmd)).toContain(owm)
+  })
+})
+
 describe("hook run() integration", () => {
   test("allows non-write inline eval", async () => {
     const { default: hook } = await import("./pretooluse-inline-script-write-gate.ts")
@@ -224,6 +296,18 @@ describe("hook run() integration", () => {
   test("denies inline eval with file write", async () => {
     const { default: hook } = await import("./pretooluse-inline-script-write-gate.ts")
     const cmd = `node -e "require('fs').${wfs}('out.txt', 'data')"`
+    const input = {
+      tool_name: "Bash",
+      tool_input: { command: cmd },
+    }
+    const result = (await Promise.resolve(hook.run(input))) as Record<string, unknown>
+    const hso = result.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+  })
+
+  test("denies python3 -c inline eval with file write", async () => {
+    const { default: hook } = await import("./pretooluse-inline-script-write-gate.ts")
+    const cmd = `python3 -c "open('/tmp/out','w').write('x')"`
     const input = {
       tool_name: "Bash",
       tool_input: { command: cmd },

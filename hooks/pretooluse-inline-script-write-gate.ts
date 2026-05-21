@@ -1,20 +1,65 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Block inline node/bun eval scripts that perform file writes.
-// Catches patterns like: node -e "require('fs').<writeOp>('out', data)"
-// or bun -e "await Bun.write('file', content)".
-// These bypass file-change review the same way as native Write/Edit tool calls would.
+// PreToolUse hook: Block inline runtime eval scripts that perform file writes.
+// Catches: node/bun -e, python -c (more runtimes added via RUNTIME_DEFS).
+// Inline eval scripts bypass file-change review the same way Write/Edit tool calls do.
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
-// ── Write operation patterns ──────────────────────────────────────────────────
-// Constructed dynamically so the assembled literals don't appear in source text,
-// preventing false positives when content-inspecting hooks scan this file.
+// ── Shared body parser ─────────────────────────────────────────────────────────
 
-export const INLINE_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+/** Parse a quoted or unquoted inline script body from the raw string after a flag. */
+export function parseQuotedBody(rest: string): string | null {
+  if (!rest) return null
+  const q = rest[0]!
+  if (q === "'") {
+    const end = rest.indexOf("'", 1)
+    return end === -1 ? rest.slice(1) : rest.slice(1, end)
+  }
+  if (q === '"') {
+    let body = ""
+    for (let i = 1; i < rest.length; i++) {
+      const ch = rest[i]!
+      if (ch === "\\" && i + 1 < rest.length) {
+        body += rest[++i]!
+        continue
+      }
+      if (ch === '"') break
+      body += ch
+    }
+    return body
+  }
+  if (q === "`") {
+    const end = rest.indexOf("`", 1)
+    return end === -1 ? rest.slice(1) : rest.slice(1, end)
+  }
+  const end = rest.search(/[\s|;&\n]/)
+  return end === -1 ? rest : rest.slice(0, end)
+}
+
+/** Extract the script body from the argument immediately following a flag (e.g. -e, -c, --eval). */
+export function extractBodyAfterFlag(segment: string, flagRe: string): string | null {
+  const m = segment.match(new RegExp(`(?:^|\\s)(?:${flagRe})(?:=|\\s+)([\\s\\S]*)`))
+  if (!m) return null
+  return parseQuotedBody(m[1]!.trimStart())
+}
+
+/**
+ * Extract the script body from the argument immediately following -e/--eval.
+ * Handles single-quoted, double-quoted (with backslash escapes), and unquoted bodies.
+ */
+export function extractEvalBody(segment: string): string | null {
+  return extractBodyAfterFlag(segment, "-e|--eval")
+}
+
+// ── Write operation patterns ──────────────────────────────────────────────────
+// Node/Bun patterns constructed dynamically so the assembled literals don't appear
+// in source text — prevents bun-api-enforce false positives when editing this file.
+
+const NODE_BUN_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   {
     re: new RegExp(["\\b", "write", "File", "Sync", "\\s*\\("].join("")),
     label: ["write", "File", "Sync"].join(""),
@@ -41,80 +86,78 @@ export const INLINE_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   },
 ]
 
-// ── Inline eval detection ─────────────────────────────────────────────────────
+// Python write patterns — safe as literals (bun-api-enforce doesn't scan for these).
+const PYTHON_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  {
+    // open(path, 'w'/'a'/'x'/'wb'/'ab' etc.) — write/append/exclusive-create modes
+    re: /\bopen\s*\([^)]*,\s*['"][wWaAxX][^'"]*['"]/,
+    label: "open (write mode)",
+  },
+  {
+    re: /\bwrite_text\s*\(/,
+    label: "Path.write_text",
+  },
+  {
+    re: /\bwrite_bytes\s*\(/,
+    label: "Path.write_bytes",
+  },
+]
 
-/** True when the segment contains (node|bun) followed by a -e/--eval flag. */
-const RUNTIME_WITH_EVAL_RE = /\b(?:node|bun)\b[^|;&\n]*?\s+(?:-e|--eval)(?:=|\s)/
+// ── Runtime definitions ────────────────────────────────────────────────────────
 
-/**
- * Extract the script body from the argument immediately following -e/--eval.
- * Handles single-quoted, double-quoted (with backslash escapes), and unquoted bodies.
- */
-export function extractEvalBody(segment: string): string | null {
-  const m = segment.match(/(?:^|\s)(?:-e|--eval)(?:=|\s+)([\s\S]*)/)
-  if (!m) return null
-
-  const rest = m[1]!.trimStart()
-  if (!rest) return null
-
-  const q = rest[0]!
-
-  if (q === "'") {
-    // Bash single-quoted strings have no escape sequences; end at the next '
-    const closeIdx = rest.indexOf("'", 1)
-    return closeIdx === -1 ? rest.slice(1) : rest.slice(1, closeIdx)
-  }
-
-  if (q === '"') {
-    // Bash double-quoted strings: handle \" and \\ escapes
-    let body = ""
-    for (let i = 1; i < rest.length; i++) {
-      const ch = rest[i]!
-      if (ch === "\\" && i + 1 < rest.length) {
-        body += rest[++i]!
-        continue
-      }
-      if (ch === '"') break
-      body += ch
-    }
-    return body
-  }
-
-  if (q === "`") {
-    const closeIdx = rest.indexOf("`", 1)
-    return closeIdx === -1 ? rest.slice(1) : rest.slice(1, closeIdx)
-  }
-
-  // Unquoted: take until next whitespace or segment boundary
-  const unquotedEnd = rest.search(/[\s|;&\n]/)
-  return unquotedEnd === -1 ? rest : rest.slice(0, unquotedEnd)
+interface RuntimeDef {
+  name: string
+  /** Pre-check: true when the segment contains this runtime with an inline eval flag. */
+  segmentRe: RegExp
+  /** Extract the inline script body from the matched segment. */
+  extractBody: (segment: string) => string | null
+  /** Write operation patterns to check within the extracted body. */
+  writeOps: ReadonlyArray<{ re: RegExp; label: string }>
 }
 
-/**
- * Return the write operation labels matched in the given script body.
- */
+export const RUNTIME_DEFS: ReadonlyArray<RuntimeDef> = [
+  {
+    name: "node/bun",
+    segmentRe: /\b(?:node|bun)\b[^|;&\n]*?\s+(?:-e|--eval)(?:=|\s)/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-e|--eval"),
+    writeOps: NODE_BUN_WRITE_OPS,
+  },
+  {
+    name: "python",
+    segmentRe: /\b(?:python3?)\b[^|;&\n]*?\s+-c\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-c"),
+    writeOps: PYTHON_WRITE_OPS,
+  },
+]
+
+// ── Public API ─────────────────────────────────────────────────────────────────
+
+/** Combined write ops across all registered runtimes (for inspection/testing). */
+export const INLINE_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = RUNTIME_DEFS.flatMap(
+  (r) => r.writeOps
+)
+
+/** Detect write ops in a script body against all known patterns. */
 export function detectWriteOps(scriptBody: string): string[] {
   return INLINE_WRITE_OPS.filter((op) => op.re.test(scriptBody)).map((op) => op.label)
 }
 
 /**
- * Scan all shell segments of a command for inline node/bun eval write operations.
+ * Scan all shell segments of a command for inline runtime eval write operations.
  * Returns the deduplicated set of matched write operation labels.
  */
 export function findInlineScriptWrites(command: string): string[] {
   const found = new Set<string>()
-
   for (const segment of splitShellSegments(command)) {
-    if (!RUNTIME_WITH_EVAL_RE.test(segment)) continue
-
-    const body = extractEvalBody(segment)
-    if (!body) continue
-
-    for (const label of detectWriteOps(body)) {
-      found.add(label)
+    for (const runtime of RUNTIME_DEFS) {
+      if (!runtime.segmentRe.test(segment)) continue
+      const body = runtime.extractBody(segment)
+      if (!body) continue
+      for (const op of runtime.writeOps) {
+        if (op.re.test(body)) found.add(op.label)
+      }
     }
   }
-
   return [...found]
 }
 
@@ -141,9 +184,9 @@ const pretooluseInlineScriptWriteGate: SwizToolHook = {
 
     return preToolUseDeny(
       [
-        "Do not use inline node/bun scripts to write files. These produce unreviewed changes.",
+        "Do not use inline scripting to write files. These produce unreviewed changes.",
         "",
-        `Detected file-write ${noun} in \`-e\` / \`--eval\` script:`,
+        `Detected file-write ${noun} in inline eval script:`,
         apiList,
         "",
         "Use the Write or Edit tools instead:",
