@@ -482,12 +482,14 @@ Fan out a hook event to all matching scripts in the manifest. This is the comman
 
 ```bash
 swiz dispatch <event>                       # dispatch an event, reading payload from stdin
+swiz dispatch <event> --agent claude        # skip env-based agent detection (fast path)
 swiz dispatch <event> --replay <file>       # replay a captured payload for debugging
 swiz dispatch <event> --replay <file> --json  # replay with machine-readable trace output
 ```
 
 | Flag              | Description                                                     |
 |-------------------|-----------------------------------------------------------------|
+| `--agent <id>`    | Agent id already known by the caller (`claude` \| `cursor` \| `gemini` \| `codex`). Injects `payload._agent` so daemon hooks resolve the agent without scanning `_env`. |
 | `--replay <file>` | Replay a captured payload file instead of reading stdin         |
 | `--json`          | Output trace in machine-readable JSON format (replay mode only) |
 
