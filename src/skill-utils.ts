@@ -70,11 +70,19 @@ export function skillExists(name: string): boolean {
  * Like skillExists but uses the hook payload to detect the originating agent.
  * For agents with no Skill tool, returns false EXCEPT for Codex, which accesses
  * skills by reading SKILL.md files directly — file existence signals availability.
+ *
+ * When the agent cannot be determined from the payload (e.g. hooks dispatched via
+ * the daemon without `_env`), falls back to skillFileExists() rather than
+ * skillExists(), because skillExists() requires an active agent in the current
+ * process — the daemon process has none, causing gates to be silently skipped.
  */
 export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
   if (agent?.id === "codex") return skillFileExists(name)
   if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
+  // agent is null: either daemon dispatch (no _env) or direct standalone invocation.
+  // Use skillFileExists() so daemon-dispatched hooks don't silently skip all gates.
+  if (agent === null) return skillFileExists(name)
   return skillExists(name)
 }
 
