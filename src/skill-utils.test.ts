@@ -156,6 +156,39 @@ describe("skillExistsForHookPayload", () => {
     expect(skillExistsForHookPayload("skill-that-does-not-exist-xyz-daemon", {})).toBe(false)
     clearSkillCache()
   })
+
+  test("uses skillFileExists (not skillExists) when _agent is set in payload", async () => {
+    // Regression: commit 30ab9f1d added --agent to dispatch commands, so payloads
+    // arrive with _agent: "claude". Before this fix, skillExistsForHookPayload called
+    // skillExists() which re-detects the agent via process.env. In daemon context
+    // (launchd, no CLAUDECODE), detectCurrentAgent() returns null and skillExists()
+    // permanently caches false — silently bypassing all skill gates.
+    const tmpDir = await createTempDir()
+    const skillName = "my-test-skill-agent-regression-xyz"
+    const skillDir = join(tmpDir, ".skills", skillName)
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), `# ${skillName}\n`)
+
+    const originalCwd = process.cwd()
+    const savedClaudeCode = process.env.CLAUDECODE
+    try {
+      process.chdir(tmpDir)
+      clearSkillCache()
+      // Remove the env var that detectCurrentAgent() uses for Claude Code detection,
+      // simulating the daemon launchd environment where CLAUDECODE is not set.
+      delete process.env.CLAUDECODE
+
+      // With _agent: "claude" in payload (injected by `swiz dispatch --agent claude`):
+      // OLD code: skillExists() → detectCurrentAgent() = null → cache false → returns false ✗
+      // NEW code: skillFileExists() → checks disk → returns true ✓
+      const result = skillExistsForHookPayload(skillName, { _agent: "claude" })
+      expect(result).toBe(true)
+    } finally {
+      process.chdir(originalCwd)
+      clearSkillCache()
+      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode
+    }
+  })
 })
 
 // ─── skillAdvice ──────────────────────────────────────────────────────────────
