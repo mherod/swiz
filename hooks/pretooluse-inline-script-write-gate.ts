@@ -55,6 +55,13 @@ export function extractEvalBody(segment: string): string | null {
   return extractBodyAfterFlag(segment, "-e|--eval")
 }
 
+/** Extract the script body from `deno eval <body>` (subcommand form, not a flag). */
+export function extractDenoEvalBody(segment: string): string | null {
+  const m = segment.match(/\bdeno\b[^|;&\n]*?\beval\s+([\s\S]*)/)
+  if (!m) return null
+  return parseQuotedBody(m[1]!.trimStart())
+}
+
 // ── Write operation patterns ──────────────────────────────────────────────────
 // Node/Bun patterns constructed dynamically so the assembled literals don't appear
 // in source text — prevents bun-api-enforce false positives when editing this file.
@@ -103,6 +110,39 @@ const PYTHON_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
   },
 ]
 
+// Deno write patterns — safe as literals (Deno.* APIs not scanned by bun-api-enforce)
+const DENO_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  { re: /\bDeno\.writeFileSync\s*\(/, label: "Deno.writeFileSync" },
+  { re: /\bDeno\.writeFile\s*\(/, label: "Deno.writeFile" },
+  { re: /\bDeno\.writeTextFileSync\s*\(/, label: "Deno.writeTextFileSync" },
+  { re: /\bDeno\.writeTextFile\s*\(/, label: "Deno.writeTextFile" },
+]
+
+// Perl write patterns — safe as literals
+const PERL_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  {
+    // open($fh, '>', file) / open($fh, ">", file) / open(FH, ">file") and >> variants
+    re: /\bopen\s*\([^,)]*,\s*['"]>>?/,
+    label: "open (>, >>)",
+  },
+]
+
+// Ruby write patterns — safe as literals
+const RUBY_WRITE_OPS: ReadonlyArray<{ re: RegExp; label: string }> = [
+  {
+    re: /\bFile\.write\s*\(/,
+    label: "File.write",
+  },
+  {
+    re: /\bIO\.write\s*\(/,
+    label: "IO.write",
+  },
+  {
+    re: /\bFile\.open\s*\([^)]*,\s*['"][wa]/,
+    label: "File.open (write mode)",
+  },
+]
+
 // ── Runtime definitions ────────────────────────────────────────────────────────
 
 interface RuntimeDef {
@@ -127,6 +167,24 @@ export const RUNTIME_DEFS: ReadonlyArray<RuntimeDef> = [
     segmentRe: /\b(?:python3?)\b[^|;&\n]*?\s+-c\s/,
     extractBody: (seg) => extractBodyAfterFlag(seg, "-c"),
     writeOps: PYTHON_WRITE_OPS,
+  },
+  {
+    name: "deno",
+    segmentRe: /\bdeno\b[^|;&\n]*?\beval\s/,
+    extractBody: extractDenoEvalBody,
+    writeOps: DENO_WRITE_OPS,
+  },
+  {
+    name: "perl",
+    segmentRe: /\bperl\b[^|;&\n]*?\s+-e\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-e"),
+    writeOps: PERL_WRITE_OPS,
+  },
+  {
+    name: "ruby",
+    segmentRe: /\bruby\b[^|;&\n]*?\s+-e\s/,
+    extractBody: (seg) => extractBodyAfterFlag(seg, "-e"),
+    writeOps: RUBY_WRITE_OPS,
   },
 ]
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   detectWriteOps,
+  extractDenoEvalBody,
   extractEvalBody,
   findInlineScriptWrites,
   INLINE_WRITE_OPS,
@@ -17,6 +18,8 @@ const bw = "Bun.write"
 const rfs = ["read", "File", "Sync"].join("")
 // Python write op labels (safe as literals — bun-api-enforce doesn't scan for these)
 const owm = "open (write mode)"
+// Perl write op label
+const pol = "open (>, >>)"
 const pwt = "Path.write_text"
 const pwb = "Path.write_bytes"
 
@@ -278,6 +281,134 @@ describe("findInlineScriptWrites – Python", () => {
   test("blocks chained command with python3 -c write", () => {
     const cmd = `cat data.csv && python3 -c "open('out.txt', 'w').write('done')"`
     expect(findInlineScriptWrites(cmd)).toContain(owm)
+  })
+})
+
+describe("extractDenoEvalBody", () => {
+  test("extracts single-quoted body after deno eval", () => {
+    expect(extractDenoEvalBody(`deno eval 'console.log(1)'`)).toBe("console.log(1)")
+  })
+
+  test("extracts double-quoted body after deno eval", () => {
+    expect(extractDenoEvalBody(`deno eval "console.log(1)"`)).toBe("console.log(1)")
+  })
+
+  test("returns null when eval subcommand absent", () => {
+    expect(extractDenoEvalBody("deno run script.ts")).toBeNull()
+  })
+})
+
+describe("findInlineScriptWrites – Deno", () => {
+  test("blocks deno eval with Deno.writeTextFile", () => {
+    const cmd = `deno eval "await Deno.writeTextFile('out.txt', 'data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("Deno.writeTextFile")
+  })
+
+  test("blocks deno eval with Deno.writeTextFileSync", () => {
+    const cmd = `deno eval "Deno.writeTextFileSync('out.txt', 'data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("Deno.writeTextFileSync")
+  })
+
+  test(`blocks deno eval with Deno.${wf}`, () => {
+    const cmd = `deno eval "await Deno.${wf}('out.bin', new Uint8Array([1,2]))"`
+    expect(findInlineScriptWrites(cmd)).toContain(`Deno.${wf}`)
+  })
+
+  test(`blocks deno eval with Deno.${wfs}`, () => {
+    const cmd = `deno eval "Deno.${wfs}('out.bin', new Uint8Array([1,2]))"`
+    expect(findInlineScriptWrites(cmd)).toContain(`Deno.${wfs}`)
+  })
+
+  test("does not block deno eval with only console.log", () => {
+    expect(findInlineScriptWrites(`deno eval "console.log('hello')"`)).toEqual([])
+  })
+
+  test("does not block deno eval with Deno.readTextFile (read-only)", () => {
+    const cmd = `deno eval "const t = await Deno.readTextFile('in.txt'); console.log(t)"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block deno run script file execution (no eval subcommand)", () => {
+    expect(findInlineScriptWrites("deno run script.ts")).toEqual([])
+  })
+
+  test("blocks chained command with deno eval write", () => {
+    const cmd = `echo start && deno eval "await Deno.writeTextFile('f.txt', 'x')"`
+    expect(findInlineScriptWrites(cmd)).toContain("Deno.writeTextFile")
+  })
+})
+
+describe("findInlineScriptWrites – Perl", () => {
+  test("blocks perl -e with 3-arg open write mode", () => {
+    const cmd = `perl -e "open(my $fh, '>', 'out.txt'); print $fh 'data'"`
+    expect(findInlineScriptWrites(cmd)).toContain(pol)
+  })
+
+  test("blocks perl -e with 3-arg open append mode", () => {
+    const cmd = `perl -e "open(my $fh, '>>', '/tmp/log'); print $fh 'line'"`
+    expect(findInlineScriptWrites(cmd)).toContain(pol)
+  })
+
+  test("blocks perl -e with 2-arg open write mode", () => {
+    const cmd = `perl -e 'open(FH, ">out.txt"); print FH "data"; close FH'`
+    expect(findInlineScriptWrites(cmd)).toContain(pol)
+  })
+
+  test("blocks perl -e with 2-arg open double-quoted", () => {
+    const cmd = `perl -e "open(FH, '>>/tmp/log'); print FH 'line'; close FH"`
+    expect(findInlineScriptWrites(cmd)).toContain(pol)
+  })
+
+  test("does not block perl -e with read-only open", () => {
+    const cmd = `perl -e "open(my $fh, '<', 'in.txt'); while(<$fh>){print}"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block perl -e with only print to stdout", () => {
+    expect(findInlineScriptWrites(`perl -e "print 'hello\\n'"`)).toEqual([])
+  })
+
+  test("does not block perl script file execution (no -e flag)", () => {
+    expect(findInlineScriptWrites("perl script.pl")).toEqual([])
+  })
+})
+
+describe("findInlineScriptWrites – Ruby", () => {
+  test("blocks ruby -e with File.write", () => {
+    const cmd = `ruby -e "File.write('out.txt', 'data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("File.write")
+  })
+
+  test("blocks ruby -e with IO.write", () => {
+    const cmd = `ruby -e "IO.write('/tmp/out', 'data')"`
+    expect(findInlineScriptWrites(cmd)).toContain("IO.write")
+  })
+
+  test("blocks ruby -e with File.open write mode", () => {
+    const cmd = `ruby -e "File.open('out.txt', 'w') { |f| f.write('data') }"`
+    expect(findInlineScriptWrites(cmd)).toContain("File.open (write mode)")
+  })
+
+  test("blocks ruby -e with File.open append mode", () => {
+    const cmd = `ruby -e "File.open('log.txt', 'a') { |f| f.puts 'line' }"`
+    expect(findInlineScriptWrites(cmd)).toContain("File.open (write mode)")
+  })
+
+  test("does not block ruby -e with File.read", () => {
+    expect(findInlineScriptWrites(`ruby -e "puts File.read('in.txt')"`)).toEqual([])
+  })
+
+  test("does not block ruby -e with File.open read mode", () => {
+    const cmd = `ruby -e "File.open('in.txt', 'r') { |f| puts f.read }"`
+    expect(findInlineScriptWrites(cmd)).toEqual([])
+  })
+
+  test("does not block ruby -e with only puts", () => {
+    expect(findInlineScriptWrites(`ruby -e "puts 'hello'"`)).toEqual([])
+  })
+
+  test("does not block ruby script file execution (no -e flag)", () => {
+    expect(findInlineScriptWrites("ruby script.rb")).toEqual([])
   })
 })
 
