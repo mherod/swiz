@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { getAgentSettingsPath, getAgentSettingsSearchPaths } from "./agent-paths.ts"
+import {
+  detectCurrentAgentFromHookPayload,
+  getAgentSettingsPath,
+  getAgentSettingsSearchPaths,
+} from "./agent-paths.ts"
 
 describe("getAgentSettingsSearchPaths", () => {
   const homeDir = "/test/home"
@@ -38,5 +42,38 @@ describe("getAgentSettingsSearchPaths", () => {
     const globalPath = `${homeDir}/.codex/hooks.json`
     const localPath = `${cwd}/.codex/hooks.json`
     expect(codexPaths).toEqual([globalPath, localPath])
+  })
+})
+
+describe("detectCurrentAgentFromHookPayload _agent fast path", () => {
+  it("returns the named agent when _agent is a valid id", () => {
+    const agent = detectCurrentAgentFromHookPayload({ _agent: "claude" })
+    expect(agent?.id).toBe("claude")
+  })
+
+  it("returns cursor when _agent is 'cursor'", () => {
+    const agent = detectCurrentAgentFromHookPayload({ _agent: "cursor" })
+    expect(agent?.id).toBe("cursor")
+  })
+
+  it("falls through to env detection when _agent is an unknown id", () => {
+    const agent = detectCurrentAgentFromHookPayload({
+      _agent: "unknown-agent-xyz",
+      _env: { CLAUDECODE: "1" },
+    })
+    expect(agent?.id).toBe("claude")
+  })
+
+  it("returns null when payload is undefined", () => {
+    const agent = detectCurrentAgentFromHookPayload(undefined)
+    expect(agent).toBeNull()
+  })
+
+  it("prefers _agent over _env when both are present", () => {
+    const agent = detectCurrentAgentFromHookPayload({
+      _agent: "cursor",
+      _env: { CLAUDECODE: "1" },
+    })
+    expect(agent?.id).toBe("cursor")
   })
 })

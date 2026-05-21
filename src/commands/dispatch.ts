@@ -449,7 +449,11 @@ async function tryNonGitFastPath(timing: DispatchTiming, hookEventName: string):
 
 // ─── Dispatch callback ─────────────────────────────────────────────────────
 
-async function runDispatch(canonicalEvent: string, hookEventName: string): Promise<void> {
+async function runDispatch(
+  canonicalEvent: string,
+  hookEventName: string,
+  agentId?: string
+): Promise<void> {
   const t0 = performance.now()
   maybeForceDispatchFailureForTesting()
   const payloadStr = await readStdinPayloadWithTimeout()
@@ -493,6 +497,11 @@ async function runDispatch(canonicalEvent: string, hookEventName: string): Promi
   // Use an allowlist to avoid cloning ~50-200KB per dispatch in LaunchAgent mode.
   if (!payload._env) {
     payload._env = buildAllowlistedEnv()
+  }
+  // Fast path: when the caller already knows the agent (--agent flag), skip
+  // env-based detection in daemon hooks by propagating the resolved agent id.
+  if (agentId && !payload._agent) {
+    payload._agent = agentId
   }
   const enrichedPayloadStr = JSON.stringify(payload)
 
@@ -576,6 +585,11 @@ export const dispatchCommand: Command = {
       description: "Replay a captured payload and show a hook-by-hook trace",
     },
     {
+      flags: "--agent <name>",
+      description:
+        "Agent id already known by the caller (claude | cursor | gemini | codex). Injects payload._agent so daemon hooks skip env-based detection.",
+    },
+    {
       flags: "--json",
       description: "Output trace in machine-readable JSON format (replay mode only)",
     },
@@ -626,13 +640,24 @@ export const dispatchCommand: Command = {
         return
       }
 
-      const canonicalEvent = args[0]
+      // Parse --agent <name> flag before positional args
+      let agentId: string | undefined
+      const filteredArgs: string[] = []
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--agent" && i + 1 < args.length) {
+          agentId = args[++i]
+        } else {
+          filteredArgs.push(args[i]!)
+        }
+      }
+
+      const canonicalEvent = filteredArgs[0]
       if (!canonicalEvent) {
         throw new Error("Usage: swiz dispatch <event> [agentEventName]")
       }
-      const hookEventName = args[1] ?? canonicalEvent
+      const hookEventName = filteredArgs[1] ?? canonicalEvent
 
-      await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName))
+      await withLogBuffer(() => runDispatch(canonicalEvent, hookEventName, agentId))
     } catch (err) {
       const isReplay = args[0] === "replay"
       const canonicalEvent = isReplay

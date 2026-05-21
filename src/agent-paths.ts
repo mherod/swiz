@@ -140,8 +140,16 @@ function detectCodexPayload(input: HookPayload | undefined): AgentDef | null {
  * which do not always include CODEX_* env vars. Do not fall back to
  * process.env here: test runners and daemons can have ambient agent variables
  * that are not the hook caller.
+ *
+ * Fast path: if `_agent` is set on the payload (injected by `swiz dispatch
+ * --agent <name>`), resolve it directly and skip env scanning.
  */
 export function detectCurrentAgentFromHookPayload(input: HookPayload | undefined): AgentDef | null {
+  const explicitAgentId = getStringField(input, "_agent")
+  if (explicitAgentId) {
+    const found = getAgent(explicitAgentId)
+    if (found) return found
+  }
   const env = payloadEnv(input)
   const byPayloadEnv = env ? detectCurrentAgentFromEnv(env) : null
   if (byPayloadEnv) return byPayloadEnv
