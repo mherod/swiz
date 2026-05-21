@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy, uniq } from "lodash-es"
 import {
@@ -9,9 +9,11 @@ import {
 import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
+import { projectKeyFromCwd } from "./project-key.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import {
   type CurrentSessionUsageRecencyOptions,
+  computeSummaryFromSessionLines,
   formatCurrentSessionUsageWindow,
   getRecentSkillsUsedForCurrentSession,
   getRecentToolsUsedForCurrentSession,
@@ -354,6 +356,52 @@ export async function wasSkillRecentlyInvokedInCurrentSession(
   options?: CurrentSessionUsageRecencyOptions
 ): Promise<boolean> {
   return (await getRecentlyInvokedSkillsForCurrentSession(source, options)).includes(skillName)
+}
+
+/**
+ * Check whether a skill was invoked anywhere in the given session lines.
+ * Unlike `getRecentlyInvokedSkillsForCurrentSession`, this scans ALL lines
+ * (not filtered to the current user turn) to avoid timing race conditions
+ * where the Skill tool call was just appended to the transcript.
+ */
+export function hasSkillInSessionLines(lines: string[], skillName: string): boolean {
+  return computeSummaryFromSessionLines(lines).skillInvocations.includes(skillName)
+}
+
+/**
+ * Check whether a skill was invoked in ANY session for the current project
+ * within the last `maxAgeMs` milliseconds (default 5 minutes).
+ * Scans all recently-modified JSONL transcript files under
+ * `~/.claude/projects/<projectKey>/`.
+ */
+export async function hasSkillUsedInProjectRecently(
+  skillName: string,
+  cwd: string,
+  home?: string,
+  maxAgeMs = 5 * 60 * 1000
+): Promise<boolean> {
+  const resolvedHome = home ?? process.env.HOME ?? ""
+  if (!resolvedHome) return false
+  const projectKey = projectKeyFromCwd(cwd)
+  const projectDir = join(resolvedHome, ".claude", "projects", projectKey)
+  const now = Date.now()
+  let files: string[]
+  try {
+    files = await readdir(projectDir)
+  } catch {
+    return false
+  }
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue
+    const filePath = join(projectDir, f)
+    try {
+      const { mtimeMs } = await stat(filePath)
+      if (now - mtimeMs > maxAgeMs) continue
+      const text = await Bun.file(filePath).text()
+      if (hasSkillInSessionLines(text.split("\n"), skillName)) return true
+    } catch {}
+  }
+  return false
 }
 
 export async function wasToolRecentlyUsedInCurrentSession(

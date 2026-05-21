@@ -12,6 +12,7 @@
 
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { hasSkillInSessionLines, hasSkillUsedInProjectRecently } from "../src/skill-utils.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import {
@@ -19,11 +20,71 @@ import {
   branchReferencesAlign,
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
+import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
 import { git, isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-issue"
 const PR_WORKFLOW_SKILL = "work-on-prs"
+
+/** Task-subject patterns that require a specific skill to be invoked first. */
+const TASK_SKILL_GATES: Array<{
+  pattern: RegExp
+  skill: string
+  title: string
+  body: string
+}> = [
+  {
+    pattern: /^work\s+on\s+issue\s+#\d+/i,
+    skill: WORKFLOW_SKILL,
+    title: "Issue workflow required",
+    body: "File edits and shell commands are blocked until the issue workflow has been started.",
+  },
+  {
+    pattern: /^push\s+#\d+/i,
+    skill: "push",
+    title: "Push workflow required",
+    body: "File edits and shell commands are blocked until the push workflow has been started.",
+  },
+]
+
+async function getActiveTasks(
+  sessionId: string,
+  cwd: string,
+  home?: string
+): Promise<Array<{ subject: string; status: string }>> {
+  const daemonTasks = await fetchSessionTasksFromDaemon(sessionId, cwd)
+  // Only trust daemon when it returned actual tasks; empty array means session is
+  // unknown to the daemon (not "session exists with no tasks"), so fall back to disk.
+  if (daemonTasks?.length) return daemonTasks
+  const { readSessionTasks } = await import("../src/tasks/task-recovery.ts")
+  return await readSessionTasks(sessionId, home)
+}
+
+async function findActiveTaskGate(
+  sessionId: string,
+  cwd: string,
+  home?: string
+): Promise<(typeof TASK_SKILL_GATES)[number] | null> {
+  const tasks = await getActiveTasks(sessionId, cwd, home)
+  const inProgress = tasks.filter((t) => t.status === "in_progress")
+  for (const gate of TASK_SKILL_GATES) {
+    if (inProgress.some((t) => gate.pattern.test(t.subject))) return gate
+  }
+  return null
+}
+
+function buildMissingSkillMessage(gate: (typeof TASK_SKILL_GATES)[number]): string {
+  return (
+    `**${gate.title}.**\n\n` +
+    `${gate.body}\n\n` +
+    skillAdvice(
+      gate.skill,
+      `Use the /${gate.skill} skill to begin the workflow.`,
+      `Run the /${gate.skill} skill before making any changes.`
+    )
+  )
+}
 
 // Bash commands that are blocked before the workflow preconditions are satisfied
 const GIT_COMMIT_RE = /\bgit\s+commit\b/
@@ -223,11 +284,15 @@ function buildBranchAlignDenyMessage(currentBranch: string, targetBranch: string
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-export async function evaluateIssueWorkflowGate(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateIssueWorkflowGate(
+  input: unknown,
+  _home?: string
+): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
   const toolName = hookInput.tool_name ?? ""
   const transcriptPath = hookInput.transcript_path ?? ""
+  const sessionId = String((hookInput as Record<string, unknown>).session_id ?? "")
 
   const isCodeChange = isCodeChangeTool(toolName)
   const isShell = isShellTool(toolName)
@@ -240,13 +305,26 @@ export async function evaluateIssueWorkflowGate(input: unknown): Promise<SwizHoo
     "NFKC"
   )
 
-  // Quick-exit for shell tools that aren't in the blocked set
-  if (isShell && !isBlockedBashCommand(command)) return {}
-
   const lines = await readSessionLines(transcriptPath)
   const { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch } =
     scanLines(lines)
 
+  // Task-subject skill gate — blocks until the required skill is invoked
+  if (sessionId) {
+    const gate = await findActiveTaskGate(sessionId, cwd, _home)
+    if (gate) {
+      const resolvedHome = _home ?? process.env.HOME ?? ""
+      const skillUsed =
+        hasSkillInSessionLines(lines, gate.skill) ||
+        (resolvedHome ? await hasSkillUsedInProjectRecently(gate.skill, cwd, resolvedHome) : false)
+      if (!skillUsed) {
+        return preToolUseDeny(buildMissingSkillMessage(gate))
+      }
+    }
+  }
+
+  // Non-blocked shell commands are exempt from workflow/preflight checks
+  if (isShell && !isBlockedBashCommand(command)) return {}
   if (!inWorkflow) return {}
 
   // AC #1-2: Block until preflight or remote-ref sync evidence exists

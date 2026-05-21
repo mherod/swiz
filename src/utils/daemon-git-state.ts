@@ -71,3 +71,31 @@ export async function fetchGitStatusFromDaemon(
     return null
   }
 }
+
+/**
+ * Fetch session tasks from the daemon's cached `/sessions/tasks` endpoint.
+ * Returns the tasks array on success, or null when the daemon is unavailable.
+ */
+export async function fetchSessionTasksFromDaemon(
+  sessionId: string,
+  cwd: string,
+  options?: FetchGitStatusFromDaemonOptions
+): Promise<Array<{ subject: string; status: string }> | null> {
+  const port = options?.port ?? getDaemonPort()
+  const signal = options?.signal ?? AbortSignal.timeout(options?.timeoutMs ?? 500)
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/sessions/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, cwd, limit: 50 }),
+      signal,
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      tasks?: Array<{ subject: string; status: string }>
+    } | null
+    return Array.isArray(data?.tasks) ? data.tasks : null
+  } catch {
+    return null
+  }
+}

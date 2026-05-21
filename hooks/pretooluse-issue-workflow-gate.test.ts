@@ -1,12 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { withGitClient } from "../src/git/client.ts"
+import type { SwizHookOutput } from "../src/SwizHook.ts"
 import {
   createMockTestRepo,
   makeWorkflowHookRunner,
+  mockGitClientForTestRepo,
   skillLine,
   textLine,
   writeTranscript,
 } from "../src/utils/test-utils.ts"
+import { evaluateIssueWorkflowGate } from "./pretooluse-issue-workflow-gate.ts"
 
 const runHook = makeWorkflowHookRunner("hooks/pretooluse-issue-workflow-gate.ts")
 
@@ -519,6 +525,210 @@ describe("pretooluse-issue-workflow-gate", () => {
       const repo = await makeRepo()
       const result = await runHook({ cwd: repo, toolName: "Edit", transcriptPath: "" })
       expect(result.decision).toBeUndefined()
+    })
+  })
+
+  // ── Active issue task gate (work-on-issue skill not yet invoked) ──────────────
+
+  describe("active issue task gate", () => {
+    const cleanupHomes: string[] = []
+
+    afterAll(async () => {
+      for (const dir of cleanupHomes) {
+        await Bun.$`rm -rf ${dir}`.quiet()
+      }
+    })
+
+    async function makeTaskHome(
+      sessionId: string,
+      tasks: Array<{ id: string; subject: string; status: string }>
+    ): Promise<string> {
+      const home = await mkdtemp(join(tmpdir(), "swiz-home-"))
+      cleanupHomes.push(home)
+      const tasksDir = join(home, ".claude", "tasks", sessionId)
+      await mkdir(tasksDir, { recursive: true })
+      for (const task of tasks) {
+        await writeFile(join(tasksDir, `${task.id}.json`), JSON.stringify(task))
+      }
+      return home
+    }
+
+    function payload(opts: {
+      toolName: string
+      command?: string
+      cwd: string
+      transcriptPath: string
+      sessionId?: string
+    }): Record<string, unknown> {
+      const toolInput =
+        opts.toolName === "Bash"
+          ? { command: opts.command ?? "echo hello", cwd: opts.cwd }
+          : { file_path: join(opts.cwd, "file.ts"), new_string: "x" }
+      return {
+        tool_name: opts.toolName,
+        tool_input: toolInput,
+        cwd: opts.cwd,
+        transcript_path: opts.transcriptPath,
+        ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+      }
+    }
+
+    function decision(result: SwizHookOutput): string | undefined {
+      const r = result as Record<string, any>
+      return r.hookSpecificOutput?.permissionDecision as string | undefined
+    }
+
+    function reason(result: SwizHookOutput): string | undefined {
+      const r = result as Record<string, any>
+      return r.hookSpecificOutput?.permissionDecisionReason as string | undefined
+    }
+
+    async function runGate(
+      repo: string,
+      p: Record<string, unknown>,
+      home: string | undefined
+    ): Promise<SwizHookOutput> {
+      const client = mockGitClientForTestRepo(repo)
+      if (client) return await withGitClient(client, () => evaluateIssueWorkflowGate(p, home))
+      return await evaluateIssueWorkflowGate(p, home)
+    }
+
+    test("blocks Edit when in_progress issue task and no skill used", async () => {
+      const sessionId = "test-issue-gate-edit-block"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Working on something")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #42", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBe("deny")
+      expect(reason(result)).toContain("Issue workflow required")
+    })
+
+    test("blocks Bash (any command) when in_progress issue task and no skill used", async () => {
+      const sessionId = "test-issue-gate-bash-block"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #99", status: "in_progress" },
+      ])
+      // A non-blocked command (ls) that would normally pass the isBlockedBashCommand gate
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Bash", command: "ls -la", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBe("deny")
+    })
+
+    test("blocks Write when in_progress issue task and no skill used", async () => {
+      const sessionId = "test-issue-gate-write-block"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #7", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Write", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBe("deny")
+    })
+
+    test("deny message does not reveal task subject inspection", async () => {
+      const sessionId = "test-issue-gate-message"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #42", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      const msg = reason(result) ?? ""
+      expect(msg).not.toContain("task")
+      expect(msg).not.toContain("#42")
+      expect(msg).not.toContain("subject")
+    })
+
+    test("allows Edit when skill has been used (falls through to preflight check)", async () => {
+      const sessionId = "test-issue-gate-skill-used"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [skillLine("work-on-issue")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #42", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      // Skill used → issue task gate skipped; falls through to preflight → blocked with preflight message
+      expect(decision(result)).toBe("deny")
+      expect(reason(result)).toContain("preflight required")
+    })
+
+    test("allows Edit when issue task is pending (not in_progress)", async () => {
+      const sessionId = "test-issue-gate-pending"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Work on issue #42", status: "pending" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBeUndefined()
+    })
+
+    test("allows Edit when task subject does not match issue pattern", async () => {
+      const sessionId = "test-issue-gate-no-match"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "Refactor authentication module", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBeUndefined()
+    })
+
+    test("allows Edit with no session_id (gate skipped)", async () => {
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp }),
+        undefined
+      )
+      expect(decision(result)).toBeUndefined()
+    })
+
+    test("matches subject case-insensitively (lowercase)", async () => {
+      const sessionId = "test-issue-gate-case"
+      const repo = await makeRepo()
+      const tp = await makeTranscript(repo, [textLine("Starting")])
+      const home = await makeTaskHome(sessionId, [
+        { id: "1", subject: "work on issue #100", status: "in_progress" },
+      ])
+      const result = await runGate(
+        repo,
+        payload({ toolName: "Edit", cwd: repo, transcriptPath: tp, sessionId }),
+        home
+      )
+      expect(decision(result)).toBe("deny")
     })
   })
 })

@@ -473,7 +473,7 @@ interface MockTestRepoState {
 
 const mockTestRepos = new Map<string, MockTestRepoState>()
 
-function mockGitClientForTestRepo(cwd: string): MockGitClient | null {
+export function mockGitClientForTestRepo(cwd: string): MockGitClient | null {
   const state = mockTestRepos.get(cwd)
   if (!state) return null
   return new MockGitClient((args) => {
