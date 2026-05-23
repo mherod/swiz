@@ -749,11 +749,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
     default: true,
     docs: {
-      description: "Block silent retry loops until /unblock-myself has been run",
+      description: "Emit advisory context for repeated no-progress retry loops",
       effectExplanation:
-        "When enabled, a PreToolUse hook watches for repeated file edits, repeated failing Bash commands, and long idle periods without forward progress. It blocks the next Edit/Write/Bash call until /unblock-myself runs.",
-      enableDescription: "Enforce /unblock-myself before continuing stuck retry loops",
-      disableDescription: "Do not block silent retry loops with /unblock-myself enforcement",
+        "When enabled, a PreToolUse hook watches for repeated file edits, repeated failing Bash commands, and long idle periods without forward progress. It injects advisory context but does not block the next Edit/Write/Bash call.",
+      enableDescription: "Show advisory context for stuck retry loops",
+      disableDescription: "Do not show stuck retry loop advisories",
     },
   },
   {

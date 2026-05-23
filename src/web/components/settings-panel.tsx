@@ -583,8 +583,8 @@ const GLOBAL_TOGGLES: Array<{
   },
   {
     key: "enforceUnblockMyself",
-    label: "Enforce unblock-myself",
-    desc: "Block repeated no-progress Edit, Write, or Bash loops until /unblock-myself has been run.",
+    label: "Stuck-state advisories",
+    desc: "Show advisory context for repeated no-progress Edit, Write, or Bash loops.",
   },
   {
     key: "enforceMidSessionCheckin",

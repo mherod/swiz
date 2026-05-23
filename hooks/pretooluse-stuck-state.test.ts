@@ -12,6 +12,8 @@ interface HookResult {
   exitCode: number | null
   stdout: string
   reason: string
+  systemMessage: string
+  additionalContext: string
 }
 
 function atMinutesAgo(minutes: number): string {
@@ -75,6 +77,8 @@ async function runHook(
     exitCode: result.exitCode,
     stdout: trimmed,
     reason: String(parsed.hookSpecificOutput?.permissionDecisionReason ?? ""),
+    systemMessage: String(parsed.systemMessage ?? ""),
+    additionalContext: String(parsed.hookSpecificOutput?.additionalContext ?? ""),
   }
 }
 
@@ -88,7 +92,7 @@ async function withTranscript<T>(lines: string[], fn: (path: string) => Promise<
 }
 
 describe("pretooluse-stuck-state", () => {
-  test("repeat-edit without commit blocks", async () => {
+  test("repeat-edit without commit emits advisory context", async () => {
     const lines = Array.from({ length: 8 }, (_, index) => {
       const id = `edit-${index}`
       return [
@@ -104,12 +108,15 @@ describe("pretooluse-stuck-state", () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.reason).toContain("same file edited 9 times in 20 minutes without commit")
-      expect(result.reason).toContain("/unblock-myself")
+      expect(result.reason).toBe("")
+      expect(result.systemMessage).toContain(
+        "same file edited 9 times in 20 minutes without commit"
+      )
+      expect(result.additionalContext).toContain("retry is intentional")
     })
   })
 
-  test("repeat-Bash failure blocks", async () => {
+  test("repeat-Bash failure emits advisory context", async () => {
     const command = "bun test src/failing.test.ts"
     const lines = [0, 1, 2].flatMap((index) => {
       const id = `bash-${index}`
@@ -123,11 +130,12 @@ describe("pretooluse-stuck-state", () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.reason).toContain("same Bash command failed 4 times")
+      expect(result.reason).toBe("")
+      expect(result.systemMessage).toContain("same Bash command failed 4 times")
     })
   })
 
-  test("idle no-forward-progress blocks", async () => {
+  test("idle no-forward-progress emits advisory context", async () => {
     const lines = [
       assistantTool("bash-old", "Bash", { command: "bun test old.test.ts" }, 25),
       toolResult("bash-old", false, 25),
@@ -140,7 +148,8 @@ describe("pretooluse-stuck-state", () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.reason).toContain("no forward progress in 25 minutes")
+      expect(result.reason).toBe("")
+      expect(result.systemMessage).toContain("25 minutes")
     })
   })
 

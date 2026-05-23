@@ -157,8 +157,8 @@ function buildTaskGovernanceContext(settings: EffectiveSwizSettings): string {
     ? "action plans may create tasks automatically"
     : "action plans remain advisory until tasks are created"
   const unblock = settings.enforceUnblockMyself
-    ? "stuck retry loops require /unblock-myself"
-    : "stuck retry loop enforcement is off"
+    ? "stuck retry loop advisories are on"
+    : "stuck retry loop advisories are off"
   return `${[
     `Task governance: ${settings.auditStrictness} audit strictness`,
     transitions,

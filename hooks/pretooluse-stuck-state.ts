@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import {
-  preToolUseDeny,
+  buildContextHookOutput,
   runSwizHookAsMain,
   type SwizHookOutput,
   type SwizToolHook,
@@ -389,8 +389,9 @@ export async function evaluatePretooluseStuckState(input: object): Promise<SwizH
   const signal = detectStuckStateSignal(events, current, nowMs)
   if (!signal) return {}
 
-  return preToolUseDeny(
-    `Stuck-state detected: ${signal.message} - run /${UNBLOCK_SKILL} before continuing this approach.`
+  return buildContextHookOutput(
+    "PreToolUse",
+    `Stuck-state advisory: ${signal.message}. Continue only if this retry is intentional; otherwise change tactics before retrying.`
   )
 }
 
