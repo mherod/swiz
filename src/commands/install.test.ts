@@ -1,4 +1,95 @@
+import { mkdir, mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+
+const INDEX_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "index.ts")
+const SWIZ_DISPATCH_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop"
+const STATUS_LINE_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz status-line"
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+async function readJson<T>(path: string): Promise<T> {
+  return (await Bun.file(path).json()) as T
+}
+
+async function runInstall(
+  args: string[],
+  home: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", INDEX_PATH, "install", ...args], {
+    cwd: home,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1" },
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
+}
+
+describe("install --uninstall scope", () => {
+  it("removes only Codex hooks when --codex scopes uninstall", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-install-codex-scope-"))
+    const codexPath = join(home, ".codex", "hooks.json")
+    const claudeSettingsPath = join(home, ".claude", "settings.json")
+    const cursorMcpPath = join(home, ".cursor", "mcp.json")
+
+    await writeJson(codexPath, {
+      hooks: {
+        Stop: [
+          {
+            matcher: "",
+            hooks: [{ type: "command", command: SWIZ_DISPATCH_CMD }],
+          },
+        ],
+      },
+    })
+    await writeJson(claudeSettingsPath, {
+      statusLine: { type: "command", command: STATUS_LINE_CMD },
+      userSetting: true,
+    })
+    await writeJson(cursorMcpPath, {
+      mcpServers: {
+        swiz: { command: "swiz", args: ["mcp"] },
+        other: { command: "other-tool" },
+      },
+    })
+
+    const result = await runInstall(["--uninstall", "--codex"], home)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    expect(result.stdout).toContain("Agents: Codex CLI")
+    expect(result.stdout).not.toContain("daemon LaunchAgent")
+    expect(result.stdout).not.toContain("Git mergetool")
+    expect(result.stdout).not.toContain("statusLine")
+    expect(result.stdout).not.toContain('MCP server "swiz"')
+
+    const codex = await readJson<{ hooks: Record<string, unknown[]> }>(codexPath)
+    expect(codex.hooks).toEqual({})
+
+    const claude = await readJson<{
+      statusLine?: { type?: string; command?: string }
+      userSetting?: boolean
+    }>(claudeSettingsPath)
+    expect(claude.statusLine).toEqual({ type: "command", command: STATUS_LINE_CMD })
+    expect(claude.userSetting).toBe(true)
+
+    const cursorMcp = await readJson<{
+      mcpServers?: Record<string, { command: string; args?: string[] }>
+    }>(cursorMcpPath)
+    expect(cursorMcp.mcpServers?.swiz).toEqual({ command: "swiz", args: ["mcp"] })
+    expect(cursorMcp.mcpServers?.other).toEqual({ command: "other-tool" })
+  })
+})
 
 describe("install.ts statusMessage field", () => {
   describe("basic functionality", () => {

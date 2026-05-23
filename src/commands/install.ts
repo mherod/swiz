@@ -65,12 +65,24 @@ function parseInstallRunOptions(args: string[]): InstallRunOptions {
 }
 
 /** True when `install --uninstall` should remove every swiz integration (no scope flags). */
-function isFullUninstall(opts: InstallRunOptions): boolean {
-  return opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.daemon
+function isFullUninstall(args: string[], opts: InstallRunOptions): boolean {
+  return (
+    opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.daemon && !hasAnyAgentFlag(args)
+  )
 }
 
 function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
   return (!opts.mergeTool && !opts.daemon) || hasAnyAgentFlag(args)
+}
+
+function getScopedMcpTargets(
+  args: string[],
+  opts: InstallRunOptions
+): Array<(typeof MCP_MANAGED_AGENT_IDS)[number]> {
+  if (!hasAnyAgentFlag(args)) return MCP_MANAGED_AGENT_IDS
+
+  const targetIds = new Set(opts.targets.map((agent) => agent.id as string))
+  return MCP_MANAGED_AGENT_IDS.filter((agentId) => targetIds.has(agentId))
 }
 
 async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
@@ -83,12 +95,9 @@ async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions)
   if (!shouldInstallHooks(args, opts)) return
   const home = getHomeDirOrNull()
   if (!home) return
-  const { updated, skipped } = await installSwizAsMcpServer(
-    MCP_MANAGED_AGENT_IDS,
-    home,
-    false,
-    opts.dryRun
-  )
+  const targets = getScopedMcpTargets(args, opts)
+  if (targets.length === 0) return
+  const { updated, skipped } = await installSwizAsMcpServer(targets, home, false, opts.dryRun)
   if (updated.length === 0 && skipped.length === 0) return
   console.log(`  MCP server "swiz":`)
   for (const entry of updated) {
@@ -101,15 +110,12 @@ async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions)
 }
 
 async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!isFullUninstall(opts) && !shouldInstallHooks(args, opts)) return
+  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
   const home = getHomeDirOrNull()
   if (!home) return
-  const { removed } = await uninstallSwizAsMcpServer(
-    MCP_MANAGED_AGENT_IDS,
-    home,
-    false,
-    opts.dryRun
-  )
+  const targets = getScopedMcpTargets(args, opts)
+  if (targets.length === 0) return
+  const { removed } = await uninstallSwizAsMcpServer(targets, home, false, opts.dryRun)
   if (removed.length === 0) return
   console.log(`  MCP server "swiz":`)
   for (const entry of removed) {
@@ -118,8 +124,8 @@ async function uninstallSwizMcpServerStep(args: string[], opts: InstallRunOption
   console.log()
 }
 
-async function runOptionalUninstallSteps(opts: InstallRunOptions): Promise<void> {
-  const all = isFullUninstall(opts)
+async function runOptionalUninstallSteps(args: string[], opts: InstallRunOptions): Promise<void> {
+  const all = isFullUninstall(args, opts)
   // Tear down daemon first — it holds hot-reloaded hook modules in memory.
   if (all || opts.daemon) await uninstallDaemonForCli(opts.dryRun)
   if (all || opts.mergeTool) await uninstallMergeTool(opts.dryRun)
@@ -180,7 +186,7 @@ async function installHooksForTargets(args: string[], opts: InstallRunOptions): 
 }
 
 async function uninstallHooksForTargets(args: string[], opts: InstallRunOptions): Promise<void> {
-  if (!isFullUninstall(opts) && !shouldInstallHooks(args, opts)) return
+  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
 
   console.log(`  Hooks: ${HOOKS_DIR}`)
   console.log(`  Agents: ${opts.targets.map((a) => a.name).join(", ")}\n`)
@@ -319,11 +325,11 @@ export const installCommand: Command = {
 
     if (opts.uninstall) {
       console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
-      await runOptionalUninstallSteps(opts)
+      await runOptionalUninstallSteps(args, opts)
       await uninstallSwizMcpServerStep(args, opts)
       await uninstallHooksForTargets(args, opts)
-      if (isFullUninstall(opts)) await uninstallProjectHooks(opts.dryRun)
-      if (!opts.dryRun && isFullUninstall(opts)) await pauseSessionstartSelfHeal()
+      if (isFullUninstall(args, opts)) await uninstallProjectHooks(opts.dryRun)
+      if (!opts.dryRun && isFullUninstall(args, opts)) await pauseSessionstartSelfHeal()
       if (opts.dryRun) {
         console.log("  No changes written.\n")
       }
