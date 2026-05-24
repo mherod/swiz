@@ -122,6 +122,11 @@ describe("swiz doctor", () => {
       expect(result.stdout).toContain("TTS backend")
     })
 
+    test("reports daemon LaunchAgent env status", () => {
+      expect(result.stdout).toContain("Daemon LaunchAgent env")
+      expect(result.stdout).toContain("LaunchAgent not installed")
+    })
+
     test("reports swiz settings status", () => {
       expect(result.stdout).toContain("Swiz settings")
     })
@@ -174,6 +179,31 @@ describe("swiz doctor", () => {
     const { stat: statFn } = await import("node:fs/promises")
     const s = await statFn(scriptPath)
     expect(s.mode & 0o100).not.toBe(0)
+  }, 60_000)
+
+  test("reports OPENROUTER_API_KEY presence in daemon LaunchAgent config without printing it", async () => {
+    const home = await createTempHome()
+    const launchAgentsDir = join(home, "Library", "LaunchAgents")
+    await mkdir(launchAgentsDir, { recursive: true })
+    await writeFile(
+      join(launchAgentsDir, "com.swiz.daemon.plist"),
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>OPENROUTER_API_KEY</key>
+      <string>secret-doctor-key</string>
+    </dict>
+  </dict>
+</plist>`
+    )
+
+    const result = await runDoctor(home)
+
+    expect(result.stdout).toContain("Daemon LaunchAgent env")
+    expect(result.stdout).toContain("OPENROUTER_API_KEY present")
+    expect(result.stdout).not.toContain("secret-doctor-key")
   }, 60_000)
 
   // ── Missing/invalid config script detection: share one home ───────────

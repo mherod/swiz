@@ -3,6 +3,7 @@ import { agentBinaryAndSettingsCheck } from "./agent-binary-and-settings.ts"
 import { agentConfigSyncCheck } from "./agent-config-sync.ts"
 import { bunRuntimeCheck } from "./bun-runtime.ts"
 import { configScriptsCheck } from "./config-scripts.ts"
+import { daemonLaunchAgentEnvCheck } from "./daemon-launch-agent-env.ts"
 import { ghAuthCheck } from "./gh-auth.ts"
 import { hookScriptsCheck } from "./hook-scripts.ts"
 import { invalidSkillEntriesCheck } from "./invalid-skill-entries.ts"
@@ -18,6 +19,7 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   bunRuntimeCheck,
   ghAuthCheck,
   ttsBackendCheck,
+  daemonLaunchAgentEnvCheck,
   agentBinaryAndSettingsCheck,
   hookScriptsCheck,
   manifestPathsCheck,

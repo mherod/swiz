@@ -3,6 +3,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import {
+  buildDaemonLaunchAgentPlist,
+  DAEMON_OPENROUTER_API_KEY_ENV,
+  daemonLaunchAgentPlistHasOpenRouterApiKey,
+  redactDaemonLaunchAgentPlistSecrets,
+} from "./install/daemon-helpers.ts"
 
 const INDEX_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "index.ts")
 const SWIZ_DISPATCH_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop"
@@ -34,6 +40,39 @@ async function runInstall(
   await proc.exited
   return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
 }
+
+describe("daemon LaunchAgent environment", () => {
+  it("includes OPENROUTER_API_KEY from the current process", () => {
+    const original = process.env[DAEMON_OPENROUTER_API_KEY_ENV]
+    process.env[DAEMON_OPENROUTER_API_KEY_ENV] = `router&<>"'key`
+
+    try {
+      const plist = buildDaemonLaunchAgentPlist(7943)
+
+      expect(plist).toContain(`<key>${DAEMON_OPENROUTER_API_KEY_ENV}</key>`)
+      expect(plist).toContain("<string>router&amp;&lt;&gt;&quot;&apos;key</string>")
+      expect(daemonLaunchAgentPlistHasOpenRouterApiKey(plist)).toBe(true)
+      expect(redactDaemonLaunchAgentPlistSecrets(plist)).not.toContain("router&amp;")
+    } finally {
+      if (original === undefined) delete process.env[DAEMON_OPENROUTER_API_KEY_ENV]
+      else process.env[DAEMON_OPENROUTER_API_KEY_ENV] = original
+    }
+  })
+
+  it("omits OPENROUTER_API_KEY when it is not set", () => {
+    const original = process.env[DAEMON_OPENROUTER_API_KEY_ENV]
+    delete process.env[DAEMON_OPENROUTER_API_KEY_ENV]
+
+    try {
+      const plist = buildDaemonLaunchAgentPlist(7943)
+
+      expect(plist).not.toContain(`<key>${DAEMON_OPENROUTER_API_KEY_ENV}</key>`)
+      expect(daemonLaunchAgentPlistHasOpenRouterApiKey(plist)).toBe(false)
+    } finally {
+      if (original !== undefined) process.env[DAEMON_OPENROUTER_API_KEY_ENV] = original
+    }
+  })
+})
 
 describe("install --uninstall scope", () => {
   it("removes only Codex hooks when --codex scopes uninstall", async () => {

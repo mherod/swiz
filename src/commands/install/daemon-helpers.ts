@@ -24,6 +24,49 @@ const REQUIRED_DAEMON_PATH_DIRS = [
   "/sbin",
 ]
 
+export const DAEMON_OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
+
+function escapePlistString(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+}
+
+function daemonEnvironmentEntry(key: string, value: string): string {
+  return `        <key>${key}</key>
+        <string>${escapePlistString(value)}</string>`
+}
+
+function buildDaemonEnvironmentVariables(envPath: string): string {
+  const entries = [daemonEnvironmentEntry("PATH", envPath)]
+  const openRouterApiKey = process.env[DAEMON_OPENROUTER_API_KEY_ENV]
+  if (openRouterApiKey) {
+    entries.push(daemonEnvironmentEntry(DAEMON_OPENROUTER_API_KEY_ENV, openRouterApiKey))
+  }
+  return entries.join("\n")
+}
+
+export function daemonLaunchAgentPlistHasOpenRouterApiKey(plist: string): boolean {
+  const keyPattern = new RegExp(
+    `<key>${DAEMON_OPENROUTER_API_KEY_ENV}</key>\\s*<string>([\\s\\S]*?)</string>`
+  )
+  const match = keyPattern.exec(plist)
+  return Boolean(match?.[1]?.trim())
+}
+
+export function redactDaemonLaunchAgentPlistSecrets(plist: string): string {
+  const keyPattern = new RegExp(
+    `(<key>${DAEMON_OPENROUTER_API_KEY_ENV}</key>\\s*<string>)([\\s\\S]*?)(</string>)`,
+    "g"
+  )
+  return plist.replace(keyPattern, (_, prefix: string, _value: string, suffix: string) => {
+    return `${prefix}&lt;redacted&gt;${suffix}`
+  })
+}
+
 export function buildDaemonPath(bunPath: string): string {
   const dirs = new Set(REQUIRED_DAEMON_PATH_DIRS)
   const bunDir = dirname(bunPath)
@@ -90,8 +133,7 @@ export function buildDaemonLaunchAgentPlist(port: number): string {
 
       <key>EnvironmentVariables</key>
       <dict>
-        <key>PATH</key>
-        <string>${envPath}</string>
+${buildDaemonEnvironmentVariables(envPath)}
       </dict>
     </dict>
   </plist>`
@@ -101,12 +143,23 @@ export function buildDaemonLaunchAgentPlist(port: number): string {
 export async function installDaemonLaunchAgent(port: number): Promise<void> {
   const plist = buildDaemonLaunchAgentPlist(port)
   const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  const wasLoaded = await isLaunchAgentLoaded(SWIZ_DAEMON_LABEL)
+
+  if (wasLoaded) {
+    const existingFile = Bun.file(plistPath)
+    if (await existingFile.exists()) {
+      await unloadLaunchAgent(plistPath)
+    }
+    await bootoutLaunchAgent(SWIZ_DAEMON_LABEL)
+    await Bun.sleep(100)
+  }
+
   await Bun.write(plistPath, plist)
   console.log(`Wrote ${plistPath}`)
 
   const loadExitCode = await loadLaunchAgent(plistPath)
   if (loadExitCode !== 0) throw new Error("launchctl load failed")
-  console.log(`Loaded ${SWIZ_DAEMON_LABEL}`)
+  console.log(`${wasLoaded ? "Reloaded" : "Loaded"} ${SWIZ_DAEMON_LABEL}`)
 }
 
 /** Uninstall daemon LaunchAgent; used by `swiz install --uninstall --daemon` and `swiz daemon --uninstall`. */
@@ -149,7 +202,14 @@ export async function installDaemonForCli(port: number, dryRun: boolean): Promis
       console.log(`  ${DIM}daemon LaunchAgent: already installed${RESET}\n`)
     } else {
       console.log(`  ${GREEN}+ daemon LaunchAgent: ${plistPath}${RESET}\n`)
-      console.log(formatUnifiedDiff(plistPath, existingContent, proposed))
+      const redactedExisting = redactDaemonLaunchAgentPlistSecrets(existingContent)
+      const redactedProposed = redactDaemonLaunchAgentPlistSecrets(proposed)
+      console.log(formatUnifiedDiff(plistPath, redactedExisting, redactedProposed))
+      if (existingContent !== proposed && redactedExisting === redactedProposed) {
+        console.log(
+          `  ${DIM}${plistPath}: only redacted daemon environment secrets changed${RESET}\n`
+        )
+      }
     }
     return
   }
