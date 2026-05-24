@@ -28,6 +28,7 @@ import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-stee
 import {
   consumeAutoSteerRequest,
   isAppleScriptTerminalApp,
+  renderQueuedAutoSteerRequest,
 } from "../src/utils/auto-steer-helpers.ts"
 import { sendAutoSteer } from "../src/utils/hook-utils.ts"
 import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
@@ -93,7 +94,8 @@ async function deliverTriggers(
   for (const trigger of triggersToDeliver) {
     const req = await consumeAutoSteerRequest(sessionId, trigger)
     if (req && !sent.has(req.message)) {
-      await sendAutoSteer(req.message, app, { requeueOnForegroundDeferSessionId: sessionId })
+      const message = await renderQueuedAutoSteerRequest(sessionId, req)
+      await sendAutoSteer(message, app, { requeueOnForegroundDeferSessionId: sessionId })
       sent.add(req.message)
     }
   }

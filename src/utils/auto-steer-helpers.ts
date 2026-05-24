@@ -6,6 +6,7 @@
  */
 
 import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { LRUCache } from "lru-cache"
 import { z } from "zod"
 import type { AutoSteerTrigger } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
@@ -175,20 +176,72 @@ export function isMcpChannelLiveForCwd(cwd: string): boolean {
 
 export interface AutoSteerRequest {
   message: string
+  dedupKey?: string | null
   timestamp: number
   trigger?: AutoSteerTrigger
 }
 
-/** Hard cap on how long humanisation may block a hook before falling back to the raw text. */
+/** Hard cap on how long humanisation may block a hook before using the local rewrite. */
 const HUMANISE_TIMEOUT_MS = 8_000
 
 const HUMANISE_SYSTEM_PROMPT = [
   "You rewrite terse, machine-generated coding-agent steering notes into a short, natural paragraph.",
-  "Keep the rewrite to one paragraph in a calm, collegial human voice, as if a teammate left the nudge.",
-  "Preserve every concrete instruction, file path, command, and constraint exactly.",
+  "Squash the full mechanical dump into one authentic instruction, framed as though the user wrote it.",
+  "Keep the rewrite to a single paragraph in a calm, direct human voice.",
+  "Preserve every concrete instruction, file path, command, and constraint.",
   "Do not add new instructions, headings, bullet points, quotes, or commentary about the rewrite.",
   "Return only the rewritten paragraph.",
 ].join(" ")
+
+const HUMANISE_CACHE = new LRUCache<string, Promise<string>>({
+  max: 250,
+  ttl: 10 * 60 * 1000,
+})
+
+const MECHANICAL_AUTO_STEER_LINE_RE =
+  /^(?:[-*_]{3,}|action required:?.*|stop is blocked by .*|resolve them in the order shown\.?|git status|ship checklist|repository|incomplete tasks|you must act on this now\.?|do not try to stop again.*|this hook will block every stop attempt.*|if you believe this is a false positive.*|task files?:\s.*)$/i
+
+const LEADING_MARKER_RE = /^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+|[a-z][.)]\s+|\[[ x]\]\s+)/i
+
+const KNOWN_IMPERATIVE_RE =
+  /^(Continue|Take|Fix|Add|Update|Commit|Push|Run|Resolve|Use|Complete|Create|Check|Inspect|Read|Review|Re-run|Rerun|Open|Follow|Handle|Address)\b/
+
+function stripMechanicalAutoSteerLine(line: string): string {
+  let text = line.normalize("NFKC").trim()
+  if (!text) return ""
+  text = text.replace(LEADING_MARKER_RE, "").trim()
+  if (!text || MECHANICAL_AUTO_STEER_LINE_RE.test(text)) return ""
+  return text.replace(/\s+/g, " ")
+}
+
+function toSingleParagraph(text: string): string {
+  return text
+    .split(/\r?\n+/)
+    .map(stripMechanicalAutoSteerLine)
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function lowerKnownImperative(text: string): string {
+  return text.replace(KNOWN_IMPERATIVE_RE, (verb) => verb.toLowerCase())
+}
+
+function sentenceCaseAutoSteer(text: string): string {
+  if (!text) return text
+  return /[.!?]$/.test(text) ? text : `${text}.`
+}
+
+function fallbackHumaniseAutoSteerMessage(message: string): string {
+  const paragraph = toSingleParagraph(message)
+  if (!paragraph) return message
+  const instruction = lowerKnownImperative(paragraph)
+  if (/^(?:please|i need you to|can you|could you|when you|let's)\b/i.test(instruction)) {
+    return sentenceCaseAutoSteer(instruction)
+  }
+  return sentenceCaseAutoSteer(`Please ${instruction}`)
+}
 
 /**
  * Rewrite a steering message into a humanised, single paragraph via the AI provider layer.
@@ -197,24 +250,41 @@ const HUMANISE_SYSTEM_PROMPT = [
  * well under {@link HUMANISE_TIMEOUT_MS}, unlike the local Claude CLI which can
  * block the calling hook for 6-13s and ignore the timeout.
  *
- * Fail-open: when OpenRouter is unavailable, the call errors, or it exceeds the
- * timeout, the original message is returned unchanged so scheduling never
- * depends on the model being reachable.
+ * If OpenRouter is unavailable, errors, echoes the raw note, or exceeds the
+ * timeout, a deterministic local rewrite is used so raw mechanical dumps are
+ * not delivered when humanisation is enabled.
  */
 export async function humaniseAutoSteerMessage(message: string): Promise<string> {
   const trimmed = message.trim()
   if (!trimmed) return message
 
+  const cached = HUMANISE_CACHE.get(trimmed)
+  if (cached) return cached
+
+  const promise = humaniseAutoSteerMessageUncached(trimmed)
+  HUMANISE_CACHE.set(trimmed, promise)
+  return promise
+}
+
+async function humaniseAutoSteerMessageUncached(trimmed: string): Promise<string> {
+  const fallback = fallbackHumaniseAutoSteerMessage(trimmed)
+
   try {
     const { promptText } = await import("../ai-providers.ts")
     const prompt = `${HUMANISE_SYSTEM_PROMPT}\n\nSteering note to rewrite:\n${trimmed}`
-    const rewritten = (
+    const rewritten = toSingleParagraph(
       await promptText(prompt, { provider: "openrouter", timeout: HUMANISE_TIMEOUT_MS })
-    ).trim()
-    return rewritten || message
+    )
+    if (!rewritten) return fallback
+    if (rewritten === toSingleParagraph(trimmed)) return fallback
+    return rewritten
   } catch {
-    return message
+    return fallback
   }
+}
+
+export function clearAutoSteerHumanisationCache(): void {
+  HUMANISE_CACHE.clear()
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
@@ -327,45 +397,24 @@ async function isHumaniseAutoSteerEnabled(sessionId: string): Promise<boolean> {
   return settings.humaniseAutoSteer
 }
 
-const inflightHumanisation = new Set<Promise<void>>()
-
 /**
- * Await all in-flight async humanisation rewrites. Exposed for tests and
- * graceful shutdown so the fire-and-forget rewrites can be observed.
+ * Kept for compatibility with hook teardown and older tests. Humanisation is
+ * now completed before enqueue, so there is no background work to drain.
  */
 export async function flushAutoSteerHumanisation(): Promise<void> {
-  await Promise.all([...inflightHumanisation])
+  return Promise.resolve()
 }
 
-/**
- * Kick off a non-blocking humanisation of an already-enqueued steer. The raw
- * text is enqueued synchronously by the caller; this rewrites it in the
- * background and swaps the stored row's message in place once ready, so
- * PreToolUse gates that await scheduleAutoSteer never pay the model latency.
- * Best-effort: if the setting is off, the rewrite errors, or the row was
- * already delivered, the raw text stands.
- */
-function kickOffHumanisation(
+export async function renderAutoSteerMessage(sessionId: string, message: string): Promise<string> {
+  if (!(await isHumaniseAutoSteerEnabled(sessionId))) return message
+  return humaniseAutoSteerMessage(message)
+}
+
+export async function renderQueuedAutoSteerRequest(
   sessionId: string,
-  safeSession: string,
-  rawMessage: string,
-  trigger: AutoSteerTrigger
-): void {
-  const task = (async () => {
-    try {
-      if (!(await isHumaniseAutoSteerEnabled(sessionId))) return
-      const humanised = await humaniseAutoSteerMessage(rawMessage)
-      if (!humanised || humanised === rawMessage) return
-      const { getAutoSteerStore } = await import("../auto-steer-store.ts")
-      getAutoSteerStore().updatePendingMessage(safeSession, rawMessage, trigger, humanised)
-    } catch {
-      // fire-and-forget: raw text is already enqueued, humanisation is best-effort
-    }
-  })()
-  const tracked = task.finally(() => {
-    inflightHumanisation.delete(tracked)
-  })
-  inflightHumanisation.add(tracked)
+  request: Pick<AutoSteerRequest, "message" | "dedupKey">
+): Promise<string> {
+  return renderAutoSteerMessage(sessionId, request.dedupKey ?? request.message)
 }
 
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
@@ -485,23 +534,25 @@ export async function scheduleAutoSteer(
   const { terminalApp, settingsAutoSteer } = await checkAutoSteerEligibility(sessionId)
   if (!settingsAutoSteer) return false
 
-  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
-  const store = getAutoSteerStore()
   if (terminalApp) {
-    const enqueued = store.enqueue(safeSession, message, resolvedTrigger, { dedupKey: message })
-    if (enqueued) kickOffHumanisation(sessionId, safeSession, message, resolvedTrigger)
+    const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+    const store = getAutoSteerStore()
+    const renderedMessage = await renderAutoSteerMessage(sessionId, message)
+    store.enqueue(safeSession, renderedMessage, resolvedTrigger, { dedupKey: message })
     return true
   }
 
   if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
-  const enqueued = store.enqueue(safeSession, message, resolvedTrigger, {
+  const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+  const store = getAutoSteerStore()
+  const renderedMessage = await renderAutoSteerMessage(sessionId, message)
+  const enqueued = store.enqueue(safeSession, renderedMessage, resolvedTrigger, {
     cwd,
     dedupKey: message,
   })
   if (enqueued) {
-    kickOffHumanisation(sessionId, safeSession, message, resolvedTrigger)
     touchMcpChannelNotify(cwd)
   }
   return true
@@ -536,13 +587,13 @@ export async function scheduleAutoSteerViaChannel(
 
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  const enqueued = store.enqueue(safeSession, message, trigger, {
+  const renderedMessage = await renderAutoSteerMessage(sessionId, message)
+  const enqueued = store.enqueue(safeSession, renderedMessage, trigger, {
     cwd,
     ttlMs: opts?.ttlMs,
     dedupKey: message,
   })
   if (enqueued) {
-    kickOffHumanisation(sessionId, safeSession, message, trigger)
     touchMcpChannelNotify(cwd)
   }
   return enqueued
@@ -565,5 +616,5 @@ export async function consumeAutoSteerRequest(
   if (requests.length === 0) return null
 
   const first = requests[0]!
-  return { message: first.message, timestamp: first.createdAt }
+  return { message: first.message, dedupKey: first.dedupKey, timestamp: first.createdAt }
 }

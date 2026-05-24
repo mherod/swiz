@@ -51,6 +51,7 @@ export interface QueuedAutoSteerRequest {
   id: number
   sessionId: string
   message: string
+  dedupKey?: string | null
   trigger: AutoSteerTrigger
   createdAt: number
   deliveredAt: number | null
@@ -147,7 +148,7 @@ export class AutoSteerStore {
     // Scoped by session_id (delivery is per-session).
     // Returns exactly one row per call to ensure atomic transaction-protected dequeue.
     this._stmtConsumeOne = this.db.prepare(
-      `SELECT id, session_id, message, trigger_type as trigger, created_at
+      `SELECT id, session_id, message, dedup_key, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE session_id = ? AND trigger_type = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
@@ -189,7 +190,7 @@ export class AutoSteerStore {
     )
     // Pending: select undelivered, non-expired rows across all triggers
     this._stmtPending = this.db.prepare(
-      `SELECT id, session_id, message, trigger_type as trigger, created_at
+      `SELECT id, session_id, message, dedup_key, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE session_id = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
@@ -198,7 +199,7 @@ export class AutoSteerStore {
     // ConsumeOne by project_key — used by the MCP channel delivery path where
     // the server process knows its cwd but not the host agent's session id.
     this._stmtConsumeOneByProjectKey = this.db.prepare(
-      `SELECT id, session_id, message, trigger_type as trigger, created_at
+      `SELECT id, session_id, message, dedup_key, trigger_type as trigger, created_at
        FROM auto_steer_queue
        WHERE project_key = ? AND trigger_type = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
@@ -303,6 +304,7 @@ export class AutoSteerStore {
             id: number
             session_id: string
             message: string
+            dedup_key: string | null
             trigger: string
             created_at: number
           }
@@ -314,6 +316,7 @@ export class AutoSteerStore {
           id: row.id,
           sessionId: row.session_id,
           message: row.message,
+          dedupKey: row.dedup_key,
           trigger: row.trigger as AutoSteerTrigger,
           createdAt: row.created_at,
           deliveredAt: now,
@@ -351,6 +354,7 @@ export class AutoSteerStore {
             id: number
             session_id: string
             message: string
+            dedup_key: string | null
             trigger: string
             created_at: number
           }
@@ -365,6 +369,7 @@ export class AutoSteerStore {
         id: row.id,
         sessionId: row.session_id,
         message: row.message,
+        dedupKey: row.dedup_key,
         trigger: row.trigger as AutoSteerTrigger,
         createdAt: row.created_at,
         deliveredAt: now,
@@ -428,6 +433,7 @@ export class AutoSteerStore {
       id: number
       session_id: string
       message: string
+      dedup_key: string | null
       trigger: string
       created_at: number
     }>
@@ -435,6 +441,7 @@ export class AutoSteerStore {
       id: row.id,
       sessionId: row.session_id,
       message: row.message,
+      dedupKey: row.dedup_key,
       trigger: row.trigger as AutoSteerTrigger,
       createdAt: row.created_at,
       deliveredAt: null,

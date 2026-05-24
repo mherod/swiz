@@ -132,13 +132,13 @@ async function emitHookOutputIfNonEmpty(output: SwizHookOutput): Promise<void> {
  * if (import.meta.main) await runSwizHookAsMain(myHook)
  * ```
  */
-/** Max time to wait for in-flight auto-steer humanisation before forcing process exit. */
+/** Max compatibility wait for older in-flight auto-steer humanisation paths. */
 const AUTO_STEER_FLUSH_CAP_MS = 2_500
 
 /**
- * Await any fire-and-forget auto-steer humanisation kicked off during the hook,
- * capped so a slow provider never delays teardown. Lazy import keeps the
- * auto-steer module off the hot path of hooks that never schedule a steer.
+ * Await any compatibility auto-steer humanisation work, capped so a slow
+ * provider never delays teardown. Current scheduling humanises before enqueue,
+ * so this is normally a no-op.
  */
 async function flushPendingAutoSteerHumanisation(): Promise<void> {
   try {
@@ -149,7 +149,7 @@ async function flushPendingAutoSteerHumanisation(): Promise<void> {
     })
     await Promise.race([flushAutoSteerHumanisation().finally(() => clearTimeout(timer)), cap])
   } catch {
-    // best-effort: the raw steer text is already enqueued
+    // best-effort only
   }
 }
 
@@ -173,10 +173,8 @@ export async function runSwizHookAsMain(
   }
   const output = await hook.run(input)
   await emitHookOutputIfNonEmpty(output)
-  // The hook decision is already emitted above. Before this short-lived process
-  // exits, persist any fire-and-forget auto-steer humanisation it kicked off so
-  // the rewritten steer reaches the queue (issue #669). Capped so a slow
-  // provider never delays teardown; raw text already stands if it elapses.
+  // The hook decision is already emitted above. Keep the old flush point for
+  // compatibility with any external hook path that still tracks async rewrites.
   await flushPendingAutoSteerHumanisation()
   // Always exit explicitly: dynamic imports (settings.ts, hook-utils.ts) may open
   // SQLite connections or file watchers that prevent natural process exit when

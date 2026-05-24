@@ -10,9 +10,11 @@ import {
   swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import {
+  clearAutoSteerHumanisationCache,
   flushAutoSteerHumanisation,
   getMcpChannelAvailability,
   humaniseAutoSteerMessage,
+  renderQueuedAutoSteerRequest,
   scheduleAutoSteer,
   scheduleAutoSteerViaChannel,
 } from "./auto-steer-helpers.ts"
@@ -118,6 +120,7 @@ describe("auto-steer helpers", () => {
   beforeEach(async () => {
     await acquireEnvLock()
     resetAutoSteerStore()
+    clearAutoSteerHumanisationCache()
     originalHome = process.env.HOME
     clearTerminalEnv()
     for (const key of AI_ENV_KEYS) {
@@ -175,7 +178,7 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(true)
   })
 
-  test("scheduleAutoSteerViaChannel humanises the queued message asynchronously", async () => {
+  test("scheduleAutoSteerViaChannel humanises the queued message before delivery", async () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
     const projectKey = projectKeyFromCwd(cwd)
@@ -184,7 +187,6 @@ describe("auto-steer helpers", () => {
     process.env.AI_TEST_TEXT_RESPONSE = "Whenever you're ready, please take the next task."
 
     const scheduled = await scheduleAutoSteerViaChannel("session-h-ch", "Take the next task", cwd)
-    // Humanisation is fire-and-forget; wait for the background swap to land.
     await flushAutoSteerHumanisation()
 
     const store = getAutoSteerStore()
@@ -270,7 +272,9 @@ describe("auto-steer helpers", () => {
     expect(scheduled).toBe(true)
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
     expect(store.consumeOneByProjectKey(projectKey, "next_turn")).toBeNull()
-    expect(store.consumeOne("session-3", "next_turn")[0]?.message).toBe("Continue via terminal")
+    expect(store.consumeOne("session-3", "next_turn")[0]?.message).toBe(
+      "Please continue via terminal."
+    )
   })
 
   test("humaniseAutoSteerMessage rewrites via the provider when one is available", async () => {
@@ -283,11 +287,58 @@ describe("auto-steer helpers", () => {
     expect(result).toBe("When you get a moment, could you pick up the next task on the queue?")
   })
 
-  test("humaniseAutoSteerMessage falls open to the original when no provider is available", async () => {
+  test("humaniseAutoSteerMessage uses a local paragraph rewrite when no provider is available", async () => {
     // beforeEach sets AI_TEST_NO_BACKEND=1
     const result = await humaniseAutoSteerMessage("Take the next task")
 
-    expect(result).toBe("Take the next task")
+    expect(result).toBe("Please take the next task.")
+  })
+
+  test("humaniseAutoSteerMessage strips mechanical dump wording into one paragraph", async () => {
+    const result = await humaniseAutoSteerMessage(
+      [
+        "Stop is blocked by 2 checks. Resolve them in the order shown.",
+        "",
+        "### git status",
+        'Run `git status`, then `git add .` and `git commit -m "fix: thing"`.',
+        "",
+        "ACTION REQUIRED: You must act on this now. Do not try to stop again without completing the required action.",
+      ].join("\n")
+    )
+
+    expect(result).not.toContain("\n")
+    expect(result).not.toContain("ACTION REQUIRED")
+    expect(result).toBe(
+      'Please run `git status`, then `git add .` and `git commit -m "fix: thing"`.'
+    )
+  })
+
+  test("humaniseAutoSteerMessage caches the promise for repeated input text", async () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Could you take the next task?"
+    const first = await humaniseAutoSteerMessage("Take the next cached task")
+
+    process.env.AI_TEST_TEXT_RESPONSE = "This second provider result should not be used."
+    const second = await humaniseAutoSteerMessage("Take the next cached task")
+
+    expect(first).toBe("Could you take the next task?")
+    expect(second).toBe("Could you take the next task?")
+  })
+
+  test("renderQueuedAutoSteerRequest humanises raw queued rows lazily at delivery", async () => {
+    await setupAutoSteerHome()
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Please finish the repository checks before stopping."
+
+    const store = getAutoSteerStore()
+    const enqueued = store.enqueue("session-lazy", "Complete repository checks", "next_turn", {
+      dedupKey: "Complete repository checks",
+    })
+    const req = store.consumeOne("session-lazy", "next_turn")[0]!
+    const rendered = await renderQueuedAutoSteerRequest("session-lazy", req)
+
+    expect(enqueued).toBe(true)
+    expect(rendered).toBe("Please finish the repository checks before stopping.")
   })
 
   test("humaniseAutoSteerMessage returns the original for blank input", async () => {

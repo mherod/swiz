@@ -929,6 +929,8 @@ export { spawnSpeak } from "../speech.ts"
 export {
   type AutoSteerRequest,
   isAutoSteerAvailable,
+  renderAutoSteerMessage,
+  renderQueuedAutoSteerRequest,
   type SendAutoSteerOptions,
   scheduleAutoSteer,
   scheduleAutoSteerViaChannel,

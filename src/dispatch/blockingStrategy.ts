@@ -127,7 +127,7 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
   const store = getAutoSteerStore()
   if (!store.hasPending(ctx.safeSession, "on_session_stop")) return false
 
-  const { sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const { renderQueuedAutoSteerRequest, sendAutoSteer } = await import("../utils/hook-utils.ts")
   const sent = new Set<string>()
   let deliveredCount = 0
   let batch = store.consumeOne(ctx.safeSession, "on_session_stop")
@@ -135,7 +135,8 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
     const req = batch[0]!
     deliveredCount++
     if (!sent.has(req.message)) {
-      const ok = await sendAutoSteer(req.message, ctx.terminalApp)
+      const message = await renderQueuedAutoSteerRequest(ctx.sessionId, req)
+      const ok = await sendAutoSteer(message, ctx.terminalApp)
       if (ok) {
         log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
       }
@@ -160,8 +161,9 @@ async function tryAutoSteerStopBlock(
   const { getAutoSteerStore: getStore } = await import("../../src/auto-steer-store.ts")
   if (getStore().wasRecentlyDelivered(ctx.safeSession, blockReason, "on_session_stop")) return
 
-  const { sendAutoSteer } = await import("../utils/hook-utils.ts")
-  const sent = await sendAutoSteer(blockReason, ctx.terminalApp)
+  const { renderAutoSteerMessage, sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const message = await renderAutoSteerMessage(ctx.sessionId, blockReason)
+  const sent = await sendAutoSteer(message, ctx.terminalApp)
   if (!sent) return
   log(
     `   auto-steer: sent stop block reason to terminal (${ctx.terminalApp}) — converting to allow`

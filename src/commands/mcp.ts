@@ -160,6 +160,7 @@ function writeChannelStatus(status: McpChannelRuntimeStatus): void {
 async function drainAutoSteersOnce(projectKey: string): Promise<number> {
   if (activeServer === null) return 0
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+  const { renderQueuedAutoSteerRequest } = await import("../utils/auto-steer-helpers.ts")
   const store = getAutoSteerStore()
   let delivered = 0
   for (const trigger of CHANNEL_TRIGGERS) {
@@ -167,9 +168,10 @@ async function drainAutoSteersOnce(projectKey: string): Promise<number> {
       const req = store.consumeOneByProjectKey(projectKey, trigger)
       if (!req) break
       try {
+        const message = await renderQueuedAutoSteerRequest(req.sessionId, req)
         await pushChannelEvent(
           {
-            content: req.message,
+            content: message,
             meta: {
               trigger: req.trigger,
               session_id: req.sessionId,
