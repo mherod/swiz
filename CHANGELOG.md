@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-05-24
+
+### Features
+
+- **Humanised auto-steer text** — Scheduled steer messages are now rewritten
+  into a natural, single paragraph via the AI provider layer before delivery,
+  so the terminal nudge reads like a teammate's note instead of terse hook
+  copy. The rewrite always uses the OpenRouter provider (`openrouter/auto`),
+  which returns in ~1–2s, and fails open to the raw text when OpenRouter is
+  unavailable or the call errors. The `AutoSteerStore` gained a `dedup_key`
+  column so dedup keys on the original text while the humanised text is what
+  gets stored and delivered, preserving cross-session dedup despite
+  non-deterministic rewrites.
+
+- **`humaniseAutoSteer` setting** — A new global boolean (default on) gates the
+  rewrite. Disable it to deliver raw steer text and skip the per-steer
+  OpenRouter call for cost/latency-sensitive setups.
+
+### Fixes
+
+- **OpenRouter default model** — The default model was changed from the dead
+  `stepfun/step-3.5-flash:free` (which returned "No endpoints found") to
+  `openrouter/auto`, restoring the OpenRouter path for all callers, including
+  `swiz continue` and the merge-conflict resolver.
+
 ## 2026-05-21
 
 ### Features
