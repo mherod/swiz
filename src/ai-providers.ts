@@ -57,7 +57,7 @@ export interface PromptStreamOptions extends PromptOptions {
 }
 
 const CLAUDE_DEFAULT_MODEL = "sonnet"
-const OPENROUTER_DEFAULT_MODEL = "stepfun/step-3.5-flash:free"
+const OPENROUTER_DEFAULT_MODEL = "openrouter/auto"
 const GEMINI_KNOWN_MODELS = [
   "gemini-flash-latest",
   "gemini-2.5-flash",
