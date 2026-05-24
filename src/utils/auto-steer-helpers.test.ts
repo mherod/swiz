@@ -175,6 +175,43 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(true)
   })
 
+  test("scheduleAutoSteerViaChannel humanises the queued message asynchronously", async () => {
+    const home = await setupAutoSteerHome()
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    await writeLiveChannelStatus(cwd)
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Whenever you're ready, please take the next task."
+
+    const scheduled = await scheduleAutoSteerViaChannel("session-h-ch", "Take the next task", cwd)
+    // Humanisation is fire-and-forget; wait for the background swap to land.
+    await flushAutoSteerHumanisation()
+
+    const store = getAutoSteerStore()
+    expect(scheduled).toBe(true)
+    expect(store.consumeOneByProjectKey(projectKey, "next_turn")?.message).toBe(
+      "Whenever you're ready, please take the next task."
+    )
+  })
+
+  test("scheduleAutoSteerViaChannel leaves raw text when humaniseAutoSteer is disabled", async () => {
+    const home = await setupAutoSteerHome({ humaniseAutoSteer: false })
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    await writeLiveChannelStatus(cwd)
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "this rewrite must not be used"
+
+    const scheduled = await scheduleAutoSteerViaChannel("session-noh-ch", "Take the next task", cwd)
+    await flushAutoSteerHumanisation()
+
+    const store = getAutoSteerStore()
+    expect(scheduled).toBe(true)
+    expect(store.consumeOneByProjectKey(projectKey, "next_turn")?.message).toBe(
+      "Take the next task"
+    )
+  })
+
   test("scheduleAutoSteerViaChannel returns false when the MCP channel is not live", async () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
