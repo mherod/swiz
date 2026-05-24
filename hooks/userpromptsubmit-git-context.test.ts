@@ -16,12 +16,16 @@ await mock.module("../src/utils/git-utils.ts", () => {
 })
 
 await mock.module("../src/issue-store.ts", () => {
+  // The hook resolves session edits via getIssueStoreReader (daemon-fallback
+  // reader added in 17046fd2); getIssueStore is kept for any sync callers.
+  const reader = {
+    listSessionEdits: (projectKey: string, sessionId: string) => {
+      return mockSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
+    },
+  }
   return {
-    getIssueStore: () => ({
-      listSessionEdits: (projectKey: string, sessionId: string) => {
-        return mockSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
-      },
-    }),
+    getIssueStore: () => reader,
+    getIssueStoreReader: () => reader,
   }
 })
 
