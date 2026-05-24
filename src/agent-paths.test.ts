@@ -43,6 +43,15 @@ describe("getAgentSettingsSearchPaths", () => {
     const localPath = `${cwd}/.codex/hooks.json`
     expect(codexPaths).toEqual([globalPath, localPath])
   })
+
+  it("resolves Antigravity hooks under its dedicated hooks.json", () => {
+    const paths = getAgentSettingsSearchPaths("antigravity", { homeDir, cwd })
+    expect(paths[0]).toBe(getAgentSettingsPath("antigravity", homeDir))
+    expect(paths).toEqual([
+      `${homeDir}/.gemini/antigravity-cli/hooks.json`,
+      `${cwd}/.gemini/antigravity-cli/hooks.json`,
+    ])
+  })
 })
 
 describe("detectCurrentAgentFromHookPayload _agent fast path", () => {
