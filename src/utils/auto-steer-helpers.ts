@@ -193,20 +193,24 @@ const HUMANISE_SYSTEM_PROMPT = [
 /**
  * Rewrite a steering message into a humanised, single paragraph via the AI provider layer.
  *
- * Fail-open: when no provider is configured, the call errors, or it exceeds
- * {@link HUMANISE_TIMEOUT_MS}, the original message is returned unchanged so
- * scheduling never depends on the model being reachable.
+ * Always uses the OpenRouter provider: its fast hosted models keep the rewrite
+ * well under {@link HUMANISE_TIMEOUT_MS}, unlike the local Claude CLI which can
+ * block the calling hook for 6-13s and ignore the timeout.
+ *
+ * Fail-open: when OpenRouter is unavailable, the call errors, or it exceeds the
+ * timeout, the original message is returned unchanged so scheduling never
+ * depends on the model being reachable.
  */
 export async function humaniseAutoSteerMessage(message: string): Promise<string> {
   const trimmed = message.trim()
   if (!trimmed) return message
 
   try {
-    const { hasAiProvider, promptText } = await import("../ai-providers.ts")
-    if (!hasAiProvider()) return message
-
+    const { promptText } = await import("../ai-providers.ts")
     const prompt = `${HUMANISE_SYSTEM_PROMPT}\n\nSteering note to rewrite:\n${trimmed}`
-    const rewritten = (await promptText(prompt, { timeout: HUMANISE_TIMEOUT_MS })).trim()
+    const rewritten = (
+      await promptText(prompt, { provider: "openrouter", timeout: HUMANISE_TIMEOUT_MS })
+    ).trim()
     return rewritten || message
   } catch {
     return message

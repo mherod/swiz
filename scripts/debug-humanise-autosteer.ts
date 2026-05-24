@@ -67,6 +67,24 @@ for (const sample of SAMPLES) {
   console.log("")
 }
 
+// Surface the real error when forcing the OpenRouter provider (humanise swallows it).
+{
+  console.log("--- forced OpenRouter error probe ---")
+  const t0 = performance.now()
+  try {
+    const out = await promptText(`Rewrite in one short sentence: ${SAMPLES[0]!.text}`, {
+      provider: "openrouter",
+      timeout: 8000,
+    })
+    console.log(`elapsed ms: ${(performance.now() - t0).toFixed(1)}`)
+    console.log(`SUCCESS (${out.length} chars): ${out.slice(0, 120)}`)
+  } catch (e) {
+    console.log(`elapsed ms: ${(performance.now() - t0).toFixed(1)}`)
+    console.log(`THREW: ${(e as Error).message}`)
+  }
+  console.log("")
+}
+
 // Decisive probe: does the timeout actually abort the provider call?
 // 2s timeout. If honored → returns at ~2s. If ignored by claude-code → runs full duration.
 {
