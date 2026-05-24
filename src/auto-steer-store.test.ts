@@ -162,6 +162,28 @@ describe("AutoSteerStore", () => {
     store.close()
   })
 
+  it("enqueue dedups on dedupKey while storing the rendered message", () => {
+    const store = createStore()
+    const first = store.enqueue("sess1", "rewritten A", "next_turn", { dedupKey: "raw" })
+    // Different stored message but same canonical dedupKey — should be skipped.
+    const second = store.enqueue("sess1", "rewritten B", "next_turn", { dedupKey: "raw" })
+    expect(first).toBe(true)
+    expect(second).toBe(false)
+    const pending = store.listPending("sess1")
+    expect(pending).toHaveLength(1)
+    expect(pending[0]!.message).toBe("rewritten A")
+    store.close()
+  })
+
+  it("enqueue dedups a delivered dedupKey across differing rendered messages", () => {
+    const store = createStore()
+    store.enqueue("sess1", "rewritten A", "next_turn", { dedupKey: "raw" })
+    store.consume("sess1") // marks delivered
+    const result = store.enqueue("sess1", "rewritten B", "next_turn", { dedupKey: "raw" })
+    expect(result).toBe(false)
+    store.close()
+  })
+
   it("enqueue allows same message with different trigger", () => {
     const store = createStore()
     const first = store.enqueue("sess1", "same message", "next_turn")
