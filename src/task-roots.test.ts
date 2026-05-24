@@ -2,7 +2,11 @@ import { describe, expect, it } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createTaskStoreForHookPayload, findTaskStoreForSession } from "./task-roots.ts"
+import {
+  createTaskStoreForHookPayload,
+  createTaskStoreForProvider,
+  findTaskStoreForSession,
+} from "./task-roots.ts"
 
 describe("task roots", () => {
   it("resolves Codex task roots from a Codex hook payload", () => {
@@ -25,5 +29,12 @@ describe("task roots", () => {
 
     const roots = findTaskStoreForSession(sessionId, home)
     expect(roots.tasksDir).toBe(join(home, ".codex", "tasks"))
+  })
+
+  it("maps Antigravity task roots to its brain and conversations dirs", () => {
+    const home = "/Users/test"
+    const roots = createTaskStoreForProvider("antigravity", home)
+    expect(roots.tasksDir).toBe(join(home, ".gemini", "antigravity-cli", "brain"))
+    expect(roots.projectsDir).toBe(join(home, ".gemini", "antigravity-cli", "conversations"))
   })
 })
