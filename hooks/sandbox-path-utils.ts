@@ -32,6 +32,18 @@ function sanitizeShellCommand(command: string): string {
     .trim()
 }
 
+// Benign redirections that never write to an arbitrary file: merging a stream
+// into another fd (e.g. `2>&1`) and discarding output to /dev/null (e.g.
+// `2>/dev/null`, `&>/dev/null`). These are routine on read-only inspection
+// commands such as `ls -la <path> 2>&1 | head`, so they must be stripped before
+// the redirect/background rejection below — otherwise the lone `>`/`&` they
+// contain would wrongly disqualify an otherwise safe command.
+const BENIGN_REDIRECT_RE = /(?:[0-9]*>&[0-9]+)|(?:(?:&|[0-9]+)?>>?\s*\/dev\/null\b)/g
+
+function stripBenignRedirects(command: string): string {
+  return command.replace(BENIGN_REDIRECT_RE, " ").replace(/\s+/g, " ").trim()
+}
+
 function isSafeSedCommand(stage: string): boolean {
   const tokens = stage.split(/\s+/).filter(Boolean)
   for (const token of tokens.slice(1)) {
@@ -54,7 +66,7 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
   const normalized = command.normalize("NFKC")
   if (normalized.includes("`") || normalized.includes("$(")) return false
 
-  const sanitized = sanitizeShellCommand(normalized)
+  const sanitized = stripBenignRedirects(sanitizeShellCommand(normalized))
   if (!sanitized) return false
   if (
     sanitized.includes("&&") ||

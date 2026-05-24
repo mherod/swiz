@@ -88,4 +88,17 @@ describe("isSafeReadOnlyShellCommand", () => {
     expect(isSafeReadOnlyShellCommand("sed -i 's/foo/bar/' ~/.swiz/settings.json")).toBe(false)
     expect(isSafeReadOnlyShellCommand('cat $(printf "%s" "$HOME")/.swiz/settings.json')).toBe(false)
   })
+
+  it("allows benign stderr/null redirections on read-only commands", () => {
+    expect(isSafeReadOnlyShellCommand("ls -la ~/.gemini 2>&1 | head -50")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("ls -la ~/.gemini 2>/dev/null")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("rg --files ~/.gemini 2>/dev/null | head -100")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json 2>&1")).toBe(true)
+    expect(isSafeReadOnlyShellCommand("ls ~/.gemini &>/dev/null")).toBe(true)
+  })
+
+  it("still rejects redirects that write to real files", () => {
+    expect(isSafeReadOnlyShellCommand("ls -la ~/.gemini > /tmp/out")).toBe(false)
+    expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json 2>/tmp/err")).toBe(false)
+  })
 })
