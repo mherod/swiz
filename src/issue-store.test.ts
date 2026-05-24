@@ -499,6 +499,58 @@ describe("Session commit tracking", () => {
   })
 })
 
+describe("Session edit tracking", () => {
+  test("records and lists file edits for a project/session pair", () => {
+    const store = createStore()
+    try {
+      const projectKey = "-Users-me-work-repo"
+      const sessionId = "session-a"
+
+      expect(store.listSessionEdits(projectKey, sessionId)).toHaveLength(0)
+
+      store.recordSessionEdit(projectKey, sessionId, "/path/to/file1.ts", 1000)
+      store.recordSessionEdit(projectKey, sessionId, "/path/to/file2.ts", 2000)
+
+      const edits = store.listSessionEdits(projectKey, sessionId)
+      expect(edits).toHaveLength(2)
+      expect(edits[0]).toEqual({ file_path: "/path/to/file1.ts", updated_at: 1000 })
+      expect(edits[1]).toEqual({ file_path: "/path/to/file2.ts", updated_at: 2000 })
+    } finally {
+      store.close()
+    }
+  })
+
+  test("isolates edits by project and session", () => {
+    const store = createStore()
+    try {
+      store.recordSessionEdit("project-a", "session-a", "/file1.ts", 1000)
+      store.recordSessionEdit("project-a", "session-b", "/file2.ts", 2000)
+      store.recordSessionEdit("project-b", "session-a", "/file3.ts", 3000)
+
+      expect(store.listSessionEdits("project-a", "session-a")).toHaveLength(1)
+      expect(store.listSessionEdits("project-a", "session-b")).toHaveLength(1)
+      expect(store.listSessionEdits("project-b", "session-a")).toHaveLength(1)
+      expect(store.listSessionEdits("project-b", "session-b")).toHaveLength(0)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("updates timestamp for the same file in the same session", () => {
+    const store = createStore()
+    try {
+      store.recordSessionEdit("project-a", "session-a", "/file1.ts", 1000)
+      store.recordSessionEdit("project-a", "session-a", "/file1.ts", 2000)
+
+      const edits = store.listSessionEdits("project-a", "session-a")
+      expect(edits).toHaveLength(1)
+      expect(edits[0]!.updated_at).toBe(2000)
+    } finally {
+      store.close()
+    }
+  })
+})
+
 describe("replayPendingMutations", () => {
   test("discards mutations that exceed max attempts", async () => {
     const store = createStore()
@@ -1909,6 +1961,7 @@ describe("IssueStoreReader", () => {
       listLabels: async <T = unknown>() => [] as T[],
       listMilestones: async <T = unknown>() => [] as T[],
       getBranchProtection: async () => null,
+      listSessionEdits: async <T = unknown>() => [] as T[],
     }
 
     const issues = await mockReader.listIssues("any/repo")
@@ -2081,6 +2134,19 @@ describe("DaemonBackedIssueStore", () => {
     expect(await store.getCiStatus("owner/repo", "sha")).toBeNull()
     expect(await store.getCiBranchRuns("owner/repo", "main")).toBeNull()
     expect(await store.getPrBranchDetail("owner/repo", "b")).toBeNull()
+  })
+
+  test("listSessionEdits fetches from session-edits/list daemon endpoint", async () => {
+    const fetchMock = (async (url: any, init: any) => {
+      const body = JSON.parse(init?.body as string)
+      expect(url).toContain("/session-edits/list")
+      expect(body.projectKey).toBe("project-1")
+      expect(body.sessionId).toBe("session-2")
+      return Response.json({ edits: [{ file_path: "src/file.ts", updated_at: 12345 }] })
+    }) as unknown as typeof fetch
+    const store = new DaemonBackedIssueStore(fetchMock)
+    const result = await store.listSessionEdits("project-1", "session-2")
+    expect(result).toEqual([{ file_path: "src/file.ts", updated_at: 12345 }])
   })
 })
 

@@ -240,6 +240,28 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return result ?? null
   }
 
+  async listSessionEdits<T = unknown>(projectKey: string, sessionId: string): Promise<T[]> {
+    if (this.daemonAvailable === false) return [] as T[]
+    try {
+      const resp = await this.fetchImpl(
+        `http://127.0.0.1:${DAEMON_FALLBACK_PORT}/session-edits/list`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectKey, sessionId }),
+          signal: AbortSignal.timeout(DAEMON_FALLBACK_TIMEOUT_MS),
+        }
+      )
+      if (!resp.ok) {
+        return [] as T[]
+      }
+      const data = (await resp.json()) as { edits: T[] }
+      return (data.edits ?? []) as T[]
+    } catch {
+      return [] as T[]
+    }
+  }
+
   get isDaemonAvailable(): boolean | null {
     return this.daemonAvailable
   }

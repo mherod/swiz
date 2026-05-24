@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**138 hooks. 12 event types. Every agent. Zero compromises.**
+**139 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -201,7 +201,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts`             | Blocks all `swiz tasks` CLI usage in Claude Code except `swiz tasks adopt` (orphan recovery). Requires native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) for every other task operation.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-### PostToolUse (26)
+### PostToolUse (27)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -233,6 +233,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-skill-steps.ts` | After a Skill tool call, extracts numbered steps from the skill's `## Steps` section and creates pending tasks for each step that doesn't already exist as a pending/in_progress task. Uses subject fingerprinting and overlap detection to avoid duplicates. |
 | `posttooluse-auto-steer.ts` | Consumes any scheduled steer message and types it into the active terminal session after a tool call using AppleScript automation. Scheduled steers are humanised into a natural paragraph at enqueue (falling back to the raw text, e.g. "Continue"). Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
+| `posttooluse-session-edits.ts` | Records files edited during the session into the `session_edits` table in IssueStore. |
 
 ### SessionStart (9)
 

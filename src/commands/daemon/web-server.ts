@@ -968,6 +968,27 @@ async function handleGitState(req: Request, ctx: CacheRoutesContext): Promise<Re
   return Response.json(state)
 }
 
+async function handleSessionEditsList(req: Request, _ctx: CacheRoutesContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    projectKey?: string
+    sessionId?: string
+  } | null
+  if (
+    typeof body?.projectKey !== "string" ||
+    !body.projectKey ||
+    typeof body?.sessionId !== "string" ||
+    !body.sessionId
+  ) {
+    return Response.json(
+      { error: "Missing required fields: projectKey (string), sessionId (string)" },
+      { status: 400 }
+    )
+  }
+  const reader = getIssueStoreReader()
+  const edits = await reader.listSessionEdits(body.projectKey, body.sessionId)
+  return Response.json({ edits })
+}
+
 type CacheRouteHandler = (req: Request, ctx: CacheRoutesContext) => Promise<Response>
 
 const CACHE_ROUTE_TABLE: Record<string, CacheRouteHandler> = {
@@ -977,6 +998,7 @@ const CACHE_ROUTE_TABLE: Record<string, CacheRouteHandler> = {
   "/hooks/cooldown": handleCooldownCheck,
   "/hooks/cooldown/mark": handleCooldownMark,
   "/git/state": handleGitState,
+  "/session-edits/list": handleSessionEditsList,
 }
 
 async function handleCacheRoutes(

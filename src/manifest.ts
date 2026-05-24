@@ -20,6 +20,7 @@ import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
 import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
 import posttoolusePostPushCooldown from "../hooks/posttooluse-push-cooldown.ts"
+import posttooluseSessionEdits from "../hooks/posttooluse-session-edits.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
 import posttooluseSpeakNarrator from "../hooks/posttooluse-speak-narrator.ts"
 import posttooluseStateTransition from "../hooks/posttooluse-state-transition.ts"
@@ -457,6 +458,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseFileTruncationGuard },
       { hook: posttoolusePrettierTs },
       { hook: posttoolusMidSessionPrompt },
+      { hook: posttooluseSessionEdits },
     ],
   },
   {

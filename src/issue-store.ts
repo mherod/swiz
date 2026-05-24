@@ -66,6 +66,13 @@ export interface CachedComment {
   synced_at: number
 }
 
+export interface SessionEditRecord {
+  project_key: string
+  session_id: string
+  file_path: string
+  updated_at: number
+}
+
 export interface SessionCommitRecord {
   project_key: string
   session_id: string
@@ -126,6 +133,8 @@ export interface IssueStoreReader {
   listMilestones<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
   /** Cached branch protection rules for a repo. Returns null when not yet synced. */
   getBranchProtection<T = unknown>(repo: string, branch: string): Promise<T | null>
+  /** Get files edited during a specific session. */
+  listSessionEdits<T = unknown>(projectKey: string, sessionId: string): Promise<T[]>
 }
 
 // ─── GitHubClient ────────────────────────────────────────────────────────────
@@ -305,6 +314,8 @@ export class IssueStore {
   private _stmtRemovePullRequest!: Statement
   private _stmtListIssueComments!: Statement<{ data: string }>
   private _stmtListAllCommentIds!: Statement<{ comment_id: number; issue_number: number }>
+  private _stmtRecordSessionEdit!: Statement
+  private _stmtListSessionEdits!: Statement<{ file_path: string; updated_at: number }>
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getDefaultDbPath()
@@ -331,6 +342,12 @@ export class IssueStore {
     )
     this._stmtListAllCommentIds = this.db.prepare(
       "SELECT comment_id, issue_number FROM issue_comments WHERE repo = ?"
+    )
+    this._stmtRecordSessionEdit = this.db.prepare(
+      "INSERT INTO session_edits (project_key, session_id, file_path, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(project_key, session_id, file_path) DO UPDATE SET updated_at = excluded.updated_at"
+    )
+    this._stmtListSessionEdits = this.db.prepare(
+      "SELECT file_path, updated_at FROM session_edits WHERE project_key = ? AND session_id = ? ORDER BY updated_at ASC"
     )
   }
 
@@ -490,6 +507,19 @@ export class IssueStore {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_session_commits_project_last_commit
       ON session_commits (project_key, last_commit_at)
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS session_edits (
+        project_key TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (project_key, session_id, file_path)
+      )
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_session_edits_project_session
+      ON session_edits (project_key, session_id)
     `)
   }
 
@@ -1126,6 +1156,26 @@ export class IssueStore {
       .run(repo, endpoint, etag, data, Date.now())
   }
 
+  // ─── Session edit tracking ─────────────────────────────────────────────
+
+  /** Record a file edit performed by a session. */
+  recordSessionEdit(
+    projectKey: string,
+    sessionId: string,
+    filePath: string,
+    updatedAt = Date.now()
+  ): void {
+    this._stmtRecordSessionEdit.run(projectKey, sessionId, filePath, updatedAt)
+  }
+
+  /** List all files edited during a specific session. */
+  listSessionEdits(
+    projectKey: string,
+    sessionId: string
+  ): { file_path: string; updated_at: number }[] {
+    return this._stmtListSessionEdits.all(projectKey, sessionId)
+  }
+
   // ─── Session commit tracking ───────────────────────────────────────────
 
   /** Record the latest commit performed by a session within a project. */
@@ -1222,6 +1272,8 @@ export class IssueStore {
         Promise.resolve(this.listMilestones<T>(repo, ttlMs)),
       getBranchProtection: <T = unknown>(repo: string, branch: string) =>
         Promise.resolve(this.getBranchProtection<T>(repo, branch)),
+      listSessionEdits: <T = unknown>(projectKey: string, sessionId: string) =>
+        Promise.resolve(this.listSessionEdits(projectKey, sessionId) as unknown as T[]),
     }
   }
 }
@@ -1471,6 +1523,8 @@ function createNoOpStore(): IssueStore {
             _repo: string,
             _branch: string
           ): Promise<T | null> => null,
+          listSessionEdits: async <T = unknown>(_projectKey: string, _sessionId: string) =>
+            [] as T[],
         })
       }
       if (READ_LIST_METHODS.has(prop as string)) {

@@ -93,11 +93,12 @@ async function loadGitDirectives(
 async function buildPostToolGitStatusLine(
   cwd: string,
   effective: any,
-  gitStatus: GitStatusV2 | null
+  gitStatus: GitStatusV2 | null,
+  sessionId?: string
 ): Promise<string> {
   if (!gitStatus) return ""
   const unpushedCommitSummaries = gitStatus.ahead > 0 ? await getUnpushedCommitSummaries(cwd) : []
-  return buildGitContextLine(
+  let gitLine = buildGitContextLine(
     gitStatus,
     {
       collaborationMode: effective.collaborationMode,
@@ -106,6 +107,75 @@ async function buildPostToolGitStatusLine(
     },
     unpushedCommitSummaries
   )
+
+  if (gitStatus.total > 0 && gitStatus.lines && gitStatus.lines.length > 0) {
+    const maxFiles = 30
+    const editedByUs: string[] = []
+    let editedByOthers: string[] = []
+
+    if (sessionId) {
+      try {
+        const { getIssueStore } = await import("../src/issue-store.ts")
+        const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+        const { git } = await import("../src/git-helpers.ts")
+        const { resolve, relative } = await import("node:path")
+
+        const projectKey = projectKeyFromCwd(cwd)
+        const store = getIssueStore()
+        const rawEdits = store.listSessionEdits(projectKey, sessionId)
+
+        let gitRoot = cwd
+        try {
+          gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
+        } catch {
+          // fallback
+        }
+
+        const dbPaths = new Set(
+          rawEdits.map((e: any) => {
+            const abs = resolve(cwd, e.file_path)
+            return relative(gitRoot, abs)
+          })
+        )
+
+        for (const file of gitStatus.lines) {
+          const normalizedFile = relative(gitRoot, resolve(gitRoot, file))
+          if (dbPaths.has(normalizedFile)) {
+            editedByUs.push(file)
+          } else {
+            editedByOthers.push(file)
+          }
+        }
+      } catch {
+        editedByOthers = gitStatus.lines
+      }
+    } else {
+      editedByOthers = gitStatus.lines
+    }
+
+    gitLine += `\nUncommitted files:`
+    if (editedByUs.length > 0) {
+      const visibleUs = editedByUs.slice(0, maxFiles)
+      gitLine +=
+        `\n  Edited in this session (by us):\n` +
+        visibleUs.map((file) => `    - ${file}`).join("\n")
+      if (editedByUs.length > maxFiles) {
+        gitLine += `\n    ... and ${editedByUs.length - maxFiles} more file(s)`
+      }
+    }
+    if (editedByOthers.length > 0) {
+      const remainingSlots = Math.max(5, maxFiles - editedByUs.length)
+      const visibleOthers = editedByOthers.slice(0, remainingSlots)
+      gitLine +=
+        `\n  Edited externally (by tools or other parallel agents):\n` +
+        visibleOthers.map((file) => `    - ${file}`).join("\n")
+      if (editedByOthers.length > remainingSlots) {
+        gitLine += `\n    ... and ${editedByOthers.length - remainingSlots} more file(s)`
+      }
+    }
+  }
+
+  return gitLine
 }
 
 const posttoolusGitContext: SwizHook = {
@@ -139,7 +209,7 @@ const posttoolusGitContext: SwizHook = {
       payload: input as Record<string, any>,
     })
     const gitStatus = await getGitStatus(cwd, fetchGitStatusFromDaemon, getGitStatusV2)
-    const statusLine = await buildPostToolGitStatusLine(cwd, effective, gitStatus)
+    const statusLine = await buildPostToolGitStatusLine(cwd, effective, gitStatus, input.session_id)
 
     let directives: string[] = []
     if (shouldLoadDirectives(tool_name, input, gitStatus, isShellTool, GIT_ANY_CMD_RE)) {

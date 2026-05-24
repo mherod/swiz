@@ -2,14 +2,37 @@ import { describe, expect, mock, test } from "bun:test"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { hookOutputSchema } from "../src/schemas.ts"
+import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import type { GitStatusV2 } from "../src/utils/git-utils.ts"
 import { evaluateUserpromptsubmitGitContext } from "./userpromptsubmit-git-context.ts"
 
 const mockGitStatusByCwd = new Map<string, GitStatusV2 | null>()
+const mockSessionEdits = new Map<string, { file_path: string }[]>()
 
 await mock.module("../src/utils/git-utils.ts", () => {
   return {
     getGitStatusV2: (cwd: string) => mockGitStatusByCwd.get(cwd) ?? null,
+  }
+})
+
+await mock.module("../src/issue-store.ts", () => {
+  return {
+    getIssueStore: () => ({
+      listSessionEdits: (projectKey: string, sessionId: string) => {
+        return mockSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
+      },
+    }),
+  }
+})
+
+await mock.module("../src/git-helpers.ts", () => {
+  return {
+    git: (args: string[], cwd?: string) => {
+      if (args.includes("rev-parse") && args.includes("--show-toplevel")) {
+        return Promise.resolve(cwd ?? process.cwd())
+      }
+      return Promise.resolve("")
+    },
   }
 })
 
@@ -99,5 +122,42 @@ describe("userpromptsubmit-git-context", () => {
     expect(context).toContain("  - src/file-29.ts")
     expect(context).not.toContain("  - src/file-30.ts")
     expect(context).toContain("... and 15 more file(s)")
+  })
+
+  test("partitions uncommitted files into session edits and external edits", async () => {
+    const cwd = testCwd("partitioned")
+    const projKey = projectKeyFromCwd(cwd)
+    const sessionId = "session-xyz"
+
+    // Mock two files edited by us in this session
+    mockSessionEdits.set(`${projKey}:${sessionId}`, [
+      { file_path: "src/file1.ts" },
+      { file_path: "src/file2.ts" },
+    ])
+
+    mockGitStatusByCwd.set(
+      cwd,
+      gitStatus({
+        modified: 3,
+        lines: ["src/file1.ts", "src/file2.ts", "src/file3.ts"],
+        total: 3,
+      })
+    )
+
+    const result = await evaluateUserpromptsubmitGitContext({
+      session_id: sessionId,
+      cwd,
+    })
+
+    const context = additionalContext(result)
+    expect(context).toContain("Uncommitted files:")
+    expect(context).toContain("  Edited in this session (by us):")
+    expect(context).toContain("    - src/file1.ts")
+    expect(context).toContain("    - src/file2.ts")
+    expect(context).toContain("  Edited externally (by tools or other parallel agents):")
+    expect(context).toContain("    - src/file3.ts")
+    expect(context).not.toContain(
+      "    - src/file1.ts" + "\n" + "    - src/file2.ts" + "\n" + "    - src/file3.ts"
+    ) // shouldn't be under one single list
   })
 })

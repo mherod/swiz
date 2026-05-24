@@ -74,11 +74,68 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
   let gitLine = buildGitContextLine(gitStatus, behavior.gitOptions)
   if (gitStatus.total > 0 && gitStatus.lines && gitStatus.lines.length > 0) {
     const maxFiles = 30
-    const visibleFiles = gitStatus.lines.slice(0, maxFiles)
-    const fileList = visibleFiles.map((file) => `  - ${file}`).join("\n")
-    const remainingCount = gitStatus.lines.length - maxFiles
-    const remainingSuffix = remainingCount > 0 ? `\n  ... and ${remainingCount} more file(s)` : ""
-    gitLine += `\nUncommitted files:\n${fileList}${remainingSuffix}`
+    const editedByUs: string[] = []
+    let editedByOthers: string[] = []
+
+    if (hookInput.session_id) {
+      try {
+        const { getIssueStore } = await import("../src/issue-store.ts")
+        const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+        const { resolve, relative } = await import("node:path")
+
+        const projectKey = projectKeyFromCwd(cwd)
+        const store = getIssueStore()
+        const rawEdits = store.listSessionEdits(projectKey, hookInput.session_id)
+
+        let gitRoot = cwd
+        try {
+          gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
+        } catch {
+          // fallback
+        }
+
+        const dbPaths = new Set(
+          rawEdits.map((e: any) => {
+            const abs = resolve(cwd, e.file_path)
+            return relative(gitRoot, abs)
+          })
+        )
+
+        for (const file of gitStatus.lines) {
+          const normalizedFile = relative(gitRoot, resolve(gitRoot, file))
+          if (dbPaths.has(normalizedFile)) {
+            editedByUs.push(file)
+          } else {
+            editedByOthers.push(file)
+          }
+        }
+      } catch {
+        editedByOthers = gitStatus.lines
+      }
+    } else {
+      editedByOthers = gitStatus.lines
+    }
+
+    gitLine += `\nUncommitted files:`
+    if (editedByUs.length > 0) {
+      const visibleUs = editedByUs.slice(0, maxFiles)
+      gitLine +=
+        `\n  Edited in this session (by us):\n` +
+        visibleUs.map((file) => `    - ${file}`).join("\n")
+      if (editedByUs.length > maxFiles) {
+        gitLine += `\n    ... and ${editedByUs.length - maxFiles} more file(s)`
+      }
+    }
+    if (editedByOthers.length > 0) {
+      const remainingSlots = Math.max(5, maxFiles - editedByUs.length)
+      const visibleOthers = editedByOthers.slice(0, remainingSlots)
+      gitLine +=
+        `\n  Edited externally (by tools or other parallel agents):\n` +
+        visibleOthers.map((file) => `    - ${file}`).join("\n")
+      if (editedByOthers.length > remainingSlots) {
+        gitLine += `\n    ... and ${editedByOthers.length - remainingSlots} more file(s)`
+      }
+    }
   }
 
   return buildContextHookOutput("UserPromptSubmit", combineContext(gitLine, behavior.context))
