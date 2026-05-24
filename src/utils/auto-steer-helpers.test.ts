@@ -11,9 +11,12 @@ import {
 } from "../temp-paths.ts"
 import {
   getMcpChannelAvailability,
+  humaniseAutoSteerMessage,
   scheduleAutoSteer,
   scheduleAutoSteerViaChannel,
 } from "./auto-steer-helpers.ts"
+
+const AI_ENV_KEYS = ["AI_TEST_NO_BACKEND", "AI_TEST_TEXT_RESPONSE", "AI_PROVIDER"] as const
 
 const TERMINAL_ENV_KEYS = [
   "TERM_PROGRAM",
@@ -109,11 +112,20 @@ async function writeLiveChannelStatus(cwd: string): Promise<void> {
 describe("auto-steer helpers", () => {
   let originalHome: string | undefined
 
+  const originalAiEnv = new Map<string, string | undefined>()
+
   beforeEach(async () => {
     await acquireEnvLock()
     resetAutoSteerStore()
     originalHome = process.env.HOME
     clearTerminalEnv()
+    for (const key of AI_ENV_KEYS) {
+      originalAiEnv.set(key, process.env[key])
+      delete process.env[key]
+    }
+    // Default: no AI backend so humanisation fails open to the original text,
+    // keeping message assertions deterministic. Humanisation tests opt in.
+    process.env.AI_TEST_NO_BACKEND = "1"
   })
 
   afterEach(async () => {
@@ -125,6 +137,15 @@ describe("auto-steer helpers", () => {
         process.env.HOME = originalHome
       }
       restoreTerminalEnv()
+      for (const key of AI_ENV_KEYS) {
+        const value = originalAiEnv.get(key)
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+      originalAiEnv.clear()
       for (const dir of tmpDirs) {
         await rm(dir, { recursive: true, force: true })
       }
@@ -210,6 +231,50 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
     expect(store.consumeOneByProjectKey(projectKey, "next_turn")).toBeNull()
     expect(store.consumeOne("session-3", "next_turn")[0]?.message).toBe("Continue via terminal")
+  })
+
+  test("humaniseAutoSteerMessage rewrites via the provider when one is available", async () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE =
+      "When you get a moment, could you pick up the next task on the queue?"
+
+    const result = await humaniseAutoSteerMessage("Take the next task")
+
+    expect(result).toBe("When you get a moment, could you pick up the next task on the queue?")
+  })
+
+  test("humaniseAutoSteerMessage falls open to the original when no provider is available", async () => {
+    // beforeEach sets AI_TEST_NO_BACKEND=1
+    const result = await humaniseAutoSteerMessage("Take the next task")
+
+    expect(result).toBe("Take the next task")
+  })
+
+  test("humaniseAutoSteerMessage returns the original for blank input", async () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "rewritten"
+
+    expect(await humaniseAutoSteerMessage("   ")).toBe("   ")
+  })
+
+  test("scheduleAutoSteer stores the humanised text but dedups on the original", async () => {
+    const home = await setupAutoSteerHome()
+    const cwd = join(home, "repo")
+    process.env.TERM_PROGRAM = "Apple_Terminal"
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Mind taking a look at the failing tests when you can?"
+
+    const first = await scheduleAutoSteer("session-h", "Fix the failing tests", "next_turn", cwd)
+    const second = await scheduleAutoSteer("session-h", "Fix the failing tests", "next_turn", cwd)
+
+    const store = getAutoSteerStore()
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    // Dedup keyed on the original text, so only one row is queued despite two schedules.
+    expect(store.listPending("session-h")).toHaveLength(1)
+    expect(store.consumeOne("session-h", "next_turn")[0]?.message).toBe(
+      "Mind taking a look at the failing tests when you can?"
+    )
   })
 
   test("getMcpChannelAvailability explains missing status separately from heartbeat", async () => {

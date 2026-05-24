@@ -179,6 +179,40 @@ export interface AutoSteerRequest {
   trigger?: AutoSteerTrigger
 }
 
+/** Hard cap on how long humanisation may block a hook before falling back to the raw text. */
+const HUMANISE_TIMEOUT_MS = 8_000
+
+const HUMANISE_SYSTEM_PROMPT = [
+  "You rewrite terse, machine-generated coding-agent steering notes into a short, natural paragraph.",
+  "Keep the rewrite to one paragraph in a calm, collegial human voice, as if a teammate left the nudge.",
+  "Preserve every concrete instruction, file path, command, and constraint exactly.",
+  "Do not add new instructions, headings, bullet points, quotes, or commentary about the rewrite.",
+  "Return only the rewritten paragraph.",
+].join(" ")
+
+/**
+ * Rewrite a steering message into a humanised, single paragraph via the AI provider layer.
+ *
+ * Fail-open: when no provider is configured, the call errors, or it exceeds
+ * {@link HUMANISE_TIMEOUT_MS}, the original message is returned unchanged so
+ * scheduling never depends on the model being reachable.
+ */
+export async function humaniseAutoSteerMessage(message: string): Promise<string> {
+  const trimmed = message.trim()
+  if (!trimmed) return message
+
+  try {
+    const { hasAiProvider, promptText } = await import("../ai-providers.ts")
+    if (!hasAiProvider()) return message
+
+    const prompt = `${HUMANISE_SYSTEM_PROMPT}\n\nSteering note to rewrite:\n${trimmed}`
+    const rewritten = (await promptText(prompt, { timeout: HUMANISE_TIMEOUT_MS })).trim()
+    return rewritten || message
+  } catch {
+    return message
+  }
+}
+
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
 
 type AutoSteerTerminalKind = "iterm2" | "apple-terminal"
@@ -403,14 +437,19 @@ export async function scheduleAutoSteer(
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
   if (terminalApp) {
-    store.enqueue(safeSession, message, resolvedTrigger)
+    const humanised = await humaniseAutoSteerMessage(message)
+    store.enqueue(safeSession, humanised, resolvedTrigger, { dedupKey: message })
     return true
   }
 
   if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
-  const enqueued = store.enqueue(safeSession, message, resolvedTrigger, { cwd })
+  const humanised = await humaniseAutoSteerMessage(message)
+  const enqueued = store.enqueue(safeSession, humanised, resolvedTrigger, {
+    cwd,
+    dedupKey: message,
+  })
   if (enqueued) touchMcpChannelNotify(cwd)
   return true
 }
@@ -444,7 +483,12 @@ export async function scheduleAutoSteerViaChannel(
 
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  const enqueued = store.enqueue(safeSession, message, trigger, { cwd, ttlMs: opts?.ttlMs })
+  const humanised = await humaniseAutoSteerMessage(message)
+  const enqueued = store.enqueue(safeSession, humanised, trigger, {
+    cwd,
+    ttlMs: opts?.ttlMs,
+    dedupKey: message,
+  })
   if (enqueued) touchMcpChannelNotify(cwd)
   return enqueued
 }

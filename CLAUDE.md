@@ -81,21 +81,21 @@ alwaysApply: false
 - Task exemptions: read-only git, `gh`, `swiz`, setup, recovery. DON'T add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Settings/state schemas also in `src/settings/persistence.ts`.
-- **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window.
-- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
-- **DO**: Use `resolveThresholds(cwd)` for memory thresholds (default 5000). Never hardcode.
-- **DO**: Use `computeProjectedContent()` — suppresses interpolation. DON'T call `.replace()`. Fail-open on errors.
+- **Hook cooldowns**: `cooldownSeconds` skips re-runs in-window.
+- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Pre-enqueue `humaniseAutoSteerMessage()` (`promptText`, 8s, fail-open) rewrites it; dedups on original via `dedup_key`.
+- **DO**: `resolveThresholds(cwd)` for memory thresholds (default 5000); never hardcode.
+- **DO**: `computeProjectedContent()` suppresses interpolation; DON'T `.replace()`; fail-open on errors.
 - NFKC-normalize `new_string`/`content`/`old_string` in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be in `EXEMPT_HOOKS`.
-- Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
+- `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
-- Track current diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
-- Use `sanitizeSessionId()` for `/tmp` names.
-- DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
+- Track diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
+- `sanitizeSessionId()` for `/tmp` names.
+- DO: `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
-- Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; use lazy `await import(...)` in `hook-utils.ts` (circular avoidance).
-- Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
+- Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; use lazy `await import(...)` in `hook-utils.ts` (circular).
+- Workflow enforcement: scan `transcript_path` for evidence; no extra state files.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
 - **DO**: When extracting from a shared module, re-export all types downstream consumers import.
 ## Task Data

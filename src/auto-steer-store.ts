@@ -119,11 +119,12 @@ export class AutoSteerStore {
         created_at INTEGER NOT NULL,
         delivered_at INTEGER,
         ttl_ms INTEGER,
-        project_key TEXT
+        project_key TEXT,
+        dedup_key TEXT
       )
     `)
     // Migrations: add columns if missing (existing DBs)
-    for (const col of ["ttl_ms INTEGER", "project_key TEXT"]) {
+    for (const col of ["ttl_ms INTEGER", "project_key TEXT", "dedup_key TEXT"]) {
       try {
         this.db.run(`ALTER TABLE auto_steer_queue ADD COLUMN ${col}`)
       } catch {
@@ -139,7 +140,7 @@ export class AutoSteerStore {
 
   private prepareStatements(): void {
     this._stmtEnqueue = this.db.prepare(
-      "INSERT INTO auto_steer_queue (session_id, message, trigger_type, created_at, ttl_ms, project_key) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO auto_steer_queue (session_id, message, trigger_type, created_at, ttl_ms, project_key, dedup_key) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
     // ConsumeOne: select the next undelivered row (FIFO by id) that hasn't expired.
     // Scoped by session_id (delivery is per-session).
@@ -160,7 +161,7 @@ export class AutoSteerStore {
     // Falls back to session_id when project_key is NULL (legacy rows).
     this._stmtPendingDuplicate = this.db.prepare(
       `SELECT 1 FROM auto_steer_queue
-       WHERE trigger_type = ? AND message = ? AND delivered_at IS NULL
+       WHERE trigger_type = ? AND COALESCE(dedup_key, message) = ? AND delivered_at IS NULL
          AND (ttl_ms IS NULL OR created_at + ttl_ms >= ?)
          AND (
            (project_key IS NOT NULL AND project_key = ?)
@@ -172,7 +173,7 @@ export class AutoSteerStore {
     // Delivered rows retain dedup effect regardless of their original TTL.
     this._stmtRecentlyDelivered = this.db.prepare(
       `SELECT 1 FROM auto_steer_queue
-       WHERE trigger_type = ? AND message = ? AND delivered_at >= ?
+       WHERE trigger_type = ? AND COALESCE(dedup_key, message) = ? AND delivered_at >= ?
          AND (
            (project_key IS NOT NULL AND project_key = ?)
            OR (project_key IS NULL AND session_id = ?)
@@ -209,6 +210,8 @@ export class AutoSteerStore {
    * Enqueue a steering message for a session with a given trigger.
    * @param opts.ttlMs Optional TTL in milliseconds — message expires if not consumed in time.
    * @param opts.cwd   Optional working directory — used to derive project_key for cross-session dedup.
+   * @param opts.dedupKey Optional canonical text used for dedup instead of `message`. Lets callers
+   *   store a rendered/humanised `message` while deduping on the stable original text.
    * Dedup: skips if an identical message is already pending for this project (not expired)
    * or was delivered to any session on this project within the dedup window.
    * Returns true if enqueued, false if skipped as duplicate.
@@ -217,15 +220,16 @@ export class AutoSteerStore {
     sessionId: string,
     message: string,
     trigger: AutoSteerTrigger = "next_turn",
-    opts?: { ttlMs?: number; cwd?: string }
+    opts?: { ttlMs?: number; cwd?: string; dedupKey?: string }
   ): boolean {
     const now = Date.now()
     const projKey = opts?.cwd ? projectKeyFromCwd(opts.cwd) : null
+    const dedupKey = opts?.dedupKey ?? message
 
     // Skip if identical message is already pending for this project (and not expired)
     const pendingDup = this._stmtPendingDuplicate.get(
       trigger,
-      message,
+      dedupKey,
       now,
       projKey ?? sessionId,
       sessionId
@@ -236,14 +240,14 @@ export class AutoSteerStore {
     const recentCutoff = now - DEDUP_WINDOW_MS
     const recentDup = this._stmtRecentlyDelivered.get(
       trigger,
-      message,
+      dedupKey,
       recentCutoff,
       projKey ?? sessionId,
       sessionId
     )
     if (recentDup) return false
 
-    this._stmtEnqueue.run(sessionId, message, trigger, now, opts?.ttlMs ?? null, projKey)
+    this._stmtEnqueue.run(sessionId, message, trigger, now, opts?.ttlMs ?? null, projKey, dedupKey)
     return true
   }
 
