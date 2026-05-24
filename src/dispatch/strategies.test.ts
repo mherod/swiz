@@ -4,7 +4,60 @@ import { join } from "node:path"
 import { processAggregatedStopResults, processBlockingResults } from "./blockingStrategy.ts"
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
+import { writeResponse } from "./engine.ts"
 import { preparePreToolHints } from "./preToolUseStrategy.ts"
+
+/** Capture everything writeResponse emits to stdout for a single call. */
+function captureWriteResponse(response: Record<string, any>): string {
+  const stdout = process.stdout as { write: (chunk: string | Uint8Array) => boolean }
+  const original = stdout.write.bind(process.stdout)
+  let captured = ""
+  stdout.write = (chunk: string | Uint8Array) => {
+    captured += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")
+    return true
+  }
+  try {
+    writeResponse(response)
+  } finally {
+    process.stdout.write = original
+  }
+  return captured
+}
+
+describe("writeResponse JSON validity", () => {
+  // Regression: the agent rejects PreToolUse stdout with "hook returned invalid
+  // pre-tool-use JSON output" if any byte breaks JSON.parse. Reason/context
+  // strings carry untrusted content (em-dash hints, multi-line tips, AI-humanised
+  // text, subprocess snippets), so writeResponse must always emit parseable JSON.
+  it("emits JSON.parse-valid output for adversarial reason characters", () => {
+    const reason =
+      "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore." +
+      "\n  fd 'pattern'\twith tab\r and CR and lone surrogate \uD800 end"
+    const out = captureWriteResponse({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: reason,
+      },
+    })
+    // Must parse with the same JSON parser the agent uses — never throw.
+    const parsed = JSON.parse(out)
+    expect(parsed.hookSpecificOutput.permissionDecisionReason).toBe(reason)
+    // Control characters must be escaped, not emitted raw, so the line stays single.
+    expect(out.endsWith("\n")).toBe(true)
+    expect(out.trimEnd().includes("\n")).toBe(false)
+  })
+
+  it("strips internal dispatch fields and stays valid with raw subprocess snippets", () => {
+    const out = captureWriteResponse({
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
+      hookExecutions: [{ stdoutSnippet: "junk\uD834ctl" }],
+    })
+    const parsed = JSON.parse(out)
+    expect("hookExecutions" in parsed).toBe(false)
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe("allow")
+  })
+})
 
 function makeHookExecution(file: string, status: HookExecution["status"] = "ok"): HookExecution {
   return {
