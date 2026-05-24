@@ -15,8 +15,12 @@ export interface AgentDef {
   hooksKey: string
   /** Whether the hooks object is wrapped (e.g. Cursor's { version: 1, hooks }) */
   wrapsHooks?: { version: number }
-  /** Config structure uses nested matcher groups (Claude/Gemini) vs flat list (Cursor) */
-  configStyle: "nested" | "flat"
+  /**
+   * Config structure: nested matcher groups (Claude/Gemini), Cursor's flat list,
+   * or Antigravity's flat lifecycle list (`[{type,command,timeout}]` per event,
+   * no matcher wrapper — agy only fires turn-level lifecycle hooks).
+   */
+  configStyle: "nested" | "flat" | "flat-lifecycle"
   /** Binary name on PATH — used for auto-detection */
   binary: string
   /** Tool name aliases: canonical (Claude-style) → agent-specific */
@@ -284,36 +288,45 @@ export const AGENTS: AgentDef[] = registerAgents([
   },
   // Antigravity CLI (`agy`, Google's Gemini-based agent). Hooks live in a
   // dedicated hooks.json — NOT settings.json — under a named top-level group,
-  // so hooksKey is the group name ("swiz") and the existing nested-config
-  // installer writes { "swiz": { <Event>: [...] } } with no extra machinery.
+  // so hooksKey is the group name ("swiz") and agy reads it as one of its
+  // "named hooks": { "swiz": { <Event>: [...] } }.
+  //
+  // CRITICAL (agy v1.0.x): only turn-level lifecycle events actually fire —
+  // PreInvocation, PostInvocation and Stop carry protobuf HookArgs types in the
+  // binary. PreToolUse/PostToolUse/SessionStart are registered enum stubs that
+  // never fire (verified empirically: tool calls produced no dispatch). So the
+  // eventMap targets only the firing events; there is NO tool-level gating on
+  // Antigravity yet (same limitation pattern as Cursor CLI). agy also expects
+  // lifecycle events as a FLAT [{type,command,timeout}] list, hence
+  // configStyle "flat-lifecycle" (the nested {matcher,hooks} shape gets mangled).
   //
   // Antigravity does not inject identifying env vars into shell subprocesses, so
   // runtime detection relies on the `--agent antigravity` flag swiz install bakes
   // into each dispatch command, with the parent-process pattern as a shell-shim
   // fallback. Tasks use the brain/<uuid>/task.md markdown checklist rather than
-  // the Task* tools, so tasksEnabled is false. toolAliases and the
-  // PreInvocation/PostInvocation event mapping are intentionally minimal until
-  // live payload dumps confirm the real tool_name convention.
+  // the Task* tools, so tasksEnabled is false.
   {
     id: "antigravity",
     name: "Antigravity CLI",
     settingsPath: getAgentSettingsPath("antigravity", HOME),
     hooksKey: "swiz",
-    configStyle: "nested",
+    configStyle: "flat-lifecycle",
     binary: "agy",
     tasksEnabled: false,
     hooksConfigurable: true,
     processPattern: /\bagy\b|antigravity/,
     toolAliases: {},
     eventMap: {
-      preToolUse: "PreToolUse",
-      postToolUse: "PostToolUse",
       stop: "Stop",
-      sessionStart: "SessionStart",
-      sessionEnd: "SessionEnd",
+      userPromptSubmit: "PreInvocation",
     },
+    // Tool-level and session events are enum stubs in agy v1.0.x — they never
+    // fire, so swiz does not install them.
     unsupportedEvents: [
-      "userPromptSubmit",
+      "preToolUse",
+      "postToolUse",
+      "sessionStart",
+      "sessionEnd",
       "preCompact",
       "notification",
       "subagentStart",

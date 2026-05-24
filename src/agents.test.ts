@@ -53,10 +53,14 @@ describe("agents.ts", () => {
       // Hooks are written under a named "swiz" group in a dedicated hooks.json,
       // and antigravity uses brain/<uuid>/task.md instead of the Task* tools.
       expect(antigravity?.hooksKey).toBe("swiz")
-      expect(antigravity?.configStyle).toBe("nested")
+      // agy stores lifecycle hooks as flat [{type,command,timeout}] lists.
+      expect(antigravity?.configStyle).toBe("flat-lifecycle")
       expect(antigravity?.settingsPath.endsWith(".gemini/antigravity-cli/hooks.json")).toBe(true)
       expect(antigravity?.tasksEnabled).toBe(false)
-      expect(antigravity?.eventMap.preToolUse).toBe("PreToolUse")
+      // Only agy's actually-firing turn-level events are mapped (no tool hooks).
+      expect(antigravity?.eventMap.stop).toBe("Stop")
+      expect(antigravity?.eventMap.userPromptSubmit).toBe("PreInvocation")
+      expect(antigravity?.eventMap.preToolUse).toBeUndefined()
     })
 
     it("each agent has required properties", () => {
@@ -473,9 +477,15 @@ describe("agents.ts", () => {
   })
 
   describe("event mappings", () => {
-    it("all agents have preToolUse mapping", () => {
+    it("all agents map preToolUse unless they declare it unsupported", () => {
+      // Antigravity (agy v1.0.x) only fires turn-level lifecycle hooks, so it
+      // lists preToolUse in unsupportedEvents rather than mapping it.
       AGENTS.forEach((agent) => {
-        expect(agent.eventMap.preToolUse).toBeDefined()
+        if (agent.unsupportedEvents?.includes("preToolUse")) {
+          expect(agent.eventMap.preToolUse).toBeUndefined()
+        } else {
+          expect(agent.eventMap.preToolUse).toBeDefined()
+        }
       })
     })
 

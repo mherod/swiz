@@ -97,7 +97,10 @@ async function loadAllSettings(): Promise<LoadedSettings[]> {
         const raw = json.hooks ?? json[agent.hooksKey]
         if (!raw) continue
 
-        const hooks = agent.configStyle === "flat" ? normalizeFlatHooks(raw) : (raw as HooksConfig)
+        // Both Cursor ("flat") and Antigravity ("flat-lifecycle") store each
+        // event as a flat list of hook objects rather than nested matcher groups.
+        const hooks =
+          agent.configStyle === "nested" ? (raw as HooksConfig) : normalizeFlatHooks(raw)
 
         results.push({ source: path, agent, hooks })
       } catch {}

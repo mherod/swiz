@@ -119,13 +119,58 @@ export function mergeFlatConfig(
   return merged
 }
 
+/**
+ * Strip swiz-managed entries from a lifecycle event array, tolerating both the
+ * flat shape (`{type,command,timeout}`) and any leftover nested shape
+ * (`{hooks:[...]}`) — agy normalizes hooks.json on load, so a re-install may see
+ * either form for the same event.
+ */
+function stripManagedFromLifecycleList(entries: unknown[]): unknown[] {
+  return entries.filter((entry) => {
+    const e = entry as Record<string, any>
+    if (Array.isArray(e.hooks)) {
+      return e.hooks.some((h: Record<string, any>) => !isManagedSwizCommand(h.command))
+    }
+    return !isManagedSwizCommand(e.command)
+  })
+}
+
+/**
+ * Antigravity (`agy`) lifecycle config: each event holds a flat list of
+ * `{type,command,timeout}` hook objects (no matcher wrapper). Only events agy
+ * actually fires (Stop, PreInvocation, PostInvocation) are installed; agy strips
+ * unknown fields like `statusMessage` on load, so we omit it.
+ */
+export function mergeLifecycleConfig(
+  agent: AgentDef,
+  existingHooks: Record<string, any>
+): Record<string, unknown[]> {
+  const merged: Record<string, unknown[]> = {}
+  for (const [event, entries] of Object.entries(existingHooks)) {
+    if (!Array.isArray(entries)) continue
+    const userEntries = stripManagedFromLifecycleList(entries)
+    if (userEntries.length > 0) merged[event] = userEntries
+  }
+  addDispatchEntries(agent, merged, (cmd, timeout) => ({
+    type: "command",
+    command: cmd,
+    timeout,
+  }))
+  return merged
+}
+
 export function mergeConfig(
   agent: AgentDef,
   existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
-  return agent.configStyle === "nested"
-    ? mergeNestedConfig(agent, existingHooks)
-    : mergeFlatConfig(agent, existingHooks)
+  switch (agent.configStyle) {
+    case "nested":
+      return mergeNestedConfig(agent, existingHooks)
+    case "flat-lifecycle":
+      return mergeLifecycleConfig(agent, existingHooks)
+    default:
+      return mergeFlatConfig(agent, existingHooks)
+  }
 }
 
 export function collectNestedHooks(hooks: unknown[], cmds: Set<string>): void {
