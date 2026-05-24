@@ -6,7 +6,6 @@
  */
 
 import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
-import { LRUCache } from "lru-cache"
 import { z } from "zod"
 import type { AutoSteerTrigger } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
@@ -17,6 +16,7 @@ import {
   swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
+import { clearHumaniseCache, fallbackHumaniseText, humaniseText } from "./humanise.ts"
 
 /**
  * Touch the MCP channel notify sentinel so the `swiz mcp` drain loop wakes
@@ -193,18 +193,10 @@ const HUMANISE_SYSTEM_PROMPT = [
   "Return only the rewritten paragraph.",
 ].join(" ")
 
-const HUMANISE_CACHE = new LRUCache<string, Promise<string>>({
-  max: 250,
-  ttl: 10 * 60 * 1000,
-})
-
 const MECHANICAL_AUTO_STEER_LINE_RE =
   /^(?:[-*_]{3,}|action required:?.*|stop is blocked by .*|resolve them in the order shown\.?|git status|ship checklist|repository|incomplete tasks|you must act on this now\.?|do not try to stop again.*|this hook will block every stop attempt.*|if you believe this is a false positive.*|task files?:\s.*)$/i
 
 const LEADING_MARKER_RE = /^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+|[a-z][.)]\s+|\[[ x]\]\s+)/i
-
-const KNOWN_IMPERATIVE_RE =
-  /^(Continue|Take|Fix|Add|Update|Commit|Push|Run|Resolve|Use|Complete|Create|Check|Inspect|Read|Review|Re-run|Rerun|Open|Follow|Handle|Address)\b/
 
 function stripMechanicalAutoSteerLine(line: string): string {
   let text = line.normalize("NFKC").trim()
@@ -214,33 +206,10 @@ function stripMechanicalAutoSteerLine(line: string): string {
   return text.replace(/\s+/g, " ")
 }
 
-function toSingleParagraph(text: string): string {
-  return text
-    .split(/\r?\n+/)
-    .map(stripMechanicalAutoSteerLine)
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function lowerKnownImperative(text: string): string {
-  return text.replace(KNOWN_IMPERATIVE_RE, (verb) => verb.toLowerCase())
-}
-
-function sentenceCaseAutoSteer(text: string): string {
-  if (!text) return text
-  return /[.!?]$/.test(text) ? text : `${text}.`
-}
-
 function fallbackHumaniseAutoSteerMessage(message: string): string {
-  const paragraph = toSingleParagraph(message)
-  if (!paragraph) return message
-  const instruction = lowerKnownImperative(paragraph)
-  if (/^(?:please|i need you to|can you|could you|when you|let's)\b/i.test(instruction)) {
-    return sentenceCaseAutoSteer(instruction)
-  }
-  return sentenceCaseAutoSteer(`Please ${instruction}`)
+  return fallbackHumaniseText(message, {
+    stripLine: stripMechanicalAutoSteerLine,
+  })
 }
 
 /**
@@ -255,36 +224,16 @@ function fallbackHumaniseAutoSteerMessage(message: string): string {
  * not delivered when humanisation is enabled.
  */
 export async function humaniseAutoSteerMessage(message: string): Promise<string> {
-  const trimmed = message.trim()
-  if (!trimmed) return message
-
-  const cached = HUMANISE_CACHE.get(trimmed)
-  if (cached) return cached
-
-  const promise = humaniseAutoSteerMessageUncached(trimmed)
-  HUMANISE_CACHE.set(trimmed, promise)
-  return promise
-}
-
-async function humaniseAutoSteerMessageUncached(trimmed: string): Promise<string> {
-  const fallback = fallbackHumaniseAutoSteerMessage(trimmed)
-
-  try {
-    const { promptText } = await import("../ai-providers.ts")
-    const prompt = `${HUMANISE_SYSTEM_PROMPT}\n\nSteering note to rewrite:\n${trimmed}`
-    const rewritten = toSingleParagraph(
-      await promptText(prompt, { provider: "openrouter", timeout: HUMANISE_TIMEOUT_MS })
-    )
-    if (!rewritten) return fallback
-    if (rewritten === toSingleParagraph(trimmed)) return fallback
-    return rewritten
-  } catch {
-    return fallback
-  }
+  return humaniseText(message, {
+    systemPrompt: HUMANISE_SYSTEM_PROMPT,
+    timeoutMs: HUMANISE_TIMEOUT_MS,
+    fallback: fallbackHumaniseAutoSteerMessage,
+    stripLine: stripMechanicalAutoSteerLine,
+  })
 }
 
 export function clearAutoSteerHumanisationCache(): void {
-  HUMANISE_CACHE.clear()
+  clearHumaniseCache()
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])

@@ -334,12 +334,32 @@ export class BlockingStrategy implements HookExecutionStrategy {
             if (result.parsed && isBlock(result.parsed)) abort()
           },
       collectionTimeoutMs: isStop ? STOP_COLLECTION_TIMEOUT_MS : undefined,
-      processResults: (results, executions) => {
+      processResults: async (results, executions) => {
         if (isStop) {
           processAggregatedStopResults(results, executions, finalResponse, ctx.hookEventName)
         } else {
           processBlockingResults(results, executions, finalResponse, ctx.hookEventName)
         }
+
+        let humaniseEnabled = false
+        try {
+          const payload = JSON.parse(ctx.enrichedPayloadStr)
+          humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+        } catch {}
+
+        if (humaniseEnabled && finalResponse.hookSpecificOutput?.additionalContext) {
+          const rawContext = finalResponse.hookSpecificOutput.additionalContext.trim()
+          if (rawContext) {
+            const { humaniseText } = await import("../utils/humanise.ts")
+            const humanised = await humaniseText(rawContext, {
+              systemPrompt:
+                "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear executive direction. Encourage decisive forward progress and focus on delivering the next actions in an authoritative, collaborative, and direct human voice. Start directly with the core action needed, avoiding tentative phrasing or conversational filler. Do not include raw file system specifics or explicit file paths in the output; instead, convert any file references into natural language descriptions of what they are (for example, turn '/docs/api-spec-file.md' into 'the API spec document' or 'src/utils/humanise.ts' into 'the humanisation helper'). Keep every other concrete detail, constraint, command, and instruction. Do not add any new instructions or commentary. Return only the rewritten paragraph.",
+            })
+            finalResponse.systemMessage = humanised
+            finalResponse.hookSpecificOutput.additionalContext = humanised
+          }
+        }
+
         if (!isBlock(finalResponse)) {
           log(`   result: all passed`)
         }

@@ -61,7 +61,10 @@ export async function runStrategyPipeline(
   ctx: HookStrategyContext,
   opts: {
     onResult?: (result: HookResult, abort: () => void) => void
-    processResults: (results: HookResult[], executions: HookExecution[]) => Record<string, any>
+    processResults: (
+      results: HookResult[],
+      executions: HookExecution[]
+    ) => Record<string, any> | Promise<Record<string, any>>
     /** Max time to wait for all hooks before aborting stragglers. */
     collectionTimeoutMs?: number
   }
@@ -101,7 +104,7 @@ export async function runStrategyPipeline(
   ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
   const executions: HookExecution[] = []
-  const finalResponse = opts.processResults(results, executions)
+  const finalResponse = await opts.processResults(results, executions)
 
   logSlowHookSummary(executions)
   if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })

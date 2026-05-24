@@ -134,7 +134,7 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
       onResult: (result, abort) => {
         if (result.parsed && isDeny(result.parsed)) abort()
       },
-      processResults: (results, executions) => {
+      processResults: async (results, executions) => {
         for (const { execution, parsed: resp } of results) {
           if (execution.status === "skipped" || execution.status === "aborted") {
             executions.push(execution)
@@ -148,7 +148,30 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
           }
         }
         if (!isDeny(finalResponse)) {
-          merge(finalResponse, buildPreToolResponse(hints, contexts))
+          const response = buildPreToolResponse(hints, contexts)
+
+          let humaniseEnabled = false
+          try {
+            const payload = JSON.parse(ctx.enrichedPayloadStr)
+            humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+          } catch {}
+
+          if (humaniseEnabled && contexts.length > 0) {
+            const rawContext = contexts.join("\n\n").trim()
+            if (rawContext) {
+              const { humaniseText } = await import("../utils/humanise.ts")
+              const humanised = await humaniseText(rawContext, {
+                systemPrompt:
+                  "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear executive direction. Encourage decisive forward progress and focus on delivering the next actions in an authoritative, collaborative, and direct human voice. Start directly with the core action needed, avoiding tentative phrasing or conversational filler. Do not include raw file system specifics or explicit file paths in the output; instead, convert any file references into natural language descriptions of what they are (for example, turn '/docs/api-spec-file.md' into 'the API spec document' or 'src/utils/humanise.ts' into 'the humanisation helper'). Keep every other concrete detail, constraint, command, and instruction. Do not add any new instructions or commentary. Return only the rewritten paragraph.",
+              })
+              response.systemMessage = humanised
+              if (response.hookSpecificOutput) {
+                response.hookSpecificOutput.contextsJoined = humanised
+              }
+            }
+          }
+
+          merge(finalResponse, response)
         }
         return finalResponse
       },
