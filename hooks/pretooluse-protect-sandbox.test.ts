@@ -140,6 +140,23 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(result.decision).toBe("allow")
   })
 
+  test("blocks read-only shell commands against task files", async () => {
+    const result = await runPinnedHomeBashHook("cat ~/.claude/tasks/session/1.json")
+    expect(result.decision).toBe("deny")
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
+    const reason =
+      ((parsed.hookSpecificOutput as Record<string, any>)?.permissionDecisionReason as string) ?? ""
+    expect(reason).toContain("Task file access is blocked")
+    expect(reason).toContain("native task tools")
+  })
+
+  test("blocks read-only shell commands against Codex task files", async () => {
+    const result = await runPinnedHomeBashHook(
+      `sed -n '1,20p' ${join(TEST_HOME, ".Codex", "tasks", "session", "1.json")}`
+    )
+    expect(result.decision).toBe("deny")
+  })
+
   test("allows grep and sed read-only pipelines against hidden home paths", async () => {
     const result = await runPinnedHomeBashHook(
       `grep sandboxedEdits ${join(TEST_HOME, ".swiz", "settings.json")} | head -n 5`
@@ -242,6 +259,15 @@ describe("pretooluse-protect-sandbox (file edits)", () => {
       newString: "{}",
     })
     expect(result.decision).toBe("deny")
+  })
+
+  test("blocks edits to task files", async () => {
+    const result = await runFileEditHook(HOOK, {
+      filePath: "/some/project/.claude/tasks/session/1.json",
+      newString: "{}",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("Task file access is blocked")
   })
 
   test("allows edits to non-swiz files", async () => {

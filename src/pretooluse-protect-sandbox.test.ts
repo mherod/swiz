@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import { isSandboxDisableCommand } from "../hooks/pretooluse-protect-sandbox.ts"
-import { isSafeReadOnlyShellCommand } from "../hooks/sandbox-path-utils.ts"
+import {
+  isProtectedTaskStoragePath,
+  isSafeReadOnlyShellCommand,
+} from "../hooks/sandbox-path-utils.ts"
 
 describe("isSandboxDisableCommand", () => {
   // ── disable subcommand ────────────────────────────────────────────────────
@@ -100,5 +103,18 @@ describe("isSafeReadOnlyShellCommand", () => {
   it("still rejects redirects that write to real files", () => {
     expect(isSafeReadOnlyShellCommand("ls -la ~/.gemini > /tmp/out")).toBe(false)
     expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json 2>/tmp/err")).toBe(false)
+  })
+})
+
+describe("isProtectedTaskStoragePath", () => {
+  it("matches agent task storage roots", () => {
+    expect(isProtectedTaskStoragePath("/Users/dev/.claude/tasks/session/1.json")).toBe(true)
+    expect(isProtectedTaskStoragePath("/Users/dev/.codex/tasks/session/1.json")).toBe(true)
+    expect(isProtectedTaskStoragePath("/Users/dev/.Codex/tasks/session/1.json")).toBe(true)
+  })
+
+  it("does not match non-task hidden home paths", () => {
+    expect(isProtectedTaskStoragePath("/Users/dev/.swiz/settings.json")).toBe(false)
+    expect(isProtectedTaskStoragePath("/Users/dev/.claude/skills/commit/SKILL.md")).toBe(false)
   })
 })

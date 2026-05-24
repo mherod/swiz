@@ -27,7 +27,9 @@ const AUTO_MEMORY_PATH_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/
 
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
 import {
+  buildProtectedTaskStorageDenyReason,
   isHiddenTopLevelHomePath,
+  isProtectedTaskStoragePath,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
 } from "./sandbox-path-utils.ts"
@@ -91,6 +93,11 @@ function checkSwizConfigEdit(filePath: string): SwizHookOutput | null {
       SAFE_READ_ONLY_INSPECTION_HINT,
     ].join("\n")
   )
+}
+
+function checkProtectedTaskStorageEdit(filePath: string): SwizHookOutput | null {
+  if (!isProtectedTaskStoragePath(filePath)) return null
+  return preToolUseDeny(buildProtectedTaskStorageDenyReason(filePath))
 }
 
 /**
@@ -211,6 +218,14 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     const filePath: string = (parsed.tool_input?.file_path as string | undefined) ?? ""
     if (!filePath) return preToolUseAllow("")
 
+    // Task files are managed by native task tools, never direct file edits.
+    const rawTaskStorageResult = checkProtectedTaskStorageEdit(filePath)
+    if (rawTaskStorageResult) return rawTaskStorageResult
+
+    const target = await resolveCanonical(filePath)
+    const taskStorageResult = checkProtectedTaskStorageEdit(target)
+    if (taskStorageResult) return taskStorageResult
+
     const settings = await readSwizSettings()
     if (!settings.sandboxedEdits) return preToolUseAllow("")
 
@@ -227,7 +242,6 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     // All paths are resolved through resolveCanonical so the isWithin() check
     // operates in a uniform canonical namespace — no mix of logical and real paths.
     const cwd = await resolveCanonical(hookCwd)
-    const target = await resolveCanonical(filePath)
 
     // 3a. Auto-memory writes are always allowed — outside cwd but owned by the agent.
     if (AUTO_MEMORY_PATH_RE.test(target.replace(/\\/g, "/"))) {

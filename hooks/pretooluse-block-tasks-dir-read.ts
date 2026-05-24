@@ -2,10 +2,10 @@
 
 // PreToolUse hook: Redirect task queries to TaskList/TaskGet tool calls.
 
-import { getHomeDir } from "../src/home.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
+import { isProtectedTaskStoragePath } from "./sandbox-path-utils.ts"
 
 const DENY_REASON =
   "Use `TaskList` to see all tasks or `TaskGet` with a task ID to inspect a specific one."
@@ -22,8 +22,7 @@ const pretooluseBlockTasksDirRead: SwizToolHook = {
 
     const filePath: string = (parsed.data as Record<string, any>).tool_input?.file_path ?? ""
 
-    const tasksDir = `${getHomeDir()}/.claude/tasks`
-    if (filePath === tasksDir || filePath.startsWith(`${tasksDir}/`)) {
+    if (isProtectedTaskStoragePath(filePath)) {
       return preToolUseDeny(DENY_REASON)
     }
 

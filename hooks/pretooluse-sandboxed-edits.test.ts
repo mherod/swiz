@@ -162,6 +162,29 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(hso?.permissionDecision).toBe("allow")
   })
 
+  test("blocks edits to task files even when they are under cwd", async () => {
+    const cwd = await createTempDir()
+    const result = await runHook(cwd, "Write", join(cwd, ".claude", "tasks", "session", "1.json"))
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+    expect(String(hso?.permissionDecisionReason)).toContain("Task file access is blocked")
+  })
+
+  test("blocks edits to task files even when sandboxedEdits is disabled", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const taskPath = join(fakeHome, ".codex", "tasks", "session", "1.json")
+    const result = await runHook(cwd, "Write", taskPath, {
+      fakeHomeOverride: fakeHome,
+      sandboxedEdits: false,
+    })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+    expect(String(hso?.permissionDecisionReason)).toContain("native task tools")
+  })
+
   test("blocks non-markdown writes to memory directory with /update-memory redirect guidance", async () => {
     const cwd = await createTempDir()
     const fakeHome = await createTempDir()

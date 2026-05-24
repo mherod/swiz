@@ -26,6 +26,28 @@ export const SAFE_READ_ONLY_INSPECTION_HINT = [
   "Do not chain writes, tees, redirects, or command substitution when you only need a read.",
 ].join(" ")
 
+export const PROTECTED_TASK_STORAGE_HINT = [
+  "Task files are managed state and must not be read, edited, or written directly.",
+  "Use native task tools only: TaskList/TaskGet for inspection and TaskCreate/TaskUpdate or the current planning surface for changes.",
+].join(" ")
+
+const PROTECTED_TASK_STORAGE_RE =
+  /(?:^|[/\\])\.(?:claude|codex|gemini|cursor)[/\\]tasks(?:[/\\]|[*{[]|$)/i
+
+export function isProtectedTaskStoragePath(target: string): boolean {
+  return PROTECTED_TASK_STORAGE_RE.test(target.normalize("NFKC").replace(/\\/g, "/"))
+}
+
+export function buildProtectedTaskStorageDenyReason(attemptedPath: string): string {
+  return [
+    "Task file access is blocked.",
+    "",
+    `Attempted path: ${attemptedPath}.`,
+    "",
+    PROTECTED_TASK_STORAGE_HINT,
+  ].join("\n")
+}
+
 function sanitizeShellCommand(command: string): string {
   return stripQuotedShellStrings(stripHeredocs(normalizeCommand(command).normalize("NFKC")))
     .replace(/\s+/g, " ")

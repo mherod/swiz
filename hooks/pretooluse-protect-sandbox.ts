@@ -17,7 +17,9 @@ import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseAllowWithContext, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 import {
+  buildProtectedTaskStorageDenyReason,
   isHiddenTopLevelHomePath,
+  isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
@@ -49,6 +51,10 @@ const HOME_REFERENCE_RE =
   /\b(?:os\.)?homedir\s*\(\)|\bhomedir\s*\(\)|process\.env\.(?:HOME|USERPROFILE)|\$\{?HOME\}?/i
 const PATH_BUILDER_RE = /\b(?:path\.)?(?:join|resolve)\s*\(/i
 const SHELL_QUOTED_FRAGMENT_RE = /'([^']*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g
+
+type BlockedShellPath =
+  | { kind: "task-storage"; path: string }
+  | { kind: "hidden-home"; path: string }
 
 function isWithin(parent: string, child: string): boolean {
   const normalizedParent = parent.replace(/\\/g, "/")
@@ -142,7 +148,10 @@ async function isHiddenHomePathInCommand(
   return !isWithin(hiddenRoot, normalizedCwd)
 }
 
-async function shouldBlockShellCommand(command: string, cwd: string): Promise<string | null> {
+async function shouldBlockShellCommand(
+  command: string,
+  cwd: string
+): Promise<BlockedShellPath | null> {
   const homeDir = homedir()
   if (!homeDir || !command) return null
   const canonicalHomeDir = await resolveCanonical(homeDir)
@@ -177,15 +186,19 @@ async function shouldBlockShellCommand(command: string, cwd: string): Promise<st
       if (!candidate.includes("/") && !candidate.startsWith("~") && !candidate.startsWith("."))
         continue
 
+      const resolvedCandidate = await normalizeShellPath(candidate, canonicalCwd, canonicalHomeDir)
+      if (resolvedCandidate && isProtectedTaskStoragePath(resolvedCandidate)) {
+        return { kind: "task-storage", path: resolvedCandidate }
+      }
       if (await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir)) {
-        return candidate
+        return { kind: "hidden-home", path: candidate }
       }
       if (
         hasHomeReference &&
         hasPathBuilder &&
         (await isHiddenHomePathInCommand(candidate, canonicalHomeDir, canonicalHomeDir))
       ) {
-        return candidate
+        return { kind: "hidden-home", path: candidate }
       }
     }
   }
@@ -262,8 +275,13 @@ const pretoolUseProtectSandbox: SwizToolHook = {
         )
       }
 
-      const blockedPath = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
-      if (blockedPath) {
+      const blocked = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
+      if (blocked) {
+        if (blocked.kind === "task-storage") {
+          return preToolUseDeny(buildProtectedTaskStorageDenyReason(blocked.path))
+        }
+
+        const blockedPath = blocked.path
         if (isSafeReadOnlyShellCommand(command)) {
           return preToolUseAllowWithContext(
             "Read-only inspection command is allowed.",
@@ -301,6 +319,9 @@ const pretoolUseProtectSandbox: SwizToolHook = {
 
     if (isFileEditTool(toolName)) {
       const filePath: string = (toolInput?.file_path ?? "").normalize("NFKC")
+      if (isProtectedTaskStoragePath(filePath)) {
+        return preToolUseDeny(buildProtectedTaskStorageDenyReason(filePath))
+      }
       if (SWIZ_CONFIG_RE.test(filePath)) {
         return preToolUseDeny(
           "Editing swiz config files directly is not permitted from agent file edits.\n\n" +

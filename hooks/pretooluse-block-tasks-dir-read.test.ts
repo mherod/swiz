@@ -59,6 +59,16 @@ describe("pretooluse-block-tasks-dir-read", () => {
     expect(result.reason).toContain("TaskGet")
   })
 
+  test("blocks read of Codex task files", async () => {
+    const result = await runHook(`${getHomeDir()}/.codex/tasks/abc123/task-1.json`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks read via tilde shorthand", async () => {
+    const result = await runHook("~/.claude/tasks/abc123/task-1.json")
+    expect(result.decision).toBe("deny")
+  })
+
   test("blocks read of session subdirectory inside tasks directory", async () => {
     const result = await runHook(`${TASKS_DIR}/some-session-id`)
     expect(result.decision).toBe("deny")
@@ -108,6 +118,16 @@ describe("pretooluse-block-tasks-dir-bash", () => {
     expect(result.decision).toBe("deny")
   })
 
+  test("blocks access to Codex task files", async () => {
+    const result = await runBashHook("cat ~/.Codex/tasks/session/task.json")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks access to quoted task file paths", async () => {
+    const result = await runBashHook('cat "$HOME/.claude/tasks/session/task.json"')
+    expect(result.decision).toBe("deny")
+  })
+
   test("allows unrelated Bash command", async () => {
     const result = await runBashHook("git status")
     expect(result.decision).toBe("allow")
@@ -152,6 +172,11 @@ describe("pretooluse-block-tasks-dir-glob", () => {
     expect(result.decision).toBe("deny")
   })
 
+  test("blocks glob targeting Codex tasks", async () => {
+    const result = await runGlobHook("~/.codex/tasks/**/*.json")
+    expect(result.decision).toBe("deny")
+  })
+
   test("blocks LS path targeting the tasks directory", async () => {
     const result = await runLsHook(TASKS_DIR)
     expect(result.decision).toBe("deny")
@@ -188,6 +213,11 @@ describe("pretooluse-block-tasks-dir-edit", () => {
 
   test("blocks Write of file inside tasks directory", async () => {
     const result = await runEditHook("Write", `${TASKS_DIR}/some-session/task.json`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks Write of file inside Codex tasks directory", async () => {
+    const result = await runEditHook("Write", `${getHomeDir()}/.codex/tasks/session/task.json`)
     expect(result.decision).toBe("deny")
   })
 
