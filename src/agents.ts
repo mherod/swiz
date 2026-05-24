@@ -3,7 +3,7 @@ import { getHomeDir } from "./home.ts"
 
 const HOME = getHomeDir()
 
-export type AgentId = "claude" | "cursor" | "gemini" | "codex"
+export type AgentId = "claude" | "cursor" | "gemini" | "codex" | "antigravity"
 
 // ─── Agent definition ───────────────────────────────────────────────────────
 
@@ -80,6 +80,22 @@ const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
     "Notification",
   ]),
   codex: new Set(["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"]),
+  // Antigravity CLI (`agy`) reads ~/.gemini/antigravity-cli/hooks.json. Its hook
+  // event surface (per the v1.0.x binary) is the nested matcher-group style:
+  // PreToolUse/PostToolUse/Stop/SessionStart/SessionEnd plus the agent-invocation
+  // lifecycle PreInvocation/PostInvocation and Notification. Only the events swiz
+  // confidently maps are listed in the eventMap below; the rest stay reserved
+  // until live payload dumps confirm their semantics.
+  antigravity: new Set([
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+    "SessionStart",
+    "SessionEnd",
+    "PreInvocation",
+    "PostInvocation",
+    "Notification",
+  ]),
 }
 
 export function validatePublicAgentHookMappings(agents: AgentDef[]): void {
@@ -260,6 +276,44 @@ export const AGENTS: AgentDef[] = registerAgents([
     },
     unsupportedEvents: [
       "sessionEnd",
+      "preCompact",
+      "notification",
+      "subagentStart",
+      "subagentStop",
+    ],
+  },
+  // Antigravity CLI (`agy`, Google's Gemini-based agent). Hooks live in a
+  // dedicated hooks.json — NOT settings.json — under a named top-level group,
+  // so hooksKey is the group name ("swiz") and the existing nested-config
+  // installer writes { "swiz": { <Event>: [...] } } with no extra machinery.
+  //
+  // Antigravity does not inject identifying env vars into shell subprocesses, so
+  // runtime detection relies on the `--agent antigravity` flag swiz install bakes
+  // into each dispatch command, with the parent-process pattern as a shell-shim
+  // fallback. Tasks use the brain/<uuid>/task.md markdown checklist rather than
+  // the Task* tools, so tasksEnabled is false. toolAliases and the
+  // PreInvocation/PostInvocation event mapping are intentionally minimal until
+  // live payload dumps confirm the real tool_name convention.
+  {
+    id: "antigravity",
+    name: "Antigravity CLI",
+    settingsPath: getAgentSettingsPath("antigravity", HOME),
+    hooksKey: "swiz",
+    configStyle: "nested",
+    binary: "agy",
+    tasksEnabled: false,
+    hooksConfigurable: true,
+    processPattern: /\bagy\b|antigravity/,
+    toolAliases: {},
+    eventMap: {
+      preToolUse: "PreToolUse",
+      postToolUse: "PostToolUse",
+      stop: "Stop",
+      sessionStart: "SessionStart",
+      sessionEnd: "SessionEnd",
+    },
+    unsupportedEvents: [
+      "userPromptSubmit",
       "preCompact",
       "notification",
       "subagentStart",

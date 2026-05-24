@@ -45,6 +45,20 @@ describe("agents.ts", () => {
       expect(codex?.name).toBe("Codex CLI")
     })
 
+    it("contains antigravity agent definition", () => {
+      const antigravity = AGENTS.find((a) => a.id === "antigravity")
+      expect(antigravity).toBeDefined()
+      expect(antigravity?.name).toBe("Antigravity CLI")
+      expect(antigravity?.binary).toBe("agy")
+      // Hooks are written under a named "swiz" group in a dedicated hooks.json,
+      // and antigravity uses brain/<uuid>/task.md instead of the Task* tools.
+      expect(antigravity?.hooksKey).toBe("swiz")
+      expect(antigravity?.configStyle).toBe("nested")
+      expect(antigravity?.settingsPath.endsWith(".gemini/antigravity-cli/hooks.json")).toBe(true)
+      expect(antigravity?.tasksEnabled).toBe(false)
+      expect(antigravity?.eventMap.preToolUse).toBe("PreToolUse")
+    })
+
     it("each agent has required properties", () => {
       AGENTS.forEach((agent) => {
         expect(agent).toHaveProperty("id")

@@ -101,8 +101,7 @@ async function readAgentSettings(
 async function collectAgentStatus(agent: AgentDef): Promise<string[]> {
   const lines = formatAgentBinary(agent)
 
-  const agentId = agent.id as "claude" | "cursor" | "gemini" | "codex"
-  const settingsPaths = getAgentSettingsSearchPaths(agentId)
+  const settingsPaths = getAgentSettingsSearchPaths(agent.id)
   const foundPaths: string[] = []
   const allHooks = new Map<string, Record<string, any>>()
 

@@ -45,6 +45,13 @@ export function createTaskStoreForProvider(
         tasksDir: join(homeDir, ".gemini", "tasks"),
         projectsDir: join(homeDir, ".gemini", "projects"),
       }
+    case "antigravity":
+      // Antigravity keeps per-session task.md artifacts under brain/<uuid>; it has
+      // no JSON task store (tasksEnabled is false), so this is informational.
+      return {
+        tasksDir: join(homeDir, ".gemini", "antigravity-cli", "brain"),
+        projectsDir: join(homeDir, ".gemini", "antigravity-cli", "conversations"),
+      }
   }
 }
 

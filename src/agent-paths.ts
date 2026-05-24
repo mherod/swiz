@@ -9,7 +9,7 @@ import {
 } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 
-export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex"
+export type AgentSettingsId = "claude" | "cursor" | "gemini" | "codex" | "antigravity"
 
 export interface AgentSettingsSearchOptions {
   cwd?: string
@@ -29,6 +29,10 @@ export function getAgentSettingsPath(
       return join(homeDir, ".gemini", "settings.json")
     case "codex":
       return join(homeDir, ".codex", "hooks.json")
+    case "antigravity":
+      // Antigravity stores hooks separately from settings.json, in its own
+      // hooks.json under the antigravity-cli data dir.
+      return join(homeDir, ".gemini", "antigravity-cli", "hooks.json")
   }
 }
 
@@ -56,6 +60,9 @@ export function getAgentSettingsSearchPaths(
       break
     case "codex":
       paths.push(join(cwd, ".codex", "hooks.json"))
+      break
+    case "antigravity":
+      paths.push(join(cwd, ".gemini", "antigravity-cli", "hooks.json"))
       break
   }
 

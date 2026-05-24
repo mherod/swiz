@@ -116,6 +116,17 @@ const CODEX_CONFIG: ProviderConfig = {
   skillDir: "skills",
 }
 
+// Antigravity (`agy`) is Gemini-based: it shares ~/.gemini for global rules and
+// skills, but keeps its own session state under ~/.gemini/antigravity-cli
+// (brain/<uuid>/task.md task artifacts and conversations/<uuid>.pb transcripts).
+const ANTIGRAVITY_CONFIG: ProviderConfig = {
+  agentId: "antigravity",
+  configDir: join(".gemini", "antigravity-cli"),
+  projectFiles: ["GEMINI.md", ".gemini/GEMINI.md"],
+  ruleExtensions: [".md"],
+  skillDir: "skills",
+}
+
 const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
   claude: {
     id: "claude",
@@ -318,6 +329,55 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return {
         tasksDir: join(this.getHomeDir(), "tasks"),
         projectsDir: join(this.getHomeDir(), "projects"),
+      }
+    },
+  },
+
+  antigravity: {
+    id: "antigravity",
+    config: ANTIGRAVITY_CONFIG,
+    getHomeDir() {
+      return join(getHomeDir(), ".gemini", "antigravity-cli")
+    },
+    getProjectStateDir(projectDir: string) {
+      return projectDir
+    },
+    getProjectFiles(projectDir: string) {
+      return ANTIGRAVITY_CONFIG.projectFiles.map((file) => projectPath(projectDir, file))
+    },
+    getRuleDirs(projectDir: string) {
+      return {
+        project: join(projectDir, ".gemini", "rules"),
+        global: join(getHomeDir(), ".gemini", "rules"),
+      }
+    },
+    getMemorySources(projectDir: string) {
+      const sources: ProviderMemorySource[] = []
+      for (const file of this.getProjectFiles(projectDir)) {
+        if (!file.endsWith("GEMINI.md")) continue
+        const label = file.includes(".gemini") ? "Project rules (.gemini/)" : "Project rules"
+        sources.push({ label, path: file })
+      }
+      sources.push({ label: "Global rules", path: join(getHomeDir(), ".gemini", "GEMINI.md") })
+      return sources
+    },
+    getTranscriptProviders() {
+      return new Set<TranscriptProviderId>(["antigravity"])
+    },
+    getSessionDir() {
+      // Conversation transcripts are protobuf (<uuid>.pb), keyed by the same
+      // UUID as the brain/<uuid> task-artifact directories.
+      return join(this.getHomeDir(), "conversations")
+    },
+    getSkillDirs() {
+      // Antigravity shares the Gemini skill roots; it has no skills dir of its own.
+      return [join(getHomeDir(), ".gemini", "skills")]
+    },
+    getTaskRoots() {
+      // Tasks live as brain/<uuid>/task.md markdown checklists, not a JSON store.
+      return {
+        tasksDir: join(this.getHomeDir(), "brain"),
+        projectsDir: join(this.getHomeDir(), "conversations"),
       }
     },
   },
