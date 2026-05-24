@@ -305,6 +305,10 @@ export const DEFAULT_TTL_MS = 5 * 60 * 1000
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export class IssueStore {
+  get isNoOp(): boolean {
+    return false
+  }
+
   private db: Database
   private _stmtListIssues!: Statement<{ data: string }>
   private _stmtGetIssue!: Statement<{ data: string }>
@@ -1492,6 +1496,7 @@ function createNoOpStore(): IssueStore {
 
   const handler: ProxyHandler<IssueStore> = {
     get(_target, prop) {
+      if (prop === "isNoOp") return true
       if (prop === "close") return () => {}
       // When SQLite is unavailable, callers may still go through the reader
       // abstraction (`getIssueStoreReader()` → `store.asReader()`).
@@ -1568,12 +1573,13 @@ export function resetIssueStore(): void {
   sharedStore = null
 }
 
-// ─── Daemon-backed async store (extracted to issue-store-daemon.ts) ────────
-export {
+import {
   DaemonBackedIssueStore,
   getDaemonBackedStore,
   resetDaemonBackedStore,
 } from "./issue-store-daemon.ts"
+
+export { DaemonBackedIssueStore, getDaemonBackedStore, resetDaemonBackedStore }
 
 /**
  * Factory: returns the best available IssueStoreReader.
@@ -1582,6 +1588,9 @@ export {
  */
 export function getIssueStoreReader(): IssueStoreReader {
   const store = getIssueStore()
+  if (store.isNoOp) {
+    return getDaemonBackedStore()
+  }
   // If the store has data capacity (not no-op), use it
   const reader = store.asReader()
   return reader

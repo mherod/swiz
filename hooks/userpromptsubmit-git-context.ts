@@ -79,13 +79,13 @@ export async function evaluateUserpromptsubmitGitContext(input: unknown): Promis
 
     if (hookInput.session_id) {
       try {
-        const { getIssueStore } = await import("../src/issue-store.ts")
+        const { getIssueStoreReader } = await import("../src/issue-store.ts")
         const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
         const { resolve, relative } = await import("node:path")
 
         const projectKey = projectKeyFromCwd(cwd)
-        const store = getIssueStore()
-        const rawEdits = store.listSessionEdits(projectKey, hookInput.session_id)
+        const store = getIssueStoreReader()
+        const rawEdits = await store.listSessionEdits(projectKey, hookInput.session_id)
 
         let gitRoot = cwd
         try {

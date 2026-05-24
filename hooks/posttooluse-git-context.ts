@@ -115,14 +115,14 @@ async function buildPostToolGitStatusLine(
 
     if (sessionId) {
       try {
-        const { getIssueStore } = await import("../src/issue-store.ts")
+        const { getIssueStoreReader } = await import("../src/issue-store.ts")
         const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
         const { git } = await import("../src/git-helpers.ts")
         const { resolve, relative } = await import("node:path")
 
         const projectKey = projectKeyFromCwd(cwd)
-        const store = getIssueStore()
-        const rawEdits = store.listSessionEdits(projectKey, sessionId)
+        const store = getIssueStoreReader()
+        const rawEdits = await store.listSessionEdits(projectKey, sessionId)
 
         let gitRoot = cwd
         try {
