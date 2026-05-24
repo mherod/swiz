@@ -927,6 +927,7 @@ describe("SETTINGS_REGISTRY", () => {
       "speak",
       "suggestWebSearch",
       "autoSteer",
+      "humaniseAutoSteer",
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "transcriptMonitorMaxConcurrentDispatches",

@@ -321,6 +321,18 @@ async function isMcpChannelsSettingEnabled(sessionId: string): Promise<boolean> 
   return settings.mcpChannels
 }
 
+async function isHumaniseAutoSteerEnabled(sessionId: string): Promise<boolean> {
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../settings.ts")
+  const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
+  return settings.humaniseAutoSteer
+}
+
+/** Humanise the steer only when the humaniseAutoSteer setting is enabled; otherwise return raw. */
+async function maybeHumaniseAutoSteer(sessionId: string, message: string): Promise<string> {
+  if (!(await isHumaniseAutoSteerEnabled(sessionId))) return message
+  return humaniseAutoSteerMessage(message)
+}
+
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
   return !!cwd && MCP_CHANNEL_TRIGGERS.has(trigger) && isMcpChannelLiveForCwd(cwd)
 }
@@ -441,7 +453,7 @@ export async function scheduleAutoSteer(
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
   if (terminalApp) {
-    const humanised = await humaniseAutoSteerMessage(message)
+    const humanised = await maybeHumaniseAutoSteer(sessionId, message)
     store.enqueue(safeSession, humanised, resolvedTrigger, { dedupKey: message })
     return true
   }
@@ -449,7 +461,7 @@ export async function scheduleAutoSteer(
   if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
-  const humanised = await humaniseAutoSteerMessage(message)
+  const humanised = await maybeHumaniseAutoSteer(sessionId, message)
   const enqueued = store.enqueue(safeSession, humanised, resolvedTrigger, {
     cwd,
     dedupKey: message,
@@ -487,7 +499,7 @@ export async function scheduleAutoSteerViaChannel(
 
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  const humanised = await humaniseAutoSteerMessage(message)
+  const humanised = await maybeHumaniseAutoSteer(sessionId, message)
   const enqueued = store.enqueue(safeSession, humanised, trigger, {
     cwd,
     ttlMs: opts?.ttlMs,

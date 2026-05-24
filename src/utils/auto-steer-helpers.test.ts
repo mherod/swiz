@@ -277,6 +277,26 @@ describe("auto-steer helpers", () => {
     )
   })
 
+  test("scheduleAutoSteer skips humanisation when humaniseAutoSteer is disabled", async () => {
+    const home = await setupAutoSteerHome({ humaniseAutoSteer: false })
+    const cwd = join(home, "repo")
+    process.env.TERM_PROGRAM = "Apple_Terminal"
+    // A provider IS available, but the toggle is off, so the raw text must be stored.
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "this rewrite must not be used"
+
+    const scheduled = await scheduleAutoSteer(
+      "session-noh",
+      "Fix the failing tests",
+      "next_turn",
+      cwd
+    )
+
+    const store = getAutoSteerStore()
+    expect(scheduled).toBe(true)
+    expect(store.consumeOne("session-noh", "next_turn")[0]?.message).toBe("Fix the failing tests")
+  })
+
   test("getMcpChannelAvailability explains missing status separately from heartbeat", async () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")

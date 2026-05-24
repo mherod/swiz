@@ -175,6 +175,7 @@ function buildBaseSettings(
     ignoreMcpTools: settings.ignoreMcpTools,
     mcpChannels: settings.mcpChannels,
     autoSteer: settings.autoSteer,
+    humaniseAutoSteer: settings.humaniseAutoSteer,
     swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,

@@ -199,6 +199,8 @@ export interface SwizSettings {
   suggestWebSearch: boolean
   /** When true, types "Continue" into the terminal after every tool call via AppleScript. */
   autoSteer: boolean
+  /** When true, rewrite scheduled steer messages into a natural paragraph via OpenRouter before delivery. */
+  humaniseAutoSteer: boolean
   /** When true, allow transcript/session monitoring to synthesize pseudo-hook dispatches. */
   swizNotifyHooks: boolean
   /** When true, the daemon monitors session transcripts and triggers auto-steer via post-tool hooks. */

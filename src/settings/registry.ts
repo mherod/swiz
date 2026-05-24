@@ -158,6 +158,20 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "humaniseAutoSteer",
+    aliases: ["humanise-auto-steer", "humanize-auto-steer", "humanise_auto_steer"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description: "Rewrite scheduled steer messages into a natural paragraph before delivery",
+      effectExplanation:
+        "When enabled, each scheduled steer is rewritten via the OpenRouter provider (openrouter/auto) into a calm, human-sounding paragraph before being delivered. Adds one ~1-2s OpenRouter call per steer; fails open to the raw text when OpenRouter is unavailable. Disable to skip the rewrite and deliver the raw steer text.",
+      enableDescription: "Humanise scheduled steer text via OpenRouter",
+      disableDescription: "Deliver raw steer text without humanisation",
+    },
+  },
+  {
     key: "swizNotifyHooks",
     aliases: [
       "pseudo-hooks",
