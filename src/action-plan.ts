@@ -6,7 +6,7 @@
 
 import { join } from "node:path"
 import { resolveTranslationAgent } from "./agent-paths.ts"
-import { type AgentDef, translateMatcher } from "./agents.ts"
+import { type AgentDef, translateTaskToolName } from "./agents.ts"
 import { readSwizSettings } from "./settings/persistence.ts"
 import {
   extractStepsFromSkill,
@@ -41,6 +41,7 @@ export function formatActionPlan(
       })
     : null
   const lines = renderItems(steps, agent, 1, "  ")
+  if (!lines.trim()) return ""
   const header = options?.header ?? "Action plan:"
   return `${header}\n${lines}\n`
 }
@@ -55,7 +56,8 @@ function renderItems(
   let index = startIndex
   for (const item of items) {
     if (typeof item === "string") {
-      const text = agent ? (translateMatcher(item, agent) ?? item) : item
+      const text = agent ? translateActionPlanText(item, agent) : item
+      if (text === null) continue
       lines.push(`${indent}${index}. ${text}`)
       index++
     } else {
@@ -69,17 +71,42 @@ function renderItems(
 
 function renderSubItems(items: ActionPlanItem[], agent: AgentDef | null, indent: string): string[] {
   const lines: string[] = []
-  for (const [i, item] of items.entries()) {
+  let index = 0
+  for (const item of items) {
     if (typeof item === "string") {
-      const text = agent ? (translateMatcher(item, agent) ?? item) : item
-      const letter = String.fromCharCode(97 + (i % 26))
+      const text = agent ? translateActionPlanText(item, agent) : item
+      if (text === null) continue
+      const letter = String.fromCharCode(97 + (index % 26))
       lines.push(`${indent}${letter}. ${text}`)
+      index++
     } else {
       // Deeper nesting: recurse with more indent
       lines.push(...renderSubItems(item, agent, `${indent}   `))
     }
   }
   return lines
+}
+
+function translateActionPlanText(text: string, agent: AgentDef): string | null {
+  let omittedUnavailableTaskTool = false
+  const translated = text.replace(/\b\w+\b/g, (tok) => {
+    const taskAlias = translateTaskToolName(tok, agent)
+    if (taskAlias === null) {
+      omittedUnavailableTaskTool = true
+      return tok
+    }
+    return taskAlias
+  })
+
+  if (omittedUnavailableTaskTool) return null
+  return collapseDuplicateToolAlternatives(translated)
+}
+
+function collapseDuplicateToolAlternatives(text: string): string {
+  return text
+    .replace(/\b(update_plan)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
+    .replace(/\b(write_todos)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
+    .replace(/\b(TodoWrite)(?:\s+(?:or|and|\/)\s+\1)+\b/g, "$1")
 }
 
 // ─── Skill reference expansion ─────────────────────────────────────────────

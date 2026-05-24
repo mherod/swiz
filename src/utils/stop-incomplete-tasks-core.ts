@@ -15,7 +15,11 @@ import { formatActionPlan } from "../action-plan.ts"
 import type { HookOutput } from "../schemas.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { warnInvalidTransition } from "../tasks/task-event-state.ts"
-import { getTaskToolName } from "../tasks/task-governance-messages.ts"
+import {
+  buildTaskReviewInstruction,
+  getTaskToolName,
+  type TaskReviewInstructionContext,
+} from "../tasks/task-governance-messages.ts"
 import {
   getSessionTasksDir,
   hasSessionTasksDir,
@@ -132,8 +136,9 @@ async function logStopDiagnostic(message: string): Promise<void> {
 export async function checkIncompleteTasks(
   sessionId: string,
   home: string,
-  autoTransitionEnabled = true
+  options: { autoTransitionEnabled?: boolean } & TaskReviewInstructionContext = {}
 ): Promise<HookOutput | null> {
+  const autoTransitionEnabled = options.autoTransitionEnabled ?? true
   if (isCurrentAgent("gemini")) {
     await logStopDiagnostic(`skip: gemini agent (session=${sessionId.slice(0, 8)})`)
     return null
@@ -186,14 +191,18 @@ export async function checkIncompleteTasks(
     `BLOCK: ${incompleteDetails.length} incomplete (session=${sessionId.slice(0, 8)}): ${incompleteDetails.join("; ")}`
   )
 
-  const sourceCtx = `Use ${getTaskToolName("TaskList")} to review tasks, then ${getTaskToolName("TaskUpdate")} to update their status.`
+  const sourceCtx = buildTaskReviewInstruction(options)
+  const taskUpdateToolName = options.taskUpdateToolName ?? getTaskToolName("TaskUpdate")
+  const completionStep = taskUpdateToolName
+    ? `If the work is already done, use ${taskUpdateToolName} to mark each current-session task as completed.`
+    : "If the work is already done, mark each current-session task as completed in the current planning surface."
 
   return blockStopObj(
     formatActionPlan(
       [
         ...incompleteDetails,
         sourceCtx,
-        `If the work is already done, use ${getTaskToolName("TaskUpdate")} to mark each current-session task as completed.`,
+        completionStep,
         "If the work is still needed, complete it before stopping.",
       ],
       {

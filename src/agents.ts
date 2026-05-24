@@ -25,6 +25,11 @@ export interface AgentDef {
   binary: string
   /** Tool name aliases: canonical (Claude-style) → agent-specific */
   toolAliases: Record<string, string>
+  /**
+   * Human-facing task/planning aliases for governance messages. These do not
+   * imply emitted-tool support; use toolAliases for actual hook matcher names.
+   */
+  taskToolAliases?: Record<string, string | null>
   /** Event name map: canonical → agent-specific */
   eventMap: Record<string, string>
   /** Canonical events intentionally unsupported by this agent runtime. */
@@ -256,8 +261,15 @@ export const AGENTS: AgentDef[] = registerAgents([
     tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
-    // Codex exposes update_plan as its planning surface. Task* canonical names
-    // intentionally remain unaliased because there is no exact Codex equivalent.
+    // Codex emits update_plan for planning. Task* canonical names intentionally
+    // remain out of toolAliases because there is no exact emitted-tool equivalent.
+    taskToolAliases: {
+      Task: "update_plan",
+      TaskCreate: "update_plan",
+      TaskUpdate: "update_plan",
+      TaskList: null,
+      TaskGet: null,
+    },
     toolAliases: {
       Bash: "shell_command",
       exec_command: "exec_command",
@@ -404,6 +416,13 @@ export function getEmittedToolNames(agent: AgentDef): ReadonlySet<string> {
 export function translateMatcher(matcher: string | undefined, agent: AgentDef): string | undefined {
   if (!matcher) return undefined
   return matcher.replace(/\b\w+\b/g, (tok) => agent.toolAliases[tok] ?? tok)
+}
+
+export function translateTaskToolName(canonicalName: string, agent: AgentDef): string | null {
+  if (agent.taskToolAliases && Object.hasOwn(agent.taskToolAliases, canonicalName)) {
+    return agent.taskToolAliases[canonicalName] ?? null
+  }
+  return translateMatcher(canonicalName, agent) ?? canonicalName
 }
 
 export function translateEvent(canonical: string, agent: AgentDef): string {

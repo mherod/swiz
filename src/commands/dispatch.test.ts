@@ -80,14 +80,27 @@ async function runGit(cwd: string, args: string[]): Promise<void> {
 
 describe("dispatch preToolUse", () => {
   test("allows clean git commands", async () => {
-    const result = await dispatch("preToolUse", {
-      tool_name: "Bash",
-      tool_input: { command: "git status" },
-    })
-    // Should either be empty (all pass) or allow-with-reason (from require-tasks)
-    if (result.parsed) {
-      const hso = result.parsed.hookSpecificOutput as Record<string, any> | undefined
-      expect(hso?.permissionDecision).not.toBe("deny")
+    const fakeHome = await mkdtemp(join(tmpdir(), "swiz-dispatch-clean-git-home-"))
+    const cwd = await mkdtemp(join(tmpdir(), "swiz-dispatch-clean-git-cwd-"))
+
+    try {
+      const result = await dispatch(
+        "preToolUse",
+        {
+          cwd,
+          tool_name: "Bash",
+          tool_input: { command: "git status" },
+        },
+        { env: { HOME: fakeHome, AI_TEST_NO_BACKEND: "1" } }
+      )
+      // Should either be empty (all pass) or allow-with-reason (from require-tasks)
+      if (result.parsed) {
+        const hso = result.parsed.hookSpecificOutput as Record<string, any> | undefined
+        expect(hso?.permissionDecision).not.toBe("deny")
+      }
+    } finally {
+      await rm(fakeHome, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
     }
   }, 30_000)
 

@@ -254,7 +254,9 @@ describe("stop-incomplete-tasks", () => {
     })
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("Codex work")
-    expect(result.reason).not.toContain("Run TaskList")
+    expect(result.reason).toContain("Use update_plan to update task statuses")
+    expect(result.reason).not.toContain("TaskList")
+    expect(result.reason).not.toContain("TaskUpdate")
   })
 
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {

@@ -100,4 +100,18 @@ describe("formatIncompleteReason — source context (#613)", () => {
     expect(reason).toContain("task #10")
     expect(reason).toContain("Complete these tasks before stopping")
   })
+
+  it("names update_plan when TaskList is unavailable", () => {
+    const details = ["Update Codex messaging (task #11)"]
+    const reason = formatIncompleteReason(details, {
+      tasksDir: "/home/.codex/tasks/sess",
+      sessionId: "sess",
+      taskListAvailable: false,
+      taskUpdateToolName: "update_plan",
+    })
+
+    expect(reason).toContain("Use update_plan to update task statuses")
+    expect(reason).not.toContain("TaskList")
+    expect(reason).not.toContain("TaskUpdate")
+  })
 })

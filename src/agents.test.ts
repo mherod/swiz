@@ -11,6 +11,7 @@ import {
   isAgentInstalled,
   translateEvent,
   translateMatcher,
+  translateTaskToolName,
   validatePublicAgentHookMappings,
 } from "./agents.ts"
 
@@ -297,6 +298,9 @@ describe("agents.ts", () => {
       expect(agentSupportsTool(codex, "functions.update_plan")).toBe(true)
       expect(agentSupportsTool(codex, "TaskList")).toBe(false)
       expect(agentSupportsTool(codex, "TaskUpdate")).toBe(false)
+      expect(translateTaskToolName("TaskUpdate", codex)).toBe("update_plan")
+      expect(translateTaskToolName("TaskList", codex)).toBe(null)
+      expect(translateTaskToolName("TaskGet", codex)).toBe(null)
 
       expect(cursor.tasksEnabled).toBe(false)
       expect(gemini.tasksEnabled).toBe(false)

@@ -8,6 +8,7 @@ import {
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
   isCurrentAgent,
+  taskToolNameForHookPayload,
 } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
@@ -49,6 +50,8 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   // Gemini agent exemption
   if (isCurrentAgent("gemini")) return {}
   const taskListAvailable = agentHasTaskListToolForHookPayload(input as Record<string, any>)
+  const taskListToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskList")
+  const taskUpdateToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskUpdate")
 
   // Deduplicate stale tasks against completed ones
   const completedTasks = ctx.allTasks.filter((t) => t.status === "completed")
@@ -79,6 +82,8 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
         tasksDir: ctx.tasksDir,
         sessionId: ctx.sessionId,
         taskListAvailable,
+        taskListToolName,
+        taskUpdateToolName,
       })
     }
     // Promotion failed (no issue candidates, no fallback) — allow stop as last resort
@@ -112,5 +117,7 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     tasksDir: ctx.tasksDir,
     sessionId: ctx.sessionId,
     taskListAvailable,
+    taskListToolName,
+    taskUpdateToolName,
   })
 }

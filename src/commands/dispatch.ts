@@ -7,6 +7,7 @@
  */
 
 import { appendFile } from "node:fs/promises"
+import { agentHasTaskListToolForHookPayload, taskToolNameForHookPayload } from "../agent-paths.ts"
 import { debugLog, stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
@@ -396,7 +397,10 @@ function maybeForceDispatchFailureForTesting(): void {
 }
 
 /** In-process incomplete-tasks check — skips daemon round-trip when tasks block. */
-async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
+async function tryStopFastPath(
+  timing: DispatchTiming,
+  payload: Record<string, unknown>
+): Promise<boolean> {
   const { canonicalEvent, sessionId } = timing
   if (!isStopLikeEvent(canonicalEvent) || !sessionId) return false
 
@@ -404,7 +408,11 @@ async function tryStopFastPath(timing: DispatchTiming): Promise<boolean> {
   if (!home) return false
 
   const tFast = performance.now()
-  const blockResult = await checkIncompleteTasks(sessionId, home)
+  const blockResult = await checkIncompleteTasks(sessionId, home, {
+    taskListAvailable: agentHasTaskListToolForHookPayload(payload),
+    taskListToolName: taskToolNameForHookPayload(payload, "TaskList"),
+    taskUpdateToolName: taskToolNameForHookPayload(payload, "TaskUpdate"),
+  })
   log(`   ⏱ cli:fast-incomplete-tasks: ${Math.round(performance.now() - tFast)}ms`)
 
   if (!blockResult) return false
@@ -516,7 +524,7 @@ async function runDispatch(
   }
 
   // ── Fast path: in-process incomplete-tasks check for stop events ──
-  if (await tryStopFastPath(timing)) return
+  if (await tryStopFastPath(timing, payload)) return
   // Signal to hooks that the fast path already scanned tasks (no blockers found)
   if (isStopLikeEvent(canonicalEvent) && sessionId) {
     payload._fastPathTaskScanComplete = true

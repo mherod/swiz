@@ -1,5 +1,5 @@
 import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
-import { detectCurrentAgentFromEnv, toolNameForCurrentAgent } from "../agent-paths.ts"
+import { taskToolNameForCurrentAgent } from "../agent-paths.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
@@ -13,35 +13,66 @@ export const TASKLIST_STABILITY_STEP = "Run TaskList now."
 
 export const TASKLIST_CONFIRM_STEP = "Run TaskList again after updating tasks."
 
-function resolveCodexTaskAlias(canonicalName: string): string {
-  const agent = detectCurrentAgentFromEnv()
-  if (agent?.id === "codex" && (canonicalName === "TaskCreate" || canonicalName === "TaskUpdate")) {
-    return "update_plan"
-  }
-  return toolNameForCurrentAgent(canonicalName)
+function getOptionalTaskToolName(canonicalName: string): string | null {
+  return taskToolNameForCurrentAgent(canonicalName)
 }
 
 export function getTaskToolName(canonicalName: string): string {
-  return resolveCodexTaskAlias(canonicalName)
+  return getOptionalTaskToolName(canonicalName) ?? canonicalName
 }
 
 function taskCreateToolName(): string {
-  return resolveCodexTaskAlias("TaskCreate")
+  return getTaskToolName("TaskCreate")
 }
 
 function taskUpdateToolName(): string {
-  return resolveCodexTaskAlias("TaskUpdate")
+  return getTaskToolName("TaskUpdate")
 }
 
 function taskApproachMessage(): string {
   const taskCreateName = taskCreateToolName()
   const taskUpdateName = taskUpdateToolName()
-  return replaceTaskGovernanceSynonyms(
-    "Allowed approaches:\n" +
-      `  - ${taskCreateName} - add new tasks\n` +
-      `  - ${taskUpdateName} - status, subject, description, and marking completed\n` +
-      `  - ${toolNameForCurrentAgent("TaskList")} / ${toolNameForCurrentAgent("TaskGet")} - query tasks`
-  )
+  const taskListName = getOptionalTaskToolName("TaskList")
+  const taskGetName = getOptionalTaskToolName("TaskGet")
+  const queryTaskNames =
+    taskListName && taskGetName
+      ? taskListName === taskGetName
+        ? taskListName
+        : `${taskListName} / ${taskGetName}`
+      : (taskListName ?? taskGetName)
+  const lines = [
+    "Allowed approaches:",
+    `  - ${taskCreateName} - add new tasks`,
+    `  - ${taskUpdateName} - status, subject, description, and marking completed`,
+    ...(queryTaskNames ? [`  - ${queryTaskNames} - query tasks`] : []),
+  ]
+  return replaceTaskGovernanceSynonyms(lines.join("\n"))
+}
+
+export interface TaskReviewInstructionContext {
+  taskListAvailable?: boolean
+  taskListToolName?: string | null
+  taskUpdateToolName?: string | null
+}
+
+export function buildTaskReviewInstruction(options: TaskReviewInstructionContext = {}): string {
+  const updateToolName = options.taskUpdateToolName ?? getOptionalTaskToolName("TaskUpdate")
+  if (options.taskListAvailable === false) {
+    if (!updateToolName) return "Update task statuses in the current planning surface."
+    return `Use ${updateToolName} to update task statuses.`
+  }
+
+  const taskListToolName = options.taskListToolName ?? getOptionalTaskToolName("TaskList")
+  if (!taskListToolName) {
+    if (!updateToolName) return "Update task statuses in the current planning surface."
+    return `Use ${updateToolName} to update task statuses.`
+  }
+  if (!updateToolName) return `Use ${taskListToolName} to review tasks.`
+  if (taskListToolName === updateToolName) {
+    return `Use ${updateToolName} to review tasks and update their status.`
+  }
+
+  return `Use ${taskListToolName} to review tasks, then ${updateToolName} to update their status.`
 }
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
@@ -750,7 +781,7 @@ function appendHygieneFeedback(
 
 export function formatIncompleteReason(
   taskDetails: string[],
-  sourceCtx?: { tasksDir: string | null; sessionId: string; taskListAvailable?: boolean }
+  sourceCtx?: { tasksDir: string | null; sessionId: string } & TaskReviewInstructionContext
 ): string {
   if (taskDetails.length === 0) return ""
 
@@ -759,11 +790,10 @@ export function formatIncompleteReason(
   const sourceNote = sourceCtx
     ? `\n\nTask files: ${sourceCtx.tasksDir ?? `~/.claude/tasks/${sourceCtx.sessionId}`}`
     : ""
-  const stabilityStep =
+  const footer =
     sourceCtx?.taskListAvailable === false
-      ? "Use the current planning surface to refresh task state."
-      : TASKLIST_STABILITY_STEP
-  const footer = `\n\nComplete these tasks before stopping. ${stabilityStep} Then update each task only when the work is done and the completion has evidence.`
+      ? `\n\nComplete these tasks before stopping. ${buildTaskReviewInstruction(sourceCtx)} Only mark tasks completed when the work is done and the completion has evidence.`
+      : `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
 
   return header + taskList + sourceNote + footer
 }

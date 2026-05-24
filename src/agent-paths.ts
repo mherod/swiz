@@ -6,6 +6,7 @@ import {
   getAgent,
   inferAgentFromToolNames,
   translateMatcher,
+  translateTaskToolName,
 } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 
@@ -251,4 +252,19 @@ export function toolNameForCurrentAgent(canonicalName: string): string {
   const agent = detectCurrentAgent()
   if (!agent) return canonicalName
   return translateMatcher(canonicalName, agent) ?? canonicalName
+}
+
+export function taskToolNameForCurrentAgent(canonicalName: string): string | null {
+  const agent = detectCurrentAgent()
+  if (!agent) return canonicalName
+  return translateTaskToolName(canonicalName, agent)
+}
+
+export function taskToolNameForHookPayload(
+  input: HookPayload | undefined,
+  canonicalName: string
+): string | null {
+  const agent = detectCurrentAgentFromHookPayload(input) ?? detectCurrentAgent()
+  if (!agent) return canonicalName
+  return translateTaskToolName(canonicalName, agent)
 }

@@ -3,14 +3,17 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
-import { formatIncompleteReason } from "../../src/tasks/task-governance-messages.ts"
+import {
+  formatIncompleteReason,
+  type TaskReviewInstructionContext,
+} from "../../src/tasks/task-governance-messages.ts"
 import { blockStopObj } from "../../src/utils/hook-utils.ts"
 
 export { formatIncompleteReason } from "../../src/tasks/task-governance-messages.ts"
 
 export function buildIncompleteBlockOutput(
   taskDetails: string[],
-  sourceCtx?: { tasksDir: string | null; sessionId: string; taskListAvailable?: boolean }
+  sourceCtx?: { tasksDir: string | null; sessionId: string } & TaskReviewInstructionContext
 ): SwizHookOutput {
   const reason = formatIncompleteReason(taskDetails, sourceCtx)
   return blockStopObj(reason)
