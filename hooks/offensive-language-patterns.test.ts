@@ -799,8 +799,16 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("Anything else you need from me?")
       expect(m?.category).toBe("premature_completion")
     })
-    test.todo("matches 'I'll pick this up tomorrow'", () => {
+    test("matches 'I'll pick this up tomorrow'", () => {
       const m = findLazyPattern("I'll pick this up tomorrow when I have more time.")
+      expect(m?.category).toBe("premature_completion")
+    })
+    test("matches 'I will do this in the next phase'", () => {
+      const m = findLazyPattern("I will do this in the next phase.")
+      expect(m?.category).toBe("premature_completion")
+    })
+    test("matches 'let's resume post-session'", () => {
+      const m = findLazyPattern("Let's resume this post-session.")
       expect(m?.category).toBe("premature_completion")
     })
     test.todo("matches 'save that for another day'", () => {

@@ -1,5 +1,21 @@
+export const SESSION_KEYWORDS = [
+  "session",
+  "conversation",
+  "chat",
+  "phase",
+  "sprint",
+  "release",
+  "iteration",
+  "cycle",
+  "week",
+]
+
+export const DEFERRAL_KEYWORDS = ["tomorrow", "post-session", "post-conversation", "next phase"]
+
 const LEADING_MARKER_CHARS = String.raw`[\s•◼◻⏳✓✗⎿*-]*`
 const ISSUE_REF = String.raw`(?:issue\s*)?#\d+`
+
+const SESSION_UNION = `(?:${SESSION_KEYWORDS.join("|")})`
 
 const WORK_DEFERRAL_PATTERNS = [
   // "Defer #1727", "Deferred: ...", "Deferring: ..."
@@ -35,14 +51,14 @@ const WORK_DEFERRAL_PATTERNS = [
   ),
   /\b(?:not\s+now|later\s+if|when\s+there(?:'s|\s+is)\s+time)\b/i,
   /\b(?:after|following)\s+(?:this|the)\s+(?:session|turn|current\s+task)\b/i,
-  /\b(?:save|leave|reserve)\b.*\b(?:later|tomorrow|next\s+(?:session|sprint|release|iteration|cycle|week))\b/i,
-  // "... to/for/until next session/sprint/release/iteration/cycle/week"
-  /\b(?:to|for|until)\s+(?:the\s+)?next\s+(?:session|sprint|release|iteration|cycle|week)\b/i,
-  // "Next session: ...", "Next sprint: ...", etc.
   new RegExp(
-    `^${LEADING_MARKER_CHARS}next\\s+(?:session|sprint|release|iteration|cycle|week)\\b`,
+    `\\b(?:save|leave|reserve)\\b.*\\b(?:later|tomorrow|next\\s+${SESSION_UNION})\\b`,
     "i"
   ),
+  // "... to/for/until next session/sprint/release/iteration/cycle/week/phase"
+  new RegExp(`\\b(?:to|for|until)\\s+(?:the\\s+)?next\\s+${SESSION_UNION}\\b`, "i"),
+  // "Next session: ...", "Next sprint: ...", "Next phase: ...", etc.
+  new RegExp(`^${LEADING_MARKER_CHARS}next\\s+${SESSION_UNION}\\b`, "i"),
   // Any "Follow-up: X" task defers current-session work — do it now or record a real blocker
   new RegExp(`^${LEADING_MARKER_CHARS}follow[-\\s]?up\\s*:`, "i"),
   new RegExp(`^${LEADING_MARKER_CHARS}future\\s*[:\\s-]`, "i"),
@@ -51,6 +67,11 @@ const WORK_DEFERRAL_PATTERNS = [
     `^${LEADING_MARKER_CHARS}(?:later|todo|backlog|punt|punted|postponed?|tomorrow|someday|eventually|hold(?:\\s+off)?)\\b\\s*[:\\s-]`,
     "i"
   ),
+  // Additional general deferral patterns
+  /\bpost-session\b/i,
+  /\bnext\s+phase\b/i,
+  new RegExp(`^${LEADING_MARKER_CHARS}tomorrow\\b`, "i"),
+  /\b(?:to|for|until|scheduled\\s+for)\\s+tomorrow\\b/i,
 ]
 
 const CARRYOVER_DEFERRAL_PREFIX_RE = /^\s*(?:consider\b|revisit\b|future\s*:|follow[-\s]?up\s*:)/i

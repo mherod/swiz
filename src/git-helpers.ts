@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
+import { currentEnv } from "./gh-rate-limit"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
 import { getGitClient } from "./git/client.ts"
 import { getHomeDirOrNull } from "./home.ts"
@@ -21,12 +22,6 @@ export const GIT_INDEX_LOCK = "index.lock"
 // behind `GitClient`; gh keeps this real spawn binding until it has the same
 // client abstraction.
 const spawnOriginal = Bun.spawn.bind(Bun)
-
-function currentEnv(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
-  )
-}
 
 /** Join a path under `<repoRoot>/.git/...`. */
 export function joinGitPath(repoRoot: string, ...segments: string[]): string {

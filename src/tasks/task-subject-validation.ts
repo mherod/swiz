@@ -3,6 +3,7 @@
 import { getHomeDirOrNull } from "../home.ts"
 import { TASK_TOOLS } from "../tool-matchers.ts"
 import { isPlaceholderSubject } from "../utils/inline-hook-helpers.ts"
+import { escapeRegex as escapeRegExp } from "../utils/shell-patterns"
 import { isTaskSubjectWorkDeferral } from "./task-subject-deferral.ts"
 
 export interface CompoundResult {
@@ -125,10 +126,6 @@ function detectDeferral(s: string): CompoundMatch | null {
       "Record the blocker and evidence",
     ],
   }
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function stripTrailingSeparators(s: string): string {

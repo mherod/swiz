@@ -62,7 +62,7 @@ const JS_TS_EXTENSIONS = ["js", "ts", "mjs", "cjs"] as const
 const PYTHON_INDICATOR_FILES = ["pyproject.toml", "setup.py", "requirements.txt"] as const
 const JAVA_INDICATOR_FILES = ["pom.xml", "build.gradle"] as const
 
-async function hasAnyFile(dir: string, files: readonly string[]): Promise<boolean> {
+export async function hasAnyFile(dir: string, files: readonly string[]): Promise<boolean> {
   for (const file of files) {
     if (await fileExists(join(dir, file))) return true
   }

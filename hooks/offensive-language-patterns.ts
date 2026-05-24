@@ -1,3 +1,5 @@
+import { DEFERRAL_KEYWORDS, SESSION_KEYWORDS } from "../src/tasks/task-subject-deferral.ts"
+
 /**
  * Shared offensive-language detection patterns and utilities.
  *
@@ -74,9 +76,9 @@ const THAT = "(?:th(?:is|at|ese|ose)|it)"
 /** Optional article + hook enforcement noun. */
 const THE_HOOK = `(?:the |this |that )?${HOOK}`
 /** Session/conversation nouns for premature completion. */
-const SESSION = "(?:session|conversation|chat)"
+const SESSION = `(?:${SESSION_KEYWORDS.join("|")})`
 /** Future session reference. */
-const FUTURE_SESSION = `(?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) ${SESSION}`
+const FUTURE_SESSION = `(?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) ${SESSION}|${DEFERRAL_KEYWORDS.join("|")}`
 
 /** Cancellation/deletion verbs used in task cancellation patterns. */
 const CANCEL = "(?:cancel|remove|close|drop|skip|abandon|delete)"
@@ -1364,7 +1366,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "premature_completion",
     pattern: re(
-      `${I_WILL} (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) ${THAT} (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:${SESSION}|iteration|pass))`
+      `${I_WILL} (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) ${THAT} (?:(?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:${SESSION}|iteration|pass))|tomorrow|post-session)`
     ),
     response:
       "There is no 'next session.' This is the session. The user gave you a task — do it now. " +
@@ -1402,7 +1404,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     category: "premature_completion",
     pattern: re(
       `(?:the |this )?(?:implementation|feature|change|fix|update) (?:is |has been )?(?:confirmed|verified|ready|done|complete|finished|implemented)[.!]?\\s*` +
-        `(?:in (?:the |a )?next ${SESSION}|(?:${I_WILL}|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) ${SESSION}))`
+        `(?:in (?:the |a )?next ${SESSION}|(?:${I_WILL}|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|tomorrow|post-session|in (?:the |a )?(?:next|follow-?up) ${SESSION}))`
     ),
     response:
       "Declaring something 'confirmed' and then deferring the rest to a future session is a contradiction. " +

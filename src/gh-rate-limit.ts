@@ -36,7 +36,7 @@ let budget: RateLimitBudget | null = null
 let retryAfterUntil = 0
 let bootstrapInProgress: Promise<void> | null = null
 
-function currentEnv(): Record<string, string> {
+export function currentEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
   )

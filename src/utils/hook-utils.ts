@@ -56,6 +56,8 @@ import {
   type TaskFileDenyMeta,
 } from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
+
+export { preToolUseDeny } from "../SwizHook"
 export { getTaskToolName }
 
 // Re-export skillAdvice for backward compatibility with existing hooks.
@@ -971,14 +973,6 @@ export function preToolUseAllow(reason = ""): SwizHookOutput {
     systemMessage: preview,
     hookSpecificOutput: hsoPreToolUseAllow(rephrasedReason),
   }
-}
-
-/** Build a PreToolUse deny response (mirrors `denyPreToolUse`). */
-export function preToolUseDeny(reason: string): SwizHookOutput {
-  return preToolUseDenyWithSystemMessage(
-    reason,
-    extractHookSystemMessagePreview(reason) || "Denied without reason"
-  )
 }
 
 /** Build a task-file-access denial with structured telemetry metadata. */

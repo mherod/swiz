@@ -119,6 +119,17 @@ describe("isTaskSubjectWorkDeferral", () => {
     expect(isTaskSubjectWorkDeferral("Hold off: billing changes")).toBe(true)
   })
 
+  test("matches next phase, post-session, and tomorrow", () => {
+    expect(isTaskSubjectWorkDeferral("Next phase: migrate database")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Migrate database in next phase")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Post-session: cleanup logs")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Cleanup logs post-session")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Tomorrow: fix unit tests")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Tomorrow fix unit tests")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Save for tomorrow")).toBe(true)
+    expect(isTaskSubjectWorkDeferral("Postpone until tomorrow")).toBe(true)
+  })
+
   test("does not match legitimate current-session work", () => {
     expect(isTaskSubjectWorkDeferral("Implement deferred image loading")).toBe(false)
     expect(isTaskSubjectWorkDeferral("Add session token refresh logic")).toBe(false)

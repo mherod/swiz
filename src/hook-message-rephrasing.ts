@@ -1,3 +1,5 @@
+import { escapeRegex as escapeRegExp } from "./utils/shell-patterns"
+
 type RephraseRule = readonly [string, readonly string[]]
 
 const REPHRASE_WINDOW_MS = 5 * 60 * 1000
@@ -146,10 +148,6 @@ const REPHRASE_RULES = [
   ["concerning", ["poor", "risky", "troubling", "suboptimal", "weak"]],
   ["risky", ["poor", "concerning", "troubling", "suboptimal", "weak"]],
 ] as const satisfies readonly RephraseRule[]
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 const REPHRASE_LOOKUP = new Map<string, readonly string[]>()
 for (const [match, replacements] of REPHRASE_RULES) {

@@ -2,6 +2,7 @@
 // Walks up from CWD looking for lockfiles. Cached per process.
 
 import { dirname, join } from "node:path"
+import { hasAnyFile as hasAnyLockfile } from "../detect-frameworks"
 import { fileExists } from "../detect-frameworks.ts"
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
@@ -45,13 +46,6 @@ async function detectFromNpmrc(dir: string): Promise<boolean> {
 
 async function hasPnpmNodeModulesLock(dir: string): Promise<boolean> {
   return fileExists(join(dir, "node_modules", ".pnpm", "lock.yaml"))
-}
-
-async function hasAnyLockfile(dir: string, lockfiles: readonly string[]): Promise<boolean> {
-  for (const lockfile of lockfiles) {
-    if (await fileExists(join(dir, lockfile))) return true
-  }
-  return false
 }
 
 async function detectFromLockfiles(dir: string): Promise<PackageManager | null> {
