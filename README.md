@@ -2,7 +2,7 @@
 
 AI coding agents are capable of impressive things. They're also capable of forgetting to commit, shipping debug statements, ignoring failing CI, losing track of what they were supposed to do, and declaring "task complete" the moment they want to stop. **swiz** is a hook framework that doesn't let them get away with any of it.
 
-One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
+One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, Codex CLI, and Antigravity — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
@@ -31,7 +31,7 @@ Tool completes         →  posttooluse-* hooks validate results, remind about t
 Agent tries to stop    →  stop-* hooks audit the full session state and block if anything is unresolved
 ```
 
-Hooks communicate back using **polyglot JSON** — a single output format that all four agents understand. A hook script written once works identically whether it was triggered by Claude, Cursor, Gemini, or Codex.
+Hooks communicate back using **polyglot JSON** — a single output format that every supported agent understands. A hook script written once works identically whether it was triggered by Claude, Cursor, Gemini, Codex, or Antigravity.
 
 ```json
 {
@@ -52,6 +52,7 @@ swiz supports every agent that has a hook system, with automatic translation of 
 | Cursor CLI  | `~/.cursor/hooks.json`    | Limited — only `beforeShellExecution`/`afterShellExecution` fire. Cursor team confirmed full hook event parity is "in development, no ETA" ([forum thread](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)). The canonical swiz workaround is `swiz shim install`, which intercepts shell commands at the `~/.zshenv` layer regardless of which agent is running. Non-shell events (Edit/Write/Read PreToolUse, Stop, SessionStart, UserPromptSubmit) cannot be intercepted under Cursor CLI until upstream ships them — when that happens, update `EVENT_MAP` in `src/agents.ts` and rerun `swiz install`. |
 | Gemini CLI  | `~/.gemini/settings.json` | Full support — nested matcher groups, all 5 event types                                                                                                                                                   |
 | Codex CLI   | `~/.codex/hooks.json`     | Full support — nested matcher groups, shipped event types (`SessionStart`, `Stop`, `UserPromptSubmit`)                                                                                                    |
+| Antigravity | `~/.gemini/antigravity-cli/hooks.json` | Supported — nested matcher groups under a named `swiz` group; `PreToolUse`/`PostToolUse`/`Stop`/`SessionStart` mapped. Agent detection uses the `--agent antigravity` dispatch flag (no env injection). Tasks use brain `task.md` checklists, so the Task\* governance hooks are skipped. `tool_name` matchers and the `PreInvocation`/`PostInvocation` mapping are pending live payload confirmation. |
 
 ### Cross-Agent Translation
 
@@ -303,6 +304,7 @@ swiz install --claude     # Claude Code only
 swiz install --cursor     # Cursor only
 swiz install --gemini     # Gemini CLI only
 swiz install --codex      # shows Codex status (not yet configurable)
+swiz install --antigravity # Antigravity CLI only (~/.gemini/antigravity-cli/hooks.json)
 swiz install --dry-run    # line-by-line unified diff, no writes
 ```
 
