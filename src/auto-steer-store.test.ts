@@ -184,6 +184,24 @@ describe("AutoSteerStore", () => {
     store.close()
   })
 
+  it("updatePendingMessage swaps a pending row's text by dedup key", () => {
+    const store = createStore()
+    store.enqueue("sess1", "raw text", "next_turn", { dedupKey: "raw text" })
+    const updated = store.updatePendingMessage("sess1", "raw text", "next_turn", "humanised text")
+    expect(updated).toBe(true)
+    expect(store.consumeOne("sess1", "next_turn")[0]?.message).toBe("humanised text")
+    store.close()
+  })
+
+  it("updatePendingMessage is a no-op once the row was delivered", () => {
+    const store = createStore()
+    store.enqueue("sess1", "raw text", "next_turn", { dedupKey: "raw text" })
+    store.consumeOne("sess1", "next_turn") // marks delivered
+    const updated = store.updatePendingMessage("sess1", "raw text", "next_turn", "too late")
+    expect(updated).toBe(false)
+    store.close()
+  })
+
   it("enqueue allows same message with different trigger", () => {
     const store = createStore()
     const first = store.enqueue("sess1", "same message", "next_turn")

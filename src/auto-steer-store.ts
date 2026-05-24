@@ -99,6 +99,7 @@ export class AutoSteerStore {
     created_at: number
   }>
   private _stmtConsumeOneByProjectKey!: Statement
+  private _stmtUpdatePendingMessage!: Statement
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getAutoSteerDbPath()
@@ -204,6 +205,20 @@ export class AutoSteerStore {
        ORDER BY id ASC
        LIMIT 1`
     )
+    // Swap the rendered text of the most recent still-pending row for a dedup key.
+    // Used by the async humanisation path: enqueue raw immediately, then replace
+    // the stored message with the humanised text once the rewrite resolves.
+    // No-op (0 changes) if the row was already delivered or pruned.
+    this._stmtUpdatePendingMessage = this.db.prepare(
+      `UPDATE auto_steer_queue SET message = ?
+       WHERE id = (
+         SELECT id FROM auto_steer_queue
+         WHERE session_id = ? AND trigger_type = ?
+           AND COALESCE(dedup_key, message) = ? AND delivered_at IS NULL
+         ORDER BY id DESC
+         LIMIT 1
+       )`
+    )
   }
 
   /**
@@ -249,6 +264,21 @@ export class AutoSteerStore {
 
     this._stmtEnqueue.run(sessionId, message, trigger, now, opts?.ttlMs ?? null, projKey, dedupKey)
     return true
+  }
+
+  /**
+   * Replace the rendered `message` of the most recent still-pending row matching
+   * `dedupKey` for a session+trigger. Returns true if a pending row was updated,
+   * false if none matched (already delivered/pruned). Used by the async
+   * humanisation path to swap raw text for the humanised rewrite after enqueue.
+   */
+  updatePendingMessage(
+    sessionId: string,
+    dedupKey: string,
+    trigger: AutoSteerTrigger,
+    newMessage: string
+  ): boolean {
+    return this._stmtUpdatePendingMessage.run(newMessage, sessionId, trigger, dedupKey).changes > 0
   }
 
   /**

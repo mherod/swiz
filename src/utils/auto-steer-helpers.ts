@@ -327,10 +327,45 @@ async function isHumaniseAutoSteerEnabled(sessionId: string): Promise<boolean> {
   return settings.humaniseAutoSteer
 }
 
-/** Humanise the steer only when the humaniseAutoSteer setting is enabled; otherwise return raw. */
-async function maybeHumaniseAutoSteer(sessionId: string, message: string): Promise<string> {
-  if (!(await isHumaniseAutoSteerEnabled(sessionId))) return message
-  return humaniseAutoSteerMessage(message)
+const inflightHumanisation = new Set<Promise<void>>()
+
+/**
+ * Await all in-flight async humanisation rewrites. Exposed for tests and
+ * graceful shutdown so the fire-and-forget rewrites can be observed.
+ */
+export async function flushAutoSteerHumanisation(): Promise<void> {
+  await Promise.all([...inflightHumanisation])
+}
+
+/**
+ * Kick off a non-blocking humanisation of an already-enqueued steer. The raw
+ * text is enqueued synchronously by the caller; this rewrites it in the
+ * background and swaps the stored row's message in place once ready, so
+ * PreToolUse gates that await scheduleAutoSteer never pay the model latency.
+ * Best-effort: if the setting is off, the rewrite errors, or the row was
+ * already delivered, the raw text stands.
+ */
+function kickOffHumanisation(
+  sessionId: string,
+  safeSession: string,
+  rawMessage: string,
+  trigger: AutoSteerTrigger
+): void {
+  const task = (async () => {
+    try {
+      if (!(await isHumaniseAutoSteerEnabled(sessionId))) return
+      const humanised = await humaniseAutoSteerMessage(rawMessage)
+      if (!humanised || humanised === rawMessage) return
+      const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+      getAutoSteerStore().updatePendingMessage(safeSession, rawMessage, trigger, humanised)
+    } catch {
+      // fire-and-forget: raw text is already enqueued, humanisation is best-effort
+    }
+  })()
+  const tracked = task.finally(() => {
+    inflightHumanisation.delete(tracked)
+  })
+  inflightHumanisation.add(tracked)
 }
 
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
@@ -453,20 +488,22 @@ export async function scheduleAutoSteer(
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
   if (terminalApp) {
-    const humanised = await maybeHumaniseAutoSteer(sessionId, message)
-    store.enqueue(safeSession, humanised, resolvedTrigger, { dedupKey: message })
+    const enqueued = store.enqueue(safeSession, message, resolvedTrigger, { dedupKey: message })
+    if (enqueued) kickOffHumanisation(sessionId, safeSession, message, resolvedTrigger)
     return true
   }
 
   if (!(await isMcpChannelsSettingEnabled(sessionId))) return false
   if (!canUseMcpChannel(resolvedTrigger, cwd)) return false
 
-  const humanised = await maybeHumaniseAutoSteer(sessionId, message)
-  const enqueued = store.enqueue(safeSession, humanised, resolvedTrigger, {
+  const enqueued = store.enqueue(safeSession, message, resolvedTrigger, {
     cwd,
     dedupKey: message,
   })
-  if (enqueued) touchMcpChannelNotify(cwd)
+  if (enqueued) {
+    kickOffHumanisation(sessionId, safeSession, message, resolvedTrigger)
+    touchMcpChannelNotify(cwd)
+  }
   return true
 }
 
@@ -499,13 +536,15 @@ export async function scheduleAutoSteerViaChannel(
 
   const { getAutoSteerStore } = await import("../auto-steer-store.ts")
   const store = getAutoSteerStore()
-  const humanised = await maybeHumaniseAutoSteer(sessionId, message)
-  const enqueued = store.enqueue(safeSession, humanised, trigger, {
+  const enqueued = store.enqueue(safeSession, message, trigger, {
     cwd,
     ttlMs: opts?.ttlMs,
     dedupKey: message,
   })
-  if (enqueued) touchMcpChannelNotify(cwd)
+  if (enqueued) {
+    kickOffHumanisation(sessionId, safeSession, message, trigger)
+    touchMcpChannelNotify(cwd)
+  }
   return enqueued
 }
 

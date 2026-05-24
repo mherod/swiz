@@ -82,7 +82,7 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Settings/state schemas also in `src/settings/persistence.ts`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs in-window.
-- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Pre-enqueue `humaniseAutoSteerMessage()` (`promptText`, 8s, fail-open) rewrites it; dedups on original via `dedup_key`.
+- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Enqueues raw; async `humaniseAutoSteerMessage()` (`promptText` openrouter) swaps it; `humaniseAutoSteer` gates; dedup `dedup_key`.
 - **DO**: `resolveThresholds(cwd)` for memory thresholds (default 5000); never hardcode.
 - **DO**: `computeProjectedContent()` suppresses interpolation; DON'T `.replace()`; fail-open on errors.
 - NFKC-normalize `new_string`/`content`/`old_string` in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be in `EXEMPT_HOOKS`.

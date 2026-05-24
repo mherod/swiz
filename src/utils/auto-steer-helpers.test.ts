@@ -10,6 +10,7 @@ import {
   swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import {
+  flushAutoSteerHumanisation,
   getMcpChannelAvailability,
   humaniseAutoSteerMessage,
   scheduleAutoSteer,
@@ -130,6 +131,8 @@ describe("auto-steer helpers", () => {
 
   afterEach(async () => {
     try {
+      // Drain any fire-and-forget humanisation before closing the store.
+      await flushAutoSteerHumanisation()
       resetAutoSteerStore()
       if (originalHome === undefined) {
         delete process.env.HOME
@@ -266,6 +269,8 @@ describe("auto-steer helpers", () => {
 
     const first = await scheduleAutoSteer("session-h", "Fix the failing tests", "next_turn", cwd)
     const second = await scheduleAutoSteer("session-h", "Fix the failing tests", "next_turn", cwd)
+    // Humanisation is async/non-blocking — wait for the background rewrite to land.
+    await flushAutoSteerHumanisation()
 
     const store = getAutoSteerStore()
     expect(first).toBe(true)
@@ -291,6 +296,8 @@ describe("auto-steer helpers", () => {
       "next_turn",
       cwd
     )
+    // Even after the async path settles, the toggle-off case must leave raw text.
+    await flushAutoSteerHumanisation()
 
     const store = getAutoSteerStore()
     expect(scheduled).toBe(true)
