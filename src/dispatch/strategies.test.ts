@@ -5,7 +5,7 @@ import { processAggregatedStopResults, processBlockingResults } from "./blocking
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
 import { writeResponse } from "./engine.ts"
-import { preparePreToolHints } from "./preToolUseStrategy.ts"
+import { applyPreToolHumanisedContext, preparePreToolHints } from "./preToolUseStrategy.ts"
 
 /** Capture everything writeResponse emits to stdout for a single call. */
 function captureWriteResponse(response: Record<string, any>): string {
@@ -56,6 +56,40 @@ describe("writeResponse JSON validity", () => {
     const parsed = JSON.parse(out)
     expect("hookExecutions" in parsed).toBe(false)
     expect(parsed.hookSpecificOutput.permissionDecision).toBe("allow")
+  })
+})
+
+describe("applyPreToolHumanisedContext", () => {
+  // Regression: humanised PreToolUse context must land in `additionalContext`, the
+  // agent-recognized field. Writing any other key (e.g. the old `contextsJoined`)
+  // leaks an unknown key into hookSpecificOutput, which the agent rejects as
+  // "hook returned invalid pre-tool-use JSON output" (schemas are looseObject and
+  // don't strip it at the wire boundary).
+  it("writes humanised text to additionalContext and never an unknown key", () => {
+    const response: Record<string, any> = {
+      systemMessage: "raw context",
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: "raw hints",
+        additionalContext: "raw context",
+      },
+    }
+    applyPreToolHumanisedContext(response, "humanised paragraph")
+
+    expect(response.systemMessage).toBe("humanised paragraph")
+    expect(response.hookSpecificOutput.additionalContext).toBe("humanised paragraph")
+    // The legacy bug set `contextsJoined`; it must never appear.
+    expect("contextsJoined" in response.hookSpecificOutput).toBe(false)
+    // permissionDecisionReason (hints) is left untouched.
+    expect(response.hookSpecificOutput.permissionDecisionReason).toBe("raw hints")
+  })
+
+  it("is a no-op on hookSpecificOutput when none is present", () => {
+    const response: Record<string, any> = { systemMessage: "raw" }
+    applyPreToolHumanisedContext(response, "humanised")
+    expect(response.systemMessage).toBe("humanised")
+    expect(response.hookSpecificOutput).toBeUndefined()
   })
 })
 

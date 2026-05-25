@@ -124,6 +124,23 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
   })
 }
 
+/**
+ * Replace the merged allow response's context fields with humanised text.
+ * Must write `additionalContext` (the agent-recognized PreToolUse field) — writing
+ * any other key leaks an unknown field into `hookSpecificOutput`, which the agent
+ * rejects as "hook returned invalid pre-tool-use JSON output" (schemas are looseObject,
+ * so the bad key survives boundary validation).
+ */
+export function applyPreToolHumanisedContext(
+  response: Record<string, any>,
+  humanised: string
+): void {
+  response.systemMessage = humanised
+  if (response.hookSpecificOutput) {
+    response.hookSpecificOutput.additionalContext = humanised
+  }
+}
+
 export class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const hints: string[] = []
@@ -164,10 +181,7 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
                 systemPrompt:
                   "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear executive direction. Encourage decisive forward progress and focus on delivering the next actions in an authoritative, collaborative, and direct human voice. Start directly with the core action needed, avoiding tentative phrasing or conversational filler. Do not include raw file system specifics or explicit file paths in the output; instead, convert any file references into natural language descriptions of what they are (for example, turn '/docs/api-spec-file.md' into 'the API spec document' or 'src/utils/humanise.ts' into 'the humanisation helper'). Keep every other concrete detail, constraint, command, and instruction. Do not add any new instructions or commentary. Return only the rewritten paragraph.",
               })
-              response.systemMessage = humanised
-              if (response.hookSpecificOutput) {
-                response.hookSpecificOutput.contextsJoined = humanised
-              }
+              applyPreToolHumanisedContext(response, humanised)
             }
           }
 
