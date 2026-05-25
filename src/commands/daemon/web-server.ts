@@ -28,6 +28,7 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../../task-roots.ts"
+import { computeComplianceState } from "../../tasks/task-compliance-history.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
@@ -1505,12 +1506,20 @@ async function handleStatusLineSnapshot(
   const issueSyncStale = syncEntry
     ? syncEntry.lastSyncAt === null || Date.now() - syncEntry.lastSyncAt > STALE_SYNC_THRESHOLD_MS
     : null
+  // Compliance-derived baseline of the GTA wanted level, surfaced from the daemon
+  // so any consumer (status line, future web view) reads a warm value. Retry-after-block
+  // infractions are layered on top client-side by the status line.
+  const wantedLevel =
+    taskCounts && taskCounts.incomplete > 0 && computeComplianceState(taskCounts) === "unhealthy"
+      ? 1
+      : 0
   return Response.json({
     snapshot: {
       ...snapshot,
       taskCounts,
       complianceDurationLabel,
       complianceDurationSeconds,
+      wantedLevel,
       issueSyncStale,
     },
   })

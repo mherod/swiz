@@ -306,6 +306,19 @@ describe("renderStatusLineFromSnapshot", () => {
     expect(out).toContain("★★")
   })
 
+  it("falls back to the daemon-surfaced snapshot.wantedLevel when no opt is passed", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-sonnet" } },
+      snapshot: { ...baseSnapshot, wantedLevel: 1 },
+      taskCounts: { total: 3, incomplete: 1, pending: 0, inProgress: 1 },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("★")
+  })
+
   it("renders the current CI status when present", () => {
     const out = renderStatusLineFromSnapshot({
       input: { model: { display_name: "claude-haiku" } },

@@ -66,6 +66,8 @@ export interface WarmStatusLineSnapshot {
   complianceDurationLabel?: string | null
   /** Raw seconds the current compliance state has been maintained. Used to upgrade 👍→👏 after 2 minutes. */
   complianceDurationSeconds?: number | null
+  /** Compliance-derived baseline of the GTA wanted level, computed daemon-side. Infractions are layered on top locally. */
+  wantedLevel?: number | null
   activeSkills?: string[] | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
@@ -1094,7 +1096,7 @@ export function renderStatusLineFromSnapshot(opts: {
     input.vim?.mode,
     taskCounts,
     activeSkills,
-    wantedLevel
+    wantedLevel || (snapshot.wantedLevel ?? 0)
   )
 
   const fill = `${DIM}─${R}`
@@ -1157,10 +1159,12 @@ export const statusLineCommand: Command = {
       activeSkills = await getRecentlyInvokedSkillsForCurrentSession(sessionPath).catch(() => null)
     }
 
-    // Wanted level: unhealthy task compliance contributes a baseline ★1, and
-    // retry-after-block infractions in the transcript raise it further.
-    let wantedLevel =
+    // Wanted level: unhealthy task compliance contributes a baseline ★1 (preferring
+    // the daemon-computed value when present), and retry-after-block infractions in
+    // the transcript raise it further.
+    const complianceBaseline =
       taskCounts && taskCounts.incomplete > 0 && !isTaskGovernanceHealthy(taskCounts) ? 1 : 0
+    let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaseline)
     if (sessionPath) {
       try {
         const lines = await readSessionLines(sessionPath)
