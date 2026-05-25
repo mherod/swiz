@@ -388,6 +388,43 @@ describe("evaluateNativeTaskUpdatePath", () => {
       await cleanupSession(sessionId)
     }
   })
+
+  test("denies TaskUpdate when updating to a deferral subject", async () => {
+    const sessionId = uniqueSessionId("task-update-deferral")
+    try {
+      await cleanupSession(sessionId)
+      const toolInput = { taskId: "1", subject: "Future: add feature" }
+      const input = {
+        session_id: sessionId,
+        tool_name: "TaskUpdate",
+        tool_input: toolInput,
+        _taskHome: TASK_HOME,
+      }
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, toolInput, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("Deferral tactic detected")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies update_plan when proposing a plan with a deferral step", async () => {
+    const sessionId = uniqueSessionId("update-plan-deferral")
+    try {
+      await cleanupSession(sessionId)
+      const input = updatePlanInput(sessionId, [
+        { step: "Future: do later", status: "pending" },
+        { step: "implement now", status: "in_progress" },
+      ])
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(result)).toBe("deny")
+      expect(decisionReason(result)).toContain("Deferral tactic detected")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
 })
 
 describe("evaluateTaskCreatePath", () => {
@@ -443,6 +480,30 @@ describe("evaluateTaskCreatePath", () => {
       const result = await evaluateTaskCreatePath(input, {
         subject: "add user login and fix typo in header",
       })
+      expect(permissionDecision(result)).toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies a work deferral subject", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-deferral")
+    try {
+      await cleanupSession(sessionId)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, { subject: "Future: implement auth" })
+      expect(permissionDecision(result)).toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("denies a carryover deferral subject", async () => {
+    const sessionId = uniqueSessionId("pgrep-dispatch-test-carryover")
+    try {
+      await cleanupSession(sessionId)
+      const input = { tool_name: "TaskCreate", session_id: sessionId, _taskHome: TASK_HOME }
+      const result = await evaluateTaskCreatePath(input, { subject: "Consider extracting helpers" })
       expect(permissionDecision(result)).toBe("deny")
     } finally {
       await cleanupSession(sessionId)

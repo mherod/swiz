@@ -76,7 +76,10 @@ import {
   CANONICAL_TASKLIST_SYNC_MAX_AGE_MS,
   readCanonicalTaskListSyncAtMs,
 } from "../src/tasks/task-state-cache.ts"
-import { isTaskSubjectWorkDeferral } from "../src/tasks/task-subject-deferral.ts"
+import {
+  isTaskSubjectCarryoverDeferral,
+  isTaskSubjectWorkDeferral,
+} from "../src/tasks/task-subject-deferral.ts"
 import {
   applyTaskUpdatePreview,
   duplicateSubjectSeverity,
@@ -1441,6 +1444,18 @@ async function evaluateUpdatePlanGovernance(
 
   const cwd = (input.cwd as string) ?? process.cwd()
   const plan = parseUpdatePlanTasks(toolInput)
+  for (const item of plan) {
+    if (
+      isIncompleteTaskStatus(item.status) &&
+      (isTaskSubjectWorkDeferral(item.step) || isTaskSubjectCarryoverDeferral(item.step))
+    ) {
+      return preToolUseDeny(
+        `Deferral tactic detected: task subject "${item.step}" uses deferral framing. ` +
+          "All work is to be completed in this session. There is no follow-up session. " +
+          "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+      )
+    }
+  }
   const projection = await readUpdatePlanProjection(input, sessionId, plan)
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
@@ -1680,6 +1695,18 @@ export async function evaluateNativeTaskUpdatePath(
     return {}
   }
 
+  if (
+    typeof toolInput.subject === "string" &&
+    (isTaskSubjectWorkDeferral(toolInput.subject) ||
+      isTaskSubjectCarryoverDeferral(toolInput.subject))
+  ) {
+    return preToolUseDeny(
+      `Deferral tactic detected: task subject "${toolInput.subject}" uses deferral framing. ` +
+        "All work is to be completed in this session. There is no follow-up session. " +
+        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+    )
+  }
+
   const unsupported = Object.keys(toolInput).filter((k) => !TASK_UPDATE_ALLOWED_FIELDS.has(k))
   if (unsupported.length > 0) {
     const allowed = [...TASK_UPDATE_ALLOWED_FIELDS].join(", ")
@@ -1709,6 +1736,13 @@ export async function evaluateTaskCreatePath(
   toolInput: Record<string, any>
 ): Promise<SwizHookOutput> {
   const subject: string = (toolInput?.subject as string) ?? ""
+  if (isTaskSubjectWorkDeferral(subject) || isTaskSubjectCarryoverDeferral(subject)) {
+    return preToolUseDeny(
+      `Deferral tactic detected: task subject "${subject}" uses deferral framing. ` +
+        "All work is to be completed in this session. There is no follow-up session. " +
+        "Replace it with concrete current-session work, start it now, or record a real blocker with evidence."
+    )
+  }
   const duplicateOutcome = await checkTaskCreateSubjectGovernance(input, subject)
   if (duplicateOutcome) return duplicateOutcome
 

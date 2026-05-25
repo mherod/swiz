@@ -23,7 +23,6 @@ import { resolveTaskCheckContext } from "./context.ts"
 import {
   filterBlockingIncomplete,
   filterIncompleteStatus,
-  isDeferredSubject,
   stripDeferralPrefix,
 } from "./incomplete-check-validator.ts"
 
@@ -90,29 +89,22 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
     return {}
   }
 
-  // Deferred-subject pending tasks ("Consider ", "Future:", "Follow-up:") are
-  // forward-looking notes that carry over to the next session — they satisfy
-  // the planning buffer for hygiene but should not block stop. See issue #563.
   const blockingIncomplete = filterBlockingIncomplete(ctx.allTasks)
   if (blockingIncomplete.length === 0) {
-    // Edge case: exactly one deferred task is the sole remaining task. That is
+    // Edge case: having deferred tasks as the sole remaining tasks. That is
     // likely a dodge — the agent parked real work under a "Future:" label instead
     // of completing it. Steer back to the actual work.
-    if (remainingIncomplete.length === 1 && isDeferredSubject(remainingIncomplete[0]?.subject)) {
-      const subject = remainingIncomplete[0]?.subject ?? ""
-      return buildSoleDeferralSteeringOutput(stripDeferralPrefix(subject) || subject)
+    if (remainingIncomplete.length > 0) {
+      const subjects = remainingIncomplete
+        .map((t) => t.subject ?? "")
+        .map((s) => stripDeferralPrefix(s) || s)
+      return buildSoleDeferralSteeringOutput(subjects)
     }
     return {}
   }
 
-  // Build block output — only list non-deferred tasks so the agent isn't told
-  // to act on tasks that the hook has already decided to carry over.
-  const taskDetails = getIncompleteDetails(ctx.allTasks).filter((line) => {
-    // Lines are formatted as `${subject} (task #${id})` — strip the suffix
-    // before classification so deferred subjects ending in `:` still match.
-    const subject = line.replace(/\s*\(task #[^)]*\)\s*$/, "")
-    return !isDeferredSubject(subject)
-  })
+  // Build block output — list all incomplete tasks so the agent knows to complete everything.
+  const taskDetails = getIncompleteDetails(ctx.allTasks)
   return buildIncompleteBlockOutput(taskDetails, {
     tasksDir: ctx.tasksDir,
     sessionId: ctx.sessionId,

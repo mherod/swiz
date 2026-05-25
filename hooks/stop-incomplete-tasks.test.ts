@@ -138,7 +138,7 @@ describe("stop-incomplete-tasks", () => {
     expect(allowResult.decision).toBe("block")
   })
 
-  test("allows stop when only deferred-subject pending tasks remain (issue #563)", async () => {
+  test("blocks stop when only deferred-subject pending tasks remain", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-deferred-only"
 
@@ -148,7 +148,7 @@ describe("stop-incomplete-tasks", () => {
       subject: "Ship the feature",
       status: "completed",
     })
-    // Forward-looking notes that should NOT block stop
+    // Forward-looking notes that should block stop
     await writeTask(homeDir, sessionId, {
       id: "2",
       subject: "Consider promoting fragmentation thresholds to swiz settings",
@@ -166,7 +166,12 @@ describe("stop-incomplete-tasks", () => {
     })
 
     const result = await runHook({ homeDir, sessionId })
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain(
+      "The remaining tasks were parked under a deferral label instead of completed"
+    )
+    expect(result.reason).toContain("revisit cache TTL")
+    expect(result.reason).toContain("docs for new flag")
   })
 
   test("blocks when sole remaining task has a deferral prefix (dodge steering)", async () => {
@@ -191,7 +196,7 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).toContain("Do the work now")
   })
 
-  test("still allows stop when multiple deferred tasks remain (not a dodge)", async () => {
+  test("blocks stop when multiple deferred tasks remain", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-multi-deferred"
 
@@ -212,7 +217,12 @@ describe("stop-incomplete-tasks", () => {
     })
 
     const result = await runHook({ homeDir, sessionId })
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain(
+      "The remaining tasks were parked under a deferral label instead of completed"
+    )
+    expect(result.reason).toContain("add rate-limiting to comments endpoint")
+    expect(result.reason).toContain("extracting helper")
   })
 
   test("blocks when real pending task sits alongside deferred subjects", async () => {

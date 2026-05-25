@@ -19,11 +19,16 @@ export function buildIncompleteBlockOutput(
   return blockStopObj(reason)
 }
 
-export function buildSoleDeferralSteeringOutput(realWork: string): SwizHookOutput {
+export function buildSoleDeferralSteeringOutput(realWorks: string[]): SwizHookOutput {
+  const plural = realWorks.length > 1
   const reason = [
-    "The last remaining task was parked under a deferral label instead of completed.",
+    plural
+      ? "The remaining tasks were parked under a deferral label instead of completed."
+      : "The last remaining task was parked under a deferral label instead of completed.",
     "All work is to be completed in this session. There is no follow-up session.",
-    `Do the work now: ${realWork}`,
+    plural
+      ? `Do the work now:\n${realWorks.map((s) => `  • ${s}`).join("\n")}`
+      : `Do the work now: ${realWorks[0] ?? ""}`,
   ].join("\n")
   return blockStopObj(reason)
 }
