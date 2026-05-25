@@ -136,6 +136,18 @@ describe("manifest.ts", () => {
       expect(hasRequireTasksHook).toBe(tasksEnabled)
     })
 
+    it("Edit|Write|Bash matcher has infraction-escalation hook", () => {
+      const editWriteBashGroup = manifest.find(
+        (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|Bash"
+      )
+      expect(editWriteBashGroup).toBeDefined()
+      const hasInfractionHook =
+        editWriteBashGroup?.hooks.some((h) =>
+          hookIdentifier(h).includes("infraction-escalation")
+        ) ?? false
+      expect(hasInfractionHook).toBe(true)
+    })
+
     it("Edit|Write|NotebookEdit|Bash matcher has update-memory enforcement hook", () => {
       const updateMemoryGroup = manifest.find(
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|NotebookEdit|Bash"

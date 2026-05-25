@@ -55,6 +55,7 @@ import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretooluseGitFlowIntegrationBaseGate from "../hooks/pretooluse-gitflow-integration-base-gate.ts"
+import pretooluseInfractionEscalation from "../hooks/pretooluse-infraction-escalation.ts"
 import pretooluseInlineScriptWriteGate from "../hooks/pretooluse-inline-script-write-gate.ts"
 import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
 import pretooluseIssueWorkflowGate from "../hooks/pretooluse-issue-workflow-gate.ts"
@@ -306,6 +307,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseRequireTasks },
       { hook: pretooluseStateGate },
       { hook: pretooluseStuckState },
+      { hook: pretooluseInfractionEscalation },
       { hook: pretooluseBlockPreexistingDismissals },
       { hook: pretoolusBranchIntentGate },
     ],
