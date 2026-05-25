@@ -429,6 +429,41 @@ export function translateEvent(canonical: string, agent: AgentDef): string {
   return agent.eventMap[canonical] ?? canonical
 }
 
+/** Agent-specific tool names this agent emits (alias targets + task aliases). */
+function agentAliasValues(agent: AgentDef): Set<string> {
+  const values = new Set<string>(Object.values(agent.toolAliases))
+  for (const target of Object.values(agent.taskToolAliases ?? {})) {
+    if (target) values.add(target)
+  }
+  return values
+}
+
+/**
+ * Collapse runs of the same alias joined by "or"/"and"/"/" — produced when
+ * several canonical tool names map to one agent tool (e.g. TaskCreate/TaskUpdate
+ * → TodoWrite becomes "TodoWrite or TodoWrite"). Only collapses tokens that are
+ * actual agent tool names so ordinary prose ("again and again") is untouched.
+ */
+function collapseAdjacentDuplicateAliases(text: string, aliasValues: Set<string>): string {
+  return text.replace(/\b(\w+)((?:\s+(?:or|and|\/)\s+\1)+)\b/g, (match, tok) =>
+    aliasValues.has(tok) ? tok : match
+  )
+}
+
+/**
+ * Translate canonical tool-name tokens embedded in agent-visible free text
+ * (hook reason, systemMessage, additionalContext) to this agent's tool names.
+ *
+ * Whole-word replacement via {@link translateTaskToolName} so both general tool
+ * aliases and task-tool aliases resolve in one pass. Tokens with no agent
+ * equivalent (translateTaskToolName returns null, e.g. Codex TaskList) are left
+ * unchanged — prose cannot cleanly drop a word the way an action-plan line can.
+ */
+export function translateToolNamesInText(text: string, agent: AgentDef): string {
+  const translated = text.replace(/\b\w+\b/g, (tok) => translateTaskToolName(tok, agent) ?? tok)
+  return collapseAdjacentDuplicateAliases(translated, agentAliasValues(agent))
+}
+
 /**
  * Infer the most likely agent from emitted tool names.
  *

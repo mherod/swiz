@@ -12,6 +12,7 @@ import {
   translateEvent,
   translateMatcher,
   translateTaskToolName,
+  translateToolNamesInText,
   validatePublicAgentHookMappings,
 } from "./agents.ts"
 
@@ -241,6 +242,50 @@ describe("agents.ts", () => {
       expect(result).toContain("Shell")
       expect(result).toContain("StrReplace")
       expect(result).toContain("TodoWrite")
+    })
+  })
+
+  describe("translateToolNamesInText", () => {
+    it("leaves canonical tool names unchanged for Claude", () => {
+      const claude = getAgent("claude")!
+      const text = "Run TaskList then use Bash to commit and Edit the file."
+      expect(translateToolNamesInText(text, claude)).toBe(text)
+    })
+
+    it("translates embedded tool names to Cursor names", () => {
+      const cursor = getAgent("cursor")!
+      const result = translateToolNamesInText("Use Bash to run, then Edit the file.", cursor)
+      expect(result).toBe("Use Shell to run, then StrReplace the file.")
+    })
+
+    it("collapses duplicate aliases when several canonical names map to one tool", () => {
+      const cursor = getAgent("cursor")!
+      const result = translateToolNamesInText("Use TaskCreate or TaskUpdate to track work.", cursor)
+      expect(result).toBe("Use TodoWrite to track work.")
+    })
+
+    it("does not collapse ordinary repeated prose words", () => {
+      const cursor = getAgent("cursor")!
+      const result = translateToolNamesInText("Try again and again until done.", cursor)
+      expect(result).toBe("Try again and again until done.")
+    })
+
+    it("translates embedded tool names to Gemini names", () => {
+      const gemini = getAgent("gemini")!
+      const result = translateToolNamesInText("Bash then Read the file.", gemini)
+      expect(result).toBe("run_shell_command then read_file the file.")
+    })
+
+    it("translates Edit and Bash to Codex names", () => {
+      const codex = getAgent("codex")!
+      const result = translateToolNamesInText("Use Edit then Bash to verify.", codex)
+      expect(result).toBe("Use apply_patch then shell_command to verify.")
+    })
+
+    it("leaves untranslatable Codex task tools (TaskList) unchanged", () => {
+      const codex = getAgent("codex")!
+      const result = translateToolNamesInText("Run TaskList to check state.", codex)
+      expect(result).toBe("Run TaskList to check state.")
     })
   })
 

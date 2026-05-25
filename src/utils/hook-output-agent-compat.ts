@@ -1,4 +1,5 @@
 import { detectCurrentAgentFromEnv } from "../agent-paths.ts"
+import { type AgentDef, getAgent, translateToolNamesInText } from "../agents.ts"
 
 type HookOutputLike = Record<string, any>
 
@@ -80,12 +81,57 @@ function sanitizeCodexHookOutput(output: HookOutputLike): HookOutputLike {
   return cloned
 }
 
+/** Agent-visible free-text fields that may embed canonical tool names. */
+const TOOL_NAME_TEXT_FIELDS = ["reason", "systemMessage", "stopReason"] as const
+const NESTED_TOOL_NAME_TEXT_FIELDS = ["additionalContext", "permissionDecisionReason"] as const
+
+/**
+ * Rewrite canonical tool names (Bash/Edit/TaskCreate…) in agent-visible text
+ * fields to the agent's own tool names, so no foreign tool name leaks to the
+ * agent. No-op for Claude (canonical === Claude names) and alias-less agents;
+ * returns the original reference unchanged when nothing is translated so callers
+ * relying on identity (e.g. Claude pass-through) keep working.
+ */
+function translateHookOutputToolNames<T extends HookOutputLike>(
+  output: T,
+  agent: AgentDef | undefined
+): T {
+  if (!agent || agent.id === "claude") return output
+  if (Object.keys(agent.toolAliases).length === 0 && !agent.taskToolAliases) return output
+
+  let result: HookOutputLike | null = null
+  const ensureClone = (): HookOutputLike => {
+    result ??= structuredClone(output)
+    return result
+  }
+
+  for (const field of TOOL_NAME_TEXT_FIELDS) {
+    const value = output[field]
+    if (typeof value !== "string" || !value) continue
+    const translated = translateToolNamesInText(value, agent)
+    if (translated !== value) ensureClone()[field] = translated
+  }
+
+  const hookSpecificOutput = output.hookSpecificOutput
+  if (isPlainObject(hookSpecificOutput)) {
+    for (const field of NESTED_TOOL_NAME_TEXT_FIELDS) {
+      const value = hookSpecificOutput[field]
+      if (typeof value !== "string" || !value) continue
+      const translated = translateToolNamesInText(value, agent)
+      if (translated !== value) ensureClone().hookSpecificOutput[field] = translated
+    }
+  }
+
+  return (result ?? output) as T
+}
+
 export function sanitizeHookOutputForAgent<T extends HookOutputLike>(
   output: T,
   agentId: string | null | undefined
 ): T {
-  if (agentId !== "codex") return output
-  return sanitizeCodexHookOutput(output) as T
+  const base = agentId === "codex" ? (sanitizeCodexHookOutput(output) as T) : output
+  const agent = agentId ? getAgent(agentId) : undefined
+  return translateHookOutputToolNames(base, agent)
 }
 
 export function sanitizeHookOutputForCurrentAgent<T extends HookOutputLike>(output: T): T {
