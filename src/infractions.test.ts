@@ -259,6 +259,22 @@ function succeededAttempt(id: string, command: string): string[] {
   ]
 }
 
+/** A successful (non-denied) call of a named tool, e.g. Skill / WebSearch / TaskCreate. */
+function succeededTool(id: string, name: string): string[] {
+  return [
+    JSON.stringify({
+      type: "assistant",
+      timestamp: ETS,
+      message: { content: [{ type: "tool_use", id, name, input: {} }] },
+    }),
+    JSON.stringify({
+      type: "user",
+      timestamp: ETS,
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+    }),
+  ]
+}
+
 const bash = (command: string) => ({ toolName: "Bash", key: command })
 
 describe("evaluateInfraction — cooldown + de-escalation", () => {
@@ -354,6 +370,20 @@ describe("standingWantedLevel", () => {
       ...deniedBashAttempt("c", "git push", ETS),
     ]
     expect(standingWantedLevel(lines, ENOW).wantedLevel).toBe(2)
+  })
+
+  it.each([
+    "Skill",
+    "WebSearch",
+    "TaskCreate",
+  ])("de-escalates to clear after good behaviour: %s", (tool) => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+      ...succeededTool("d", tool),
+    ]
+    expect(standingWantedLevel(lines, ENOW).wantedLevel).toBe(0)
   })
 
   it("clears after good behaviour (a successful most-recent action)", () => {
