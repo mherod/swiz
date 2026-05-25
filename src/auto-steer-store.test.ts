@@ -26,13 +26,21 @@ describe("AutoSteerStore", () => {
   })
 
   it("centralises channel-deliverable triggers excluding on_session_stop", () => {
-    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("asap")
-    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_created")
-    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_updated")
-    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_completed")
+    // Exact canonical list — guards against drift between this set and the
+    // consumers in src/commands/mcp.ts and src/utils/auto-steer-helpers.ts.
+    expect([...CHANNEL_DELIVERABLE_TRIGGERS]).toEqual([
+      "asap",
+      "next_turn",
+      "after_commit",
+      "after_all_tasks_complete",
+      "task_created",
+      "task_updated",
+      "task_completed",
+    ])
     // on_session_stop stays on the AppleScript path — the channel tears down at stop.
     expect(CHANNEL_DELIVERABLE_TRIGGERS).not.toContain("on_session_stop")
     expect(CHANNEL_DELIVERABLE_TRIGGER_SET.has("asap")).toBe(true)
+    expect(CHANNEL_DELIVERABLE_TRIGGER_SET.has("task_completed")).toBe(true)
     expect(CHANNEL_DELIVERABLE_TRIGGER_SET.has("on_session_stop")).toBe(false)
   })
 
