@@ -19,6 +19,7 @@ import posttoolusPrChangesContext from "../hooks/posttooluse-pr-changes-context.
 import posttoolusPrContext from "../hooks/posttooluse-pr-context.ts"
 import posttoolusePrCreateRefine from "../hooks/posttooluse-pr-create-refine.ts"
 import posttoolusePrettierTs from "../hooks/posttooluse-prettier-ts.ts"
+import posttoolusePushAutosteerIssue from "../hooks/posttooluse-push-autosteer-issue.ts"
 import posttoolusePostPushCooldown from "../hooks/posttooluse-push-cooldown.ts"
 import posttooluseSessionEdits from "../hooks/posttooluse-session-edits.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
@@ -447,6 +448,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseCommitAuthorVerification },
       { hook: posttooluseStateTransition },
       { hook: posttoolusUpstreamSyncOnPush },
+      { hook: posttoolusePushAutosteerIssue },
     ],
   },
   {
