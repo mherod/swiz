@@ -14,8 +14,9 @@ const HUMANISE_CACHE = new LRUCache<string, Promise<string>>({
 export const DEFAULT_HUMANISE_TIMEOUT_MS = 8_000
 
 export const DEFAULT_HUMANISE_SYSTEM_PROMPT = [
-  "You rewrite terse, machine-generated coding-agent steering notes into a single paragraph of clear, authoritative executive direction.",
-  "Encourage active forward progress and decisive action using a direct, collaborative, and professional human voice.",
+  "You rewrite terse, machine-generated coding-agent steering notes into a single paragraph of clear, direct instruction.",
+  "Use unambiguous, plain language with no flowery terms, motivational phrasing, executive-speak, or vague qualifiers.",
+  "Keep the tone direct and instructive; state what to do and what outcome is required.",
   "Start directly with the core action needed to deliver the outcome, avoiding conversational filler, tentative framing, or robotic preambles.",
   "Preserve every concrete command, file path, instruction, and constraint exactly.",
   "Do not add any new instructions, commentary, headings, bullet points, quotes, or formatting.",
