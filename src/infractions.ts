@@ -339,6 +339,29 @@ export function evaluateInfraction(
   return direct
 }
 
+/**
+ * Standing wanted level for display (e.g. the status line) — the agent's current
+ * "heat" independent of any pending call. Good behaviour clears it: a successful
+ * most-recent action, a served cooldown, or no denials all read as level 0.
+ * Otherwise it reflects how many times the most-recently-blocked action was denied
+ * in the window (1–2 → yellow, ≥3 → red). The transient cooldown tier is not a
+ * standing state, so display caps at red.
+ */
+export function standingWantedLevel(
+  lines: string[],
+  nowMs: number = Date.now(),
+  windowMs: number = INFRACTION_WINDOW_MS
+): InfractionAssessment {
+  const last = lastSettledAttempt(lines)
+  // Last action succeeded / there were none / the cooldown was served → cleared.
+  if (!last || !last.denied || last.isCooldown) return wantedAssessment("none", 0, "", "")
+
+  const count = denialCountForKey(last.key, collectBlockedAttempts(lines), nowMs, windowMs)
+  const level: InfractionLevel =
+    count >= RED_DENIAL_THRESHOLD ? "red" : count >= 1 ? "yellow" : "none"
+  return wantedAssessment(level, count, last.key, "")
+}
+
 /** Resolve the current PreToolUse call into a comparable attempt, or null if it has no key. */
 export function resolveCurrentAttempt(input: {
   tool_name?: string

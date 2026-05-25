@@ -11,6 +11,7 @@ import {
   getGitBranchStatus,
   getRepoSlug,
 } from "../git-helpers.ts"
+import { standingWantedLevel } from "../infractions.ts"
 import { getIssueStoreReader } from "../issue-store.ts"
 import {
   DEFAULT_SETTINGS,
@@ -27,6 +28,7 @@ import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
 import { readTasks } from "../tasks/task-repository.ts"
 import { findAllProviderSessions } from "../transcript-sessions.ts"
 import type { Command } from "../types.ts"
+import { readSessionLines } from "../utils/transcript.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
@@ -909,10 +911,21 @@ function renderCappedTicks(count: number, glyph: string, color: string): string 
   return `${color}${glyph.repeat(MAX_TASK_TICKS)}${R}${DIM}⋯${R}${color}+${overflow}${R}`
 }
 
+/**
+ * GTA-style wanted level (0–3) rendered as red stars. Complements the compliance
+ * emoji: 0 shows nothing, 1–3 show ★ per level so a "hot" session reads at a glance.
+ */
+export function renderWantedStars(wantedLevel: number | null | undefined): string {
+  const level = typeof wantedLevel === "number" ? Math.min(Math.max(wantedLevel, 0), 3) : 0
+  if (level <= 0) return ""
+  return `\x1b[91m${"★".repeat(level)}${R}`
+}
+
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
   durationLabel?: string | null,
-  durationSeconds?: number | null
+  durationSeconds?: number | null,
+  wantedLevel?: number | null
 ): string {
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
@@ -932,6 +945,8 @@ export function formatTaskCountSegment(
     }
     parts.push(durationLabel ? `${indicator} ${DIM}${durationLabel}${R}` : indicator)
   }
+  const stars = renderWantedStars(wantedLevel)
+  if (stars) parts.push(stars)
   return parts.join(" ")
 }
 
@@ -988,7 +1003,8 @@ function buildLine3(
   agentName: string | undefined,
   vimMode: string | undefined,
   taskCounts: TaskCounts | null | undefined,
-  activeSkills: string[] | null | undefined
+  activeSkills: string[] | null | undefined,
+  wantedLevel?: number | null
 ): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
@@ -997,7 +1013,8 @@ function buildLine3(
   const taskSeg = formatTaskCountSegment(
     taskCounts,
     snapshot.complianceDurationLabel,
-    snapshot.complianceDurationSeconds
+    snapshot.complianceDurationSeconds,
+    wantedLevel
   )
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
@@ -1037,6 +1054,7 @@ export function renderStatusLineFromSnapshot(opts: {
   daemonMetrics?: StatusLineDaemonMetrics | null
   taskCounts?: TaskCounts | null
   activeSkills?: string[] | null
+  wantedLevel?: number | null
   ctxPct: number
   ctxTokens: number
   ctxStats: ContextStats | null
@@ -1048,6 +1066,7 @@ export function renderStatusLineFromSnapshot(opts: {
     daemonMetrics = null,
     taskCounts: explicitTaskCounts,
     activeSkills: explicitActiveSkills,
+    wantedLevel = 0,
     ctxPct,
     ctxTokens,
     ctxStats,
@@ -1074,7 +1093,8 @@ export function renderStatusLineFromSnapshot(opts: {
     input.agent?.name,
     input.vim?.mode,
     taskCounts,
-    activeSkills
+    activeSkills,
+    wantedLevel
   )
 
   const fill = `${DIM}─${R}`
@@ -1119,18 +1139,34 @@ export const statusLineCommand: Command = {
       snapshot.taskCounts ??
       (sessionTasks.length > 0 ? buildTaskCountsFromTasks(sessionTasks) : null)
 
+    // Resolve the session transcript once for both the active-skills fallback and
+    // the GTA wanted level computed from retry-after-block infractions.
+    let sessionPath: string | null = null
+    try {
+      const sessions = await findAllProviderSessions(cwd)
+      sessionPath =
+        (sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0])?.path ?? null
+    } catch {
+      // Fall back to null
+    }
+
     // Fallback: if the daemon snapshot doesn't include activeSkills (old daemon),
     // compute from the locally-read session transcript.
     let activeSkills = snapshot.activeSkills
-    if (activeSkills === undefined || activeSkills === null) {
+    if ((activeSkills === undefined || activeSkills === null) && sessionPath) {
+      activeSkills = await getRecentlyInvokedSkillsForCurrentSession(sessionPath).catch(() => null)
+    }
+
+    // Wanted level: unhealthy task compliance contributes a baseline ★1, and
+    // retry-after-block infractions in the transcript raise it further.
+    let wantedLevel =
+      taskCounts && taskCounts.incomplete > 0 && !isTaskGovernanceHealthy(taskCounts) ? 1 : 0
+    if (sessionPath) {
       try {
-        const sessions = await findAllProviderSessions(cwd)
-        const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
-        if (session?.path) {
-          activeSkills = await getRecentlyInvokedSkillsForCurrentSession(session.path)
-        }
+        const lines = await readSessionLines(sessionPath)
+        wantedLevel = Math.max(wantedLevel, standingWantedLevel(lines).wantedLevel)
       } catch {
-        // Fall back to null
+        // Leave the compliance-derived baseline in place
       }
     }
 
@@ -1141,6 +1177,7 @@ export const statusLineCommand: Command = {
         daemonMetrics,
         taskCounts,
         activeSkills,
+        wantedLevel,
         ctxPct,
         ctxTokens,
         ctxStats,

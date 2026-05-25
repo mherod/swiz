@@ -15,6 +15,7 @@ import {
   getContextStatsPath,
   readContextStats,
   renderStatusLineFromSnapshot,
+  renderWantedStars,
   summarizeGitHubCiRuns,
   updateContextStats,
 } from "./status-line.ts"
@@ -455,6 +456,28 @@ describe("formatTaskCountSegment", () => {
     )
     expect(segDown).toContain("⚠️")
     expect(segDown).toContain("12s")
+  })
+
+  it("appends red wanted-level stars when wantedLevel > 0", () => {
+    const counts = { total: 5, incomplete: 3, pending: 2, inProgress: 1 }
+    const seg = formatTaskCountSegment(counts, null, null, 2)
+    expect(seg).toContain("★★")
+    // still shows the compliance indicator alongside the stars
+    expect(seg).toContain("👍")
+  })
+
+  it("renders no stars when wantedLevel is 0 or omitted", () => {
+    const counts = { total: 5, incomplete: 3, pending: 2, inProgress: 1 }
+    expect(formatTaskCountSegment(counts, null, null, 0)).not.toContain("★")
+    expect(formatTaskCountSegment(counts)).not.toContain("★")
+  })
+
+  it("renderWantedStars caps at 3 and clears at 0", () => {
+    expect(renderWantedStars(0)).toBe("")
+    expect(renderWantedStars(null)).toBe("")
+    expect(renderWantedStars(1)).toContain("★")
+    expect(renderWantedStars(5)).toContain("★★★")
+    expect(renderWantedStars(5)).not.toContain("★★★★")
   })
 
   it("upgrades to clapping emoji when good compliance has been held for ≥2 minutes", () => {

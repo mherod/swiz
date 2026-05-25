@@ -9,6 +9,7 @@ import {
   INFRACTION_WINDOW_MS,
   lastSettledAttempt,
   resolveCurrentAttempt,
+  standingWantedLevel,
 } from "./infractions.ts"
 
 const DENY_FOOTER = DENY_FOOTER_MARKERS[0]
@@ -312,6 +313,48 @@ describe("evaluateInfraction — cooldown + de-escalation", () => {
     // A single denial is not red — the next event should not be held.
     const lines = [...deniedBashAttempt("a", "git push", ETS)]
     expect(evaluateInfraction(lines, bash("bun test"), ENOW).level).toBe("none")
+  })
+})
+
+describe("standingWantedLevel", () => {
+  it("is clear (0) on an empty transcript", () => {
+    expect(standingWantedLevel([], ENOW).wantedLevel).toBe(0)
+  })
+
+  it("reads ★1 (yellow) when the most recent action was blocked once", () => {
+    const lines = [...deniedBashAttempt("a", "git push", ETS)]
+    const out = standingWantedLevel(lines, ENOW)
+    expect(out.level).toBe("yellow")
+    expect(out.wantedLevel).toBe(1)
+  })
+
+  it("reads ★2 (red) when the most recent action was blocked three+ times", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+    ]
+    expect(standingWantedLevel(lines, ENOW).wantedLevel).toBe(2)
+  })
+
+  it("clears after good behaviour (a successful most-recent action)", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+      ...succeededAttempt("d", "bun test"),
+    ]
+    expect(standingWantedLevel(lines, ENOW).wantedLevel).toBe(0)
+  })
+
+  it("clears once a cooldown has been served", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+      ...cooldownAttempt("d", "bun test"),
+    ]
+    expect(standingWantedLevel(lines, ENOW).wantedLevel).toBe(0)
   })
 })
 
