@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -34,23 +34,23 @@ function deniedBash(id: string, command: string): string[] {
 }
 
 describe("pretooluse-infraction-escalation", () => {
-  let dir: string
-  let transcriptPath: string
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "infraction-hook-"))
-    transcriptPath = join(dir, "transcript.jsonl")
-  })
+  // Each test owns its own temp dir/path via a local const — describe-scope
+  // mutable state would be clobbered under `bun test --concurrent`.
+  const dirsToClean: string[] = []
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true })
+    await Promise.all(dirsToClean.splice(0).map((d) => rm(d, { recursive: true, force: true })))
   })
 
-  async function writeTranscript(lines: string[]): Promise<void> {
+  async function writeTranscript(lines: string[]): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "infraction-hook-"))
+    dirsToClean.push(dir)
+    const transcriptPath = join(dir, "transcript.jsonl")
     await writeFile(transcriptPath, lines.join("\n"))
+    return transcriptPath
   }
 
-  function input(command: string): Record<string, any> {
+  function input(command: string, transcriptPath: string): Record<string, unknown> {
     return {
       tool_name: "Bash",
       tool_input: { command },
@@ -60,29 +60,35 @@ describe("pretooluse-infraction-escalation", () => {
   }
 
   it("passes through when there are no prior denials", async () => {
-    await writeTranscript([])
-    const out = await evaluatePretooluseInfractionEscalation(input("git push"))
+    const transcriptPath = await writeTranscript([])
+    const out = await evaluatePretooluseInfractionEscalation(input("git push", transcriptPath))
     expect(out).toEqual({})
   })
 
   it("does not pile on the first block (one prior denial → yellow, not deny)", async () => {
-    await writeTranscript(deniedBash("a", "git push"))
-    const out = await evaluatePretooluseInfractionEscalation(input("git push"))
+    const transcriptPath = await writeTranscript(deniedBash("a", "git push"))
+    const out = await evaluatePretooluseInfractionEscalation(input("git push", transcriptPath))
     expect(isDeny(out)).toBe(false)
-    // yellow card surfaces advisory context
+    // yellow card surfaces advisory context naming the prior block
     expect(JSON.stringify(out)).toContain("blocked it")
   })
 
   it("hard-blocks (red card) after two prior denials of the same call", async () => {
-    await writeTranscript([...deniedBash("a", "git push"), ...deniedBash("b", "git push")])
-    const out = await evaluatePretooluseInfractionEscalation(input("git push"))
+    const transcriptPath = await writeTranscript([
+      ...deniedBash("a", "git push"),
+      ...deniedBash("b", "git push"),
+    ])
+    const out = await evaluatePretooluseInfractionEscalation(input("git push", transcriptPath))
     expect(isDeny(out)).toBe(true)
     expect(JSON.stringify(out)).toContain("re-assess")
   })
 
   it("ignores denials of a different command", async () => {
-    await writeTranscript([...deniedBash("a", "rm -rf /"), ...deniedBash("b", "rm -rf /")])
-    const out = await evaluatePretooluseInfractionEscalation(input("git push"))
+    const transcriptPath = await writeTranscript([
+      ...deniedBash("a", "rm -rf /"),
+      ...deniedBash("b", "rm -rf /"),
+    ])
+    const out = await evaluatePretooluseInfractionEscalation(input("git push", transcriptPath))
     expect(out).toEqual({})
   })
 })

@@ -41,16 +41,16 @@ function describeAction(toolName: string, key: string): string {
 function yellowCardMessage(toolName: string, key: string): string {
   return (
     `You already tried ${describeAction(toolName, key)} once and a guard blocked it. ` +
-    `Do not retry the same call — do what the block asked first (the deny message above it spells out the required step). ` +
-    `If you retry this again unchanged, it will be hard-blocked.`
+    `Take the action that block asked for instead of retrying — the deny message above it spells out the required step. ` +
+    `Retrying this again unchanged will hard-block it.`
   )
 }
 
 function redCardMessage(toolName: string, key: string, priorDenialCount: number): string {
   return (
-    `Blocked. You have retried ${describeAction(toolName, key)} ${priorDenialCount} times after it was denied, without doing what the block required.\n\n` +
-    `Stop retrying this call. Re-read the original deny message and take the action it asked for instead. ` +
-    `If you genuinely believe the block is wrong, use the /re-assess skill — do not keep re-issuing the same call.`
+    `Blocked. You have retried ${describeAction(toolName, key)} ${priorDenialCount} times after it was denied, without taking the action the block required.\n\n` +
+    `Stop retrying this call. Re-read the original deny message and take the action it asked for. ` +
+    `If you genuinely believe the block is wrong, use the /re-assess skill rather than re-issuing the same call.`
   )
 }
 
