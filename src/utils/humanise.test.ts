@@ -73,9 +73,9 @@ describe("generic humanise utility", () => {
     expect(result).toBe("keep: another line")
   })
 
-  test("fallbackHumaniseText creates an astute instruction paragraph", () => {
+  test("fallbackHumaniseText creates a polite instruction paragraph", () => {
     expect(fallbackHumaniseText("Take the next task")).toBe(
-      "I noticed you haven't, so we need to take the next task."
+      "I noticed you haven't done this yet — please take the next task, thanks."
     )
     expect(fallbackHumaniseText("Please take the next task")).toBe("Please take the next task.")
     expect(fallbackHumaniseText("Can you take the next task?")).toBe("Can you take the next task?")
@@ -84,16 +84,18 @@ describe("generic humanise utility", () => {
   test("humaniseText rewrites via provider when one is available", async () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.AI_TEST_TEXT_RESPONSE =
-      "I noticed you haven't worked on the next task, so we need to work on it."
+      "Great work so far! I noticed you haven't worked on the next task yet — please pick it up now, thanks."
 
     const result = await humaniseText("Take the next task")
-    expect(result).toBe("I noticed you haven't worked on the next task, so we need to work on it.")
+    expect(result).toBe(
+      "Great work so far! I noticed you haven't worked on the next task yet — please pick it up now, thanks."
+    )
   })
 
   test("humaniseText uses local fallback when no provider is available", async () => {
     // process.env.AI_TEST_NO_BACKEND is set to "1" in beforeEach
     const result = await humaniseText("Take the next task")
-    expect(result).toBe("I noticed you haven't, so we need to take the next task.")
+    expect(result).toBe("I noticed you haven't done this yet — please take the next task, thanks.")
   })
 
   test("humaniseText caches resolved promises to avoid extra calls", async () => {
