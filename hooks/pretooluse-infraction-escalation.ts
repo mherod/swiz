@@ -8,10 +8,13 @@
 // checked is retry-after-block: re-issuing a tool call a PreToolUse hook already
 // DENIED, instead of doing what the block asked.
 //
-//   • 1st retry of a blocked action → yellow card (escalating advisory; the next
-//     retry will hard-block).
-//   • 2nd+ retry → red card (hard deny that refuses the tool until the agent does
-//     the required action instead of retrying).
+// Modelled as a GTA-style wanted level (see src/infractions.ts):
+//   • ★1 yellow   — 1st retry of a blocked action (advisory; next retry hard-blocks).
+//   • ★2 red      — 2nd+ retry (hard deny; do the required action, not the retry).
+//   • ★3 cooldown — the event right after a red card is held once with a human
+//     explanation, then the session continues.
+// De-escalates to clear on good behaviour (a successful action, switching away) and
+// as denials age out of the window.
 //
 // This does NOT fire on the first block (whichever hook denied it owns that), and
 // it does NOT fire on healthy-but-improvable advisory state — only on a concrete,

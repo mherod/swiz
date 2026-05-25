@@ -282,6 +282,11 @@ describe("evaluateInfraction — cooldown + de-escalation", () => {
     expect(evaluateInfraction(lines, bash("git push"), ENOW).level).toBe("red")
   })
 
+  it("passes yellow through when the current call is a first retry", () => {
+    const lines = [...deniedBashAttempt("a", "git push", ETS)]
+    expect(evaluateInfraction(lines, bash("git push"), ENOW).level).toBe("yellow")
+  })
+
   it("de-escalates to none once the cooldown has been served", () => {
     // ...red card, then the cooldown hold was served → session continues.
     const lines = [
