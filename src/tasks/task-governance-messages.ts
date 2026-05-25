@@ -128,14 +128,6 @@ interface GovernanceThresholds {
 
 export type TaskGovernanceMessageRequest =
   | {
-      kind: "prior-session-tasks"
-      toolName: string
-      priorSessionId: string
-      priorTaskCount: number
-      taskLines: string
-      completeExamples: string
-    }
-  | {
       kind: "no-tasks"
       toolName: string
       thresholds: GovernanceThresholds
@@ -242,23 +234,6 @@ type Req<K extends TaskGovernanceMessageRequest["kind"]> = Extract<
   TaskGovernanceMessageRequest,
   { kind: K }
 >
-
-function buildPriorSessionTasksMessage(r: Req<"prior-session-tasks">): string {
-  const taskCreateName = taskCreateToolName()
-  return (
-    `Prior incomplete tasks found from session ${r.priorSessionId} (${r.priorTaskCount} task(s)):\n` +
-    r.taskLines +
-    `\n\n` +
-    formatTranslatedActionPlan(
-      [
-        `If the work is already done, mark the prior tasks complete:\n${r.completeExamples}`,
-        `If the work is still needed, use ${taskCreateName} to re-create these tasks and mark the current one in_progress.`,
-        retryAfterTaskList(r.toolName),
-      ],
-      { taskListFirst: true }
-    )
-  )
-}
 
 function buildNoTasksMessage(r: Req<"no-tasks">): string {
   const taskCreateName = taskCreateToolName()
@@ -545,7 +520,6 @@ function buildTasklistDuplicateSubjectNoticeMessage(
 const MESSAGE_BUILDERS: {
   [K in TaskGovernanceMessageRequest["kind"]]: (r: Req<K>) => string
 } = {
-  "prior-session-tasks": buildPriorSessionTasksMessage,
   "no-tasks": buildNoTasksMessage,
   "all-tasks-completed": buildAllTasksCompletedMessage,
   "missing-task-minimums": buildMissingTaskMinimumsMessage,

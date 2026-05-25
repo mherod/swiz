@@ -10,8 +10,6 @@ import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
 import {
-  findPriorSessionTasks,
-  formatNativeTaskCompleteCommand,
   formatTaskList,
   getSessionTaskPath,
   getSessionTasksDir,
@@ -181,27 +179,9 @@ function buildIncompleteTaskSection(tasks: SessionTask[]): string {
   )
 }
 
-async function collectPriorSessionSection(cwd: string, sessionId: string): Promise<string | null> {
-  const priorResult = await findPriorSessionTasks(cwd, sessionId)
-  if (!priorResult || priorResult.tasks.length === 0) return null
-  const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-  const completeHint = formatNativeTaskCompleteCommand("<id>", priorSessionId, "note:done")
-  return (
-    `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
-    `If already done: ${completeHint}\n` +
-    `Otherwise continue these before creating new tasks:\n` +
-    formatTaskList(priorTasks, {
-      limit: TASK_PREVIEW_LIMIT,
-      overflowLabel: "incomplete task(s)",
-      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
-    })
-  )
-}
-
 async function buildTaskSections(
   snapshot: CompactSnapshot | null,
   sessionId: string,
-  cwd: string,
   home: string
 ): Promise<string[]> {
   const sections: string[] = []
@@ -215,9 +195,6 @@ async function buildTaskSections(
   const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
   if (currentIncomplete.length > 0) {
     sections.push(buildIncompleteTaskSection(currentIncomplete))
-  } else {
-    const priorSection = await collectPriorSessionSection(cwd, sessionId)
-    if (priorSection) sections.push(priorSection)
   }
 
   return sections
@@ -234,12 +211,11 @@ export async function evaluateSessionstartCompactContext(input: unknown): Promis
       "Run git diff after reaching success.",
   ]
 
-  const cwd = hookInput.cwd ?? process.cwd()
   const sessionId = hookInput.session_id ?? ""
   const home = getHomeDirWithFallback("")
 
   const snapshot = sessionId ? await readCompactSnapshot(sessionId, home) : null
-  const taskSections = await buildTaskSections(snapshot, sessionId, cwd, home)
+  const taskSections = await buildTaskSections(snapshot, sessionId, home)
   sections.push(...taskSections)
 
   const ctx = joinSectionsWithinBudget(sections, COMPACT_CONTEXT_MAX_CHARS)

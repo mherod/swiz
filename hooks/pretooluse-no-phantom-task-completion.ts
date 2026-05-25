@@ -13,8 +13,7 @@
 //   1. Completion description contains traceable evidence prefixes
 //      (commit:, pr:, file:, test:, ci_green:)
 //   2. No in_progress transition for this task found in the current session
-//      transcript — task may have been set in_progress in a prior session.
-//      Fail-open; we can only verify what the transcript contains.
+//      transcript. Fail-open; we can only verify what the transcript contains.
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
@@ -211,7 +210,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
 
   if (!anchorFound)
     return preToolUseAllow(
-      `Continue in prior-session task mode: no active-work adoption event for #${taskId} appears in this transcript.`
+      `Continue in unauditable task mode: no active-work adoption event for #${taskId} appears in this transcript.`
     )
 
   if (workCallCount >= 1) {

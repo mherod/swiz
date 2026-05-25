@@ -3,7 +3,6 @@ import { orderBy } from "lodash-es"
 import { debugLog } from "../debug.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { getTaskToolName } from "./task-governance-messages.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
@@ -34,12 +33,6 @@ export interface SessionTask {
 export function getTasksRoot(home: string = getHomeDirWithFallback("")): string | null {
   if (!home) return null
   return join(home, ".claude", "tasks")
-}
-
-/** Resolve ~/.claude/projects for the active home directory. */
-export function getProjectsRoot(home: string = getHomeDirWithFallback("")): string | null {
-  if (!home) return null
-  return join(home, ".claude", "projects")
 }
 
 /** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
@@ -171,15 +164,6 @@ export async function readSessionTasksFresh(
   return readSessionTasks(sessionId, home)
 }
 
-/**
- * Result of scanning prior sessions for incomplete tasks.
- * Includes the session ID so callers can construct `swiz tasks complete --session` commands.
- */
-export interface PriorSessionResult {
-  sessionId: string
-  tasks: SessionTask[]
-}
-
 export interface LimitedItems<T> {
   visible: T[]
   remaining: number
@@ -193,66 +177,6 @@ export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
     visible,
     remaining: Math.max(items.length - visible.length, 0),
   }
-}
-
-/**
- * Find incomplete tasks from the most recent prior session for a given project.
- *
- * Scans ~/.claude/projects/<projectKey>/ for session transcript IDs, then checks
- * ~/.claude/tasks/<sessionId>/ for incomplete tasks (pending | in_progress).
- * Returns tasks from the most recently-modified session that has any tasks,
- * excluding `excludeSessionId` (the current session).
- */
-async function collectSessionsFromTranscripts(
-  projectDir: string,
-  excludeSessionId: string
-): Promise<{ id: string; mtime: number }[]> {
-  const { readdir, stat } = await import("node:fs/promises")
-  let transcriptFiles: string[]
-  try {
-    transcriptFiles = await readdir(projectDir)
-  } catch {
-    return []
-  }
-
-  const sessions: { id: string; mtime: number }[] = []
-  for (const f of transcriptFiles) {
-    if (!f.endsWith(".jsonl")) continue
-    const id = f.slice(0, -6)
-    if (id === excludeSessionId) continue
-    try {
-      const s = await stat(join(projectDir, f))
-      sessions.push({ id, mtime: s.mtimeMs })
-    } catch {}
-  }
-  return orderBy(sessions, [(session) => session.mtime], ["desc"])
-}
-
-export async function findPriorSessionTasks(
-  cwd: string,
-  excludeSessionId: string,
-  home: string = getHomeDirWithFallback("")
-): Promise<PriorSessionResult | null> {
-  if (!home || !cwd) return null
-  const { projectKeyFromCwd } = await import("../transcript-utils.ts")
-
-  const projectKey = projectKeyFromCwd(cwd)
-  const projectsRoot = getProjectsRoot(home)
-  if (!projectsRoot) return null
-  const projectDir = join(projectsRoot, projectKey)
-
-  const orderedSessions = await collectSessionsFromTranscripts(projectDir, excludeSessionId)
-
-  // Walk sessions newest-first; return incomplete tasks from first session with tasks
-  for (const { id } of orderedSessions) {
-    const tasks = await readSessionTasks(id, home)
-    const incomplete = tasks
-      .filter((t) => isIncompleteTaskStatus(t.status))
-      // Filter to only numeric IDs (user-created tasks), excluding legacy prefixed placeholders
-      .filter((t) => /^\d+$/.test(t.id))
-    if (incomplete.length > 0) return { sessionId: id, tasks: incomplete }
-  }
-  return null
 }
 
 /** True when a task status counts as incomplete work. */
@@ -338,36 +262,6 @@ export function formatTaskCompleteCommands(
 ): string {
   return tasks
     .map((t) => formatTaskCompleteCommand(String(t.id), sessionId, evidence, options))
-    .join("\n")
-}
-
-/**
- * Agent-facing hint: complete a task (including prior-session tasks) via native TaskUpdate.
- * Do not use the `swiz tasks` CLI inside the agent.
- */
-export function formatNativeTaskCompleteCommand(
-  taskId: string,
-  sessionId: string,
-  evidence: string,
-  options: { indent?: string } = {}
-): string {
-  const indent = options.indent ?? ""
-  const taskUpdateName = getTaskToolName("TaskUpdate")
-  return (
-    `${indent}${taskUpdateName} with taskId "${taskId}", status "completed", and description including ` +
-    `"${evidence}" (task lived under prior session ${sessionId})`
-  )
-}
-
-/** One native completion hint per task. */
-export function formatNativeTaskCompleteCommands(
-  tasks: Array<Pick<SessionTask, "id">>,
-  sessionId: string,
-  evidence: string,
-  options: { indent?: string } = {}
-): string {
-  return tasks
-    .map((t) => formatNativeTaskCompleteCommand(String(t.id), sessionId, evidence, options))
     .join("\n")
 }
 

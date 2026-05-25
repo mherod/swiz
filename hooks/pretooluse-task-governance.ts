@@ -65,9 +65,6 @@ import { replaceTaskGovernanceSynonyms } from "../src/tasks/task-governance-reph
 import { fetchIssueHints } from "../src/tasks/task-issue-hints.ts"
 import {
   applyCacheTaskUpdate,
-  findPriorSessionTasks,
-  formatNativeTaskCompleteCommands,
-  formatTaskList,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
   readSessionTasks,
@@ -371,36 +368,12 @@ function buildSlowTaskWarning(
 
 function checkNoTasks(
   toolName: string,
-  cwd: string,
-  sessionId: string,
   thresholds: GovernanceThresholds
 ): (
   allTasks: Array<{ id: string; status: string; subject: string }>
-) => Promise<SwizHookOutput | undefined> {
-  return async (allTasks) => {
+) => SwizHookOutput | undefined {
+  return (allTasks) => {
     if (allTasks.length !== 0) return undefined
-    const priorResult = await findPriorSessionTasks(cwd, sessionId)
-    if (priorResult && priorResult.tasks.length > 0) {
-      const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const taskLines = formatTaskList(priorTasks)
-      const completeExamples = formatNativeTaskCompleteCommands(
-        priorTasks,
-        priorSessionId,
-        "note:completed in prior session",
-        { indent: "  " }
-      )
-      return preToolUseDeny(
-        buildTaskGovernanceMessage({
-          kind: "prior-session-tasks",
-          toolName,
-          priorSessionId,
-          priorTaskCount: priorTasks.length,
-          taskLines,
-          completeExamples,
-        })
-      )
-    }
-
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "no-tasks", toolName, thresholds }))
   }
 }
@@ -865,7 +838,7 @@ async function runTaskStateChecks(
   const deletionOutcome = checkTaskDeletion(toolName, allTasks, thresholds, input)
   if (deletionOutcome) return deletionOutcome
 
-  const noTasksOutcome = await checkNoTasks(toolName, cwd, sessionId, thresholds)(allTasks)
+  const noTasksOutcome = checkNoTasks(toolName, thresholds)(allTasks)
   if (noTasksOutcome) return noTasksOutcome
 
   const summary = buildIncompleteTaskSummary(allTasks)

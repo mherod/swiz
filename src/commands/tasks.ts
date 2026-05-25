@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
+import { stderrLog } from "../debug.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { PROJECT_STATES } from "../settings.ts"
 import { readAuditLog } from "../tasks/task-audit-verification.ts"
@@ -13,7 +14,6 @@ import type { Task } from "../tasks/task-repository.ts"
 import {
   atomicWriteJson,
   compareTaskIds,
-  isIncompleteTaskStatus,
   parseTaskId,
   readTasks,
   sessionPrefix,
@@ -27,7 +27,6 @@ import {
   resolveTaskById,
 } from "../tasks/task-resolver.ts"
 import {
-  adoptOrphanedTasks,
   applyStateUpdate,
   completeTaskWithAutoTransition,
   createTask,
@@ -97,39 +96,6 @@ async function resolveSession(args: string[]): Promise<string> {
   return sessions[0]!
 }
 
-async function printPreviousSessionIncompleteHint(sessionId: string): Promise<void> {
-  const tasks = await readTasks(sessionId)
-  if (tasks.length === 0) return
-
-  const hasIncomplete = tasks.some((t) => isIncompleteTaskStatus(t.status))
-  if (hasIncomplete) return
-
-  const sessions = await getSessions(process.cwd())
-  for (const prevSessionId of sessions.slice(1)) {
-    const prev = await readTasks(prevSessionId)
-    const prevIncomplete = prev.filter((t) => isIncompleteTaskStatus(t.status))
-    if (prevIncomplete.length === 0) continue
-
-    console.log(
-      `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
-    )
-    for (const task of prevIncomplete) {
-      console.log(
-        `    ${DIM}swiz tasks complete ${task.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
-      )
-    }
-    const agent = detectCurrentAgent()
-    const nativeTool = agent?.toolAliases.Task
-    if (nativeTool) {
-      console.log(
-        `  ${DIM}hint: prefer native ${nativeTool} tool over shell commands when available${RESET}`
-      )
-    }
-    console.log()
-    break
-  }
-}
-
 function isListInvocation(subcommand: string | undefined): boolean {
   return (
     !subcommand ||
@@ -195,10 +161,6 @@ async function runListTasks(args: string[]): Promise<void> {
     dateFormat,
     orphanIds.has(sessionId)
   )
-
-  if (!args.includes("--session") && !allProjects) {
-    await printPreviousSessionIncompleteHint(sessionId)
-  }
 }
 
 async function runCreateTask(rest: string[]): Promise<void> {
@@ -659,10 +621,12 @@ const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) =
   },
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
-  adopt: async (rest) => {
-    const sessionId = await resolveSession(rest)
-    await adoptOrphanedTasks(sessionId, process.cwd())
-    await printSessionTasks(sessionId, process.cwd())
+  adopt: async () => {
+    stderrLog(
+      "tasks adopt deprecation",
+      "Error: Adopting tasks is no longer supported. This feature has been removed, and any workflow or agent relying on it is on the wrong path."
+    )
+    process.exitCode = 1
   },
   repair: (rest) => runRepairTasks(rest),
 }
@@ -692,7 +656,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|status|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|status] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -707,10 +671,6 @@ export const tasksCommand: Command = {
     {
       flags: "status <id> <status>",
       description: "Set status: pending | in_progress | completed | cancelled",
-    },
-    {
-      flags: "adopt [--recovered]",
-      description: "Re-associate orphan (compaction-gap) session tasks to the current session",
     },
     { flags: "--session <id>", description: "Target a specific session (prefix match)" },
     { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },

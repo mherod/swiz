@@ -1,8 +1,8 @@
-import { readdir, readFile, stat, unlink } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { resolveTranslationAgent } from "../agent-paths.ts"
 import { type AgentDef, translateMatcher } from "../agents.ts"
-import { DIM, GREEN, RESET } from "../ansi.ts"
+import { DIM, RESET } from "../ansi.ts"
 import { verifyTaskSubject } from "../commands/tasks.ts"
 import { getGitClient } from "../git/client.ts"
 import {
@@ -27,7 +27,7 @@ import {
   writeAudit,
   writeTask,
 } from "./task-repository.ts"
-import { collectIncompleteTasks, getOrphanSessionIds, resolveTaskById } from "./task-resolver.ts"
+import { collectIncompleteTasks, resolveTaskById } from "./task-resolver.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
 export { compareTaskIds, parseTaskId, sessionPrefix }
@@ -640,76 +640,6 @@ export async function completeTaskWithAutoTransition(
     await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
   }
   await updateStatus(sessionId, taskId, "completed", options)
-}
-
-// ─── Adopt ────────────────────────────────────────────────────────────────────
-
-/**
- * Re-associate all tasks from orphan (compaction-gap) sessions into the given
- * target session.
- */
-export async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise<void> {
-  const orphanIds = await getOrphanSessionIds(undefined, undefined, cwd)
-  if (orphanIds.size === 0) {
-    console.log("\n  No recovered sessions to adopt.\n")
-    return
-  }
-
-  const { tasksDir } = createDefaultTaskStore()
-  const prefix = sessionPrefix(targetSessionId)
-
-  const existing = await readTasks(targetSessionId)
-  let maxSeq = existing.reduce((m, t) => {
-    const parsed = parseTaskId(t.id)
-    const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
-    return Math.max(m, Number.isNaN(seq) ? 0 : seq)
-  }, 0)
-
-  const existingFingerprints = new Set(
-    existing.map((t) => t.subjectFingerprint ?? computeSubjectFingerprint(t.subject))
-  )
-
-  let adopted = 0
-  let skipped = 0
-
-  for (const orphanSessionId of orphanIds) {
-    const tasks = await readTasks(orphanSessionId)
-    if (tasks.length === 0) continue
-
-    for (const task of tasks) {
-      const fp = task.subjectFingerprint ?? computeSubjectFingerprint(task.subject)
-      if (existingFingerprints.has(fp)) {
-        console.log(`  ${DIM}⚠ Skipped #${task.id} (duplicate subject): ${task.subject}${RESET}`)
-        skipped++
-        continue
-      }
-      existingFingerprints.add(fp)
-      maxSeq++
-      const newId = `${prefix}-${maxSeq}`
-      const adoptedTask: Task = { ...task, id: newId }
-      await writeTask(targetSessionId, adoptedTask, cwd)
-      await writeAudit(targetSessionId, {
-        timestamp: new Date().toISOString(),
-        taskId: newId,
-        action: "create",
-        newStatus: adoptedTask.status,
-        subject: adoptedTask.subject,
-        verificationText: `adopted from orphan session ${orphanSessionId.slice(0, 8)}`,
-      })
-      try {
-        await unlink(join(tasksDir, orphanSessionId, `${task.id}.json`))
-      } catch {}
-      console.log(
-        `  ${GREEN}✓${RESET} Adopted #${newId} ${DIM}(was ${task.id} in ${orphanSessionId.slice(0, 8)}...)${RESET}: ${task.subject}`
-      )
-      adopted++
-    }
-  }
-
-  const skippedNote = skipped > 0 ? `, ${skipped} skipped (duplicate subject)` : ""
-  console.log(
-    `\n  ${adopted} task(s) adopted into session ${targetSessionId.slice(0, 8)}...${skippedNote}\n`
-  )
 }
 
 // ─── State update ─────────────────────────────────────────────────────────────

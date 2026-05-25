@@ -69,6 +69,7 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "src/commands/daemon/web-server.ts",
     "daemon dispatch error handling — resolveTaskCountsFromCache failures",
   ],
+  ["src/commands/tasks.ts", "tasks adopt deprecation stderr warnings"],
 ])
 
 /** Files in src/ that legitimately use console.log/console.info for CLI output. */

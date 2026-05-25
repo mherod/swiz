@@ -113,15 +113,6 @@ async function runStandaloneRequireTasks(input: Record<string, any>): Promise<Ho
 
 const { create: createTempHome } = useTempDir("swiz-require-tasks-")
 
-/** Write a stub transcript file for project discovery */
-async function writeTranscript(homeDir: string, cwd: string, sessionId: string) {
-  const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
-  const projectKey = projectKeyFromCwd(cwd)
-  const dir = join(homeDir, ".claude", "projects", projectKey)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, `${sessionId}.jsonl`), "")
-}
-
 async function writeTask(
   homeDir: string,
   sessionId: string,
@@ -186,30 +177,6 @@ describe("pretooluse-require-tasks", () => {
     const result = await runHook({ homeDir, toolName: "Bash" })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("needs tasks in place first")
-  })
-
-  test("denies Bash with prior-session restore message when prior session has incomplete tasks", async () => {
-    const homeDir = await createTempHome()
-    const cwd = process.cwd() // must be a git repo with CLAUDE.md — swiz root qualifies
-    const priorSessionId = `prior-session-${Date.now()}`
-    const currentSessionId = `current-session-${Date.now()}`
-
-    // Seed prior session with an incomplete task
-    await writeTask(homeDir, priorSessionId, {
-      id: "1",
-      subject: "Implement cross-session restore",
-      status: "in_progress",
-    })
-    await writeTranscript(homeDir, cwd, priorSessionId)
-
-    // Current session has no tasks
-    const result = await runHook({ homeDir, toolName: "Bash", sessionId: currentSessionId, cwd })
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("prior session")
-    expect(result.reason).toContain("Implement cross-session restore")
-    // Verify prior-session completion uses native TaskUpdate guidance
-    expect(result.reason).toContain("TaskUpdate")
-    expect(result.reason).toContain(priorSessionId)
   })
 
   test("allows Edit when all tasks are completed (wrap-up work)", async () => {
@@ -332,7 +299,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("Duplicate task subjects found")
     expect(result.reason).toContain("Pick the duplicate entry")
-    expect(result.reason).toContain("Run TaskList")
+    expect(result.reason).toContain("Retry this")
   })
 
   test("allows with a non-blocking warning when an in-progress task exceeds the default duration threshold", async () => {
@@ -687,7 +654,8 @@ describe("pretooluse-require-tasks", () => {
     for (const [command, label] of blockedShellCommands) {
       test(`denies ${label} when task buffer is missing`, async () => {
         const homeDir = await createTempHome()
-        const result = await runHook({ homeDir, command })
+        const sessionId = `session-shell-${label.replace(/\s+/g, "-")}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const result = await runHook({ homeDir, command, sessionId })
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("needs tasks in place first")
       })
