@@ -919,15 +919,16 @@ function renderCappedTicks(count: number, glyph: string, color: string): string 
  */
 export function renderWantedStars(wantedLevel: number | null | undefined): string {
   const level = typeof wantedLevel === "number" ? Math.min(Math.max(wantedLevel, 0), 3) : 0
-  if (level <= 0) return ""
-  return `\x1b[91m${"★".repeat(level)}${R}`
+  const stars = "★".repeat(level) + "☆".repeat(3 - level)
+  // GTA-style meter: always visible. Dim empty stars when clear; bold red siren when raised.
+  if (level <= 0) return `${DIM}☆☆☆${R}`
+  return `${BOLD}\x1b[91m🚨 ${stars}${R}`
 }
 
 export function formatTaskCountSegment(
   counts: TaskCounts | null | undefined,
   durationLabel?: string | null,
-  durationSeconds?: number | null,
-  wantedLevel?: number | null
+  durationSeconds?: number | null
 ): string {
   if (!counts || counts.total === 0) return ""
   const parts: string[] = []
@@ -947,8 +948,6 @@ export function formatTaskCountSegment(
     }
     parts.push(durationLabel ? `${indicator} ${DIM}${durationLabel}${R}` : indicator)
   }
-  const stars = renderWantedStars(wantedLevel)
-  if (stars) parts.push(stars)
   return parts.join(" ")
 }
 
@@ -960,15 +959,24 @@ function buildDaemonMetricsSegment(metrics: StatusLineDaemonMetrics | null | und
 
 type SegChecker = (name: string) => boolean
 
-function buildLine1(seg: SegChecker, snapshot: WarmStatusLineSnapshot, a2: string): string {
+function buildLine1(
+  seg: SegChecker,
+  snapshot: WarmStatusLineSnapshot,
+  a2: string,
+  wantedLevel?: number | null
+): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
   const ciSeg = snapshot.ignoreCi ? "" : formatGitHubCiSegment(snapshot.ciState, snapshot.ciLabel)
   const reviewStatus = buildReviewSegment(snapshot)
+  const wantedSeg = renderWantedStars(wantedLevel)
   return joinGroups([
     seg("repo") ? `${lbl("repo")} ${a2}${snapshot.shortCwd}${R}` : "",
     seg("git") && snapshot.gitInfo ? `${lbl("git")} ${snapshot.gitInfo}` : "",
     seg("git") && ciSeg ? `${lbl("ci")} ${ciSeg}` : "",
     seg("pr") && reviewStatus ? `${lbl("pr")} ${reviewStatus}` : "",
+    // GTA-style: wanted level lives top-right, where there's the most room. Not
+    // gated by statusLineSegments — it's a core safety indicator, always shown.
+    wantedSeg ? `${lbl("wanted")} ${wantedSeg}` : "",
   ])
 }
 
@@ -1005,8 +1013,7 @@ function buildLine3(
   agentName: string | undefined,
   vimMode: string | undefined,
   taskCounts: TaskCounts | null | undefined,
-  activeSkills: string[] | null | undefined,
-  wantedLevel?: number | null
+  activeSkills: string[] | null | undefined
 ): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
@@ -1015,8 +1022,7 @@ function buildLine3(
   const taskSeg = formatTaskCountSegment(
     taskCounts,
     snapshot.complianceDurationLabel,
-    snapshot.complianceDurationSeconds,
-    wantedLevel
+    snapshot.complianceDurationSeconds
   )
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
@@ -1085,7 +1091,7 @@ export function renderStatusLineFromSnapshot(opts: {
   const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
   const model = input.model?.display_name ?? "claude"
 
-  const line1 = buildLine1(seg, snapshot, a2)
+  const line1 = buildLine1(seg, snapshot, a2, wantedLevel || (snapshot.wantedLevel ?? 0))
   const line2 = buildLine2({ seg, ctxPct, ctxTokens, ctxStats, model, rb })
   const line3 = buildLine3(
     seg,
@@ -1095,8 +1101,7 @@ export function renderStatusLineFromSnapshot(opts: {
     input.agent?.name,
     input.vim?.mode,
     taskCounts,
-    activeSkills,
-    wantedLevel || (snapshot.wantedLevel ?? 0)
+    activeSkills
   )
 
   const fill = `${DIM}─${R}`
