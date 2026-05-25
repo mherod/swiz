@@ -1,5 +1,6 @@
 import { detectCurrentAgentFromEnv } from "../agent-paths.ts"
 import { type AgentDef, getAgent, translateToolNamesInText } from "../agents.ts"
+import { tildifyHome } from "../home.ts"
 
 type HookOutputLike = Record<string, any>
 
@@ -125,13 +126,46 @@ function translateHookOutputToolNames<T extends HookOutputLike>(
   return (result ?? output) as T
 }
 
+/**
+ * Redact the absolute home directory to `~` in agent-visible text fields, so
+ * swiz-emitted context/reasons never leak the user's home path. Applies to every
+ * agent. Clones on first change and returns the original reference when nothing
+ * is redacted, preserving identity for callers that rely on it.
+ */
+/** Return the redacted form of a field value, or null when unchanged/non-string. */
+function redactedHomeField(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null
+  const redacted = tildifyHome(value)
+  return redacted !== value ? redacted : null
+}
+
+function redactHomePathsInOutput<T extends HookOutputLike>(output: T): T {
+  let result: HookOutputLike | null = null
+  const ensureClone = (): HookOutputLike => (result ??= structuredClone(output))
+
+  for (const field of TOOL_NAME_TEXT_FIELDS) {
+    const redacted = redactedHomeField(output[field])
+    if (redacted !== null) ensureClone()[field] = redacted
+  }
+
+  const hookSpecificOutput = output.hookSpecificOutput
+  if (isPlainObject(hookSpecificOutput)) {
+    for (const field of NESTED_TOOL_NAME_TEXT_FIELDS) {
+      const redacted = redactedHomeField(hookSpecificOutput[field])
+      if (redacted !== null) ensureClone().hookSpecificOutput[field] = redacted
+    }
+  }
+
+  return (result ?? output) as T
+}
+
 export function sanitizeHookOutputForAgent<T extends HookOutputLike>(
   output: T,
   agentId: string | null | undefined
 ): T {
   const base = agentId === "codex" ? (sanitizeCodexHookOutput(output) as T) : output
   const agent = agentId ? getAgent(agentId) : undefined
-  return translateHookOutputToolNames(base, agent)
+  return redactHomePathsInOutput(translateHookOutputToolNames(base, agent))
 }
 
 export function sanitizeHookOutputForCurrentAgent<T extends HookOutputLike>(output: T): T {

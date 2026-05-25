@@ -23,3 +23,16 @@ export function getHomeDirWithFallback(fallback: string): string {
 export function expandHomeVars(value: string, homeDir: string = getHomeDir()): string {
   return value.replace(/\$HOME/g, homeDir)
 }
+
+/**
+ * Redact the absolute home directory prefix to `~` for display in agent-visible
+ * text. Only matches the home path at a token boundary (followed by `/`, end of
+ * string, or a non-word char) so siblings like `/Users/bob2` are left intact.
+ * No-op when HOME is unset, `~`, or `/`.
+ */
+export function tildifyHome(value: string, homeDir: string = getHomeDir()): string {
+  if (!value || !homeDir || homeDir === "~" || homeDir === "/") return value
+  if (!value.includes(homeDir)) return value
+  const escaped = homeDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return value.replace(new RegExp(`${escaped}(?=/|$|[^\\w])`, "g"), "~")
+}

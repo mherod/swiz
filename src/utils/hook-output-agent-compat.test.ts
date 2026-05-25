@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { getHomeDir } from "../home.ts"
 import { sanitizeHookOutputForAgent } from "./hook-output-agent-compat.ts"
 
 describe("sanitizeHookOutputForAgent", () => {
@@ -200,5 +201,44 @@ describe("sanitizeHookOutputForAgent tool-name translation", () => {
       "codex"
     )
     expect(output.systemMessage).toBe("Run TaskList to check state.")
+  })
+})
+
+describe("sanitizeHookOutputForAgent home-path redaction", () => {
+  const home = getHomeDir()
+  const hasRealHome = home !== "~" && home !== "/"
+
+  test("redacts the home path in reason and nested additionalContext for Claude", () => {
+    if (!hasRealHome) return
+    const output = sanitizeHookOutputForAgent<Record<string, any>>(
+      {
+        reason: `Edit ${home}/Development/swiz/src/home.ts`,
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          additionalContext: `Memory lives in ${home}/.claude`,
+        },
+      },
+      "claude"
+    )
+    expect(output.reason).toBe("Edit ~/Development/swiz/src/home.ts")
+    expect(output.hookSpecificOutput.additionalContext).toBe("Memory lives in ~/.claude")
+  })
+
+  test("redacts the home path in systemMessage and stopReason", () => {
+    if (!hasRealHome) return
+    const output = sanitizeHookOutputForAgent<Record<string, any>>(
+      {
+        systemMessage: `cwd ${home}`,
+        stopReason: `unpushed work in ${home}/repo`,
+      },
+      "claude"
+    )
+    expect(output.systemMessage).toBe("cwd ~")
+    expect(output.stopReason).toBe("unpushed work in ~/repo")
+  })
+
+  test("preserves identity when no home path is present", () => {
+    const output = { reason: "All checks passed; nothing to do." }
+    expect(sanitizeHookOutputForAgent(output, "claude")).toBe(output)
   })
 })
