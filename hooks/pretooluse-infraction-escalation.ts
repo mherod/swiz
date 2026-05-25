@@ -17,11 +17,7 @@
 // it does NOT fire on healthy-but-improvable advisory state — only on a concrete,
 // already-denied action being repeated. Pure transcript scan, no state files.
 
-import {
-  assessInfraction,
-  collectBlockedAttempts,
-  resolveCurrentAttempt,
-} from "../src/infractions.ts"
+import { COOLDOWN_MARKER, evaluateInfraction, resolveCurrentAttempt } from "../src/infractions.ts"
 import {
   buildContextHookOutput,
   preToolUseDeny,
@@ -54,6 +50,14 @@ function redCardMessage(toolName: string, key: string, priorDenialCount: number)
   )
 }
 
+function cooldownMessage(): string {
+  // Must contain COOLDOWN_MARKER verbatim so a later scan knows this hold was served.
+  return (
+    `Hold on — you're ${COOLDOWN_MARKER}. A hard block just landed, so this next step pauses for one beat.\n\n` +
+    `Re-read what that block asked for and line up the right next action. This hold clears after this single step — then carry on normally.`
+  )
+}
+
 export async function evaluatePretooluseInfractionEscalation(
   input: object
 ): Promise<SwizHookOutput> {
@@ -61,7 +65,7 @@ export async function evaluatePretooluseInfractionEscalation(
 
   const current = resolveCurrentAttempt({
     tool_name: hookInput.tool_name,
-    tool_input: hookInput.tool_input as Record<string, any> | undefined,
+    tool_input: hookInput.tool_input as Record<string, unknown> | undefined,
   })
   if (!current) return {}
 
@@ -71,20 +75,20 @@ export async function evaluatePretooluseInfractionEscalation(
   const lines = await readSessionLines(transcriptPath)
   if (lines.length === 0) return {}
 
-  const blockedAttempts = collectBlockedAttempts(lines)
-  if (blockedAttempts.length === 0) return {}
-
   const nowMs =
     typeof hookInput._testNowMs === "number" && Number.isFinite(hookInput._testNowMs)
       ? hookInput._testNowMs
       : Date.now()
 
-  const assessment = assessInfraction(current, blockedAttempts, nowMs)
+  const assessment = evaluateInfraction(lines, current, nowMs)
 
   if (assessment.level === "red") {
     return preToolUseDeny(
       redCardMessage(assessment.toolName, assessment.key, assessment.priorDenialCount)
     )
+  }
+  if (assessment.level === "cooldown") {
+    return preToolUseDeny(cooldownMessage())
   }
   if (assessment.level === "yellow") {
     return buildContextHookOutput(

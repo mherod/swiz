@@ -33,10 +33,33 @@ const COMMAND_KEY_LENGTH = 60
 /** How far back denied attempts count toward an infraction. */
 export const INFRACTION_WINDOW_MS = 20 * 60 * 1000
 
-export type InfractionLevel = "none" | "yellow" | "red"
+/**
+ * Stable phrase embedded in the post-red-card cooldown block so a later scan can
+ * tell "this denial was the cooldown we already served" from "this was a real
+ * block". Must survive the synonym rephraser — verified by the hook tests.
+ */
+export const COOLDOWN_MARKER = "cooling off after a hard block"
+
+/**
+ * Wanted level, GTA-style: rises with repeated bad behaviour, falls with good.
+ *   - none     → ☆0  clear
+ *   - yellow   → ★1  first retry of a blocked action (advisory only)
+ *   - red      → ★2  repeated retry (hard block)
+ *   - cooldown → ★3  the mandatory next-event hold right after a red card
+ */
+export type InfractionLevel = "none" | "yellow" | "red" | "cooldown"
+
+export const WANTED_LEVEL_BY_INFRACTION: Record<InfractionLevel, number> = {
+  none: 0,
+  yellow: 1,
+  red: 2,
+  cooldown: 3,
+}
 
 export interface InfractionAssessment {
   level: InfractionLevel
+  /** GTA-style wanted level 0–3 derived from `level`. */
+  wantedLevel: number
   /** Number of prior denials of the same action within the window. */
   priorDenialCount: number
   /** Normalised key the denials share (command key, file path, or tool name). */
@@ -48,6 +71,8 @@ interface ToolResultRecord {
   text: string
   timestampMs: number | null
   denied: boolean
+  /** True when this denial was our own cooldown hold (carries COOLDOWN_MARKER). */
+  isCooldown: boolean
 }
 
 /** A tool_use whose result was a denial, reduced to a comparable key. */
@@ -55,11 +80,29 @@ export interface BlockedAttempt {
   toolName: string
   key: string
   timestampMs: number | null
+  /** True when the denial was our cooldown hold, not a real block. */
+  isCooldown: boolean
+}
+
+/** The most recent tool call that has a settled result, with how it resolved. */
+export interface SettledAttempt {
+  key: string
+  denied: boolean
+  isCooldown: boolean
 }
 
 interface CurrentAttempt {
   toolName: string
   key: string
+}
+
+function wantedAssessment(
+  level: InfractionLevel,
+  priorDenialCount: number,
+  key: string,
+  toolName: string
+): InfractionAssessment {
+  return { level, wantedLevel: WANTED_LEVEL_BY_INFRACTION[level], priorDenialCount, key, toolName }
 }
 
 function parseTimestampMs(value: unknown): number | null {
@@ -143,6 +186,7 @@ function collectResults(lines: string[]): Map<string, ToolResultRecord> {
         text,
         timestampMs: parseTimestampMs(block.timestamp) ?? entryTimestampMs,
         denied: isDenialText(text),
+        isCooldown: text.includes(COOLDOWN_MARKER),
       })
     }
   }
@@ -161,7 +205,35 @@ function blockedAttemptFromBlock(
   const toolName = String(block.name ?? "")
   const key = attemptKey(toolName, block.input)
   if (!key) return null
-  return { toolName, key, timestampMs: result.timestampMs ?? entryTimestampMs }
+  return {
+    toolName,
+    key,
+    timestampMs: result.timestampMs ?? entryTimestampMs,
+    isCooldown: result.isCooldown,
+  }
+}
+
+/**
+ * Find the most recent tool call that has a settled result and report how it
+ * resolved. Used to decide whether a red-card cooldown is owed (previous event
+ * was a real block) or already served (previous event was the cooldown itself).
+ */
+export function lastSettledAttempt(lines: string[]): SettledAttempt | null {
+  const results = collectResults(lines)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed = entryBlocks(lines[i] ?? "")
+    if (!parsed || parsed.entry.type !== "assistant") continue
+    for (let j = parsed.blocks.length - 1; j >= 0; j--) {
+      const block = parsed.blocks[j]
+      if (!block || block.type !== "tool_use") continue
+      const result = results.get(String(block.id ?? ""))
+      if (!result) continue
+      const key = attemptKey(String(block.name ?? ""), block.input)
+      if (!key) continue
+      return { key, denied: result.denied, isCooldown: result.isCooldown }
+    }
+  }
+  return null
 }
 
 /**
@@ -198,16 +270,13 @@ export function assessInfraction(
   nowMs: number = Date.now(),
   windowMs: number = INFRACTION_WINDOW_MS
 ): InfractionAssessment {
-  const base: InfractionAssessment = {
-    level: "none",
-    priorDenialCount: 0,
-    key: current.key,
-    toolName: current.toolName,
-  }
-  if (!current.key) return base
+  if (!current.key) return wantedAssessment("none", 0, current.key, current.toolName)
 
+  // Cooldown holds are our own blocks, not the agent re-issuing a denied action —
+  // they must not inflate the retry count.
   const priorDenialCount = blockedAttempts.filter(
     (attempt) =>
+      !attempt.isCooldown &&
       attempt.key === current.key &&
       (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
   ).length
@@ -215,7 +284,59 @@ export function assessInfraction(
   const level: InfractionLevel =
     priorDenialCount >= 2 ? "red" : priorDenialCount === 1 ? "yellow" : "none"
 
-  return { ...base, level, priorDenialCount }
+  return wantedAssessment(level, priorDenialCount, current.key, current.toolName)
+}
+
+const RED_DENIAL_THRESHOLD = 3
+
+/** Count non-cooldown denials of a key inside the window. */
+function denialCountForKey(
+  key: string,
+  blockedAttempts: readonly BlockedAttempt[],
+  nowMs: number,
+  windowMs: number
+): number {
+  return blockedAttempts.filter(
+    (attempt) =>
+      !attempt.isCooldown &&
+      attempt.key === key &&
+      (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
+  ).length
+}
+
+/**
+ * Full wanted-level evaluation for the current call against the whole transcript.
+ *
+ * Order of precedence:
+ *   1. If the current call is itself a repeated retry → yellow/red (assessInfraction).
+ *   2. Else if a red card just landed on the previous event (a real block of a
+ *      red-level key, not the cooldown) → "cooldown": hold this one event, then
+ *      the session may continue.
+ *   3. Else de-escalate: a successful previous call, switching to a fresh action,
+ *      or an already-served cooldown all leave the wanted level at none.
+ */
+export function evaluateInfraction(
+  lines: string[],
+  current: CurrentAttempt,
+  nowMs: number = Date.now(),
+  windowMs: number = INFRACTION_WINDOW_MS
+): InfractionAssessment {
+  const blockedAttempts = collectBlockedAttempts(lines)
+  const direct = assessInfraction(current, blockedAttempts, nowMs, windowMs)
+  // Retrying the same blocked action outranks the cooldown — keep the specific message.
+  if (direct.level === "red" || direct.level === "yellow") return direct
+
+  const last = lastSettledAttempt(lines)
+  const cooldownDue =
+    !!last &&
+    last.denied &&
+    !last.isCooldown &&
+    denialCountForKey(last.key, blockedAttempts, nowMs, windowMs) >= RED_DENIAL_THRESHOLD
+  if (cooldownDue) {
+    return wantedAssessment("cooldown", direct.priorDenialCount, current.key, current.toolName)
+  }
+
+  return direct
 }
 
 /** Resolve the current PreToolUse call into a comparable attempt, or null if it has no key. */

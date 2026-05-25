@@ -2,9 +2,12 @@ import { describe, expect, it } from "bun:test"
 import {
   assessInfraction,
   attemptKey,
+  COOLDOWN_MARKER,
   collectBlockedAttempts,
   DENY_FOOTER_MARKERS,
+  evaluateInfraction,
   INFRACTION_WINDOW_MS,
+  lastSettledAttempt,
   resolveCurrentAttempt,
 } from "./infractions.ts"
 
@@ -108,51 +111,65 @@ describe("collectBlockedAttempts", () => {
   })
 })
 
+function bk(
+  key: string,
+  timestampMs: number | null,
+  isCooldown = false
+): { toolName: string; key: string; timestampMs: number | null; isCooldown: boolean } {
+  return { toolName: "Bash", key, timestampMs, isCooldown }
+}
+
 describe("assessInfraction", () => {
   it("returns none with no prior denials — the first block stands alone", () => {
     const current = { toolName: "Bash", key: "git push" }
     const assessment = assessInfraction(current, [])
     expect(assessment.level).toBe("none")
     expect(assessment.priorDenialCount).toBe(0)
+    expect(assessment.wantedLevel).toBe(0)
   })
 
-  it("returns yellow after one prior denial of the same action", () => {
+  it("returns yellow (wanted level 1) after one prior denial of the same action", () => {
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [{ toolName: "Bash", key: "git push", timestampMs: Date.now() }]
-    expect(assessInfraction(current, blocked).level).toBe("yellow")
+    const assessment = assessInfraction(current, [bk("git push", Date.now())])
+    expect(assessment.level).toBe("yellow")
+    expect(assessment.wantedLevel).toBe(1)
   })
 
-  it("returns red after two or more prior denials of the same action", () => {
+  it("returns red (wanted level 2) after two or more prior denials of the same action", () => {
     const now = Date.now()
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [
-      { toolName: "Bash", key: "git push", timestampMs: now - 1000 },
-      { toolName: "Bash", key: "git push", timestampMs: now - 500 },
-    ]
+    const blocked = [bk("git push", now - 1000), bk("git push", now - 500)]
     const assessment = assessInfraction(current, blocked, now)
     expect(assessment.level).toBe("red")
     expect(assessment.priorDenialCount).toBe(2)
+    expect(assessment.wantedLevel).toBe(2)
+  })
+
+  it("does not count cooldown holds as retries of the action", () => {
+    const now = Date.now()
+    const current = { toolName: "Bash", key: "git push" }
+    // One real denial + one cooldown hold on the same key → still only yellow.
+    const blocked = [bk("git push", now - 1000), bk("git push", now - 500, true)]
+    expect(assessInfraction(current, blocked, now).level).toBe("yellow")
   })
 
   it("does not count denials of a different action", () => {
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [{ toolName: "Edit", key: "/x.ts", timestampMs: Date.now() }]
+    const blocked = [{ toolName: "Edit", key: "/x.ts", timestampMs: Date.now(), isCooldown: false }]
     expect(assessInfraction(current, blocked).level).toBe("none")
   })
 
   it("ignores denials older than the window", () => {
     const now = Date.now()
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [
-      { toolName: "Bash", key: "git push", timestampMs: now - INFRACTION_WINDOW_MS - 1 },
-    ]
-    expect(assessInfraction(current, blocked, now).level).toBe("none")
+    expect(
+      assessInfraction(current, [bk("git push", now - INFRACTION_WINDOW_MS - 1)], now).level
+    ).toBe("none")
   })
 
   it("treats null-timestamp denials as in-window (conservative)", () => {
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [{ toolName: "Bash", key: "git push", timestampMs: null }]
-    expect(assessInfraction(current, blocked).level).toBe("yellow")
+    expect(assessInfraction(current, [bk("git push", null)]).level).toBe("yellow")
   })
 
   it("returns none when the current call has no comparable key", () => {
@@ -191,5 +208,117 @@ describe("end-to-end: transcript scan to assessment", () => {
     expect(current).not.toBeNull()
     const assessment = assessInfraction(current!, blocked, nowMs)
     expect(assessment.level).toBe("red")
+  })
+})
+
+// ─── Wanted-level: cooldown after a red card + de-escalation ─────────────────
+
+const ETS = "2026-05-25T00:00:00.000Z"
+const ENOW = Date.parse(ETS) + 1000
+
+/** A denied tool_use whose result carries the cooldown marker (our own hold). */
+function cooldownAttempt(id: string, command: string): string[] {
+  return [
+    JSON.stringify({
+      type: "assistant",
+      timestamp: ETS,
+      message: { content: [{ type: "tool_use", id, name: "Bash", input: { command } }] },
+    }),
+    JSON.stringify({
+      type: "user",
+      timestamp: ETS,
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: id,
+            is_error: true,
+            content: `${COOLDOWN_MARKER}.\n\n${DENY_FOOTER_MARKERS[0]}`,
+          },
+        ],
+      },
+    }),
+  ]
+}
+
+/** A tool_use whose result succeeded (no deny footer). */
+function succeededAttempt(id: string, command: string): string[] {
+  return [
+    JSON.stringify({
+      type: "assistant",
+      timestamp: ETS,
+      message: { content: [{ type: "tool_use", id, name: "Bash", input: { command } }] },
+    }),
+    JSON.stringify({
+      type: "user",
+      timestamp: ETS,
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+    }),
+  ]
+}
+
+const bash = (command: string) => ({ toolName: "Bash", key: command })
+
+describe("evaluateInfraction — cooldown + de-escalation", () => {
+  it("holds the next event (cooldown, wanted level 3) right after a red card", () => {
+    // Three denials of `git push` → the last one was a red card. The next event
+    // is a *different* command, which must still be held for one beat.
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+    ]
+    const out = evaluateInfraction(lines, bash("bun test"), ENOW)
+    expect(out.level).toBe("cooldown")
+    expect(out.wantedLevel).toBe(3)
+  })
+
+  it("re-issuing the red-carded command stays red, not cooldown", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+    ]
+    expect(evaluateInfraction(lines, bash("git push"), ENOW).level).toBe("red")
+  })
+
+  it("de-escalates to none once the cooldown has been served", () => {
+    // ...red card, then the cooldown hold was served → session continues.
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+      ...cooldownAttempt("d", "bun test"),
+    ]
+    expect(evaluateInfraction(lines, bash("ls"), ENOW).level).toBe("none")
+  })
+
+  it("de-escalates to none after good behaviour (a successful action)", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...deniedBashAttempt("c", "git push", ETS),
+      ...succeededAttempt("d", "bun run typecheck"),
+    ]
+    expect(evaluateInfraction(lines, bash("ls"), ENOW).level).toBe("none")
+  })
+
+  it("does not hold when the last block was a one-off, not a red card", () => {
+    // A single denial is not red — the next event should not be held.
+    const lines = [...deniedBashAttempt("a", "git push", ETS)]
+    expect(evaluateInfraction(lines, bash("bun test"), ENOW).level).toBe("none")
+  })
+})
+
+describe("lastSettledAttempt", () => {
+  it("reports the most recent settled tool call and how it resolved", () => {
+    const lines = [...deniedBashAttempt("a", "git push", ETS), ...succeededAttempt("b", "ls")]
+    const last = lastSettledAttempt(lines)
+    expect(last).toEqual({ key: "ls", denied: false, isCooldown: false })
+  })
+
+  it("flags a cooldown hold as the most recent settled call", () => {
+    const last = lastSettledAttempt(cooldownAttempt("a", "bun test"))
+    expect(last).toEqual({ key: "bun test", denied: true, isCooldown: true })
   })
 })
