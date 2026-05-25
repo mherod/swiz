@@ -3,10 +3,16 @@
  * PostToolUse hook: auto-steer — types a steering prompt into the active terminal
  * when a request has been scheduled by another hook via `scheduleAutoSteer()`.
  *
- * Handles three trigger types during PostToolUse:
+ * Handles these trigger types during PostToolUse:
  *   - `next_turn`              — deliver on every PostToolUse cycle (default)
  *   - `after_commit`           — deliver when the tool was a Bash `git commit`
  *   - `after_all_tasks_complete` — deliver when all session tasks are completed
+ *   - `task_created`           — deliver when the tool was a TaskCreate
+ *   - `task_updated`           — deliver when the tool was a TaskUpdate
+ *   - `task_completed`         — deliver when a TaskUpdate set status to completed
+ *
+ * The `asap` trigger is delivered at schedule time (see scheduleAutoSteer), not
+ * here, and `on_session_stop` is delivered by the Stop blocking strategy.
  *
  * Consumes scheduled requests from the SQLite queue and sends them via AppleScript.
  * This is an async fire-and-forget hook — it does not block tool execution.
@@ -23,7 +29,7 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { isShellTool } from "../src/tool-matchers.ts"
+import { isShellTool, isTaskCreateTool, isTaskUpdateTool } from "../src/tool-matchers.ts"
 import { shouldDeferAutoSteerForForegroundChatApp } from "../src/utils/auto-steer-foreground.ts"
 import {
   consumeAutoSteerRequest,
@@ -59,7 +65,36 @@ async function hasAllTasksCompleteTrigger(
   )
 }
 
-async function getTriggersToDeliver(
+function hasTaskCreatedTrigger(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  rec: Record<string, any>
+): boolean {
+  if (!store.hasPending(safeSession, "task_created")) return false
+  return isTaskCreateTool((rec.tool_name as string) ?? "")
+}
+
+function hasTaskUpdatedTrigger(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  rec: Record<string, any>
+): boolean {
+  if (!store.hasPending(safeSession, "task_updated")) return false
+  return isTaskUpdateTool((rec.tool_name as string) ?? "")
+}
+
+function hasTaskCompletedTrigger(
+  store: ReturnType<typeof getAutoSteerStore>,
+  safeSession: string,
+  rec: Record<string, any>
+): boolean {
+  if (!store.hasPending(safeSession, "task_completed")) return false
+  if (!isTaskUpdateTool((rec.tool_name as string) ?? "")) return false
+  const status = (rec.tool_input as { status?: string } | undefined)?.status
+  return status === "completed"
+}
+
+export async function getTriggersToDeliver(
   store: ReturnType<typeof getAutoSteerStore>,
   safeSession: string,
   sessionId: string,
@@ -79,6 +114,18 @@ async function getTriggersToDeliver(
 
   if (await hasAllTasksCompleteTrigger(store, safeSession, sessionId)) {
     triggers.push("after_all_tasks_complete")
+  }
+
+  if (hasTaskCreatedTrigger(store, safeSession, rec)) {
+    triggers.push("task_created")
+  }
+
+  if (hasTaskUpdatedTrigger(store, safeSession, rec)) {
+    triggers.push("task_updated")
+  }
+
+  if (hasTaskCompletedTrigger(store, safeSession, rec)) {
+    triggers.push("task_completed")
   }
 
   return triggers

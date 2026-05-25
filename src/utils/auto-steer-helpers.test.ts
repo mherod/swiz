@@ -254,6 +254,22 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(true)
   })
 
+  test("scheduleAutoSteer asap falls back to the MCP channel without AppleScript", async () => {
+    const home = await setupAutoSteerHome()
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    await writeLiveChannelStatus(cwd)
+
+    const scheduled = await scheduleAutoSteer("session-asap", "Handle this now", "asap", cwd)
+
+    const store = getAutoSteerStore()
+    expect(scheduled).toBe(true)
+    expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(true)
+    // No AppleScript terminal: the asap message is queued for the live channel
+    // under the asap trigger rather than waiting for a dispatch.
+    expect(store.consumeOneByProjectKey(projectKey, "asap")?.trigger).toBe("asap")
+  })
+
   test("scheduleAutoSteer prefers AppleScript over a live MCP channel", async () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")

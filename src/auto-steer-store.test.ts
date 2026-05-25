@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AutoSteerStore } from "./auto-steer-store.ts"
+import {
+  AutoSteerStore,
+  CHANNEL_DELIVERABLE_TRIGGER_SET,
+  CHANNEL_DELIVERABLE_TRIGGERS,
+} from "./auto-steer-store.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
 describe("AutoSteerStore", () => {
@@ -19,6 +23,27 @@ describe("AutoSteerStore", () => {
       rmSync(dir, { recursive: true, force: true })
     }
     tmpDirs.length = 0
+  })
+
+  it("centralises channel-deliverable triggers excluding on_session_stop", () => {
+    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("asap")
+    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_created")
+    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_updated")
+    expect(CHANNEL_DELIVERABLE_TRIGGERS).toContain("task_completed")
+    // on_session_stop stays on the AppleScript path — the channel tears down at stop.
+    expect(CHANNEL_DELIVERABLE_TRIGGERS).not.toContain("on_session_stop")
+    expect(CHANNEL_DELIVERABLE_TRIGGER_SET.has("asap")).toBe(true)
+    expect(CHANNEL_DELIVERABLE_TRIGGER_SET.has("on_session_stop")).toBe(false)
+  })
+
+  it("round-trips the asap and task lifecycle triggers", () => {
+    const store = createStore()
+    for (const trigger of ["asap", "task_created", "task_updated", "task_completed"] as const) {
+      store.enqueue("sess-trig", `msg ${trigger}`, trigger, { dedupKey: trigger })
+      const results = store.consumeOne("sess-trig", trigger)
+      expect(results).toHaveLength(1)
+      expect(results[0]!.trigger).toBe(trigger)
+    }
   })
 
   it("enqueue and consume single message", () => {

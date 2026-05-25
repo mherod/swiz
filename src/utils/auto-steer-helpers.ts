@@ -7,7 +7,7 @@
 
 import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { z } from "zod"
-import type { AutoSteerTrigger } from "../auto-steer-store.ts"
+import { type AutoSteerTrigger, CHANNEL_DELIVERABLE_TRIGGER_SET } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import {
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
@@ -37,12 +37,6 @@ function touchMcpChannelNotify(cwd: string): void {
     }
   }
 }
-
-const MCP_CHANNEL_TRIGGERS = new Set<AutoSteerTrigger>([
-  "next_turn",
-  "after_commit",
-  "after_all_tasks_complete",
-])
 
 export type McpChannelWatcherState = "starting" | "active" | "error" | "unavailable" | "closed"
 
@@ -367,7 +361,7 @@ export async function renderQueuedAutoSteerRequest(
 }
 
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
-  return !!cwd && MCP_CHANNEL_TRIGGERS.has(trigger) && isMcpChannelLiveForCwd(cwd)
+  return !!cwd && CHANNEL_DELIVERABLE_TRIGGER_SET.has(trigger) && isMcpChannelLiveForCwd(cwd)
 }
 
 export function isAppleScriptTerminalApp(app: string | null | undefined): boolean {
@@ -487,6 +481,20 @@ export async function scheduleAutoSteer(
     const { getAutoSteerStore } = await import("../auto-steer-store.ts")
     const store = getAutoSteerStore()
     const renderedMessage = await renderAutoSteerMessage(sessionId, message)
+
+    if (resolvedTrigger === "asap") {
+      // Deliver immediately instead of waiting for a PostToolUse/Stop dispatch.
+      // Enqueue first so the queue's dedup ledger suppresses duplicate sends,
+      // then atomically consume it and type it straight into the terminal.
+      const enqueued = store.enqueue(safeSession, renderedMessage, "asap", { dedupKey: message })
+      if (!enqueued) return false
+      const pending = store.consumeOne(safeSession, "asap")
+      if (pending.length === 0) return false
+      return await sendAutoSteer(pending[0]!.message, terminalApp, {
+        requeueOnForegroundDeferSessionId: safeSession,
+      })
+    }
+
     store.enqueue(safeSession, renderedMessage, resolvedTrigger, { dedupKey: message })
     return true
   }

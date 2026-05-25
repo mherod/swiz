@@ -18,10 +18,29 @@ are defined in `src/auto-steer-store.ts`.
 
 | Trigger | Delivered by | Fires when |
 | --- | --- | --- |
+| `asap` | `scheduleAutoSteer()` (immediate) | Delivered the moment it is scheduled — typed straight into the terminal without waiting for any dispatch or Stop event. Falls back to the MCP channel when no AppleScript terminal is present. |
 | `next_turn` | `hooks/posttooluse-auto-steer.ts` | Every PostToolUse cycle (the default). |
 | `after_commit` | `hooks/posttooluse-auto-steer.ts` | The PostToolUse tool was a Bash `git commit` (matched by `GIT_COMMIT_RE`). |
 | `after_all_tasks_complete` | `hooks/posttooluse-auto-steer.ts` | All session tasks are `completed`/`cancelled` (and at least one task exists). |
+| `task_created` | `hooks/posttooluse-auto-steer.ts` | The PostToolUse tool was a `TaskCreate`. |
+| `task_updated` | `hooks/posttooluse-auto-steer.ts` | The PostToolUse tool was a `TaskUpdate`. |
+| `task_completed` | `hooks/posttooluse-auto-steer.ts` | A `TaskUpdate` set the task `status` to `completed`. |
 | `on_session_stop` | `src/dispatch/blockingStrategy.ts` | The Stop event; pending messages short-circuit (skip) the stop hooks and are typed to the terminal. |
+
+### Delivery mechanism
+
+A scheduled message reaches the agent through one of two transports:
+
+- **AppleScript terminal** (preferred): the message is typed into the active
+  iTerm2 / Terminal window. `asap` types immediately at schedule time; the other
+  PostToolUse triggers drain on the next `postToolUse` cycle; `on_session_stop`
+  drains at the Stop event.
+- **MCP channel** (fallback when no AppleScript terminal): the message is
+  enqueued and the `swiz mcp` server pushes it to the agent as a
+  `<channel source="swiz">` event. Channel-deliverable triggers are defined once
+  in `CHANNEL_DELIVERABLE_TRIGGERS` (`src/auto-steer-store.ts`) and consumed by
+  both `swiz mcp` and the `scheduleAutoSteer` fallback. `on_session_stop` is
+  excluded — by the time Stop fires the channel is tearing down with the session.
 
 ## Scheduled cases
 
@@ -50,5 +69,9 @@ and the condition under which the message is emitted.
   bookkeeping in `blockingStrategy.ts`.
 - **Channel vs terminal:** `scheduleAutoSteer()` prefers an AppleScript terminal
   and falls back to the MCP channel; `scheduleAutoSteerViaChannel()` always
-  targets the channel. `on_session_stop` is intentionally excluded from the
-  channel (`CHANNEL_TRIGGERS` in `src/commands/mcp.ts`).
+  targets the channel. The channel-deliverable trigger set lives in
+  `CHANNEL_DELIVERABLE_TRIGGERS` (`src/auto-steer-store.ts`) and `on_session_stop`
+  is intentionally excluded from it.
+- **`asap`:** delivered immediately at schedule time. On the terminal path it is
+  enqueued (for dedup), atomically consumed, then typed in straight away rather
+  than waiting for a PostToolUse/Stop dispatch.

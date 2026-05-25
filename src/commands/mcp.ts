@@ -3,6 +3,7 @@ import { readFileSync, unlinkSync, utimesSync, watch, writeFileSync } from "node
 import { appendFile, mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { z } from "zod"
+import { CHANNEL_DELIVERABLE_TRIGGERS } from "../auto-steer-store.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { readSwizSettings } from "../settings.ts"
@@ -127,10 +128,7 @@ export async function pushChannelEvent(event: ChannelEvent, projectKey: string):
 
 // Safety fallback only — the fast path is fs.watch on the notify sentinel.
 // Keep this loose so we don't hammer SQLite when nothing is enqueued.
-// Triggers delivered via the MCP channel. `on_session_stop` stays on the
-// AppleScript path because by the time stop fires, the MCP transport is
-// tearing down alongside the agent session.
-const CHANNEL_TRIGGERS = ["next_turn", "after_commit", "after_all_tasks_complete"] as const
+// Channel-deliverable triggers are defined centrally in auto-steer-store.ts.
 
 interface McpChannelRuntimeStatus {
   projectKey: string
@@ -163,7 +161,7 @@ async function drainAutoSteersOnce(projectKey: string): Promise<number> {
   const { renderQueuedAutoSteerRequest } = await import("../utils/auto-steer-helpers.ts")
   const store = getAutoSteerStore()
   let delivered = 0
-  for (const trigger of CHANNEL_TRIGGERS) {
+  for (const trigger of CHANNEL_DELIVERABLE_TRIGGERS) {
     while (true) {
       const req = store.consumeOneByProjectKey(projectKey, trigger)
       if (!req) break

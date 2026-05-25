@@ -2,7 +2,10 @@
  * SQLite-backed auto-steer queue with two-layer deduplication and optional TTL.
  *
  * Supports multiple pending messages per session and delivery triggers
- * (next_turn, after_commit, after_all_tasks_complete, on_session_stop).
+ * (asap, next_turn, after_commit, after_all_tasks_complete, task_created,
+ * task_updated, task_completed, on_session_stop). The `asap` trigger is
+ * delivered immediately at schedule time rather than waiting for a PostToolUse
+ * or Stop dispatch; the `task_*` triggers fire on the matching task tool use.
  *
  * ## TTL (time-to-live)
  *
@@ -42,10 +45,39 @@ export { projectKeyFromCwd }
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type AutoSteerTrigger =
+  | "asap"
   | "next_turn"
   | "after_commit"
   | "after_all_tasks_complete"
+  | "task_created"
+  | "task_updated"
+  | "task_completed"
   | "on_session_stop"
+
+/**
+ * Canonical list of triggers that can be delivered through the MCP channel
+ * transport, in drain order. This is the single source of truth shared by the
+ * `swiz mcp` channel drain loop and the `scheduleAutoSteer` channel fallback —
+ * do not redefine these sets elsewhere.
+ *
+ * `on_session_stop` is intentionally excluded: by the time the Stop event fires
+ * the MCP transport is tearing down alongside the agent session, so stop
+ * messages stay on the AppleScript path.
+ */
+export const CHANNEL_DELIVERABLE_TRIGGERS = [
+  "asap",
+  "next_turn",
+  "after_commit",
+  "after_all_tasks_complete",
+  "task_created",
+  "task_updated",
+  "task_completed",
+] as const satisfies readonly AutoSteerTrigger[]
+
+/** Membership-test form of {@link CHANNEL_DELIVERABLE_TRIGGERS}. */
+export const CHANNEL_DELIVERABLE_TRIGGER_SET: ReadonlySet<AutoSteerTrigger> = new Set(
+  CHANNEL_DELIVERABLE_TRIGGERS
+)
 
 export interface QueuedAutoSteerRequest {
   id: number
