@@ -292,6 +292,20 @@ describe("renderStatusLineFromSnapshot", () => {
     expect(out).not.toContain("state")
   })
 
+  it("threads wantedLevel through to the task segment as stars", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-sonnet" } },
+      snapshot: baseSnapshot,
+      taskCounts: { total: 5, incomplete: 3, pending: 2, inProgress: 1 },
+      wantedLevel: 2,
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("★★")
+  })
+
   it("renders the current CI status when present", () => {
     const out = renderStatusLineFromSnapshot({
       input: { model: { display_name: "claude-haiku" } },
