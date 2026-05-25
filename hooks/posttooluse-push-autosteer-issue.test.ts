@@ -25,12 +25,15 @@ await mock.module("applescript-node", () => ({
   runScript: () => Promise.resolve({ output: "Terminal" }),
 }))
 
+import { acquireEnvLock, releaseEnvLockFn } from "../src/utils/test-utils.ts"
+
 describe("posttooluse-push-autosteer-issue", () => {
   let tempHome: string
   let originalHome: string | undefined
   const sessionId = "session-push-steer-test"
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await acquireEnvLock()
     resetAutoSteerStore()
     resetIssueStore()
     originalHome = process.env.HOME
@@ -46,12 +49,16 @@ describe("posttooluse-push-autosteer-issue", () => {
   })
 
   afterEach(async () => {
-    resetAutoSteerStore()
-    resetIssueStore()
-    delete process.env.TERM_PROGRAM
-    if (originalHome === undefined) delete process.env.HOME
-    else process.env.HOME = originalHome
-    await rm(tempHome, { recursive: true, force: true })
+    try {
+      resetAutoSteerStore()
+      resetIssueStore()
+      delete process.env.TERM_PROGRAM
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      await rm(tempHome, { recursive: true, force: true })
+    } finally {
+      releaseEnvLockFn()
+    }
   })
 
   // Helper to mock git client

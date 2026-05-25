@@ -643,3 +643,31 @@ export async function writeTask(
     JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] }, null, 2)
   )
 }
+
+let envLock: Promise<void> = Promise.resolve()
+let releaseEnvLock: (() => void) | null = null
+
+/**
+ * Acquire a sequential environment lock to serialize tests that mutate
+ * process-wide shared environment variables or singletons.
+ */
+export async function acquireEnvLock(): Promise<void> {
+  const previous = envLock
+  let release!: () => void
+  envLock = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  releaseEnvLock = release
+}
+
+/**
+ * Release the sequential environment lock.
+ */
+export function releaseEnvLockFn(): void {
+  if (releaseEnvLock) {
+    const release = releaseEnvLock
+    releaseEnvLock = null
+    release()
+  }
+}

@@ -18,6 +18,7 @@ import {
   scheduleAutoSteer,
   scheduleAutoSteerViaChannel,
 } from "./auto-steer-helpers.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "./test-utils.ts"
 
 const AI_ENV_KEYS = ["AI_TEST_NO_BACKEND", "AI_TEST_TEXT_RESPONSE", "AI_PROVIDER"] as const
 
@@ -42,18 +43,6 @@ const TERMINAL_ENV_KEYS = [
 const originalEnv = new Map<string, string | undefined>()
 const tmpDirs: string[] = []
 const tmpFiles: string[] = []
-let envLock: Promise<void> = Promise.resolve()
-let releaseEnvLock: (() => void) | null = null
-
-async function acquireEnvLock(): Promise<void> {
-  const previous = envLock
-  let release!: () => void
-  envLock = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await previous
-  releaseEnvLock = release
-}
 
 function clearTerminalEnv(): void {
   for (const key of TERMINAL_ENV_KEYS) {
@@ -161,8 +150,7 @@ describe("auto-steer helpers", () => {
       tmpDirs.length = 0
       tmpFiles.length = 0
     } finally {
-      releaseEnvLock?.()
-      releaseEnvLock = null
+      releaseEnvLockFn()
     }
   })
 
