@@ -340,6 +340,20 @@ export function evaluateInfraction(
 }
 
 /**
+ * Compliance-derived baseline of the wanted level: unhealthy task governance earns
+ * ★1 even before any retry-after-block infraction. Mirrors the governance-healthy
+ * rule (≥1 in_progress, ≥1 pending, ≥2 incomplete). Shared by the status line and
+ * the daemon snapshot so the baseline is computed identically in both.
+ */
+export function complianceBaselineWantedLevel(
+  counts: { incomplete: number; pending: number; inProgress: number } | null | undefined
+): number {
+  if (!counts || counts.incomplete <= 0) return 0
+  const healthy = counts.inProgress >= 1 && counts.pending >= 1 && counts.incomplete >= 2
+  return healthy ? 0 : 1
+}
+
+/**
  * Standing wanted level for display (e.g. the status line) — the agent's current
  * "heat" independent of any pending call. Good behaviour clears it: a successful
  * most-recent action, a served cooldown, or no denials all read as level 0.

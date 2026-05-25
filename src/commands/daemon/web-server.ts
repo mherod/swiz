@@ -18,6 +18,7 @@ import { isStopLikeDispatchEvent } from "../../dispatch/stop-response.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
 import { readHookLogs } from "../../hook-log.ts"
+import { complianceBaselineWantedLevel } from "../../infractions.ts"
 import { getIssueStoreReader } from "../../issue-store.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
@@ -28,7 +29,6 @@ import {
   writeSwizSettings,
 } from "../../settings.ts"
 import { createTaskStoreForHookPayload, findTaskStoreForSession } from "../../task-roots.ts"
-import { computeComplianceState } from "../../tasks/task-compliance-history.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
@@ -1509,10 +1509,7 @@ async function handleStatusLineSnapshot(
   // Compliance-derived baseline of the GTA wanted level, surfaced from the daemon
   // so any consumer (status line, future web view) reads a warm value. Retry-after-block
   // infractions are layered on top client-side by the status line.
-  const wantedLevel =
-    taskCounts && taskCounts.incomplete > 0 && computeComplianceState(taskCounts) === "unhealthy"
-      ? 1
-      : 0
+  const wantedLevel = complianceBaselineWantedLevel(taskCounts)
   return Response.json({
     snapshot: {
       ...snapshot,

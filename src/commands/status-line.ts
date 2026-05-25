@@ -11,7 +11,7 @@ import {
   getGitBranchStatus,
   getRepoSlug,
 } from "../git-helpers.ts"
-import { standingWantedLevel } from "../infractions.ts"
+import { complianceBaselineWantedLevel, standingWantedLevel } from "../infractions.ts"
 import { getIssueStoreReader } from "../issue-store.ts"
 import {
   DEFAULT_SETTINGS,
@@ -1162,9 +1162,7 @@ export const statusLineCommand: Command = {
     // Wanted level: unhealthy task compliance contributes a baseline ★1 (preferring
     // the daemon-computed value when present), and retry-after-block infractions in
     // the transcript raise it further.
-    const complianceBaseline =
-      taskCounts && taskCounts.incomplete > 0 && !isTaskGovernanceHealthy(taskCounts) ? 1 : 0
-    let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaseline)
+    let wantedLevel = Math.max(snapshot.wantedLevel ?? 0, complianceBaselineWantedLevel(taskCounts))
     if (sessionPath) {
       try {
         const lines = await readSessionLines(sessionPath)

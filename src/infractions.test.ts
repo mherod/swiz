@@ -4,6 +4,7 @@ import {
   attemptKey,
   COOLDOWN_MARKER,
   collectBlockedAttempts,
+  complianceBaselineWantedLevel,
   DENY_FOOTER_MARKERS,
   evaluateInfraction,
   INFRACTION_WINDOW_MS,
@@ -313,6 +314,24 @@ describe("evaluateInfraction — cooldown + de-escalation", () => {
     // A single denial is not red — the next event should not be held.
     const lines = [...deniedBashAttempt("a", "git push", ETS)]
     expect(evaluateInfraction(lines, bash("bun test"), ENOW).level).toBe("none")
+  })
+})
+
+describe("complianceBaselineWantedLevel", () => {
+  it("is 0 when there are no incomplete tasks", () => {
+    expect(complianceBaselineWantedLevel(null)).toBe(0)
+    expect(complianceBaselineWantedLevel({ incomplete: 0, pending: 0, inProgress: 0 })).toBe(0)
+  })
+
+  it("is 0 when task governance is healthy (≥1 in_progress, ≥1 pending, ≥2 incomplete)", () => {
+    expect(complianceBaselineWantedLevel({ incomplete: 3, pending: 2, inProgress: 1 })).toBe(0)
+  })
+
+  it("is 1 when task governance is unhealthy with incomplete work", () => {
+    // in_progress only, no pending buffer → unhealthy
+    expect(complianceBaselineWantedLevel({ incomplete: 1, pending: 0, inProgress: 1 })).toBe(1)
+    // no in_progress → unhealthy
+    expect(complianceBaselineWantedLevel({ incomplete: 2, pending: 2, inProgress: 0 })).toBe(1)
   })
 })
 
