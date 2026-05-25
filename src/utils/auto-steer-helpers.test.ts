@@ -293,7 +293,7 @@ describe("auto-steer helpers", () => {
     expect(existsSync(swizMcpChannelNotifyPath(projectKey))).toBe(false)
     expect(store.consumeOneByProjectKey(projectKey, "next_turn")).toBeNull()
     expect(store.consumeOne("session-3", "next_turn")[0]?.message).toBe(
-      "Please continue via terminal."
+      "I noticed you haven't, so we need to continue via terminal."
     )
   })
 
@@ -311,7 +311,7 @@ describe("auto-steer helpers", () => {
     // beforeEach sets AI_TEST_NO_BACKEND=1
     const result = await humaniseAutoSteerMessage("Take the next task")
 
-    expect(result).toBe("Please take the next task.")
+    expect(result).toBe("I noticed you haven't, so we need to take the next task.")
   })
 
   test("humaniseAutoSteerMessage strips mechanical dump wording into one paragraph", async () => {
@@ -329,7 +329,7 @@ describe("auto-steer helpers", () => {
     expect(result).not.toContain("\n")
     expect(result).not.toContain("ACTION REQUIRED")
     expect(result).toBe(
-      'Please run `git status`, then `git add .` and `git commit -m "fix: thing"`.'
+      'I noticed you haven\'t, so we need to run `git status`, then `git add .` and `git commit -m "fix: thing"`.'
     )
   })
 

@@ -73,24 +73,27 @@ describe("generic humanise utility", () => {
     expect(result).toBe("keep: another line")
   })
 
-  test("fallbackHumaniseText creates a polite instruction paragraph", () => {
-    expect(fallbackHumaniseText("Take the next task")).toBe("Please take the next task.")
+  test("fallbackHumaniseText creates an astute instruction paragraph", () => {
+    expect(fallbackHumaniseText("Take the next task")).toBe(
+      "I noticed you haven't, so we need to take the next task."
+    )
     expect(fallbackHumaniseText("Please take the next task")).toBe("Please take the next task.")
     expect(fallbackHumaniseText("Can you take the next task?")).toBe("Can you take the next task?")
   })
 
   test("humaniseText rewrites via provider when one is available", async () => {
     delete process.env.AI_TEST_NO_BACKEND
-    process.env.AI_TEST_TEXT_RESPONSE = "Let's work on the next task."
+    process.env.AI_TEST_TEXT_RESPONSE =
+      "I noticed you haven't worked on the next task, so we need to work on it."
 
     const result = await humaniseText("Take the next task")
-    expect(result).toBe("Let's work on the next task.")
+    expect(result).toBe("I noticed you haven't worked on the next task, so we need to work on it.")
   })
 
   test("humaniseText uses local fallback when no provider is available", async () => {
     // process.env.AI_TEST_NO_BACKEND is set to "1" in beforeEach
     const result = await humaniseText("Take the next task")
-    expect(result).toBe("Please take the next task.")
+    expect(result).toBe("I noticed you haven't, so we need to take the next task.")
   })
 
   test("humaniseText caches resolved promises to avoid extra calls", async () => {

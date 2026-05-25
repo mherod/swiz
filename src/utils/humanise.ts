@@ -15,9 +15,9 @@ export const DEFAULT_HUMANISE_TIMEOUT_MS = 8_000
 
 export const DEFAULT_HUMANISE_SYSTEM_PROMPT = [
   "You rewrite terse, machine-generated coding-agent steering notes into a single paragraph of clear, direct instruction.",
+  "Frame the output in an astute but direct manner, pointing out what has not been done yet and what needs to happen (for example, starting with 'I noticed you haven't [action/state], so we need to [next steps]').",
   "Use unambiguous, plain language with no flowery terms, motivational phrasing, executive-speak, or vague qualifiers.",
   "Keep the tone direct and instructive; state what to do and what outcome is required.",
-  "Start directly with the core action needed to deliver the outcome, avoiding conversational filler, tentative framing, or robotic preambles.",
   "Preserve every concrete command, file path, instruction, and constraint exactly.",
   "Do not add any new instructions, commentary, headings, bullet points, quotes, or formatting.",
   "Return only the rewritten paragraph.",
@@ -75,7 +75,7 @@ export function fallbackHumaniseText(
   if (/^(?:please|i need you to|can you|could you|when you|let's)\b/i.test(instruction)) {
     return sentenceCase(instruction)
   }
-  const prefix = options?.prefix ?? "Please "
+  const prefix = options?.prefix ?? "I noticed you haven't, so we need to "
   return sentenceCase(`${prefix}${instruction}`)
 }
 
