@@ -270,6 +270,22 @@ describe("auto-steer helpers", () => {
     expect(store.consumeOneByProjectKey(projectKey, "asap")?.trigger).toBe("asap")
   })
 
+  test("scheduleAutoSteer routes task lifecycle triggers through the MCP channel", async () => {
+    const home = await setupAutoSteerHome()
+    const cwd = join(home, "repo")
+    const projectKey = projectKeyFromCwd(cwd)
+    await writeLiveChannelStatus(cwd)
+
+    // canUseMcpChannel now admits the task lifecycle triggers via the centralised
+    // CHANNEL_DELIVERABLE_TRIGGER_SET, so each should enqueue for the live channel.
+    const store = getAutoSteerStore()
+    for (const trigger of ["task_created", "task_updated", "task_completed"] as const) {
+      const scheduled = await scheduleAutoSteer(`session-${trigger}`, `do ${trigger}`, trigger, cwd)
+      expect(scheduled).toBe(true)
+      expect(store.consumeOneByProjectKey(projectKey, trigger)?.trigger).toBe(trigger)
+    }
+  })
+
   test("scheduleAutoSteer prefers AppleScript over a live MCP channel", async () => {
     const home = await setupAutoSteerHome()
     const cwd = join(home, "repo")
