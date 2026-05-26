@@ -29,16 +29,21 @@ function promptCacheDir(): string {
 /**
  * Resolve the on-disk cache file for a given prompt string. The file name is a
  * SHA-256 hex digest of the full prompt so identical prompts share an entry.
+ * `dir` is injectable (defaults to {@link promptCacheDir}) so callers and tests
+ * can target an isolated directory without mutating process-wide env.
  */
-export function promptCachePath(prompt: string): string {
+export function promptCachePath(prompt: string, dir: string = promptCacheDir()): string {
   const hash = createHash("sha256").update(prompt).digest("hex")
-  return join(promptCacheDir(), `${hash}.txt`)
+  return join(dir, `${hash}.txt`)
 }
 
 /** Read a previously cached humanisation from disk, or null on miss/error. */
-export async function readPromptDiskCache(prompt: string): Promise<string | null> {
+export async function readPromptDiskCache(
+  prompt: string,
+  dir: string = promptCacheDir()
+): Promise<string | null> {
   try {
-    const file = Bun.file(promptCachePath(prompt))
+    const file = Bun.file(promptCachePath(prompt, dir))
     if (!(await file.exists())) return null
     const text = await file.text()
     return text.length > 0 ? text : null
@@ -48,10 +53,14 @@ export async function readPromptDiskCache(prompt: string): Promise<string | null
 }
 
 /** Persist a humanisation to disk (best-effort; write errors are ignored). */
-export async function writePromptDiskCache(prompt: string, value: string): Promise<void> {
+export async function writePromptDiskCache(
+  prompt: string,
+  value: string,
+  dir: string = promptCacheDir()
+): Promise<void> {
   try {
-    await mkdir(promptCacheDir(), { recursive: true })
-    await Bun.write(promptCachePath(prompt), value)
+    await mkdir(dir, { recursive: true })
+    await Bun.write(promptCachePath(prompt, dir), value)
   } catch {
     // Disk cache is best-effort; a failed write must not break humanisation.
   }
@@ -134,6 +143,8 @@ export interface HumaniseOptions {
   timeoutMs?: number
   fallback?: (text: string) => string
   stripLine?: (line: string) => string
+  /** Override the on-disk cache directory (defaults to ~/.swiz/prompt-cache). */
+  cacheDir?: string
 }
 
 /**
@@ -165,8 +176,9 @@ async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions):
   const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
   const stripLine = options?.stripLine
   const prompt = `${systemPrompt}\n\nText to rewrite:\n${trimmed}`
+  const cacheDir = options?.cacheDir
 
-  const diskCached = await readPromptDiskCache(prompt)
+  const diskCached = await readPromptDiskCache(prompt, cacheDir)
   if (diskCached) return diskCached
 
   try {
@@ -176,7 +188,7 @@ async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions):
     if (!rewritten || rewritten === toSingleParagraph(trimmed, stripLine)) {
       return fallback
     }
-    await writePromptDiskCache(prompt, rewritten)
+    await writePromptDiskCache(prompt, rewritten, cacheDir)
     return rewritten
   } catch {
     return fallback
