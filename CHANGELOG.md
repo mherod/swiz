@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-05-26
+
+### Improvements
+
+- **Clearer stop git context** — Stop blockers now include branch,
+  upstream, uncommitted-file, and unpushed-commit context when
+  repository work must be committed or pushed before the session ends.
+
+### Fixes
+
+- **Task auto-promotion removed** — Finished sessions no longer create
+  automatic replacement tasks from issues or fallback prompts. Follow-up
+  tasks must now be created explicitly when more work remains.
+
 ## 2026-05-24
 
 ### Features
