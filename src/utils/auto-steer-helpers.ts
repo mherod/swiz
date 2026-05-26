@@ -16,7 +16,12 @@ import {
   swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
-import { clearHumaniseCache, fallbackHumaniseText, humaniseText } from "./humanise.ts"
+import {
+  clearHumaniseCache,
+  DEFAULT_HUMANISE_SYSTEM_PROMPT,
+  fallbackHumaniseText,
+  humaniseText,
+} from "./humanise.ts"
 
 /**
  * Touch the MCP channel notify sentinel so the `swiz mcp` drain loop wakes
@@ -178,14 +183,7 @@ export interface AutoSteerRequest {
 /** Hard cap on how long humanisation may block a hook before using the local rewrite. */
 const HUMANISE_TIMEOUT_MS = 8_000
 
-const HUMANISE_SYSTEM_PROMPT = [
-  "You rewrite terse, machine-generated coding-agent steering notes into a short, natural paragraph.",
-  "Squash the full mechanical dump into one authentic instruction, framed as though the user wrote it.",
-  "Keep the rewrite to a single paragraph in a calm, direct human voice.",
-  "Preserve every concrete instruction, file path, command, and constraint.",
-  "Do not add new instructions, headings, bullet points, quotes, or commentary about the rewrite.",
-  "Return only the rewritten paragraph.",
-].join(" ")
+const HUMANISE_SYSTEM_PROMPT = DEFAULT_HUMANISE_SYSTEM_PROMPT
 
 const MECHANICAL_AUTO_STEER_LINE_RE =
   /^(?:[-*_]{3,}|action required:?.*|stop is blocked by .*|resolve them in the order shown\.?|git status|ship checklist|repository|incomplete tasks|you must act on this now\.?|do not try to stop again.*|this hook will block every stop attempt.*|if you believe this is a false positive.*|task files?:\s.*)$/i

@@ -103,6 +103,7 @@ async function writeLiveChannelStatus(cwd: string): Promise<void> {
 
 describe("auto-steer helpers", () => {
   let originalHome: string | undefined
+  let originalCacheDir: string | undefined
 
   const originalAiEnv = new Map<string, string | undefined>()
 
@@ -111,6 +112,7 @@ describe("auto-steer helpers", () => {
     resetAutoSteerStore()
     clearAutoSteerHumanisationCache()
     originalHome = process.env.HOME
+    originalCacheDir = process.env.SWIZ_PROMPT_CACHE_DIR
     clearTerminalEnv()
     for (const key of AI_ENV_KEYS) {
       originalAiEnv.set(key, process.env[key])
@@ -119,6 +121,11 @@ describe("auto-steer helpers", () => {
     // Default: no AI backend so humanisation fails open to the original text,
     // keeping message assertions deterministic. Humanisation tests opt in.
     process.env.AI_TEST_NO_BACKEND = "1"
+
+    // Set up an isolated prompt cache directory for tests to prevent test pollution
+    const cacheDir = mkdtempSync(join(tmpdir(), "swiz-prompt-cache-test-"))
+    tmpDirs.push(cacheDir)
+    process.env.SWIZ_PROMPT_CACHE_DIR = cacheDir
   })
 
   afterEach(async () => {
@@ -130,6 +137,11 @@ describe("auto-steer helpers", () => {
         delete process.env.HOME
       } else {
         process.env.HOME = originalHome
+      }
+      if (originalCacheDir === undefined) {
+        delete process.env.SWIZ_PROMPT_CACHE_DIR
+      } else {
+        process.env.SWIZ_PROMPT_CACHE_DIR = originalCacheDir
       }
       restoreTerminalEnv()
       for (const key of AI_ENV_KEYS) {
