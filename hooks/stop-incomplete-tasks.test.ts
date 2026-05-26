@@ -20,11 +20,20 @@ async function runHook({
   envOverrides?: Record<string, string | undefined>
   transcriptPath?: string
 }): Promise<HookResult> {
+  const hasOtherAgent = Object.keys(envOverrides).some((key) =>
+    AGENTS.some((a) => a.id !== "claude" && a.envVars?.includes(key))
+  )
+  const finalEnvOverrides = { ...envOverrides }
+  if (!hasOtherAgent && !envOverrides.CLAUDECODE) {
+    finalEnvOverrides.CLAUDECODE = "1"
+  }
+
   const payload = JSON.stringify({
     session_id: sessionId,
     cwd: cwd ?? process.cwd(),
     hook_event_name: "Stop",
     ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
+    _env: finalEnvOverrides,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   for (const agent of AGENTS) {

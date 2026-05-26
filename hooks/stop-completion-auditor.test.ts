@@ -209,17 +209,25 @@ async function runAuditor(
   transcriptPath: string,
   envOverrides: Record<string, string> = {}
 ): Promise<{ blocked: boolean; reason?: string; raw: string }> {
+  const hasOtherAgent = Object.keys(envOverrides).some((key) =>
+    AGENTS.some((a) => a.id !== "claude" && a.envVars?.includes(key))
+  )
+  const finalEnvOverrides = { ...envOverrides }
+  if (!hasOtherAgent && !envOverrides.CLAUDECODE) {
+    finalEnvOverrides.CLAUDECODE = "1"
+  }
+
   const payload = JSON.stringify({
     cwd: process.cwd(),
     session_id: SESSION_ID,
     transcript_path: transcriptPath,
-    ...(Object.keys(envOverrides).length > 0 ? { _env: envOverrides } : {}),
+    _env: finalEnvOverrides,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: home }
   for (const agent of AGENTS) {
     for (const v of agent.envVars ?? []) env[v] = ""
   }
-
+  env.SWIZ_DAEMON_PORT = "19999"
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
     stdout: "pipe",

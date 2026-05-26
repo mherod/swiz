@@ -8,7 +8,7 @@
  * - Preparing context for all validators
  */
 
-import { agentHasTaskListToolForHookPayload } from "../../src/agent-paths.ts"
+import { detectCurrentAgentFromHookPayload } from "../../src/agent-paths.ts"
 import { isIncompleteTaskStatus } from "../../src/tasks/task-recovery.ts"
 import { isTaskListTool } from "../../src/tool-matchers.ts"
 import {
@@ -28,8 +28,9 @@ export function requireTaskListSync(
 ): ValidationResult | null {
   // Skip if no tasks exist yet
   if (ctx.allTasks.length === 0) return null
-  // Skip if the originating agent cannot call TaskList.
-  if (!agentHasTaskListToolForHookPayload(input)) return null
+  // Disable the TaskList sync requirement when not running inside Claude
+  const agent = detectCurrentAgentFromHookPayload(input)
+  if (!agent || agent.id !== "claude") return null
 
   // Skip if TaskList was called recently in the current session.
   if (ctx.recentObservedToolNames.some((n) => isTaskListTool(n))) return null

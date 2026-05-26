@@ -23,7 +23,16 @@ async function runHook(
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
+  const finalPayload = { ...stdinPayload }
+  if (!finalPayload._agent && !finalPayload._env) {
+    const hasOtherAgent = Object.keys(envOverrides).some((key) =>
+      AGENTS.some((a) => a.id !== "claude" && a.envVars?.includes(key))
+    )
+    if (!hasOtherAgent) {
+      finalPayload._agent = "claude"
+    }
+  }
+  const payload = JSON.stringify(finalPayload)
   const env: Record<string, string | undefined> = { ...process.env }
   // Neutralize all agent env vars — set to empty string rather than delete,
   // because Bun.spawn re-injects vars from the parent even when they're

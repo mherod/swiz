@@ -12,6 +12,7 @@
 import {
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromHookPayload,
 } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -28,10 +29,15 @@ export async function evaluateStopIncompleteTasksHook(
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   const parsed = stopHookInputSchema.parse(input)
 
-  // Require TaskList before stop when the session has used task tools.
+  // Require TaskList before stop when the session has used task tools and is running inside Claude.
   // This ensures the task-state-cache is synced via posttooluse-task-list-sync.
   const transcriptSource = (input as Record<string, any>) ?? parsed.transcript_path ?? ""
-  if (transcriptSource && agentHasTaskListToolForHookPayload(input as Record<string, any>)) {
+  const agent = detectCurrentAgentFromHookPayload(input as Record<string, any>)
+  if (
+    agent?.id === "claude" &&
+    transcriptSource &&
+    agentHasTaskListToolForHookPayload(input as Record<string, any>)
+  ) {
     const toolNames = await getRecentlyUsedToolsForCurrentSession(transcriptSource)
     const hasTaskActivity = toolNames.some((n) => isTaskTool(n))
     const hasTaskList = toolNames.some((n) => isTaskListTool(n))
