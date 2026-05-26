@@ -481,18 +481,18 @@ describe("pretooluse-sandboxed-edits", () => {
       return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
     }
 
-    test("blocks edits on non-default branch when trunk mode is enabled", async () => {
+    test("allows edits on non-default branch when trunk mode is enabled but warns with context", async () => {
       const cwd = await createTempDir()
       await initGitRepoWithBranch(cwd, "main", "feature-branch")
 
       const result = await runHookWithTrunkMode(cwd, join(cwd, "src", "app.ts"), true)
       expect(result.exitCode).toBe(0)
       const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
-      expect(hso?.permissionDecision).toBe("deny")
-      const msg = String(hso?.permissionDecisionReason)
-      expect(msg).toContain("Trunk mode is enabled")
-      expect(msg).toContain("feature-branch")
-      expect(msg).toContain("main")
+      expect(hso?.permissionDecision).toBe("allow")
+      const sysMsg = String(result.json?.systemMessage)
+      expect(sysMsg).toContain("Trunk mode is enabled")
+      expect(sysMsg).toContain("feature-branch")
+      expect(sysMsg).toContain("main")
     })
 
     test("allows edits on default branch when trunk mode is enabled", async () => {

@@ -54,16 +54,15 @@ async function checkTrunkMode(cwd: string): Promise<SwizHookOutput | null> {
   const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
 
   if (currentBranch && currentBranch !== defaultBranch) {
-    return preToolUseDeny(
+    return preToolUseAllowWithContext(
+      "Trunk mode is enabled — file edits are allowed but not recommended on non-default branches.",
       [
-        "Trunk mode is enabled — file edits are blocked on non-default branches.",
+        "WARNING: Trunk mode is enabled, but you are editing files on a non-default branch.",
         "",
         `  Current branch: ${currentBranch}`,
         `  Default branch: ${defaultBranch}`,
         "",
-        `Switch to the default branch first: git checkout ${defaultBranch}`,
-        "",
-        SAFE_READ_ONLY_INSPECTION_HINT,
+        `Please ensure you switch back and integrate work on the default branch: git checkout ${defaultBranch}`,
       ].join("\n")
     )
   }
