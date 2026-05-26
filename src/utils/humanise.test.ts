@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, utimes } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -8,7 +8,10 @@ import {
   fallbackHumaniseText,
   humaniseText,
   lowerKnownImperative,
+  PROMPT_CACHE_MAX_AGE_MS,
+  PROMPT_CACHE_MAX_ENTRIES,
   promptCachePath,
+  prunePromptDiskCache,
   readPromptDiskCache,
   sentenceCase,
   toSingleParagraph,
@@ -202,6 +205,86 @@ describe("generic humanise utility", () => {
       } finally {
         await cleanup()
       }
+    })
+
+    describe("pruning", () => {
+      test("prunePromptDiskCache removes entries older than the age threshold", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const fresh = promptCachePath("fresh prompt", dir)
+          const stale = promptCachePath("stale prompt", dir)
+          await writePromptDiskCache("fresh prompt", "fresh value", dir)
+          await writePromptDiskCache("stale prompt", "stale value", dir)
+
+          // Backdate the stale entry well past the age threshold.
+          const old = new Date(Date.now() - PROMPT_CACHE_MAX_AGE_MS - 60_000)
+          await utimes(stale, old, old)
+
+          await prunePromptDiskCache(dir)
+
+          expect(await Bun.file(fresh).exists()).toBe(true)
+          expect(await Bun.file(stale).exists()).toBe(false)
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("prunePromptDiskCache trims the oldest entries past the count cap", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const total = PROMPT_CACHE_MAX_ENTRIES + 5
+          for (let i = 0; i < total; i++) {
+            const path = promptCachePath(`prompt ${i}`, dir)
+            await Bun.write(path, `value ${i}`)
+            // Stagger mtimes so the lowest indices are oldest.
+            const t = new Date(Date.now() - (total - i) * 1000)
+            await utimes(path, t, t)
+          }
+
+          await prunePromptDiskCache(dir)
+
+          // The 5 oldest (lowest indices) are evicted; the cap remains.
+          expect(await Bun.file(promptCachePath("prompt 0", dir)).exists()).toBe(false)
+          expect(await Bun.file(promptCachePath("prompt 4", dir)).exists()).toBe(false)
+          expect(await Bun.file(promptCachePath("prompt 5", dir)).exists()).toBe(true)
+          expect(await Bun.file(promptCachePath(`prompt ${total - 1}`, dir)).exists()).toBe(true)
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("prunePromptDiskCache is best-effort on a missing directory", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const missing = join(dir, "does-not-exist")
+          // Must resolve without throwing even when the dir is absent.
+          await prunePromptDiskCache(missing)
+          expect(true).toBe(true)
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("writePromptDiskCache keeps the cache within the count cap", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          // Pre-seed the cap with backdated entries so a fresh write evicts one.
+          for (let i = 0; i < PROMPT_CACHE_MAX_ENTRIES; i++) {
+            const path = promptCachePath(`seed ${i}`, dir)
+            await Bun.write(path, `seed value ${i}`)
+            const t = new Date(Date.now() - (PROMPT_CACHE_MAX_ENTRIES - i) * 1000)
+            await utimes(path, t, t)
+          }
+
+          await writePromptDiskCache("newest prompt", "newest value", dir)
+
+          // The newest write survives; the oldest seed was evicted to stay at cap.
+          expect(await readPromptDiskCache("newest prompt", dir)).toBe("newest value")
+          expect(await Bun.file(promptCachePath("seed 0", dir)).exists()).toBe(false)
+        } finally {
+          await cleanup()
+        }
+      })
     })
   })
 })

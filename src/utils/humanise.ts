@@ -4,7 +4,7 @@
  */
 
 import { createHash } from "node:crypto"
-import { mkdir } from "node:fs/promises"
+import { mkdir, readdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { promptText } from "../ai-providers.ts"
@@ -52,6 +52,46 @@ export async function readPromptDiskCache(
   }
 }
 
+/** Maximum number of cached prompt files retained on disk before eviction. */
+export const PROMPT_CACHE_MAX_ENTRIES = 500
+/** Entries older than this (by mtime) are pruned on the next write. */
+export const PROMPT_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * Best-effort bound on the on-disk cache, mirroring the in-memory LRU's
+ * eviction. Removes entries older than {@link PROMPT_CACHE_MAX_AGE_MS}, then
+ * trims the oldest remaining files until at most {@link PROMPT_CACHE_MAX_ENTRIES}
+ * remain. All errors are swallowed — pruning must never break humanisation.
+ */
+export async function prunePromptDiskCache(dir: string = promptCacheDir()): Promise<void> {
+  try {
+    const names = (await readdir(dir)).filter((name) => name.endsWith(".txt"))
+    const now = Date.now()
+    const entries: Array<{ path: string; mtimeMs: number }> = []
+    for (const name of names) {
+      const path = join(dir, name)
+      try {
+        const info = await stat(path)
+        if (now - info.mtimeMs > PROMPT_CACHE_MAX_AGE_MS) {
+          await rm(path, { force: true })
+          continue
+        }
+        entries.push({ path, mtimeMs: info.mtimeMs })
+      } catch {
+        // Skip files that vanish or fail to stat between readdir and stat.
+      }
+    }
+    if (entries.length <= PROMPT_CACHE_MAX_ENTRIES) return
+    entries.sort((a, b) => a.mtimeMs - b.mtimeMs)
+    const overflow = entries.slice(0, entries.length - PROMPT_CACHE_MAX_ENTRIES)
+    for (const { path } of overflow) {
+      await rm(path, { force: true }).catch(() => {})
+    }
+  } catch {
+    // Directory missing or unreadable; nothing to prune.
+  }
+}
+
 /** Persist a humanisation to disk (best-effort; write errors are ignored). */
 export async function writePromptDiskCache(
   prompt: string,
@@ -61,6 +101,7 @@ export async function writePromptDiskCache(
   try {
     await mkdir(dir, { recursive: true })
     await Bun.write(promptCachePath(prompt, dir), value)
+    await prunePromptDiskCache(dir)
   } catch {
     // Disk cache is best-effort; a failed write must not break humanisation.
   }
