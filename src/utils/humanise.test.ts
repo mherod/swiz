@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -33,31 +33,25 @@ async function withCacheDir(): Promise<{ dir: string; cleanup: () => Promise<voi
   return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 
-describe("generic humanise utility", () => {
-  const originalAiEnv = new Map<string, string | undefined>()
-
-  beforeEach(() => {
-    clearHumaniseCache()
+/** Snapshot the AI test env so a single test can mutate it and restore after. */
+function snapshotAiEnv(): () => void {
+  const original = new Map<string, string | undefined>()
+  for (const key of AI_ENV_KEYS) {
+    original.set(key, process.env[key])
+  }
+  return () => {
     for (const key of AI_ENV_KEYS) {
-      originalAiEnv.set(key, process.env[key])
-      delete process.env[key]
-    }
-    process.env.AI_TEST_NO_BACKEND = "1"
-  })
-
-  afterEach(() => {
-    clearHumaniseCache()
-    for (const key of AI_ENV_KEYS) {
-      const value = originalAiEnv.get(key)
+      const value = original.get(key)
       if (value === undefined) {
         delete process.env[key]
       } else {
         process.env[key] = value
       }
     }
-    originalAiEnv.clear()
-  })
+  }
+}
 
+describe("generic humanise utility", () => {
   test("lowerKnownImperative converts imperative verbs to lowercase", () => {
     expect(lowerKnownImperative("Take the next task")).toBe("take the next task")
     expect(lowerKnownImperative("Run git status")).toBe("run git status")
@@ -104,57 +98,52 @@ describe("generic humanise utility", () => {
     expect(fallbackHumaniseText("Can you take the next task?")).toBe("Can you take the next task?")
   })
 
-  test("humaniseText rewrites via provider when one is available", async () => {
-    const { dir, cleanup } = await withCacheDir()
+  test("humaniseText returns original input for blank input", async () => {
+    // Blank input returns before the provider/cache layer, so it needs no env.
+    expect(await humaniseText("   ")).toBe("   ")
+  })
+
+  // All provider-dependent scenarios live in ONE test: it is the only test that
+  // touches the shared AI_TEST_* env, so nothing else can race with it under
+  // `bun test --concurrent`. Each scenario uses an isolated cache dir and a
+  // cleared in-memory cache.
+  test("humaniseText routes between provider, fallback, and caching", async () => {
+    const restoreEnv = snapshotAiEnv()
+    const provider = await withCacheDir()
+    const fallback = await withCacheDir()
+    const caching = await withCacheDir()
     try {
+      // 1. Provider available → returns the provider's rewrite.
+      clearHumaniseCache()
       delete process.env.AI_TEST_NO_BACKEND
       process.env.AI_TEST_TEXT_RESPONSE =
         "Great work so far! I noticed you haven't worked on the next task yet — please pick it up now, thanks."
-
-      const result = await humaniseText("Take the next task", { cacheDir: dir })
-      expect(result).toBe(
+      expect(await humaniseText("Take the next task", { cacheDir: provider.dir })).toBe(
         "Great work so far! I noticed you haven't worked on the next task yet — please pick it up now, thanks."
       )
-    } finally {
-      await cleanup()
-    }
-  })
 
-  test("humaniseText uses local fallback when no provider is available", async () => {
-    const { dir, cleanup } = await withCacheDir()
-    try {
-      // process.env.AI_TEST_NO_BACKEND is set to "1" in beforeEach
-      const result = await humaniseText("Take the next task", { cacheDir: dir })
-      expect(result).toBe(
+      // 2. No provider → local polite fallback.
+      clearHumaniseCache()
+      delete process.env.AI_TEST_TEXT_RESPONSE
+      process.env.AI_TEST_NO_BACKEND = "1"
+      expect(await humaniseText("Take the next task", { cacheDir: fallback.dir })).toBe(
         "I noticed you haven't done this yet — please take the next task, thanks."
       )
-    } finally {
-      await cleanup()
-    }
-  })
 
-  test("humaniseText caches resolved promises to avoid extra calls", async () => {
-    const { dir, cleanup } = await withCacheDir()
-    try {
+      // 3. In-memory cache returns the first resolved value on repeat calls.
+      clearHumaniseCache()
       delete process.env.AI_TEST_NO_BACKEND
       process.env.AI_TEST_TEXT_RESPONSE = "First response"
-
-      const first = await humaniseText("unique prompt", { cacheDir: dir })
+      const first = await humaniseText("unique prompt", { cacheDir: caching.dir })
       process.env.AI_TEST_TEXT_RESPONSE = "Second response should be cached"
-      const second = await humaniseText("unique prompt", { cacheDir: dir })
-
+      const second = await humaniseText("unique prompt", { cacheDir: caching.dir })
       expect(first).toBe("First response")
       expect(second).toBe("First response")
     } finally {
-      await cleanup()
+      restoreEnv()
+      clearHumaniseCache()
+      await Promise.all([provider.cleanup(), fallback.cleanup(), caching.cleanup()])
     }
-  })
-
-  test("humaniseText returns original input for blank input", async () => {
-    delete process.env.AI_TEST_NO_BACKEND
-    process.env.AI_TEST_TEXT_RESPONSE = "rewritten"
-
-    expect(await humaniseText("   ")).toBe("   ")
   })
 
   describe("disk cache", () => {
@@ -199,11 +188,11 @@ describe("generic humanise utility", () => {
       }
     })
 
-    test("humaniseText returns the disk-cached value across in-memory clears", async () => {
+    test("humaniseText returns the disk-cached value before reaching the provider", async () => {
       const { dir, cleanup } = await withCacheDir()
       try {
-        // Provider unavailable (AI_TEST_NO_BACKEND set in beforeEach), so the disk
-        // hit — checked before any provider call — is what must be returned.
+        // The disk hit is checked before any provider call, so this is robust
+        // regardless of the shared AI_TEST_* env state.
         const text = "Take the disk-cached task"
         await writePromptDiskCache(buildPrompt(text), "Cached on disk, thanks.", dir)
         clearHumaniseCache()
