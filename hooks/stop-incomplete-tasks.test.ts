@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { unlink } from "node:fs/promises"
 import { AGENTS } from "../src/agents.ts"
-import { sessionTaskSentinelPath } from "../src/temp-paths.ts"
 import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 interface HookResult {
@@ -71,7 +69,7 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).toContain("Unfinished work")
   })
 
-  test("blocks stop when all tasks are completed (zero-task governance)", async () => {
+  test("allows stop when all tasks are completed", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-completed"
     await writeTask(homeDir, sessionId, {
@@ -81,8 +79,7 @@ describe("stop-incomplete-tasks", () => {
     })
 
     const result = await runHook({ homeDir, sessionId })
-    // Zero incomplete tasks triggers promotion + block — governance invariant
-    expect(result.decision).toBe("block")
+    expect(result.decision).toBeUndefined()
   })
 
   test("allows stop when running in Gemini CLI (GEMINI_CLI=1) even with incomplete tasks", async () => {
@@ -133,9 +130,9 @@ describe("stop-incomplete-tasks", () => {
       status: "completed",
     })
 
-    // Phase 5: Hook blocks on zero-task governance — promotion creates successor
+    // Phase 5: Hook allows stop once no incomplete tasks remain
     const allowResult = await runHook({ homeDir, sessionId })
-    expect(allowResult.decision).toBe("block")
+    expect(allowResult.decision).toBeUndefined()
   })
 
   test("blocks stop when only deferred-subject pending tasks remain", async () => {
@@ -295,35 +292,5 @@ describe("stop-incomplete-tasks", () => {
     const endpointIdx = result.reason?.indexOf("Implement API endpoint") ?? -1
     const testIdx = result.reason?.indexOf("Add unit tests for validation") ?? -1
     expect(endpointIdx).toBeLessThan(testIdx)
-  })
-
-  test("allows stop when ship-checklist sentinel exists and all generated tasks are complete (issue #612)", async () => {
-    const homeDir = await createTempHome()
-    const sessionId = "session-checklist-complete"
-
-    // Ship checklist generated a root task and action-plan sub-tasks; all are completed
-    await writeTask(homeDir, sessionId, {
-      id: "1",
-      subject: "Complete ship checklist before stopping",
-      status: "completed",
-    })
-    await writeTask(homeDir, sessionId, {
-      id: "2",
-      subject: "Commit uncommitted changes",
-      status: "completed",
-    })
-
-    // Write the sentinel that stop-ship-checklist creates when it fires
-    const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
-    const sentinelPath = sessionTaskSentinelPath("stop-ship-checklist-task-created", safeSession)
-    await Bun.write(sentinelPath, "")
-
-    try {
-      const result = await runHook({ homeDir, sessionId })
-      // Zero-incomplete promotion must NOT fire when sentinel is present — stop should be allowed
-      expect(result.decision).toBeUndefined()
-    } finally {
-      await unlink(sentinelPath).catch(() => {})
-    }
   })
 })

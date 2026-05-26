@@ -405,94 +405,8 @@ export function isGitWorkingTreeClean(cwd?: string): boolean {
 }
 
 /**
- * Promote a pending task when the session would otherwise be left with zero
- * incomplete tasks. Fetch order:
- *
- *   1. Top-ranked ready GitHub issue from the `IssueStore` cache (same path
- *      `stop-personal-repo-issues` uses).
- *   2. Top-ranked refinement-required issue, retagged as a refinement task.
- *   3. Deterministic fallback task (`Review backlog health`) when no issue
- *      candidate is available.
- *
- * Returns `true` when any successor task was created. The only false path is
- * when `createTaskInProcess` itself throws.
- */
-export async function promoteNextTaskFromIssues(sessionId: string, cwd?: string): Promise<boolean> {
-  const workingDir = cwd ?? process.cwd()
-  try {
-    const pick = await pickPromotionCandidate(workingDir)
-    const { subject, description } = pick ?? buildFallbackPromotion()
-    await createTaskInProcess({
-      sessionId,
-      subject,
-      description,
-      cwd: workingDir,
-      skipSubjectValidation: true,
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-interface PromotionCandidate {
-  subject: string
-  description: string
-}
-
-async function pickPromotionCandidate(workingDir: string): Promise<PromotionCandidate | null> {
-  try {
-    const { getRepoSlug } = await import("../git-helpers.ts")
-    const slug = await getRepoSlug(workingDir)
-    if (!slug) return null
-
-    const { getIssueStore } = await import("../issue-store.ts")
-    const store = getIssueStore()
-    const issues = store.listIssues<{
-      number: number
-      title: string
-      labels?: Array<{ name: string }>
-      state?: string
-    }>(slug, Number.MAX_SAFE_INTEGER)
-    if (issues.length === 0) return null
-
-    const { needsRefinement } = await import("../issue-refinement.ts")
-    const open = issues.filter((i) => (i.state ?? "open").toLowerCase() === "open")
-    const ready = open.filter((i) => !needsRefinement({ ...i, labels: i.labels ?? [] }))
-    const refinement = open.filter((i) => needsRefinement({ ...i, labels: i.labels ?? [] }))
-
-    const pick = ready[0] ?? refinement[0]
-    if (!pick) return null
-    const isRefinement = ready.length === 0
-    const verb = isRefinement ? "Refine" : "Work on"
-    return {
-      subject: `${verb} #${pick.number}: ${pick.title}`.slice(0, 120),
-      description: `Auto-promoted from ${
-        isRefinement ? "refinement-required" : "ready"
-      } issue #${pick.number} to preserve the last-task-standing invariant.`,
-    }
-  } catch {
-    return null
-  }
-}
-
-function buildFallbackPromotion(): PromotionCandidate {
-  return {
-    subject: "Review backlog health and generate next work",
-    description:
-      "Auto-promoted fallback — no ready or refinement-required issues available. " +
-      "Triage the repository state: run /triage-issues, scan recent commits for TODOs, " +
-      "or close this task after confirming the session has genuinely no pending work.",
-  }
-}
-
-/**
  * Validate that completing a task won't leave zero incomplete tasks in the session.
  * Returns an error string if blocked, null if allowed.
- *
- * This invariant is unconditional: the empty task list is a reachable state only
- * via bypasses. Callers that hit the error should invoke {@link promoteNextTaskFromIssues}
- * before retrying the completion.
  */
 export function validateLastTaskStanding(
   taskId: string,
@@ -570,18 +484,12 @@ export async function updateStatus(
   }
 
   // Enforce last-task-standing invariant: completing a task must never leave
-  // zero incomplete tasks. This is the canonical enforcement point — all code
-  // paths that complete tasks flow through updateStatus. When the completion
-  // would empty the list, attempt to promote a successor task from the ready
-  // GitHub issues pool (same source as stop-personal-repo-issues); only if no
-  // successor can be created does the guard block.
+  // zero incomplete tasks. Callers must create the next task explicitly before
+  // completing the current final task.
   if (newStatus === "completed" && !options.skipLastTaskGuard) {
     const allTasks = await readTasks(effectiveSessionId)
     const lastTaskError = validateLastTaskStanding(taskId, allTasks)
-    if (lastTaskError) {
-      const promoted = await promoteNextTaskFromIssues(effectiveSessionId, filterCwd)
-      if (!promoted) throw new Error(lastTaskError)
-    }
+    if (lastTaskError) throw new Error(lastTaskError)
   }
 
   const oldStatus = task.status
