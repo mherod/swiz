@@ -3,13 +3,59 @@
  * Rewrites terse, machine-generated notes or logs into short, natural paragraphs.
  */
 
+import { createHash } from "node:crypto"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { promptText } from "../ai-providers.ts"
+import { getHomeDirWithFallback } from "../home.ts"
 
 const HUMANISE_CACHE = new LRUCache<string, Promise<string>>({
   max: 250,
   ttl: 10 * 60 * 1000,
 })
+
+/**
+ * Directory holding the persistent on-disk humanise prompt cache.
+ * Honours `SWIZ_PROMPT_CACHE_DIR` as an override (used by tests and to relocate
+ * the cache); otherwise defaults to `~/.swiz/prompt-cache`.
+ */
+function promptCacheDir(): string {
+  const override = process.env.SWIZ_PROMPT_CACHE_DIR
+  if (override) return override
+  return join(getHomeDirWithFallback("/tmp"), ".swiz", "prompt-cache")
+}
+
+/**
+ * Resolve the on-disk cache file for a given prompt string. The file name is a
+ * SHA-256 hex digest of the full prompt so identical prompts share an entry.
+ */
+export function promptCachePath(prompt: string): string {
+  const hash = createHash("sha256").update(prompt).digest("hex")
+  return join(promptCacheDir(), `${hash}.txt`)
+}
+
+/** Read a previously cached humanisation from disk, or null on miss/error. */
+export async function readPromptDiskCache(prompt: string): Promise<string | null> {
+  try {
+    const file = Bun.file(promptCachePath(prompt))
+    if (!(await file.exists())) return null
+    const text = await file.text()
+    return text.length > 0 ? text : null
+  } catch {
+    return null
+  }
+}
+
+/** Persist a humanisation to disk (best-effort; write errors are ignored). */
+export async function writePromptDiskCache(prompt: string, value: string): Promise<void> {
+  try {
+    await mkdir(promptCacheDir(), { recursive: true })
+    await Bun.write(promptCachePath(prompt), value)
+  } catch {
+    // Disk cache is best-effort; a failed write must not break humanisation.
+  }
+}
 
 export const DEFAULT_HUMANISE_TIMEOUT_MS = 8_000
 
@@ -115,18 +161,22 @@ function getFallback(trimmed: string, options?: HumaniseOptions): string {
 async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions): Promise<string> {
   const fallback = getFallback(trimmed, options)
 
-  try {
-    const systemPrompt = options?.systemPrompt ?? DEFAULT_HUMANISE_SYSTEM_PROMPT
-    const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
-    const stripLine = options?.stripLine
+  const systemPrompt = options?.systemPrompt ?? DEFAULT_HUMANISE_SYSTEM_PROMPT
+  const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
+  const stripLine = options?.stripLine
+  const prompt = `${systemPrompt}\n\nText to rewrite:\n${trimmed}`
 
-    const prompt = `${systemPrompt}\n\nText to rewrite:\n${trimmed}`
+  const diskCached = await readPromptDiskCache(prompt)
+  if (diskCached) return diskCached
+
+  try {
     const rewrittenRaw = await promptText(prompt, { provider: "openrouter", timeout })
     const rewritten = toSingleParagraph(rewrittenRaw, stripLine)
 
     if (!rewritten || rewritten === toSingleParagraph(trimmed, stripLine)) {
       return fallback
     }
+    await writePromptDiskCache(prompt, rewritten)
     return rewritten
   } catch {
     return fallback
