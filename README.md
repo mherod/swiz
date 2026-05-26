@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**140 hooks. 12 event types. Every agent. Zero compromises.**
+**141 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -202,7 +202,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-enforce-taskupdate.ts`             | Blocks all `swiz tasks` CLI usage in Claude Code except `swiz tasks adopt` (orphan recovery). Requires native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) for every other task operation.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-### PostToolUse (27)
+### PostToolUse (28)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -225,6 +225,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-memory-size.ts` | Checks CLAUDE.md and memory files after edits — if they exceed line/word thresholds, advises compaction using the /compact-memory skill. Keeps guidance files lean. |
 | `posttooluse-file-truncation-guard.ts` | After any Edit or Write, compares the resulting file line count against the git HEAD version. If the file lost ≥50 lines and ≥50% of its content, injects a warning so the agent can recover before committing silently-truncated work. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
+| `posttooluse-push-autosteer-issue.ts` | After a `git push` lands (local HEAD matches the remote tracking branch), schedules an auto-steer message to pick up a ready issue from the issue store — but only when the session has no incomplete tasks and a refined issue is available. Keeps the agent moving between units of work without manual prompting. |
 | `posttooluse-push-cooldown.ts` | After any `git push` executes, writes the cooldown sentinel. Pairs with `pretooluse-push-cooldown.ts` — by writing *after* the push runs, only successful pushes arm the cooldown, so blocked pushes no longer trigger a false 60-second wait. |
 | `posttooluse-verify-push.ts` | After any `git push`, verifies the local HEAD SHA matches the remote tracking branch SHA. Blocks with a hard error if they diverge — prevents the agent from declaring push success when the commit didn't land on the remote. |
 | `posttooluse-state-transition.ts` | Auto-transitions project state based on PR lifecycle: `gh pr create` moves `in-development` → `awaiting-feedback`; `gh pr merge` moves `awaiting-feedback` → `in-development`. |
