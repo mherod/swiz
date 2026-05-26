@@ -350,10 +350,11 @@ export class BlockingStrategy implements HookExecutionStrategy {
         if (humaniseEnabled && finalResponse.hookSpecificOutput?.additionalContext) {
           const rawContext = finalResponse.hookSpecificOutput.additionalContext.trim()
           if (rawContext) {
-            const { humaniseText } = await import("../utils/humanise.ts")
+            const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(
+              "../utils/humanise.ts"
+            )
             const humanised = await humaniseText(rawContext, {
-              systemPrompt:
-                "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear instruction, adopting a self-aware 2026 progressive developer tone (sarcasm, dry humor, dead-pan attitude). MANDATORY: You MUST use good manners. ALWAYS include 'please' when making requests, and ALWAYS close your paragraph with 'thanks' or 'thank you'. Praise what has been done well (or dryly/ironically acknowledge it) before raising what still needs attention. MANDATORY: Prefer collaborative 'we' and 'let's' framing over commanding 'you' instructions (e.g., 'we need to look at...', 'let's update...'). Speak as an equal coworker sharing the workspace. MANDATORY: Aim for a conversational, spoken-word feel. Always use natural contractions (like 'don't', 'haven't', 'I've', 'let's', 'it's'). Ban formal transitions (such as 'subsequently', 'therefore', 'initially', 'consequently') and instead connect ideas naturally with 'and', 'but', 'so', or 'then'. Never enumerate steps or list procedures. MANDATORY: Weave in realistic human emotion by identifying the correct emotional trigger mode for the context (Dead-pan/Attitude for errors/fixes/cleanups, Ironic Exuberance for success/green status, Standard Flow for normal sequential progress). Do not include raw file system specifics or explicit file paths in the output; instead, convert any file references into natural language descriptions of what they are (for example, turn '/docs/api-spec-file.md' into 'the API spec document' or 'src/utils/humanise.ts' into 'the humanisation helper'). Keep every other concrete detail, constraint, command, and instruction. MANDATORY: Completely strip out and ignore all internal agent/system constraints, safety/audit gates, task-tracking mechanics, and file/memory limits (such as age gates, dirty file limits, task buffers, or secret scan checks). Do not add any new instructions, commentary, headings, bullet points, quotes, or formatting. Return only the rewritten paragraph.",
+              systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
             })
             finalResponse.systemMessage = humanised
             finalResponse.hookSpecificOutput.additionalContext = humanised
