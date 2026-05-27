@@ -342,9 +342,14 @@ export class BlockingStrategy implements HookExecutionStrategy {
         }
 
         let humaniseEnabled = false
+        let sessionId: string | undefined
+        let transcriptPath: string | undefined
         try {
           const payload = JSON.parse(ctx.enrichedPayloadStr)
           humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+          sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+          transcriptPath =
+            typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
         } catch {}
 
         if (humaniseEnabled && finalResponse.hookSpecificOutput?.additionalContext) {
@@ -355,6 +360,8 @@ export class BlockingStrategy implements HookExecutionStrategy {
             )
             const humanised = await humaniseText(rawContext, {
               systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
+              sessionId,
+              transcriptPath,
             })
             finalResponse.systemMessage = humanised
             finalResponse.hookSpecificOutput.additionalContext = humanised

@@ -168,9 +168,14 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
           const response = buildPreToolResponse(hints, contexts)
 
           let humaniseEnabled = false
+          let sessionId: string | undefined
+          let transcriptPath: string | undefined
           try {
             const payload = JSON.parse(ctx.enrichedPayloadStr)
             humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+            sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+            transcriptPath =
+              typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
           } catch {}
 
           if (humaniseEnabled && contexts.length > 0) {
@@ -181,6 +186,8 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
               )
               const humanised = await humaniseText(rawContext, {
                 systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
+                sessionId,
+                transcriptPath,
               })
               applyPreToolHumanisedContext(response, humanised)
             }

@@ -6,6 +6,8 @@ import {
   clearHumaniseCache,
   DEFAULT_HUMANISE_SYSTEM_PROMPT,
   fallbackHumaniseText,
+  getInProgressTasksSnippet,
+  getLastTranscriptMessage,
   humaniseText,
   lowerKnownImperative,
   PROMPT_CACHE_MAX_AGE_MS,
@@ -281,6 +283,175 @@ describe("generic humanise utility", () => {
           // The newest write survives; the oldest seed was evicted to stay at cap.
           expect(await readPromptDiskCache("newest prompt", dir)).toBe("newest value")
           expect(await Bun.file(promptCachePath("seed 0", dir)).exists()).toBe(false)
+        } finally {
+          await cleanup()
+        }
+      })
+    })
+
+    describe("transcript context injection", () => {
+      test("getLastTranscriptMessage returns null on missing or empty files", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const path = join(dir, "empty-transcript.jsonl")
+          expect(await getLastTranscriptMessage(path)).toBeNull()
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("getLastTranscriptMessage extracts the last valid user/assistant message", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const path = join(dir, "transcript.jsonl")
+          const lines = [
+            JSON.stringify({ type: "user", message: { content: "First user prompt" } }),
+            JSON.stringify({ type: "assistant", message: { content: "First assistant reply" } }),
+            "", // empty line
+            JSON.stringify({ type: "user", message: { content: "Second user prompt" } }),
+            JSON.stringify({ type: "system", message: { content: "System message" } }), // should be ignored
+            JSON.stringify({
+              type: "user",
+              message: { content: "Stop hook feedback: should be skipped" },
+            }), // skipped
+            JSON.stringify({ type: "user", message: { content: "Second user prompt normalized" } }),
+          ]
+          await Bun.write(path, lines.join("\n"))
+
+          const lastMsg = await getLastTranscriptMessage(path)
+          expect(lastMsg).not.toBeNull()
+          expect(lastMsg?.role).toBe("user")
+          expect(lastMsg?.text).toBe("Second user prompt normalized")
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("getLastTranscriptMessage handles different JSON message schemas", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const path = join(dir, "transcript.jsonl")
+          const lines = [JSON.stringify({ type: "assistant", content: "Flat content text" })]
+          await Bun.write(path, lines.join("\n"))
+
+          const lastMsg = await getLastTranscriptMessage(path)
+          expect(lastMsg).not.toBeNull()
+          expect(lastMsg?.role).toBe("assistant")
+          expect(lastMsg?.text).toBe("Flat content text")
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("humaniseText includes resolved transcript context in cache key and prompt", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const path = join(dir, "transcript.jsonl")
+          const lines = [
+            JSON.stringify({ type: "user", message: { content: "My specific context" } }),
+          ]
+          await Bun.write(path, lines.join("\n"))
+
+          clearHumaniseCache()
+
+          // We'll mock the OpenRouter call by writing to the disk cache with the prompt containing the context.
+          // The prompt structure is: `${systemPrompt}${contextSnippet}\n\nText to rewrite:\n${trimmed}`
+          const systemPrompt = "Custom System Prompt"
+          const trimmedText = "Please implement that feature"
+          const contextSnippet =
+            "\n\nRelated Conversation Context (Last Message):\n[User]: My specific context"
+          const expectedPrompt = `${systemPrompt}${contextSnippet}\n\nText to rewrite:\n${trimmedText}`
+
+          // Pre-seed disk cache for the expected prompt with context
+          await writePromptDiskCache(expectedPrompt, "Rewritten with context, thanks.", dir)
+
+          const result = await humaniseText(trimmedText, {
+            systemPrompt,
+            transcriptPath: path,
+            cacheDir: dir,
+          })
+
+          expect(result).toBe("Rewritten with context, thanks.")
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("getInProgressTasksSnippet retrieves and formats in_progress tasks", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const sessionId = "my-test-session"
+          const tasksDir = join(dir, ".claude", "tasks", sessionId)
+          const { mkdir } = await import("node:fs/promises")
+          await mkdir(tasksDir, { recursive: true })
+
+          // Create an in_progress task and a pending task
+          await Bun.write(
+            join(tasksDir, "task1.json"),
+            JSON.stringify({ id: "task1", subject: "Develop unit tests", status: "in_progress" })
+          )
+          await Bun.write(
+            join(tasksDir, "task2.json"),
+            JSON.stringify({ id: "task2", subject: "Refactor prompts", status: "pending" })
+          )
+
+          const snippet = await getInProgressTasksSnippet(sessionId, dir)
+          expect(snippet).toContain("Active In-Progress Tasks:")
+          expect(snippet).toContain("- #task1: Develop unit tests")
+          expect(snippet).not.toContain("Refactor prompts")
+        } finally {
+          await cleanup()
+        }
+      })
+
+      test("humaniseText includes both transcript context and in-progress tasks", async () => {
+        const { dir, cleanup } = await withCacheDir()
+        try {
+          const sessionId = "my-test-session"
+          const tasksDir = join(dir, ".claude", "tasks", sessionId)
+          const { mkdir } = await import("node:fs/promises")
+          await mkdir(tasksDir, { recursive: true })
+
+          // Write task
+          await Bun.write(
+            join(tasksDir, "task-abc.json"),
+            JSON.stringify({
+              id: "task-abc",
+              subject: "Write excellent tests",
+              status: "in_progress",
+            })
+          )
+
+          // Write transcript
+          const transcriptPath = join(dir, "transcript.jsonl")
+          const lines = [
+            JSON.stringify({ type: "user", message: { content: "My specific context" } }),
+          ]
+          await Bun.write(transcriptPath, lines.join("\n"))
+
+          clearHumaniseCache()
+
+          const systemPrompt = "Custom System Prompt"
+          const trimmedText = "Please implement that feature"
+
+          const transcriptSnippet =
+            "\n\nRelated Conversation Context (Last Message):\n[User]: My specific context"
+          const taskSnippet = "\n\nActive In-Progress Tasks:\n- #task-abc: Write excellent tests"
+          const contextSnippet = `${transcriptSnippet}${taskSnippet}`
+          const expectedPrompt = `${systemPrompt}${contextSnippet}\n\nText to rewrite:\n${trimmedText}`
+
+          // Pre-seed disk cache for the expected prompt with both contexts
+          await writePromptDiskCache(expectedPrompt, "Rewritten with both context and tasks.", dir)
+
+          const result = await humaniseText(trimmedText, {
+            systemPrompt,
+            transcriptPath,
+            sessionId,
+            homeDir: dir,
+            cacheDir: dir,
+          })
+
+          expect(result).toBe("Rewritten with both context and tasks.")
         } finally {
           await cleanup()
         }

@@ -9,6 +9,9 @@ import { join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { promptText } from "../ai-providers.ts"
 import { getHomeDirWithFallback } from "../home.ts"
+import { extractTextFromUnknownContent } from "../transcript-extract.ts"
+import { tryParseJsonLine } from "./jsonl.ts"
+import { readSessionLines } from "./transcript.ts"
 
 const HUMANISE_CACHE = new LRUCache<string, Promise<string>>({
   max: 250,
@@ -276,6 +279,82 @@ export interface HumaniseOptions {
   stripLine?: (line: string) => string
   /** Override the on-disk cache directory (defaults to ~/.swiz/prompt-cache). */
   cacheDir?: string
+  sessionId?: string
+  homeDir?: string
+  transcriptPath?: string
+  /** @internal Resolved context snippet to inject, used for cache-key stability */
+  _contextSnippet?: string
+}
+
+/**
+ * Resolves the last non-empty user or assistant message from the session transcript.
+ * This provides crucial conversation context for humanisation rewrites.
+ */
+export async function getLastTranscriptMessage(
+  transcriptPath: string
+): Promise<{ role: "user" | "assistant"; text: string } | null> {
+  try {
+    const lines = await readSessionLines(transcriptPath)
+    if (lines.length === 0) return null
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (!line?.trim()) continue
+
+      const parsed = tryParseJsonLine(line) as Record<string, any> | undefined
+      if (!parsed) continue
+
+      let role: "user" | "assistant" | null = null
+      let content: any = null
+
+      if (parsed.type === "user" || parsed.type === "human") {
+        role = "user"
+        content = parsed.message?.content ?? parsed.content
+      } else if (parsed.type === "assistant") {
+        role = "assistant"
+        content = parsed.message?.content ?? parsed.content
+      }
+
+      if (!role || !content) continue
+
+      const text = extractTextFromUnknownContent(content).normalize("NFKC").trim()
+      if (!text) continue
+
+      // Skip internal hook feedback or command messages
+      if (
+        role === "user" &&
+        (text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>"))
+      ) {
+        continue
+      }
+
+      return { role, text }
+    }
+  } catch {
+    // Graceful fallback on any reading/parsing failure
+  }
+  return null
+}
+
+/**
+ * Resolves the in-progress tasks for the session and returns a formatted snippet.
+ */
+export async function getInProgressTasksSnippet(
+  sessionId: string,
+  homeDir?: string
+): Promise<string> {
+  try {
+    const { readSessionTasks } = await import("../tasks/task-recovery.ts")
+    const tasks = await readSessionTasks(sessionId, homeDir)
+    const inProgress = tasks.filter((t) => t.status === "in_progress")
+    if (inProgress.length === 0) return ""
+
+    const taskLines = inProgress.map((t) => `- #${t.id}: ${t.subject}`).join("\n")
+    return `\n\nActive In-Progress Tasks:\n${taskLines}`
+  } catch {
+    // Graceful fallback if task retrieval fails
+  }
+  return ""
 }
 
 /**
@@ -285,12 +364,30 @@ export async function humaniseText(message: string, options?: HumaniseOptions): 
   const trimmed = message.trim()
   if (!trimmed) return message
 
-  // Include the system prompt in the cache key to prevent collision if different prompts are used
-  const cacheKey = `${trimmed}::${options?.systemPrompt ?? ""}`
+  let contextSnippet = options?._contextSnippet ?? ""
+  if (!options?._contextSnippet) {
+    let transcriptSnippet = ""
+    if (options?.transcriptPath) {
+      const lastMsg = await getLastTranscriptMessage(options.transcriptPath)
+      if (lastMsg) {
+        transcriptSnippet = `\n\nRelated Conversation Context (Last Message):\n[${lastMsg.role === "user" ? "User" : "Assistant"}]: ${lastMsg.text}`
+      }
+    }
+
+    let taskSnippet = ""
+    if (options?.sessionId) {
+      taskSnippet = await getInProgressTasksSnippet(options.sessionId, options.homeDir)
+    }
+
+    contextSnippet = `${transcriptSnippet}${taskSnippet}`
+  }
+
+  const optsWithContext = { ...options, _contextSnippet: contextSnippet }
+  const cacheKey = `${trimmed}::${options?.systemPrompt ?? ""}::${contextSnippet}`
   const cached = HUMANISE_CACHE.get(cacheKey)
   if (cached) return cached
 
-  const promise = humaniseTextUncached(trimmed, options)
+  const promise = humaniseTextUncached(trimmed, optsWithContext)
   HUMANISE_CACHE.set(cacheKey, promise)
   return promise
 }
@@ -306,7 +403,8 @@ async function humaniseTextUncached(trimmed: string, options?: HumaniseOptions):
   const systemPrompt = options?.systemPrompt ?? DEFAULT_HUMANISE_SYSTEM_PROMPT
   const timeout = options?.timeoutMs ?? DEFAULT_HUMANISE_TIMEOUT_MS
   const stripLine = options?.stripLine
-  const prompt = `${systemPrompt}\n\nText to rewrite:\n${trimmed}`
+  const contextSnippet = options?._contextSnippet ?? ""
+  const prompt = `${systemPrompt}${contextSnippet}\n\nText to rewrite:\n${trimmed}`
   const cacheDir = options?.cacheDir
 
   const diskCached = await readPromptDiskCache(prompt, cacheDir)
