@@ -113,10 +113,10 @@ export async function writePromptDiskCache(
 export const DEFAULT_HUMANISE_TIMEOUT_MS = 8_000
 
 export const PROMPT_PART_GOAL_STEERING =
-  "You rewrite terse, machine-generated coding-agent steering notes into a single paragraph of clear, polite, and direct instruction."
+  "You rewrite terse, machine-generated coding-agent steering notes into a single paragraph of clear, polite, and direct instruction. Use the provided Git status, active task lists, and conversation history to naturally inform and develop the rewritten text so it flows seamlessly from our ongoing progress."
 
 export const PROMPT_PART_GOAL_STRATEGY =
-  "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear instruction, adopting a professional, direct, coworker-like developer tone (calm, focused, helpful, slightly dead-pan, without hyperactive sarcasm, extreme exaggeration, or emotional drama)."
+  "You rewrite a concatenated list of development environment warnings, status checks, and task lists into a single, cohesive paragraph of clear instruction, adopting a professional, direct, coworker-like developer tone (calm, focused, helpful, slightly dead-pan, without hyperactive sarcasm, extreme exaggeration, or emotional drama). Use the provided Git status, active tasks, and conversation history to naturally inform and develop the rewritten text so it flows seamlessly from our ongoing progress."
 
 export const PROMPT_PART_MANNERS =
   "MANDATORY: You MUST use good manners. ALWAYS include 'please' when making requests, and ALWAYS close your paragraph with 'thanks' or 'thank you'. Praise what has been done well (or dryly acknowledge it) before raising what still needs attention."
