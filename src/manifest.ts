@@ -50,6 +50,7 @@ import pretooluseBlockTasksDirRead from "../hooks/pretooluse-block-tasks-dir-rea
 import pretoolusBranchIntentGate from "../hooks/pretooluse-branch-intent-gate.ts"
 import pretooluseBunApiEnforce from "../hooks/pretooluse-bun-api-enforce.ts"
 import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent.ts"
+import pretooluseClaudeMdUpdateMemoryGate from "../hooks/pretooluse-claude-md-update-memory-gate.ts"
 import pretooluseClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
@@ -333,6 +334,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseLargeFiles },
       { hook: pretooluseWorkflowPermissionsGate },
       { hook: pretoolUseManiOrderValidation },
+      { hook: pretooluseClaudeMdUpdateMemoryGate },
       { hook: pretooluseClaudeMdWordLimit },
     ],
   },
