@@ -213,7 +213,7 @@ export function filterRequiredSettingsHooks(
       ? hook.hook.requiredSettings
       : hook.requiredSettings
     if (!requiredSettings || requiredSettings.length === 0) return true
-    return requiredSettings.every((key) => !!effective[key])
+    return requiredSettings.every((key) => !!effective[key as keyof EffectiveSwizSettings])
   })
 }
 
