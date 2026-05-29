@@ -23,7 +23,7 @@ function isSecretLine(line: string): boolean {
   return GENERIC_SECRET_RE.test(line) && !GENERIC_EXCLUDE_RE.test(line)
 }
 
-function scanDiffForSecrets(diff: string, limit = 10): string[] {
+export function scanDiffForSecrets(diff: string, limit = 10): string[] {
   const findings: string[] = []
   let currentFile = ""
   for (const line of diff.split("\n")) {
