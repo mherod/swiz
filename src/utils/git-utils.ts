@@ -17,7 +17,7 @@ export {
   normalizeCommitSummary,
 } from "./git-context-messages.ts"
 
-import { normalizeCommitSummary } from "./git-context-messages.ts"
+import { type GitContextMessageStatus, normalizeCommitSummary } from "./git-context-messages.ts"
 
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
@@ -247,20 +247,8 @@ export async function getGitAheadBehind(
   return { ahead, behind, upstream }
 }
 
-export interface GitStatusV2 {
-  branch: string
-  total: number
-  modified: number
-  added: number
-  deleted: number
-  untracked: number
-  lines: string[]
-  ahead: number
-  behind: number
-  upstream: string | null
-  /** True when branch.upstream is set but the remote branch no longer exists (gone). */
-  upstreamGone: boolean
-}
+/** Canonical git-status shape — alias of GitContextMessageStatus to avoid duplication. */
+export type GitStatusV2 = GitContextMessageStatus
 
 /**
  * Parse the raw output of `git status --porcelain=v2 --branch` into a GitStatusV2 object.

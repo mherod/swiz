@@ -9,6 +9,7 @@ export interface GitContextMessageStatus {
   ahead: number
   behind: number
   upstream: string | null
+  /** True when branch.upstream is set but the remote branch no longer exists (gone). */
   upstreamGone: boolean
 }
 
