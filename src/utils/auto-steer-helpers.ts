@@ -9,6 +9,7 @@ import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { z } from "zod"
 import { type AutoSteerTrigger, CHANNEL_DELIVERABLE_TRIGGER_SET } from "../auto-steer-store.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { isWithinUserMessageGrace } from "../tasks/task-governance-grace.ts"
 import {
   SWIZ_MCP_CHANNEL_HEARTBEAT_FRESH_MS,
   swizMcpChannelHeartbeatPath,
@@ -346,16 +347,33 @@ export async function flushAutoSteerHumanisation(): Promise<void> {
   return Promise.resolve()
 }
 
-export async function renderAutoSteerMessage(sessionId: string, message: string): Promise<string> {
+/**
+ * Render a steering message for delivery, humanising it via the AI provider when
+ * `humaniseAutoSteer` is enabled.
+ *
+ * `graceInput` is the hook payload (carrying `_lastUserMessageAt` and/or
+ * `transcript_path`). When the user sent a message within the post-user-message
+ * grace window, humanisation is skipped and the raw mechanical text is returned —
+ * this keeps the mechanical auto-steer voice visually distinct from the user's own
+ * messages while they are actively present. Omitting `graceInput` (schedule-time
+ * renders with no payload) preserves the prior always-humanise behaviour.
+ */
+export async function renderAutoSteerMessage(
+  sessionId: string,
+  message: string,
+  graceInput?: Record<string, any> | null
+): Promise<string> {
   if (!(await isHumaniseAutoSteerEnabled(sessionId))) return message
+  if (graceInput && (await isWithinUserMessageGrace(graceInput))) return message
   return humaniseAutoSteerMessage(message)
 }
 
 export async function renderQueuedAutoSteerRequest(
   sessionId: string,
-  request: Pick<AutoSteerRequest, "message" | "dedupKey">
+  request: Pick<AutoSteerRequest, "message" | "dedupKey">,
+  graceInput?: Record<string, any> | null
 ): Promise<string> {
-  return renderAutoSteerMessage(sessionId, request.dedupKey ?? request.message)
+  return renderAutoSteerMessage(sessionId, request.dedupKey ?? request.message, graceInput)
 }
 
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {

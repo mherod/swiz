@@ -83,22 +83,19 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: use schema parse from `hooks/schemas.ts`; **DON'T** use `as { ... }` casts for stdin. Settings/state schemas also in `src/settings/persistence.ts`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs in-window.
-- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` with triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Enqueues raw; async `humaniseAutoSteerMessage()` (openrouter) swaps it; `humaniseAutoSteer` gates; dedup `dedup_key`.
-- **DO**: `resolveThresholds(cwd)` for memory thresholds (default 5000); never hardcode.
-- **DO**: `computeProjectedContent()` suppresses interpolation; DON'T `.replace()`; fail-open on errors.
+- **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`. Enqueues raw; `humaniseAutoSteerMessage()` swaps it; dedup `dedup_key`.
+- **Humanise grace skip**: `humanise.ts` callers (not the file) skip humanisation within `USER_MESSAGE_GRACE_MS` (`task-governance-grace.ts`) of the last user message. Pass the hook payload as `graceInput` to `renderAutoSteerMessage`/`renderQueuedAutoSteerRequest`; `contextStrategy`/`preToolUseStrategy`/`blockingStrategy` gate `humaniseText` on `isWithinUserMessageGrace(payload)`.
+- **DO**: `resolveThresholds(cwd)` for memory thresholds (default 5000), never hardcode; `computeProjectedContent()` suppresses interpolation, DON'T `.replace()`, fail-open on errors.
 - NFKC-normalize `new_string`/`content`/`old_string` in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be in `EXEMPT_HOOKS`.
 - `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test exclusions.
 - DO NOT test external repo code here; file issue in owning repo.
 - Track diff file from `+++ b/<path>` headers; apply exclusions via that path.
-- `sanitizeSessionId()` for `/tmp` names.
-- DO: `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
-- DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
+- DO: `src/temp-paths.ts` for `/tmp` paths (no `/tmp/*` literals); `sanitizeSessionId()` for `/tmp` names. DON'T hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference: `hooks/stop-ship-checklist.ts` (git+CI+issues). `hooks/stop-git-status.ts` exports `collectGitWorkflowStop`/`evaluateStopGitStatus`.
 - Import `projectKeyFromCwd` from `src/transcript-utils.ts` — DO NOT reimplement; lazy `await import(...)` in `hook-utils.ts` (circular).
 - Workflow enforcement: scan `transcript_path` for evidence; no extra state files.
-- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`.
-- **DO**: Re-export all types that downstream consumers import from shared modules.
+- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, {crossRepo:true, hostname})`. Re-export all types downstream consumers import from shared modules.
 ## Task Data
 - Task storage: `createDefaultTaskStore()` in `src/task-roots.ts` via `getTaskRoots()` in `src/provider-adapters.ts`.
 - Cross-session checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
@@ -121,7 +118,7 @@ alwaysApply: false
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
 - After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
 - Session resume: verify `completed` commit/push tasks against `git status` — uncommitted/unpushed = phantom; reopen.
-- After `CLAUDE.md` edit: `wc -w CLAUDE.md`; `/compact-memory` near threshold. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
+- `CLAUDE.md` ≥3500 words HARD-BLOCKS commit (lefthook `memory` step); `wc -w` and trim/`/compact-memory` below threshold before `git commit`. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
 - CI: `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before untracked `.lock`/local state.
 ## Standard Work Sequence
 - Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
@@ -155,19 +152,15 @@ alwaysApply: false
 - Show all effective values; never hide user/default. No shared `source` for multiple settings.
 - Adding boolean setting (global): update `types.ts`, `registry.ts`, `persistence.ts`, `resolution.ts`, `settings.ts`, `settings-panel.tsx`, `settings.test.ts`.
 ## CLI Error Handling
-- In `src/commands/`, throw errors instead of `process.exit(1)`.
-- `src/cli.ts` handles command errors via `process.exitCode = 1`.
-- `src/commands/continue.ts`: stream Agent SDK messages; `process.exitCode = 1` on non-success.
-- Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
+- `src/commands/` throw errors, not `process.exit(1)`; `src/cli.ts` maps to `process.exitCode = 1` (so does `continue.ts`, which streams Agent SDK messages, on non-success). Hook scripts (`hooks/*.ts`) intentionally `process.exit(0)`.
 - In CI/hook scripts, don't use `console.log` for status/debug; use `console.error`.
 - `src/debug-logging.test.ts` allowlists `console.*`; elsewhere use `debugLog` from `./debug.ts`. Allowlist edits need a justification comment.
 ## Conventions
 - No top-level `await` in `src/`; use lazy async (`let cache; async load() {...}`). Hooks exempt.
 - DON'T embed ESC (0x1b) in regex; construct at runtime. Bun test output: `/\bRan \d+ tests? across \d+ files?\./`; strip ANSI before match.
-- **CRITICAL self-ref PreToolUse**: edit import before usage. Reversed order deadlocks — recover via `git checkout -- <file>`. Rename declaration + all usages atomically; DON'T add unrequested renames. Remove fn + all usages atomically.
+- **CRITICAL self-ref PreToolUse**: edit import before usage (reversed deadlocks — recover via `git checkout -- <file>`). Rename/remove a declaration + all usages atomically; DON'T add unrequested renames.
 - DO: Read every file in full before editing — snippets miss conflicts.
-- ANSI escape codes direct; no color libraries.
-- DON'T pass multi-param functions to `.flatMap()`/`.map()` — injected `(value, index, array)` args corrupt optional positionals. Wrap: `.flatMap((b) => fn(b))`.
+- ANSI codes direct, no color libraries. DON'T pass multi-param fns to `.flatMap()`/`.map()` — injected `(value, index, array)` corrupt optional positionals; wrap `.flatMap((b) => fn(b))`.
 - Biome import ordering: `bun:*` → `node:*` (alpha) → `../` → `./`. `bun:test` before `node:fs/promises`, `node:os`, `node:path`.
 - Hooks are `.ts`; run as `bun hooks/<file>.ts`.
 - Settings writes: `.bak` backup first.
@@ -176,7 +169,7 @@ alwaysApply: false
 - Unblocking a gated session: complete prior task with evidence, create `in_progress` task before tool calls.
 - `pretooluse-require-tasks.ts` / `pretooluse-update-memory-enforcement.ts` skip outside git repos or when `CLAUDE.md` missing; guard with `isGitRepo(cwd)` + upward search, else `process.exit(0)`.
 - DO: Investigate before completing tasks. Parser misses → dump entries with attrs. Empty recency → print timestamps vs cutoff.
-- DO: After editing `src/` modules consumed by hooks (transcript-summary, hook-utils, dispatch), restart daemon (`lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`) before next hook-gated action.
+- DO: After editing `src/` modules consumed by hooks, restart daemon before the next hook-gated action: `lsof -ti tcp:7943 | xargs -r kill && swiz daemon --port 7943`.
 - DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry after a hook block — instrument the hook's detection logic against current transcript_path first.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
@@ -196,7 +189,7 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
-- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction; fabricate placeholder tasks to pad the ≥2 buffer (auto-completed into false records); hedge before investigating; say "satisfies the gate"/"unblocks the hook"; re-implement without inspecting.
+- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction; fabricate placeholder tasks to pad the ≥2 buffer; hedge before investigating; say "satisfies the gate"/"unblocks the hook"; re-implement without inspecting.
 - DO: Answer user questions and execute requested actions before diagnostics; stop active loops when corrected.
 ## Output & Shell
 - Filter output with `tail` ≥10, or Read with offset/limit. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
@@ -205,7 +198,7 @@ alwaysApply: false
 - Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
 ## Testing
 - DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure.
-- **MANDATORY performance rule**: unit tests must not spawn hook subprocesses. Use `runHookInProcess()`, `runBashHook()`, `runFileEditHook()`, `dispatchInProcess()`, or exported `evaluate*()` functions. `Bun.spawn(["bun", "hooks/..."])` is allowed only in explicit standalone-contract tests such as malformed stdin, executable smoke tests, env-isolation behavior, or process-exit compatibility. Every exception needs a comment naming the subprocess-only behavior under test.
+- **MANDATORY performance rule**: unit tests must not spawn hook subprocesses. Use `runHookInProcess()`, `runBashHook()`, `runFileEditHook()`, `dispatchInProcess()`, or exported `evaluate*()` functions. `Bun.spawn(["bun", "hooks/..."])` is allowed only in explicit standalone-contract tests (malformed stdin, smoke tests, env-isolation, process-exit compat); every exception needs a comment naming the subprocess-only behavior.
 - **MANDATORY heavy-work rule**: mock `gh`, daemon HTTP, filesystem watchers, timers, sleeps, CLI cold starts, and large file contents unless the behavior under test is the external boundary. Prefer injected settings (`_effectiveSettings`), injected state (`_projectState`), temp paths, and direct command/hook function calls over process-wide env mutation.
 - **Regression guard**: when touching hook tests, grep for `Bun.spawn(["bun", "hooks/` and replace legacy runners with shared in-process helpers before adding cases. Do not paper over timeouts by raising `setDefaultTimeout`; remove the subprocess/heavy fixture cause.
 - In hook/unit test edits, run this audit command and keep only intentional exceptions:  

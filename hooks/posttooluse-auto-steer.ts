@@ -134,14 +134,15 @@ export async function getTriggersToDeliver(
 async function deliverTriggers(
   sessionId: string,
   triggersToDeliver: AutoSteerTrigger[],
-  terminal: { app: TerminalApp; name: string } | undefined
+  terminal: { app: TerminalApp; name: string } | undefined,
+  graceInput: Record<string, any>
 ) {
   const app = terminal?.app ?? detectTerminal().app
   const sent = new Set<string>()
   for (const trigger of triggersToDeliver) {
     const req = await consumeAutoSteerRequest(sessionId, trigger)
     if (req && !sent.has(req.message)) {
-      const message = await renderQueuedAutoSteerRequest(sessionId, req)
+      const message = await renderQueuedAutoSteerRequest(sessionId, req, graceInput)
       await sendAutoSteer(message, app, { requeueOnForegroundDeferSessionId: sessionId })
       sent.add(req.message)
     }
@@ -172,7 +173,7 @@ export async function evaluatePosttooluseAutoSteer(input: unknown): Promise<Swiz
   if (triggersToDeliver.length === 0) return {}
   if (await shouldDeferAutoSteerForForegroundChatApp()) return {}
 
-  await deliverTriggers(sessionId, triggersToDeliver, terminal)
+  await deliverTriggers(sessionId, triggersToDeliver, terminal, rec)
 
   store.prune()
   return {}

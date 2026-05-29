@@ -373,6 +373,41 @@ describe("auto-steer helpers", () => {
     expect(rendered).toBe("Please finish the repository checks before stopping.")
   })
 
+  test("renderQueuedAutoSteerRequest skips humanisation within the user-message grace window", async () => {
+    await setupAutoSteerHome()
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Please finish the repository checks before stopping."
+
+    const store = getAutoSteerStore()
+    store.enqueue("session-grace", "Complete repository checks", "next_turn", {
+      dedupKey: "Complete repository checks",
+    })
+    const req = store.consumeOne("session-grace", "next_turn")[0]!
+    const rendered = await renderQueuedAutoSteerRequest("session-grace", req, {
+      _lastUserMessageAt: Date.now(),
+    })
+
+    // User just messaged: keep the raw mechanical text so it stays distinct from their voice.
+    expect(rendered).toBe("Complete repository checks")
+  })
+
+  test("renderQueuedAutoSteerRequest humanises once the grace window has elapsed", async () => {
+    await setupAutoSteerHome()
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "Please finish the repository checks before stopping."
+
+    const store = getAutoSteerStore()
+    store.enqueue("session-grace-expired", "Complete repository checks", "next_turn", {
+      dedupKey: "Complete repository checks",
+    })
+    const req = store.consumeOne("session-grace-expired", "next_turn")[0]!
+    const rendered = await renderQueuedAutoSteerRequest("session-grace-expired", req, {
+      _lastUserMessageAt: Date.now() - 10 * 60 * 1000,
+    })
+
+    expect(rendered).toBe("Please finish the repository checks before stopping.")
+  })
+
   test("humaniseAutoSteerMessage returns the original for blank input", async () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.AI_TEST_TEXT_RESPONSE = "rewritten"

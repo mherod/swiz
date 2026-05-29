@@ -23,6 +23,8 @@ interface StopAutoSteerContext {
   sessionId: string
   safeSession: string
   terminalApp: string
+  /** Parsed payload (carries `_lastUserMessageAt`/`transcript_path`) for the grace-window check. */
+  graceInput: Record<string, any>
 }
 
 function mergeHookContexts(contexts: string[], hookEventName: string): string | null {
@@ -116,7 +118,7 @@ async function resolveStopAutoSteerContext(
   const terminalApp = (payload._terminal as { app: string } | undefined)?.app ?? null
   if (!terminalApp) return null
 
-  return { sessionId, safeSession, terminalApp }
+  return { sessionId, safeSession, terminalApp, graceInput: payload }
 }
 
 async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boolean> {
@@ -135,7 +137,7 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
     const req = batch[0]!
     deliveredCount++
     if (!sent.has(req.message)) {
-      const message = await renderQueuedAutoSteerRequest(ctx.sessionId, req)
+      const message = await renderQueuedAutoSteerRequest(ctx.sessionId, req, ctx.graceInput)
       const ok = await sendAutoSteer(message, ctx.terminalApp)
       if (ok) {
         log(`   auto-steer: delivered on_session_stop message to terminal (${ctx.terminalApp})`)
@@ -162,7 +164,7 @@ async function tryAutoSteerStopBlock(
   if (getStore().wasRecentlyDelivered(ctx.safeSession, blockReason, "on_session_stop")) return
 
   const { renderAutoSteerMessage, sendAutoSteer } = await import("../utils/hook-utils.ts")
-  const message = await renderAutoSteerMessage(ctx.sessionId, blockReason)
+  const message = await renderAutoSteerMessage(ctx.sessionId, blockReason, ctx.graceInput)
   const sent = await sendAutoSteer(message, ctx.terminalApp)
   if (!sent) return
   log(
@@ -344,15 +346,27 @@ export class BlockingStrategy implements HookExecutionStrategy {
         let humaniseEnabled = false
         let sessionId: string | undefined
         let transcriptPath: string | undefined
+        let withinGrace = false
         try {
           const payload = JSON.parse(ctx.enrichedPayloadStr)
           humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
           sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
           transcriptPath =
             typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
+          const { isWithinUserMessageGrace } = await import(
+            "../../src/tasks/task-governance-grace.ts"
+          )
+          withinGrace = await isWithinUserMessageGrace(payload)
         } catch {}
 
-        if (humaniseEnabled && finalResponse.hookSpecificOutput?.additionalContext) {
+        // Skip humanisation inside the post-user-message grace window so the
+        // mechanical context voice stays visually distinct from the user's own
+        // messages while they are actively present.
+        if (
+          humaniseEnabled &&
+          !withinGrace &&
+          finalResponse.hookSpecificOutput?.additionalContext
+        ) {
           const rawContext = finalResponse.hookSpecificOutput.additionalContext.trim()
           if (rawContext) {
             const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(

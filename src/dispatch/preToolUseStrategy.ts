@@ -170,15 +170,21 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
           let humaniseEnabled = false
           let sessionId: string | undefined
           let transcriptPath: string | undefined
+          let withinGrace = false
           try {
             const payload = JSON.parse(ctx.enrichedPayloadStr)
             humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
             sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
             transcriptPath =
               typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
+            const { isWithinUserMessageGrace } = await import("../tasks/task-governance-grace.ts")
+            withinGrace = await isWithinUserMessageGrace(payload)
           } catch {}
 
-          if (humaniseEnabled && contexts.length > 0) {
+          // Skip humanisation inside the post-user-message grace window so the
+          // mechanical context voice stays visually distinct from the user's own
+          // messages while they are actively present.
+          if (humaniseEnabled && !withinGrace && contexts.length > 0) {
             const rawContext = contexts.join("\n\n").trim()
             if (rawContext) {
               const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(
