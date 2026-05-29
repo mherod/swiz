@@ -51,7 +51,7 @@ alwaysApply: false
 ## Skill Requirement Gates
 - "Used this session" = last 30 turns AND last 20 minutes. Shared helpers: `src/transcript-summary.ts`/`src/skill-utils.ts` (`getRecentlyInvokedSkillsForCurrentSession`, `getRecentlyUsedToolsForCurrentSession`, `getRecentBashCommandsUsedForCurrentSession`, `formatCurrentSessionUsageWindow`). Never rescan or duplicate recency math.
 - `hooks/pretooluse-skill-invocation-gate.ts`: requires `/commit` before `git commit`, `/push` before `git push`, `/triage-issues` to add `triaged`, `/refine-issue` for label changes, `/pr-open` for `gh pr create`, `/pr-comments-address` before dismissing reviews. Branch-delete pushes exempt.
-- `hooks/pretooluse-claude-md-update-memory-gate.ts`: requires `/update-memory` this session before any Edit/Write to a CLAUDE.md file (incl. nested). Skipped if skill uninstalled (`skillExistsForHookPayload` false) or no transcript. Unconditional, unlike reactive `pretooluse-update-memory-enforcement.ts`.
+- `hooks/pretooluse-claude-md-update-memory-gate.ts`: requires `/update-memory` before Edit/Write to CLAUDE.md, GEMINI.md, AGENTS.md, .cursorrules (incl. nested). Skipped if skill uninstalled (`skillExistsForHookPayload` false) or no transcript. Unconditional, unlike reactive `pretooluse-update-memory-enforcement.ts`.
 - After `/commit`, recent `TaskList` required before `git commit`.
 - `hooks/pretooluse-push-checks-gate.ts`: before `git push`, branch, PR, and CI checks must be recent or hook emits advisory. Behind-remote, WIP/fixup/squash commits, secrets, large files are hard blocks.
 - `hooks/stop-required-skills.ts`: stop requires in order: `/end-of-day` (unpushed commits/incomplete tasks), `/farm-out-issues` (git repos), `/continue-with-tasks`, `/reflect-on-session-mistakes`.
