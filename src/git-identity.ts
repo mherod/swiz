@@ -1,18 +1,18 @@
 import { git, isGitRepo } from "./git-helpers.ts"
 
-export interface GitIdentity {
+interface GitIdentity {
   name: string
   email: string
 }
 
-export interface GitIdentityCheck {
+interface GitIdentityCheck {
   ok: boolean
   isGitRepo: boolean
   identity: GitIdentity
   problems: string[]
 }
 
-export interface HeadCommitIdentityCheck extends GitIdentityCheck {
+interface HeadCommitIdentityCheck extends GitIdentityCheck {
   head?: {
     author: GitIdentity
     committer: GitIdentity
@@ -60,7 +60,7 @@ function isPlaceholderEmail(email: string): boolean {
   return PLACEHOLDER_EMAIL_RE.some((pattern) => pattern.test(normalized))
 }
 
-export function validateGitIdentity(identity: GitIdentity, label = "git config"): string[] {
+function validateGitIdentity(identity: GitIdentity, label = "git config"): string[] {
   const problems: string[] = []
   const name = normalize(identity.name)
   const email = normalize(identity.email)
@@ -75,7 +75,7 @@ export function validateGitIdentity(identity: GitIdentity, label = "git config")
   return problems
 }
 
-export async function readGitIdentity(cwd: string): Promise<GitIdentity> {
+async function readGitIdentity(cwd: string): Promise<GitIdentity> {
   const [name, email] = await Promise.all([
     git(["config", "--get", "user.name"], cwd),
     git(["config", "--get", "user.email"], cwd),

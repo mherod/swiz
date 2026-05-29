@@ -1,18 +1,18 @@
 import { detectForkTopology, getRepoSlug, gh, ghJson } from "./git-helpers.ts"
 import type { CollaborationMode } from "./settings.ts"
 
-export interface OpenPullRequest {
+interface OpenPullRequest {
   author?: { login?: string | null } | null
 }
 
-export interface CollaborationPolicyInput {
+interface CollaborationPolicyInput {
   currentUser: string | null
   openPullRequests: OpenPullRequest[]
   recentContributorLogins: Array<string | null | undefined>
   repoOwner: string | null
 }
 
-export interface CollaborationPolicyResult {
+interface CollaborationPolicyResult {
   isCollaborative: boolean
   isOrgRepo: boolean
   openPullRequestCount: number
@@ -35,16 +35,13 @@ interface CollaborationDetectionDependencies {
   ghJson?: <T>(args: string[], cwd: string) => Promise<T | null>
 }
 
-export type DetectRepoOwnershipOptions = Pick<
-  CollaborationDetectionDependencies,
-  "getRepoSlug" | "gh"
->
+type DetectRepoOwnershipOptions = Pick<CollaborationDetectionDependencies, "getRepoSlug" | "gh">
 
-export interface DetectProjectCollaborationOptions extends CollaborationDetectionDependencies {
+interface DetectProjectCollaborationOptions extends CollaborationDetectionDependencies {
   nowMs?: number
 }
 
-export interface RepoOwnershipDetectionResult {
+interface RepoOwnershipDetectionResult {
   currentUser: string | null
   isPersonalRepo: boolean
   repoName: string | null
@@ -53,7 +50,7 @@ export interface RepoOwnershipDetectionResult {
   resolved: boolean
 }
 
-export interface ProjectCollaborationDetectionResult extends CollaborationPolicyResult {
+interface ProjectCollaborationDetectionResult extends CollaborationPolicyResult {
   currentUser: string | null
   isPersonalRepo: boolean
   repoName: string | null
@@ -229,7 +226,7 @@ export async function detectRepoOwnership(
  * Describes the permission boundaries enforced for a given collaboration mode.
  * This is the settings-layer complement to the signal-based `CollaborationPolicyResult`.
  */
-export interface CollaborationModePolicy {
+interface CollaborationModePolicy {
   /** Whether feature branches are required for all work (no direct default-branch commits). */
   requireFeatureBranch: boolean
   /** Whether an open PR is required before merging to the default branch. */

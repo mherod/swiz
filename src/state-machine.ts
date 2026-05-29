@@ -7,37 +7,39 @@ import { z } from "zod"
 import type { EffectiveSwizSettings, ProjectState } from "./settings.ts"
 
 /** Workflow intent that influences hook behavior and guidance */
-export const workflowIntentSchema = z.enum([
+const workflowIntentSchema = z.enum([
   "planning-work",
   "active-development",
   "awaiting-review",
   "responding-to-feedback",
 ])
-export type WorkflowIntent = z.infer<typeof workflowIntentSchema>
+type WorkflowIntent = z.infer<typeof workflowIntentSchema>
 
 /** Priority level that can influence task ordering and reminders */
-export const statePrioritySchema = z.enum(["immediate", "high", "normal", "low"])
-export type StatePriority = z.infer<typeof statePrioritySchema>
+const statePrioritySchema = z.enum(["immediate", "high", "normal", "low"])
+type StatePriority = z.infer<typeof statePrioritySchema>
 
 /** Metadata attached to each state */
+// Kept exported: its runtime value is referenced only via `typeof` (z.infer below),
+// so dropping `export` trips no-unused-vars. De-exporting needs a deeper change (#676).
 export const stateMetadataSchema = z.object({
   intent: workflowIntentSchema,
   priority: statePrioritySchema,
   isTerminal: z.boolean(),
   description: z.string(),
 })
-export type StateMetadata = z.infer<typeof stateMetadataSchema>
+type StateMetadata = z.infer<typeof stateMetadataSchema>
 
 /** Guard function that evaluates whether a transition is allowed */
-export type TransitionGuard = (
+type TransitionGuard = (
   context: TransitionContext
 ) => Promise<{ allowed: boolean; reason?: string }>
 
 /** Side effect function that runs when a transition occurs */
-export type TransitionEffect = (context: TransitionContext) => Promise<void>
+type TransitionEffect = (context: TransitionContext) => Promise<void>
 
 /** Context provided to guard and effect functions */
-export interface TransitionContext {
+interface TransitionContext {
   from: ProjectState | null
   to: ProjectState
   currentSettings: Partial<EffectiveSwizSettings>
@@ -46,7 +48,7 @@ export interface TransitionContext {
 }
 
 /** Transition rule definition with optional guards and effects */
-export interface TransitionRule {
+interface TransitionRule {
   to: ProjectState
   guards?: TransitionGuard[]
   onEnter?: TransitionEffect[]
@@ -54,7 +56,7 @@ export interface TransitionRule {
 }
 
 /** Enriched state definition combining metadata and allowed transitions */
-export interface EnrichedStateDefinition {
+interface EnrichedStateDefinition {
   metadata: StateMetadata
   transitions: TransitionRule[]
 }
@@ -91,7 +93,7 @@ export const STATE_METADATA: Record<ProjectState, StateMetadata> = {
  * Guard: Require clean/default branch when entering active development in team or relaxed-collab mode.
  * This prevents starting work on a polluted branch when branch hygiene is required.
  */
-export async function requireCleanBranchInTeamMode(
+async function requireCleanBranchInTeamMode(
   context: TransitionContext
 ): Promise<{ allowed: boolean; reason?: string }> {
   const isTeamMode =
@@ -122,7 +124,7 @@ export async function logStateTransition(_context: TransitionContext): Promise<v
  * Enriched state machine definition with transitions, guards, and effects.
  * This replaces the simple STATE_TRANSITIONS map with a richer model.
  */
-export const ENRICHED_STATE_MACHINE: Record<ProjectState, EnrichedStateDefinition> = {
+const ENRICHED_STATE_MACHINE: Record<ProjectState, EnrichedStateDefinition> = {
   planning: {
     metadata: STATE_METADATA.planning,
     transitions: [
