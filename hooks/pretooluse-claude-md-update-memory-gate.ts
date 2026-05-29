@@ -1,17 +1,18 @@
 #!/usr/bin/env bun
 
 // PreToolUse hook: Mandate that the /update-memory skill has been invoked in the
-// current session before any Edit/Write to a CLAUDE.md memory file is permitted.
+// current session before any Edit/Write to a memory file is permitted.
 //
-// CLAUDE.md is the project's memory file. Editing it ad-hoc bypasses the
-// /update-memory workflow, which decides what belongs in memory, keeps the file
-// focused, and records DO/DON'T rules in the canonical format. This gate requires
-// a recent /update-memory invocation — analogous to /commit before `git commit`
-// in pretooluse-skill-invocation-gate.ts — but matched on file edits rather than
+// Memory files (CLAUDE.md, GEMINI.md, AGENTS.md, .cursorrules) are the project's
+// instruction/memory layer. Editing them ad-hoc bypasses the /update-memory
+// workflow, which decides what belongs in memory, keeps files focused, and records
+// DO/DON'T rules in the canonical format. This gate requires a recent
+// /update-memory invocation — analogous to /commit before `git commit` in
+// pretooluse-skill-invocation-gate.ts — but matched on file edits rather than
 // shell commands.
 //
 // Skipped when:
-//   - the edit does not target a CLAUDE.md file
+//   - the edit does not target a recognised memory file
 //   - the /update-memory skill is not installed for the current agent
 //     (skillExistsForHookPayload returns false, which also covers agents without
 //      the Skill tool, e.g. Codex which reads SKILL.md directly)
@@ -39,16 +40,23 @@ import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 const UPDATE_MEMORY_SKILL = "update-memory"
 
+/** Filename suffixes / basenames that are treated as memory files. */
+const MEMORY_FILE_PATTERNS = ["CLAUDE.md", "GEMINI.md", "AGENTS.md", ".cursorrules"] as const
+
+function isMemoryFileEdit(input: Record<string, any>): boolean {
+  return MEMORY_FILE_PATTERNS.some((pattern) => isFileEditForPath(input, pattern))
+}
+
 function buildDenyReason(ref: string, windowText: string): string {
   return (
-    `BLOCKED: editing a CLAUDE.md memory file requires the ${ref} skill to be used first.\n\n` +
+    `BLOCKED: editing a memory file requires the ${ref} skill to be used first.\n\n` +
     `The ${ref} skill has not been invoked recently (${windowText}).\n\n` +
-    formatActionPlan([`Invoke the ${ref} skill, then retry this CLAUDE.md edit.`], {
+    formatActionPlan([`Invoke the ${ref} skill, then retry this edit.`], {
       header: "To resolve:",
     }) +
-    `\nWhy this matters: CLAUDE.md is the project's memory file. The ${ref} skill decides what ` +
-    `belongs in memory, keeps the file focused, and records the rule in the canonical format. ` +
-    `Editing CLAUDE.md directly skips these safeguards.`
+    `\nWhy this matters: memory files (CLAUDE.md, GEMINI.md, AGENTS.md, .cursorrules) are the ` +
+    `project's instruction layer. The ${ref} skill decides what belongs in memory, keeps files ` +
+    `focused, and records rules in the canonical format. Editing them directly skips these safeguards.`
   )
 }
 
@@ -70,8 +78,8 @@ export async function evaluateClaudeMdUpdateMemoryGate(
     cwd?: string
   }
 
-  // Only gate Edit/Write operations that target a CLAUDE.md file.
-  if (!isFileEditForPath(input, "CLAUDE.md")) return {}
+  // Only gate Edit/Write operations that target a recognised memory file.
+  if (!isMemoryFileEdit(input)) return {}
 
   // Nothing to enforce when the skill is not installed for this agent. This also
   // skips agents without the Skill tool (skillExistsForHookPayload returns false).

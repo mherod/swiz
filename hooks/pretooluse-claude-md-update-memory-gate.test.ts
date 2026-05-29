@@ -113,4 +113,44 @@ describe("pretooluse-claude-md-update-memory-gate", () => {
     const result = await evaluateClaudeMdUpdateMemoryGate(payload, skillInstalled)
     expect(decisionOf(result)).toBe("allow")
   })
+
+  it("blocks GEMINI.md edit without /update-memory", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([skillInvocationLine("commit")], "/repo/GEMINI.md"),
+      skillInstalled
+    )
+    expect(decisionOf(result)).toBe("deny")
+  })
+
+  it("blocks AGENTS.md edit without /update-memory", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([skillInvocationLine("commit")], "/repo/AGENTS.md"),
+      skillInstalled
+    )
+    expect(decisionOf(result)).toBe("deny")
+  })
+
+  it("blocks .cursorrules edit without /update-memory", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([skillInvocationLine("commit")], "/repo/.cursorrules"),
+      skillInstalled
+    )
+    expect(decisionOf(result)).toBe("deny")
+  })
+
+  it("allows GEMINI.md edit after /update-memory was invoked", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([skillInvocationLine("update-memory")], "/repo/GEMINI.md"),
+      skillInstalled
+    )
+    expect(decisionOf(result)).toBe("allow")
+  })
+
+  it("ignores edits to non-memory files even when they contain memory-like names", async () => {
+    const result = await evaluateClaudeMdUpdateMemoryGate(
+      claudeMdEditPayload([], "/repo/src/not-a-CLAUDE.md.ts"),
+      skillInstalled
+    )
+    expect(result).toEqual({})
+  })
 })
