@@ -51,6 +51,7 @@ import {
   needsReconciliation,
   overlayEventState,
 } from "../src/tasks/task-event-state.ts"
+import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
 import {
   buildTaskGovernanceMessage,
   buildTaskGovernancePreview,
@@ -968,6 +969,8 @@ export async function evaluatePretooluseRequireTasks(
 
   const parsed = await tryParseAndGuard(input)
   if (!parsed) return {}
+  // Relax require-tasks pressure within the post-user-message grace window.
+  if (await isWithinUserMessageGrace(input)) return {}
   return await runRequireTasksChecks(parsed)
 }
 
@@ -1595,7 +1598,12 @@ export async function evaluatePretooluseEnforceTaskupdate(input: unknown): Promi
   const toolName = String(rec.tool_name ?? "")
   if (!hasTaskGovernanceSurface(rec, toolName)) return {}
 
-  if (isNativeTaskTool(toolName)) {
+  // Within the post-user-message grace window, skip completion governance (rate
+  // limits, thresholds, shortcut blocks) but keep the swiz-tasks-files integrity
+  // enforcement below — tampering with task state is never relaxed.
+  const withinGrace = await isWithinUserMessageGrace(rec)
+
+  if (isNativeTaskTool(toolName) && !withinGrace) {
     const n = await checkNativeTaskUpdateCompletion(rec)
     if (n === "early_exit") return {}
     if (n !== "continue") return n
@@ -1825,6 +1833,11 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   if (blockedTaskFiles) return blockedTaskFiles
 
   if (!hasTaskGovernanceSurface(input, toolName)) return {}
+
+  // Fully relax workflow-governance blocks for a short window after a user message.
+  // The task-file integrity precheck above still applies; only the buffer/staleness/
+  // rate-limit/minimums pressure is suspended so a fresh request can be acted on at once.
+  if (await isWithinUserMessageGrace(input)) return {}
 
   const overflow = await evaluatePendingOverflowGuard(input, toolName)
   if (overflow) return overflow

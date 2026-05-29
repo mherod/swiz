@@ -20,6 +20,7 @@ import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { createDefaultTaskStore } from "../src/task-roots.ts"
+import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
 import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
 import {
@@ -216,6 +217,13 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
   if (workCallCount >= 1) {
     return preToolUseAllow(
       `Continue in tool-backed task-completion mode: Task #${taskId} has ${workCallCount} work tool call(s) after in_progress.`
+    )
+  }
+
+  // Relax phantom-completion blocking within the post-user-message grace window.
+  if (await isWithinUserMessageGrace(raw as Record<string, any>)) {
+    return preToolUseAllow(
+      "Continue in post-user-message grace mode: task-governance blocks are relaxed briefly after a user message."
     )
   }
 

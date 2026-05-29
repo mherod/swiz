@@ -28,6 +28,7 @@ import {
   GhQueryCache,
   GitStateCache,
   HookEligibilityCache,
+  LastUserMessageCache,
   ManifestCache,
   ProjectSettingsCache,
   TranscriptIndexCache,
@@ -151,6 +152,7 @@ function createDaemonCaches() {
   const upstreamSyncRegistry = new UpstreamSyncRegistry()
   const workerRuntime = new DaemonWorkerRuntime()
   const gitStateCache = new GitStateCache()
+  const lastUserMessageCache = new LastUserMessageCache()
   const projectSettingsCache = new ProjectSettingsCache()
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
@@ -167,6 +169,7 @@ function createDaemonCaches() {
     upstreamSyncRegistry,
     workerRuntime,
     gitStateCache,
+    lastUserMessageCache,
     projectSettingsCache,
     manifestCache,
     snapshots,
@@ -398,6 +401,7 @@ function createPruner(
     for (const [sessionId, usage] of state.sessionToolUsage) {
       if (usage.lastSeen < cutoffMs) state.sessionToolUsage.delete(sessionId)
     }
+    caches.lastUserMessageCache.pruneOlderThan(cutoffMs)
 
     evictIdleProjects(now, state, registeredProjects, evictProject)
     transcriptMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
@@ -573,6 +577,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     eligibilityCache: caches.eligibilityCache,
     cooldownRegistry: caches.cooldownRegistry,
     gitStateCache: caches.gitStateCache,
+    lastUserMessageCache: caches.lastUserMessageCache,
     ciWatchRegistry: caches.ciWatchRegistry,
     upstreamSyncRegistry: caches.upstreamSyncRegistry,
     projectSettingsCache: caches.projectSettingsCache,

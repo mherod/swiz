@@ -63,6 +63,7 @@ import {
   type GhQueryCache,
   type GitStateCache,
   type HookEligibilityCache,
+  type LastUserMessageCache,
   type ManifestCache,
   type ProjectSettingsCache,
   recordDispatch,
@@ -242,6 +243,7 @@ export interface DaemonWebServerContext {
   eligibilityCache: HookEligibilityCache
   cooldownRegistry: CooldownRegistry
   gitStateCache: GitStateCache
+  lastUserMessageCache: LastUserMessageCache
   ciWatchRegistry: CiWatchRegistry
   upstreamSyncRegistry: UpstreamSyncRegistry
   projectSettingsCache: ProjectSettingsCache
@@ -312,6 +314,7 @@ export interface DispatchRoutesContext {
   prReviewMonitor: PrReviewMonitor
   upstreamSyncRegistry: UpstreamSyncRegistry
   transcriptIndex: TranscriptIndexCache
+  lastUserMessageCache: LastUserMessageCache
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
   recentHookAllowMessages: CappedMap<string, string>
 }
@@ -333,6 +336,7 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     prReviewMonitor: ctx.prReviewMonitor,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
+    lastUserMessageCache: ctx.lastUserMessageCache,
     taskStateCache: ctx.taskStateCache,
     recentHookAllowMessages: ctx.recentHookAllowMessages,
   }
@@ -444,6 +448,7 @@ export interface CacheRoutesContext {
   transcriptIndex: TranscriptIndexCache
   cooldownRegistry: CooldownRegistry
   gitStateCache: GitStateCache
+  lastUserMessageCache: LastUserMessageCache
   ciWatchRegistry: CiWatchRegistry
   projectSettingsCache: ProjectSettingsCache
   manifestCache: ManifestCache
@@ -460,6 +465,7 @@ export function buildCacheRoutesContext(ctx: DaemonWebServerContext): CacheRoute
     transcriptIndex: ctx.transcriptIndex,
     cooldownRegistry: ctx.cooldownRegistry,
     gitStateCache: ctx.gitStateCache,
+    lastUserMessageCache: ctx.lastUserMessageCache,
     ciWatchRegistry: ctx.ciWatchRegistry,
     projectSettingsCache: ctx.projectSettingsCache,
     manifestCache: ctx.manifestCache,
@@ -576,6 +582,9 @@ async function updateParsedPayloadMetrics(
       lastSeen: nowMs,
       dispatches: (prev?.dispatches ?? 0) + 1,
     })
+    if (canonicalEvent === "userPromptSubmit") {
+      ctx.lastUserMessageCache.recordFromHook(parsed.sessionId, nowMs)
+    }
     if (canonicalEvent === "preToolUse" && parsed.toolName) {
       captureSessionToolCall(
         ctx.sessionToolCalls,
@@ -708,6 +717,8 @@ async function handleDispatchRoute(
         signal: requestAbort.signal,
         currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
           getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
+        lastUserMessageAtProvider: (sessionId) =>
+          ctx.lastUserMessageCache.peek(sessionId)?.at ?? null,
         disableTranscriptSummaryFallback: true,
         manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
         onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
@@ -969,6 +980,23 @@ async function handleGitState(req: Request, ctx: CacheRoutesContext): Promise<Re
   return Response.json(state)
 }
 
+async function handleLastUserMessage(req: Request, ctx: CacheRoutesContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    sessionId?: string
+    transcriptPath?: string
+    cwd?: string
+  } | null
+  if (typeof body?.sessionId !== "string" || !body.sessionId) {
+    return Response.json({ error: "Missing required field: sessionId" }, { status: 400 })
+  }
+  if (typeof body.cwd === "string" && body.cwd) registerProjectAndTouch(ctx, body.cwd)
+  const entry = await ctx.lastUserMessageCache.get(body.sessionId, body.transcriptPath)
+  if (!entry) {
+    return Response.json({ error: "No user message recorded for session" }, { status: 404 })
+  }
+  return Response.json(entry)
+}
+
 async function handleSessionEditsList(req: Request, _ctx: CacheRoutesContext): Promise<Response> {
   const body = (await req.json().catch(() => null)) as {
     projectKey?: string
@@ -999,6 +1027,7 @@ const CACHE_ROUTE_TABLE: Record<string, CacheRouteHandler> = {
   "/hooks/cooldown": handleCooldownCheck,
   "/hooks/cooldown/mark": handleCooldownMark,
   "/git/state": handleGitState,
+  "/sessions/last-user-message": handleLastUserMessage,
   "/session-edits/list": handleSessionEditsList,
 }
 

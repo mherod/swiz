@@ -71,6 +71,8 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _currentSessionToolUsage?: CurrentSessionToolUsage
   /** Pre-parsed transcript metadata (tool calls, commands, skills, elapsed time). */
   _transcriptSummary?: TranscriptSummary
+  /** Epoch ms of the last user message for this session (daemon hot-cache fast path). */
+  _lastUserMessageAt?: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -199,6 +201,7 @@ interface EnrichPayloadOptions {
     sessionId: string,
     transcriptPath?: string
   ) => Promise<CurrentSessionToolUsage | null>
+  lastUserMessageAtProvider?: (sessionId: string) => number | null
   disableTranscriptSummaryFallback?: boolean
 }
 
@@ -207,6 +210,7 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     payload,
     summaryProvider,
     currentSessionToolUsageProvider,
+    lastUserMessageAtProvider,
     disableTranscriptSummaryFallback,
   } = opts
 
@@ -224,6 +228,11 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
         `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
       )
     }
+  }
+
+  if (lastUserMessageAtProvider && sessionId) {
+    const at = lastUserMessageAtProvider(sessionId)
+    if (typeof at === "number" && Number.isFinite(at)) payload._lastUserMessageAt = at
   }
 
   const summary = await resolveTranscriptSummary(
@@ -288,6 +297,8 @@ export interface DispatchRequest {
     sessionId: string,
     transcriptPath?: string
   ) => Promise<CurrentSessionToolUsage | null>
+  /** Optional daemon-backed provider for the session's last user-message time (epoch ms). */
+  lastUserMessageAtProvider?: (sessionId: string) => number | null
   /** When true, skip the default file-backed transcript summary enrichment. */
   disableTranscriptSummaryFallback?: boolean
   /** Optional cached manifest provider (injected by daemon to skip cold manifest rebuild). */
@@ -666,6 +677,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     payload: ctx.payload,
     summaryProvider: req.transcriptSummaryProvider,
     currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
+    lastUserMessageAtProvider: req.lastUserMessageAtProvider,
     disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
   })
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
