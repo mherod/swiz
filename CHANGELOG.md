@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-05-29
+
+### Features
+
+- **Last user-message tracking + task-governance grace** — The daemon now
+  keeps each session's most recent user-message time hot in memory (fed by the
+  `userPromptSubmit` hook and the transcript) and exposes it via
+  `/sessions/last-user-message`. Task-governance PreToolUse blocks
+  (require-tasks, governance, phantom-completion) fully relax for 3 minutes
+  after a user message, so a fresh instruction is never immediately gated.
+
+### Improvements
+
+- **hook-utils.ts decomposition (#677)** — Extracted the hook-response /
+  output-helper cluster (`denyPreToolUse`, `allowPreToolUse*`, `blockStop*`,
+  `filePathGuardHook`, `emitContext`, …) into `src/utils/hook-response.ts`,
+  re-exported through the preserved barrel; `hook-utils.ts` drops from 1039 to
+  749 lines with zero importer changes.
+- **Smaller public API surface (#676)** — Dropped the redundant `export`
+  keyword on 25 internal-only symbols across `state-machine.ts`,
+  `git-identity.ts`, and `collaboration-policy.ts`.
+- **Full command coverage in README** — Documented all swiz commands plus the
+  daemon subsystem overview.
+
+### Fixes
+
+- **Sandbox allows reading session tool-results** — The sandbox guard no longer
+  blocks shell reads of the harness's persisted tool-result files under
+  `.claude/projects/**/tool-results/`; these are the agent's own session output
+  and reading them back (including via compound commands) is now permitted.
+
 ## 2026-05-26
 
 ### Improvements
