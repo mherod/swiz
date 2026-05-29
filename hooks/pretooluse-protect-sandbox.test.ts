@@ -191,6 +191,28 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     expect(reason).toContain("update-memory")
     expect(reason).toContain("read-only shell command")
   })
+
+  // The harness persists oversized tool stdout under the session's tool-results
+  // directory; the agent must be able to read it back even via a compound command.
+  const toolResultsPath = join(
+    TEST_HOME,
+    ".claude",
+    "projects",
+    "-Users-me-Development-swiz",
+    "session-abc",
+    "tool-results",
+    "out.txt"
+  )
+
+  test("allows reading a session tool-results file", async () => {
+    const result = await runPinnedHomeBashHook(`tail -25 ${toolResultsPath}`)
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows reading a session tool-results file from a compound command", async () => {
+    const result = await runPinnedHomeBashHook(`echo hi; git log -1; tail -25 ${toolResultsPath}`)
+    expect(result.decision).toBeUndefined()
+  })
 })
 
 describe("pretooluse-protect-sandbox (skill file reads #607)", () => {

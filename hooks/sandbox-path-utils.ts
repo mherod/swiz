@@ -38,6 +38,19 @@ export function isProtectedTaskStoragePath(target: string): boolean {
   return PROTECTED_TASK_STORAGE_RE.test(target.normalize("NFKC").replace(/\\/g, "/"))
 }
 
+// Persisted tool-result / output files for the current session live under
+// ~/.<agent>/projects/<key>/<session>/tool-results/. The harness writes a tool's
+// stdout there when it is too large to inline, and the agent legitimately needs
+// to read it back (cat/tail/grep). Such paths are the agent's own session output,
+// not protected config or task state, so they are exempt from the hidden-home
+// shell-path block — reads and writes here cannot bypass any sandbox protection.
+const SESSION_TOOL_RESULTS_RE =
+  /[/\\]\.(?:claude|codex|gemini|cursor)[/\\]projects[/\\].+[/\\]tool-results(?:[/\\]|$)/i
+
+export function isSessionToolResultsPath(target: string): boolean {
+  return SESSION_TOOL_RESULTS_RE.test(target.normalize("NFKC").replace(/\\/g, "/"))
+}
+
 export function buildProtectedTaskStorageDenyReason(attemptedPath: string): string {
   return [
     "Task file access is blocked.",

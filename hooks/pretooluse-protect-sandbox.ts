@@ -21,6 +21,7 @@ import {
   isHiddenTopLevelHomePath,
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
+  isSessionToolResultsPath,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
 } from "./sandbox-path-utils.ts"
@@ -138,6 +139,9 @@ async function isHiddenHomePathInCommand(
 ): Promise<boolean> {
   const resolved = await normalizeShellPath(rawPath, cwd, homeDir)
   if (!resolved) return false
+  // The session's own persisted tool-result/output files live under a hidden
+  // home dir but are the agent's own working data — never block reading them.
+  if (isSessionToolResultsPath(resolved)) return false
   if (!isHiddenTopLevelHomePath(resolved, homeDir)) return false
 
   const normalizedCwd = cwd.replace(/\\/g, "/")
