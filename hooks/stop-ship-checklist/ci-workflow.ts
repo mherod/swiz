@@ -9,13 +9,9 @@ import { getIssueStore, getIssueStoreReader } from "../../src/issue-store.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import type { ActionPlanItem } from "../../src/utils/hook-utils.ts"
 import {
-  getDefaultBranch,
   getRepoSlug,
   ghJson,
-  git,
-  hasGhCli,
-  isDefaultBranch,
-  isGitHubRemote,
+  resolveCurrentFeatureBranch,
   skillExistsForHookPayload,
 } from "../../src/utils/hook-utils.ts"
 
@@ -78,16 +74,6 @@ function findFailing(runs: CIRun[]): CIRun[] {
         r.conclusion === "timed_out" ||
         r.conclusion === "action_required")
   )
-}
-
-async function resolveTargetBranch(cwd: string): Promise<string | null> {
-  if (!(await isGitHubRemote(cwd))) return null
-  if (!hasGhCli()) return null
-  const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return null
-  const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) return null
-  return branch
 }
 
 /**
@@ -207,7 +193,7 @@ export async function collectCiWorkflow(input: StopHookInput): Promise<WorkflowS
   const cwd = input.cwd ?? process.cwd()
 
   try {
-    const branch = await resolveTargetBranch(cwd)
+    const branch = await resolveCurrentFeatureBranch(cwd)
     if (!branch) return null
 
     const relevant = await pollUntilComplete(branch, cwd)

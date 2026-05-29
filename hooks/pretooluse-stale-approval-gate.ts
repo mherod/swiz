@@ -10,18 +10,13 @@ import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   formatActionPlan,
   GIT_COMMIT_RE,
-  getDefaultBranch,
   getOpenPrForBranch,
   getRepoSlug,
   ghJson,
-  git,
-  hasGhCli,
-  isDefaultBranch,
-  isGitHubRemote,
-  isGitRepo,
   isShellTool,
   preToolUseAllow,
   preToolUseDeny,
+  resolveCurrentFeatureBranch,
   type ToolHookInput,
 } from "../src/utils/hook-utils.ts"
 
@@ -40,18 +35,6 @@ interface PrWithReviews {
 
 interface BranchProtectionReviews {
   dismiss_stale_reviews?: boolean
-}
-
-async function resolveFeatureBranch(cwd: string): Promise<string | null> {
-  if (!(await isGitRepo(cwd))) return null
-  if (!hasGhCli()) return null
-  if (!(await isGitHubRemote(cwd))) return null
-
-  const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return null
-  const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) return null
-  return branch
 }
 
 async function findApprovedPr(
@@ -128,7 +111,7 @@ export async function evaluatePretooluseStaleApprovalGate(input: unknown): Promi
   const cwd = resolveGitCommitContext(hookInput)
   if (!cwd) return {}
 
-  const branch = await resolveFeatureBranch(cwd)
+  const branch = await resolveCurrentFeatureBranch(cwd)
   if (!branch) return {}
 
   const result = await findApprovedPr(branch, cwd)

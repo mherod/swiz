@@ -799,6 +799,7 @@ export {
   RECOVERY_CMD_RE,
   type RemoteInfo,
   recentHeadRange,
+  resolveCurrentFeatureBranch,
   SETUP_CMD_RE,
   SOURCE_EXT_RE,
   SWIZ_ISSUE_RE,

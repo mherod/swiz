@@ -1,6 +1,13 @@
 // Git command regexes, argument parsing, and status utilities for hook scripts.
 
-import { detectForkTopology, git } from "../git-helpers.ts"
+import {
+  detectForkTopology,
+  git,
+  hasGhCli,
+  isDefaultBranch,
+  isGitHubRemote,
+  isGitRepo,
+} from "../git-helpers.ts"
 import { readProjectSettings } from "../settings.ts"
 import {
   GIT_GLOBAL_OPTS,
@@ -21,7 +28,7 @@ import { type GitContextMessageStatus, normalizeCommitSummary } from "./git-cont
 
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
-export { isDefaultBranch } from "../git-helpers.ts"
+export { isDefaultBranch }
 
 const _defaultBranchCache = new Map<string, string>()
 
@@ -81,6 +88,25 @@ export async function getDefaultBranch(cwd: string): Promise<string> {
   const result = "main"
   _defaultBranchCache.set(cwd, result)
   return result
+}
+
+/**
+ * Resolve the current non-default feature branch for a GitHub-backed repo.
+ *
+ * Returns null when the cwd is not a git repo, gh CLI is unavailable, the
+ * remote is not GitHub, HEAD is detached / has no current branch, or the
+ * current branch is the default branch. Canonical resolver shared by hooks —
+ * never re-implement this guard chain locally.
+ */
+export async function resolveCurrentFeatureBranch(cwd: string): Promise<string | null> {
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
+  const branch = await git(["branch", "--show-current"], cwd)
+  if (!branch) return null
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (isDefaultBranch(branch, defaultBranch)) return null
+  return branch
 }
 
 // ── Git status parsing ────────────────────────────────────────────────────────
