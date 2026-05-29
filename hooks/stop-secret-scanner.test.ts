@@ -55,10 +55,11 @@ const Kpw = "password"
 const V = "supersecret1234" // 15 chars, no exclusion words
 const Vpw = "wwwwwwwwwwww" // 12 chars
 
-// Direct scanDiffForSecrets tests bypass the withGitClient→runHookInProcess chain
-// (AsyncLocalStorage context doesn't propagate to git() inside the hook in Bun workers).
-// These tests validate the regex/scanning logic; end-to-end pipeline is covered by
-// the exclusion tests below which correctly expect blocked:false when git is unavailable.
+// Direct scanDiffForSecrets tests bypass the withGitClient→runHookInProcess chain.
+// runHookInProcess is in-process (not a Bun worker), but withGitClient mock injection
+// is unreliable here due to Bun's module import cache — git() misses the AsyncLocalStorage
+// context on repeated invocations. These tests validate the regex/scanning logic directly;
+// end-to-end hook dispatch is covered by the non-git directory test at the bottom of this file.
 describe("stop-secret-scanner: GENERIC_SECRET_RE \\s*[:=]\\s* spacing variants", () => {
   test("blocks API_KEY=value (no spaces around =)", () => {
     const dir = makeRepo()
