@@ -379,6 +379,28 @@ export async function wasSkillRecentlyInvokedInCurrentSession(
 }
 
 /**
+ * Skills whose recent use opens an escape hatch through edit-blocking gates.
+ * `/unblock-myself` and `/re-assess` are the designated "I've deliberately
+ * stepped back and reconsidered" actions — exactly what a contested block asks
+ * for — so recent use of either should let an otherwise-blocked edit proceed.
+ */
+export const EDIT_UNBLOCK_SKILLS = ["unblock-myself", "re-assess"] as const
+
+/**
+ * True when `/unblock-myself` or `/re-assess` was invoked recently in the current
+ * session. Edit-blocking PreToolUse gates consult this to stand down after the
+ * agent has taken the deliberate re-assess/unblock action rather than blindly
+ * retrying the same call.
+ */
+export async function wasEditUnblockSkillRecentlyUsed(
+  source: CurrentSessionUsageSource,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<boolean> {
+  const invoked = await getRecentlyInvokedSkillsForCurrentSession(source, options)
+  return EDIT_UNBLOCK_SKILLS.some((skill) => invoked.includes(skill))
+}
+
+/**
  * Check whether a skill was invoked anywhere in the given session lines.
  * Unlike `getRecentlyInvokedSkillsForCurrentSession`, this scans ALL lines
  * (not filtered to the current user turn) to avoid timing race conditions

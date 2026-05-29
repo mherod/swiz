@@ -29,6 +29,15 @@ import {
   type SwizToolHook,
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import {
+  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
+  DEFAULT_SKILL_RECENCY_MAX_TURNS,
+  resolveNumericSetting,
+} from "../src/settings/resolution.ts"
+import {
+  type CurrentSessionUsageRecencyOptions,
+  wasEditUnblockSkillRecentlyUsed,
+} from "../src/skill-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 function describeAction(toolName: string, key: string): string {
@@ -84,6 +93,28 @@ export async function evaluatePretooluseInfractionEscalation(
       : Date.now()
 
   const assessment = evaluateInfraction(lines, current, nowMs)
+
+  // Escape hatch: a recent /unblock-myself or /re-assess is the deliberate
+  // "I've reconsidered this block" action the red card itself points to. When the
+  // agent has taken it, stand down the hard blocks instead of escalating further.
+  if (assessment.level === "red" || assessment.level === "cooldown") {
+    const cwd = (input as { cwd?: string }).cwd ?? process.cwd()
+    const [maxTurns, maxAgeMinutes] = await Promise.all([
+      resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
+      resolveNumericSetting(
+        cwd,
+        "skillRecencyMaxAgeMinutes",
+        DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES
+      ),
+    ])
+    const recencyOptions: CurrentSessionUsageRecencyOptions = {
+      maxTurns,
+      maxAgeMs: maxAgeMinutes * 60 * 1000,
+    }
+    if (await wasEditUnblockSkillRecentlyUsed(input as Record<string, unknown>, recencyOptions)) {
+      return {}
+    }
+  }
 
   if (assessment.level === "red") {
     return preToolUseDeny(
