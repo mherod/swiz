@@ -538,16 +538,16 @@ Session discovery paths:
 
 Provider precedence is deterministic when timestamps tie: Claude → Gemini → Antigravity → Codex.
 
-### `swiz cleanup`
+### `swiz doctor clean`
 
-Remove old Claude Code session data from `~/.claude/projects/` and Gemini backup artifacts from `~/.gemini/`. Keeps disk usage under control for long-running projects.
+Remove old Claude Code session data from `~/.claude/projects/` and Gemini backup artifacts from `~/.gemini/`. Keeps disk usage under control for long-running projects. (Formerly `swiz cleanup`; merged into `swiz doctor` — `--clean` is an alias.)
 
 ```bash
-swiz cleanup                                # remove sessions older than 30 days (+ Gemini backups)
-swiz cleanup --older-than 7d               # remove sessions older than 7 days (+ Gemini backups)
-swiz cleanup --task-older-than 30d         # also remove old task files (any status)
-swiz cleanup --dry-run                     # preview what would be removed
-swiz cleanup --project myrepo              # limit Claude cleanup to a specific project
+swiz doctor clean                           # remove sessions older than 30 days (+ Gemini backups)
+swiz doctor clean --older-than 7d           # remove sessions older than 7 days (+ Gemini backups)
+swiz doctor clean --task-older-than 30d     # also remove old task files (any status)
+swiz doctor clean --dry-run                 # preview what would be removed
+swiz doctor clean --project myrepo          # limit Claude cleanup to a specific project
 ```
 
 **Claude cleanup scope:** `~/.claude/projects/` and `~/.claude/tasks/`
@@ -660,6 +660,149 @@ swiz push-wait --timeout 180               # custom max wait in seconds
 |------|-------------|
 | `--timeout, -t <seconds>` | Max wait for cooldown to expire (default: 120) |
 
+### `swiz push-ci`
+
+Push to the remote and wait for CI to pass — combines `push-wait` and `ci-wait` in one step.
+
+```bash
+swiz push-ci                                # push to origin, then wait for CI
+swiz push-ci origin main --ci-timeout 300   # explicit remote/branch + CI timeout
+```
+
+### `swiz daemon`
+
+Run the optional background service (default port 7943) that makes hook dispatch fast and powers cross-session features. Hooks work without it — they fall back to direct computation — but the daemon makes them faster and enables session monitoring. It:
+
+- **Caches dispatch infrastructure** — manifest, project settings, git state, transcript indexes, hook eligibility — so hooks skip cold-start work.
+- **Monitors transcripts** across active sessions and fires `Notification` hooks (e.g. TTS) when new assistant messages appear.
+- **Tracks GitHub state** via a shared `IssueStore` (`~/.swiz/issues.db`), refreshed on `git push`/`gh` mutations, so PR/issue/CI lookups in hooks hit a warm cache instead of the API.
+- **Watches CI runs** and notifies on completion; serves `/metrics` and a web dashboard for live session and project status.
+
+```bash
+swiz daemon                                 # run in the foreground on port 7943
+swiz daemon --port 8080                     # custom port
+swiz daemon --restart                       # stop any daemon on the port, then start fresh
+swiz daemon --install                       # install as a macOS LaunchAgent (auto-start)
+swiz daemon --uninstall                     # remove the LaunchAgent
+swiz daemon status                          # show metrics and status
+```
+
+| Flag | Description |
+|------|-------------|
+| `--port <port>` | Port to listen on (default: 7943) |
+| `--restart` | Stop any daemon on the port, then start fresh |
+| `--install` | Install as a macOS LaunchAgent (`com.swiz.daemon`) |
+| `--uninstall` | Uninstall the LaunchAgent |
+| `status` | Show daemon metrics and status |
+
+### `swiz state`
+
+Show or set the persistent project state (`planning` / `developing` / `reviewing` / `addressing-feedback`). Review/planning states can switch Claude Code to the Opus model via `.claude/settings.local.json`.
+
+```bash
+swiz state                                  # show current state
+swiz state list                            # list available states
+swiz state set reviewing                   # set the project state
+```
+
+### `swiz status-line`
+
+Output a rich ANSI status bar for Claude Code's `statusLine` hook — branch, task, and session context. Reads the hook JSON from stdin and is wired automatically by `swiz install`.
+
+```bash
+swiz status-line                            # reads JSON from stdin
+```
+
+### `swiz model`
+
+Show or set the Claude Code default model in `settings.json`.
+
+```bash
+swiz model                                  # show current default model
+swiz model opus                            # set the default model (user settings)
+swiz model --project sonnet                # set a per-project default
+```
+
+### `swiz compact`
+
+Reduce a memory file's word count (`CLAUDE.md`, `MEMORY.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`) to lower per-session context overhead, respecting the configured word cap.
+
+```bash
+swiz compact CLAUDE.md                       # compact to the resolved word cap
+swiz compact CLAUDE.md --dry-run            # preview removals without writing
+```
+
+### `swiz plugins`
+
+Manage Claude plugins in `~/.claude/plugins`.
+
+```bash
+swiz plugins list                           # list installed plugins
+swiz plugins info <name>                    # show plugin details
+swiz plugins uninstall <name>               # remove a plugin
+```
+
+### `swiz manage`
+
+Manage shared swiz resources across agents — currently MCP server configuration.
+
+```bash
+swiz manage mcp list                        # list MCP servers across target agents
+swiz manage mcp add|remove|validate|merge   # edit MCP server configuration
+```
+
+### `swiz mcp`
+
+Run swiz itself as a Model Context Protocol (MCP) stdio server, exposing task tools and a `reply` channel to other agents.
+
+```bash
+swiz mcp                                     # start the MCP stdio server
+```
+
+### `swiz idea`
+
+Use the configured AI backend (Gemini) to propose a creative next idea for the current project.
+
+```bash
+swiz idea                                    # suggest a next idea for the cwd project
+```
+
+### `swiz reflect`
+
+Use the configured AI backend to reflect on mistakes in a session transcript — the engine behind the `/reflect-on-session-mistakes` workflow.
+
+```bash
+swiz reflect                                 # reflect on the latest session
+swiz reflect --count 5                      # request a specific number of lessons
+```
+
+### `swiz usage`
+
+Summarize Claude usage data from `~/.claude.json`.
+
+```bash
+swiz usage                                   # show usage summary
+swiz usage --top 10 --json                  # top N entries as JSON
+```
+
+### `swiz cross-repo-issue`
+
+File a GitHub issue in another repository for a blocked file in a sandboxed dependency path — used by hooks when a fix belongs to a different repo.
+
+```bash
+swiz cross-repo-issue --file <abs-path> --title "..." --criteria "..."
+```
+
+### `swiz emergency-bypass`
+
+Activate a time-limited PreToolUse hook bypass for deadlock recovery (max 300s).
+
+```bash
+swiz emergency-bypass                        # activate the default 120s bypass
+swiz emergency-bypass --duration 300        # custom duration (max 300)
+swiz emergency-bypass --status              # show remaining bypass time
+```
+
 ### `swiz doctor`
 
 Check environment health and prerequisites. Reports the status of each detected agent (Claude Code, Cursor, Gemini CLI, Codex), whether its hook configuration is up to date, and whether duplicate skill names exist across skill directories.
@@ -710,7 +853,7 @@ swiz/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 78 hook scripts (all TypeScript)
+    └── *.ts                  # hook scripts, all TypeScript (see Bundled Hooks above for counts)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini, `Stop` → `Stop` for Codex user hooks), then generates the correct config structure per agent.

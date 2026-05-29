@@ -196,10 +196,10 @@ alwaysApply: false
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
-- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction (use `TaskUpdate`); hedge before investigating; say "satisfies the gate"/"unblocks the hook"; re-implement without inspecting first. Use Claude Agent SDK in-process.
-- DO: Answer user questions directly and execute requested actions (e.g. /skill) before diagnostics; stop active loops when corrected.
+- DON'T: ask permission; dismiss findings as "pre-existing"; delete tasks after correction; fabricate placeholder tasks to pad the ≥2 buffer (auto-completed into false records); hedge before investigating; say "satisfies the gate"/"unblocks the hook"; re-implement without inspecting.
+- DO: Answer user questions and execute requested actions before diagnostics; stop active loops when corrected.
 ## Output & Shell
-- Filter output with `tail` ≥10; Read with offset/limit instead. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
+- Filter output with `tail` ≥10, or Read with offset/limit. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
 ## Issue Management
 - Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
