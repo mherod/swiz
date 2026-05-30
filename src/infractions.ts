@@ -47,16 +47,16 @@ export const COOLDOWN_MARKER = "cooling off after a hard block"
  *   - red      → ★2  repeated retry (hard block)
  *   - cooldown → ★3  the mandatory next-event hold right after a red card
  */
-export type InfractionLevel = "none" | "yellow" | "red" | "cooldown"
+type InfractionLevel = "none" | "yellow" | "red" | "cooldown"
 
-export const WANTED_LEVEL_BY_INFRACTION: Record<InfractionLevel, number> = {
+const WANTED_LEVEL_BY_INFRACTION: Record<InfractionLevel, number> = {
   none: 0,
   yellow: 1,
   red: 2,
   cooldown: 3,
 }
 
-export interface InfractionAssessment {
+interface InfractionAssessment {
   level: InfractionLevel
   /** GTA-style wanted level 0–3 derived from `level`. */
   wantedLevel: number
@@ -76,7 +76,7 @@ interface ToolResultRecord {
 }
 
 /** A tool_use whose result was a denial, reduced to a comparable key. */
-export interface BlockedAttempt {
+interface BlockedAttempt {
   toolName: string
   key: string
   timestampMs: number | null
@@ -85,7 +85,7 @@ export interface BlockedAttempt {
 }
 
 /** The most recent tool call that has a settled result, with how it resolved. */
-export interface SettledAttempt {
+interface SettledAttempt {
   key: string
   denied: boolean
   isCooldown: boolean

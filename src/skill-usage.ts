@@ -6,7 +6,7 @@
  * opening the skill file directly.
  */
 
-export interface SkillUsageToolInput {
+interface SkillUsageToolInput {
   args?: string
   command?: string
   cmd?: string
@@ -16,7 +16,7 @@ export interface SkillUsageToolInput {
   skill?: string
 }
 
-export interface SkillInvocationPreamble {
+interface SkillInvocationPreamble {
   /** Inferred skill name without a leading slash, when the preamble exposes it. */
   name: string | null
   /** Text before the skill body preamble, trimmed for display. */
@@ -41,7 +41,7 @@ function pushUniqueSkill(skills: string[], skill: string | undefined): void {
   if (skill && !skills.includes(skill)) skills.push(skill)
 }
 
-export function extractSkillNamesFromSkillMdPathText(
+function extractSkillNamesFromSkillMdPathText(
   text: string,
   options: { allowBasenamePath?: boolean } = {}
 ): string[] {
@@ -63,7 +63,7 @@ export function extractSkillNameFromSkillMdPathText(
   return extractSkillNamesFromSkillMdPathText(text, options)[0] ?? null
 }
 
-export function isSkillMdShellReadCommand(command: string): boolean {
+function isSkillMdShellReadCommand(command: string): boolean {
   return SKILL_MD_SHELL_READ_RE.test(command.trim())
 }
 
@@ -111,7 +111,7 @@ export function extractSkillNameFromCapturedSkillDetail(detail: string): string 
   return skill || null
 }
 
-export function extractSkillNamesFromLegacyCommandTags(text: string): string[] {
+function extractSkillNamesFromLegacyCommandTags(text: string): string[] {
   if (!text) return []
   const skills: string[] = []
   for (const match of text.matchAll(COMMAND_NAME_RE)) {
@@ -120,7 +120,7 @@ export function extractSkillNamesFromLegacyCommandTags(text: string): string[] {
   return skills
 }
 
-export function extractSkillNamesFromActivationBanner(text: string): string[] {
+function extractSkillNamesFromActivationBanner(text: string): string[] {
   if (!text) return []
   const skills: string[] = []
   for (const match of text.matchAll(SKILL_DIR_BANNER_RE)) {

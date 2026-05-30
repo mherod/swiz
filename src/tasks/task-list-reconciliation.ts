@@ -19,7 +19,7 @@ export interface NormalizedTask {
   status: string
 }
 
-export interface SyncResult {
+interface SyncResult {
   created: number
   updated: number
   skipped: number
@@ -33,7 +33,7 @@ export interface SyncResult {
  * Parse a single task object from TaskList response into normalized shape.
  * Returns null if required fields (id, subject) are missing.
  */
-export function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
+function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
   const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
   const subject = typeof t.subject === "string" ? t.subject : ""
   const status = typeof t.status === "string" ? t.status : "pending"
@@ -45,7 +45,7 @@ export function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask 
  * Extract tasks array from raw tool response (string JSON or object).
  * Returns null if response is not a valid object with a `tasks` array.
  */
-export function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[] | null {
+function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[] | null {
   if (!raw) return null
   let parsed: unknown = raw
   if (typeof raw === "string") {
@@ -83,11 +83,7 @@ export function parseToolResponse(raw: PostToolHookInput["tool_response"]): Norm
  * Sets initial timing fields based on status: in_progress gets startedAt,
  * completed gets completedAt and completionTimestamp.
  */
-export function buildNewTaskRecord(
-  task: NormalizedTask,
-  nowIso: string,
-  nowMs: number
-): SessionTask {
+function buildNewTaskRecord(task: NormalizedTask, nowIso: string, nowMs: number): SessionTask {
   return {
     id: task.id,
     subject: task.subject,
@@ -105,7 +101,7 @@ export function buildNewTaskRecord(
  * When transitioning out of in_progress, accumulates elapsedMs.
  * Updates statusChangedAt and sets completion fields when entering completed.
  */
-export function updateExistingTask(existing: SessionTask, task: NormalizedTask): SessionTask {
+function updateExistingTask(existing: SessionTask, task: NormalizedTask): SessionTask {
   const merged: SessionTask = { ...existing, subject: task.subject, status: task.status }
   const nowIso = new Date().toISOString()
   const nowMs = Date.now()
