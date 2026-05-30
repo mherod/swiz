@@ -14,7 +14,7 @@ const NEWLINE_BYTE = 0x0a
 
 type JsonlBuffer = Uint8Array<ArrayBufferLike>
 const JSONL_TMP_SUFFIX = ".swiz-jsonl.tmp"
-export const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
+const DEFAULT_JSONL_TAIL_INITIAL_BYTES = 256 * 1024
 
 // ── Streaming / parsed-object reading ────────────────────────────────────────
 
@@ -153,7 +153,7 @@ export function splitJsonlLines(text: string): string[] {
  * Split streamed JSONL text into complete lines and an unfinished remainder.
  * Preserves blank complete lines so callers can maintain accurate byte offsets.
  */
-export function splitJsonlChunk(text: string): { lines: string[]; remainder: string } {
+function splitJsonlChunk(text: string): { lines: string[]; remainder: string } {
   const parts = text.split("\n")
   return {
     lines: parts.slice(0, -1),
@@ -184,7 +184,7 @@ export function tryParseJsonLine(line: string): unknown | undefined {
  *
  * Malformed JSON lines are silently skipped.
  */
-export function forEachJsonlLine(text: string, fn: (entry: unknown, index: number) => void): void {
+function forEachJsonlLine(text: string, fn: (entry: unknown, index: number) => void): void {
   const lines = splitJsonlLines(text)
   for (let i = 0; i < lines.length; i++) {
     const parsed = tryParseJsonLine(lines[i]!)
@@ -196,7 +196,7 @@ export function forEachJsonlLine(text: string, fn: (entry: unknown, index: numbe
  * Like {@link forEachJsonlLine} but validates each entry against a Zod schema.
  * Only invokes `fn` for lines that pass validation.
  */
-export function forEachJsonlEntry<T>(
+function forEachJsonlEntry<T>(
   text: string,
   schema: ZodType<T>,
   fn: (entry: T, index: number) => void
@@ -224,7 +224,7 @@ export function parseJsonl<T>(text: string, schema: ZodType<T>): T[] {
 }
 
 /** Result of parsing a single JSONL line against a Zod schema. */
-export type JsonlParseResult<T> = { ok: true; data: T; line: number } | { ok: false; line: number }
+type JsonlParseResult<T> = { ok: true; data: T; line: number } | { ok: false; line: number }
 
 /**
  * Like {@link parseJsonl} but also yields line indices and error info.
@@ -286,7 +286,7 @@ export function parseJsonlHead<T>(text: string, schema: ZodType<T>, n: number): 
  * Parse the last `n` lines from a JSONL string against a schema.
  * Slices raw lines before parsing — avoids JSON.parse on discarded lines.
  */
-export function parseJsonlTail<T>(text: string, schema: ZodType<T>, n: number): T[] {
+function parseJsonlTail<T>(text: string, schema: ZodType<T>, n: number): T[] {
   const lines = splitJsonlLines(text)
   const tail = n >= lines.length ? lines : lines.slice(-n)
   return parseJsonl(tail.join("\n"), schema)
@@ -296,23 +296,23 @@ export function parseJsonlTail<T>(text: string, schema: ZodType<T>, n: number): 
  * Parse the last `n` lines from a JSONL string without schema validation.
  * Slices raw lines before parsing — avoids JSON.parse on discarded lines.
  */
-export function parseJsonlTailUntyped(text: string, n: number): unknown[] {
+function parseJsonlTailUntyped(text: string, n: number): unknown[] {
   const lines = splitJsonlLines(text)
   const tail = n >= lines.length ? lines : lines.slice(-n)
   return parseJsonlUntyped(tail.join("\n"))
 }
 
-export interface JsonlTailTextMeta {
+interface JsonlTailTextMeta {
   reachedStart: boolean
   bytesRead: number
   fileSize: number
 }
 
-export interface JsonlTailTextResult extends JsonlTailTextMeta {
+interface JsonlTailTextResult extends JsonlTailTextMeta {
   text: string
 }
 
-export interface JsonlTailTextOptions {
+interface JsonlTailTextOptions {
   initialBytes?: number
   maxBytes?: number
   isEnough?: (text: string, meta: JsonlTailTextMeta) => boolean
