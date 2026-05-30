@@ -44,7 +44,7 @@ interface StatusLineInput {
 
 import { BOLD, DIM, RESET as R } from "../ansi.ts"
 
-export type FetchStatus = "ok" | "stale" | "error"
+type FetchStatus = "ok" | "stale" | "error"
 
 export interface WarmStatusLineSnapshot {
   shortCwd: string
@@ -73,7 +73,7 @@ export interface WarmStatusLineSnapshot {
   issueSyncStale?: boolean | null
 }
 
-export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
+type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
 
 interface StatusLineDaemonMetrics {
   uptimeHuman: string
@@ -510,7 +510,7 @@ async function fetchCiRunsViaStore(
 
 // ── Per-project context usage extremes ─────────────────────────────────────
 
-export interface ContextStats {
+interface ContextStats {
   minPct: number
   maxPct: number
 }
@@ -902,7 +902,7 @@ function isTaskGovernanceHealthy(counts: TaskCounts): boolean {
 }
 
 /** Max glyphs rendered in any single task-tick group before collapsing into an overflow indicator. */
-export const MAX_TASK_TICKS = 10
+const MAX_TASK_TICKS = 10
 /** @deprecated Use MAX_TASK_TICKS. */
 export const MAX_DONE_TICKS = MAX_TASK_TICKS
 
@@ -991,7 +991,7 @@ function buildModeSeg(
 }
 
 /** Max distinct skills printed inline before collapsing into an overflow indicator. */
-export const MAX_ACTIVE_SKILLS = 6
+const MAX_ACTIVE_SKILLS = 6
 
 export function formatActiveSkillsSegment(skills: string[] | null | undefined): string {
   if (!skills || skills.length === 0) return ""

@@ -6,7 +6,7 @@ import { isManagedSwizCommand } from "../../swiz-hook-commands.ts"
  * Strip swiz-managed and legacy hooks from a nested matcher group array,
  * returning only user-defined entries.
  */
-export function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
+function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
   const kept: unknown[] = []
   for (const group of groups) {
     const g = group as Record<string, any>
@@ -27,16 +27,16 @@ export function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
 /**
  * Strip swiz-managed and legacy hooks from a flat hook array.
  */
-export function stripManagedFromFlatList(entries: unknown[]): unknown[] {
+function stripManagedFromFlatList(entries: unknown[]): unknown[] {
   return entries.filter((e) => !isManagedSwizCommand((e as Record<string, any>).command))
 }
 
-export function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
+function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
   const unsupported = new Set(agent.unsupportedEvents ?? [])
   return !unsupported.has(canonicalEvent) && canonicalEvent in agent.eventMap
 }
 
-export function buildDispatchEntry(
+function buildDispatchEntry(
   agent: AgentDef,
   canonicalEvent: string
 ): { eventName: string; timeout: number; cmd: string } {
@@ -47,7 +47,7 @@ export function buildDispatchEntry(
   return { eventName, timeout, cmd }
 }
 
-export function addAdditionalDispatchEntries(
+function addAdditionalDispatchEntries(
   agent: AgentDef,
   merged: Record<string, unknown[]>,
   wrapEntry: (cmd: string, timeout: number) => unknown,
@@ -63,7 +63,7 @@ export function addAdditionalDispatchEntries(
   }
 }
 
-export function addDispatchEntries(
+function addDispatchEntries(
   agent: AgentDef,
   merged: Record<string, unknown[]>,
   wrapEntry: (cmd: string, timeout: number) => unknown
@@ -85,7 +85,7 @@ export function addDispatchEntries(
   addAdditionalDispatchEntries(agent, merged, wrapEntry, seenEvents)
 }
 
-export function mergeNestedConfig(
+function mergeNestedConfig(
   agent: AgentDef,
   existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
@@ -101,7 +101,7 @@ export function mergeNestedConfig(
   return merged
 }
 
-export function mergeFlatConfig(
+function mergeFlatConfig(
   agent: AgentDef,
   existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
@@ -141,7 +141,7 @@ function stripManagedFromLifecycleList(entries: unknown[]): unknown[] {
  * actually fires (Stop, PreInvocation, PostInvocation) are installed; agy strips
  * unknown fields like `statusMessage` on load, so we omit it.
  */
-export function mergeLifecycleConfig(
+function mergeLifecycleConfig(
   agent: AgentDef,
   existingHooks: Record<string, any>
 ): Record<string, unknown[]> {
@@ -173,7 +173,7 @@ export function mergeConfig(
   }
 }
 
-export function collectNestedHooks(hooks: unknown[], cmds: Set<string>): void {
+function collectNestedHooks(hooks: unknown[], cmds: Set<string>): void {
   for (const h of hooks) {
     const hh = h as Record<string, any>
     if (hh.command) cmds.add(String(hh.command))

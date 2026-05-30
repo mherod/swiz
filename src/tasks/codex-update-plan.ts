@@ -12,7 +12,7 @@ import { readTasks, type Task, type TaskStatus, writeAudit, writeTask } from "./
 import { writeCanonicalTaskListSyncSentinel } from "./task-state-cache.ts"
 
 export const CODEX_UPDATE_PLAN_TOOL_NAMES = new Set(["update_plan", "functions.update_plan"])
-export const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
+const CODEX_PLAN_TASK_ID_PREFIX = "codex-"
 
 const codexPlanStatusSchema = z.enum(["pending", "in_progress", "completed", "cancelled"])
 const codexPlanArgumentsSchema = z.looseObject({
@@ -25,19 +25,19 @@ const codexPlanArgumentsSchema = z.looseObject({
   ),
 })
 
-export interface CodexUpdatePlanTask {
+interface CodexUpdatePlanTask {
   step: string
   status: TaskStatus
 }
 
-export interface CodexUpdatePlanSnapshot {
+interface CodexUpdatePlanSnapshot {
   explanation?: string
   plan: CodexUpdatePlanTask[]
   callId?: string
   timestamp?: string
 }
 
-export interface CodexUpdatePlanSyncResult {
+interface CodexUpdatePlanSyncResult {
   snapshots: number
   created: number
   updated: number
@@ -135,7 +135,7 @@ function parseCodexPlanSnapshot(line: string): CodexUpdatePlanSnapshot | null {
   }
 }
 
-export function extractCodexUpdatePlanSnapshotsFromLines(
+function extractCodexUpdatePlanSnapshotsFromLines(
   sessionLines: string[]
 ): CodexUpdatePlanSnapshot[] {
   const snapshots: CodexUpdatePlanSnapshot[] = []
