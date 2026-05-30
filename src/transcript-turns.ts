@@ -215,7 +215,7 @@ async function loadJsonlTurnsTail(
 
 // ─── Turn loading ───────────────────────────────────────────────────────────
 
-export async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
+async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
   if (isUnsupportedTranscriptFormat(session.format)) {
     throw new Error(getUnsupportedTranscriptFormatMessage(session))
   }
@@ -283,7 +283,7 @@ async function loadWindowedJsonlTurns(
 
 // ─── Utility ────────────────────────────────────────────────────────────────
 
-export function applyHeadTail<T>(
+function applyHeadTail<T>(
   values: T[],
   headCount: number | undefined,
   tailCount: number | undefined
@@ -295,7 +295,7 @@ export function applyHeadTail<T>(
 
 // ─── Time filtering ─────────────────────────────────────────────────────────
 
-export function filterTurnsByTime(turns: Turn[], range: TimeRange): Turn[] {
+function filterTurnsByTime(turns: Turn[], range: TimeRange): Turn[] {
   return turns.filter((t) => {
     const ts = t.entry.timestamp
     if (!ts) return false
@@ -307,7 +307,7 @@ export function filterTurnsByTime(turns: Turn[], range: TimeRange): Turn[] {
   })
 }
 
-export function filterDebugEventsByTime(events: DebugEvent[], range: TimeRange): DebugEvent[] {
+function filterDebugEventsByTime(events: DebugEvent[], range: TimeRange): DebugEvent[] {
   return events.filter((e) => {
     if (range.from !== undefined && e.ts < range.from) return false
     if (range.to !== undefined && e.ts > range.to) return false
@@ -317,7 +317,7 @@ export function filterDebugEventsByTime(events: DebugEvent[], range: TimeRange):
 
 // ─── Display turn conversion ────────────────────────────────────────────────
 
-export interface DisplayTurnsResult {
+interface DisplayTurnsResult {
   displayTurns: DisplayTurn[]
   trailingDebug: Array<{ time: string; text: string }>
 }
@@ -369,7 +369,7 @@ export function turnsToDisplayTurns(turns: Turn[], debugEvents?: DebugEvent[]): 
 
 // ─── Session content loading ────────────────────────────────────────────────
 
-export async function loadOptionalDebug(
+async function loadOptionalDebug(
   session: Session,
   parsed: TranscriptArgs,
   onDebugNotFound?: (sessionId: string) => void

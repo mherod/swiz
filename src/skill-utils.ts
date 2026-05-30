@@ -334,7 +334,7 @@ function detectActiveSkillTools(): string[] {
   return orderBy([...tools], [(tool) => tool], ["asc"])
 }
 
-export interface SkillToolAvailabilityWarning {
+interface SkillToolAvailabilityWarning {
   missingTools: string[]
   activeTools: string[]
   requiredTools: string[]
@@ -384,7 +384,7 @@ export async function wasSkillRecentlyInvokedInCurrentSession(
  * stepped back and reconsidered" actions — exactly what a contested block asks
  * for — so recent use of either should let an otherwise-blocked edit proceed.
  */
-export const EDIT_UNBLOCK_SKILLS = ["unblock-myself", "re-assess"] as const
+const EDIT_UNBLOCK_SKILLS = ["unblock-myself", "re-assess"] as const
 
 /**
  * True when `/unblock-myself` or `/re-assess` was invoked recently in the current
@@ -623,7 +623,7 @@ export function filterQualitySteps(steps: SkillStep[]): SkillStep[] {
 
 // ─── Skill listing (async) ───────────────────────────────────────────────────
 
-export interface SkillInfo {
+interface SkillInfo {
   name: string
   description: string
   source: "local" | "global"

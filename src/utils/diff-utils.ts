@@ -1,6 +1,6 @@
 import { BOLD, CYAN, DIM, GREEN, RED, RESET } from "../ansi.ts"
 
-export interface DiffHunk {
+interface DiffHunk {
   oldStart: number
   oldCount: number
   newStart: number
@@ -8,9 +8,9 @@ export interface DiffHunk {
   lines: string[]
 }
 
-export type DiffOp = { type: "equal" | "delete" | "insert"; line: string }
+type DiffOp = { type: "equal" | "delete" | "insert"; line: string }
 
-export function computeLCS(a: string[], b: string[]): number[][] {
+function computeLCS(a: string[], b: string[]): number[][] {
   const m = a.length
   const n = b.length
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
@@ -23,7 +23,7 @@ export function computeLCS(a: string[], b: string[]): number[][] {
   return dp
 }
 
-export function diffLines(oldText: string, newText: string): DiffOp[] {
+function diffLines(oldText: string, newText: string): DiffOp[] {
   const a = oldText.split("\n")
   const b = newText.split("\n")
   const dp = computeLCS(a, b)
@@ -55,7 +55,7 @@ export function diffLines(oldText: string, newText: string): DiffOp[] {
   return ops
 }
 
-export function buildHunk(
+function buildHunk(
   tagged: Array<DiffOp & { oldLine: number; newLine: number }>,
   start: number,
   end: number
