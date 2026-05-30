@@ -9,12 +9,9 @@
  * is needed, so each consumer can emit it in its own way.
  */
 
-import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { formatActionPlan } from "../action-plan.ts"
 import type { HookOutput } from "../schemas.ts"
-import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { warnInvalidTransition } from "../tasks/task-event-state.ts"
 import {
   buildTaskReviewInstruction,
   getTaskToolName,
@@ -27,79 +24,9 @@ import {
   readSessionTasks,
   type SessionTask,
 } from "../tasks/task-recovery.ts"
-import { validateTransition } from "../tasks/task-service.ts"
 import { isTaskSubjectCarryoverDeferral } from "../tasks/task-subject-deferral.ts"
 import { stopIncompleteTasksLogPath } from "../temp-paths.ts"
-import {
-  autoTransitionForComplete,
-  blockStopObj,
-  isCurrentAgent,
-  normalizeSubject,
-  subjectsOverlap,
-} from "./hook-utils.ts"
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-// ─── Deduplication ──────────────────────────────────────────────────────────
-
-export function isTaskDuplicate(
-  stale: SessionTask,
-  completedFingerprints: Set<string>,
-  completedNormalized: string[]
-): boolean {
-  const staleFp = stale.subjectFingerprint ?? computeSubjectFingerprint(stale.subject)
-  if (completedFingerprints.has(staleFp)) return true
-
-  const staleNorm = normalizeSubject(stale.subject)
-  return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
-}
-
-export async function completeStaleTask(
-  stale: SessionTask,
-  tasksDir: string,
-  autoTransitionEnabled: boolean,
-  sessionId: string
-): Promise<void> {
-  try {
-    const taskPath = join(tasksDir, `${stale.id}.json`)
-    autoTransitionForComplete(stale, autoTransitionEnabled)
-    if (validateTransition(stale.status, "completed")) {
-      warnInvalidTransition("stop-dedup", sessionId, stale.id, stale.status, "completed")
-      return
-    }
-    const updated = {
-      ...stale,
-      status: "completed" as const,
-      completionEvidence: "note:auto-completed — duplicate of a completed task",
-    }
-    await Bun.write(taskPath, JSON.stringify(updated, null, 2))
-    stale.status = "completed"
-  } catch {
-    // Write failed — leave as-is and let the block message fire
-  }
-}
-
-export async function deduplicateStaleTasks(
-  completedTasks: SessionTask[],
-  incompleteTasks: SessionTask[],
-  tasksDir: string,
-  autoTransitionEnabled: boolean,
-  sessionId: string
-): Promise<void> {
-  if (completedTasks.length === 0 || incompleteTasks.length === 0) return
-
-  const completedFingerprints = new Set<string>()
-  for (const t of completedTasks) {
-    completedFingerprints.add(t.subjectFingerprint ?? computeSubjectFingerprint(t.subject))
-  }
-
-  const completedNormalized = completedTasks.map((t) => normalizeSubject(t.subject))
-
-  for (const stale of incompleteTasks) {
-    if (!isTaskDuplicate(stale, completedFingerprints, completedNormalized)) continue
-    await completeStaleTask(stale, tasksDir, autoTransitionEnabled, sessionId)
-  }
-}
+import { blockStopObj, isCurrentAgent } from "./hook-utils.ts"
 
 // ─── Incomplete detail formatting ───────────────────────────────────────────
 
@@ -120,8 +47,8 @@ export function getIncompleteDetails(allTasks: SessionTask[]): string[] {
 /**
  * Check whether a session has incomplete tasks that should block stop.
  *
- * Reads task files, deduplicates stale entries, and returns a block result
- * when incomplete tasks remain — or null when stop is allowed.
+ * Reads task files and returns a block result when incomplete tasks remain,
+ * or null when stop is allowed.
  */
 async function logStopDiagnostic(message: string): Promise<void> {
   try {
@@ -136,9 +63,8 @@ async function logStopDiagnostic(message: string): Promise<void> {
 export async function checkIncompleteTasks(
   sessionId: string,
   home: string,
-  options: { autoTransitionEnabled?: boolean } & TaskReviewInstructionContext = {}
+  options: TaskReviewInstructionContext = {}
 ): Promise<HookOutput | null> {
-  const autoTransitionEnabled = options.autoTransitionEnabled ?? true
   if (isCurrentAgent("gemini")) {
     await logStopDiagnostic(`skip: gemini agent (session=${sessionId.slice(0, 8)})`)
     return null
@@ -166,23 +92,10 @@ export async function checkIncompleteTasks(
     return null
   }
 
-  // Deduplicate before checking
-  const completedTasks = allTasks.filter((t) => t.status === "completed")
-  const incompleteTasks = allTasks.filter(
-    (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
-  )
-  await deduplicateStaleTasks(
-    completedTasks,
-    incompleteTasks,
-    tasksDir,
-    autoTransitionEnabled,
-    sessionId
-  )
-
   const incompleteDetails = getIncompleteDetails(allTasks)
   if (incompleteDetails.length === 0) {
     await logStopDiagnostic(
-      `allow: all tasks complete after dedup (session=${sessionId.slice(0, 8)}, total=${allTasks.length})`
+      `allow: all tasks complete (session=${sessionId.slice(0, 8)}, total=${allTasks.length})`
     )
     return null
   }

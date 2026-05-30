@@ -1,87 +1,29 @@
 #!/usr/bin/env bun
 /**
- * PostToolUse hook: Auto-complete Commit/Push tasks after git operations
+ * PostToolUse hook: Emit push reminder context after git push
  *
- * After a successful `git commit` or `git push` Bash call, scans the session's
- * task files and marks any pending/in_progress task whose subject contains
- * "Commit" or "Push" (case-insensitive) as completed.
+ * After a successful `git push` Bash call, emits additionalContext reminding
+ * the agent to create the next workflow task (either CI follow-through or PR
+ * creation, depending on settings).
  *
- * After a push, emits additionalContext reminding the agent to create the next
- * workflow task (either CI follow-through or PR creation, depending on
- * settings) — the only way to affect Claude's in-memory task list is via the
- * hook output channel, not filesystem writes.
+ * After a successful `git commit`, records the commit timestamp for the session
+ * in IssueStore.
  */
 
-import { homedir } from "node:os"
-import { join } from "node:path"
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { applyTaskUpdateEvent, warnInvalidTransition } from "../src/tasks/task-event-state.ts"
 import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
 import {
-  applyCacheTaskUpdate,
-  getSessionTasksDir,
-  readSessionTasks,
-} from "../src/tasks/task-recovery.ts"
-import { atomicWriteJson, writeAudit } from "../src/tasks/task-repository.ts"
-import { validateTransition } from "../src/tasks/task-service.ts"
-import {
-  autoTransitionForComplete,
   buildContextHookOutput,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
   isShellTool,
-  isTerminalTaskStatus,
   resolveSafeSessionId,
   stripHeredocs,
 } from "../src/utils/hook-utils.ts"
-
-const SUBJECT_RE = /\b(commit|push)\b/i
-
-function shouldCompleteTask(
-  task: { status: string; subject: string },
-  isCommit: boolean,
-  isPush: boolean
-): boolean {
-  if (isTerminalTaskStatus(task.status)) return false
-  if (!SUBJECT_RE.test(task.subject)) return false
-  const subjectLower = task.subject.toLowerCase()
-  return (isPush && subjectLower.includes("push")) || (isCommit && subjectLower.includes("commit"))
-}
-
-async function completeTasks(
-  sessionId: string,
-  tasksDir: string,
-  tasks: Array<{ id: string; status: string; subject: string }>,
-  opts: { isCommit: boolean; isPush: boolean; autoTransitionEnabled: boolean }
-): Promise<void> {
-  const { isCommit, isPush, autoTransitionEnabled } = opts
-  for (const task of tasks) {
-    if (!shouldCompleteTask(task, isCommit, isPush)) continue
-    autoTransitionForComplete(task, autoTransitionEnabled)
-    const oldStatus = task.status
-    if (validateTransition(task.status, "completed")) {
-      warnInvalidTransition("git-autocomplete", sessionId, task.id, task.status, "completed")
-      continue
-    }
-    task.status = "completed"
-    await atomicWriteJson(join(tasksDir, `${task.id}.json`), task)
-    // Sync to event state, audit log, and cache so downstream hooks see the completion
-    applyTaskUpdateEvent(sessionId, task.id, { status: "completed" })
-    await writeAudit(sessionId, {
-      timestamp: new Date().toISOString(),
-      taskId: task.id,
-      action: "status_change",
-      oldStatus: oldStatus as "pending" | "in_progress" | "completed" | "cancelled",
-      newStatus: "completed",
-      subject: task.subject,
-    })
-    applyCacheTaskUpdate(sessionId, task)
-  }
-}
 
 async function buildPushContext(sessionId: string, cwd: string): Promise<string> {
   const taskCreateName = getTaskToolName("TaskCreate")
@@ -133,19 +75,6 @@ export async function evaluatePosttooluseGitTaskAutocomplete(
   if (op.isCommit) {
     await recordCommitForSession(op.sessionId, cwd)
   }
-
-  const home = homedir()
-  const tasksDir = getSessionTasksDir(op.sessionId, home)
-  if (!tasksDir) return {}
-  const tasks = await readSessionTasks(op.sessionId, home)
-
-  const settings = await readSwizSettings()
-  await completeTasks(
-    op.sessionId,
-    tasksDir,
-    tasks as Array<{ id: string; status: string; subject: string }>,
-    { isCommit: op.isCommit, isPush: op.isPush, autoTransitionEnabled: settings.autoTransition }
-  )
 
   if (op.isPush) {
     return buildContextHookOutput("PostToolUse", await buildPushContext(op.sessionId, cwd))

@@ -12,10 +12,7 @@ import {
 } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import {
-  deduplicateStaleTasks,
-  getIncompleteDetails,
-} from "../../src/utils/stop-incomplete-tasks-core.ts"
+import { getIncompleteDetails } from "../../src/utils/stop-incomplete-tasks-core.ts"
 import { buildIncompleteBlockOutput, buildSoleDeferralSteeringOutput } from "./action-plan.ts"
 import { resolveTaskCheckContext } from "./context.ts"
 import {
@@ -41,15 +38,6 @@ export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise
   const taskListToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskList")
   const taskUpdateToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskUpdate")
 
-  // Deduplicate stale tasks against completed ones
-  const completedTasks = ctx.allTasks.filter((t) => t.status === "completed")
-  const incompleteTasks = filterIncompleteStatus(ctx.allTasks)
-
-  if (ctx.tasksDir) {
-    await deduplicateStaleTasks(completedTasks, incompleteTasks, ctx.tasksDir, true, ctx.sessionId)
-  }
-
-  // Re-filter after deduplication
   const remainingIncomplete = filterIncompleteStatus(ctx.allTasks)
   if (remainingIncomplete.length === 0) {
     return {}

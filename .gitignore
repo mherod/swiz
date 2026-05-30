@@ -53,3 +53,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .swiz/gh-cache.json
 /.output.txt
 output.txt
+/.pipeline

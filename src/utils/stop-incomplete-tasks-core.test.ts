@@ -62,6 +62,22 @@ describe("getIncompleteDetails — deferred-subject exemption (#580)", () => {
   })
 })
 
+describe("getIncompleteDetails — deduplication is no longer performed", () => {
+  it("returns duplicate-subject incomplete tasks (no longer auto-completed)", () => {
+    const tasks: SessionTask[] = [
+      task("1", "completed", "Push changes to main"),
+      task("2", "in_progress", "Push changes to main"),
+    ]
+    // Before auto-transition removal, deduplicateStaleTasks would have silently
+    // completed task #2 because its subject matched the completed task #1.
+    // Now the duplicate must still surface so it blocks stop.
+    const details = getIncompleteDetails(tasks)
+    expect(details).toHaveLength(1)
+    expect(details[0]).toContain("Push changes to main")
+    expect(details[0]).toContain("task #2")
+  })
+})
+
 describe("formatIncompleteReason — source context (#613)", () => {
   it("includes tasksDir path when sourceCtx is provided", () => {
     const details = ["Implement feature (task #1)"]

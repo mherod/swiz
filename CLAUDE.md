@@ -109,7 +109,7 @@ alwaysApply: false
 ## Task Lifecycle & Enforcement
 - State machine: `pending` → `in_progress` → `completed` or `deleted`.
 - Gates: `stop-incomplete-tasks/evaluate.ts` blocks incomplete; `pretooluse-task-transition-validator.ts` blocks `pending`→`completed`; `pretooluse-no-phantom-task-completion.ts` requires substantive tool calls and evidence.
-- Rate/dedupe: `pretooluse-task-completion-rate-limit.ts` max 2/5s, requires `TaskList`; `deduplicateStaleTasks()` auto-completes pending tasks matching completed subjects.
+- Rate limit: `pretooluse-task-completion-rate-limit.ts` max 2/5s, requires `TaskList`. Tasks are never auto-completed/auto-deleted; agents must transition every task explicitly via `TaskUpdate`.
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.

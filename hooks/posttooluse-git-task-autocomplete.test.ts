@@ -250,6 +250,45 @@ describe("posttooluse-git-task-autocomplete: git commit exits silently", () => {
   })
 })
 
+// ─── Does not mutate task files ───────────────────────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: does not mutate task files", () => {
+  test("git commit does NOT auto-complete a commit-subject task on disk", async () => {
+    const home = await createTempHomeWithSettings({})
+    const cwd = await isolatedProjectCwd()
+    const sessionId = "no-mutate-session-id"
+    const tasksDir = join(home, ".claude", "tasks", sessionId)
+    await mkdir(tasksDir, { recursive: true })
+    const taskPath = join(tasksDir, "1.json")
+    const record = {
+      id: "1",
+      subject: "commit changes to main",
+      description: "",
+      status: "in_progress",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    await Bun.write(taskPath, `${JSON.stringify(record)}\n`)
+
+    try {
+      const result = await runHook(
+        'git commit -m "feat: something"',
+        "Bash",
+        sessionId,
+        { HOME: home },
+        cwd
+      )
+      expect(result.exitedCleanly).toBe(true)
+      const after = (await Bun.file(taskPath).json()) as { status: string }
+      // Auto-completion was removed: the hook must leave the task untouched.
+      expect(after.status).toBe("in_progress")
+    } finally {
+      await rm(home, { recursive: true, force: true })
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
 // ─── Non-matching commands → silent ──────────────────────────────────────────
 
 describe("posttooluse-git-task-autocomplete: non-git commands exit silently", () => {
@@ -318,10 +357,10 @@ describe("posttooluse-git-task-autocomplete: multiline commands with newline sep
     expect(result.additionalContext).toContain("Wait for CI")
   })
 
-  test("git commit on second line (newline separator) auto-completes silently", async () => {
+  test("git commit on second line (newline separator) exits silently", async () => {
     const result = await runHook("git add .\ngit commit -m 'fix'")
     expect(result.exitedCleanly).toBe(true)
-    // commit-only: no additionalContext, just silent file writes
+    // commit-only: records commit timestamp but emits no output
     expect(result.rawOutput.trim()).toBe("")
   })
 
