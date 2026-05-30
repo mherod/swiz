@@ -6,7 +6,7 @@ import type { AgentDef } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
-export type ProviderAgentId = AgentSettingsId
+type ProviderAgentId = AgentSettingsId
 export type TranscriptProviderId = ProviderAgentId | "antigravity"
 
 export interface ProviderConfig {
@@ -17,12 +17,12 @@ export interface ProviderConfig {
   skillDir?: string
 }
 
-export interface ProviderRuleDirs {
+interface ProviderRuleDirs {
   project: string | null
   global: string | null
 }
 
-export interface ProviderMemorySource {
+interface ProviderMemorySource {
   label: string
   path: string
 }
@@ -32,7 +32,7 @@ export interface ProviderTaskRoots {
   projectsDir: string
 }
 
-export interface ProviderAdapter {
+interface ProviderAdapter {
   id: ProviderAgentId
   config: ProviderConfig
   getHomeDir(): string

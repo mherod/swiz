@@ -70,7 +70,7 @@ async function discoverRunId(
   return runId
 }
 
-export async function pollUntilAllJobsSuccess(
+async function pollUntilAllJobsSuccess(
   commitSha: string,
   timeoutSeconds: number,
   cwd?: string
@@ -136,7 +136,7 @@ export function getSentinelPath(cwd: string): string {
   return swizPushCooldownSentinelPath(repoKey)
 }
 
-export function getRepoKey(cwd: string): string {
+function getRepoKey(cwd: string): string {
   const proc = getGitClient().runSync(["rev-parse", "--show-toplevel"], {
     cwd,
   })
@@ -160,7 +160,7 @@ export async function getRemainingCooldownMs(sentinelPath: string): Promise<numb
   }
 }
 
-export interface WaitForCooldownOptions {
+interface WaitForCooldownOptions {
   sentinelPath: string
   timeoutSeconds: number
   pollIntervalMs?: number
@@ -204,7 +204,7 @@ export async function waitForCooldown(opts: WaitForCooldownOptions): Promise<{ w
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
 
-export interface PushWaitArgs {
+interface PushWaitArgs {
   remote: string
   branch: string
   timeout: number
@@ -270,7 +270,7 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
 
 // ─── Push result file ───────────────────────────────────────────────────
 
-export interface PushResult {
+interface PushResult {
   success: boolean
   commitSha: string
   branch: string
