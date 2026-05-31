@@ -53,6 +53,7 @@ import { backfillPayloadDefaults } from "./payload-backfill.ts"
 import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
+import { isSubagentSession } from "./subagent-detect.ts"
 
 // ─── Enriched dispatch payload type ───────────────────────────────────────────
 
@@ -309,6 +310,10 @@ export interface DispatchRequest {
    *  When fired, all running hook processes are SIGTERM'd and the dispatch
    *  returns early with a timeout error. */
   signal?: AbortSignal
+  /** Test-only seam: resolve global settings from this home dir instead of
+   *  `process.env.HOME`. Lets tests inject settings without mutating shared
+   *  global env (avoids `--concurrent` races). Unset in production. */
+  settingsHomeOverride?: string
 }
 
 export interface DispatchResult {
@@ -369,6 +374,7 @@ interface DispatchContext {
   toolName: string | undefined
   trigger: string | undefined
   agentId: string | null
+  settingsHomeOverride: string | undefined
 }
 
 async function buildDispatchContext(req: DispatchRequest): Promise<DispatchContext> {
@@ -396,7 +402,17 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
 
   const cwd = (payload.cwd as string) ?? process.cwd()
 
-  return { canonicalEvent, hookEventName, payload, payloadStr, cwd, toolName, trigger, agentId }
+  return {
+    canonicalEvent,
+    hookEventName,
+    payload,
+    payloadStr,
+    cwd,
+    toolName,
+    trigger,
+    agentId,
+    settingsHomeOverride: req.settingsHomeOverride,
+  }
 }
 
 interface ResolvedGroups {
@@ -623,8 +639,22 @@ function assertDispatchResponseMatchesWire(
 async function shouldSkipMcpToolDispatch(ctx: DispatchContext): Promise<boolean> {
   if (!ctx.toolName?.startsWith("mcp__")) return false
   if (TOOL_NAME_OPTIONAL_EVENTS.has(ctx.canonicalEvent)) return false
-  const settings = await readSwizSettings()
+  const settings = await readSwizSettings(
+    ctx.settingsHomeOverride ? { home: ctx.settingsHomeOverride } : undefined
+  )
   return settings.ignoreMcpTools !== false
+}
+
+/** Events that form the push/commit safety floor — never relaxed for subagents. */
+const SUBAGENT_FLOOR_EVENTS = new Set(["preCommit", "commitMsg", "prePush"])
+
+async function shouldSkipSubagentDispatch(ctx: DispatchContext): Promise<boolean> {
+  if (SUBAGENT_FLOOR_EVENTS.has(ctx.canonicalEvent)) return false
+  if (!isSubagentSession(ctx.payload)) return false
+  const settings = await readSwizSettings(
+    ctx.settingsHomeOverride ? { home: ctx.settingsHomeOverride } : undefined
+  )
+  return settings.relaxSubagentHooks !== false // default ON
 }
 
 function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
@@ -651,6 +681,15 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
   if (await shouldSkipMcpToolDispatch(ctx)) {
     log(`   ⏭ ignoreMcpTools enabled, skipping dispatch for ${ctx.toolName}`)
+    const response = buildSkipResponse(ctx, req.daemonContext)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+    return { response }
+  }
+
+  if (await shouldSkipSubagentDispatch(ctx)) {
+    log(
+      `   ⏭ subagent session (agent_type=${ctx.payload.agent_type ?? ctx.payload.agent_id}), relaxing hooks`
+    )
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return { response }

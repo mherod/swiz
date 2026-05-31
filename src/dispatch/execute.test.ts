@@ -356,9 +356,10 @@ describe("dispatch execute integration", () => {
     it("runs dispatch for mcp__* tool names when ignoreMcpTools is disabled", async () => {
       const { writeSwizSettings, invalidateSettingsCache, getSwizSettingsPath, readSwizSettings } =
         await import("../settings.ts")
+      // Inject settings via `settingsHomeOverride` instead of mutating the
+      // shared global `process.env.HOME` — mutating it races with other
+      // settings-dependent tests under `bun test --concurrent`.
       const tempHome = `/tmp/swiz-mcp-toggle-${Date.now()}-${crypto.randomUUID()}`
-      const originalHome = process.env.HOME
-      process.env.HOME = tempHome
       try {
         const defaults = await readSwizSettings({ home: tempHome })
         await writeSwizSettings({ ...defaults, ignoreMcpTools: false }, { home: tempHome })
@@ -369,6 +370,7 @@ describe("dispatch execute integration", () => {
         const req: DispatchRequest = {
           canonicalEvent: "preToolUse",
           hookEventName: "PreToolUse",
+          settingsHomeOverride: tempHome,
           payloadStr: JSON.stringify({
             cwd: process.cwd(),
             session_id: "mcp-toggle-session",
@@ -383,8 +385,176 @@ describe("dispatch execute integration", () => {
         await executeDispatch(req)
         expect(providerCalled).toBe(true)
       } finally {
-        if (originalHome === undefined) delete process.env.HOME
-        else process.env.HOME = originalHome
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+      }
+    })
+  })
+
+  describe("relaxSubagentHooks short-circuit", () => {
+    it("skips dispatch for subagent payloads (agent_type set) on preToolUse", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "subagent-session",
+          tool_name: "Bash",
+          tool_input: { command: "echo hi" },
+          agent_type: "general-purpose",
+          agent_id: "subagent-abc-123",
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      const result = await executeDispatch(req)
+      expect(providerCalled).toBe(false)
+      expect(result.response).toEqual({})
+    })
+
+    it("skips dispatch for subagent payloads on stop", async () => {
+      const originalHome = process.env.HOME
+      process.env.HOME = `/tmp/swiz-subagent-stop-${Date.now()}`
+      try {
+        let providerCalled = false
+        const req: DispatchRequest = {
+          canonicalEvent: "stop",
+          hookEventName: "Stop",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: "subagent-stop-session",
+            agent_type: "general-purpose",
+          }),
+          manifestProvider: async () => {
+            providerCalled = true
+            return []
+          },
+          daemonContext: true,
+        }
+        const result = await executeDispatch(req)
+        expect(providerCalled).toBe(false)
+        // Stop-like events still emit a normalized allow envelope
+        expect(result.response.continue).toBe(true)
+      } finally {
+        process.env.HOME = originalHome
+      }
+    })
+
+    it("does not skip for top-level session (no agent_type/agent_id)", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "top-level-session",
+          tool_name: "Bash",
+          tool_input: { command: "echo hi" },
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
+    it("does not skip for preCommit (safety floor)", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "preCommit",
+        hookEventName: "PreCommit",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "subagent-commit-session",
+          agent_type: "general-purpose",
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
+    it("does not skip for prePush (safety floor)", async () => {
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "prePush",
+        hookEventName: "PrePush",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "subagent-push-session",
+          agent_type: "general-purpose",
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
+    it("does not skip for commitMsg (safety floor)", async () => {
+      // commitMsg is a SUBAGENT_FLOOR_EVENTS member alongside preCommit/prePush;
+      // this test verifies the floor is exhaustive for all three floor events.
+      let providerCalled = false
+      const req: DispatchRequest = {
+        canonicalEvent: "commitMsg",
+        hookEventName: "CommitMsg",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "subagent-commitmsg-session",
+          agent_type: "general-purpose",
+        }),
+        manifestProvider: async () => {
+          providerCalled = true
+          return []
+        },
+      }
+      await executeDispatch(req)
+      expect(providerCalled).toBe(true)
+    })
+
+    it("runs hooks for subagent when relaxSubagentHooks is disabled", async () => {
+      const { writeSwizSettings, invalidateSettingsCache, getSwizSettingsPath, readSwizSettings } =
+        await import("../settings.ts")
+      // Inject settings via `settingsHomeOverride` instead of mutating the
+      // shared global `process.env.HOME` — mutating it races with other
+      // settings-dependent tests under `bun test --concurrent`.
+      const tempHome = `/tmp/swiz-subagent-toggle-${Date.now()}-${crypto.randomUUID()}`
+      try {
+        const defaults = await readSwizSettings({ home: tempHome })
+        await writeSwizSettings({ ...defaults, relaxSubagentHooks: false }, { home: tempHome })
+        const settingsPath = getSwizSettingsPath(tempHome)
+        if (settingsPath) invalidateSettingsCache(settingsPath)
+
+        let providerCalled = false
+        const req: DispatchRequest = {
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          settingsHomeOverride: tempHome,
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: "subagent-strict-session",
+            tool_name: "Bash",
+            tool_input: { command: "echo hi" },
+            agent_type: "general-purpose",
+          }),
+          manifestProvider: async () => {
+            providerCalled = true
+            return []
+          },
+        }
+        await executeDispatch(req)
+        expect(providerCalled).toBe(true)
+      } finally {
         const settingsPath = getSwizSettingsPath(tempHome)
         if (settingsPath) invalidateSettingsCache(settingsPath)
       }

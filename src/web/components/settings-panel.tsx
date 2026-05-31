@@ -31,6 +31,7 @@ interface GlobalSettingsForm {
   qualityChecksGate: boolean
   skipSecretScan: boolean
   ignoreMcpTools: boolean
+  relaxSubagentHooks: boolean
   mcpChannels: boolean
   autoTransition: boolean
   taskDurationWarningMinutes: number
@@ -73,6 +74,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   qualityChecksGate: true,
   skipSecretScan: false,
   ignoreMcpTools: true,
+  relaxSubagentHooks: true,
   mcpChannels: false,
   autoTransition: true,
   taskDurationWarningMinutes: 45,
@@ -205,6 +207,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     qualityChecksGate: readBooleanSetting(settings, "qualityChecksGate", true),
     skipSecretScan: readBooleanSetting(settings, "skipSecretScan"),
     ignoreMcpTools: readBooleanSetting(settings, "ignoreMcpTools", true),
+    relaxSubagentHooks: readBooleanSetting(settings, "relaxSubagentHooks", true),
     mcpChannels: readBooleanSetting(settings, "mcpChannels"),
     autoTransition: readBooleanSetting(settings, "autoTransition", true),
     taskDurationWarningMinutes: readNumberSetting(settings, "taskDurationWarningMinutes", 45),
@@ -567,6 +570,11 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Skip hook execution for MCP tool calls (tool names starting with mcp__).",
   },
   {
+    key: "relaxSubagentHooks",
+    label: "Relax subagent hooks",
+    desc: "Skip enforcement hooks for Claude Code Task subagent sessions (agent_type/agent_id set). The commit/push safety floor stays active.",
+  },
+  {
     key: "mcpChannels",
     label: "MCP channels",
     desc: "Expose Claude MCP channel and permission capabilities. Auto-steer remains controlled separately.",
@@ -620,7 +628,7 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
   },
   {
     title: "MCP",
-    keys: ["ignoreMcpTools", "mcpChannels"],
+    keys: ["ignoreMcpTools", "relaxSubagentHooks", "mcpChannels"],
   },
   {
     title: "Git & Push",

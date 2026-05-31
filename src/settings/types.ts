@@ -263,6 +263,12 @@ export interface SwizSettings {
    * so PreToolUse/PostToolUse hooks never match against MCP tool invocations. Defaults to true.
    */
   ignoreMcpTools: boolean
+  /**
+   * When true, dispatch short-circuits hook execution for orchestrated Task subagent sessions
+   * (Claude Code populates agent_type/agent_id on the hook payload). Defaults to true.
+   * The push/commit safety floor (preCommit, commitMsg, prePush) is never relaxed.
+   */
+  relaxSubagentHooks: boolean
   /** When true, `swiz mcp` advertises Claude channel capabilities and runs channel delivery. Defaults to false. */
   mcpChannels: boolean
   /** Which segments to display in the status line. Defaults to all segments. */

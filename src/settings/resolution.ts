@@ -173,6 +173,7 @@ function buildBaseSettings(
     skipSecretScan: settings.skipSecretScan,
     sandboxedEdits: settings.sandboxedEdits,
     ignoreMcpTools: settings.ignoreMcpTools,
+    relaxSubagentHooks: settings.relaxSubagentHooks,
     mcpChannels: settings.mcpChannels,
     autoSteer: settings.autoSteer,
     humaniseAutoSteer: settings.humaniseAutoSteer,

@@ -8,6 +8,7 @@ package-lock.json
 # Claude Code local settings (machine-specific, not shared)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/agent-memory/
 
 # Agent memory files (written to project root by Claude Code auto-memory)
 memory/

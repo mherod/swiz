@@ -87,6 +87,27 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "relaxSubagentHooks",
+    aliases: [
+      "relax-subagent-hooks",
+      "relaxsubagenthooks",
+      "relax_subagent_hooks",
+      "subagent-relax",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description: "Relax (skip) enforcement hooks for orchestrated Task subagent sessions",
+      effectExplanation:
+        "When enabled, PreToolUse/Stop/task-governance hooks are short-circuited for sessions Claude Code marks with agent_type/agent_id (i.e. Task subagents). The commit/push secret-scan safety floor (preCommit, commitMsg, prePush) stays active regardless. Disable to apply full hook enforcement to subagent sessions.",
+      enableDescription:
+        "Skip enforcement hooks for Claude Code Task subagent sessions (agent_type/agent_id set)",
+      disableDescription:
+        "Apply full hook enforcement to subagent sessions like any top-level session",
+    },
+  },
+  {
     key: "mcpChannels",
     aliases: ["mcp-channels", "mcp-channel", "mcpchannels", "mcp_channels"],
     kind: "boolean",

@@ -147,6 +147,8 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("speak")
     expect(parsed).toHaveProperty("swizNotifyHooks")
     expect(parsed).toHaveProperty("mcpChannels")
+    expect(parsed).toHaveProperty("ignoreMcpTools")
+    expect(parsed).toHaveProperty("relaxSubagentHooks")
     expect(parsed).toHaveProperty("gitStatusGate")
     expect(parsed).toHaveProperty("ignoreCi")
     expect(parsed).toHaveProperty("memoryLineThreshold")
@@ -943,6 +945,7 @@ describe("SETTINGS_REGISTRY", () => {
       "qualityChecksGate",
       "skipSecretScan",
       "ignoreMcpTools",
+      "relaxSubagentHooks",
       "mcpChannels",
       "prAgeGateMinutes",
       "pushCooldownMinutes",
