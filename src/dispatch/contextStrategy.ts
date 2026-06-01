@@ -1,4 +1,5 @@
 import { hookOutputSchema, hookSpecificOutputSchema } from "../schemas.ts"
+import { shouldHumaniseContextOutput } from "./context-humanise.ts"
 import { extractContext, log } from "./engine.ts"
 import {
   type HookExecutionStrategy,
@@ -58,11 +59,15 @@ export class ContextStrategy implements HookExecutionStrategy {
           withinGrace = await isWithinUserMessageGrace(payload)
         } catch {}
 
-        // Skip humanisation inside the post-user-message grace window so the
-        // mechanical context voice stays visually distinct from the user's own
-        // messages while they are actively present.
         let additionalContext = mergedContext
-        if (humaniseEnabled && !withinGrace && mergedContext.trim()) {
+        if (
+          shouldHumaniseContextOutput({
+            canonicalEvent: ctx.canonicalEvent,
+            humaniseEnabled,
+            withinGrace,
+          }) &&
+          mergedContext.trim()
+        ) {
           const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(
             "../utils/humanise.ts"
           )
