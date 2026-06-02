@@ -377,6 +377,52 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("allow")
   })
 
+  async function runIssueSelfAssignGateSubprocess(
+    command: string,
+    sessionLines: string[] = []
+  ): Promise<Record<string, any>> {
+    return await runGateSubprocess("work-on-issue", {
+      tool_name: "Bash",
+      tool_input: { command },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines(sessionLines),
+    })
+  }
+
+  it("blocks assigning yourself to an issue when work-on-issue was not used recently", async () => {
+    const result = await runIssueSelfAssignGateSubprocess("gh issue edit 630 --add-assignee @me")
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain(
+      "assigning yourself to an issue"
+    )
+  })
+
+  it("allows assigning yourself to an issue when work-on-issue was used recently", async () => {
+    const result = await runIssueSelfAssignGateSubprocess("gh issue edit 630 --add-assignee @me", [
+      assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "work-on-issue" } }]),
+    ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  it("does not require work-on-issue for assigning another user", async () => {
+    const result = await runIssueSelfAssignGateSubprocess(
+      "gh issue edit 630 --add-assignee teammate"
+    )
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).not.toBe("deny")
+  })
+
   async function runLabelGateSubprocess(
     command: string,
     sessionLines: string[] = []

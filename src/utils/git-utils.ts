@@ -584,6 +584,10 @@ export const GH_ISSUE_REMOVE_BACKLOG_LABEL_RE =
 export const GH_ISSUE_LABEL_CHANGE_RE =
   /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--(?:add|remove)-label\b/
 
+/** Matches `gh issue edit ... --add-assignee @me` — claiming issue ownership. */
+export const GH_ISSUE_SELF_ASSIGN_RE =
+  /\bgh\b[\s\S]*?\bissue\b[\s\S]*?\bedit\b[\s\S]*?--add-assignee(?:=|\s+)(?:"|')?(?:[^\s,;"'`]+,)*@me(?:$|[\s,;"'`])/
+
 /** Matches CI verification commands. */
 export const CI_WAIT_RE = shellStatementCommandRe("(?:swiz|bun\\b[^|;]*)\\s+ci-wait\\b")
 

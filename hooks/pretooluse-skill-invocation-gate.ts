@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Block `git commit`, `git push`, and `gh issue edit` label
-// operations unless the corresponding skill has been invoked recently in the
-// current session — but only when that skill is installed on this machine.
+// PreToolUse hook: Block workflow-sensitive shell commands unless the
+// corresponding skill has been invoked recently in the current session — but
+// only when that skill is installed on this machine.
 //
 // Rules:
 //   git commit                                →  requires recent /commit skill
@@ -12,6 +12,7 @@
 //     UNLESS all changed labels are readiness-only (backlog, ready, blocked,
 //     upstream, needs-refinement, needs-breakdown) — those communicate scheduling
 //     state, not issue quality, so /refine-issue is not required.
+//   gh issue edit … --add-assignee @me     →  requires /work-on-issue skill
 //   gh issue create                           →  NOT gated (label arg is --label,
 //     not --add-label; creation is not a label change on an existing issue)
 //   gh pr create                              →  requires /pr-open skill
@@ -55,6 +56,7 @@ import { isShellTool, isTaskListTool } from "../src/tool-matchers.ts"
 import {
   GH_ISSUE_ADD_TRIAGED_LABEL_RE,
   GH_ISSUE_LABEL_CHANGE_RE,
+  GH_ISSUE_SELF_ASSIGN_RE,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   GH_PR_MERGE_RE,
@@ -173,6 +175,8 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
     if (allLabelsAreReadinessOnly(extractChangedLabels(command))) return null
     return { primary: "refine-issue", anyOf: ["refine-issue"] }
   }
+  if (GH_ISSUE_SELF_ASSIGN_RE.test(command))
+    return { primary: "work-on-issue", anyOf: ["work-on-issue"] }
   if (GH_PR_CHECKOUT_RE.test(cleanedCommand))
     return {
       primary: "pr-checkout",
@@ -214,6 +218,13 @@ const SKILL_DENY_CONFIGS: Record<
     whyMatters:
       `the ${ref} skill validates label changes against issue state. ` +
       `Modifying labels directly skips these safeguards.`,
+  }),
+  "work-on-issue": (ref) => ({
+    action: "assigning yourself to an issue",
+    planStep: `Invoke the ${ref} skill before claiming issue ownership.`,
+    whyMatters:
+      `the ${ref} skill loads issue context, checks for existing work, and sets up the task workflow. ` +
+      `Claiming an issue directly skips those safeguards.`,
   }),
   "pr-checkout": (ref) => ({
     action: "checking out a pull request branch",
