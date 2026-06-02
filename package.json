@@ -56,7 +56,7 @@
     "lefthook": "^2.1.1",
     "lint-staged": "^16.2.7",
     "typescript-eslint": "^8.57.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.0"
   },
   "peerDependencies": {
     "typescript": "^5"
