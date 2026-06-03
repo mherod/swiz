@@ -180,6 +180,18 @@ interface ProjectHealth {
   openTasks: number | null
   ciStatus: string | null
   ciConclusion: string | null
+  testStats: {
+    totalTimeMs: number
+    count: number
+    averageMs: number
+    assessment: "negligible" | "significant"
+  } | null
+  lintStats: {
+    totalTimeMs: number
+    count: number
+    averageMs: number
+    assessment: "negligible" | "significant"
+  } | null
 }
 
 interface ProjectHealthOptions {
@@ -357,11 +369,30 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
   }
 }
 
+async function readStatsFile(
+  statsPath: string
+): Promise<{ totalTimeMs: number; count: number } | null> {
+  const file = Bun.file(statsPath)
+  if (!(await file.exists())) return null
+  try {
+    const raw = await file.text()
+    const parsed = JSON.parse(raw)
+    if (
+      typeof parsed.totalTimeMs === "number" &&
+      typeof parsed.count === "number" &&
+      parsed.count > 0
+    ) {
+      return { totalTimeMs: parsed.totalTimeMs, count: parsed.count }
+    }
+  } catch {}
+  return null
+}
+
 async function getProjectHealth(
   cwd: string,
   options: ProjectHealthOptions = {}
 ): Promise<ProjectHealth> {
-  const [stateData, branch, statusOut, aheadBehind, openTasks] = await Promise.all([
+  const [stateData, branch, statusOut, aheadBehind, openTasks, repoRoot] = await Promise.all([
     readStateData(cwd).catch(() => null),
     spawnLine(["git", "-C", cwd, "branch", "--show-current"], {
       timeoutMs: STATUS_GIT_TIMEOUT_MS,
@@ -373,6 +404,9 @@ async function getProjectHealth(
       timeoutMs: STATUS_GIT_TIMEOUT_MS,
     }).catch(() => null),
     getOpenTaskCount(cwd),
+    spawnLine(["git", "-C", cwd, "rev-parse", "--show-toplevel"], {
+      timeoutMs: STATUS_GIT_TIMEOUT_MS,
+    }).catch(() => null),
   ])
 
   const uncommittedFiles = statusOut ? statusOut.split("\n").filter(Boolean).length : 0
@@ -393,6 +427,39 @@ async function getProjectHealth(
   const isTerminal = state ? TERMINAL_STATES.includes(state as never) : false
   const allowedTransitions = state ? (STATE_TRANSITIONS[state as never] ?? []) : []
 
+  const projectRoot = repoRoot || cwd
+  const testStatsPath = join(projectRoot, ".swiz", "test-execution-stats.json")
+  const lintStatsPath = join(projectRoot, ".swiz", "lint-execution-stats.json")
+
+  const [testStatsData, lintStatsData] = await Promise.all([
+    readStatsFile(testStatsPath),
+    readStatsFile(lintStatsPath),
+  ])
+
+  const testStats = testStatsData
+    ? {
+        totalTimeMs: testStatsData.totalTimeMs,
+        count: testStatsData.count,
+        averageMs: testStatsData.totalTimeMs / testStatsData.count,
+        assessment:
+          testStatsData.totalTimeMs / testStatsData.count < 5000
+            ? ("negligible" as const)
+            : ("significant" as const),
+      }
+    : null
+
+  const lintStats = lintStatsData
+    ? {
+        totalTimeMs: lintStatsData.totalTimeMs,
+        count: lintStatsData.count,
+        averageMs: lintStatsData.totalTimeMs / lintStatsData.count,
+        assessment:
+          lintStatsData.totalTimeMs / lintStatsData.count < 5000
+            ? ("negligible" as const)
+            : ("significant" as const),
+      }
+    : null
+
   return {
     state,
     isTerminal,
@@ -403,6 +470,8 @@ async function getProjectHealth(
     openTasks,
     ciStatus,
     ciConclusion,
+    testStats,
+    lintStats,
   }
 }
 
@@ -457,6 +526,31 @@ function renderHealthPanel(health: ProjectHealth): void {
   }
 
   console.log(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
+
+  if (health.testStats) {
+    const avgSec = (health.testStats.averageMs / 1000).toFixed(2)
+    const runs = health.testStats.count
+    const assessmentColor = health.testStats.assessment === "negligible" ? GREEN : RED
+    const assessmentText = `${assessmentColor}${health.testStats.assessment}${RESET}`
+    console.log(
+      `    Avg Test:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
+    )
+  } else {
+    console.log(`    Avg Test:  ${DIM}no runs recorded${RESET}`)
+  }
+
+  if (health.lintStats) {
+    const avgSec = (health.lintStats.averageMs / 1000).toFixed(2)
+    const runs = health.lintStats.count
+    const assessmentColor = health.lintStats.assessment === "negligible" ? GREEN : RED
+    const assessmentText = `${assessmentColor}${health.lintStats.assessment}${RESET}`
+    console.log(
+      `    Avg Lint:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
+    )
+  } else {
+    console.log(`    Avg Lint:  ${DIM}no runs recorded${RESET}`)
+  }
+
   console.log()
 }
 

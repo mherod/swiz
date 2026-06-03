@@ -10,7 +10,7 @@
  * Hooks that need tool-name translation must remain file-based.
  */
 
-import type { ToolHookInput } from "../schemas.ts"
+import type { PostToolHookInput, ToolHookInput } from "../schemas.ts"
 import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 // ─── Issue guidance ──────────────────────────────────────────────────────────
@@ -116,4 +116,57 @@ function renderSubItems(items: ActionPlanItem[], indent: string): string[] {
     }
   }
   return lines
+}
+
+// ─── Command/Execution Timing Hook Helpers ────────────────────────────────────
+
+/**
+ * Returns true if the executed shell tool command represents a background task.
+ */
+export function isBackgroundCommand(hookInput: PostToolHookInput, command: string): boolean {
+  return (
+    hookInput.tool_input?.run_in_background === true ||
+    /\s+&\s*$|\s+&\s/.test(command) ||
+    (typeof hookInput.tool_response === "string" &&
+      /running in background|background task/i.test(hookInput.tool_response))
+  )
+}
+
+/**
+ * Basic shell tokenizer that splits on whitespace while respecting single/double quotes.
+ */
+export function tokenize(segment: string): string[] {
+  const tokens: string[] = []
+  let token = ""
+  let quote: string | null = null
+
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i]!
+    if (quote) {
+      if (ch === quote) {
+        quote = null
+      } else if (quote === '"' && ch === "\\" && i + 1 < segment.length) {
+        token += segment[++i]!
+      } else {
+        token += ch
+      }
+    } else {
+      if (ch === '"' || ch === "'") {
+        quote = ch
+      } else if (ch === "\\" && i + 1 < segment.length) {
+        token += segment[++i]!
+      } else if (ch === " " || ch === "\t") {
+        if (token) {
+          tokens.push(token)
+          token = ""
+        }
+      } else {
+        token += ch
+      }
+    }
+  }
+  if (token) {
+    tokens.push(token)
+  }
+  return tokens
 }

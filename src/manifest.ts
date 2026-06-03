@@ -13,6 +13,8 @@ import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
 import posttooluseMcpChannelTrace from "../hooks/posttooluse-mcp-channel-trace.ts"
+import posttooluseMeasureLintTime from "../hooks/posttooluse-measure-lint-time.ts"
+import posttooluseMeasureTestTime from "../hooks/posttooluse-measure-test-time.ts"
 import posttooluseMemorySize from "../hooks/posttooluse-memory-size.ts"
 import posttoolusMidSessionPrompt from "../hooks/posttooluse-mid-session-prompt.ts"
 import posttoolusPrChangesContext from "../hooks/posttooluse-pr-changes-context.ts"
@@ -66,6 +68,8 @@ import pretooluseLargeFiles from "../hooks/pretooluse-large-files.ts"
 import pretooluseLongSleep from "../hooks/pretooluse-long-sleep.ts"
 import pretooluseMainBranchScopeGate from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import pretoolUseManiOrderValidation from "../hooks/pretooluse-manifest-order-validation.ts"
+import pretooluseMeasureLintTime from "../hooks/pretooluse-measure-lint-time.ts"
+import pretooluseMeasureTestTime from "../hooks/pretooluse-measure-test-time.ts"
 import pretooluseNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
 import pretooluseNoGitChecks from "../hooks/pretooluse-no-git-checks.ts"
@@ -376,6 +380,8 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseNoReadyToBacklog },
       { hook: pretooluseNoIssueClose },
       { hook: pretooluseBlockTasksDirBash },
+      { hook: pretooluseMeasureTestTime },
+      { hook: pretooluseMeasureLintTime },
     ],
   },
   {
@@ -451,6 +457,8 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: posttooluseStateTransition },
       { hook: posttoolusUpstreamSyncOnPush },
       { hook: posttoolusePushAutosteerIssue },
+      { hook: posttooluseMeasureTestTime },
+      { hook: posttooluseMeasureLintTime },
     ],
   },
   {

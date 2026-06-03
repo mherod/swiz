@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { statusCommand } from "./status.ts"
 
 const SWIZ_ENTRY = join(import.meta.dir, "../../index.ts")
 
@@ -93,4 +96,108 @@ describe("swiz status — agent environment detection", () => {
       expect(out).toContain("swiz status")
     }
   }, 15_000)
+})
+
+describe("swiz status — test and lint execution stats rendering", () => {
+  let tempDir: string
+
+  async function runStatusInProcess(cwd: string, args: string[] = []): Promise<string> {
+    const originalCwd = process.cwd
+    process.cwd = () => cwd
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    let output = ""
+    try {
+      await statusCommand.run(args)
+      output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n")
+    } finally {
+      process.cwd = originalCwd
+      consoleLogSpy.mockRestore()
+    }
+    const ansiRegex = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")
+    return output.replace(ansiRegex, "")
+  }
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "swiz-status-test-"))
+  })
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  it("outputs 'no runs recorded' when no stats files exist", async () => {
+    const out = await runStatusInProcess(tempDir)
+    expect(out).toContain("Avg Test:  no runs recorded")
+    expect(out).toContain("Avg Lint:  no runs recorded")
+  })
+
+  it("renders stats when they exist (negligible test, significant lint)", async () => {
+    await mkdir(join(tempDir, ".swiz"), { recursive: true })
+
+    // Test stats: total 4000ms across 2 runs (average 2.00s < 5s -> negligible)
+    await Bun.write(
+      join(tempDir, ".swiz", "test-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 4000, count: 2 })
+    )
+
+    // Lint stats: total 18000ms across 3 runs (average 6.00s >= 5s -> significant)
+    await Bun.write(
+      join(tempDir, ".swiz", "lint-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 18000, count: 3 })
+    )
+
+    const out = await runStatusInProcess(tempDir)
+    expect(out).toContain("Avg Test:  2.00s (based on 2 runs) [negligible]")
+    expect(out).toContain("Avg Lint:  6.00s (based on 3 runs) [significant]")
+  })
+
+  it("renders stats when they exist (significant test, negligible lint)", async () => {
+    await mkdir(join(tempDir, ".swiz"), { recursive: true })
+
+    // Test stats: total 6000ms across 1 run (average 6.00s >= 5s -> significant)
+    await Bun.write(
+      join(tempDir, ".swiz", "test-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 6000, count: 1 })
+    )
+
+    // Lint stats: total 3000ms across 3 runs (average 1.00s < 5s -> negligible)
+    await Bun.write(
+      join(tempDir, ".swiz", "lint-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 3000, count: 3 })
+    )
+
+    const out = await runStatusInProcess(tempDir)
+    expect(out).toContain("Avg Test:  6.00s (based on 1 run) [significant]")
+    expect(out).toContain("Avg Lint:  1.00s (based on 3 runs) [negligible]")
+  })
+
+  it("outputs JSON with correct stats structure when --json is passed", async () => {
+    await mkdir(join(tempDir, ".swiz"), { recursive: true })
+
+    await Bun.write(
+      join(tempDir, ".swiz", "test-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 4000, count: 2 })
+    )
+
+    await Bun.write(
+      join(tempDir, ".swiz", "lint-execution-stats.json"),
+      JSON.stringify({ totalTimeMs: 18000, count: 3 })
+    )
+
+    const out = await runStatusInProcess(tempDir, ["--json"])
+    const parsed = JSON.parse(out)
+
+    expect(parsed.testStats).toEqual({
+      totalTimeMs: 4000,
+      count: 2,
+      averageMs: 2000,
+      assessment: "negligible",
+    })
+    expect(parsed.lintStats).toEqual({
+      totalTimeMs: 18000,
+      count: 3,
+      averageMs: 6000,
+      assessment: "significant",
+    })
+  })
 })

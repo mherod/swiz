@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**142 hooks. 12 event types. Every agent. Zero compromises.**
+**146 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -85,7 +85,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-119 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+123 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
@@ -123,7 +123,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (73)
+### PreToolUse (75)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -201,9 +201,11 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-offensive-language.ts`             | Scans the last assistant message for two categories of bad behavior: (1) **hedging/deferring** — asking permission instead of acting ("Would you like me to…", "Shall I proceed?", "Let me know if you'd like…"), and (2) **dismissing responsibility** — deflecting issues as "pre-existing", "unrelated to our changes", or "safely ignored". Each pattern triggers a tailored scolding. The agent must produce a new message acknowledging the feedback before the hook allows tool calls to proceed.                                                                                                           |
 | `pretooluse-read-grep-stall-guard.ts`          | Blocks Read/Grep/Glob when 15+ consecutive read/search tool calls have occurred without any Edit or Write. Detects stall patterns where the model endlessly reads files without producing output. After any Edit or Write, the counter resets and reads are unblocked.                                                                                                                                                                                                                                                                                                                                             |
 | `pretooluse-enforce-taskupdate.ts`             | Blocks all `swiz tasks` CLI usage in Claude Code except `swiz tasks adopt` (orphan recovery). Requires native task tools (TaskCreate, TaskUpdate, TaskGet, TaskList) for every other task operation.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `posttooluse-speak-narrator.ts`                | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async.                                                                                                                                                                                                                                                                                                                                                                    |
+| `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
+| `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
-### PostToolUse (28)
+### PostToolUse (30)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -237,6 +239,8 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-auto-steer.ts` | Consumes any scheduled steer message and types it into the active terminal session after a tool call using AppleScript automation. Scheduled steers are humanised into a natural paragraph at enqueue (falling back to the raw text, e.g. "Continue"). Supports iTerm2 (`write text`) and Terminal.app (`do script`). Runs async. |
 | `posttooluse-mid-session-prompt.ts` | After 3+ hours of session activity, checks for drift signals (>10 uncommitted files, stale last commit with dirty tree, new review-requested PRs) and softly suggests /mid-session-checkin via additionalContext. Opt-in via `enforceMidSessionCheckin` setting (default off). Cooldown: 30 minutes. |
 | `posttooluse-session-edits.ts` | Records files edited during the session into the `session_edits` table in IssueStore. |
+| `posttooluse-measure-test-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the test run duration, updates average stats in `.swiz/test-execution-stats.json`, and reports the updated average via systemMessage. |
+| `posttooluse-measure-lint-time.ts`            | Reads start time sentinels written by the preToolUse hook, computes the lint run duration, updates average stats in `.swiz/lint-execution-stats.json`, and reports the updated average via systemMessage. |
 
 ### SessionStart (9)
 
