@@ -521,11 +521,9 @@ async function checkTaskStaleness(
     `Use ${taskCreateToolName()} to create at least one further task for the next concrete step based on the work underway.`,
     stateStep,
   ]
-  const stalePlanSteps: (string | string[])[] = [
-    TASKLIST_STABILITY_STEP,
-    ...staleTaskSteps,
-    TASKLIST_CONFIRM_STEP,
-  ]
+  const stalePlanSteps: (string | string[])[] = agentHasTaskListToolForHookPayload(input)
+    ? [TASKLIST_STABILITY_STEP, ...staleTaskSteps, TASKLIST_CONFIRM_STEP]
+    : staleTaskSteps
   const sid = (input as Record<string, any>).session_id as string | undefined
   if (sid) await mergeActionPlanIntoTasks(staleTaskSteps, sid, cwd)
   return await denyAutoSteerOrBlock(
@@ -830,7 +828,12 @@ async function runTaskStateChecks(
   input: Record<string, any>,
   transcriptPath: string
 ): Promise<SwizHookOutput> {
-  if (needsReconciliation(sessionId) && isBlockedTool(toolName) && !isTaskListTool(toolName)) {
+  if (
+    needsReconciliation(sessionId) &&
+    isBlockedTool(toolName) &&
+    !isTaskListTool(toolName) &&
+    agentHasTaskListToolForHookPayload(input)
+  ) {
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
 

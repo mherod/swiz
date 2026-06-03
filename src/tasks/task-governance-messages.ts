@@ -1,5 +1,6 @@
 import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
-import { taskToolNameForCurrentAgent } from "../agent-paths.ts"
+import { resolveTranslationAgent, taskToolNameForCurrentAgent } from "../agent-paths.ts"
+import { agentSupportsTool } from "../agents.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
@@ -95,9 +96,12 @@ function formatTranslatedActionPlan(
   steps: ActionPlanItem[],
   options: { header?: string; taskListFirst?: boolean; confirm?: boolean } = {}
 ): string {
-  const actionSteps = options.taskListFirst
-    ? buildTaskListRepairPlan(steps, { confirm: options.confirm })
-    : steps
+  const agent = resolveTranslationAgent()
+  const hasTaskList = agent ? agentSupportsTool(agent, "TaskList") : true
+  const actionSteps =
+    options.taskListFirst && hasTaskList
+      ? buildTaskListRepairPlan(steps, { confirm: options.confirm })
+      : steps
   return formatActionPlan(actionSteps, {
     translateToolNames: true,
     ...(options.header ? { header: options.header } : {}),
@@ -348,6 +352,18 @@ function buildTaskDeletionThresholdMessage(r: Req<"task-deletion-threshold">): s
 }
 
 function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
+  const agent = resolveTranslationAgent()
+  const hasTaskList = agent ? agentSupportsTool(agent, "TaskList") : true
+  if (!hasTaskList) {
+    const taskUpdateName = taskUpdateToolName()
+    return (
+      `Too many pending tasks — reduce them before retrying ${r.toolName}.\n\n` +
+      formatTranslatedActionPlan([
+        `Use ${taskUpdateName} to clean up or complete pending tasks.`,
+        `Retry ${r.toolName} once the task queue is resolved.`,
+      ])
+    )
+  }
   return (
     `Run TaskList to clear the task state, then retry ${r.toolName}.\n\n` +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])

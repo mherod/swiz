@@ -181,7 +181,7 @@ export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined):
 export function agentHasTaskListToolForHookPayload(input: HookPayload | undefined): boolean {
   const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent) return true
-  return agentSupportsTool(agent, "TaskList")
+  return agent.id === "claude" && agentSupportsTool(agent, "TaskList")
 }
 
 /**

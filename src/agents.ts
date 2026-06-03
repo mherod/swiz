@@ -362,6 +362,11 @@ export function hasAnyAgentFlag(args: string[]): boolean {
 
 /** Check if an agent supports a specific tool by name. */
 export function agentSupportsTool(agent: AgentDef, toolName: string): boolean {
+  // Only Claude has the TaskList tool
+  if (toolName === "TaskList") {
+    return agent.id === "claude"
+  }
+
   // Claude (empty aliases or only Skill) supports canonical tools directly.
   if (agent.id === "claude") return true
 
