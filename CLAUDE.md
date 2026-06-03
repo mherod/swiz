@@ -116,7 +116,7 @@ alwaysApply: false
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
-- After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 20 calls.
+- After compaction: `TaskList`, close stale tasks with `git log --oneline -3`; staleness gate at 40 calls.
 - Session resume: verify `completed` commit/push tasks against `git status` — uncommitted/unpushed = phantom; reopen.
 - `CLAUDE.md` ≥3500 words HARD-BLOCKS commit (lefthook `memory` step); `wc -w` and trim/`/compact-memory` below threshold before `git commit`. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
 - CI: `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before untracked `.lock`/local state.

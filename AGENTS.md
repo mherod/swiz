@@ -115,7 +115,7 @@ alwaysApply: false
 - **DON'T**: Complete the final incomplete task without first creating a pending next-step task — `pretooluse-require-tasks.ts` blocks when zero incomplete tasks remain.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
-- Call task tools every 10 calls; staleness gate at 20.
+- Call task tools every 20 calls; staleness gate at 40.
 - **DO**: Use native task tools, not `swiz tasks` CLI (exception: `swiz tasks adopt`).
 - **DO**: Use `createTaskInProcess()` from `src/tasks/task-service.ts` or `createSessionTask()` from `hook-utils.ts` in hooks.
 - Call `TaskUpdate` after each file, at least every 3 edits.

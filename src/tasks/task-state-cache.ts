@@ -24,6 +24,13 @@ import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { taskListSyncSentinelPath } from "../temp-paths.ts"
 import { pruneSession, warnRevertedInvalidTransition } from "./task-event-state.ts"
 import { isSessionTaskJsonFile } from "./task-file-utils.ts"
+import {
+  COMPLETED_TASK_PRUNE_AGE_MS,
+  DEFAULT_MAX_STALE_MS,
+  DEFAULT_STALE_CEILING_MS,
+  INCREMENTAL_FILE_LIMIT,
+  MAX_CACHED_SESSIONS,
+} from "./task-governance-constants.ts"
 import type { SessionTask } from "./task-recovery.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 import { computeTransitionPath, isValidTransition } from "./task-transitions.ts"
@@ -53,7 +60,6 @@ export interface SessionTaskState {
  * etc.). When more than this many files have mtimes newer than the cached
  * `loadedAtMs`, the read escalates to a full reload so updates can't slip past.
  */
-const INCREMENTAL_FILE_LIMIT = 10
 
 /**
  * Time-based staleness ceiling: even when fs.watch hasn't flagged the entry
@@ -63,7 +69,6 @@ const INCREMENTAL_FILE_LIMIT = 10
  * (e.g., Claude's native TaskUpdate writes directly to disk before swiz's
  * write-through helpers see them).
  */
-const DEFAULT_STALE_CEILING_MS = 5_000
 
 /**
  * Fire-and-forget disk revert for an invalid transition that landed on disk.
@@ -95,14 +100,7 @@ function queueDiskRevert(
   })()
 }
 
-/** Default max age (ms) for freshness-guaranteed reads. */
-const DEFAULT_MAX_STALE_MS = 60_000
-
-/** Canonical TaskList snapshots must be refreshed within 10 minutes. */
-export const CANONICAL_TASKLIST_SYNC_MAX_AGE_MS = 10 * 60_000
-
-/** Maximum cached sessions before LRU eviction. */
-const MAX_CACHED_SESSIONS = 50
+export { CANONICAL_TASKLIST_SYNC_MAX_AGE_MS } from "./task-governance-constants.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -218,9 +216,6 @@ async function listTaskFiles(dir: string): Promise<FileWithMtime[]> {
   }
   return result
 }
-
-/** Completed tasks older than this are pruned from cache and disk on full reload. */
-const COMPLETED_TASK_PRUNE_AGE_MS = 15 * 60_000
 
 /**
  * Remove completed tasks that have been done for more than COMPLETED_TASK_PRUNE_AGE_MS.

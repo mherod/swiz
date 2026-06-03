@@ -464,8 +464,8 @@ describe("pretooluse-require-tasks", () => {
   test("allows update_plan even when TaskList is stale", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-stale-update-plan"
-    // Write a stale sentinel (11 minutes ago)
-    const staleTime = Date.now() - 11 * 60 * 1000
+    // Write a stale sentinel (21 minutes ago)
+    const staleTime = Date.now() - 21 * 60 * 1000
     await writeTaskListSyncSentinel(sessionId, staleTime)
 
     const result = await runHook({
@@ -591,7 +591,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("denies when canonical TaskList sync is older than 5 minutes", async () => {
+  test("denies when canonical TaskList sync is older than 20 minutes", async () => {
     const homeDir = await createTempHome()
     const sessionId = `session-stale-tasklist-sync-${Date.now()}`
     await writeTask(homeDir, sessionId, {
@@ -604,7 +604,7 @@ describe("pretooluse-require-tasks", () => {
       subject: "Next step",
       status: "pending",
     })
-    await writeTaskListSyncSentinel(sessionId, Date.now() - 11 * 60_000)
+    await writeTaskListSyncSentinel(sessionId, Date.now() - 21 * 60_000)
 
     const result = await runHook({
       homeDir,
@@ -620,7 +620,7 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).not.toContain("recent context")
   })
 
-  test("allows when canonical TaskList sync is within 5 minutes", async () => {
+  test("allows when canonical TaskList sync is within 20 minutes", async () => {
     const homeDir = await createTempHome()
     const sessionId = `session-fresh-tasklist-sync-${Date.now()}`
     await writeTask(homeDir, sessionId, {

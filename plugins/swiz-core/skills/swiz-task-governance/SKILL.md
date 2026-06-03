@@ -54,7 +54,7 @@ Maintain the buffer proactively — do not wait for a block to appear:
 ### Mid-session sequence
 
 ```
-1. Check: is there an in_progress task? (last TaskList < 5 min ago)
+1. Check: is there an in_progress task? (last TaskList < 10 min ago)
 2. If no in_progress: TaskUpdate a pending task → in_progress
 3. If no pending tasks exist: TaskCreate at least 2 pending tasks first
 4. Proceed
@@ -62,7 +62,7 @@ Maintain the buffer proactively — do not wait for a block to appear:
 
 ### Staleness gate
 
-If your last `TaskList` call was **more than 5 minutes ago**, run `TaskList` again before any Bash/Edit/Write to refresh canonical state. The hook enforces this.
+If your last `TaskList` call was **more than 10 minutes ago**, run `TaskList` again before any Bash/Edit/Write to refresh canonical state. The hook enforces this.
 
 ## Creating Good Tasks
 

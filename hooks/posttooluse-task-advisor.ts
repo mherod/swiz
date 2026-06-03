@@ -8,6 +8,10 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
+  TASK_CREATION_ADVISORY_THRESHOLD as CREATION_THRESHOLD,
+  TASK_STALENESS_ADVISORY_THRESHOLD as STALENESS_THRESHOLD,
+} from "../src/tasks/task-governance-constants.ts"
+import {
   buildTaskAdvisorStalenessMessage,
   buildTaskCreationCountdownMessage,
   getTaskToolName,
@@ -19,9 +23,6 @@ import {
   isWriteTool,
   scheduleAutoSteer,
 } from "../src/utils/hook-utils.ts"
-
-const CREATION_THRESHOLD = 5
-const STALENESS_THRESHOLD = 10
 
 let advisorSessionId = ""
 let advisorCwd: string | undefined

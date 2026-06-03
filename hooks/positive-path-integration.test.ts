@@ -436,8 +436,17 @@ describe("posttooluse-task-advisor: positive paths", () => {
 
   test("emits creation countdown when approaching threshold", async () => {
     const tmp = await createTempDir()
-    // 3 tool calls, no TaskCreate → remaining = 5 - 3 = 2 (within ≤3 range)
-    const transcript = await createTranscript(tmp, ["Read", "Glob", "Read"])
+    // 8 tool calls, no TaskCreate → remaining = 10 - 8 = 2 (within ≤3 range)
+    const transcript = await createTranscript(tmp, [
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+    ])
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
@@ -446,10 +455,20 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(hso?.additionalContext).toContain("TaskCreate required")
   })
 
-  test("emits warning at 4/5 tool calls before creation threshold", async () => {
+  test("emits warning at 9/10 tool calls before creation threshold", async () => {
     const tmp = await createTempDir()
-    // 4 calls → remaining = 5 - 4 = 1 (within ≤1 range)
-    const transcript = await createTranscript(tmp, ["Read", "Glob", "Read", "Bash"])
+    // 9 calls → remaining = 10 - 9 = 1 (within ≤1 range)
+    const transcript = await createTranscript(tmp, [
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+      "Read",
+    ])
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, any>
@@ -461,7 +480,16 @@ describe("posttooluse-task-advisor: positive paths", () => {
   test("uses translated task tool name when current agent is Codex", async () => {
     // Codex uses update_plan for task planning in this workflow.
     const tmp = await createTempDir()
-    const transcript = await createTranscript(tmp, ["Read", "Glob", "Read"])
+    const transcript = await createTranscript(tmp, [
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+      "Read",
+      "Glob",
+      "Read",
+      "Bash",
+    ])
     const r = await runHook(
       HOOK,
       { transcript_path: transcript },
@@ -474,7 +502,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
 
   test("no output for small transcript (below threshold)", async () => {
     const tmp = await createTempDir()
-    // 1 tool call → remaining = 5 - 1 = 4 (> 3, and total < 2)
+    // 1 tool call → remaining = 10 - 1 = 9 (> 3, and total < 2)
     const transcript = await createTranscript(tmp, ["Read"])
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
@@ -483,8 +511,28 @@ describe("posttooluse-task-advisor: positive paths", () => {
 
   test("emits staleness countdown when task tools used but stale", async () => {
     const tmp = await createTempDir()
-    // TaskCreate at index 0, then 8 more calls → callsSinceTask = 8, remaining = 10-8 = 2
-    const tools = ["TaskCreate", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
+    // TaskCreate at index 0, then 18 more calls → callsSinceTask = 18, remaining = 20-18 = 2
+    const tools = [
+      "TaskCreate",
+      "Read",
+      "Glob",
+      "Read",
+      "Edit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Read",
+      "Read",
+      "Glob",
+      "Read",
+      "Edit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Read",
+      "Read",
+      "Glob",
+    ]
     const transcript = await createTranscript(tmp, tools)
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
@@ -514,7 +562,7 @@ describe("posttooluse-task-advisor: positive paths", () => {
 
   test("no staleness warning when task tools used recently", async () => {
     const tmp = await createTempDir()
-    // TaskCreate at index 0, then 2 calls → remaining = 10-2 = 8 (> 4)
+    // TaskCreate at index 0, then 2 calls → remaining = 20-2 = 18 (> 4)
     const transcript = await createTranscript(tmp, ["TaskCreate", "Read", "Glob"])
     const r = await runHook(HOOK, { transcript_path: transcript })
     expect(r.exitCode).toBe(0)
