@@ -9,6 +9,7 @@ import {
   computeWarmStatusLineSnapshot,
   formatActiveSkillsSegment,
   formatCountSegment,
+  formatExecStatsSegment,
   formatGitHubCiSegment,
   formatProjectState,
   formatTaskCountSegment,
@@ -735,5 +736,110 @@ describe("issueSyncStale warning in backlog segment", () => {
       timeOffset: 0,
     })
     expect(out).toContain("⚠ sync")
+  })
+})
+
+describe("formatExecStatsSegment", () => {
+  function stripAnsi(text: string): string {
+    const esc = String.fromCharCode(27)
+    return text.replace(new RegExp(`${esc}\\[[0-9;]*m`, "g"), "")
+  }
+
+  const fastTest = {
+    totalTimeMs: 2400,
+    count: 2,
+    averageMs: 1200,
+    assessment: "negligible" as const,
+  }
+  const slowLint = {
+    totalTimeMs: 24000,
+    count: 2,
+    averageMs: 12000,
+    assessment: "significant" as const,
+  }
+
+  it("returns empty string for null/undefined stats", () => {
+    expect(formatExecStatsSegment(null)).toBe("")
+    expect(formatExecStatsSegment(undefined)).toBe("")
+  })
+
+  it("returns empty string when both test and lint stats are null", () => {
+    expect(formatExecStatsSegment({ test: null, lint: null })).toBe("")
+  })
+
+  it("renders test average with run count", () => {
+    const out = stripAnsi(formatExecStatsSegment({ test: fastTest, lint: null }))
+    expect(out).toBe("⏱ test 1.2s×2")
+  })
+
+  it("renders both test and lint averages", () => {
+    const out = stripAnsi(formatExecStatsSegment({ test: fastTest, lint: slowLint }))
+    expect(out).toBe("⏱ test 1.2s×2 lint 12s×2")
+  })
+
+  it("renders lint-only stats", () => {
+    const out = stripAnsi(formatExecStatsSegment({ test: null, lint: slowLint }))
+    expect(out).toBe("⏱ lint 12s×2")
+  })
+})
+
+describe("renderStatusLineFromSnapshot checks segment", () => {
+  const baseSnap = {
+    shortCwd: "swiz",
+    gitInfo: "✦ main",
+    gitBranch: "main",
+    activeSegments: [],
+    ciState: "none" as const,
+    ciLabel: "",
+    issueCount: 0,
+    prCount: 0,
+    fetchStatus: "ok" as const,
+    reviewDecision: "",
+    commentCount: 0,
+    projectState: null,
+    settingsParts: [],
+  }
+  const execStats = {
+    test: { totalTimeMs: 4800, count: 4, averageMs: 1200, assessment: "negligible" as const },
+    lint: { totalTimeMs: 1600, count: 2, averageMs: 800, assessment: "negligible" as const },
+  }
+
+  it("renders exec stats from the snapshot in line 3", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, execStats },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).toContain("checks")
+    expect(out).toContain("⏱")
+    expect(out).toContain("1.2s")
+    expect(out).toContain("0.8s")
+  })
+
+  it("omits the checks segment when no exec stats recorded", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, execStats: null },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("⏱")
+  })
+
+  it("respects segment gating — hidden when checks not in activeSegments", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnap, activeSegments: ["model"], execStats },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("⏱")
   })
 })

@@ -113,7 +113,7 @@ describe("swiz status — test and lint execution stats rendering", () => {
       process.cwd = originalCwd
       consoleLogSpy.mockRestore()
     }
-    const ansiRegex = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")
+    const ansiRegex = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
     return output.replace(ansiRegex, "")
   }
 

@@ -10,6 +10,7 @@ import { HOOKS_DIR, isSwizCommand } from "../swiz-hook-commands.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { isIncompleteTaskStatus } from "../tasks/task-repository.ts"
 import type { Command } from "../types.ts"
+import { type ExecutionStatsSummary, readExecutionStats } from "../utils/execution-stats.ts"
 
 const STATUS_GIT_TIMEOUT_MS = 800
 const STATUS_CI_TIMEOUT_MS = 1_000
@@ -180,18 +181,8 @@ interface ProjectHealth {
   openTasks: number | null
   ciStatus: string | null
   ciConclusion: string | null
-  testStats: {
-    totalTimeMs: number
-    count: number
-    averageMs: number
-    assessment: "negligible" | "significant"
-  } | null
-  lintStats: {
-    totalTimeMs: number
-    count: number
-    averageMs: number
-    assessment: "negligible" | "significant"
-  } | null
+  testStats: ExecutionStatsSummary | null
+  lintStats: ExecutionStatsSummary | null
 }
 
 interface ProjectHealthOptions {
@@ -369,25 +360,6 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
   }
 }
 
-async function readStatsFile(
-  statsPath: string
-): Promise<{ totalTimeMs: number; count: number } | null> {
-  const file = Bun.file(statsPath)
-  if (!(await file.exists())) return null
-  try {
-    const raw = await file.text()
-    const parsed = JSON.parse(raw)
-    if (
-      typeof parsed.totalTimeMs === "number" &&
-      typeof parsed.count === "number" &&
-      parsed.count > 0
-    ) {
-      return { totalTimeMs: parsed.totalTimeMs, count: parsed.count }
-    }
-  } catch {}
-  return null
-}
-
 async function getProjectHealth(
   cwd: string,
   options: ProjectHealthOptions = {}
@@ -428,37 +400,10 @@ async function getProjectHealth(
   const allowedTransitions = state ? (STATE_TRANSITIONS[state as never] ?? []) : []
 
   const projectRoot = repoRoot || cwd
-  const testStatsPath = join(projectRoot, ".swiz", "test-execution-stats.json")
-  const lintStatsPath = join(projectRoot, ".swiz", "lint-execution-stats.json")
-
-  const [testStatsData, lintStatsData] = await Promise.all([
-    readStatsFile(testStatsPath),
-    readStatsFile(lintStatsPath),
+  const [testStats, lintStats] = await Promise.all([
+    readExecutionStats(projectRoot, "test"),
+    readExecutionStats(projectRoot, "lint"),
   ])
-
-  const testStats = testStatsData
-    ? {
-        totalTimeMs: testStatsData.totalTimeMs,
-        count: testStatsData.count,
-        averageMs: testStatsData.totalTimeMs / testStatsData.count,
-        assessment:
-          testStatsData.totalTimeMs / testStatsData.count < 5000
-            ? ("negligible" as const)
-            : ("significant" as const),
-      }
-    : null
-
-  const lintStats = lintStatsData
-    ? {
-        totalTimeMs: lintStatsData.totalTimeMs,
-        count: lintStatsData.count,
-        averageMs: lintStatsData.totalTimeMs / lintStatsData.count,
-        assessment:
-          lintStatsData.totalTimeMs / lintStatsData.count < 5000
-            ? ("negligible" as const)
-            : ("significant" as const),
-      }
-    : null
 
   return {
     state,

@@ -10,6 +10,7 @@ import {
   type GitBranchStatus,
   getGitBranchStatus,
   getRepoSlug,
+  git,
 } from "../git-helpers.ts"
 import { complianceBaselineWantedLevel, standingWantedLevel } from "../infractions.ts"
 import { getIssueStoreReader } from "../issue-store.ts"
@@ -28,6 +29,11 @@ import { isIncompleteTaskStatus } from "../tasks/task-recovery.ts"
 import { readTasks } from "../tasks/task-repository.ts"
 import { findAllProviderSessions } from "../transcript-sessions.ts"
 import type { Command } from "../types.ts"
+import {
+  type ExecutionStatsSummary,
+  type ProjectExecutionStats,
+  readProjectExecutionStats,
+} from "../utils/execution-stats.ts"
 import { readSessionLines } from "../utils/transcript.ts"
 import type { SerializedDaemonMetrics } from "./daemon/cache/metrics.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
@@ -71,6 +77,8 @@ export interface WarmStatusLineSnapshot {
   activeSkills?: string[] | null
   /** True when the daemon's upstream sync hasn't succeeded for this project in over 10 minutes. Null/undefined when unknown (non-daemon path). */
   issueSyncStale?: boolean | null
+  /** Average test/lint execution times recorded by the measure-*-time hooks. Null when no runs recorded. */
+  execStats?: ProjectExecutionStats | null
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
@@ -684,6 +692,12 @@ function extractGhCounts(gh: GhFetchResults) {
   }
 }
 
+/** Resolve the repo root (where the measure hooks write stats) and read exec stats. */
+async function readExecStatsForCwd(cwd: string): Promise<ProjectExecutionStats | null> {
+  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd).catch(() => "")
+  return readProjectExecutionStats(repoRoot || cwd).catch(() => null)
+}
+
 function assembleSnapshot(
   shortCwd: string,
   gitResult: { branch: string; info: string },
@@ -691,7 +705,8 @@ function assembleSnapshot(
   gh: GhFetchResults,
   effective: EffectiveSwizSettings | null,
   taskCounts: TaskCounts | null,
-  activeSkills: string[] | null
+  activeSkills: string[] | null,
+  execStats: ProjectExecutionStats | null
 ): WarmStatusLineSnapshot {
   const suppressCi = Boolean(effective?.ignoreCi)
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
@@ -709,6 +724,7 @@ function assembleSnapshot(
     settingsParts: buildSettingsFlags(effective),
     taskCounts,
     activeSkills,
+    execStats,
   }
 }
 
@@ -717,26 +733,34 @@ export async function computeWarmStatusLineSnapshot(
   sessionId: string | null | undefined
 ): Promise<WarmStatusLineSnapshot> {
   const shortCwd = shortenPath(cwd)
-  const [gitResult, swizSettings, projectSettings, ciProviders, sessionTasks, activeSkills] =
-    await Promise.all([
-      getGitBranchAndInfo(cwd),
-      readSwizSettings().catch(() => null),
-      readProjectSettings(cwd).catch(() => null),
-      detectCiProviders(cwd).catch(() => new Set()),
-      sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
-      (async () => {
-        try {
-          const sessions = await findAllProviderSessions(cwd)
-          const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
-          if (session?.path) {
-            return await getRecentlyInvokedSkillsForCurrentSession(session.path)
-          }
-        } catch {
-          // Fall back to null
+  const [
+    gitResult,
+    swizSettings,
+    projectSettings,
+    ciProviders,
+    sessionTasks,
+    activeSkills,
+    execStats,
+  ] = await Promise.all([
+    getGitBranchAndInfo(cwd),
+    readSwizSettings().catch(() => null),
+    readProjectSettings(cwd).catch(() => null),
+    detectCiProviders(cwd).catch(() => new Set()),
+    sessionId ? readStatusLineSessionTasks(sessionId) : Promise.resolve([]),
+    (async () => {
+      try {
+        const sessions = await findAllProviderSessions(cwd)
+        const session = sessionId ? sessions.find((s) => s.id === sessionId) : sessions[0]
+        if (session?.path) {
+          return await getRecentlyInvokedSkillsForCurrentSession(session.path)
         }
-        return null
-      })(),
-    ])
+      } catch {
+        // Fall back to null
+      }
+      return null
+    })(),
+    readExecStatsForCwd(cwd),
+  ])
 
   const effective = swizSettings
     ? getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
@@ -754,7 +778,8 @@ export async function computeWarmStatusLineSnapshot(
     gh,
     effective,
     taskCounts,
-    activeSkills
+    activeSkills,
+    execStats
   )
 }
 
@@ -951,6 +976,24 @@ export function formatTaskCountSegment(
   return parts.join(" ")
 }
 
+function formatExecStat(label: string, stat: ExecutionStatsSummary | null): string {
+  if (!stat) return ""
+  const color = stat.assessment === "negligible" ? "\x1b[92m" : "\x1b[91m"
+  const avgSec = stat.averageMs / 1000
+  const avg = avgSec >= 10 ? avgSec.toFixed(0) : avgSec.toFixed(1)
+  return `${DIM}${label}${R} ${color}${avg}s${R}${DIM}×${stat.count}${R}`
+}
+
+/** Average test/lint runtimes recorded by the measure-*-time hooks, e.g. `⏱ test 1.2s×12 lint 0.8s×4`. */
+export function formatExecStatsSegment(stats: ProjectExecutionStats | null | undefined): string {
+  if (!stats) return ""
+  const parts = [formatExecStat("test", stats.test), formatExecStat("lint", stats.lint)].filter(
+    Boolean
+  )
+  if (parts.length === 0) return ""
+  return `⏱ ${parts.join(" ")}`
+}
+
 function buildDaemonMetricsSegment(metrics: StatusLineDaemonMetrics | null | undefined): string {
   if (!metrics || metrics.totalDispatches <= 0) return ""
   const dispatchLabel = metrics.totalDispatches === 1 ? "dispatch" : "dispatches"
@@ -1025,6 +1068,7 @@ function buildLine3(
     snapshot.complianceDurationSeconds
   )
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
+  const checksSeg = formatExecStatsSegment(snapshot.execStats)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
@@ -1032,6 +1076,7 @@ function buildLine3(
     seg("tasks") && taskSeg ? `${lbl("tasks")} ${taskSeg}` : "",
     seg("skills") && skillsSeg ? `${lbl("skills")} ${skillsSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
+    seg("checks") && checksSeg ? `${lbl("checks")} ${checksSeg}` : "",
     seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
     seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
     seg("flags") && flagsStr ? `${lbl("flags")} ${flagsStr}` : "",
@@ -1162,6 +1207,12 @@ export const statusLineCommand: Command = {
     let activeSkills = snapshot.activeSkills
     if ((activeSkills === undefined || activeSkills === null) && sessionPath) {
       activeSkills = await getRecentlyInvokedSkillsForCurrentSession(sessionPath).catch(() => null)
+    }
+
+    // Fallback: if the daemon snapshot doesn't include execStats (old daemon),
+    // read the per-project stats files directly.
+    if (snapshot.execStats === undefined) {
+      snapshot.execStats = await readExecStatsForCwd(cwd)
     }
 
     // Wanted level: unhealthy task compliance contributes a baseline ★1 (preferring
