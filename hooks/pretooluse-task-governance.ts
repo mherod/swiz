@@ -96,12 +96,14 @@ import {
   formatActionPlan,
   getCurrentSessionTaskToolStats,
   hasFileInTree,
+  isCodeChangeTool,
   isEditTool,
   isFileEditTool,
   isGitRepo,
   isShellTool,
   isTaskCreateTool,
   isTaskListTool,
+  isTaskUpdateTool,
   isTerminalTaskStatus,
   isWriteTool,
   mergeActionPlanIntoTasks,
@@ -1972,11 +1974,17 @@ export function isComplianceSuppressible(
   return now - entry.at >= COMPLIANCE_SUPPRESS_THRESHOLD_MS
 }
 
-async function shouldSuppressGovernanceTrace(input: Record<string, any>): Promise<boolean> {
+export async function shouldSuppressGovernanceTrace(input: Record<string, any>): Promise<boolean> {
   const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
   if (!sessionId) return false
   try {
     const entry = await getCurrentComplianceEntry(sessionId)
+    if (entry && entry.state === "healthy") {
+      const toolName = (input?.tool_name as string) ?? ""
+      if (isCodeChangeTool(toolName) || isTaskUpdateTool(toolName)) {
+        return true
+      }
+    }
     return isComplianceSuppressible(entry)
   } catch {
     return false

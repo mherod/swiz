@@ -16,6 +16,7 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
+import { hasHealthyTaskBuffer } from "../src/tasks/task-buffer-health.ts"
 import {
   recordComplianceState,
   type TaskActivityDuration,
@@ -110,6 +111,9 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
   if (eventState && eventState.length > 0) {
     const hints = await hintsPromise
     recordComplianceFromTasks(sessionId, eventState).catch(() => {})
+    if (parsed.tool_name === "TaskUpdate" && hasHealthyTaskBuffer(eventState)) {
+      return {}
+    }
     return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(eventState, hints))
   }
 
@@ -132,6 +136,9 @@ export async function evaluatePosttooluseTaskCountContext(input: unknown): Promi
 
   const hints = await hintsPromise
   recordComplianceFromTasks(sessionId, tasks, diskTasks).catch(() => {})
+  if (parsed.tool_name === "TaskUpdate" && hasHealthyTaskBuffer(tasks)) {
+    return {}
+  }
   return buildContextHookOutput("PostToolUse", buildCountSummaryFromTasks(tasks, hints))
 }
 

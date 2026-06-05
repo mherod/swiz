@@ -172,3 +172,44 @@ describe("buildCountSummary", () => {
     expect(s).toContain("#100 Critical bug in login")
   })
 })
+
+describe("evaluatePosttooluseTaskCountContext", () => {
+  it("suppresses output on TaskUpdate when task governance is healthy", async () => {
+    const { applyTaskListEvent } = await import("../src/tasks/task-event-state.ts")
+    const { evaluatePosttooluseTaskCountContext } = await import(
+      "./posttooluse-task-count-context.ts"
+    )
+    const sessionId = "test-session-healthy-taskupdate"
+    applyTaskListEvent(sessionId, [
+      { id: "1", status: "in_progress", subject: "A" },
+      { id: "2", status: "pending", subject: "B" },
+      { id: "3", status: "pending", subject: "C" },
+    ])
+    const res = await evaluatePosttooluseTaskCountContext({
+      session_id: sessionId,
+      tool_name: "TaskUpdate",
+      tool_input: { taskId: "1", status: "in_progress" },
+      cwd: process.cwd(),
+      agent: "claude",
+    })
+    expect(res).toEqual({})
+  })
+
+  it("does not suppress output on TaskUpdate when task governance is unhealthy", async () => {
+    const { applyTaskListEvent } = await import("../src/tasks/task-event-state.ts")
+    const { evaluatePosttooluseTaskCountContext } = await import(
+      "./posttooluse-task-count-context.ts"
+    )
+    const sessionId = "test-session-unhealthy-taskupdate"
+    applyTaskListEvent(sessionId, [{ id: "1", status: "in_progress", subject: "A" }])
+    const res = await evaluatePosttooluseTaskCountContext({
+      session_id: sessionId,
+      tool_name: "TaskUpdate",
+      tool_input: { taskId: "1", status: "in_progress" },
+      cwd: process.cwd(),
+      agent: "claude",
+    })
+    expect(res).not.toEqual({})
+    expect((res as any).systemMessage).toContain("Planning buffer empty")
+  })
+})
