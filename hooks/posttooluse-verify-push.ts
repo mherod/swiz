@@ -26,6 +26,7 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { formatDurationPrecise } from "../src/format-duration.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
 import {
@@ -71,7 +72,7 @@ async function verifyWithRetries(localHead: string, cwd: string): Promise<SwizHo
     if (refreshed === localHead) {
       return buildContextHookOutput(
         "PostToolUse",
-        `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+        `Push verified (after ${formatDurationPrecise(delayMs)} retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
       )
     }
   }

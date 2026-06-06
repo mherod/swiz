@@ -9,6 +9,7 @@
  */
 
 import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
+import { formatDurationPrecise } from "../src/format-duration.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -20,8 +21,7 @@ import { detectTerminal, type TerminalApp } from "../src/utils/terminal-detectio
 
 function formatAge(ms: number | undefined): string {
   if (ms === undefined) return "missing"
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  return formatDurationPrecise(ms)
 }
 
 function injectedTerminalApp(raw: Record<string, unknown>): TerminalApp {
