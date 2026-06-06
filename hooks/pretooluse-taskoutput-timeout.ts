@@ -7,11 +7,14 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { formatDurationPrecise } from "../src/format-duration.ts"
 import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const MAX_TIMEOUT_MS = 120_000
+const MAX_TIMEOUT_LABEL = formatDurationPrecise(MAX_TIMEOUT_MS)
+const RETRY_INSTRUCTION = `To proceed, retry the TaskOutput call with \`timeout: ${MAX_TIMEOUT_MS}\` (${MAX_TIMEOUT_LABEL}) or a smaller value.`
 
 function evaluate(input: ToolHookInput) {
   const toolInput = input.tool_input ?? {}
@@ -23,7 +26,7 @@ function evaluate(input: ToolHookInput) {
         "TaskOutput requires a `timeout` parameter (number, milliseconds).",
         "",
         "Missing timeouts block the session indefinitely waiting for output.",
-        `Set timeout to at most ${MAX_TIMEOUT_MS}ms (${MAX_TIMEOUT_MS / 1000}s).`,
+        RETRY_INSTRUCTION,
       ].join("\n")
     )
   }
@@ -33,7 +36,7 @@ function evaluate(input: ToolHookInput) {
       [
         `TaskOutput \`timeout\` must be a number, got ${typeof timeout}.`,
         "",
-        `Set timeout to at most ${MAX_TIMEOUT_MS}ms (${MAX_TIMEOUT_MS / 1000}s).`,
+        RETRY_INSTRUCTION,
       ].join("\n")
     )
   }
@@ -41,9 +44,10 @@ function evaluate(input: ToolHookInput) {
   if (timeout > MAX_TIMEOUT_MS) {
     return preToolUseDeny(
       [
-        `TaskOutput timeout ${timeout}ms exceeds the ${MAX_TIMEOUT_MS / 1000}s maximum.`,
+        `TaskOutput timeout of ${formatDurationPrecise(timeout)} exceeds the ${MAX_TIMEOUT_LABEL} maximum.`,
         "",
-        `Reduce timeout to at most ${MAX_TIMEOUT_MS}ms. Long waits block the session and waste time.`,
+        "Long waits block the session and waste time.",
+        RETRY_INSTRUCTION,
       ].join("\n")
     )
   }
