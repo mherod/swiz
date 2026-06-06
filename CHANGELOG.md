@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-06-06
+
+### Features
+
+- **Test/lint timing stats in status line** — Full-suite test and lint runs are
+  timed via hook pairs and accumulated into per-project execution stats. The
+  `swiz status` command and a new status-line "checks" segment surface average
+  durations and run counts, flagging slow check suites at a glance.
+- **Subagent session detection** — Orchestrated subagent sessions are detected
+  at dispatch time and hook enforcement (task governance, skill gates) is
+  relaxed for them, so workflow subagents are not blocked by parent-session
+  requirements.
+
+### Improvements
+
+- **Seconds/minutes duration formatting in hook messages** — A new
+  `formatDurationPrecise()` helper renders durations exactly in seconds or
+  minutes (`45s`, `1.5s`, `2m`, `2m 10s`). The TaskOutput timeout gate,
+  push-verification retry note, and MCP channel trace ages no longer mix raw
+  millisecond values into prose, and the timeout gate's deny messages now end
+  with an explicit retry instruction for correcting the blocked call.
+- **Quieter healthy-task feedback** — Edit/update tool calls no longer receive
+  governance commentary when the task queue is in a healthy state.
+- **Centralised governance constants** — Task governance and cache constants
+  consolidated into one module (and thresholds doubled) instead of being
+  scattered per hook.
+- **De-exported internal symbols (#676)** — Continued sweep dropping the
+  redundant `export` keyword on internal-only symbols across utils, jsonl,
+  and task modules.
+
+### Fixes
+
+- **TaskList requirements scoped to Claude** — Agents without native task
+  tools are no longer blocked by TaskList-recency requirements.
+- **Issue self-assignment gated** — GitHub issue self-assignment is now
+  gated instead of automatic.
+- **Factual dispatch prompt context** — Prompt context assembled by dispatch
+  sticks to observed facts.
+- **Auto task transitions removed** — Tasks are never silently completed or
+  deleted; every transition must be explicit via task tools.
+
 ## 2026-05-29
 
 ### Features
