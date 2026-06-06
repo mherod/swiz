@@ -435,29 +435,45 @@ describe("pretooluse-skill-invocation-gate", () => {
     })
   }
 
-  describe("refine-issue gate — readiness label scoping", () => {
-    it("allows --add-label backlog without /refine-issue (readiness label)", async () => {
+  describe("refine-issue gate — all label changes gated", () => {
+    it("blocks --add-label backlog without /refine-issue (readiness label)", async () => {
       const result = await runLabelGateSubprocess("gh issue edit 630 --add-label backlog")
       expect(
         (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
           ?.permissionDecision
-      ).not.toBe("deny")
+      ).toBe("deny")
     })
 
-    it("allows --add-label ready without /refine-issue (readiness label)", async () => {
+    it("blocks --add-label ready without /refine-issue (readiness label)", async () => {
       const result = await runLabelGateSubprocess("gh issue edit 630 --add-label ready")
       expect(
         (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
           ?.permissionDecision
-      ).not.toBe("deny")
+      ).toBe("deny")
     })
 
-    it("allows --remove-label backlog without /refine-issue (readiness label)", async () => {
+    it('blocks --add-label "blocked" without /refine-issue (quoted readiness label)', async () => {
+      const result = await runLabelGateSubprocess('gh issue edit 1550 --add-label "blocked"')
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
+    })
+
+    it("blocks --remove-label backlog without /refine-issue (readiness label)", async () => {
       const result = await runLabelGateSubprocess("gh issue edit 630 --remove-label backlog")
       expect(
         (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
           ?.permissionDecision
-      ).not.toBe("deny")
+      ).toBe("deny")
+    })
+
+    it('blocks --remove-label "blocked" without /refine-issue (quoted readiness label)', async () => {
+      const result = await runLabelGateSubprocess('gh issue edit 1550 --remove-label "blocked"')
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
     })
 
     it("blocks --add-label bug without /refine-issue (type label)", async () => {

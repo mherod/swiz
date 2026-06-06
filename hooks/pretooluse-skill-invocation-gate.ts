@@ -9,9 +9,8 @@
 //   git push                                  →  requires recent /push skill
 //   gh issue edit … --add-label triaged       →  requires /triage-issues skill
 //   gh issue edit … --add-label/--remove-label →  requires /refine-issue skill
-//     UNLESS all changed labels are readiness-only (backlog, ready, blocked,
-//     upstream, needs-refinement, needs-breakdown) — those communicate scheduling
-//     state, not issue quality, so /refine-issue is not required.
+//     (every label change is gated — including readiness/scheduling labels like
+//     backlog, ready, or blocked — so label edits always go through refinement)
 //   gh issue edit … --add-assignee @me     →  requires /work-on-issue skill
 //   gh issue create                           →  NOT gated (label arg is --label,
 //     not --add-label; creation is not a label change on an existing issue)
@@ -72,17 +71,6 @@ import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
-/** Labels that communicate scheduling state — not issue quality. Changing only these
- *  labels does not require /refine-issue. */
-const READINESS_LABELS = new Set([
-  "backlog",
-  "ready",
-  "blocked",
-  "upstream",
-  "needs-refinement",
-  "needs-breakdown",
-])
-
 const SKILL_REQUIREMENT_COOLDOWN_MS = 2 * 60 * 1000
 
 function safeCooldownPart(value: string): string {
@@ -127,22 +115,6 @@ async function markSkillRequirementCooldown(
   })
 }
 
-/** Extract all label names from --add-label and --remove-label arguments. */
-function extractChangedLabels(command: string): string[] {
-  const matches = [...command.matchAll(/--(?:add|remove)-label\s+["']?([^"'\s]+)["']?/g)]
-  return matches.flatMap((m) =>
-    (m[1] ?? "")
-      .split(",")
-      .map((l) => l.trim())
-      .filter(Boolean)
-  )
-}
-
-/** Returns true when every changed label is a readiness/scheduling label. */
-function allLabelsAreReadinessOnly(labels: string[]): boolean {
-  return labels.length > 0 && labels.every((l) => READINESS_LABELS.has(l))
-}
-
 /** Human-readable line listing Skill-tool invocations for this session (for hook reasons). */
 function formatSessionSkillsForReason(
   skills: string[],
@@ -171,10 +143,8 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
   }
   if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command))
     return { primary: "triage-issues", anyOf: ["triage-issues"] }
-  if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
-    if (allLabelsAreReadinessOnly(extractChangedLabels(command))) return null
+  if (GH_ISSUE_LABEL_CHANGE_RE.test(command))
     return { primary: "refine-issue", anyOf: ["refine-issue"] }
-  }
   if (GH_ISSUE_SELF_ASSIGN_RE.test(command))
     return { primary: "work-on-issue", anyOf: ["work-on-issue"] }
   if (GH_PR_CHECKOUT_RE.test(cleanedCommand))
