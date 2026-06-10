@@ -10,6 +10,16 @@ export interface ConversionResult {
 
 // ─── Tool name remapping ─────────────────────────────────────────────────────
 
+// Tool tokens may carry a permission specifier, e.g. `Bash(git add:*)`.
+// The base name is remapped; the specifier is preserved verbatim.
+const TOOL_SPECIFIER_RE = /^([A-Za-z][\w-]*)\((.*)\)$/
+
+function splitToolSpecifier(tool: string): { base: string; specifier: string | null } {
+  const match = tool.match(TOOL_SPECIFIER_RE)
+  if (!match) return { base: tool, specifier: null }
+  return { base: match[1]!, specifier: match[2]! }
+}
+
 /**
  * Build a reverse alias map: agent-specific tool name → canonical (Claude) name.
  * Claude's toolAliases is `{}`, so for Claude as source the reverse map is empty
@@ -187,10 +197,17 @@ export function convertSkillContent(
     ? { TaskList: taskCreateTarget, TaskGet: taskCreateTarget }
     : {}
 
-  /** Resolve a single tool token: source-specific → canonical → target-specific */
-  function remap(tool: string): string {
+  /** Resolve a single tool name: source-specific → canonical → target-specific */
+  function remapName(tool: string): string {
     const canonical = reverseFrom[tool] ?? tool
     return toAliases[canonical] ?? conversionSupplement[canonical] ?? canonical
+  }
+
+  /** Remap a tool token, handling `Tool(specifier)` forms like `Bash(git add:*)`. */
+  function remap(tool: string): string {
+    const { base, specifier } = splitToolSpecifier(tool)
+    if (specifier === null) return remapName(tool)
+    return `${remapName(base)}(${specifier})`
   }
 
   const unmappedSet = new Set<string>()
@@ -198,7 +215,8 @@ export function convertSkillContent(
   // ── Rewrite frontmatter allowed-tools field ──────────────────────────────
   // Supports both inline and YAML-list forms.
   const remappedFrontmatter = remapAllowedToolsFrontmatter(content, remap)
-  for (const u of remappedFrontmatter.unmapped) unmappedSet.add(u)
+  // Report base names for specifier tokens: `ImaginaryTool(x)` → `ImaginaryTool`.
+  for (const u of remappedFrontmatter.unmapped) unmappedSet.add(splitToolSpecifier(u).base)
   let result = remappedFrontmatter.result
 
   result = rewriteBodyToolNames(result, fromAgent, conversionSupplement, allAgents, remap)

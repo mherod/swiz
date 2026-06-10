@@ -558,6 +558,68 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("shell_command")
     expect(result).not.toContain("read_file")
   })
+
+  test("remaps the base name in Tool(specifier) tokens (claude → gemini)", () => {
+    const content = "---\nallowed-tools: Bash(git add:*), Read\n---\n# Body\n"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
+    expect(result).toContain("allowed-tools: run_shell_command(git add:*), read_file")
+    expect(unmapped).toHaveLength(0)
+  })
+
+  test("preserves quoted Tool(specifier) tokens with quotes intact", () => {
+    const content = '---\nallowed-tools: "Bash(git commit:*)", Edit\n---\n'
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
+    expect(result).toContain('"run_shell_command(git commit:*)"')
+    expect(unmapped).toHaveLength(0)
+  })
+
+  test("reports the base name when a specifier tool has no target equivalent", () => {
+    const content = "---\nallowed-tools: ImaginaryTool(x:*)\n---\n"
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
+    expect(result).toContain("ImaginaryTool(x:*)")
+    expect(unmapped).toEqual(["ImaginaryTool"])
+  })
+})
+
+// ─── swiz skill --convert (single skill) ──────────────────────────────────────
+
+describe("swiz skill --convert with a skill name", () => {
+  test("converts only the named skill", async () => {
+    const fakeHome = await createTempDir()
+    for (const name of ["convert-pick-me", "convert-leave-me"]) {
+      const dir = join(fakeHome, ".claude", "skills", name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, "SKILL.md"), "---\nallowed-tools: Bash\n---\nUse Bash.\n")
+    }
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--convert", "--from", "claude", "--to", "gemini", "convert-pick-me"],
+      fakeHome
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("converted convert-pick-me")
+
+    const pickedTarget = join(fakeHome, ".gemini", "skills", "convert-pick-me", "SKILL.md")
+    expect(await Bun.file(pickedTarget).text()).toContain("run_shell_command")
+    const leftTarget = join(fakeHome, ".gemini", "skills", "convert-leave-me", "SKILL.md")
+    expect(await Bun.file(leftTarget).exists()).toBe(false)
+  })
+
+  test("errors with a clear message when the named skill does not exist", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr, exitCode } = await runSkillCli(
+      ["--convert", "--from", "claude", "--to", "gemini", "missing-convert-skill-xyz"],
+      fakeHome
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("Skill not found: missing-convert-skill-xyz")
+  })
 })
 
 // ─── error handling ───────────────────────────────────────────────────────────

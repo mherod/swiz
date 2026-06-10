@@ -110,4 +110,74 @@ To use this skill, call run_shell_command.
     expect(commandContent).toContain("allowed-tools: Bash, Edit")
     expect(commandContent).toContain("To use this skill, call Bash.")
   })
+
+  it("should error when the named skill does not exist", async () => {
+    const home = await createTempDir()
+    const indexPath = join(process.cwd(), "index.ts")
+
+    const proc = Bun.spawn(
+      ["bun", "run", indexPath, "skill", "--to-command", "--from", "claude", "no-such-skill-xyz"],
+      {
+        cwd: home,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: home },
+      }
+    )
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+    expect(proc.exitCode).not.toBe(0)
+    expect(stderr).toContain("Skill not found: no-such-skill-xyz")
+  })
+
+  it("should quote descriptions that would break YAML, and summarise unmapped tools", async () => {
+    const home = await createTempDir()
+    const indexPath = join(process.cwd(), "index.ts")
+
+    const skillDir = join(home, ".claude", "skills", "yaml-edge-skill")
+    await mkdir(skillDir, { recursive: true })
+    const skillContent = `---
+description: Deploy: fast and safe #1
+allowed-tools: Bash, ImaginaryTool
+---
+
+Body.
+`
+    await writeFile(join(skillDir, "SKILL.md"), skillContent)
+
+    const proc = Bun.spawn(
+      [
+        "bun",
+        "run",
+        indexPath,
+        "skill",
+        "--to-command",
+        "--from",
+        "claude",
+        "--to",
+        "gemini",
+        "yaml-edge-skill",
+      ],
+      {
+        cwd: home,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: home },
+      }
+    )
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    expect(proc.exitCode).toBe(0)
+    expect(stderr).toBe("")
+
+    const commandPath = join(home, ".gemini", "commands", "yaml-edge-skill.md")
+    const commandContent = await readFile(commandPath, "utf-8")
+    expect(commandContent).toContain('description: "Deploy: fast and safe #1"')
+    // Aggregated unmapped summary appears after the per-skill lines.
+    expect(stdout).toContain("Unmapped tool names")
+    expect(stdout).toContain("ImaginaryTool")
+  })
 })

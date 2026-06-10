@@ -17,6 +17,7 @@ import {
 } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { parseQuotedString } from "../utils/quoted-string.ts"
 import {
   eliminatePositionalArgs,
   expandInlineCommands,
@@ -120,6 +121,28 @@ function displayPath(path: string): string {
   return path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
 }
 
+/** Positional (non-flag) args, excluding values consumed by --from/--to. */
+function extractPositionals(args: string[]): string[] {
+  const flagsWithValue = new Set(["--from", "--to"])
+  return args.filter((a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? ""))
+}
+
+/** Validate that a named skill exists in the source dir; returns the name. */
+async function requireSkillName(fromSkillsDir: string, name: string): Promise<string> {
+  if (await Bun.file(join(fromSkillsDir, name, "SKILL.md")).exists()) return name
+  throw new Error(
+    `Skill not found: ${name} (no SKILL.md at ${displayPath(join(fromSkillsDir, name))}).\nOmit the skill name to process all skills, or run "swiz skill" to list them.`
+  )
+}
+
+/** Quote a frontmatter scalar when it would not survive a YAML round-trip unquoted. */
+function yamlScalar(value: string): string {
+  if (!value) return value
+  const { quoteChar } = parseQuotedString(value)
+  if (quoteChar) return value
+  return /[:#"'\n]|^\s|\s$/.test(value) ? JSON.stringify(value) : value
+}
+
 // ─── Single-skill conversion (reads file, converts, writes) ──────────────────
 
 async function convertSingleSkill(opts: {
@@ -220,26 +243,32 @@ function printConversionSummary(opts: {
     `\nSummary: ${converted} converted, ${overwritten} overwritten, ${skipped} skipped` +
       (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
   )
-  if (allUnmapped.size > 0) {
-    console.log(
-      `⚠ Unmapped tool names (no equivalent in ${agentName}): ${[...allUnmapped].join(", ")}`
-    )
-    console.log("  These tool names were preserved as-is. Review and update manually if needed.")
-  }
+  printUnmappedWarning(allUnmapped, agentName)
 }
 
-/** Convert all skills from one agent to another. */
+function printUnmappedWarning(allUnmapped: Set<string>, agentName: string): void {
+  if (allUnmapped.size === 0) return
+  console.log(
+    `⚠ Unmapped tool names (no equivalent in ${agentName}): ${[...allUnmapped].join(", ")}`
+  )
+  console.log("  These tool names were preserved as-is. Review and update manually if needed.")
+}
+
+/** Convert skills from one agent to another (all skills, or a single named one). */
 async function convertSkills(options: {
   from: string
   to: string
   dryRun: boolean
   overwrite: boolean
+  name?: string
 }): Promise<void> {
-  const { from, to, dryRun, overwrite } = options
+  const { from, to, dryRun, overwrite, name } = options
   const { fromAgent, toAgent } = resolveAgentPair(from, to)
   const fromSkillsDir = primarySkillDir(from)
   const toSkillsDir = primarySkillDir(to)
-  const orderedSkillNames = await discoverSkillNames(fromSkillsDir)
+  const orderedSkillNames = name
+    ? [await requireSkillName(fromSkillsDir, name)]
+    : await discoverSkillNames(fromSkillsDir)
 
   if (orderedSkillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
@@ -367,7 +396,9 @@ async function exportCommand(options: {
 
   const fromSkillsDir = primarySkillDir(from)
   const commandsDir = join(HOME, `.${toAgent.id}`, "commands")
-  const orderedSkillNames = name ? [name] : await discoverSkillNames(fromSkillsDir)
+  const orderedSkillNames = name
+    ? [await requireSkillName(fromSkillsDir, name)]
+    : await discoverSkillNames(fromSkillsDir)
 
   if (orderedSkillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
@@ -384,6 +415,7 @@ async function exportCommand(options: {
   let exported = 0,
     overwritten = 0,
     skipped = 0
+  const allUnmapped = new Set<string>()
 
   for (const skillName of orderedSkillNames) {
     const targetFile = join(commandsDir, `${skillName}.md`)
@@ -410,7 +442,7 @@ async function exportCommand(options: {
       convertedBody = eliminatePositionalArgs(convertedBody)
       convertedBody = unwrapInlineCommands(convertedBody)
 
-      const frontmatter = ["---", `name: ${skillName}`, `description: ${description}`]
+      const frontmatter = ["---", `name: ${skillName}`, `description: ${yamlScalar(description)}`]
 
       const allowedTools = extractMandatedSkillTools(convertedContent)
       if (allowedTools.length > 0) {
@@ -425,6 +457,7 @@ async function exportCommand(options: {
         await Bun.write(targetFile, commandContent)
       }
 
+      for (const u of unmapped) allUnmapped.add(u)
       const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
       if (
         logSkillAction(
@@ -448,6 +481,7 @@ async function exportCommand(options: {
     `\nSummary: ${exported} exported, ${overwritten} overwritten, ${skipped} skipped` +
       (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
   )
+  printUnmappedWarning(allUnmapped, toAgent.name)
 }
 
 function extractFlagValue(args: string[], flag: string): string | null {
@@ -472,7 +506,9 @@ async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean
   const to = extractFlagValue(args, "--to")
   if (!from) throw new Error("--convert requires --from <agent>.")
   if (!to) throw new Error("--convert requires --to <agent>.")
-  await convertSkills({ from, to, dryRun, overwrite })
+  // The first positional is an optional single skill name to convert.
+  const name = extractPositionals(args)[0]
+  await convertSkills({ from, to, dryRun, overwrite, name })
 }
 
 async function handleToCommand(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
@@ -480,12 +516,8 @@ async function handleToCommand(args: string[], dryRun: boolean, overwrite: boole
   if (!from) throw new Error("--to-command requires --from <agent>.")
   const to = extractFlagValue(args, "--to") ?? from
 
-  const flagsWithValue = new Set(["--from", "--to"])
-  const positionals = args.filter(
-    (a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? "")
-  )
   // The first positional after removing flags is considered the specific skill name
-  const name = positionals[0]
+  const name = extractPositionals(args)[0]
 
   await exportCommand({ from, to, dryRun, overwrite, name })
 }
@@ -496,11 +528,8 @@ async function handleSync(
   dryRun: boolean,
   overwrite: boolean
 ): Promise<void> {
-  const flagsWithValue = new Set(["--from", "--to"])
-  const positionals = args.filter(
-    (a, i) => !a.startsWith("--") && !flagsWithValue.has(args[i - 1] ?? "")
-  )
-  if (positionals.length > 0) throw new Error("--sync/--sync-gemini does not accept a skill name.")
+  if (extractPositionals(args).length > 0)
+    throw new Error("--sync/--sync-gemini does not accept a skill name.")
   const from = syncGemini ? "gemini" : extractFlagValue(args, "--from")
   if (!from) throw new Error("--sync requires --from <agent>.")
   const to = extractFlagValue(args, "--to") ?? "claude"
@@ -528,7 +557,7 @@ export const skillCommand: Command = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--to <agent>] [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [skill-name] [--dry-run] [--overwrite] | --to-command --from <agent> [skill-name] [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
@@ -545,7 +574,8 @@ export const skillCommand: Command = {
     },
     {
       flags: "--convert",
-      description: "Convert skills between agents, remapping tool names to target equivalents",
+      description:
+        "Convert skills between agents, remapping tool names to target equivalents (optionally a single [skill-name])",
     },
     {
       flags: "--to-command",
