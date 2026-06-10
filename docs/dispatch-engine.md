@@ -332,5 +332,6 @@ Slow hooks (> 3000ms) appear with a `[slow: Xms]` annotation.
 ---
 
 See also:
+- [`dispatch-and-daemon.md`](./dispatch-and-daemon.md) — end-to-end system map: entry points, daemon, agent integration
 - [`commands.md`](./commands.md) — `dispatch` command reference
 - [`ai-providers.md`](./ai-providers.md) — how AI-powered commands resolve backends

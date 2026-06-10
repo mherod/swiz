@@ -129,5 +129,6 @@ The `help` command is created dynamically in `src/commands/help.ts` with access 
 - Debug logging is gated behind `SWIZ_DEBUG`: `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`.
 
 See also:
+- [`dispatch-and-daemon.md`](./dispatch-and-daemon.md) — end-to-end map of the dispatch + daemon system
 - [`dispatch-engine.md`](./dispatch-engine.md) — how `dispatch` fans out hook events
 - [`ai-providers.md`](./ai-providers.md) — how `idea`, `reflect`, and `continue` resolve AI backends
