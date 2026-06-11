@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
+import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const SAFE_READ_ONLY_COMMANDS = new Set([
@@ -36,6 +37,35 @@ const PROTECTED_TASK_STORAGE_RE =
 
 export function isProtectedTaskStoragePath(target: string): boolean {
   return PROTECTED_TASK_STORAGE_RE.test(target.normalize("NFKC").replace(/\\/g, "/"))
+}
+
+/**
+ * Resolve a single file path through home-var expansion and symlink
+ * canonicalization, then run the protected-task-storage check on every form.
+ *
+ * The pure-textual {@link isProtectedTaskStoragePath} misses indirection: a
+ * `file_path` like `/tmp/link/1.json` whose parent symlinks into the tasks dir,
+ * or a `${HOME}/.claude/tasks/...` form, has no literal `.../tasks` segment to
+ * match until it is expanded and run through `realpath`. This resolver closes
+ * both for the single-path tools (Edit/Write/Read/Glob/LS). It is intentionally
+ * not used for Bash command strings, which are not single resolvable paths.
+ */
+export async function isProtectedTaskStoragePathResolved(filePath: string): Promise<boolean> {
+  if (!filePath) return false
+  if (isProtectedTaskStoragePath(filePath)) return true
+
+  const home = getHomeDirOrNull()
+  const expanded = home ? expandHomeVars(filePath, home) : filePath
+  if (expanded !== filePath && isProtectedTaskStoragePath(expanded)) return true
+
+  try {
+    const canonical = await resolveCanonical(expanded)
+    if (isProtectedTaskStoragePath(canonical)) return true
+  } catch {
+    // realpath resolution failed (glob metacharacters, unreadable parent, etc.);
+    // the textual checks above already ran, so there is nothing more to resolve.
+  }
+  return false
 }
 
 // Persisted tool-result / output files for the current session live under

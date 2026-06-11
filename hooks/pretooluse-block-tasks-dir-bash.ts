@@ -19,7 +19,12 @@ const pretooluseBlockTasksDirBash: SwizToolHook = {
 
   run(input): SwizHookOutput {
     const parsed = shellHookInputSchema.safeParse(input)
-    if (!parsed.success) return preToolUseAllow("")
+    if (!parsed.success) {
+      // Fail closed if the raw payload still references a protected task path.
+      return isProtectedTaskStoragePath(JSON.stringify(input))
+        ? preToolUseDeny(DENY_REASON)
+        : preToolUseAllow("")
+    }
 
     const command = parsed.data.tool_input?.command ?? ""
     if (!command) return preToolUseAllow("")

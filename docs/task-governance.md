@@ -85,3 +85,52 @@ Cache tuning (same file): `INCREMENTAL_FILE_LIMIT = 10`, `DEFAULT_STALE_CEILING_
 - Stop hooks must use `readSessionTasksFresh()`, never the `TaskStateCache`.
 - Task roots come from `createDefaultTaskStore()` / `getTaskRoots()`; daemon dispatch must
   apply `_env` first or the wrong provider root is used.
+
+## Integrity hardening (2026-06-11)
+
+Closes the in-session bypasses where a non-native writer could mutate task state
+without passing the native-tool gates.
+
+- **Auto-transition is regulated, not silent** (`completeTaskWithAutoTransition`,
+  `task-service.ts`). The `pending → completed` shortcut requires the `autoTransition`
+  setting AND meaningful completion evidence (`hasMeaningfulCompletionEvidence`), and still
+  steps through `in_progress` so both transitions hit the audit log. A task already in
+  `in_progress` completes normally. The swiz MCP `TaskUpdate` forwards its `description` as
+  evidence (native parity). This is the service-layer analogue of
+  `pretooluse-no-phantom-task-completion`.
+- **Last-task-standing is consistently enforced.** `validateLastTaskStanding` blocks any
+  completion that would leave zero incomplete tasks. The CLI's cross-session exemption
+  (`skipLastTaskGuard = !!explicit --session`, Fixes #420) now applies uniformly across
+  `runCompleteTask` (first `updateStatus` attempt, not just the auto-transition fallback)
+  and `runStatusTask`. Task-enabled agents cannot reach these CLI paths
+  (`enforceNativeTaskTools`), and the native/MCP path never sets `skipLastTaskGuard`, so the
+  agent invariant is never relaxed.
+- **Path guards canonicalize single-path tools.** `isProtectedTaskStoragePathResolved`
+  (`hooks/sandbox-path-utils.ts`) expands `~`/`$HOME` and resolves `realpath` before
+  matching, so a symlink whose parent points into the tasks dir, or a `${HOME}/...` form, is
+  caught for Edit/Write/Read/Glob/LS. The Bash guard stays textual (a command string is not
+  a single resolvable path).
+- **CLI routing covers every launcher.** `SWIZ_TASKS_CLI_RE` (`task-cli-governance.ts`) now
+  matches path-qualified `swiz` and JS-runtime entrypoints (`bun [run] index.ts tasks`,
+  `node /abs/index.ts tasks`), not just `swiz tasks` at a whitespace boundary. The runtime
+  guard `enforceNativeTaskTools` already blocked by parsed subcommand; this adds the matching
+  PreToolUse layer.
+- **Guards fail closed.** On schema parse failure the four `block-tasks-dir-*` hooks re-check
+  the raw payload for a protected marker and deny if present, instead of allowing.
+
+## Residual risks (not closeable by a textual in-session guard)
+
+- **Wrapper-script / interpreter writes**: `bun script.ts`, `bun -e`, `node -e`, or `python`
+  that writes to the tasks dir. The Bash command string carries no protected path, so the
+  textual guard cannot see it. Defense is the runtime `enforceNativeTaskTools` for the CLI
+  path only; arbitrary file writes from a script remain possible.
+- **Inline shell-variable indirection**: `D=$HOME/.claude; cat $D/tasks/...`. Only `~`/`$HOME`
+  are expanded; a var assigned earlier in the same command cannot be resolved statically.
+- **External processes and other sessions**: any process outside this agent's hooked tool
+  loop (another session, cron, an MCP server, a background job) can read/write/delete the
+  JSON files freely. Hooks gate tool calls, not the filesystem. File-level defenses
+  (restrictive perms, signed records) would be required — and a signed-record scheme cannot
+  cover files the native harness writes, since swiz does not own that writer.
+- **`autoTransition` setting is overloaded**: the same key gates both project-state lifecycle
+  transitions and the task-status `pending → completed` shortcut. Enabling it for the former
+  also enables the latter (now evidence-gated). Splitting the key is a follow-up.

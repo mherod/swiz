@@ -32,12 +32,26 @@
  * | `"~/.claude/settings.json"` | allowed (not inside tasks dir) |
  */
 import { expandHomeVars, getHomeDirOrNull } from "../home.ts"
-import { shellTokenCommandRe, stripQuotedShellStrings } from "../utils/shell-patterns.ts"
+import { stripQuotedShellStrings } from "../utils/shell-patterns.ts"
 import { SWIZ_TASKS_CLI_DENY_MESSAGE } from "./task-governance-messages.ts"
 
-const SWIZ_TASKS_CLI_RE = shellTokenCommandRe(String.raw`swiz\s+tasks(?:\s|$)`)
-const SWIZ_TASKS_CLI_SUBCOMMAND_RE = shellTokenCommandRe(
-  String.raw`swiz\s+tasks\s+([^\s;|&]+)(?:\s|$)`
+// Match the `tasks` CLI subcommand regardless of how it is launched: a bare or
+// path-qualified `swiz` (e.g. `/usr/local/bin/swiz`, `./node_modules/.bin/swiz`)
+// or the dev entrypoint `index.ts`/`index.tsx` run through a JS runtime (e.g.
+// `bun run index.ts tasks`, `bun ./index.ts tasks`, `node /abs/index.ts tasks`).
+// Anchored at a shell-token boundary; the `(?:[^\s;|&]*\/)?` prefix consumes an
+// absolute/relative launcher path so the guard cannot be evaded by qualifying
+// the binary or running the entrypoint directly. The entrypoint arm requires a
+// preceding runtime so an innocent `cat index.ts tasks` does not false-match.
+// The old token guard matched only `swiz tasks` at a whitespace boundary.
+const TASKS_CLI_LAUNCHER = String.raw`(?:(?:[^\s;|&]*\/)?swiz|(?:bun|bunx|node|deno)(?:\s+run)?\s+(?:[^\s;|&]*\/)?index\.tsx?)`
+const SWIZ_TASKS_CLI_RE = new RegExp(
+  String.raw`(?:^|[\s;|&])${TASKS_CLI_LAUNCHER}\s+tasks(?:\s|$)`,
+  "i"
+)
+const SWIZ_TASKS_CLI_SUBCOMMAND_RE = new RegExp(
+  String.raw`(?:^|[\s;|&])${TASKS_CLI_LAUNCHER}\s+tasks\s+([^\s;|&]+)(?:\s|$)`,
+  "i"
 )
 
 const SWIZ_TASKS_ALLOWED_SUBCOMMANDS = new Set(["adopt"])

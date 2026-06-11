@@ -187,3 +187,38 @@ describe("isBlockedSwizTasksCliCommand", () => {
     expect(isBlockedSwizTasksCliCommand("swiz push")).toBe(false)
   })
 })
+
+describe("task CLI launch-form detection (hardening)", () => {
+  it("detects path-qualified swiz", () => {
+    expect(isSwizTasksCommand("/usr/local/bin/swiz tasks list")).toBe(true)
+    expect(isSwizTasksCommand("./node_modules/.bin/swiz tasks complete 1")).toBe(true)
+    expect(isSwizTasksCommand("bunx swiz tasks status 1 completed")).toBe(true)
+  })
+
+  it("detects index.ts launcher forms", () => {
+    expect(isSwizTasksCommand("bun run index.ts tasks complete 1")).toBe(true)
+    expect(isSwizTasksCommand("bun index.ts tasks status 2 completed")).toBe(true)
+    expect(isSwizTasksCommand("bun run ./index.ts tasks create x y")).toBe(true)
+    expect(isSwizTasksCommand("node /abs/index.ts tasks complete 1")).toBe(true)
+  })
+
+  it("does not match a file literally named tasks", () => {
+    expect(isSwizTasksCommand("cat index.ts tasks")).toBe(false)
+    expect(isSwizTasksCommand("grep tasks index.ts")).toBe(false)
+  })
+
+  it("extracts the subcommand from launcher forms", () => {
+    expect(extractSwizTasksSubcommand("bun run index.ts tasks complete 1")).toBe("complete")
+    expect(extractSwizTasksSubcommand("/usr/local/bin/swiz tasks update 2")).toBe("update")
+  })
+
+  it("blocks mutating subcommands through every launcher", () => {
+    expect(isBlockedSwizTasksCliCommand("bun run index.ts tasks complete 5")).toBe(true)
+    expect(isBlockedSwizTasksCliCommand("/usr/local/bin/swiz tasks update 3")).toBe(true)
+    expect(isBlockedSwizTasksCliCommand("echo hi && bun run index.ts tasks complete 5")).toBe(true)
+  })
+
+  it("keeps adopt allowed regardless of launcher", () => {
+    expect(isBlockedSwizTasksCliCommand("bun run index.ts tasks adopt")).toBe(false)
+  })
+})

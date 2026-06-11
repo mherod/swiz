@@ -521,8 +521,25 @@ export async function updateStatus(
 }
 
 /**
+ * A pending task that never dwelled in `in_progress` has no observable work
+ * behind it, so an auto-transition straight to `completed` is phantom-prone.
+ * Treat completion evidence as meaningful only when it is non-empty after
+ * trimming — this is the service-layer analogue of the no-phantom-completion
+ * hook, which gates the native tool path.
+ */
+export function hasMeaningfulCompletionEvidence(evidence: string | undefined): boolean {
+  return typeof evidence === "string" && evidence.trim().length > 0
+}
+
+/**
  * Complete a task, auto-transitioning through in_progress if it's still pending.
  * This is the canonical path for "force-complete regardless of current status".
+ *
+ * The pending → completed shortcut is regulated, not silent: it requires the
+ * `autoTransition` setting AND completion evidence, and it still steps through
+ * `in_progress` so both transitions are written to the audit log. A task already
+ * in `in_progress` completes normally (no extra evidence requirement), so only
+ * the phantom-prone jump is gated.
  */
 export async function completeTaskWithAutoTransition(
   sessionId: string,
@@ -543,6 +560,13 @@ export async function completeTaskWithAutoTransition(
       throw new Error(
         `Cannot complete task ${taskId}: status is "pending". ` +
           `Auto-transition is disabled — transition to in_progress first.`
+      )
+    }
+    if (!hasMeaningfulCompletionEvidence(options.evidence)) {
+      throw new Error(
+        `Cannot auto-complete task ${taskId}: it is still "pending" with no evidence of work. ` +
+          `Transition it to in_progress and do the work, or supply completion evidence ` +
+          `(commit:<sha>, pr:<url>, file:<path>, test:<result>, or note:<why>).`
       )
     }
     await updateStatus(sessionId, taskId, "in_progress", { filterCwd })

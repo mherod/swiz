@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { isSandboxDisableCommand } from "../hooks/pretooluse-protect-sandbox.ts"
 import {
   isProtectedTaskStoragePath,
+  isProtectedTaskStoragePathResolved,
   isSafeReadOnlyShellCommand,
 } from "../hooks/sandbox-path-utils.ts"
 
@@ -116,5 +120,45 @@ describe("isProtectedTaskStoragePath", () => {
   it("does not match non-task hidden home paths", () => {
     expect(isProtectedTaskStoragePath("/Users/dev/.swiz/settings.json")).toBe(false)
     expect(isProtectedTaskStoragePath("/Users/dev/.claude/skills/commit/SKILL.md")).toBe(false)
+  })
+})
+
+describe("isProtectedTaskStoragePathResolved", () => {
+  it("keeps matching literal task paths via the sync fast path", async () => {
+    expect(await isProtectedTaskStoragePathResolved("/Users/dev/.claude/tasks/1.json")).toBe(true)
+    expect(await isProtectedTaskStoragePathResolved("~/.claude/tasks/1.json")).toBe(true)
+  })
+
+  it("returns false for empty input", async () => {
+    expect(await isProtectedTaskStoragePathResolved("")).toBe(false)
+  })
+
+  it("resolves a symlink whose target is inside the tasks dir", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-guard-"))
+    try {
+      const realTasks = join(base, ".claude", "tasks")
+      await mkdir(realTasks, { recursive: true })
+      await writeFile(join(realTasks, "1.json"), "{}")
+      const link = join(base, "link")
+      await symlink(realTasks, link)
+      // The link path has no literal `.claude/tasks` segment; only realpath reveals it.
+      expect(link.includes(".claude/tasks")).toBe(false)
+      expect(await isProtectedTaskStoragePathResolved(join(link, "1.json"))).toBe(true)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it("does not match a symlink to an unrelated directory", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-guard-"))
+    try {
+      const realDir = join(base, "data", "store")
+      await mkdir(realDir, { recursive: true })
+      const link = join(base, "link")
+      await symlink(realDir, link)
+      expect(await isProtectedTaskStoragePathResolved(join(link, "1.json"))).toBe(false)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
   })
 })

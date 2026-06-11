@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
 import { runHookInProcess } from "../src/utils/test-utils.ts"
 
@@ -239,5 +242,46 @@ describe("pretooluse-block-tasks-dir-edit", () => {
   test("allows path that is a prefix but not the tasks dir", async () => {
     const result = await runEditHook("Edit", `${TASKS_DIR}-backup/file.json`)
     expect(result.decision).toBe("allow")
+  })
+})
+
+describe("block-tasks-dir hardening", () => {
+  test("Bash guard fails closed on malformed payload referencing a task path", async () => {
+    // tool_input as an array fails the shell schema; the raw payload still names
+    // a protected path, so the guard must deny rather than allow.
+    const result = await runHookInProcess("hooks/pretooluse-block-tasks-dir-bash.ts", {
+      tool_name: "Bash",
+      tool_input: [`${TASKS_DIR}/1.json`],
+      session_id: "test-session",
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  test("Bash guard still allows a malformed payload with no task path", async () => {
+    const result = await runHookInProcess("hooks/pretooluse-block-tasks-dir-bash.ts", {
+      tool_name: "Bash",
+      tool_input: ["echo hello"],
+      session_id: "test-session",
+    })
+    expect(result.decision ?? "allow").toBe("allow")
+  })
+
+  test("Edit guard resolves a symlink into the tasks dir", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-hook-guard-"))
+    try {
+      const realTasks = join(base, ".claude", "tasks")
+      await mkdir(realTasks, { recursive: true })
+      await writeFile(join(realTasks, "1.json"), "{}")
+      const link = join(base, "link")
+      await symlink(realTasks, link)
+      const result = await runHookInProcess("hooks/pretooluse-block-tasks-dir-edit.ts", {
+        tool_name: "Write",
+        tool_input: { file_path: join(link, "1.json") },
+        session_id: "test-session",
+      })
+      expect(result.decision).toBe("deny")
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
   })
 })

@@ -791,7 +791,14 @@ async function serve(): Promise<void> {
           }
 
           if (status === "completed") {
-            await completeTaskWithAutoTransition(projectKey, taskId, { filterCwd: cwd })
+            // The agent's description is its completion evidence (native parity:
+            // evidence lives in the TaskUpdate description). Forwarding it lets a
+            // pending → completed jump satisfy the auto-transition evidence gate;
+            // a bare jump with no description is refused.
+            await completeTaskWithAutoTransition(projectKey, taskId, {
+              filterCwd: cwd,
+              evidence: description,
+            })
           } else {
             await updateStatus(projectKey, taskId, status, { filterCwd: cwd })
           }

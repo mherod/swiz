@@ -269,6 +269,10 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       evidence,
       verifyText: verify,
       filterCwd,
+      // Apply the cross-session exemption to the first attempt too, not only the
+      // auto-transition fallback — otherwise an explicit --session completion of
+      // a sole task trips last-task-standing here before reaching the fallback.
+      skipLastTaskGuard,
     })
   } catch (e) {
     await handleCompleteError(e, {
@@ -300,7 +304,13 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
   const verify = extractFlag(rest, "--verify")
   const stateFlag = extractFlag(rest, "--state")
   const subjectFlag = extractFlag(rest, "--subject")
+  const explicitSession = extractFlag(rest, "--session")
   const sessionId = await resolveSession(sessionArgs)
+  // Mirror runCompleteTask: an explicit --session is a cross-session maintenance
+  // op, exempt from last-task-standing (Fixes #420). Without this the `status`
+  // path enforces the guard while `complete` does not — an inconsistency that
+  // blocks completing a sole task by id.
+  const skipLastTaskGuard = !!explicitSession
 
   await ensureFileBackedTask({
     sessionId,
@@ -313,6 +323,7 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
     evidence,
     verifyText: verify,
     filterCwd,
+    skipLastTaskGuard,
   })
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
 
