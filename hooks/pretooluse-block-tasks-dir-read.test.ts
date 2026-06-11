@@ -147,6 +147,40 @@ describe("pretooluse-block-tasks-dir-bash", () => {
   })
 })
 
+describe("pretooluse-block-tasks-dir-bash accepted residual (issue #687)", () => {
+  // The Bash guard is a textual substring match by design: a shell command
+  // string is not a single resolvable path. The cases below name the shapes
+  // that evade it. They are intentionally ALLOWED — detection of out-of-band
+  // writes is delegated to reader-side integrity checking (#688), not to
+  // in-guard pattern matching. The first case is the literal-path control.
+
+  test("control: still denies a direct write to a literal task path", async () => {
+    const result = await runBashHook("echo {} > ~/.claude/tasks/1.json")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("allows a wrapper-script interpreter invocation (body invisible to guard)", async () => {
+    // `bun script.ts` whose body writes to the tasks dir: the command string
+    // names only the script, so the textual guard cannot see the write.
+    const result = await runBashHook("bun /tmp/write-task.ts")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows inline shell-variable indirection to the tasks dir", async () => {
+    // `.claude` and `/tasks` are never adjacent in the command string, so the
+    // protected-path regex never matches; only ~/$HOME expand, not $D.
+    const result = await runBashHook("D=$HOME/.claude; cat $D/tasks/1.json")
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows a write through a pre-existing symlink into the tasks dir", async () => {
+    // `/tmp/swiz-link` was symlinked to the tasks dir out of band; the command
+    // names only the link path, which carries no protected segment.
+    const result = await runBashHook("echo {} > /tmp/swiz-link/1.json")
+    expect(result.decision).toBe("allow")
+  })
+})
+
 describe("pretooluse-block-tasks-dir-glob", () => {
   test("blocks glob pattern targeting the tasks directory (expanded path)", async () => {
     const result = await runGlobHook(`${TASKS_DIR}/**/*.json`)
