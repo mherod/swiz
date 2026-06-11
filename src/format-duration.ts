@@ -3,18 +3,30 @@
  * e.g. 90000 → "1m", 3661000 → "1h 1m", 90061000 → "1d 1h"
  */
 /**
- * Format a millisecond duration in seconds or minutes without losing precision.
- * e.g. 45000 → "45s", 120000 → "2m", 130000 → "2m 10s", 1500 → "1.5s"
+ * Format a millisecond duration in seconds, minutes, or hours without losing
+ * precision. Tiers into an hour component at 60m, dropping zero parts the same
+ * way `formatDuration()` does (e.g. 3630500 → "1h 30.5s", not "1h 0m 30.5s").
+ * e.g. 45000 → "45s", 120000 → "2m", 130000 → "2m 10s", 1500 → "1.5s",
+ *      3600000 → "1h", 7500000 → "2h 5m", 3661000 → "1h 1m 1s"
  */
 export function formatDurationPrecise(ms: number): string {
   const totalSeconds = ms / 1000
   const renderSeconds = (seconds: number): string =>
     Number.isInteger(seconds) ? `${seconds}s` : `${Number(seconds.toFixed(1))}s`
   if (totalSeconds < 60) return renderSeconds(totalSeconds)
-  const mins = Math.floor(totalSeconds / 60)
-  const remainSeconds = Math.round((totalSeconds - mins * 60) * 10) / 10
-  if (remainSeconds === 0) return `${mins}m`
-  return `${mins}m ${renderSeconds(remainSeconds)}`
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const remainSeconds = Math.round((totalSeconds - totalMinutes * 60) * 10) / 10
+  if (totalMinutes < 60) {
+    return remainSeconds === 0
+      ? `${totalMinutes}m`
+      : `${totalMinutes}m ${renderSeconds(remainSeconds)}`
+  }
+  const hours = Math.floor(totalMinutes / 60)
+  const mins = totalMinutes % 60
+  const parts = [`${hours}h`]
+  if (mins > 0) parts.push(`${mins}m`)
+  if (remainSeconds > 0) parts.push(renderSeconds(remainSeconds))
+  return parts.join(" ")
 }
 
 export function formatDuration(ms: number): string {

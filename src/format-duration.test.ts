@@ -26,6 +26,26 @@ describe("formatDurationPrecise", () => {
     expect(formatDurationPrecise(90_500)).toBe("1m 30.5s")
   })
 
+  test("formats a whole hour with no smaller parts", () => {
+    expect(formatDurationPrecise(3_600_000)).toBe("1h")
+  })
+
+  test("formats hours with a minute remainder, dropping zero seconds", () => {
+    expect(formatDurationPrecise(7_500_000)).toBe("2h 5m")
+  })
+
+  test("drops a zero-minute part but keeps fractional seconds", () => {
+    expect(formatDurationPrecise(3_630_500)).toBe("1h 30.5s")
+  })
+
+  test("renders the full hour/minute/second form when all are present", () => {
+    expect(formatDurationPrecise(3_661_000)).toBe("1h 1m 1s")
+  })
+
+  test("drops a zero-second part when hours and minutes are present", () => {
+    expect(formatDurationPrecise(3_660_000)).toBe("1h 1m")
+  })
+
   test("formats zero as 0s", () => {
     expect(formatDurationPrecise(0)).toBe("0s")
   })
