@@ -120,17 +120,29 @@ without passing the native-tool gates.
 
 ## Residual risks (not closeable by a textual in-session guard)
 
+**Decision (#687): the Bash guard stays a textual substring match.** A shell command string
+is not a single resolvable path, and enumerating every evasion (script bodies, inline-assigned
+vars, pre-existing symlinks) is an arms race. Detection of out-of-band writes is delegated to
+reader-side integrity checking (#688), not to in-guard matching. The Bash-only vectors below
+are accepted guard-side residual, pinned by allow-but-noted cases in
+`hooks/pretooluse-block-tasks-dir-read.test.ts`.
+
 - **Wrapper-script / interpreter writes**: `bun script.ts`, `bun -e`, `node -e`, or `python`
   that writes to the tasks dir. The Bash command string carries no protected path, so the
   textual guard cannot see it. Defense is the runtime `enforceNativeTaskTools` for the CLI
   path only; arbitrary file writes from a script remain possible.
 - **Inline shell-variable indirection**: `D=$HOME/.claude; cat $D/tasks/...`. Only `~`/`$HOME`
   are expanded; a var assigned earlier in the same command cannot be resolved statically.
+- **Symlink write-through (Bash)**: `echo … > /tmp/link/1.json` where `/tmp/link` was symlinked
+  to the tasks dir out of band. The command names only the link path; the canonicalizing
+  resolver (`isProtectedTaskStoragePathResolved`) that closes this for Edit/Write/Read/Glob/LS
+  is not run for Bash command strings.
 - **External processes and other sessions**: any process outside this agent's hooked tool
   loop (another session, cron, an MCP server, a background job) can read/write/delete the
   JSON files freely. Hooks gate tool calls, not the filesystem. File-level defenses
   (restrictive perms, signed records) would be required — and a signed-record scheme cannot
-  cover files the native harness writes, since swiz does not own that writer.
+  cover files the native harness writes, since swiz does not own that writer. Reader-side
+  detection of tampered/out-of-band files is tracked in #688.
 - **`autoTransition` setting is overloaded**: the same key gates both project-state lifecycle
   transitions and the task-status `pending → completed` shortcut. Enabling it for the former
-  also enables the latter (now evidence-gated). Splitting the key is a follow-up.
+  also enables the latter (now evidence-gated). Splitting the key is tracked in #689.
