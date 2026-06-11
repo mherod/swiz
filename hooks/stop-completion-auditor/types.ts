@@ -26,7 +26,7 @@ export interface ActionPlanItem {
 
 /** Result of a single validation layer. */
 export interface ValidationResult {
-  kind: "task-creation" | "audit-log" | "ci-evidence" | "ok"
+  kind: "task-creation" | "audit-log" | "ci-evidence" | "integrity" | "ok"
   reason?: string
   planSteps?: ActionPlanItem[]
 }

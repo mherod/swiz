@@ -14,6 +14,7 @@ import { validateAuditLog } from "./audit-log-validator.ts"
 import { validateCiEvidence } from "./ci-evidence-validator.ts"
 import { resolveCompletionAuditContext } from "./context.ts"
 import { validateTaskCreation } from "./task-creation-validator.ts"
+import { validateTaskFileIntegrity } from "./task-integrity-validator.ts"
 import {
   hasIncompleteTask,
   requireTaskListSync,
@@ -55,15 +56,24 @@ export async function evaluateStopCompletionAuditor(input: StopHookInput): Promi
     return {}
   }
 
-  // Run all validators in parallel
-  const [taskCreationResult, auditLogResult, ciEvidenceResult] = await Promise.all([
-    validateTaskCreation(ctx),
-    validateAuditLog(ctx),
-    validateCiEvidence(ctx),
-  ])
+  // Run all validators in parallel. Integrity leads so its reason surfaces first
+  // when an out-of-band task file co-occurs with another failure.
+  const [integrityResult, taskCreationResult, auditLogResult, ciEvidenceResult] = await Promise.all(
+    [
+      validateTaskFileIntegrity(ctx),
+      validateTaskCreation(ctx),
+      validateAuditLog(ctx),
+      validateCiEvidence(ctx),
+    ]
+  )
 
   // Collect all results
-  const results: ValidationResult[] = [taskCreationResult, auditLogResult, ciEvidenceResult]
+  const results: ValidationResult[] = [
+    integrityResult,
+    taskCreationResult,
+    auditLogResult,
+    ciEvidenceResult,
+  ]
 
   // Build unified action plan from all failures
   const plan = buildActionPlan(results)

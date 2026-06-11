@@ -76,6 +76,11 @@ Cache tuning (same file): `INCREMENTAL_FILE_LIMIT = 10`, `DEFAULT_STALE_CEILING_
     (`ci-evidence-validator.ts:20`). Evidence lives in `t.description` for native
     `TaskUpdate` (not `completionEvidence`); when no tasks exist, transcript bash commands
     matching `CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/` count as fallback evidence.
+  - **Integrity gate (#688)**: a `completed` task file present on disk but absent from the
+    session trail (`.audit-log.jsonl`) blocks stop as a suspected out-of-band write
+    (`task-integrity-validator.ts`, `detectOrphanedCompletedTasks`). Mirrors the
+    `swiz tasks repair` orphan check. Gated on a non-empty trail so native/legacy sessions
+    that never recorded one are never flagged (AC3); only fires once no task is incomplete.
 
 ## Storage facts that bite
 
@@ -117,6 +122,13 @@ without passing the native-tool gates.
   PreToolUse layer.
 - **Guards fail closed.** On schema parse failure the four `block-tasks-dir-*` hooks re-check
   the raw payload for a protected marker and deny if present, instead of allowing.
+- **Reader-side integrity check (#688).** The stop completion auditor cross-references
+  `completed` task files against the session trail (`task-integrity-validator.ts`). A
+  completed file with no trail entry — the orphan condition `swiz tasks repair` already
+  detects — is treated as a suspected out-of-band write and blocks stop instead of being
+  trusted as done. This is the one defense that covers script, symlink, and external-process
+  writes at once, because it inspects the result rather than the command. It is gated on an
+  active trail so it never false-flags native files (see residual risks below).
 
 ## Residual risks (not closeable by a textual in-session guard)
 
@@ -139,10 +151,17 @@ are accepted guard-side residual, pinned by allow-but-noted cases in
   is not run for Bash command strings.
 - **External processes and other sessions**: any process outside this agent's hooked tool
   loop (another session, cron, an MCP server, a background job) can read/write/delete the
-  JSON files freely. Hooks gate tool calls, not the filesystem. File-level defenses
-  (restrictive perms, signed records) would be required — and a signed-record scheme cannot
-  cover files the native harness writes, since swiz does not own that writer. Reader-side
-  detection of tampered/out-of-band files is tracked in #688.
+  JSON files freely. Hooks gate tool calls, not the filesystem. **Decision (#688): adopt
+  reader-side trail reconciliation, not file signing.** A signed-record scheme cannot cover
+  files the native harness writes, since swiz does not own that writer. Instead the stop
+  auditor's integrity check (above) catches the highest-value vector — a fabricated
+  `completed` file that would otherwise satisfy the auditor — by flagging completed files
+  absent from the trail. Accepted residual: (a) a session with **no** trail baseline cannot
+  be checked at all (AC3 conservatism), (b) deleting a `pending` file is only caught when it
+  was the session's last live task (the audit-log fallback reconstructs incomplete state when
+  `allTasks` is empty), not when other files remain, and (c) out-of-band writes to
+  non-`completed` states are not flagged. Full filesystem-level prevention (restrictive perms)
+  remains out of scope.
 - **`autoTransition` setting is overloaded**: the same key gates both project-state lifecycle
   transitions and the task-status `pending → completed` shortcut. Enabling it for the former
   also enables the latter (now evidence-gated). Splitting the key is tracked in #689.
