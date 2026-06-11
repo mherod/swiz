@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-06-11
+
+### Features
+
+- **Cross-agent skill conversion improvements** — Skill installation
+  translates more agent-specific constructs when converting skills between
+  Claude, Cursor, Gemini, and Codex formats.
+
+### Improvements
+
+- **Completion-evidence predicates consolidated** — Task completion evidence
+  validation (commit/file/test/note markers, CI evidence) now lives in one
+  canonical `task-evidence` module imported by the task service, the
+  phantom-completion gate, and the stop completion auditor, replacing five
+  scattered copies.
+
+### Fixes
+
+- **Task-state governance hardened against bypasses** — Closed gaps found in
+  a task-state mutation audit, including `skipLastTaskGuard` inconsistencies
+  in the CLI `tasks` status/complete subcommands, with new guards on
+  tasks-dir access via Bash, Edit, Glob, and Read.
+
+### Security
+
+- **shell-quote patched to 1.8.4** — Resolves a critical dependabot alert via
+  a workspace override.
+
+### Documentation
+
+- **Task-governance gate map** — `docs/task-governance.md` documents every
+  verified enforcement gate in the task lifecycle.
+- **Dispatch-and-daemon system map** — New architecture doc covering dispatch
+  routing, daemon endpoints, and hook execution paths.
+
 ## 2026-06-06
 
 ### Features
