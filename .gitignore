@@ -55,3 +55,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /.output.txt
 output.txt
 /.pipeline
+
+# Local scratch/exploration files
+scratch/
