@@ -182,6 +182,7 @@ function buildBaseSettings(
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,
     autoTransition: settings.autoTransition,
+    taskAutoTransition: settings.taskAutoTransition,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     issueCloseGate: settings.issueCloseGate,

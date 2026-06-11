@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { swizSettingsSchema } from "../settings/persistence.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
@@ -962,6 +963,7 @@ describe("SETTINGS_REGISTRY", () => {
       "strictNoDirectMain",
       "trunkMode",
       "autoTransition",
+      "taskAutoTransition",
       "dirtyWorktreeThreshold",
       "auditStrictness",
       "actionPlanMerge",
@@ -978,6 +980,31 @@ describe("SETTINGS_REGISTRY", () => {
       expect(registryKeys).toContain(key)
     }
     expect(registryKeys.length).toBe(expectedKeys.length)
+  })
+
+  test("autoTransition and taskAutoTransition both default to true (#689)", () => {
+    const parsed = swizSettingsSchema.parse({})
+    expect(parsed.autoTransition).toBe(true)
+    expect(parsed.taskAutoTransition).toBe(true)
+  })
+
+  test("legacy autoTransition:false is inherited by taskAutoTransition (#689 migration)", () => {
+    // Before the split, autoTransition:false disabled the task-status shortcut.
+    // The migration preserves that so the shortcut stays off after the keys split.
+    const parsed = swizSettingsSchema.parse({ autoTransition: false })
+    expect(parsed.autoTransition).toBe(false)
+    expect(parsed.taskAutoTransition).toBe(false)
+  })
+
+  test("explicit taskAutoTransition overrides the legacy inheritance (#689)", () => {
+    const parsed = swizSettingsSchema.parse({ autoTransition: false, taskAutoTransition: true })
+    expect(parsed.taskAutoTransition).toBe(true)
+  })
+
+  test("taskAutoTransition is independent of autoTransition (#689)", () => {
+    const parsed = swizSettingsSchema.parse({ taskAutoTransition: false })
+    expect(parsed.autoTransition).toBe(true)
+    expect(parsed.taskAutoTransition).toBe(false)
   })
 
   test("ambitionMode has a validator that rejects invalid values", () => {

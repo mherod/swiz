@@ -24,6 +24,7 @@ export const BEHAVIOR_STEERING_SETTING_GROUPS = {
   taskGovernance: [
     "auditStrictness",
     "autoTransition",
+    "taskAutoTransition",
     "actionPlanMerge",
     "enforceUnblockMyself",
     "taskDurationWarningMinutes",
@@ -150,7 +151,7 @@ function buildStopGateContext(settings: EffectiveSwizSettings): string {
 }
 
 function buildTaskGovernanceContext(settings: EffectiveSwizSettings): string {
-  const transitions = settings.autoTransition
+  const transitions = settings.taskAutoTransition
     ? "task status can auto-transition when appropriate"
     : "task status changes must be explicit"
   const actionPlans = settings.actionPlanMerge

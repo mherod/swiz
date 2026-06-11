@@ -526,7 +526,7 @@ export async function updateStatus(
  * This is the canonical path for "force-complete regardless of current status".
  *
  * The pending → completed shortcut is regulated, not silent: it requires the
- * `autoTransition` setting AND completion evidence, and it still steps through
+ * `taskAutoTransition` setting AND completion evidence, and it still steps through
  * `in_progress` so both transitions are written to the audit log. A task already
  * in `in_progress` completes normally (no extra evidence requirement), so only
  * the phantom-prone jump is gated.
@@ -546,10 +546,10 @@ export async function completeTaskWithAutoTransition(
   const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
   if (task.status === "pending") {
     const settings = await readSwizSettings()
-    if (!settings.autoTransition) {
+    if (!settings.taskAutoTransition) {
       throw new Error(
         `Cannot complete task ${taskId}: status is "pending". ` +
-          `Auto-transition is disabled — transition to in_progress first.`
+          `Task auto-transition is disabled — transition to in_progress first.`
       )
     }
     if (!hasMeaningfulCompletionEvidence(options.evidence)) {

@@ -104,32 +104,55 @@ export const DEFAULT_SETTINGS: SwizSettings = {
 const statusLineSegmentSchema = z.enum(ALL_STATUS_LINE_SEGMENTS)
 
 /**
+ * Behaviour-preserving migration for the autoTransition split (#689). A legacy
+ * config that disabled the task-status completion shortcut via
+ * `autoTransition: false` (back when that one key gated both project-state and
+ * task-status) and carries no explicit `taskAutoTransition` inherits that value,
+ * so the shortcut stays off after the keys were split. Runs before field parsing
+ * so the inherited value survives into the parsed result.
+ */
+function inheritTaskAutoTransition(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const obj = raw as Record<string, unknown>
+  if (obj.taskAutoTransition === undefined && obj.autoTransition === false) {
+    return { ...obj, taskAutoTransition: false }
+  }
+  return raw
+}
+
+/**
  * swizSettingsSchema is derived from SETTINGS_REGISTRY.
  * Each registry entry with a default generates a schema field.
  * Non-registry fields (statusLineSegments, sessions, disabledHooks) are added here.
  */
-export const swizSettingsSchema: z.ZodType<SwizSettings> = z
-  .object({
-    ...deriveSchemaShape(),
-    statusLineSegments: z
-      .array(statusLineSegmentSchema)
-      .catch([...ALL_STATUS_LINE_SEGMENTS])
-      .transform(normalizeStatusLineSegments),
-    sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
-    disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
-  })
-  .transform((v) => v as unknown as SwizSettings)
+export const swizSettingsSchema: z.ZodType<SwizSettings> = z.preprocess(
+  inheritTaskAutoTransition,
+  z
+    .object({
+      ...deriveSchemaShape(),
+      statusLineSegments: z
+        .array(statusLineSegmentSchema)
+        .catch([...ALL_STATUS_LINE_SEGMENTS])
+        .transform(normalizeStatusLineSegments),
+      sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
+      disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
+    })
+    .transform((v) => v as unknown as SwizSettings)
+)
 
-const swizSettingsWithoutSessionsSchema = z
-  .object({
-    ...deriveSchemaShape(),
-    statusLineSegments: z
-      .array(statusLineSegmentSchema)
-      .catch([...ALL_STATUS_LINE_SEGMENTS])
-      .transform(normalizeStatusLineSegments),
-    disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
-  })
-  .transform((v) => v as unknown as Omit<SwizSettings, "sessions">)
+const swizSettingsWithoutSessionsSchema = z.preprocess(
+  inheritTaskAutoTransition,
+  z
+    .object({
+      ...deriveSchemaShape(),
+      statusLineSegments: z
+        .array(statusLineSegmentSchema)
+        .catch([...ALL_STATUS_LINE_SEGMENTS])
+        .transform(normalizeStatusLineSegments),
+      disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
+    })
+    .transform((v) => v as unknown as Omit<SwizSettings, "sessions">)
+)
 
 export interface ReadOptions {
   home?: string | undefined

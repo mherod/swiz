@@ -709,9 +709,24 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     default: true,
     docs: {
       description:
+        "Allow project state to auto-transition on git/PR lifecycle events (e.g. developing→reviewing on PR create)",
+      effectExplanation:
+        "When enabled, the project lifecycle state advances automatically as git and PR events occur. When disabled, project-state changes must be made explicitly. This governs project state only — task-status completion is controlled by taskAutoTransition.",
+      enableDescription: "Enable automatic project-state lifecycle transitions",
+      disableDescription: "Require explicit project-state transitions",
+    },
+  },
+  {
+    key: "taskAutoTransition",
+    aliases: ["task-auto-transition", "taskautotransition", "task_auto_transition"],
+    kind: "boolean",
+    scopes: ["global"],
+    default: true,
+    docs: {
+      description:
         "Allow multi-step task status auto-transitions (e.g. pending→in_progress→completed in one step)",
       effectExplanation:
-        "When enabled, completing a pending task automatically transitions it through in_progress first. When disabled, each status transition must be explicit — a pending task must be set to in_progress before it can be completed.",
+        "When enabled, completing a pending task automatically transitions it through in_progress first (still requires completion evidence). When disabled, each status transition must be explicit — a pending task must be set to in_progress before it can be completed.",
       enableDescription:
         "Enable automatic task status transitions (pending→completed skips through in_progress)",
       disableDescription: "Require explicit status transitions (pending→in_progress→completed)",

@@ -34,6 +34,7 @@ interface GlobalSettingsForm {
   relaxSubagentHooks: boolean
   mcpChannels: boolean
   autoTransition: boolean
+  taskAutoTransition: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
   largeFileSizeBlockKb: number
@@ -77,6 +78,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   relaxSubagentHooks: true,
   mcpChannels: false,
   autoTransition: true,
+  taskAutoTransition: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
   largeFileSizeBlockKb: 5120,
@@ -210,6 +212,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     relaxSubagentHooks: readBooleanSetting(settings, "relaxSubagentHooks", true),
     mcpChannels: readBooleanSetting(settings, "mcpChannels"),
     autoTransition: readBooleanSetting(settings, "autoTransition", true),
+    taskAutoTransition: readBooleanSetting(settings, "taskAutoTransition", true),
     taskDurationWarningMinutes: readNumberSetting(settings, "taskDurationWarningMinutes", 45),
     largeFileSizeKb: readNumberSetting(settings, "largeFileSizeKb", 200),
     largeFileSizeBlockKb: readNumberSetting(settings, "largeFileSizeBlockKb", 5120),
@@ -581,7 +584,12 @@ const GLOBAL_TOGGLES: Array<{
   },
   {
     key: "autoTransition",
-    label: "Auto-transition status",
+    label: "Auto-transition project state",
+    desc: "Allow project lifecycle state to advance automatically on git/PR events (e.g. developing→reviewing on PR create).",
+  },
+  {
+    key: "taskAutoTransition",
+    label: "Auto-transition task status",
     desc: "Allow multi-step task status transitions (e.g. completing a pending task auto-transitions through in_progress).",
   },
   {
@@ -624,6 +632,7 @@ const GLOBAL_TOGGLE_GROUPS: Array<{
       "swizNotifyHooks",
       "autoSteerTranscriptWatching",
       "autoTransition",
+      "taskAutoTransition",
     ],
   },
   {
