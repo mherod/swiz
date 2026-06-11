@@ -49,6 +49,10 @@ describe("formatDurationPrecise", () => {
   test("formats zero as 0s", () => {
     expect(formatDurationPrecise(0)).toBe("0s")
   })
+
+  test("rounds up sub-minute-boundary durations to next tier instead of 60s", () => {
+    expect(formatDurationPrecise(7_199_990)).toBe("2h")
+  })
 })
 
 describe("formatDuration", () => {

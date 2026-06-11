@@ -10,7 +10,10 @@
  *      3600000 → "1h", 7500000 → "2h 5m", 3661000 → "1h 1m 1s"
  */
 export function formatDurationPrecise(ms: number): string {
-  const totalSeconds = ms / 1000
+  // Round to nearest 100ms (0.1s) to avoid floating-point rounding
+  // pushing remainSeconds to 60s at minute boundaries.
+  const roundedMs = Math.round(ms / 100) * 100
+  const totalSeconds = roundedMs / 1000
   const renderSeconds = (seconds: number): string =>
     Number.isInteger(seconds) ? `${seconds}s` : `${Number(seconds.toFixed(1))}s`
   if (totalSeconds < 60) return renderSeconds(totalSeconds)
