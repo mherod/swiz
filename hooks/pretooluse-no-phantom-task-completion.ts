@@ -20,6 +20,7 @@ import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { createDefaultTaskStore } from "../src/task-roots.ts"
+import { hasStructuredEvidence } from "../src/tasks/task-evidence.ts"
 import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
 import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
@@ -33,11 +34,8 @@ import {
   resolveSafeSessionId,
 } from "../src/utils/hook-utils.ts"
 
-/** Evidence prefixes that indicate traceable real work was done. */
-const EVIDENCE_RE = /\b(?:commit|pr|file|test|ci_green|run):[^\s]/
-
 function hasTrackedEvidence(text: string): boolean {
-  return EVIDENCE_RE.test(text)
+  return hasStructuredEvidence(text)
 }
 
 interface ScanResult {

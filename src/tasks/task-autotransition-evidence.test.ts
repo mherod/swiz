@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { hasMeaningfulCompletionEvidence } from "./task-service.ts"
+import { hasMeaningfulCompletionEvidence } from "./task-evidence.ts"
 
 // The auto-transition completion gate (`completeTaskWithAutoTransition`) refuses
 // to take a still-`pending` task straight to `completed` unless it carries

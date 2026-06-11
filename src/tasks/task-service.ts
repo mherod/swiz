@@ -16,6 +16,7 @@ import {
 import { computeSubjectFingerprint, subjectsOverlap } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import { splitJsonlLines, tryParseJsonLine } from "../utils/jsonl.ts"
+import { hasMeaningfulCompletionEvidence } from "./task-evidence.ts"
 import {
   compareTaskIds,
   isIncompleteTaskStatus,
@@ -518,17 +519,6 @@ export async function updateStatus(
   console.log(`     ${task.subject}`)
   if (evidence) console.log(`     ${DIM}Evidence: ${evidence}${RESET}`)
   console.log()
-}
-
-/**
- * A pending task that never dwelled in `in_progress` has no observable work
- * behind it, so an auto-transition straight to `completed` is phantom-prone.
- * Treat completion evidence as meaningful only when it is non-empty after
- * trimming — this is the service-layer analogue of the no-phantom-completion
- * hook, which gates the native tool path.
- */
-export function hasMeaningfulCompletionEvidence(evidence: string | undefined): boolean {
-  return typeof evidence === "string" && evidence.trim().length > 0
 }
 
 /**

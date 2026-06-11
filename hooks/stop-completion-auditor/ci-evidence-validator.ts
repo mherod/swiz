@@ -8,6 +8,7 @@
 
 import { readdir } from "node:fs/promises"
 import { dirname } from "node:path"
+import { hasCiEvidence } from "../../src/tasks/task-evidence.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import type { SessionTask } from "../../src/tasks/task-recovery.ts"
 import {
@@ -17,16 +18,14 @@ import {
 } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
-const CI_EVIDENCE_RE = /\bci\b.*(?:green|pass|success)|conclusion.*success/i
-
 /** Matches bash commands that perform explicit CI verification. */
 const CI_CMD_RE = /gh run (?:view|watch)|swiz ci.?wait/
 
 function taskHasCiEvidence(t: SessionTask): boolean {
   return (
-    (!!t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
-    (!!t.description && CI_EVIDENCE_RE.test(t.description)) ||
-    (!!t.subject && CI_EVIDENCE_RE.test(t.subject))
+    hasCiEvidence(t.completionEvidence ?? "") ||
+    hasCiEvidence(t.description ?? "") ||
+    hasCiEvidence(t.subject ?? "")
   )
 }
 
