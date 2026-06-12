@@ -133,6 +133,7 @@ export class AutoSteerStore {
   }>
   private _stmtConsumeOneByProjectKey!: Statement
   private _stmtUpdatePendingMessage!: Statement
+  private _stmtRequeue!: Statement
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getAutoSteerDbPath()
@@ -251,6 +252,13 @@ export class AutoSteerStore {
          ORDER BY id DESC
          LIMIT 1
        )`
+    )
+    // Requeue: clear delivered_at on a consumed row so a failed send can be
+    // retried on a later dispatch cycle. Bypasses enqueue-side dedup, which
+    // would otherwise reject the retry because the row being retried was
+    // itself just marked delivered inside the dedup window.
+    this._stmtRequeue = this.db.prepare(
+      "UPDATE auto_steer_queue SET delivered_at = NULL WHERE id = ? AND delivered_at IS NOT NULL"
     )
   }
 
@@ -414,6 +422,17 @@ export class AutoSteerStore {
       }
       throw e
     }
+  }
+
+  /**
+   * Return a consumed row to the pending queue after a failed send so a later
+   * dispatch cycle can retry it. Re-enqueueing a fresh row would be rejected by
+   * the delivered-within-dedup-window check (the failed row itself), so the
+   * original row's delivered_at is cleared instead.
+   * Returns true if the row existed and was marked delivered.
+   */
+  requeue(id: number): boolean {
+    return this._stmtRequeue.run(id).changes > 0
   }
 
   /**

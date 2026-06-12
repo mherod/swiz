@@ -138,13 +138,21 @@ async function deliverTriggers(
   graceInput: Record<string, any>
 ) {
   const app = terminal?.app ?? detectTerminal().app
+  const store = getAutoSteerStore()
   const sent = new Set<string>()
   for (const trigger of triggersToDeliver) {
     const req = await consumeAutoSteerRequest(sessionId, trigger)
     if (req && !sent.has(req.message)) {
       const message = await renderQueuedAutoSteerRequest(sessionId, req, graceInput)
-      await sendAutoSteer(message, app, { requeueOnForegroundDeferSessionId: sessionId })
-      sent.add(req.message)
+      const ok = await sendAutoSteer(message, app)
+      if (ok) {
+        sent.add(req.message)
+      } else {
+        // Send failed or was deferred for a foreground chat app. Re-enqueueing a
+        // fresh row would be rejected by the delivered-row dedup window, so the
+        // consumed row itself is returned to the queue for the next cycle.
+        store.requeue(req.id)
+      }
     }
   }
 }

@@ -468,4 +468,44 @@ describe("AutoSteerStore", () => {
       store.close()
     })
   })
+
+  describe("requeue (failed-send retry path)", () => {
+    it("returns a consumed row to the pending queue", () => {
+      const store = createStore()
+      store.enqueue("sess-rq", "retry me", "next_turn")
+      const consumed = store.consumeOne("sess-rq", "next_turn")
+      expect(consumed).toHaveLength(1)
+      expect(store.hasPending("sess-rq", "next_turn")).toBe(false)
+
+      expect(store.requeue(consumed[0]!.id)).toBe(true)
+      expect(store.hasPending("sess-rq", "next_turn")).toBe(true)
+
+      const retried = store.consumeOne("sess-rq", "next_turn")
+      expect(retried[0]?.id).toBe(consumed[0]!.id)
+      expect(retried[0]?.message).toBe("retry me")
+      store.close()
+    })
+
+    it("retries the same row even though the dedup window would reject a fresh enqueue", () => {
+      const store = createStore()
+      store.enqueue("sess-rq2", "blocked by dedup", "next_turn")
+      const consumed = store.consumeOne("sess-rq2", "next_turn")[0]!
+
+      // The just-delivered row makes a fresh identical enqueue a dedup no-op…
+      expect(store.enqueue("sess-rq2", "blocked by dedup", "next_turn")).toBe(false)
+      // …but requeue restores the original row.
+      expect(store.requeue(consumed.id)).toBe(true)
+      expect(store.consumeOne("sess-rq2", "next_turn")[0]?.message).toBe("blocked by dedup")
+      store.close()
+    })
+
+    it("is a no-op for unknown or still-pending rows", () => {
+      const store = createStore()
+      expect(store.requeue(999_999)).toBe(false)
+      store.enqueue("sess-rq3", "pending", "next_turn")
+      const pending = store.listPending("sess-rq3")[0]!
+      expect(store.requeue(pending.id)).toBe(false)
+      store.close()
+    })
+  })
 })

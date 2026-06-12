@@ -408,6 +408,42 @@ describe("auto-steer helpers", () => {
     expect(rendered).toBe("Please finish the repository checks before stopping.")
   })
 
+  test("renderQueuedAutoSteerRequest delivers already-rendered rows without a second rewrite", async () => {
+    await setupAutoSteerHome()
+    delete process.env.AI_TEST_NO_BACKEND
+    // If the row were re-humanised at delivery, this stubbed response would replace it.
+    process.env.AI_TEST_TEXT_RESPONSE = "WRONG second rewrite"
+
+    const store = getAutoSteerStore()
+    // message !== dedupKey marks the row as rendered at enqueue time
+    // (scheduleAutoSteer stores the humanised text with the raw dedup key).
+    store.enqueue("session-prerendered", "Please finish the checks.", "next_turn", {
+      dedupKey: "Complete repository checks",
+    })
+    const req = store.consumeOne("session-prerendered", "next_turn")[0]!
+    const rendered = await renderQueuedAutoSteerRequest("session-prerendered", req)
+
+    expect(rendered).toBe("Please finish the checks.")
+  })
+
+  test("renderQueuedAutoSteerRequest falls back to the raw dedup key within the grace window", async () => {
+    await setupAutoSteerHome()
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_TEST_TEXT_RESPONSE = "WRONG rewrite"
+
+    const store = getAutoSteerStore()
+    store.enqueue("session-prerendered-grace", "Please finish the checks.", "next_turn", {
+      dedupKey: "Complete repository checks",
+    })
+    const req = store.consumeOne("session-prerendered-grace", "next_turn")[0]!
+    const rendered = await renderQueuedAutoSteerRequest("session-prerendered-grace", req, {
+      _lastUserMessageAt: Date.now(),
+    })
+
+    // User just messaged: the raw mechanical text stays distinct from their voice.
+    expect(rendered).toBe("Complete repository checks")
+  })
+
   test("humaniseAutoSteerMessage returns the original for blank input", async () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.AI_TEST_TEXT_RESPONSE = "rewritten"

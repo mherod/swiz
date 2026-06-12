@@ -175,6 +175,8 @@ export function isMcpChannelLiveForCwd(cwd: string): boolean {
 }
 
 export interface AutoSteerRequest {
+  /** Queue row id — pass to `AutoSteerStore.requeue()` if the send fails. */
+  id: number
   message: string
   dedupKey?: string | null
   timestamp: number
@@ -373,7 +375,15 @@ export async function renderQueuedAutoSteerRequest(
   request: Pick<AutoSteerRequest, "message" | "dedupKey">,
   graceInput?: Record<string, any> | null
 ): Promise<string> {
-  return renderAutoSteerMessage(sessionId, request.dedupKey ?? request.message, graceInput)
+  // A stored message that differs from its dedup key was already rendered
+  // (humanised) at enqueue time — deliver it as-is rather than spending
+  // another AI call inside a delivery hook's timeout budget. Within the
+  // user-message grace window the raw mechanical text is delivered instead,
+  // keeping the auto-steer voice distinct while the user is present.
+  const raw = request.dedupKey ?? request.message
+  if (graceInput && (await isWithinUserMessageGrace(graceInput))) return raw
+  if (request.message !== raw) return request.message
+  return renderAutoSteerMessage(sessionId, raw)
 }
 
 function canUseMcpChannel(trigger: AutoSteerTrigger, cwd: string | undefined): cwd is string {
@@ -589,5 +599,10 @@ export async function consumeAutoSteerRequest(
   if (requests.length === 0) return null
 
   const first = requests[0]!
-  return { message: first.message, dedupKey: first.dedupKey, timestamp: first.createdAt }
+  return {
+    id: first.id,
+    message: first.message,
+    dedupKey: first.dedupKey,
+    timestamp: first.createdAt,
+  }
 }
