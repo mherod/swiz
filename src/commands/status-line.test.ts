@@ -12,6 +12,7 @@ import {
   formatExecStatsSegment,
   formatGitHubCiSegment,
   formatProjectState,
+  formatQueuedSteersSegment,
   formatTaskCountSegment,
   getContextStatsPath,
   readContextStats,
@@ -780,6 +781,34 @@ describe("formatExecStatsSegment", () => {
   it("renders lint-only stats", () => {
     const out = stripAnsi(formatExecStatsSegment({ test: null, lint: slowLint }))
     expect(out).toBe("⏱ lint 12s×2")
+  })
+})
+
+describe("formatQueuedSteersSegment", () => {
+  function stripAnsi(text: string): string {
+    const esc = String.fromCharCode(27)
+    return text.replace(new RegExp(`${esc}\\[[0-9;]*m`, "g"), "")
+  }
+
+  it("returns empty string when nothing is queued", () => {
+    expect(formatQueuedSteersSegment(null)).toBe("")
+    expect(formatQueuedSteersSegment(undefined)).toBe("")
+    expect(formatQueuedSteersSegment({ total: 0, byTrigger: {} })).toBe("")
+  })
+
+  it("renders total with a per-trigger breakdown", () => {
+    const out = stripAnsi(
+      formatQueuedSteersSegment({
+        total: 3,
+        byTrigger: { next_turn: 2, after_commit: 1 },
+      })
+    )
+    expect(out).toBe("⤳ 3 (2 next_turn, 1 after_commit)")
+  })
+
+  it("renders a single queued steer", () => {
+    const out = stripAnsi(formatQueuedSteersSegment({ total: 1, byTrigger: { next_turn: 1 } }))
+    expect(out).toBe("⤳ 1 (1 next_turn)")
   })
 })
 

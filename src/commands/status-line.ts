@@ -79,9 +79,49 @@ export interface WarmStatusLineSnapshot {
   issueSyncStale?: boolean | null
   /** Average test/lint execution times recorded by the measure-*-time hooks. Null when no runs recorded. */
   execStats?: ProjectExecutionStats | null
+  /** Pending auto-steer messages queued for this session, by trigger. Null when none or unknown. */
+  queuedSteers?: QueuedSteerCounts | null
 }
 
 type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
+
+export interface QueuedSteerCounts {
+  total: number
+  /** Pending count per trigger, e.g. { next_turn: 2, after_commit: 1 }. */
+  byTrigger: Record<string, number>
+}
+
+/** Count pending auto-steer messages for this session from the local SQLite queue. */
+async function readQueuedSteerCounts(
+  sessionId: string | null | undefined
+): Promise<QueuedSteerCounts | null> {
+  if (!sessionId) return null
+  try {
+    const { sanitizeSessionId } = await import("../session-id.ts")
+    const safeSession = sanitizeSessionId(sessionId)
+    if (!safeSession) return null
+    const { getAutoSteerStore } = await import("../auto-steer-store.ts")
+    const pending = getAutoSteerStore().listPending(safeSession)
+    if (pending.length === 0) return null
+    const byTrigger: Record<string, number> = {}
+    for (const req of pending) {
+      byTrigger[req.trigger] = (byTrigger[req.trigger] ?? 0) + 1
+    }
+    return { total: pending.length, byTrigger }
+  } catch {
+    return null
+  }
+}
+
+/** e.g. `⤳ 3 (2 next_turn, 1 after_commit)`; empty when nothing queued. */
+export function formatQueuedSteersSegment(queued: QueuedSteerCounts | null | undefined): string {
+  if (!queued || queued.total <= 0) return ""
+  const breakdown = Object.entries(queued.byTrigger)
+    .map(([trigger, count]) => `${count} ${trigger}`)
+    .join(", ")
+  const color = queued.total >= 3 ? "\x1b[93m" : "\x1b[96m"
+  return `${color}⤳ ${queued.total}${R} ${DIM}(${breakdown})${R}`
+}
 
 interface StatusLineDaemonMetrics {
   uptimeHuman: string
@@ -706,7 +746,8 @@ function assembleSnapshot(
   effective: EffectiveSwizSettings | null,
   taskCounts: TaskCounts | null,
   activeSkills: string[] | null,
-  execStats: ProjectExecutionStats | null
+  execStats: ProjectExecutionStats | null,
+  queuedSteers: QueuedSteerCounts | null
 ): WarmStatusLineSnapshot {
   const suppressCi = Boolean(effective?.ignoreCi)
   const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
@@ -725,6 +766,7 @@ function assembleSnapshot(
     taskCounts,
     activeSkills,
     execStats,
+    queuedSteers,
   }
 }
 
@@ -741,6 +783,7 @@ export async function computeWarmStatusLineSnapshot(
     sessionTasks,
     activeSkills,
     execStats,
+    queuedSteers,
   ] = await Promise.all([
     getGitBranchAndInfo(cwd),
     readSwizSettings().catch(() => null),
@@ -760,6 +803,7 @@ export async function computeWarmStatusLineSnapshot(
       return null
     })(),
     readExecStatsForCwd(cwd),
+    readQueuedSteerCounts(sessionId),
   ])
 
   const effective = swizSettings
@@ -779,7 +823,8 @@ export async function computeWarmStatusLineSnapshot(
     effective,
     taskCounts,
     activeSkills,
-    execStats
+    execStats,
+    queuedSteers
   )
 }
 
@@ -1068,6 +1113,7 @@ function buildLine3(
     snapshot.complianceDurationSeconds
   )
   const skillsSeg = formatActiveSkillsSegment(activeSkills)
+  const steersSeg = formatQueuedSteersSegment(snapshot.queuedSteers)
   const checksSeg = formatExecStatsSegment(snapshot.execStats)
   const modeSeg = buildModeSeg(a4, agentName, vimMode)
   const flagsStr = snapshot.settingsParts.join(" ")
@@ -1075,6 +1121,7 @@ function buildLine3(
     seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
     seg("tasks") && taskSeg ? `${lbl("tasks")} ${taskSeg}` : "",
     seg("skills") && skillsSeg ? `${lbl("skills")} ${skillsSeg}` : "",
+    seg("steers") && steersSeg ? `${lbl("steers")} ${steersSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
     seg("checks") && checksSeg ? `${lbl("checks")} ${checksSeg}` : "",
     seg("metrics") && daemonMetricsSeg ? `${lbl("metrics")} ${daemonMetricsSeg}` : "",
@@ -1213,6 +1260,12 @@ export const statusLineCommand: Command = {
     // read the per-project stats files directly.
     if (snapshot.execStats === undefined) {
       snapshot.execStats = await readExecStatsForCwd(cwd)
+    }
+
+    // Fallback: if the daemon snapshot doesn't include queuedSteers (old daemon),
+    // read the local auto-steer queue directly.
+    if (snapshot.queuedSteers === undefined) {
+      snapshot.queuedSteers = await readQueuedSteerCounts(sessionId)
     }
 
     // Wanted level: unhealthy task compliance contributes a baseline ★1 (preferring
