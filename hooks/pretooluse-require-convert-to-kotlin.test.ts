@@ -135,7 +135,7 @@ describe("pretooluse-require-convert-to-kotlin", () => {
     expect(result).toEqual({})
   })
 
-  it("blocks Java edits when Gradle and Kotlin are detected, even if the convert-to-kotlin skill is NOT installed locally", async () => {
+  it("passes through when Gradle and Kotlin are detected but convert-to-kotlin skill is NOT installed (fail-open)", async () => {
     // Gradle+Kotlin detected, skill not installed
     const result = await runWithProjectAndSkill(
       "src/main/java/App.java",
@@ -143,12 +143,7 @@ describe("pretooluse-require-convert-to-kotlin", () => {
       false,
       []
     )
-    expect(
-      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
-        ?.permissionDecision
-    ).toBe("deny")
-    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
-    expect((result as { systemMessage?: string }).systemMessage).toContain("convert-to-kotlin")
+    expect(result).toEqual({})
   })
 
   it("blocks Java edits when Gradle and Kotlin are detected, skill is installed, but NOT recently invoked", async () => {
@@ -181,5 +176,62 @@ describe("pretooluse-require-convert-to-kotlin", () => {
         ?.permissionDecision
     ).toBe("allow")
     expect((result as { systemMessage?: string }).systemMessage).toContain("was invoked recently")
+  })
+
+  it("passes through when creating a new Kotlin file but NO neighbouring Java file exists", async () => {
+    // Gradle+Kotlin detected, creating Kotlin file, but no neighboring Java file exists
+    const result = await runWithProjectAndSkill(
+      "src/main/kotlin/App.kt",
+      ["build.gradle.kts"],
+      true,
+      []
+    )
+    expect(result).toEqual({})
+  })
+
+  it("blocks when creating a new Kotlin file and a neighbouring Java file exists, but skill was NOT recently invoked", async () => {
+    // Gradle+Kotlin detected, creating Kotlin file, neighboring Java file exists, skill not invoked
+    const result = await runWithProjectAndSkill(
+      "src/main/kotlin/App.kt",
+      ["build.gradle.kts", "src/main/kotlin/App.java"],
+      true,
+      []
+    )
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+    expect((result as { systemMessage?: string }).systemMessage).toContain(
+      "matches a neighbouring Java file"
+    )
+  })
+
+  it("allows creating a new Kotlin file when neighbouring Java file exists if skill WAS recently invoked", async () => {
+    // Gradle+Kotlin detected, creating Kotlin file, neighboring Java file exists, skill recently invoked
+    const sessionLines = [skillInvocationLine("convert-to-kotlin")]
+    const result = await runWithProjectAndSkill(
+      "src/main/kotlin/App.kt",
+      ["build.gradle.kts", "src/main/kotlin/App.java"],
+      true,
+      sessionLines
+    )
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("was invoked recently")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("creating Kotlin file")
+  })
+
+  it("passes through when editing an existing Kotlin file, even if a neighbouring Java file exists", async () => {
+    // Gradle+Kotlin detected, Kotlin file already exists, neighboring Java file exists, should pass through (fail-open/not creating)
+    const result = await runWithProjectAndSkill(
+      "src/main/kotlin/App.kt",
+      ["build.gradle.kts", "src/main/kotlin/App.java", "src/main/kotlin/App.kt"],
+      true,
+      []
+    )
+    expect(result).toEqual({})
   })
 })
