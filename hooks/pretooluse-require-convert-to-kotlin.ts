@@ -4,7 +4,6 @@
 //
 // Gates edits/writes to files matching *.java when both "gradle" and "kotlin" frameworks are detected.
 //
-// When the convert-to-kotlin skill is not installed on this machine, the gate is skipped (fail-open).
 // When the skill has been invoked recently in the current session, the edit proceeds.
 // Otherwise the hook blocks with an actionable message.
 //
@@ -23,7 +22,6 @@ import {
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
-  skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
@@ -48,9 +46,6 @@ const pretooluseRequireConvertToKotlin: SwizFileEditHook = {
     }
 
     const rawInput = input as unknown as Record<string, unknown>
-    if (!skillExistsForHookPayload(SKILL_NAME, rawInput)) {
-      return {}
-    }
 
     const transcriptPath = (rawInput.transcript_path as string | undefined) ?? ""
     if (!transcriptPath) {

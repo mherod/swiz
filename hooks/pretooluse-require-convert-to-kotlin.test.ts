@@ -135,7 +135,7 @@ describe("pretooluse-require-convert-to-kotlin", () => {
     expect(result).toEqual({})
   })
 
-  it("passes through when Gradle and Kotlin are detected but convert-to-kotlin skill is NOT installed (fail-open)", async () => {
+  it("blocks Java edits when Gradle and Kotlin are detected, even if the convert-to-kotlin skill is NOT installed locally", async () => {
     // Gradle+Kotlin detected, skill not installed
     const result = await runWithProjectAndSkill(
       "src/main/java/App.java",
@@ -143,7 +143,12 @@ describe("pretooluse-require-convert-to-kotlin", () => {
       false,
       []
     )
-    expect(result).toEqual({})
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+    expect((result as { systemMessage?: string }).systemMessage).toContain("convert-to-kotlin")
   })
 
   it("blocks Java edits when Gradle and Kotlin are detected, skill is installed, but NOT recently invoked", async () => {
