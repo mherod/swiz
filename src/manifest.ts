@@ -189,6 +189,8 @@ const VALID_FRAMEWORKS = new Set<string>([
   "ruby",
   "java",
   "php",
+  "kotlin",
+  "gradle",
 ])
 
 export async function evalCondition(condition: string | undefined, cwd?: string): Promise<boolean> {

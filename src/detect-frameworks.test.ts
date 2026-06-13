@@ -261,6 +261,33 @@ describe("php detection", () => {
   })
 })
 
+// ─── Kotlin & Gradle ──────────────────────────────────────────────────────────
+
+describe("kotlin and gradle detection", () => {
+  it("detects Kotlin and Gradle from build.gradle.kts", async () => {
+    const dir = await fixture("kotlin-gradle-kts")
+    await Bun.write(join(dir, "build.gradle.kts"), "// Kotlin DSL")
+    const frameworks = await detectFrameworks(dir)
+    expect(frameworks.has("kotlin")).toBe(true)
+    expect(frameworks.has("gradle")).toBe(true)
+  })
+
+  it("detects Gradle but not Kotlin from build.gradle", async () => {
+    const dir = await fixture("gradle-groovy")
+    await Bun.write(join(dir, "build.gradle"), "// Groovy DSL")
+    const frameworks = await detectFrameworks(dir)
+    expect(frameworks.has("gradle")).toBe(true)
+    expect(frameworks.has("kotlin")).toBe(false)
+  })
+
+  it("detects Gradle from gradlew wrapper script", async () => {
+    const dir = await fixture("gradle-wrapper")
+    await Bun.write(join(dir, "gradlew"), "#!/bin/sh")
+    const frameworks = await detectFrameworks(dir)
+    expect(frameworks.has("gradle")).toBe(true)
+  })
+})
+
 // ─── Multi-framework ──────────────────────────────────────────────────────────
 
 describe("multi-framework detection", () => {

@@ -34,7 +34,17 @@ export async function fileExists(path: string): Promise<boolean> {
  *
  * Stable across releases — these become part of the manifest DSL.
  */
-export type ProjectStack = "bun" | "node" | "go" | "python" | "ruby" | "rust" | "java" | "php"
+export type ProjectStack =
+  | "bun"
+  | "node"
+  | "go"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "java"
+  | "php"
+  | "kotlin"
+  | "gradle"
 
 const _stackCache = new CappedMap<string, Promise<ProjectStack[]>>(200)
 
@@ -55,12 +65,22 @@ export type Framework =
   | "ruby"
   | "java"
   | "php"
+  | "kotlin"
+  | "gradle"
 
 const _frameworkCache = new CappedMap<string, Promise<Set<Framework>>>(200)
 
 const JS_TS_EXTENSIONS = ["js", "ts", "mjs", "cjs"] as const
 const PYTHON_INDICATOR_FILES = ["pyproject.toml", "setup.py", "requirements.txt"] as const
 const JAVA_INDICATOR_FILES = ["pom.xml", "build.gradle"] as const
+const KOTLIN_INDICATOR_FILES = ["build.gradle.kts", "settings.gradle.kts"] as const
+const GRADLE_INDICATOR_FILES = [
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "gradlew",
+] as const
 
 export async function hasAnyFile(dir: string, files: readonly string[]): Promise<boolean> {
   for (const file of files) {
@@ -150,6 +170,8 @@ const FILE_DETECTIONS: Array<{ framework: Framework; files: readonly string[] }>
   { framework: "ruby", files: ["Gemfile"] },
   { framework: "java", files: JAVA_INDICATOR_FILES },
   { framework: "php", files: ["composer.json"] },
+  { framework: "kotlin", files: KOTLIN_INDICATOR_FILES },
+  { framework: "gradle", files: GRADLE_INDICATOR_FILES },
 ]
 
 async function detectFrameworksInner(dir: string): Promise<Set<Framework>> {
@@ -230,6 +252,8 @@ async function detectProjectStackInner(dir: string): Promise<ProjectStack[]> {
   if (await fileExists(join(dir, "Cargo.toml"))) stacks.push("rust")
   if (await hasAnyFile(dir, JAVA_INDICATOR_FILES)) stacks.push("java")
   if (await fileExists(join(dir, "composer.json"))) stacks.push("php")
+  if (await hasAnyFile(dir, KOTLIN_INDICATOR_FILES)) stacks.push("kotlin")
+  if (await hasAnyFile(dir, GRADLE_INDICATOR_FILES)) stacks.push("gradle")
 
   return stacks.sort()
 }

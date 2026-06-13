@@ -144,6 +144,26 @@ describe("php stack detection", () => {
   })
 })
 
+// ─── Kotlin & Gradle ──────────────────────────────────────────────────────────
+
+describe("kotlin and gradle stack detection", () => {
+  it("detects kotlin and gradle from build.gradle.kts", async () => {
+    const dir = await fixture("kotlin-gradle-kts-stack")
+    await Bun.write(join(dir, "build.gradle.kts"), "// Kotlin DSL")
+    const stacks = await detectProjectStack(dir)
+    expect(stacks).toContain("kotlin")
+    expect(stacks).toContain("gradle")
+  })
+
+  it("detects gradle but not kotlin from build.gradle", async () => {
+    const dir = await fixture("gradle-groovy-stack")
+    await Bun.write(join(dir, "build.gradle"), "// Groovy DSL")
+    const stacks = await detectProjectStack(dir)
+    expect(stacks).toContain("gradle")
+    expect(stacks).not.toContain("kotlin")
+  })
+})
+
 // ─── Empty / unknown ─────────────────────────────────────────────────────────
 
 describe("empty project", () => {
