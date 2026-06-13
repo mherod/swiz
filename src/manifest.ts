@@ -96,6 +96,7 @@ import pretoolusePushChecksGate from "../hooks/pretooluse-push-checks-gate.ts"
 import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-guard.ts"
 import pretooluseRepeatedLintTest from "../hooks/pretooluse-repeated-lint-test.ts"
+import pretooluseRequireConvertToKotlin from "../hooks/pretooluse-require-convert-to-kotlin.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretooluseSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
@@ -325,6 +326,7 @@ export const bundledHookManifest: HookGroup[] = [
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
       { hook: pretooluseApplyRscGate },
+      { hook: pretooluseRequireConvertToKotlin },
       { hook: pretooluseSandboxedEdits },
       { hook: pretooluseSandboxGuidanceConsolidation },
       { hook: pretoolusJsonValidation },
