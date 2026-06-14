@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { evaluateClaudeMdUpdateMemoryGate } from "./pretooluse-claude-md-update-memory-gate.ts"
+import { summaryFromLines } from "./test-helpers/transcript-summary-fixture.ts"
 
 // In-process tests only — no hook subprocess spawns (see CLAUDE.md performance rule).
 // Skill existence is injected (so the test never mutates process.cwd(), which races
@@ -15,21 +16,6 @@ function assistantLine(content: unknown[], timestampMs = Date.now() - 1000): str
     type: "assistant",
     message: { content },
   })
-}
-
-function summaryFromLines(sessionLines: string[]): Record<string, unknown> {
-  return {
-    toolNames: [],
-    toolCallCount: 0,
-    bashCommands: [],
-    skillInvocations: [],
-    hasGitPush: false,
-    sessionLines,
-    sessionDurationMs: 0,
-    successfulTestRuns: 0,
-    lastVerificationTime: null,
-    sessionScope: "trivial",
-  }
 }
 
 const skillInvocationLine = (skill: string): string =>

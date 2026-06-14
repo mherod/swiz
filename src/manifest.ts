@@ -97,6 +97,7 @@ import pretoolusePushCooldown from "../hooks/pretooluse-push-cooldown.ts"
 import pretooluseReadGrepStallGuard from "../hooks/pretooluse-read-grep-stall-guard.ts"
 import pretooluseRepeatedLintTest from "../hooks/pretooluse-repeated-lint-test.ts"
 import pretooluseRequireConvertToKotlin from "../hooks/pretooluse-require-convert-to-kotlin.ts"
+import pretooluseRequirementsGenerateGate from "../hooks/pretooluse-requirements-generate-gate.ts"
 import pretooluseSandboxGuidanceConsolidation from "../hooks/pretooluse-sandbox-guidance-consolidation.ts"
 import pretooluseSandboxedEdits from "../hooks/pretooluse-sandboxed-edits.ts"
 import pretooluseSkillInvocationGate from "../hooks/pretooluse-skill-invocation-gate.ts"
@@ -343,6 +344,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseWorkflowPermissionsGate },
       { hook: pretoolUseManiOrderValidation },
       { hook: pretooluseClaudeMdUpdateMemoryGate },
+      { hook: pretooluseRequirementsGenerateGate },
       { hook: pretooluseClaudeMdWordLimit },
     ],
   },
