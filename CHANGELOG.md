@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-06-14
+
+### Features
+
+- **REQUIREMENTS.md generation gate** — A new `pretooluse-requirements-generate-gate`
+  hook requires the `/generate-requirements` skill to have been used in the
+  current session before any Edit/Write to `REQUIREMENTS.md`, keeping the
+  product-requirements spec routed through its canonical workflow. Skipped when
+  the skill is not installed or no transcript is available.
+- **Kotlin/Gradle migration gates** — New-file Kotlin gating for files matching
+  neighbouring Java, and a `convert-to-kotlin` requirement for Java edits in
+  Gradle+Kotlin projects, with Kotlin and Gradle project detection.
+
+### Improvements
+
+- **Guardrail rules refined** — Governance guardrails tightened and rule-based
+  stalling is now blocked.
+
 ## 2026-06-11
 
 ### Features
