@@ -706,6 +706,30 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "helplessness",
     pattern:
+      /(?:guardrail|rule|gate|limit|constraint|restriction|protocol|guideline)s?\s+(?:prevent|forbid|restrict|stop|block|limit|bar)s?\s+(?:me|us|the agent)\s+from\s+(?:doing|marking|expanding|executing|working|adding|fixing|updating|completing)/i,
+    response:
+      "Do not hide behind rules or guardrails to justify inaction. " +
+      "If there is obviously-wanted work, prioritize forward progress and make the changes immediately.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:due to|because of|by|under|respecting)\s+(?:the\s+)?(?:(?:task|branch|commit|precommit|scope)[- ]?)?(?:guardrail|rule|gate|limit|constraint|restriction|protocol|scope|tasks?|guideline)s?,\s*(?:i\s+)?(?:can't|cannot|am\s+unable\s+to|couldn't)\s+(?:do|make|perform|expand|mark|complete|add|fix|update|track|work)/i,
+    response:
+      "Guardrails are guidelines to keep work safe, not excuses to refuse work. " +
+      "If a task needs handling, make progress and do it. Do not explain why you cannot proceed.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:can't|cannot|couldn't|unable to)\s+(?:expand\s+scope|mark\s+unfinished|mark\s+complete|do\s+work|proceed|continue)\s+(?:because(?:\s+of)?|due to|as\s+per|according to)\s+(?:the\s+)?(?:(?:task|branch|commit|precommit|scope)[- ]?)?(?:guardrail|rule|gate|limit|constraint|restriction|guideline)s?/i,
+    response:
+      "Stop explaining why you cannot proceed because of guardrails. " +
+      "If the user or queue requests the work, execute it decisively.",
+  },
+  {
+    category: "helplessness",
+    pattern:
       /(?:i |we )?(?:can't|cannot|am unable to|have no way to|don't know how to|do not know how to) (?:fix|resolve|address|comply|meet|fulfill|complete)/i,
     response:
       "You absolutely can. The hook told you exactly what to do. " +

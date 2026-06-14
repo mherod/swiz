@@ -113,6 +113,7 @@ alwaysApply: false
 - Exemptions: `AgentDef.tasksEnabled=false` (Codex) skips enforcement. Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - Workflow: `TaskCreate` → `in_progress` → work → evidence → `completed`; maintain ≥2 pending buffer. Use native task tools except `swiz tasks adopt`. Hooks use `createTaskInProcess()` or `createSessionTask()`.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete and ≥1 pending. Create tasks before non-exempt Bash. Keep last `in_progress` while shell work remains.
+- **NEVER** let guardrails, task-gates, branch-gates, or scope boundaries harden into a refusal to do obviously-wanted work. When the queue or user asks for tracked, well-specified issues, prioritize forward progress. Do not explain why you "cannot" do them — execute a minimal, concrete step immediately.
 - Task subjects: one verb; `pretooluse-task-subject-validation.ts` rejects compound subjects. Change subject/description via `TaskUpdate`, not CLI.
 - Completion evidence in `TaskUpdate description`: `commit:<sha>`, `pr:<url>`, `file:<path>`, `test:<result>`, `note:`.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces Conventional Commits. Stop requires clean git status.
@@ -197,14 +198,9 @@ alwaysApply: false
 ## Issue Management
 - Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
 ## Testing
-- DON'T: shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch` (inject); `bun test` with `run_in_background`; spawn `bun run index.ts` from tests (call `command.run(args)` in-process); re-run full suite with different filters after failure.
-- **MANDATORY performance rule**: unit tests must not spawn hook subprocesses. Use `runHookInProcess()`, `runBashHook()`, `runFileEditHook()`, `dispatchInProcess()`, or exported `evaluate*()` functions. `Bun.spawn(["bun", "hooks/..."])` is allowed only in explicit standalone-contract tests (malformed stdin, smoke tests, env-isolation, process-exit compat); every exception needs a comment naming the subprocess-only behavior.
-- **MANDATORY heavy-work rule**: mock `gh`, daemon HTTP, filesystem watchers, timers, sleeps, CLI cold starts, and large file contents unless the behavior under test is the external boundary. Prefer injected settings (`_effectiveSettings`), injected state (`_projectState`), temp paths, and direct command/hook function calls over process-wide env mutation.
-- **Regression guard**: when touching hook tests, grep for `Bun.spawn(["bun", "hooks/` and replace legacy runners with shared in-process helpers before adding cases. Do not paper over timeouts by raising `setDefaultTimeout`; remove the subprocess/heavy fixture cause.
-- In hook/unit test edits, run this audit command and keep only intentional exceptions:  
-  `rg --line-number "Bun\\.spawn\\(\\[\"bun\",\\s*\"hooks/|Bun\\.spawn\\(\\[\"bun\",\\s*\"run\", \"index\\.ts\""`  
-  Any hit must be accompanied by an explicit reason comment in the test.
-- Biome: break `expect()` chains after `.toBe(`, not `expect(`. Wrong: `expect(\n  longCall()\n).toBe(x)`. Correct: `expect(longCall()).toBe(\n  x\n)`.
+- DON'T: use shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch`; run `bun test` in background; spawn `bun run index.ts` from tests (call `command.run()` in-process); re-run full suite with different filters after failure.
+- **Testing Performance**: Unit tests must not spawn hook subprocesses; use process helpers like `runHookInProcess`, `runBashHook`, or exported `evaluate*()` functions. Standalone `Bun.spawn` is only for malformed stdin or process-exit contract tests, requiring an explanatory comment. Mock `gh`, daemon HTTP, fs watchers, cold starts, and large files. Do not raise `setDefaultTimeout` to mask timeouts.
+- Biome: break `expect()` chains after `.toBe(`, not `expect(`. Correct: `expect(longCall()).toBe(\n  x\n)`.
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.
 ## Dispatch & Daemon Context

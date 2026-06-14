@@ -178,6 +178,21 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("It seems impossible to satisfy this requirement.")
       expect(m?.category).toBe("helplessness")
     })
+    test("matches when guardrails are used to prevent doing work", () => {
+      const m = findLazyPattern("The guardrails prevent me from expanding scope or doing work.")
+      expect(m?.category).toBe("helplessness")
+      expect(m?.response).toContain("Do not hide behind rules or guardrails")
+    })
+    test("matches when due to guardrails/gates/rules the agent claims they cannot proceed", () => {
+      const m = findLazyPattern("Due to the task gate, I cannot complete the remaining items.")
+      expect(m?.category).toBe("helplessness")
+      expect(m?.response).toContain("Guardrails are guidelines to keep work safe")
+    })
+    test("matches when agent says they cannot expand scope because of guardrails", () => {
+      const m = findLazyPattern("I cannot expand scope because of the guardrails.")
+      expect(m?.category).toBe("helplessness")
+      expect(m?.response).toContain("Stop explaining why you cannot proceed")
+    })
   })
 
   // ── Foot-dragging ──────────────────────────────────────────────────────────

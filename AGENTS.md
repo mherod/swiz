@@ -12,13 +12,9 @@ alwaysApply: false
 - Use `Bun.file()` and `Bun.write()` for file I/O.
 - Use `node:fs/promises` only for directory operations (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture
-- Entry point: `index.ts`; command registration: `registerCommand()` in `src/cli.ts`.
-- `src/types.ts` `Command` interface fields: `name`, `description`, optional `usage`, `run(args)`.
-- Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
-- DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
-- **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` instead.
-- **Complexity**: Extract helpers to reduce cyclomatic complexity and max-lines violations.
-- **Consolidate utilities**: Multiple functions → single canonical module (e.g., `agent-paths.ts`). Re-export from originals.
+- Entry: `index.ts`; register commands in `src/cli.ts` via `Command` interface (`src/types.ts`). Keep manual `process.argv` parsing.
+- Interacting with Claude: Use `@anthropic-ai/claude-agent-sdk` `query()`, not spawning `claude` CLI.
+- Keep complexity low by extracting helpers and consolidating multiple functions into single canonical modules (e.g. `agent-paths.ts`).
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -113,6 +109,7 @@ alwaysApply: false
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects. DON'T list multiple files/steps in one subject.
 - Keep ≥1 `pending`/`in_progress` task before `git add`/`git commit`; mark complete after success.
 - **DON'T**: Complete the final incomplete task without first creating a pending next-step task — `pretooluse-require-tasks.ts` blocks when zero incomplete tasks remain.
+- **NEVER** let guardrails, task-gates, branch-gates, or scope boundaries harden into a refusal to do obviously-wanted work. When the queue or user asks for tracked, well-specified issues, prioritize forward progress. Do not explain why you "cannot" do them — execute a minimal, concrete step immediately.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools every 20 calls; staleness gate at 40.
@@ -207,21 +204,10 @@ alwaysApply: false
 - Separate state files for runtime data (`.swiz/context-stats.json`); never mix into config (`.swiz/config.json`).
 - 3-tier resolution: `project > user > default`. Track source per value, not per group. Label with `(project)`, `(user)`, `(default)`.
 - Show all effective values; never hide user/default. No shared `source` for multiple settings.
-- Adding a boolean setting (global scope) requires updates to 7 files:
-  1. `src/settings/types.ts` — `SwizSettings` interface.
-  2. `src/settings/registry.ts` — `SETTINGS_REGISTRY` entry.
-  3. `src/settings/persistence.ts` — `DEFAULT_SETTINGS` and `swizSettingsSchema`.
-  4. `src/settings/resolution.ts` — `getEffectiveSwizSettings` base object.
-  5. `src/commands/settings.ts` — `printGlobalSettings`.
-  6. `src/web/components/settings-panel.tsx` — `GlobalSettingsForm`, `DEFAULT_GLOBAL_FORM`, `globalSettingsToForm`, `GLOBAL_TOGGLES`.
-  7. `src/commands/settings.test.ts` — `SwizSettings` literals and `expectedKeys`.
+- Adding a boolean setting (global scope) requires updating `src/settings/{types,registry,persistence,resolution}.ts`, `src/commands/settings{.ts,.test.ts}`, and `src/web/components/settings-panel.tsx`.
 ## CLI Error Handling
-- In `src/commands/`, throw errors instead of `process.exit(1)`.
-- `src/cli.ts` handles command errors via `process.exitCode = 1`.
-- `src/commands/continue.ts`: stream Agent SDK messages; `process.exitCode = 1` on non-success.
-- Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
-- In CI/hook scripts, do not use `console.log` for status/debug; use `console.error`.
-- `src/debug-logging.test.ts` allowlists `console.*`; elsewhere use `debugLog` from `./debug.ts`. Allowlist edits need a justification comment in the test.
+- Throw errors in `src/commands/` instead of `process.exit(1)`. `src/cli.ts` and `src/commands/continue.ts` handle errors via `process.exitCode = 1`. Hook scripts (`hooks/*.ts`) use `process.exit(0)`.
+- Use `console.error` (not `console.log`) in CI/hook scripts. Use `debugLog` from `./debug.ts` elsewhere. `console.*` is blocked except where allowlisted in `src/debug-logging.test.ts` with a justification.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
