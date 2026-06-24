@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-24
+
+### Features
+
+- **PostToolUseFailure lifecycle event mapped** — Claude's `PostToolUseFailure`
+  event is now a first-class canonical event: mapped in the Claude `eventMap`
+  and public allowlist, routed as a `context` dispatch strategy, and reserved
+  as unsupported for agents without it (Cursor, Gemini, Codex, Antigravity). A
+  new `posttoolusefailure-retry-advisor` hook consumes the failure signal
+  directly — tracking consecutive same-tool failures per session and advising a
+  change of approach over a blind retry — instead of inferring failures from
+  transcript scans.
+
 ## 2026-06-14
 
 ### Features
