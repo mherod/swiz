@@ -552,6 +552,7 @@ describe("agents.ts", () => {
     it("codex marks non-public hook events unsupported", () => {
       const codex = getAgent("codex")!
       expect(codex.unsupportedEvents).toEqual([
+        "postToolUseFailure",
         "sessionEnd",
         "preCompact",
         "notification",

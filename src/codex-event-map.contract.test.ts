@@ -37,6 +37,7 @@ describe("Codex eventMap contract (hooks.json)", () => {
 
   it("marks non-public events unsupported so install skips them", () => {
     expect(codex.unsupportedEvents).toEqual([
+      "postToolUseFailure",
       "sessionEnd",
       "preCompact",
       "notification",

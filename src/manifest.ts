@@ -38,6 +38,7 @@ import {
 import posttooluseTestPairing from "../hooks/posttooluse-test-pairing.ts"
 import posttoolusUpstreamSyncOnPush from "../hooks/posttooluse-upstream-sync-on-push.ts"
 import posttoolusVerifyPush from "../hooks/posttooluse-verify-push.ts"
+import posttoolusefailureRetryAdvisor from "../hooks/posttoolusefailure-retry-advisor.ts"
 import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
@@ -482,6 +483,10 @@ export const bundledHookManifest: HookGroup[] = [
     ],
   },
   {
+    event: "postToolUseFailure",
+    hooks: [{ hook: posttoolusefailureRetryAdvisor }],
+  },
+  {
     event: "sessionStart",
     matcher: "startup",
     hooks: [
@@ -674,6 +679,7 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   stop: 180, // dominated by stop-auto-continue AI call (~120s) + stop-ship-checklist CI polling (~30s)
   preToolUse: 15, // concurrent: budget = slowest hook (~5s) + overhead
   postToolUse: 15, // concurrent: budget = slowest hook (~10s) + overhead
+  postToolUseFailure: 10,
   sessionStart: 20,
   preCompact: 15,
   userPromptSubmit: 15,

@@ -56,6 +56,7 @@ const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
     "Stop",
     "PreToolUse",
     "PostToolUse",
+    "PostToolUseFailure",
     "SessionStart",
     "SessionEnd",
     "UserPromptSubmit",
@@ -161,6 +162,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       stop: "Stop",
       preToolUse: "PreToolUse",
       postToolUse: "PostToolUse",
+      postToolUseFailure: "PostToolUseFailure",
       sessionStart: "SessionStart",
       sessionEnd: "SessionEnd",
       userPromptSubmit: "UserPromptSubmit",
@@ -215,6 +217,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       beforeShellExecution: "preToolUse",
       afterShellExecution: "postToolUse",
     },
+    // Cursor has no distinct tool-failure event; failures surface via postToolUse.
+    unsupportedEvents: ["postToolUseFailure"],
   },
   {
     id: "gemini",
@@ -249,7 +253,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       preCompact: "PreCompress",
       notification: "Notification",
     },
-    unsupportedEvents: ["subagentStart", "subagentStop"],
+    unsupportedEvents: ["postToolUseFailure", "subagentStart", "subagentStop"],
   },
   {
     id: "codex",
@@ -291,6 +295,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       userPromptSubmit: "UserPromptSubmit",
     },
     unsupportedEvents: [
+      "postToolUseFailure",
       "sessionEnd",
       "preCompact",
       "notification",
@@ -337,6 +342,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     unsupportedEvents: [
       "preToolUse",
       "postToolUse",
+      "postToolUseFailure",
       "sessionStart",
       "sessionEnd",
       "preCompact",

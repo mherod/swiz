@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**148 hooks. 12 event types. Every agent. Zero compromises.**
+**149 hooks. 13 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -281,6 +281,14 @@ Notification hooks are triggered by the daemon when it detects events such as ne
 | Hook | What it does |
 |------|-------------|
 | `notification-speak.ts` | Speaks daemon-detected assistant messages via platform-native TTS when `speak` is enabled. Triggered by the daemon's monitoring loop; fire-and-forget so it never blocks the notification path. |
+
+### PostToolUseFailure (1)
+
+PostToolUseFailure fires when a Claude tool call fails, giving hooks the failure signal directly instead of inferring it from transcript scans.
+
+| Hook | What it does |
+|------|-------------|
+| `posttoolusefailure-retry-advisor.ts` | Tracks consecutive same-tool failures per session in memory and, once a tool fails repeatedly, advises stopping to read the error and change approach rather than retrying blindly. |
 
 ## Plugin Marketplace
 

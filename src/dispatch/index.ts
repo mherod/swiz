@@ -17,6 +17,7 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   preToolUse: "preToolUse",
   stop: "blocking",
   postToolUse: "blocking",
+  postToolUseFailure: "context",
   sessionStart: "context",
   userPromptSubmit: "context",
   preCompact: "context",
