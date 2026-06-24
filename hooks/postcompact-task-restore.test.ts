@@ -1,13 +1,16 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { acquireEnvLock, releaseEnvLockFn } from "../src/utils/test-utils.ts"
 import { evaluatePostcompactTaskRestore } from "./postcompact-task-restore.ts"
 import type { CompactSnapshot } from "./precompact-task-snapshot.ts"
 
-// The shared compact-recovery helpers resolve task paths from $HOME. HOME is set
-// ONCE for the whole file (not per-test) so concurrent tests never race on the
-// shared env var; each test uses a unique session ID under ~/.claude/tasks/.
+// The shared compact-recovery helpers resolve task paths from $HOME. Mutating
+// process.env.HOME is process-global, so the env lock serializes this file's
+// HOME window against every other env-mutating test file running concurrently
+// (per the CLAUDE.md "no unguarded process.env.HOME mutation" rule). Each test
+// also uses a unique session ID under ~/.claude/tasks/.
 let home = ""
 let originalHome: string | undefined
 
@@ -21,16 +24,21 @@ async function writeSnapshot(dir: string, snapshot: CompactSnapshot): Promise<vo
   await writeFile(join(dir, "compact-snapshot.json"), JSON.stringify(snapshot))
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
+  await acquireEnvLock()
   originalHome = process.env.HOME
   home = await mkdtemp(join(tmpdir(), "swiz-postcompact-"))
   process.env.HOME = home
 })
 
-afterAll(async () => {
-  if (originalHome === undefined) delete process.env.HOME
-  else process.env.HOME = originalHome
-  if (home) await rm(home, { recursive: true, force: true })
+afterEach(async () => {
+  try {
+    if (originalHome === undefined) delete process.env.HOME
+    else process.env.HOME = originalHome
+    if (home) await rm(home, { recursive: true, force: true })
+  } finally {
+    releaseEnvLockFn()
+  }
 })
 
 describe("evaluatePostcompactTaskRestore", () => {
