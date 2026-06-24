@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**149 hooks. 13 event types. Every agent. Zero compromises.**
+**150 hooks. 14 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -264,6 +264,14 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 |-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `precompact-task-snapshot.ts` | Snapshots all current-session task IDs and statuses to disk before context compaction rewrites the transcript. The sessionstart-compact-context hook reads this snapshot on resume to verify and recreate any missing task files. |
 | `precompact-speak.ts`         | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction.                                                                      |
+
+### PostCompact (1)
+
+PostCompact fires immediately after the transcript is compacted, giving hooks a deterministic recovery point that no longer depends on SessionStart firing.
+
+| Hook | What it does |
+|------|-------------|
+| `postcompact-task-restore.ts` | Reads the pre-compaction task snapshot after compaction, recreates any task files lost in the rewrite, and injects recovery guidance (run TaskList, close stale tasks) directly — without relying on the SessionStart compact heuristic. |
 
 ### UserPromptSubmit (4)
 

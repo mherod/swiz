@@ -40,6 +40,7 @@ describe("Codex eventMap contract (hooks.json)", () => {
       "postToolUseFailure",
       "sessionEnd",
       "preCompact",
+      "postCompact",
       "notification",
       "subagentStart",
       "subagentStop",

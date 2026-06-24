@@ -555,6 +555,7 @@ describe("agents.ts", () => {
         "postToolUseFailure",
         "sessionEnd",
         "preCompact",
+        "postCompact",
         "notification",
         "subagentStart",
         "subagentStop",

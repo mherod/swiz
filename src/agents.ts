@@ -61,6 +61,7 @@ const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
     "SessionEnd",
     "UserPromptSubmit",
     "PreCompact",
+    "PostCompact",
     "Notification",
     "SubagentStart",
     "SubagentStop",
@@ -167,6 +168,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       sessionEnd: "SessionEnd",
       userPromptSubmit: "UserPromptSubmit",
       preCompact: "PreCompact",
+      postCompact: "PostCompact",
       notification: "Notification",
       subagentStart: "SubagentStart",
       subagentStop: "SubagentStop",
@@ -218,7 +220,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       afterShellExecution: "postToolUse",
     },
     // Cursor has no distinct tool-failure event; failures surface via postToolUse.
-    unsupportedEvents: ["postToolUseFailure"],
+    // Cursor has no post-compaction hook; only preCompact fires.
+    unsupportedEvents: ["postToolUseFailure", "postCompact"],
   },
   {
     id: "gemini",
@@ -253,7 +256,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       preCompact: "PreCompress",
       notification: "Notification",
     },
-    unsupportedEvents: ["postToolUseFailure", "subagentStart", "subagentStop"],
+    unsupportedEvents: ["postToolUseFailure", "postCompact", "subagentStart", "subagentStop"],
   },
   {
     id: "codex",
@@ -298,6 +301,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       "postToolUseFailure",
       "sessionEnd",
       "preCompact",
+      "postCompact",
       "notification",
       "subagentStart",
       "subagentStop",
@@ -346,6 +350,7 @@ export const AGENTS: AgentDef[] = registerAgents([
       "sessionStart",
       "sessionEnd",
       "preCompact",
+      "postCompact",
       "notification",
       "subagentStart",
       "subagentStop",

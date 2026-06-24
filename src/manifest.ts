@@ -6,6 +6,7 @@
 
 import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import notificationSpeak from "../hooks/notification-speak.ts"
+import postcompactTaskRestore from "../hooks/postcompact-task-restore.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-author-verification.ts"
 import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
@@ -510,6 +511,10 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [{ hook: precompactTaskSnapshot }, { hook: precompactSpeak }],
   },
   {
+    event: "postCompact",
+    hooks: [{ hook: postcompactTaskRestore }],
+  },
+  {
     event: "userPromptSubmit",
     hooks: [
       { hook: userpromptsubmitGitContext },
@@ -682,6 +687,7 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   postToolUseFailure: 10,
   sessionStart: 20,
   preCompact: 15,
+  postCompact: 10,
   userPromptSubmit: 15,
   preCommit: 30,
   commitMsg: 10,

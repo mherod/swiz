@@ -1,0 +1,202 @@
+// Shared post-compaction task-recovery helpers.
+//
+// Both the SessionStart(compact) hook and the dedicated PostCompact hook need to
+// read the compact-snapshot.json written by precompact-task-snapshot.ts, recreate
+// any task files lost during compaction, and render recovery guidance as
+// additionalContext. This module owns that logic so the two hooks share one
+// implementation instead of duplicating snapshot reconciliation.
+
+import {
+  buildCompactSnapshotSummary,
+  type CompactSnapshot,
+  type CompactSnapshotSummary,
+} from "../../hooks/precompact-task-snapshot.ts"
+import { getTaskToolName } from "./task-governance-messages.ts"
+import {
+  formatTaskList,
+  getSessionCompactSnapshotPath,
+  getSessionTaskPath,
+  isIncompleteTaskStatus,
+  readSessionTasks,
+  type SessionTask,
+} from "./task-recovery.ts"
+
+export const TASK_PREVIEW_LIMIT = 3
+export const TASK_SUBJECT_MAX_CHARS = 120
+// Leave headroom because buildContextHookOutput applies hook-message rephrasing
+// after this local trim, and some replacements are a few characters longer.
+export const COMPACT_CONTEXT_MAX_CHARS = 2320
+const BUDGET_TRUNCATION_NOTE = "[Compaction context truncated to fit budget.]"
+
+function summarizeSnapshot(snapshot: CompactSnapshot): CompactSnapshotSummary {
+  return snapshot.summary ?? buildCompactSnapshotSummary(snapshot.tasks)
+}
+
+function renderSnapshotSummary(snapshot: CompactSnapshot): string {
+  const summary = summarizeSnapshot(snapshot)
+  const lines = [
+    `Compaction summary: ${summary.completedCount} completed, ${summary.incompleteCount} incomplete before compaction.`,
+  ]
+
+  if (summary.completedHighlights.length > 0) {
+    lines.push(`Completed: ${summary.completedHighlights.join("; ")}`)
+  }
+  if (summary.openDecisions.length > 0) {
+    lines.push(`Open decisions: ${summary.openDecisions.join("; ")}`)
+  }
+  if (summary.nextActions.length > 0) {
+    lines.push(`Next actions: ${summary.nextActions.join("; ")}`)
+  }
+
+  return lines.join("\n")
+}
+
+function truncateToBudget(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+
+  const marker = `\n\n${BUDGET_TRUNCATION_NOTE}`
+  if (maxChars <= marker.length + 3) return text.slice(0, maxChars)
+  return `${text.slice(0, maxChars - marker.length - 3)}...${marker}`
+}
+
+export function joinSectionsWithinBudget(sections: string[], maxChars: number): string {
+  let out = ""
+  for (const section of sections) {
+    const next = out ? `${out}\n\n${section}` : section
+    if (next.length <= maxChars) {
+      out = next
+      continue
+    }
+
+    const spacerLength = out ? 2 : 0
+    const remaining = maxChars - out.length - spacerLength
+    if (remaining > 0) {
+      const truncatedSection = truncateToBudget(section, remaining)
+      out = out ? `${out}\n\n${truncatedSection}` : truncatedSection
+    }
+    break
+  }
+  return out
+}
+
+/**
+ * Read the compact snapshot for a session if it exists.
+ * Returns null when the snapshot file is absent or unreadable.
+ */
+export async function readCompactSnapshot(
+  sessionId: string,
+  home: string
+): Promise<CompactSnapshot | null> {
+  const snapshotPath = getSessionCompactSnapshotPath(sessionId, home)
+  if (!snapshotPath) return null
+  try {
+    const file = Bun.file(snapshotPath)
+    if (!(await file.exists())) return null
+    return (await file.json()) as CompactSnapshot
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Recreate a missing task file from snapshot data.
+ * Only called when the task JSON file is absent but the snapshot says it should exist.
+ */
+async function recreateTaskFile(
+  sessionId: string,
+  home: string,
+  snap: CompactSnapshot["tasks"][number]
+): Promise<void> {
+  const taskPath = getSessionTaskPath(sessionId, snap.id, home)
+  if (!taskPath) return
+  const task: Partial<SessionTask> & { id: string; subject: string; status: string } = {
+    id: snap.id,
+    subject: snap.subject,
+    status: snap.status,
+    blocks: [],
+    blockedBy: [],
+    ...(snap.activeForm ? { activeForm: snap.activeForm } : {}),
+    ...(snap.description ? { description: snap.description } : {}),
+  }
+  await Bun.write(taskPath, JSON.stringify(task, null, 2))
+}
+
+async function reconcileSnapshotTasks(
+  snapshot: CompactSnapshot,
+  sessionId: string,
+  home: string
+): Promise<{
+  recreated: Array<Pick<SessionTask, "id" | "status" | "subject">>
+  sections: string[]
+}> {
+  const sections: string[] = []
+  const recreated: Array<Pick<SessionTask, "id" | "status" | "subject">> = []
+
+  if (snapshot.tasks.length === 0) return { recreated, sections }
+
+  sections.push(renderSnapshotSummary(snapshot))
+
+  const existingTasks = await readSessionTasks(sessionId, home)
+  const existingIds = new Set(existingTasks.map((t) => t.id))
+  for (const snap of snapshot.tasks) {
+    if (existingIds.has(snap.id)) continue
+    await recreateTaskFile(sessionId, home, snap)
+    recreated.push({ id: snap.id, status: snap.status, subject: snap.subject })
+  }
+
+  if (recreated.length > 0) {
+    const restoredList = formatTaskList(recreated, {
+      limit: TASK_PREVIEW_LIMIT,
+      overflowLabel: "restored task file(s)",
+      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
+    })
+    sections.push(
+      `Compact snapshot restored ${recreated.length} missing task file(s):\n` +
+        restoredList +
+        `\n\nThese task files were recreated from the pre-compaction snapshot. ` +
+        `Verify their status reflects reality and update as needed.`
+    )
+  }
+
+  return { recreated, sections }
+}
+
+function buildIncompleteTaskSection(tasks: SessionTask[]): string {
+  const taskUpdateName = getTaskToolName("TaskUpdate")
+  return (
+    `This session has ${tasks.length} incomplete task(s) that survived compaction:\n` +
+    formatTaskList(tasks, {
+      limit: TASK_PREVIEW_LIMIT,
+      overflowLabel: "incomplete task(s)",
+      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
+    }) +
+    `\n\nIMPORTANT: Complete or update these tasks using ${taskUpdateName} — do NOT create new tasks ` +
+    `for the same work. Every task in this session must be completed before stopping. ` +
+    `If the work described by a task is already done, mark it completed immediately.`
+  )
+}
+
+/**
+ * Build the recovery sections shown after compaction: snapshot summary,
+ * recreated-task notice, and the surviving-incomplete-task reminder.
+ */
+export async function buildTaskSections(
+  snapshot: CompactSnapshot | null,
+  sessionId: string,
+  home: string
+): Promise<string[]> {
+  const sections: string[] = []
+
+  if (snapshot) {
+    const result = await reconcileSnapshotTasks(snapshot, sessionId, home)
+    sections.push(...result.sections)
+  }
+
+  const currentTasks = await readSessionTasks(sessionId, home)
+  const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
+  if (currentIncomplete.length > 0) {
+    sections.push(buildIncompleteTaskSection(currentIncomplete))
+  }
+
+  return sections
+}
