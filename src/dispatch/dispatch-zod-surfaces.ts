@@ -9,6 +9,7 @@ import { debugLog } from "../debug.ts"
 import {
   hookOutputSchema,
   notificationHookInputSchema,
+  permissionRequestHookInputSchema,
   postCompactHookInputSchema,
   postToolUseHookInputSchema,
   preCommitHookInputSchema,
@@ -48,6 +49,7 @@ export const DISPATCH_CANONICAL_INBOUND_SCHEMAS: Record<string, z.ZodType<Record
   userPromptSubmit: userPromptSubmitHookInputSchema as z.ZodType<Record<string, any>>,
   preCompact: preCompactHookInputSchema as z.ZodType<Record<string, any>>,
   postCompact: postCompactHookInputSchema as z.ZodType<Record<string, any>>,
+  permissionRequest: permissionRequestHookInputSchema as z.ZodType<Record<string, any>>,
   notification: notificationHookInputSchema as z.ZodType<Record<string, any>>,
   subagentStart: subagentStartHookInputSchema as z.ZodType<Record<string, any>>,
   sessionEnd: sessionEndHookInputSchema as z.ZodType<Record<string, any>>,

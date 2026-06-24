@@ -22,6 +22,7 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   userPromptSubmit: "context",
   preCompact: "context",
   postCompact: "context",
+  permissionRequest: "context",
   notification: "context",
   subagentStart: "context",
   subagentStop: "blocking",

@@ -6,6 +6,7 @@
 
 import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import notificationSpeak from "../hooks/notification-speak.ts"
+import permissionrequestInfractionRecord from "../hooks/permissionrequest-infraction-record.ts"
 import postcompactTaskRestore from "../hooks/postcompact-task-restore.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-author-verification.ts"
@@ -515,6 +516,10 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [{ hook: postcompactTaskRestore }],
   },
   {
+    event: "permissionRequest",
+    hooks: [{ hook: permissionrequestInfractionRecord }],
+  },
+  {
     event: "userPromptSubmit",
     hooks: [
       { hook: userpromptsubmitGitContext },
@@ -688,6 +693,7 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   sessionStart: 20,
   preCompact: 15,
   postCompact: 10,
+  permissionRequest: 10,
   userPromptSubmit: 15,
   preCommit: 30,
   commitMsg: 10,

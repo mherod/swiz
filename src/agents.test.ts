@@ -556,6 +556,7 @@ describe("agents.ts", () => {
         "sessionEnd",
         "preCompact",
         "postCompact",
+        "permissionRequest",
         "notification",
         "subagentStart",
         "subagentStop",

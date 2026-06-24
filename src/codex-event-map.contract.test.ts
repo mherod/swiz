@@ -41,6 +41,7 @@ describe("Codex eventMap contract (hooks.json)", () => {
       "sessionEnd",
       "preCompact",
       "postCompact",
+      "permissionRequest",
       "notification",
       "subagentStart",
       "subagentStop",

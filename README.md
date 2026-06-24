@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**150 hooks. 14 event types. Every agent. Zero compromises.**
+**151 hooks. 15 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -272,6 +272,14 @@ PostCompact fires immediately after the transcript is compacted, giving hooks a 
 | Hook | What it does |
 |------|-------------|
 | `postcompact-task-restore.ts` | Reads the pre-compaction task snapshot after compaction, recreates any task files lost in the rewrite, and injects recovery guidance (run TaskList, close stale tasks) directly — without relying on the SessionStart compact heuristic. |
+
+### PermissionRequest (1)
+
+PermissionRequest fires when a tool call needs a permission decision, giving the infraction layer visibility into permission-gated attempts it never used to see.
+
+| Hook | What it does |
+|------|-------------|
+| `permissionrequest-infraction-record.ts` | Records each permission request per session, keyed the same way the infraction scanner keys blocked attempts, and escalates an advisory when the same action repeatedly needs permission instead of being re-attempted blindly. |
 
 ### UserPromptSubmit (4)
 
