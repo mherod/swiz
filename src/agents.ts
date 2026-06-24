@@ -51,6 +51,9 @@ export interface AgentDef {
   additionalDispatchEntries?: Record<string, string>
 }
 
+// Which Claude lifecycle events swiz maps vs. intentionally leaves reserved (and why)
+// is documented in docs/lifecycle-event-coverage.md, kept in sync by
+// src/lifecycle-event-coverage.test.ts.
 const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
   claude: new Set([
     "Stop",
