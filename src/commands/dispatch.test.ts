@@ -393,6 +393,14 @@ describe("dispatch routing", () => {
             CODEX_THREAD_ID: "test-codex-thread",
             SWIZ_NO_DAEMON: undefined,
             SWIZ_DAEMON_PORT: String(server.port),
+            // Neutralize agent env vars inherited from the parent process (the
+            // runner spreads ...process.env, so e.g. Claude Code's CLAUDECODE
+            // leaks in). detectCurrentAgentFromEnv matches the first agent in
+            // AGENTS order, so a leaked CLAUDECODE/GEMINI_* would shadow
+            // CODEX_THREAD_ID and route output through the wrong sanitizer.
+            CLAUDECODE: undefined,
+            GEMINI_CLI: undefined,
+            GEMINI_PROJECT_DIR: undefined,
           },
         }
       )
