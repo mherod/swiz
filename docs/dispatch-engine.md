@@ -49,6 +49,40 @@ A group matches when:
 
 ---
 
+## Hook Execution Paths
+
+A matched hook runs on one of **three** execution paths. `runEntry()` (`src/dispatch/engine.ts`) picks the path from how the hook is defined and whether dispatch is running inside the daemon:
+
+| Path | When | Mechanism | Key tradeoffs |
+|------|------|-----------|---------------|
+| **Inline** | Hook is a `SwizHook` (`isInlineHookDef(hook)` true) | `runInlineHook()` calls `hook.run(payload)` in the dispatch process | No spawn cost; shares the runtime (module caches, daemon state). Must not call `process.exit`. |
+| **Worker pool** | `async: true` **file** hook, daemon context only | `WorkerPool.runHook()` runs `bun hooks/<file>.ts` in a pooled Bun `Worker` | Parallel and awaited, so the daemon can enforce timeouts and propagate abort without blocking its main thread. |
+| **Subprocess** | Any other file hook | `runHook()` spawns `bun hooks/<file>.ts` per call | Full isolation (own env, cwd, process); highest per-call cost (~Bun cold start). |
+
+### Inline hooks — `runInlineHook()`
+
+Hooks that implement the `SwizHook` interface (`hooks/SwizHook.ts` — a `{ name, event, run() }` object, optionally `async: true`) run **in-process**. `runEntry()` detects them via `isInlineHookDef()` and calls `runInlineHook()` (`src/dispatch/engine.ts`):
+
+1. Parse the payload and validate it against `hookBaseSchema`.
+2. Call `hook.run(input)` inside `withInlineSwizHookRun()` — this makes the subprocess-only helpers (`denyPreToolUse`, `emitContext`, …) throw a `SwizHookExit` carrying their output instead of calling `process.exit(0)`.
+3. Validate the returned (or thrown) output against `hookOutputSchema` and wrap it in the **same `HookRunResult` shape** the subprocess path returns, so dispatch strategies need no special-casing.
+
+Inline hooks pay no spawn cost and can share in-memory state, but because they share the dispatch process they must never call `process.exit` directly — use the SwizHook output helpers. Async inline hooks (`scheduleAsyncHookEntry`) also run in-process; they do **not** use the worker pool.
+
+### Worker pool — `WorkerPool.runHook()`
+
+`src/dispatch/worker-pool.ts` runs **async, file-based** hooks on a pool of Bun `Worker` threads (`hook-worker.ts`). This path is used **only inside the daemon** — in the CLI, async file hooks are pure fire-and-forget subprocess spawns (`runHook` without await).
+
+- **Pool size**: `max(1, cpus().length - 1)` workers, created lazily on first `runHook()` and reused (singleton via `getWorkerPool()`).
+- **Queue semantics**: jobs are pushed to a queue; `processQueue()` hands queued jobs to idle workers. The drain is serialized (`processing` flag) — a re-entrant call (e.g. a worker's `onmessage` resolving in the same tick) defers via `queueMicrotask` so no job is stranded. When every worker is busy, jobs wait in the queue.
+- **Supervisor timeout**: each dispatched job arms a supervisor timer of `hookTimeout + 10s` (`SUPERVISOR_GRACE_SEC`). If the worker does not respond in time the job is rejected and the stuck worker is terminated and replaced in its slot.
+- **Abort**: queued jobs are rejected immediately on abort; in-flight jobs are left to the supervisor/per-hook timeout, and the worker is terminated and replaced to reclaim the slot.
+- **Shutdown**: `terminate()` rejects all pending and queued jobs and tears down the workers; the pool is terminated on `process` `exit`/`SIGTERM`/`SIGINT`.
+
+### Subprocess — `runHook()`
+
+The default path for synchronous file hooks (and for CLI async hooks). Detailed below.
+
 ## Hook Execution — `runHook()`
 
 Each hook is spawned as a subprocess:
@@ -328,6 +362,19 @@ All dispatch activity is logged to `/tmp/swiz-dispatch.log`:
 ```
 
 Slow hooks (> 3000ms) appear with a `[slow: Xms]` annotation.
+
+---
+
+## Known Constraints
+
+### 2-project active-watch cap
+
+The daemon watches at most **`MAX_WATCHED_PROJECTS = 2`** projects' files at once (`src/commands/daemon.ts`). Each watched project registers file watchers on its `.git/`, project settings, and active transcript — on top of the always-on global watchers for `src/manifest.ts`, `hooks/`, and global settings.
+
+- **LRU eviction on register**: when a hook dispatches for a 3rd project, `registerProjectWatchers()` evicts the least-recently-seen project (`evictProject()` unregisters its watchers by the `:${cwd}` label suffix) before registering the new one.
+- **Idle eviction**: a periodic sweep (`evictIdleProjects()`) drops any project not seen for `PROJECT_IDLE_EVICTION_MS = 3 min`.
+
+**Latency implication**: switching between more than two projects means an evicted project's watchers must be re-registered on its next hook dispatch (a cold re-warm). The dispatch itself still runs; only the warm-watch optimisations (pre-flushed status-line/snapshot caches) are briefly cold until the watchers re-fire. Steady-state work across ≤2 projects stays fully warm.
 
 ---
 
