@@ -13,7 +13,7 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { narrateSession } from "../src/speech.ts"
 
-export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateSpeakNarrator(input: unknown): Promise<SwizHookOutput> {
   if (!input || typeof input !== "object") return {}
 
   const record = input as Record<string, any>
@@ -31,19 +31,19 @@ export async function evaluatePosttooluseSpeakNarrator(input: unknown): Promise<
   return {}
 }
 
-const posttooluseSpeakNarrator: SwizHook<Record<string, any>> = {
-  name: "posttooluse-speak-narrator",
+const speakNarrator: SwizHook<Record<string, any>> = {
+  name: "speak-narrator",
   event: "postToolUse",
   timeout: 30,
   async: true,
 
   async run(input) {
-    return await evaluatePosttooluseSpeakNarrator(input)
+    return await evaluateSpeakNarrator(input)
   },
 }
 
-export default posttooluseSpeakNarrator
+export default speakNarrator
 
 if (import.meta.main) {
-  await runSwizHookAsMain(posttooluseSpeakNarrator)
+  await runSwizHookAsMain(speakNarrator)
 }

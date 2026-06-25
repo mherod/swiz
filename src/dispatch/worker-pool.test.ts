@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { WorkerPool } from "./worker-pool.ts"
 
-/** Exits quickly when speak is off / payload is empty (see posttooluse-speak-narrator.ts). */
-const FAST_ASYNC_HOOK = "posttooluse-speak-narrator.ts"
+/** Exits quickly when speak is off / payload is empty (see speak-narrator.ts). */
+const FAST_ASYNC_HOOK = "speak-narrator.ts"
 
 describe("WorkerPool", () => {
   it("drains when queued jobs exceed worker count", async () => {

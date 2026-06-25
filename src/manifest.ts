@@ -27,7 +27,6 @@ import posttoolusePushAutosteerIssue from "../hooks/posttooluse-push-autosteer-i
 import posttoolusePostPushCooldown from "../hooks/posttooluse-push-cooldown.ts"
 import posttooluseSessionEdits from "../hooks/posttooluse-session-edits.ts"
 import posttoolusSkillSteps from "../hooks/posttooluse-skill-steps.ts"
-import posttooluseSpeakNarrator from "../hooks/posttooluse-speak-narrator.ts"
 import posttooluseStateTransition from "../hooks/posttooluse-state-transition.ts"
 import posttooluseTaskAdvisor from "../hooks/posttooluse-task-advisor.ts"
 import posttooluseTaskCountContext from "../hooks/posttooluse-task-count-context.ts"
@@ -128,6 +127,7 @@ import sessionstartSelfHeal from "../hooks/sessionstart-self-heal.ts"
 import sessionstartStateContext from "../hooks/sessionstart-state-context.ts"
 import sessionstartWebsearchSuggester from "../hooks/sessionstart-websearch-suggester.ts"
 import sessionstartWeeklyRetroPrompt from "../hooks/sessionstart-weekly-retro-prompt.ts"
+import speakNarrator from "../hooks/speak-narrator.ts"
 import stopAutoContinue from "../hooks/stop-auto-continue.ts"
 import stopBranchConflicts from "../hooks/stop-branch-conflicts.ts"
 import stopCompletionAuditor from "../hooks/stop-completion-auditor.ts"
@@ -275,12 +275,12 @@ export const bundledHookManifest: HookGroup[] = [
       // Session wrap-up
       { hook: stopRequiredSkills },
       { hook: stopAutoContinue },
-      { hook: posttooluseSpeakNarrator },
+      { hook: speakNarrator },
     ],
   },
   {
     event: "preToolUse",
-    hooks: [{ hook: posttooluseSpeakNarrator }, { hook: pretooluseTaskGovernance }],
+    hooks: [{ hook: speakNarrator }, { hook: pretooluseTaskGovernance }],
   },
   {
     event: "preToolUse",
@@ -421,7 +421,7 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [
       { hook: posttoolusGitContext },
       { hook: posttooluseMcpChannelTrace },
-      { hook: posttooluseSpeakNarrator },
+      { hook: speakNarrator },
       { hook: posttooluseAutoSteer },
     ],
   },
@@ -497,7 +497,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: sessionstartWebsearchSuggester },
       { hook: sessionstartMorningStandupPrompt },
       { hook: sessionstartWeeklyRetroPrompt },
-      { hook: posttooluseSpeakNarrator },
+      { hook: speakNarrator },
     ],
   },
   {
@@ -523,12 +523,12 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: userpromptsubmitGitContext },
       { hook: userpromptsubmitTaskAdvisor },
       { hook: userpromptsubmitSkillSteps },
-      { hook: posttooluseSpeakNarrator },
+      { hook: speakNarrator },
     ],
   },
   {
     event: "notification",
-    hooks: [{ hook: posttooluseSpeakNarrator }],
+    hooks: [{ hook: speakNarrator }],
   },
   {
     event: "subagentStart",

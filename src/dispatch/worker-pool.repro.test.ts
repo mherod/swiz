@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { WorkerPool } from "./worker-pool.ts"
 
-const FAST_ASYNC_HOOK = "posttooluse-speak-narrator.ts"
+const FAST_ASYNC_HOOK = "speak-narrator.ts"
 
 describe("WorkerPool processQueue serialization", () => {
   it("completes all jobs when runHook fans into processQueue concurrently", async () => {
