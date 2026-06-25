@@ -139,7 +139,7 @@ export async function pruneStaleIncomingCaptures(
   }
 }
 
-export interface IncomingDispatchCaptureArgs {
+interface IncomingDispatchCaptureArgs {
   canonicalEvent: string
   hookEventName: string
   parseError: boolean

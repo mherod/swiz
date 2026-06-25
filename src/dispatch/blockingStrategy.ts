@@ -177,7 +177,7 @@ async function tryAutoSteerStopBlock(
  * Slower hooks (e.g. `stop-personal-repo-issues` which queries the GitHub API)
  * are valuable for long-term session guidance but get starved when a faster
  * file-based hook blocks first. This window lets all hooks race fairly. */
-export const STOP_COLLECTION_TIMEOUT_MS = 10_000
+const STOP_COLLECTION_TIMEOUT_MS = 10_000
 
 /** Process blocking hook results, collecting contexts from all hooks.
  *  For stop events: runs all hooks, forwards first block, merges all contexts.

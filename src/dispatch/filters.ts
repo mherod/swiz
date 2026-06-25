@@ -96,7 +96,7 @@ export function countHooks(groups: HookGroup[]): number {
  *
  * Extracted from 5 duplicate inline implementations (issue #351).
  */
-export function filterHooksFromGroups(
+function filterHooksFromGroups(
   groups: HookGroup[],
   predicate: (hook: HookGroup["hooks"][number]) => boolean
 ): HookGroup[] {

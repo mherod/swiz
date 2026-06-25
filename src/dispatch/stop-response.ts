@@ -14,16 +14,10 @@ import { isBlock } from "./engine.ts"
 export const DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT = "Stop hooks completed with no findings."
 
 /** JSON-serializable values for pre-parse dispatch envelopes (avoids eslint `no-restricted-types` on `unknown`). */
-export type DispatchJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | DispatchJsonValue[]
-  | DispatchJsonRecord
+type DispatchJsonValue = string | number | boolean | null | DispatchJsonValue[] | DispatchJsonRecord
 
 /** Loose object shape for merged hook/dispatch JSON before {@link stopHookOutputSchema.parse}. */
-export type DispatchJsonRecord = { [key: string]: DispatchJsonValue }
+type DispatchJsonRecord = { [key: string]: DispatchJsonValue }
 
 export function isStopLikeDispatchEvent(canonicalEvent: string): boolean {
   return canonicalEvent === "stop" || canonicalEvent === "subagentStop"
