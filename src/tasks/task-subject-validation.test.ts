@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import { type CompoundMatch, detect, formatMessage } from "./task-subject-validation.ts"
 
-function withHome<T>(home: string | undefined, fn: () => T): T {
+// detect() reads process.env.HOME to recognize home-directory paths. Mutating it
+// is process-global, so the env lock serializes this window against every other
+// env-mutating test file under `bun test --concurrent` (issue #680). The fn() body
+// is synchronous, so the HOME window stays atomic within the held lock.
+async function withHome<T>(home: string | undefined, fn: () => T): Promise<T> {
+  await acquireEnvLock()
   const previousHome = process.env.HOME
   if (home === undefined) {
     delete process.env.HOME
@@ -17,6 +23,7 @@ function withHome<T>(home: string | undefined, fn: () => T): T {
     } else {
       process.env.HOME = previousHome
     }
+    releaseEnvLockFn()
   }
 }
 
@@ -198,8 +205,8 @@ describe("detect", () => {
   })
 
   describe("home directory rejection", () => {
-    test("rejects literal home directory paths", () => {
-      withHome("/Users/example", () => {
+    test("rejects literal home directory paths", async () => {
+      await withHome("/Users/example", () => {
         const result = detect("Edit /Users/example/Development/swiz/src/tasks/file.ts")
         expect(result.matched).toBe(true)
         if (!result.matched) return
@@ -214,14 +221,14 @@ describe("detect", () => {
       expect(detect("Inspect ${HOME}/.claude/tasks/session")).toMatchObject({ matched: true })
     })
 
-    test("does not reject repo-relative paths", () => {
-      withHome("/Users/example", () => {
+    test("does not reject repo-relative paths", async () => {
+      await withHome("/Users/example", () => {
         expect(detect("Edit src/tasks/task-subject-validation.ts").matched).toBe(false)
       })
     })
 
-    test("does not reject path prefixes that only resemble home", () => {
-      withHome("/Users/example", () => {
+    test("does not reject path prefixes that only resemble home", async () => {
+      await withHome("/Users/example", () => {
         expect(detect("Inspect /Users/example-work/project").matched).toBe(false)
       })
     })

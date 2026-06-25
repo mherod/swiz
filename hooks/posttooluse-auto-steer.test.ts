@@ -4,17 +4,25 @@ import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getAutoSteerStore, resetAutoSteerStore } from "../src/auto-steer-store.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../src/utils/test-utils.ts"
 import { getTriggersToDeliver } from "./posttooluse-auto-steer.ts"
 
 // In-process unit tests for the trigger-selection logic — no hook subprocess,
 // no AppleScript send (getTriggersToDeliver only reads the queue + tool record).
+//
+// These tests point process.env.HOME at a temp dir so the auto-steer store
+// resolves under an isolated root. That mutation is process-global, so the env
+// lock serializes this file's HOME window against every other env-mutating test
+// file running under `bun test --concurrent` (per the CLAUDE.md "no unguarded
+// process.env.HOME mutation" rule; see issue #680).
 
 const SESSION = "sess-task-triggers"
 const tmpDirs: string[] = []
 let originalHome: string | undefined
 
 describe("posttooluse-auto-steer getTriggersToDeliver", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await acquireEnvLock()
     resetAutoSteerStore()
     originalHome = process.env.HOME
     const home = mkdtempSync(join(tmpdir(), "swiz-autosteer-trigger-"))
@@ -23,11 +31,15 @@ describe("posttooluse-auto-steer getTriggersToDeliver", () => {
   })
 
   afterEach(async () => {
-    resetAutoSteerStore()
-    if (originalHome === undefined) delete process.env.HOME
-    else process.env.HOME = originalHome
-    for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true })
-    tmpDirs.length = 0
+    try {
+      resetAutoSteerStore()
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true })
+      tmpDirs.length = 0
+    } finally {
+      releaseEnvLockFn()
+    }
   })
 
   test("delivers task_created when the tool was a TaskCreate", async () => {

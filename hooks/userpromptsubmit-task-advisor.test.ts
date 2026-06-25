@@ -1,6 +1,6 @@
 // Unit tests for the userPromptSubmit task-advisor hook.
 import { describe, expect, test } from "bun:test"
-import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 import { evaluateUserpromptsubmitTaskAdvisor } from "./userpromptsubmit-task-advisor.ts"
 
 describe("userpromptsubmit-task-advisor inline validation", () => {
@@ -9,6 +9,9 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
   test("injects advisory context for codex/update_plan-style planning agents", async () => {
     const homeDir = await tmp.create()
     const originalHome = process.env.HOME
+    // process.env.HOME is process-global; serialize this window with the env
+    // lock so it cannot bleed into concurrent test files (issue #680).
+    await acquireEnvLock()
     try {
       process.env.HOME = homeDir
       const result = await evaluateUserpromptsubmitTaskAdvisor({
@@ -24,6 +27,7 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
       })
     } finally {
       process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 
@@ -44,6 +48,9 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
     })
 
     const originalHome = process.env.HOME
+    // Serialize the HOME mutation with the env lock (issue #680). The writeTask
+    // seeding above targets homeDir directly, so it is safe outside the lock.
+    await acquireEnvLock()
     try {
       process.env.HOME = homeDir
 
@@ -63,6 +70,7 @@ describe("userpromptsubmit-task-advisor inline validation", () => {
       expect(context).toContain("create a task for this prompt")
     } finally {
       process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 })

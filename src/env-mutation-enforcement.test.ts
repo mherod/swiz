@@ -26,15 +26,12 @@ const HOME_MUTATION_RE = /process\.env\.HOME\s*=(?!=)/
 // Pre-existing offenders awaiting conversion to the env lock — tracked by #680.
 // DO NOT add to this list. Convert the file to acquireEnvLock/releaseEnvLockFn instead.
 const EXEMPT_HOME_FILES = new Set([
-  "hooks/posttooluse-auto-steer.test.ts",
   "hooks/pretooluse-apply-rsc-gate.test.ts",
   "hooks/stop-auto-continue.test.ts",
-  "hooks/userpromptsubmit-task-advisor.test.ts",
   "src/commands/memory.test.ts",
   "src/commands/tasks.test.ts",
   "src/dispatch/execute.test.ts",
   "src/tasks/codex-update-plan.test.ts",
-  "src/tasks/task-subject-validation.test.ts",
 ])
 
 async function collectTestFiles(): Promise<string[]> {
