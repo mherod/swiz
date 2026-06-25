@@ -152,6 +152,32 @@ describe("get-test-scope parent-bundle lookup", () => {
     expect(result.stdout).toContain("hooks/my-bundle.test.ts")
   })
 
+  test("a directly-edited SKIP_PATTERNS test still runs targeted (not filtered out)", () => {
+    // dispatch.test.ts matches a SKIP_PATTERNS entry ("commands/dispatch.test").
+    // Editing it must still emit it as a targeted test — otherwise the scope is
+    // empty and lefthook falls through to the flaky safe-subset broad run.
+    const dir = join(
+      tmpdir(),
+      `swiz-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(join(dir, "src", "commands"), { recursive: true })
+    writeFileSync(join(dir, "src", "commands", "dispatch.test.ts"), "// dispatch test\n")
+    git(["init"], dir)
+    git(["add", "."], dir)
+    git(["commit", "--allow-empty-message", "-m", "init"], dir)
+    const baseCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).stdout.trim()
+    writeFileSync(join(dir, "src", "commands", "dispatch.test.ts"), "// dispatch test (modified)\n")
+    git(["add", "."], dir)
+    git(["commit", "-m", "edit skip-listed test"], dir)
+
+    const result = runScopeScriptFromDir(dir, { CI_BASE: baseCommit })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("src/commands/dispatch.test.ts")
+  })
+
   test("direct entry hooks/<bundle>.ts still returns hooks/<bundle>.test.ts", () => {
     const dir = join(
       tmpdir(),

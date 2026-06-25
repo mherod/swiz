@@ -40,6 +40,10 @@ const base = resolveBase()
 const changedFiles = getGitOutput(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean)
 
 const testFiles = new Set<string>()
+// Test files the developer changed directly. These must always run, even when
+// they match SKIP_PATTERNS — skipping a file you just edited would drop the only
+// test that exercises the change and fall through to the flaky safe-subset run.
+const directlyChangedTests = new Set<string>()
 
 /**
  * Locate test files associated with a sub-module entry by walking up to its
@@ -88,6 +92,7 @@ for (const file of changedFiles) {
 
   if (file.endsWith(".test.ts") || file.endsWith(".test.tsx") || file.endsWith(".spec.ts")) {
     testFiles.add(file)
+    directlyChangedTests.add(file)
     continue
   }
   if (!file.endsWith(".ts") && !file.endsWith(".tsx")) continue
@@ -149,7 +154,9 @@ const SKIP_PATTERNS = [
   "commands/idea.test",
 ]
 
-const filteredTests = Array.from(testFiles).filter((f) => !SKIP_PATTERNS.some((p) => f.includes(p)))
+const filteredTests = Array.from(testFiles).filter(
+  (f) => directlyChangedTests.has(f) || !SKIP_PATTERNS.some((p) => f.includes(p))
+)
 
 if (filteredTests.length > 0 && filteredTests.length <= 15) {
   process.stdout.write(filteredTests.join(" "))
