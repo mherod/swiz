@@ -14,8 +14,8 @@ import {
   isGitRepo,
   SOURCE_EXT_RE,
   sanitizeSessionId,
-  tryFileFollowUpIssue,
 } from "../src/utils/hook-utils.ts"
+import { tryFileFollowUpIssue } from "../src/utils/issue-guidance.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
 export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/

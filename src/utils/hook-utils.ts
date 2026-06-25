@@ -203,17 +203,6 @@ export { SwizHookExit } from "../inline-hook-context.ts"
 
 export { type ActionPlanItem, expandSkillReferences, formatActionPlan, mergeActionPlanIntoTasks }
 
-// ─── Follow-up issue filing + issue guidance ────────────────────────────
-// Extracted to ./issue-guidance.ts (issue #678); re-exported here so the stop
-// hooks that file follow-up issues keep importing from hook-utils.ts unchanged.
-export {
-  buildIssueGuidance,
-  type FileFollowUpIssueResult,
-  type FollowUpIssueOptions,
-  fileFollowUpIssue,
-  tryFileFollowUpIssue,
-} from "./issue-guidance.ts"
-
 // ─── Git / CLI helpers ──────────────────────────────────────────────────
 // Canonical definitions live in src/git-helpers.ts. Imported here so
 // internal callers within hook-utils can reference them, and re-exported

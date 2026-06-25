@@ -3,7 +3,8 @@
 // Builds the AI prompt used to generate next-step suggestions and reflections
 
 import type { AmbitionMode } from "../../src/settings.ts"
-import { buildIssueGuidance, skillAdvice } from "../../src/utils/hook-utils.ts"
+import { skillAdvice } from "../../src/utils/hook-utils.ts"
+import { buildIssueGuidance } from "../../src/utils/issue-guidance.ts"
 
 // ─── Prompt constants ────────────────────────────────────────────────────────
 
