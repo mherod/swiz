@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-25
+
+### Removals
+
+- **`pretooluse-pr-changes-skill-gate` removed** — Committing and pushing to a
+  branch whose open PR has `CHANGES_REQUESTED` reviews is now allowed. The gate
+  previously blocked `git commit` and `git push` until `/pr-comments-address`
+  was invoked, but that created a catch-22: the commits that *address* the
+  requested changes could not be pushed without first dismissing the review,
+  the wrong kind of race condition. Reviewer feedback is still surfaced by the
+  Stop-time PR-feedback hooks and `pretooluse-pr-changes-branch-guard` (which
+  only blocks switching *away* from such a branch). Hook total: 151 → 150.
+
 ## 2026-06-24
 
 ### Features
