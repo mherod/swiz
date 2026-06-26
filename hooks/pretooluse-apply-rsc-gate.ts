@@ -5,6 +5,8 @@
 // Gates edits to files matching:
 //   **/app/**/page.tsx          — Next.js App Router page components
 //   **/layout.tsx               — any layout component
+//   **/app/**/error.tsx         — App Router error boundaries (Client Components)
+//   **/app/**/loading.tsx       — App Router loading/Suspense boundaries
 //   **/app/**/*-client.tsx      — colocated Client Component files under app/
 //
 // When the apply-rsc skill is not installed on this machine, the gate is skipped
@@ -32,13 +34,23 @@ import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 const SKILL_NAME = "apply-rsc"
 
 // Matches **/app/**/page.tsx (Next.js App Router pages), **/layout.tsx (any
-// layout file), and **/app/**/*-client.tsx (colocated Client Component files).
+// layout file), **/app/**/error.tsx and **/app/**/loading.tsx (App Router error
+// and loading boundaries, at root or nested), and **/app/**/*-client.tsx
+// (colocated Client Component files).
 const RSC_PAGE_RE = /(?:^|[/\\])app[/\\].+[/\\]page\.tsx$/
 const LAYOUT_RE = /(?:^|[/\\])layout\.tsx$/
+const APP_ERROR_RE = /(?:^|[/\\])app[/\\](?:.+[/\\])?error\.tsx$/
+const APP_LOADING_RE = /(?:^|[/\\])app[/\\](?:.+[/\\])?loading\.tsx$/
 const APP_CLIENT_RE = /(?:^|[/\\])app[/\\].+-client\.tsx$/
 
 export function isRscGatedFile(filePath: string): boolean {
-  return RSC_PAGE_RE.test(filePath) || LAYOUT_RE.test(filePath) || APP_CLIENT_RE.test(filePath)
+  return (
+    RSC_PAGE_RE.test(filePath) ||
+    LAYOUT_RE.test(filePath) ||
+    APP_ERROR_RE.test(filePath) ||
+    APP_LOADING_RE.test(filePath) ||
+    APP_CLIENT_RE.test(filePath)
+  )
 }
 
 const pretooluseApplyRscGate: SwizFileEditHook = {
@@ -73,7 +85,7 @@ const pretooluseApplyRscGate: SwizFileEditHook = {
     const window = formatCurrentSessionUsageWindow(recencyOptions)
 
     if (invokedSkills.includes(SKILL_NAME)) {
-      return preToolUseAllow(`${skillRef} was invoked recently — RSC page/layout edit allowed.`)
+      return preToolUseAllow(`${skillRef} was invoked recently — RSC file edit allowed.`)
     }
 
     const fileName = filePath.split(/[/\\]/).pop() ?? filePath
@@ -82,7 +94,7 @@ const pretooluseApplyRscGate: SwizFileEditHook = {
         `Skills used recently (${window}): ${
           invokedSkills.length === 0 ? "(none)" : invokedSkills.map((s) => `/${s}`).join(", ")
         }\n\n` +
-        `Invoke ${skillRef} before editing RSC page, layout, or client component files. ` +
+        `Invoke ${skillRef} before editing RSC page, layout, error, loading, or client component files. ` +
         `The skill enforces correct Server/Client Component boundaries and import conventions.`
     )
   },

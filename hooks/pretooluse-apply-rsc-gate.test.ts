@@ -128,6 +128,30 @@ describe("isRscGatedFile", () => {
       expect(isRscGatedFile("src/app/(auth)/login/layout.tsx")).toBe(true)
     })
 
+    test("app/error.tsx at root", () => {
+      expect(isRscGatedFile("app/error.tsx")).toBe(true)
+    })
+
+    test("app/dashboard/error.tsx", () => {
+      expect(isRscGatedFile("app/dashboard/error.tsx")).toBe(true)
+    })
+
+    test("src/app/(auth)/login/error.tsx", () => {
+      expect(isRscGatedFile("src/app/(auth)/login/error.tsx")).toBe(true)
+    })
+
+    test("app/loading.tsx at root", () => {
+      expect(isRscGatedFile("app/loading.tsx")).toBe(true)
+    })
+
+    test("app/dashboard/loading.tsx", () => {
+      expect(isRscGatedFile("app/dashboard/loading.tsx")).toBe(true)
+    })
+
+    test("absolute: /project/src/app/users/loading.tsx", () => {
+      expect(isRscGatedFile("/project/src/app/users/loading.tsx")).toBe(true)
+    })
+
     test("app/dashboard/widget-client.tsx", () => {
       expect(isRscGatedFile("app/dashboard/widget-client.tsx")).toBe(true)
     })
@@ -180,6 +204,22 @@ describe("isRscGatedFile", () => {
 
     test("non-tsx -client file", () => {
       expect(isRscGatedFile("app/dashboard/widget-client.ts")).toBe(false)
+    })
+
+    test("error.tsx outside app/", () => {
+      expect(isRscGatedFile("src/components/error.tsx")).toBe(false)
+    })
+
+    test("loading.tsx outside app/", () => {
+      expect(isRscGatedFile("src/components/loading.tsx")).toBe(false)
+    })
+
+    test("non-tsx error: app/dashboard/error.ts", () => {
+      expect(isRscGatedFile("app/dashboard/error.ts")).toBe(false)
+    })
+
+    test("non-tsx loading: app/loading.ts", () => {
+      expect(isRscGatedFile("app/loading.ts")).toBe(false)
     })
   })
 })
@@ -286,6 +326,34 @@ describe("pretooluse-apply-rsc-gate (with skill installed)", () => {
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision
     ).toBe("deny")
+  })
+
+  it("blocks edit to app/**/error.tsx when apply-rsc not recently invoked", async () => {
+    // subprocess-only: CLAUDECODE env isolation required for skill detection
+    const result = await runWithSkillInstalled("app/dashboard/error.tsx", [])
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+  })
+
+  it("blocks edit to app/**/loading.tsx when apply-rsc not recently invoked", async () => {
+    // subprocess-only: CLAUDECODE env isolation required for skill detection
+    const result = await runWithSkillInstalled("src/app/users/loading.tsx", [])
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("deny")
+  })
+
+  it("allows edit to app/**/error.tsx when apply-rsc was recently invoked", async () => {
+    // subprocess-only: CLAUDECODE env isolation required for skill detection
+    const sessionLines = [skillInvocationLine("apply-rsc")]
+    const result = await runWithSkillInstalled("app/dashboard/error.tsx", sessionLines)
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
   })
 
   it("allows edit to app/**/page.tsx when apply-rsc was recently invoked", async () => {
