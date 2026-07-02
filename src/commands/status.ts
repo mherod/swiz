@@ -420,17 +420,20 @@ async function getProjectHealth(
   }
 }
 
-function renderRemoteLine(aheadBehind: { ahead: number; behind: number } | null): void {
+function renderRemoteLine(
+  aheadBehind: { ahead: number; behind: number } | null,
+  write: (line?: string) => void
+): void {
   if (!aheadBehind) return
   const { ahead, behind } = aheadBehind
   if (ahead === 0 && behind === 0) {
-    console.log(`    Remote:    ${GREEN}in sync${RESET}`)
+    write(`    Remote:    ${GREEN}in sync${RESET}`)
     return
   }
   const parts: string[] = []
   if (ahead > 0) parts.push(`${YELLOW}${ahead} ahead${RESET}`)
   if (behind > 0) parts.push(`${RED}${behind} behind${RESET}`)
-  console.log(`    Remote:    ${parts.join(", ")}`)
+  write(`    Remote:    ${parts.join(", ")}`)
 }
 
 function formatCiLine(status: string | null, conclusion: string | null): string {
@@ -441,47 +444,47 @@ function formatCiLine(status: string | null, conclusion: string | null): string 
   return `${DIM}${status}${conclusion ? ` / ${conclusion}` : ""}${RESET}`
 }
 
-function renderHealthPanel(health: ProjectHealth): void {
-  console.log(`  ${BOLD}Project Health${RESET}\n`)
+function renderHealthPanel(health: ProjectHealth, write: (line?: string) => void): void {
+  write(`  ${BOLD}Project Health${RESET}\n`)
 
   if (health.state) {
     const termTag = health.isTerminal ? ` ${DIM}(terminal)${RESET}` : ""
-    console.log(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
+    write(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
     if (health.allowedTransitions.length > 0) {
-      console.log(`    Nexts:     ${DIM}${health.allowedTransitions.join(", ")}${RESET}`)
+      write(`    Nexts:     ${DIM}${health.allowedTransitions.join(", ")}${RESET}`)
     }
   } else {
-    console.log(`    State:     ${DIM}not set${RESET}`)
+    write(`    State:     ${DIM}not set${RESET}`)
   }
 
-  console.log(`    Branch:    ${GREEN}${health.branch ?? `${DIM}unknown${RESET}`}${RESET}`)
+  write(`    Branch:    ${GREEN}${health.branch ?? `${DIM}unknown${RESET}`}${RESET}`)
   const changesLine =
     health.uncommittedFiles > 0
       ? `${YELLOW}${health.uncommittedFiles} uncommitted file(s)${RESET}`
       : `${GREEN}clean${RESET}`
-  console.log(`    Changes:   ${changesLine}`)
-  renderRemoteLine(health.aheadBehind)
+  write(`    Changes:   ${changesLine}`)
+  renderRemoteLine(health.aheadBehind, write)
 
   if (health.openTasks !== null) {
     const taskLine =
       health.openTasks === 0
         ? `${GREEN}none open${RESET}`
         : `${YELLOW}${health.openTasks} open${RESET}`
-    console.log(`    Tasks:     ${taskLine}`)
+    write(`    Tasks:     ${taskLine}`)
   }
 
-  console.log(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
+  write(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
 
   if (health.testStats) {
     const avgSec = (health.testStats.averageMs / 1000).toFixed(2)
     const runs = health.testStats.count
     const assessmentColor = health.testStats.assessment === "negligible" ? GREEN : RED
     const assessmentText = `${assessmentColor}${health.testStats.assessment}${RESET}`
-    console.log(
+    write(
       `    Avg Test:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
     )
   } else {
-    console.log(`    Avg Test:  ${DIM}no runs recorded${RESET}`)
+    write(`    Avg Test:  ${DIM}no runs recorded${RESET}`)
   }
 
   if (health.lintStats) {
@@ -489,14 +492,14 @@ function renderHealthPanel(health: ProjectHealth): void {
     const runs = health.lintStats.count
     const assessmentColor = health.lintStats.assessment === "negligible" ? GREEN : RED
     const assessmentText = `${assessmentColor}${health.lintStats.assessment}${RESET}`
-    console.log(
+    write(
       `    Avg Lint:  ${avgSec}s (based on ${runs} run${runs === 1 ? "" : "s"}) [${assessmentText}]`
     )
   } else {
-    console.log(`    Avg Lint:  ${DIM}no runs recorded${RESET}`)
+    write(`    Avg Lint:  ${DIM}no runs recorded${RESET}`)
   }
 
-  console.log()
+  write()
 }
 
 export const statusCommand: Command = {
@@ -522,32 +525,36 @@ export const statusCommand: Command = {
  * concurrently-running test files (#680). The CLI passes no cwd, preserving
  * `process.cwd()` behavior.
  */
-export async function runStatus(args: string[], cwd: string = process.cwd()): Promise<void> {
+export async function runStatus(
+  args: string[],
+  cwd: string = process.cwd(),
+  write: (line?: string) => void = console.log
+): Promise<void> {
   const jsonMode = args.includes("--json")
   const noHealth = args.includes("--no-health")
   const refreshCi = args.includes("--refresh-ci")
 
   if (jsonMode) {
     const health = await getProjectHealth(cwd, { refreshCi })
-    console.log(JSON.stringify(health, null, 2))
+    write(JSON.stringify(health, null, 2))
     return
   }
 
-  console.log(`\n  ${BOLD}swiz status${RESET}\n`)
+  write(`\n  ${BOLD}swiz status${RESET}\n`)
 
   const current = detectCurrentAgent()
   if (current) {
-    console.log(`  Running inside: ${GREEN}${current.name}${RESET}\n`)
+    write(`  Running inside: ${GREEN}${current.name}${RESET}\n`)
   }
 
-  console.log(`  Hooks directory: ${HOOKS_DIR}\n`)
+  write(`  Hooks directory: ${HOOKS_DIR}\n`)
 
   const agentStatuses = await Promise.all(AGENTS.map((agent) => collectAgentStatus(agent)))
   for (const lines of agentStatuses) {
-    for (const line of lines) console.log(line)
+    for (const line of lines) write(line)
   }
 
   if (!noHealth) {
-    renderHealthPanel(await getProjectHealth(cwd, { refreshCi }))
+    renderHealthPanel(await getProjectHealth(cwd, { refreshCi }), write)
   }
 }
