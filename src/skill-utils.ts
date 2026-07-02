@@ -12,6 +12,11 @@ import { detectCurrentAgent } from "./detect.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import {
+  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
+  DEFAULT_SKILL_RECENCY_MAX_TURNS,
+  resolveNumericSetting,
+} from "./settings/resolution.ts"
+import {
   type CurrentSessionUsageRecencyOptions,
   computeSummaryFromSessionLines,
   formatCurrentSessionUsageWindow,
@@ -353,6 +358,25 @@ export function formatSkillReferenceForAgent(skillName: string): string {
 }
 
 export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions }
+
+/**
+ * Resolve the project-configurable skill-recency window (turns + max age) and its
+ * human-readable text in one call. Replaces the per-gate `resolveNumericSetting`
+ * pair + `formatCurrentSessionUsageWindow` triple duplicated across gate hooks.
+ */
+export async function resolveSkillRecencyOptions(
+  cwd: string
+): Promise<{ recencyOptions: CurrentSessionUsageRecencyOptions; windowText: string }> {
+  const [maxTurns, maxAgeMinutes] = await Promise.all([
+    resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
+    resolveNumericSetting(cwd, "skillRecencyMaxAgeMinutes", DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES),
+  ])
+  const recencyOptions: CurrentSessionUsageRecencyOptions = {
+    maxTurns,
+    maxAgeMs: maxAgeMinutes * 60 * 1000,
+  }
+  return { recencyOptions, windowText: formatCurrentSessionUsageWindow(recencyOptions) }
+}
 
 type CurrentSessionUsageSource = Parameters<typeof getRecentSkillsUsedForCurrentSession>[0]
 

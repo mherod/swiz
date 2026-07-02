@@ -23,15 +23,9 @@
 
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import {
-  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
-  DEFAULT_SKILL_RECENCY_MAX_TURNS,
-  resolveNumericSetting,
-} from "../src/settings/resolution.ts"
-import {
-  type CurrentSessionUsageRecencyOptions,
-  formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
+  resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isFileEditForPath } from "../src/utils/edit-projection.ts"
@@ -90,18 +84,10 @@ export async function evaluateClaudeMdUpdateMemoryGate(
   if (!transcriptPath) return {}
 
   const cwd = input.cwd ?? process.cwd()
-  const [maxTurns, maxAgeMinutes] = await Promise.all([
-    resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
-    resolveNumericSetting(cwd, "skillRecencyMaxAgeMinutes", DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES),
-  ])
-  const recencyOptions: CurrentSessionUsageRecencyOptions = {
-    maxTurns,
-    maxAgeMs: maxAgeMinutes * 60 * 1000,
-  }
+  const { recencyOptions, windowText } = await resolveSkillRecencyOptions(cwd)
 
   const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
   const ref = formatSkillReferenceForAgent(UPDATE_MEMORY_SKILL)
-  const windowText = formatCurrentSessionUsageWindow(recencyOptions)
 
   if (invokedSkills.includes(UPDATE_MEMORY_SKILL)) {
     return preToolUseAllow(`${ref} skill was invoked recently (${windowText}).`)

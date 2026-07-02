@@ -11,16 +11,12 @@ import { git } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
-  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
-  DEFAULT_SKILL_RECENCY_MAX_TURNS,
-  resolveNumericSetting,
-} from "../src/settings/resolution.ts"
-import {
   agentHasSkillToolForHookPayload,
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
+  resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
@@ -270,14 +266,7 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
   // Fail-open: agents that cannot invoke the Skill tool cannot satisfy these requirements.
   if (!agentHasSkillToolForHookPayload(parsed as Record<string, unknown>)) return {}
 
-  const [maxTurns, maxAgeMinutes] = await Promise.all([
-    resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
-    resolveNumericSetting(cwd, "skillRecencyMaxAgeMinutes", DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES),
-  ])
-  const recencyOptions: CurrentSessionUsageRecencyOptions = {
-    maxTurns,
-    maxAgeMs: maxAgeMinutes * 60 * 1000,
-  }
+  const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
 
   let invokedSkills: string[] | null = null
 

@@ -638,6 +638,13 @@ describe("pretooluse-skill-invocation-gate", () => {
         ?.permissionDecision
     ).toBe("deny")
     expect(
+      (
+        first as {
+          hookSpecificOutput?: { permissionDecisionReason?: string }
+        }
+      ).hookSpecificOutput?.permissionDecisionReason
+    ).toContain("This block is advisory for the next 2 minutes")
+    expect(
       (second as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision
     ).not.toBe("deny")

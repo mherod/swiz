@@ -37,16 +37,12 @@ import { checkGitIdentity } from "../src/git-identity.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import {
-  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
-  DEFAULT_SKILL_RECENCY_MAX_TURNS,
-  resolveNumericSetting,
-} from "../src/settings/resolution.ts"
-import {
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
   getRecentlyUsedToolsForCurrentSession,
+  resolveSkillRecencyOptions,
   skillExistsForHookPayload,
   skillGateAgentIdForHookPayload,
 } from "../src/skill-utils.ts"
@@ -257,7 +253,9 @@ function buildDenyMessage(primary: string, anyOfSkills: string[], reason: string
     `${blockedLine}\n\n` +
       `${reason}\n\n` +
       formatActionPlan([planStep], { header: planHeader }) +
-      `\nWhy this matters: ${whyMatters}`
+      `\nWhy this matters: ${whyMatters}\n\n` +
+      `This block is advisory for the next ${Math.round(SKILL_REQUIREMENT_COOLDOWN_MS / 60_000)} minutes — ` +
+      `invoke the skill before retrying, don't just retry the same command.`
   )
 }
 
@@ -350,18 +348,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const preflightBlock = await checkSkillSpecificPreflight(primary, rawInput, cwd)
     if (preflightBlock) return preflightBlock
 
-    const [maxTurns, maxAgeMinutes] = await Promise.all([
-      resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
-      resolveNumericSetting(
-        cwd,
-        "skillRecencyMaxAgeMinutes",
-        DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES
-      ),
-    ])
-    const recencyOptions: CurrentSessionUsageRecencyOptions = {
-      maxTurns,
-      maxAgeMs: maxAgeMinutes * 60 * 1000,
-    }
+    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
 
     const transcriptPath: string = (rawInput.transcript_path as string) ?? ""
     if (!transcriptPath) return {}
