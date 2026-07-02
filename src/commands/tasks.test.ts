@@ -1079,3 +1079,14 @@ describe("task transition validator (#302)", () => {
     expect(validateTransition("in_progress", "in_progress")).toBeNull()
   })
 })
+
+// Several tests invoke the tasks command body in-process (runTasks), which sets
+// `process.exitCode = 1` on its error branches as a CLI side effect. That value
+// lingers in the shared test process, so `bun test` exits 1 even with zero test
+// failures — which fails the pre-push hook when this file is in the targeted
+// scope. Bun derives the real suite exit code from its own failure tally after
+// afterAll hooks run, so clearing the leaked code here never masks a genuine
+// failure; it only removes the stray CLI side effect (#680).
+afterAll(() => {
+  process.exitCode = 0
+})
