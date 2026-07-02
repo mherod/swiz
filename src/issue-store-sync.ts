@@ -189,6 +189,12 @@ export interface UpstreamSyncResult {
   events: { inserted: number; cursor: string | null }
   /** REST list-endpoint cache counters for ETag / 304 visibility. */
   restCache: { requests: number; notModified: number; writes: number }
+  /**
+   * True when the primary list fetches (issues + PRs) succeeded. Freshness
+   * cursors and the daemon's `lastSyncAt` only advance when this holds, so a
+   * fully-failed sync (offline, expired gh auth) does not report as fresh (#715).
+   */
+  fetchOk: boolean
 }
 
 /** Extract the maximum `updatedAt` ISO string from a list of entities. */
@@ -596,6 +602,7 @@ export async function syncUpstreamState(
     branchProtection: tracked(),
     events: { inserted: 0, cursor: null },
     restCache: { requests: 0, notModified: 0, writes: 0 },
+    fetchOk: false,
   }
   const gh = opts?.client ?? new GhCliGitHubClient(result.restCache)
 
@@ -712,8 +719,15 @@ export async function syncUpstreamState(
     await syncIssueEvents(s, gh, repo, result)
   }
 
-  s.setSyncCursor(repo, "last_synced", new Date().toISOString())
-  s.setSyncCursor(repo, "cwd", cwd)
+  // Only advance freshness cursors when the primary lists actually loaded.
+  // A null return means every gh/REST attempt for that list failed (offline,
+  // expired auth) — advancing the cursor would report a failed sync as fresh
+  // and make consumers skip the next real sync (#715).
+  result.fetchOk = issues !== null && prs !== null
+  if (result.fetchOk) {
+    s.setSyncCursor(repo, "last_synced", new Date().toISOString())
+    s.setSyncCursor(repo, "cwd", cwd)
+  }
 
   return result
 }

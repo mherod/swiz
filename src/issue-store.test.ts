@@ -1381,6 +1381,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       expect(result.restCache).toEqual({ requests: 0, notModified: 0, writes: 0 })
       expect(store.getIssue<{ title: string }>("test/repo", 1)?.title).toBe("Mock issue")
       expect(store.getPullRequest<{ title: string }>("test/repo", 10)?.title).toBe("Mock PR")
+      // A successful sync advances the freshness cursor (#715).
+      expect(result.fetchOk).toBe(true)
+      expect(store.getSyncCursor("test/repo", "last_synced")).not.toBeNull()
     } finally {
       store.close()
     }
@@ -1406,6 +1409,9 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       expect(result.issues.upserted).toBe(0)
       expect(result.pullRequests.upserted).toBe(0)
       expect(result.ciStatuses.upserted).toBe(0)
+      // A fully-failed sync must not advance the freshness cursor (#715).
+      expect(result.fetchOk).toBe(false)
+      expect(store.getSyncCursor("test/repo", "last_synced")).toBeNull()
     } finally {
       store.close()
     }

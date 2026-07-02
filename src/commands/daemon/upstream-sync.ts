@@ -175,7 +175,9 @@ export class UpstreamSyncRegistry {
           setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
         ),
       ])
-      entry.lastSyncAt = Date.now()
+      // Only stamp lastSyncAt on a real success — a sync where every fetch
+      // returned null must not report as fresh to status/staleness consumers (#715).
+      if (result.fetchOk) entry.lastSyncAt = Date.now()
       entry.lastResult = result
       debugLog(
         `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} labels=${result.labels.upserted} milestones=${result.milestones.upserted} branchCi=${result.branchCi.upserted} prBranchDetail=${result.prBranchDetail.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
@@ -205,6 +207,7 @@ export class UpstreamSyncRegistry {
           branchProtection: emptyTracked(),
           events: { inserted: 0, cursor: null },
           restCache: { requests: 0, notModified: 0, writes: 0 },
+          fetchOk: false,
         }
       )
     } finally {
