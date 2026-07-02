@@ -25,9 +25,10 @@
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
 //
 // Pattern matching uses two strategies:
-//   - Raw `command` for git ops and label-value patterns (label names are quoted)
-//   - `stripQuotedShellStrings(command)` for structural gh patterns where quoted
-//     args (--jq, --body) can hide flags like --dismiss
+//   - Raw `command` only for label-value patterns (label names are quoted)
+//   - `stripQuotedShellStrings(command)` for git ops and structural gh patterns,
+//     so quoted args (--jq, --body, -m) can't hide/fake a match (e.g. a
+//     `gh issue create --body "... git commit ..."` no longer gates on /commit)
 //
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
@@ -136,9 +137,9 @@ interface SkillRequirement {
  * Returns null when no skill gate applies (command is not gated or is exempt).
  */
 function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRequirement | null {
-  if (GIT_COMMIT_RE.test(command)) return { primary: "commit", anyOf: ["commit"] }
-  if (GIT_PUSH_RE.test(command)) {
-    if (GIT_PUSH_DELETE_RE.test(command)) return null // branch deletion is not a code push
+  if (GIT_COMMIT_RE.test(cleanedCommand)) return { primary: "commit", anyOf: ["commit"] }
+  if (GIT_PUSH_RE.test(cleanedCommand)) {
+    if (GIT_PUSH_DELETE_RE.test(cleanedCommand)) return null // branch deletion is not a code push
     return { primary: "push", anyOf: ["push"] }
   }
   if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command))

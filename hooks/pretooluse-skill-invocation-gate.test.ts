@@ -141,6 +141,38 @@ describe("pretooluse-skill-invocation-gate", () => {
     expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
   })
 
+  it("does not gate a quoted 'git commit' substring inside an unrelated command", async () => {
+    const result = await runGateSubprocess("commit", {
+      tool_name: "Bash",
+      tool_input: {
+        command: "gh issue create --title 'test' --body 'run git commit after merging'",
+      },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines([]),
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).not.toBe("deny")
+  })
+
+  it("does not gate a quoted 'git push' substring inside an unrelated command", async () => {
+    const result = await runGateSubprocess("push", {
+      tool_name: "Bash",
+      tool_input: {
+        command: "gh issue create --title 'test' --body 'remember to git push origin main'",
+      },
+      transcript_path: "fake-transcript.json",
+      _transcriptSummary: summaryFromLines([]),
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).not.toBe("deny")
+  })
+
   it("allows git commit when commit skill and TaskList were recently invoked", async () => {
     const sessionLines = [
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "commit" } }]),
