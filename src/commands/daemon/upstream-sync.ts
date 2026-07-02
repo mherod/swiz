@@ -9,6 +9,7 @@ import {
   type UpstreamSyncResult,
 } from "../../issue-store.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
+import { isRegisterableProjectCwd } from "./route-helpers.ts"
 
 const DEFAULT_SYNC_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
 const DEFAULT_SYNC_TIMEOUT_MS = 30 * 1000 // 30 seconds
@@ -55,6 +56,11 @@ export class UpstreamSyncRegistry {
    *  For fork workflows, also registers the upstream (parent) repo so
    *  its issues, labels, and milestones are synced alongside the fork's PRs/CI. */
   async register(cwd: string): Promise<{ deduped: boolean }> {
+    // Placeholder/relative cwds (e.g. "." from DaemonBackedIssueStore) must not
+    // become sync entries — they resolve against the daemon's own cwd and spawn
+    // a duplicate loop, and a persisted "." cursor would resurrect it on every
+    // startup via restoreKnownRepos (#716).
+    if (!isRegisterableProjectCwd(cwd)) return { deduped: false }
     if (this.entries.has(cwd)) return { deduped: true }
 
     const repo = await this.resolveSlug(cwd)
