@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-07-02
+
+### Fixes
+
+- **Issue-sync repo/cwd invariant enforced** — `syncUpstreamState` now refuses
+  to sync when the target repo does not match the origin slug of its `cwd`. The
+  default gh client resolves the repo from `cwd`, so a mismatch stored one
+  repo's data under another's key in the shared store and let
+  `removeClosedIssues` purge the victim repo's cached rows. Injected
+  slug-targeted clients bypass the guard. (#711)
+- **Status-line CI state reports the newest run** — the SQLite-served branch-CI
+  shape blanks `workflowName`/`createdAt`/`event`, so the summary collapsed
+  every run under one key and reported the oldest by array order (could show
+  "passing" while the newest run failed). Recency now falls back to
+  `databaseId` and empty-name runs are keyed per-run. (#712)
+- **Daemon ignores placeholder cwds in project registration** —
+  `DaemonBackedIssueStore` posts `cwd: "."`, which the daemon registered as a
+  project: consuming a watcher slot, watching `.git` relative to the daemon's
+  own cwd, and spawning a duplicate upstream-sync loop that `restoreKnownRepos`
+  resurrected each startup. Registration and the sync registry now require an
+  absolute path via a shared `isRegisterableProjectCwd` guard. (#716)
+
 ## 2026-06-25
 
 ### Removals
