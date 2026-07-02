@@ -136,16 +136,14 @@ describe("skillExistsForHookPayload", () => {
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "# my-test-skill-daemon\n")
 
-    // Temporarily add the temp dir to skill search path by setting cwd
-    const originalCwd = process.cwd()
+    // Pass the temp dir as the skill search cwd rather than mutating the
+    // process-global CWD (process.chdir bleeds across concurrent files — #680).
     try {
-      process.chdir(tmpDir)
       clearSkillCache()
       // payload has no _env — agent cannot be determined (daemon dispatch case)
-      const result = skillExistsForHookPayload("my-test-skill-daemon", {})
+      const result = skillExistsForHookPayload("my-test-skill-daemon", {}, tmpDir)
       expect(result).toBe(true)
     } finally {
-      process.chdir(originalCwd)
       clearSkillCache()
     }
   })
@@ -169,10 +167,8 @@ describe("skillExistsForHookPayload", () => {
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), `# ${skillName}\n`)
 
-    const originalCwd = process.cwd()
     const savedClaudeCode = process.env.CLAUDECODE
     try {
-      process.chdir(tmpDir)
       clearSkillCache()
       // Remove the env var that detectCurrentAgent() uses for Claude Code detection,
       // simulating the daemon launchd environment where CLAUDECODE is not set.
@@ -181,10 +177,9 @@ describe("skillExistsForHookPayload", () => {
       // With _agent: "claude" in payload (injected by `swiz dispatch --agent claude`):
       // OLD code: skillExists() → detectCurrentAgent() = null → cache false → returns false ✗
       // NEW code: skillFileExists() → checks disk → returns true ✓
-      const result = skillExistsForHookPayload(skillName, { _agent: "claude" })
+      const result = skillExistsForHookPayload(skillName, { _agent: "claude" }, tmpDir)
       expect(result).toBe(true)
     } finally {
-      process.chdir(originalCwd)
       clearSkillCache()
       if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode
     }

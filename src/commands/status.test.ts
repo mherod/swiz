@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { statusCommand } from "./status.ts"
+import { runStatus as runStatusCommand } from "./status.ts"
 
 const SWIZ_ENTRY = join(import.meta.dir, "../../index.ts")
 
@@ -102,15 +102,14 @@ describe("swiz status — test and lint execution stats rendering", () => {
   let tempDir: string
 
   async function runStatusInProcess(cwd: string, args: string[] = []): Promise<string> {
-    const originalCwd = process.cwd
-    process.cwd = () => cwd
     const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
     let output = ""
     try {
-      await statusCommand.run(args)
+      // Pass cwd explicitly rather than monkeypatching global process.cwd, which
+      // bleeds into concurrently-running test files (#680).
+      await runStatusCommand(args, cwd)
       output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n")
     } finally {
-      process.cwd = originalCwd
       consoleLogSpy.mockRestore()
     }
     const ansiRegex = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")

@@ -512,33 +512,42 @@ export const statusCommand: Command = {
     },
   ],
   async run(args) {
-    const cwd = process.cwd()
-    const jsonMode = args.includes("--json")
-    const noHealth = args.includes("--no-health")
-    const refreshCi = args.includes("--refresh-ci")
-
-    if (jsonMode) {
-      const health = await getProjectHealth(cwd, { refreshCi })
-      console.log(JSON.stringify(health, null, 2))
-      return
-    }
-
-    console.log(`\n  ${BOLD}swiz status${RESET}\n`)
-
-    const current = detectCurrentAgent()
-    if (current) {
-      console.log(`  Running inside: ${GREEN}${current.name}${RESET}\n`)
-    }
-
-    console.log(`  Hooks directory: ${HOOKS_DIR}\n`)
-
-    const agentStatuses = await Promise.all(AGENTS.map((agent) => collectAgentStatus(agent)))
-    for (const lines of agentStatuses) {
-      for (const line of lines) console.log(line)
-    }
-
-    if (!noHealth) {
-      renderHealthPanel(await getProjectHealth(cwd, { refreshCi }))
-    }
+    await runStatus(args)
   },
+}
+
+/**
+ * Executable body of `swiz status`, parameterized by `cwd` so tests can target a
+ * temp dir without monkeypatching the global `process.cwd`, which bleeds across
+ * concurrently-running test files (#680). The CLI passes no cwd, preserving
+ * `process.cwd()` behavior.
+ */
+export async function runStatus(args: string[], cwd: string = process.cwd()): Promise<void> {
+  const jsonMode = args.includes("--json")
+  const noHealth = args.includes("--no-health")
+  const refreshCi = args.includes("--refresh-ci")
+
+  if (jsonMode) {
+    const health = await getProjectHealth(cwd, { refreshCi })
+    console.log(JSON.stringify(health, null, 2))
+    return
+  }
+
+  console.log(`\n  ${BOLD}swiz status${RESET}\n`)
+
+  const current = detectCurrentAgent()
+  if (current) {
+    console.log(`  Running inside: ${GREEN}${current.name}${RESET}\n`)
+  }
+
+  console.log(`  Hooks directory: ${HOOKS_DIR}\n`)
+
+  const agentStatuses = await Promise.all(AGENTS.map((agent) => collectAgentStatus(agent)))
+  for (const lines of agentStatuses) {
+    for (const line of lines) console.log(line)
+  }
+
+  if (!noHealth) {
+    renderHealthPanel(await getProjectHealth(cwd, { refreshCi }))
+  }
 }

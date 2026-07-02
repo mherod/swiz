@@ -26,9 +26,14 @@ import {
 import { stripQuotes } from "./utils/quoted-string.ts"
 
 /** Resolve the current list of skill directories. */
-export function getSkillDirs(): string[] {
-  const dirs = [join(resolveSpawnCwd(), ".skills"), ...getAllProviderSkillDirs()]
-  const local = join(process.cwd(), ".skills")
+export function getSkillDirs(cwd?: string): string[] {
+  // `cwd` overrides both the spawn cwd and the local cwd — tests pass an explicit
+  // dir so they don't need to mutate the process-global CWD via process.chdir,
+  // which bleeds across concurrently-running test files (#680).
+  const spawnCwd = cwd ?? resolveSpawnCwd()
+  const localCwd = cwd ?? process.cwd()
+  const dirs = [join(spawnCwd, ".skills"), ...getAllProviderSkillDirs()]
+  const local = join(localCwd, ".skills")
   if (!dirs.includes(local)) dirs.unshift(local)
   return dirs
 }
@@ -60,9 +65,9 @@ export function clearSkillCache(): void {
   _skillCache.clear()
 }
 
-function skillFileExists(name: string): boolean {
+function skillFileExists(name: string, cwd?: string): boolean {
   if (!name.trim()) return false
-  return getSkillDirs().some((dir) => existsSync(join(dir, name, "SKILL.md")))
+  return getSkillDirs(cwd).some((dir) => existsSync(join(dir, name, "SKILL.md")))
 }
 
 /** Check if a skill exists in any of the skill directories. Cached per process. */
@@ -94,13 +99,17 @@ export function skillExists(name: string): boolean {
  * and skillExists() permanently caches false for the skill name, silently bypassing
  * all skill gates for the daemon process lifetime.
  */
-export function skillExistsForHookPayload(name: string, payload: Record<string, unknown>): boolean {
+export function skillExistsForHookPayload(
+  name: string,
+  payload: Record<string, unknown>,
+  cwd?: string
+): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
-  if (agent?.id === "codex") return skillFileExists(name)
+  if (agent?.id === "codex") return skillFileExists(name, cwd)
   if (agent !== null && !agentSupportsTool(agent, "Skill")) return false
   // agent is null (daemon without _env, standalone) or agent supports Skill:
   // the support check is already done above — just test file existence.
-  return skillFileExists(name)
+  return skillFileExists(name, cwd)
 }
 
 export { agentHasTaskToolsForHookPayload }

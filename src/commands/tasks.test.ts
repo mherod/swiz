@@ -11,6 +11,7 @@ import {
   getSessions,
   parseTaskId,
   resolveTaskById,
+  runTasks,
   sessionPrefix,
   tasksCommand,
   verifyTaskSubject,
@@ -656,21 +657,13 @@ describe("tasks command regressions (#242)", () => {
       )
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
-        await tasksCommand.run([
-          "status",
-          taskId,
-          "completed",
-          "--session",
-          sessionId,
-          "--evidence",
-          "note:completed",
-        ])
+        await runTasks(
+          ["status", taskId, "completed", "--session", sessionId, "--evidence", "note:completed"],
+          repoCwd
+        )
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) {
           delete process.env.HOME
         } else {
@@ -712,15 +705,12 @@ describe("task timing fields (#267)", () => {
       )
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
         expect(
-          tasksCommand.run(["status", taskId, "in_progress", "--session", sessionId])
+          runTasks(["status", taskId, "in_progress", "--session", sessionId], repoCwd)
         ).resolves.toBeUndefined()
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }
@@ -764,21 +754,21 @@ describe("task timing fields (#267)", () => {
       )
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
-        await tasksCommand.run([
-          "status",
-          taskId,
-          "completed",
-          "--session",
-          sessionId,
-          "--evidence",
-          "note:completed with timing",
-        ])
+        await runTasks(
+          [
+            "status",
+            taskId,
+            "completed",
+            "--session",
+            sessionId,
+            "--evidence",
+            "note:completed with timing",
+          ],
+          repoCwd
+        )
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }
@@ -811,24 +801,24 @@ describe("native task recovery paths (#271)", () => {
       await mkdir(repoCwd, { recursive: true })
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
         expect(
-          tasksCommand.run([
-            "complete",
-            taskId,
-            "--session",
-            sessionId,
-            "--state",
-            "developing",
-            "--evidence",
-            "note:completed from recovery",
-          ])
+          runTasks(
+            [
+              "complete",
+              taskId,
+              "--session",
+              sessionId,
+              "--state",
+              "developing",
+              "--evidence",
+              "note:completed from recovery",
+            ],
+            repoCwd
+          )
         ).resolves.toBeUndefined()
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }
@@ -856,27 +846,27 @@ describe("native task recovery paths (#271)", () => {
       await mkdir(repoCwd, { recursive: true })
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
         expect(
-          tasksCommand.run([
-            "status",
-            taskId,
-            "completed",
-            "--session",
-            sessionId,
-            "--subject",
-            "Recovered status task",
-            "--state",
-            "developing",
-            "--evidence",
-            "note:status recovered",
-          ])
+          runTasks(
+            [
+              "status",
+              taskId,
+              "completed",
+              "--session",
+              sessionId,
+              "--subject",
+              "Recovered status task",
+              "--state",
+              "developing",
+              "--evidence",
+              "note:status recovered",
+            ],
+            repoCwd
+          )
         ).resolves.toBeUndefined()
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }
@@ -902,26 +892,26 @@ describe("native task recovery paths (#271)", () => {
       await mkdir(repoCwd, { recursive: true })
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
       try {
         expect(
-          tasksCommand.run([
-            "update",
-            taskId,
-            "--session",
-            sessionId,
-            "--subject",
-            "Recovered update task",
-            "--description",
-            "Recovered description",
-            "--status",
-            "pending",
-          ])
+          runTasks(
+            [
+              "update",
+              taskId,
+              "--session",
+              sessionId,
+              "--subject",
+              "Recovered update task",
+              "--description",
+              "Recovered description",
+              "--status",
+              "pending",
+            ],
+            repoCwd
+          )
         ).resolves.toBeUndefined()
       } finally {
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }
@@ -960,19 +950,16 @@ describe("recovered task output", () => {
       )
 
       const prevHome = process.env.HOME
-      const prevCwd = process.cwd()
       process.env.HOME = home
-      process.chdir(repoCwd)
 
       const logs: string[] = []
       const origLog = console.log
       console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "))
 
       try {
-        await tasksCommand.run(["--all-sessions"])
+        await runTasks(["--all-sessions"], repoCwd)
       } finally {
         console.log = origLog
-        process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME
         else process.env.HOME = prevHome
       }

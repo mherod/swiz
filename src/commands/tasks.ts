@@ -107,8 +107,8 @@ function isListInvocation(subcommand: string | undefined): boolean {
   )
 }
 
-function resolveFilterCwd(args: string[]): string | undefined {
-  return args.includes("--all-projects") ? undefined : process.cwd()
+function resolveFilterCwd(args: string[], cwd: string = process.cwd()): string | undefined {
+  return args.includes("--all-projects") ? undefined : cwd
 }
 
 async function printSessionTasks(sessionId: string, filterCwd: string | undefined): Promise<void> {
@@ -141,11 +141,11 @@ async function printSessionTasks(sessionId: string, filterCwd: string | undefine
   process.stderr.write(`${lines.join("\n").trimEnd()}\n`)
 }
 
-async function runListTasks(args: string[]): Promise<void> {
+async function runListTasks(args: string[], cwd: string = process.cwd()): Promise<void> {
   const allProjects = args.includes("--all-projects")
   const allSessions = args.includes("--all-sessions")
   const recovered = args.includes("--recovered")
-  const filterCwd = resolveFilterCwd(args)
+  const filterCwd = resolveFilterCwd(args, cwd)
   const dateFormat = parseDateFormat(extractFlag(args, "--date-format"))
 
   if (allSessions || recovered) {
@@ -163,7 +163,7 @@ async function runListTasks(args: string[]): Promise<void> {
   )
 }
 
-async function runCreateTask(rest: string[]): Promise<void> {
+async function runCreateTask(rest: string[], cwd: string = process.cwd()): Promise<void> {
   const [subject, description, ...sessionArgs] = rest
   const stateFlag = extractFlag(rest, "--state")
   const statusFlag = extractFlag(rest, "--status")
@@ -183,8 +183,8 @@ async function runCreateTask(rest: string[]): Promise<void> {
   }
   const sessionId = await resolveSession(sessionArgs)
   await createTask(sessionId, subject, description)
-  await applyStateUpdate(stateFlag, process.cwd())
-  await printSessionTasks(sessionId, process.cwd())
+  await applyStateUpdate(stateFlag, cwd)
+  await printSessionTasks(sessionId, cwd)
 }
 
 async function handleCompleteError(
@@ -285,7 +285,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     })
     return
   }
-  if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+  if (stateFlag) await applyStateUpdate(stateFlag, filterCwd ?? process.cwd())
 
   const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
   await printSessionTasks(effectiveSessionId, filterCwd)
@@ -325,7 +325,7 @@ async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> 
     filterCwd,
     skipLastTaskGuard,
   })
-  if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+  if (stateFlag) await applyStateUpdate(stateFlag, filterCwd ?? process.cwd())
 
   const { sessionId: effectiveSessionId } = await resolveTaskById(taskId, sessionId, filterCwd)
   await printSessionTasks(effectiveSessionId, filterCwd)
@@ -450,7 +450,7 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
     await updateSingleTask(sessionId, taskId, filterCwd, changes)
   }
 
-  if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
+  if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, filterCwd ?? process.cwd())
   await printSessionTasks(sessionId, filterCwd)
 }
 
@@ -601,13 +601,13 @@ async function runRepairTasks(rest: string[]): Promise<void> {
 }
 
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
-  create: (rest) => runCreateTask(rest),
-  TaskCreate: (rest) => {
+  create: (rest, cwd) => runCreateTask(rest, cwd),
+  TaskCreate: (rest, cwd) => {
     const taskCreateName = getTaskToolName("TaskCreate")
     console.log(
       `  ${DIM}Note: "${taskCreateName}" is a native tool. Use "swiz tasks create" for CLI usage.${RESET}\n`
     )
-    return runCreateTask(rest)
+    return runCreateTask(rest, cwd)
   },
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
   TaskUpdate: (rest, filterCwd) => {
@@ -711,22 +711,32 @@ export const tasksCommand: Command = {
     },
   ],
   async run(args) {
-    const [subcommand] = args
-
-    enforceNativeTaskTools(subcommand)
-
-    if (isListInvocation(subcommand)) {
-      await runListTasks(args)
-      return
-    }
-
-    const rest = args.slice(1)
-    const handler = subcommand ? SUBCOMMAND_HANDLERS[subcommand] : undefined
-    if (!handler) {
-      throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
-    }
-    await handler(rest, resolveFilterCwd(args))
+    await runTasks(args)
   },
+}
+
+/**
+ * Executable body of the `swiz tasks` command, parameterized by `cwd` so tests
+ * can target a temp repo without mutating the process-global CWD via
+ * `process.chdir` (which bleeds across concurrently-running test files — #680).
+ * The CLI entry point passes no cwd, preserving `process.cwd()` behavior.
+ */
+export async function runTasks(args: string[], cwd: string = process.cwd()): Promise<void> {
+  const [subcommand] = args
+
+  enforceNativeTaskTools(subcommand)
+
+  if (isListInvocation(subcommand)) {
+    await runListTasks(args, cwd)
+    return
+  }
+
+  const rest = args.slice(1)
+  const handler = subcommand ? SUBCOMMAND_HANDLERS[subcommand] : undefined
+  if (!handler) {
+    throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
+  }
+  await handler(rest, resolveFilterCwd(args, cwd))
 }
 
 export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
