@@ -861,6 +861,36 @@ describe("syncUpstreamState", () => {
       releaseMutex()
     }
   })
+
+  test("refuses to sync when repo does not match the cwd origin slug (#711)", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    const ghFetchCalls: string[][] = []
+
+    // Record any gh fetch spawned by the default client. git() uses spawnOriginal
+    // (unaffected by this mock), so getRepoSlug still resolves the real origin.
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = (args: string[]) => {
+      if (args[0] === "gh") ghFetchCalls.push(args)
+      return createMockSpawnResult("", "unexpected fetch during refused sync", 1)
+    }
+
+    try {
+      // process.cwd() is the swiz checkout (origin mherod/swiz); target a different repo.
+      const result = await syncUpstreamState("attacker/other-repo", process.cwd(), { store })
+
+      // No fetch was issued and nothing was written under the mismatched key.
+      expect(ghFetchCalls).toHaveLength(0)
+      expect(result.issues.upserted).toBe(0)
+      expect(result.pullRequests.upserted).toBe(0)
+      expect(store.listIssues("attacker/other-repo")).toHaveLength(0)
+    } finally {
+      Bun.spawn = originalSpawn
+      store.close()
+      releaseMutex()
+    }
+  })
 })
 
 describe("ghListToRestFallback", () => {

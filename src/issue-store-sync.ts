@@ -1,3 +1,5 @@
+import { debugLog } from "./debug.ts"
+import { getRepoSlug } from "./git-helpers.ts"
 import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.ts"
 import { getDefaultBranch } from "./utils/git-utils.ts"
 
@@ -596,6 +598,28 @@ export async function syncUpstreamState(
     restCache: { requests: 0, notModified: 0, writes: 0 },
   }
   const gh = opts?.client ?? new GhCliGitHubClient(result.restCache)
+
+  // ─── Enforce the repo/cwd invariant (#711) ──────────────────────────────
+  // Every default-client fetch resolves its target repo from `cwd`'s origin
+  // remote (gh runs without `--repo`), so writing under `repo` is only safe
+  // when `repo` IS that origin slug. A mismatch would store one repo's data
+  // under another repo's key in the shared store and let removeClosedIssues()
+  // purge the victim repo's legitimate rows. Refuse rather than corrupt.
+  //
+  // An injected client (tests, or a future slug-targeted client) owns its own
+  // targeting, so it bypasses the guard. A null origin slug (no remote / not a
+  // git repo) can't be proven mismatched, so it is left permissive.
+  if (!opts?.client) {
+    const originSlug = await getRepoSlug(cwd)
+    if (originSlug !== null && originSlug !== repo) {
+      debugLog(
+        `[issue-sync] refusing sync: repo "${repo}" does not match the origin of cwd ` +
+          `("${originSlug}"). cwd-implied fetches would corrupt the cache — run from the ` +
+          `repo's checkout or supply a repo-targeted client.`
+      )
+      return result
+    }
+  }
 
   // ─── Snapshot existing state for fast-path decisions ────────────────────
   const issueSnap = s.getIssueSnapshot(repo)
