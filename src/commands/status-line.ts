@@ -360,6 +360,20 @@ function isFailingCiRun(run: GitHubCiRun): boolean {
   )
 }
 
+/**
+ * Recency comparison for CI runs. The SQLite-served branch-CI shape blanks
+ * `createdAt` (stored as ""), so a plain string compare degenerates to
+ * first-element-wins. Fall back to `databaseId` (a monotonic run id) whenever
+ * either `createdAt` is empty so the newest run is still selected on both the
+ * store-served and daemon-served paths. Returns true if `candidate` is newer.
+ */
+function isNewerCiRun(candidate: GitHubCiRun, existing: GitHubCiRun): boolean {
+  if (candidate.createdAt && existing.createdAt) {
+    return candidate.createdAt > existing.createdAt
+  }
+  return (candidate.databaseId ?? 0) > (existing.databaseId ?? 0)
+}
+
 function classifyLatestRuns(
   latestRuns: GitHubCiRun[]
 ): { state: GitHubCiState; label: string } | null {
@@ -372,7 +386,7 @@ function classifyLatestRuns(
     if (isActiveCiRun(run)) activeCount++
     if (isFailingCiRun(run)) failingCount++
     if (run.status !== "completed" || run.conclusion !== "success") allSucceeded = false
-    if (!latestRun || run.createdAt > latestRun.createdAt) latestRun = run
+    if (!latestRun || isNewerCiRun(run, latestRun)) latestRun = run
   }
 
   if (activeCount > 0) {
@@ -397,11 +411,16 @@ export function summarizeGitHubCiRuns(
 ): { state: GitHubCiState; label: string } | null {
   if (!Array.isArray(runs) || runs.length === 0) return null
   const latest = new Map<string, GitHubCiRun>()
-  for (const run of runs) {
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]!
     if (run.event === "dynamic" || run.event === "workflow_run") continue
-    const existing = latest.get(run.workflowName)
-    if (!existing || run.createdAt > existing.createdAt) {
-      latest.set(run.workflowName, run)
+    // The store-served shape blanks workflowName; keying every empty-name run
+    // under "" collapses distinct runs into one slot (oldest wins). Fall back to
+    // a per-run key so each run is kept and recency is decided by isNewerCiRun.
+    const key = run.workflowName || ` run-${run.databaseId ?? i}`
+    const existing = latest.get(key)
+    if (!existing || isNewerCiRun(run, existing)) {
+      latest.set(key, run)
     }
   }
   if (latest.size === 0) return null
@@ -506,9 +525,10 @@ function joinGroups(groups: Array<string | null | undefined>): string {
 
 // ── IssueStore-backed cache helpers ──────────────────────────────────────────
 //
-// Reads from the shared SQLite IssueStore (populated by the daemon's upstream
-// sync). Falls back to direct `gh` calls when the store has no fresh data,
-// then upserts results so subsequent reads are fast.
+// Read-only views over the shared SQLite IssueStore (populated out-of-band by
+// the daemon's upstream sync). These helpers do NOT fetch from `gh` or upsert on
+// a miss — a cold/stale store simply yields empty results, and the status line
+// renders without the GitHub segment until the daemon's next sync fills it.
 
 interface PrBranchDetail {
   reviewDecision: string

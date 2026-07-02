@@ -444,6 +444,30 @@ describe("summarizeGitHubCiRuns", () => {
     ])
     expect(summary).toBeNull()
   })
+
+  it("selects the newest run by databaseId when store-served fields are blank (#712)", () => {
+    // SQLite-served branch CI shape: workflowName/createdAt/event all "",
+    // persisted sorted by databaseId ascending, newest (highest id) failing.
+    const summary = summarizeGitHubCiRuns([
+      {
+        databaseId: 100,
+        status: "completed",
+        conclusion: "success",
+        workflowName: "",
+        createdAt: "",
+        event: "",
+      },
+      {
+        databaseId: 200,
+        status: "completed",
+        conclusion: "failure",
+        workflowName: "",
+        createdAt: "",
+        event: "",
+      },
+    ])
+    expect(summary).toEqual({ state: "failure", label: "failed" })
+  })
 })
 
 describe("formatTaskCountSegment", () => {
