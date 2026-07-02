@@ -12,7 +12,6 @@ import {
   normalizeDashboardPr,
   STALE_ISSUES_TTL_MS,
 } from "./dashboard-types.ts"
-import type { PrReviewMonitor } from "./pr-review-monitor.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 
@@ -20,26 +19,10 @@ export interface IssueRoutesContext {
   touchProject: (cwd: string) => void
   registerProjectWatchers: (cwd: string) => void
   upstreamSyncRegistry: UpstreamSyncRegistry
-  prReviewMonitor: PrReviewMonitor
-  sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
 }
 
 function clampDashboardListLimit(raw: number | undefined): number {
   return Math.max(1, Math.min(30, raw ?? 10))
-}
-
-async function processPrReviewChanges(
-  ctx: IssueRoutesContext,
-  cwd: string,
-  syncResult: import("../../issue-store.ts").UpstreamSyncResult
-): Promise<void> {
-  const repo = await getRepoSlug(cwd)
-  if (!repo) return
-
-  // Find active sessions that might be interested in this project
-  for (const [sessionId] of ctx.sessionActivity) {
-    await ctx.prReviewMonitor.processSyncResult(cwd, sessionId, repo, syncResult)
-  }
 }
 
 /** Fire-and-forget upstream sync when the store returned no rows; returns whether a sync was scheduled. */
@@ -49,15 +32,7 @@ function kickUpstreamSyncWhenEmpty(
   isEmpty: boolean
 ): boolean {
   if (!isEmpty) return false
-  void ctx.upstreamSyncRegistry
-    .register(cwd)
-    .then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
-    .then((result) => {
-      if (result) {
-        // Process PR review changes for any active sessions in this project
-        void processPrReviewChanges(ctx, cwd, result)
-      }
-    })
+  void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
   return true
 }
 

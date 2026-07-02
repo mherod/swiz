@@ -17,7 +17,6 @@ import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import type { ComplianceRoutesContext } from "./compliance-routes.ts"
 import type { IssueRoutesContext } from "./issue-routes.ts"
 import type { MetricsRoutesContext } from "./metrics-routes.ts"
-import type { PrReviewMonitor } from "./pr-review-monitor.ts"
 import type {
   CooldownRegistry,
   DaemonMetrics,
@@ -79,7 +78,6 @@ export interface DaemonWebServerContext {
   watchers: FileWatcherRegistry
   snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
   workerRuntime: DaemonWorkerRuntime
-  prReviewMonitor: PrReviewMonitor
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
   recentHookAllowMessages: CappedMap<string, string>
   sessionComplianceState: CappedMap<
@@ -184,8 +182,6 @@ export function buildIssueRoutesContext(ctx: DaemonWebServerContext): IssueRoute
     touchProject: ctx.touchProject,
     registerProjectWatchers: ctx.registerProjectWatchers,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
-    prReviewMonitor: ctx.prReviewMonitor,
-    sessionActivity: ctx.sessionActivity,
   }
 }
 

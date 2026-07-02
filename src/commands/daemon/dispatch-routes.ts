@@ -22,7 +22,6 @@ import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
-import type { PrReviewMonitor } from "./pr-review-monitor.ts"
 import {
   type CooldownRegistry,
   type DaemonMetrics,
@@ -74,7 +73,6 @@ export interface DispatchRoutesContext {
     cwd: string,
     sessionId: string | null | undefined
   ) => Promise<WarmStatusLineSnapshot>
-  prReviewMonitor: PrReviewMonitor
   upstreamSyncRegistry: UpstreamSyncRegistry
   transcriptIndex: TranscriptIndexCache
   lastUserMessageCache: LastUserMessageCache
@@ -107,7 +105,6 @@ export function buildDispatchRoutesContext(
     registerProjectWatchers: ctx.registerProjectWatchers,
     manifestCache: ctx.manifestCache,
     resolveSnapshot: ctx.resolveSnapshot,
-    prReviewMonitor: ctx.prReviewMonitor,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
     lastUserMessageCache: ctx.lastUserMessageCache,

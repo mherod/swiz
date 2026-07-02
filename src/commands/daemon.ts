@@ -18,7 +18,6 @@ import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monito
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { logPseudoHook } from "./daemon/daemon-logging.ts"
-import { PrReviewMonitor } from "./daemon/pr-review-monitor.ts"
 import {
   CappedMap,
   CooldownRegistry,
@@ -156,7 +155,6 @@ function createDaemonCaches() {
   const projectSettingsCache = new ProjectSettingsCache()
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
-  const prReviewMonitor = new PrReviewMonitor()
   const taskStateCache = new TaskStateCache()
 
   return {
@@ -173,7 +171,6 @@ function createDaemonCaches() {
     projectSettingsCache,
     manifestCache,
     snapshots,
-    prReviewMonitor,
     taskStateCache,
   }
 }
@@ -267,7 +264,6 @@ function setupWatchers(
     watchers.unregisterByLabelSuffix(`:${cwd}`)
     // Do NOT unregister from upstreamSyncRegistry here — background sync continues
     // for idle projects so the issue store stays fresh without needing external triggers.
-    caches.prReviewMonitor.clearProject(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
     for (const key of snapshots.keys()) {
       if (key.startsWith(cwd)) snapshots.delete(key)
@@ -284,7 +280,6 @@ function setupWatchers(
     sessionDataCache.invalidateProject(cwd)
     invalidateTurnsCache(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
-    caches.prReviewMonitor.clearProject(cwd)
     for (const key of snapshots.keys()) {
       if (key.startsWith(cwd)) snapshots.delete(key)
     }
@@ -405,7 +400,6 @@ function createPruner(
 
     evictIdleProjects(now, state, registeredProjects, evictProject)
     transcriptMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
-    caches.prReviewMonitor.pruneOldSessions(new Set(state.sessionActivity.keys()))
 
     // Integrated log pruning
     if (now - lastLogPruneAt >= LOG_PRUNE_INTERVAL_MS) {
@@ -587,7 +581,6 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     watchers: caches.watchers,
     snapshots: caches.snapshots,
     workerRuntime: caches.workerRuntime,
-    prReviewMonitor: caches.prReviewMonitor,
     taskStateCache: caches.taskStateCache,
   })
 
