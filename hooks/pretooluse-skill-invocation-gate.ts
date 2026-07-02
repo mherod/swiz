@@ -19,7 +19,6 @@
 //   gh pr checkout                            →  requires any of /pr-qa-and-merge,
 //     /pr-comments-address, or /work-on-issue
 //   gh pr review … --dismiss                  →  requires /pr-comments-address skill
-//   swiz tasks complete                       →  requires /swiz-task-governance skill
 //
 // If the skill is not installed (checked via the same SKILL_DIRS lookup used
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
@@ -65,8 +64,6 @@ import {
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
 } from "../src/utils/git-utils.ts"
-
-const SWIZ_TASKS_COMPLETE_RE = /\bswiz\s+tasks?\s+complete\b/
 
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
@@ -158,8 +155,6 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
   if (GH_PR_CREATE_RE.test(cleanedCommand)) return { primary: "pr-open", anyOf: ["pr-open"] }
   if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand))
     return { primary: "pr-comments-address", anyOf: ["pr-comments-address"] }
-  if (SWIZ_TASKS_COMPLETE_RE.test(command))
-    return { primary: "swiz-task-governance", anyOf: ["swiz-task-governance"] }
   return null
 }
 
@@ -224,13 +219,6 @@ const SKILL_DENY_CONFIGS: Record<
     whyMatters:
       `the ${ref} skill requires addressing every reviewer comment before dismissal. ` +
       `Dismissing a review directly skips this accountability.`,
-  }),
-  "swiz-task-governance": (ref) => ({
-    action: "completing a task via the swiz CLI",
-    planStep: `Invoke the ${ref} skill to load task governance rules, then retry.`,
-    whyMatters:
-      `the ${ref} skill ensures the agent understands the task state machine, evidence requirements, ` +
-      `and buffer rules before managing task state via the CLI.`,
   }),
   commit: (ref) => ({
     action: "running git commit",
