@@ -41,6 +41,7 @@ import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
+import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import type { Command } from "../types.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
@@ -628,9 +629,12 @@ export const dispatchCommand: Command = {
         Object.assign(payload, validated)
         const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
-        const matchingGroups = manifest.filter(
-          (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
-        )
+        const matchingGroups =
+          canonicalEvent === "preToolUse" && isSkillMdOnlyFileEditPayload(toolName, payload)
+            ? []
+            : manifest.filter(
+                (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
+              )
         const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
         const tReplay = performance.now()

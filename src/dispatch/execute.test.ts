@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { ZodError } from "zod"
-import type { SwizHook } from "../SwizHook.ts"
+import { preToolUseDeny, type SwizHook } from "../SwizHook.ts"
 import {
   coerceDispatchAgentEnvelopeInPlace,
   DispatchPayloadValidationError,
@@ -307,6 +307,116 @@ describe("dispatch execute integration", () => {
         else process.env.CODEX_THREAD_ID = prevCodexThreadId
         if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
         else process.env.CLAUDECODE = prevClaudeCode
+      }
+    })
+
+    it("skips preToolUse blockers for SKILL.md-only file edits and patches", async () => {
+      const denyHook: SwizHook = {
+        name: "test-skill-md-synthetic-blocker",
+        event: "preToolUse",
+        run: () => preToolUseDeny("synthetic block"),
+      }
+      const payloads = [
+        {
+          tool_name: "Edit",
+          tool_input: { file_path: "/repo/.codex/skills/commit/SKILL.md" },
+        },
+        {
+          tool_name: "Write",
+          tool_input: { file_path: "/repo/.agents/skills/push/SKILL.md", content: "# Push\n" },
+        },
+        {
+          tool_name: "functions.apply_patch",
+          tool_input: {
+            command: [
+              "*** Begin Patch",
+              "*** Update File: .codex/skills/commit/SKILL.md",
+              "@@",
+              "-old",
+              "+new",
+              "*** End Patch",
+            ].join("\n"),
+          },
+        },
+      ]
+
+      for (const payload of payloads) {
+        let providerCalled = false
+        const result = await executeDispatch({
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: `skill-md-${payload.tool_name}`,
+            ...payload,
+          }),
+          manifestProvider: async () => {
+            providerCalled = true
+            return [
+              { event: "preToolUse", hooks: [{ hook: denyHook }] },
+              {
+                event: "preToolUse",
+                matcher: "Edit|Write|NotebookEdit",
+                hooks: [{ hook: denyHook }],
+              },
+            ]
+          },
+        })
+
+        expect(providerCalled).toBe(false)
+        expect(result.response).toEqual({})
+      }
+    })
+
+    it("keeps preToolUse blockers active for non-SKILL edits and mixed patches", async () => {
+      const denyHook: SwizHook = {
+        name: "test-non-skill-md-synthetic-blocker",
+        event: "preToolUse",
+        run: () => preToolUseDeny("synthetic block"),
+      }
+      const payloads = [
+        { tool_name: "Edit", tool_input: { file_path: "/repo/src/main.ts" } },
+        {
+          tool_name: "apply_patch",
+          tool_input: {
+            command: [
+              "*** Begin Patch",
+              "*** Update File: .codex/skills/commit/SKILL.md",
+              "@@",
+              "-old",
+              "+new",
+              "*** Update File: src/main.ts",
+              "@@",
+              "-old",
+              "+new",
+              "*** End Patch",
+            ].join("\n"),
+          },
+        },
+      ]
+
+      for (const payload of payloads) {
+        const result = await executeDispatch({
+          canonicalEvent: "preToolUse",
+          hookEventName: "PreToolUse",
+          payloadStr: JSON.stringify({
+            cwd: process.cwd(),
+            session_id: `non-skill-md-${payload.tool_name}`,
+            ...payload,
+          }),
+          manifestProvider: async () => [
+            {
+              event: "preToolUse",
+              matcher: "Edit|Write|NotebookEdit",
+              hooks: [{ hook: denyHook }],
+            },
+          ],
+        })
+
+        expect(result.response.hookSpecificOutput?.permissionDecision).toBe("deny")
+        expect(result.response.hookSpecificOutput?.permissionDecisionReason).toContain(
+          "synthetic block"
+        )
       }
     })
   })

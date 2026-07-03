@@ -24,10 +24,21 @@ export const SHELL_TOOLS = new Set([
   "exec_command",
   "functions.exec_command",
 ])
-export const EDIT_TOOLS = new Set(["Edit", "StrReplace", "replace", "apply_patch"])
-export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch"])
+export const EDIT_TOOLS = new Set([
+  "Edit",
+  "StrReplace",
+  "replace",
+  "apply_patch",
+  "functions.apply_patch",
+])
+export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch", "functions.apply_patch"])
 export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files"])
-export const NOTEBOOK_TOOLS = new Set(["NotebookEdit", "EditNotebook", "apply_patch"])
+export const NOTEBOOK_TOOLS = new Set([
+  "NotebookEdit",
+  "EditNotebook",
+  "apply_patch",
+  "functions.apply_patch",
+])
 // Codex has a planning surface via `update_plan`, which is now treated as a task
 // surface in agent capability modeling.
 export const TASK_TOOLS = new Set([
@@ -90,4 +101,79 @@ export function isFileEditTool(name: string): boolean {
 }
 export function isCodeChangeTool(name: string): boolean {
   return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name) || NOTEBOOK_TOOLS.has(name)
+}
+
+const APPLY_PATCH_FILE_PREFIXES = [
+  "*** Update File: ",
+  "*** Delete File: ",
+  "*** Add File: ",
+  "*** Move to: ",
+]
+
+type ToolMatcherValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ToolMatcherValue[]
+  | { [key: string]: ToolMatcherValue }
+
+type ToolMatcherRecord = { [key: string]: ToolMatcherValue }
+
+function isRecord(value: ToolMatcherValue): value is ToolMatcherRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function addPath(paths: Set<string>, value: ToolMatcherValue | undefined): void {
+  if (typeof value !== "string") return
+  const trimmed = value.trim()
+  if (trimmed) paths.add(trimmed)
+}
+
+function basenameForPath(filePath: string): string {
+  const normalized = filePath.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+  return normalized.split("/").pop() ?? ""
+}
+
+export function isSkillMdPath(filePath: string): boolean {
+  return basenameForPath(filePath) === "SKILL.md"
+}
+
+export function extractApplyPatchFilePaths(command: string): string[] {
+  const paths = new Set<string>()
+  for (const line of command.split("\n")) {
+    const prefix = APPLY_PATCH_FILE_PREFIXES.find((candidate) => line.startsWith(candidate))
+    if (!prefix) continue
+    addPath(paths, line.slice(prefix.length))
+  }
+  return [...paths]
+}
+
+export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | undefined): string[] {
+  if (!isRecord(toolInput)) return []
+
+  const paths = new Set<string>()
+  addPath(paths, toolInput.file_path)
+  addPath(paths, toolInput.filePath)
+  addPath(paths, toolInput.notebook_path)
+  addPath(paths, toolInput.notebookPath)
+
+  if (typeof toolInput.command === "string") {
+    for (const filePath of extractApplyPatchFilePaths(toolInput.command)) {
+      paths.add(filePath)
+    }
+  }
+
+  return [...paths]
+}
+
+export function isSkillMdOnlyFileEditPayload(
+  toolName: string | undefined,
+  payload: ToolMatcherRecord
+): boolean {
+  if (!toolName || !isFileEditTool(toolName)) return false
+  const toolInput = payload.tool_input ?? payload.toolInput
+  const targets = extractFileEditTargetPaths(toolInput)
+  return targets.length > 0 && targets.every(isSkillMdPath)
 }

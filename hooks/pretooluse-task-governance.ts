@@ -35,10 +35,7 @@ import {
   codexPlanTaskId,
   isCodexPlanTaskId,
 } from "../src/tasks/codex-update-plan.ts"
-import {
-  hasHealthyPendingTaskBuffer,
-  hasHealthyTaskBuffer,
-} from "../src/tasks/task-buffer-health.ts"
+import { hasHealthyPendingTaskBuffer } from "../src/tasks/task-buffer-health.ts"
 import {
   isBlockedSwizTaskFilesCommand,
   isBlockedSwizTasksCliCommand,
@@ -544,20 +541,19 @@ async function checkTaskStaleness(
 async function checkCanonicalTaskListSync(
   toolName: string,
   sessionId: string,
-  allTasks: Array<{ id: string; status: string; subject: string }>,
   input: Record<string, any>
 ): Promise<SwizHookOutput | undefined> {
   if (isTaskListTool(toolName) || isTaskCreateTool(toolName) || isUpdatePlanTool(toolName)) {
     return undefined
   }
   if (!agentHasTaskListToolForHookPayload(input)) return undefined
+  if (isFileEditTool(toolName)) return undefined
 
   const lastSyncAtMs = await readCanonicalTaskListSyncAtMs(sessionId)
   const ageMs = lastSyncAtMs === null ? null : Date.now() - lastSyncAtMs
   if (ageMs !== null && ageMs <= CANONICAL_TASKLIST_SYNC_MAX_AGE_MS) {
     return undefined
   }
-  if (isFileEditTool(toolName) && hasHealthyTaskBuffer(allTasks)) return undefined
 
   return preToolUseDeny(
     buildTaskGovernanceMessage({
@@ -839,7 +835,7 @@ async function runTaskStateChecks(
     return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
   }
 
-  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, allTasks, input)
+  const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, input)
   if (taskListSyncOutcome) return taskListSyncOutcome
 
   const pendingOverflowOutcome = checkPendingOverflow(toolName, allTasks)

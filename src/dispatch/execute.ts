@@ -26,6 +26,7 @@ import {
   resolveProjectHooks,
 } from "../settings.ts"
 import { syncCodexUpdatePlanFromTranscriptSummary } from "../tasks/codex-update-plan.ts"
+import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import {
   type CurrentSessionToolUsage,
   computeTranscriptSummary,
@@ -657,6 +658,12 @@ async function shouldSkipSubagentDispatch(ctx: DispatchContext): Promise<boolean
   return settings.relaxSubagentHooks !== false // default ON
 }
 
+function shouldSkipSkillMdPreToolUse(ctx: DispatchContext): boolean {
+  return (
+    ctx.canonicalEvent === "preToolUse" && isSkillMdOnlyFileEditPayload(ctx.toolName, ctx.payload)
+  )
+}
+
 function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Record<string, any> {
   const response: Record<string, any> = {}
   if (isStopLikeDispatchEvent(ctx.canonicalEvent)) {
@@ -690,6 +697,13 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     log(
       `   ⏭ subagent session (agent_type=${ctx.payload.agent_type ?? ctx.payload.agent_id}), relaxing hooks`
     )
+    const response = buildSkipResponse(ctx, req.daemonContext)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+    return { response }
+  }
+
+  if (shouldSkipSkillMdPreToolUse(ctx)) {
+    log(`   ⏭ SKILL.md file edit, skipping preToolUse blockers`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
     return { response }
