@@ -1,4 +1,5 @@
 import { merge } from "lodash-es"
+import { type HookGroup, hookIdentifier } from "../hook-types.ts"
 import type { HookOutput } from "../schemas.ts"
 import { mergeHookSpecificOutputClone } from "../utils/hook-specific-output.ts"
 import { orderHookContexts } from "./context-order.ts"
@@ -191,6 +192,28 @@ export async function shouldSkipPostToolUseHooks(
   }
 }
 
+/**
+ * PostToolUse hooks that perform real side effects (state sync, not advisory
+ * context) and must keep running even during the skill-recency skip window.
+ * `/commit` and `/push` are themselves skills, so suppressing these would
+ * starve the IssueStore refresh exactly when it matters most.
+ */
+const SIDE_EFFECT_POST_TOOL_HOOKS = new Set(["posttooluse-upstream-sync-on-push.ts"])
+
+/**
+ * Reduce postToolUse groups to only side-effect hooks for the skill-recency
+ * skip window. Groups left with no side-effect hooks are dropped entirely.
+ * Exported for unit tests.
+ */
+export function keepSideEffectPostToolGroups(groups: HookGroup[]): HookGroup[] {
+  const kept: HookGroup[] = []
+  for (const group of groups) {
+    const hooks = group.hooks.filter((h) => SIDE_EFFECT_POST_TOOL_HOOKS.has(hookIdentifier(h)))
+    if (hooks.length > 0) kept.push({ ...group, hooks })
+  }
+  return kept
+}
+
 /** Minimum time (ms) to collect stop hook responses before processing.
  * Slower hooks (e.g. `stop-personal-repo-issues` which queries the GitHub API)
  * are valuable for long-term session guidance but get starved when a faster
@@ -326,23 +349,33 @@ export class BlockingStrategy implements HookExecutionStrategy {
     const { canonicalEvent, enrichedPayloadStr } = ctx
     const isStop = canonicalEvent === "stop"
 
-    // postToolUse: skip all hooks while a skill is recently active.
+    // postToolUse: while a skill is recently active, skip advisory hooks but
+    // keep side-effect hooks (e.g. upstream sync) running.
     if (canonicalEvent === "postToolUse") {
       let payload: Record<string, any> = {}
       try {
         payload = JSON.parse(enrichedPayloadStr)
       } catch {}
       if (await shouldSkipPostToolUseHooks(payload, ctx.cwd)) {
-        log(`   postToolUse: skill recently active — skipping hooks`)
-        const response: Record<string, any> = {}
-        coerceDispatchAgentEnvelopeInPlace(
-          response,
-          ctx.canonicalEvent,
-          ctx.hookEventName,
-          ctx.agentId
+        const sideEffectGroups = keepSideEffectPostToolGroups(ctx.filteredGroups)
+        log(
+          `   postToolUse: skill recently active — skipping advisory hooks` +
+            (sideEffectGroups.length > 0
+              ? ` (keeping ${sideEffectGroups.length} side-effect group(s))`
+              : "")
         )
-        writeResponse(response)
-        return response
+        if (sideEffectGroups.length === 0) {
+          const response: Record<string, any> = {}
+          coerceDispatchAgentEnvelopeInPlace(
+            response,
+            ctx.canonicalEvent,
+            ctx.hookEventName,
+            ctx.agentId
+          )
+          writeResponse(response)
+          return response
+        }
+        ctx = { ...ctx, filteredGroups: sideEffectGroups }
       }
     }
 

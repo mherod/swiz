@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  keepSideEffectPostToolGroups,
   processAggregatedStopResults,
   processBlockingResults,
   shouldSkipPostToolUseHooks,
@@ -130,6 +131,40 @@ describe("shouldSkipPostToolUseHooks", () => {
       },
     }
     expect(await shouldSkipPostToolUseHooks(payload, process.cwd())).toBe(false)
+  })
+})
+
+describe("keepSideEffectPostToolGroups", () => {
+  it("keeps only side-effect hooks and drops advisory-only groups", () => {
+    const groups = [
+      {
+        event: "postToolUse",
+        matcher: "Bash",
+        hooks: [
+          { file: "posttooluse-upstream-sync-on-push.ts" },
+          { file: "posttooluse-task-count-context.ts" },
+        ],
+      },
+      {
+        event: "postToolUse",
+        matcher: "Edit|Write",
+        hooks: [{ file: "posttooluse-pr-context.ts" }],
+      },
+    ]
+    const kept = keepSideEffectPostToolGroups(groups)
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.matcher).toBe("Bash")
+    expect(kept[0]?.hooks).toEqual([{ file: "posttooluse-upstream-sync-on-push.ts" }])
+  })
+
+  it("returns empty when no side-effect hooks are present", () => {
+    const groups = [
+      {
+        event: "postToolUse",
+        hooks: [{ file: "posttooluse-task-count-context.ts" }],
+      },
+    ]
+    expect(keepSideEffectPostToolGroups(groups)).toEqual([])
   })
 })
 
