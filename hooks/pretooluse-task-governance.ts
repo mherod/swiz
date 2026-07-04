@@ -218,7 +218,10 @@ export const taskSubjectValidationHook: SwizToolHook = {
     const result = detect(subject)
     if (!result.matched) return preToolUseAllow()
 
-    if (await sessionHasHealthyPendingTaskBuffer(input)) return allowCompoundSubjectWithBuffer()
+    // Severe matches (many-comma step chains) never earn the buffer exemption.
+    if (!result.severe && (await sessionHasHealthyPendingTaskBuffer(input))) {
+      return allowCompoundSubjectWithBuffer()
+    }
 
     // Advisory only — TaskCreate never blocks, it can only improve task state
     const msg = formatMessage(result)

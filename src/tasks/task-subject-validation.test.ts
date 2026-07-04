@@ -310,6 +310,39 @@ describe("detect", () => {
     })
   })
 
+  describe("many commas without an enumeration excuse", () => {
+    test("multi-step comma chain is severe", () => {
+      const result = detect(
+        "Verify each completed scenario, update REQUIREMENTS.md markers and status log, commit/push"
+      )
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.severe).toBe(true)
+    })
+
+    test("plain comma-list compound carries the severe flag", () => {
+      const result = detect("Fix the login, register, and logout flows")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.severe).toBe(true)
+    })
+
+    test("bare number enumeration is excused", () => {
+      expect(detect("Bump retry timeouts to 30, 60, 120").matched).toBe(false)
+    })
+
+    test("version enumeration is excused", () => {
+      expect(detect("Test upgrade path across 1.2, 1.3, and 1.4").matched).toBe(false)
+    })
+
+    test("non-numeric tail items are not excused", () => {
+      const result = detect("Update config for 80, staging, production")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.severe).toBe(true)
+    })
+  })
+
   describe("and-separated compound with two action verbs", () => {
     test("two independent action verbs are split", () => {
       const result = detect("Add feature and fix bug")

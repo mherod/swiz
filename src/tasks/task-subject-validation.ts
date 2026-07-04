@@ -16,6 +16,9 @@ export interface CompoundMatch {
   suggestions: string[]
   /** True when the task appears to test items that likely have matching implementation tasks. */
   pairing?: boolean
+  /** True when the subject chains many comma-separated steps with no enumeration
+   * excuse — exemptions like a healthy pending-task buffer must not wave it through. */
+  severe?: boolean
 }
 
 export type DetectionResult = CompoundResult | CompoundMatch
@@ -246,20 +249,32 @@ function detectSharedObject(parts: string[]): CompoundMatch | null {
   return { matched: true, intro: "This is a compound task. Suggested split:", suggestions }
 }
 
+/** Comma-separated tail items that are bare numbers, versions, or issue refs
+ * (e.g. "80, 443", "1.2, 1.3, 1.4", "#12, #14") enumerate one deliverable's
+ * inputs rather than chaining separate work steps. */
+const NUMERIC_LIST_ITEM_RE = /^[#v]?\d+(?:\.\d+)*$/i
+
+function isNumericEnumeration(parts: string[]): boolean {
+  return parts.length > 1 && parts.slice(1).every((p) => NUMERIC_LIST_ITEM_RE.test(p.trim()))
+}
+
 function detectCommaList(s: string, bare: string, verb: string | null): CompoundMatch | null {
   if ((s.match(/,/g) ?? []).length < 2) return null
 
   const normalized = bare.replace(/,?\s+and\s+/i, ", ").replace(/,\s*$/, "")
   const parts = normalized.split(/,\s*/)
 
+  if (isNumericEnumeration(parts)) return null
+
   const suffixResult = detectSuffixExpansion(parts, bare, verb)
-  if (suffixResult) return suffixResult
+  if (suffixResult) return { ...suffixResult, severe: true }
 
   const sharedResult = detectSharedObject(parts)
-  if (sharedResult) return sharedResult
+  if (sharedResult) return { ...sharedResult, severe: true }
 
   return {
     matched: true,
+    severe: true,
     intro: "This is a compound task. Suggested split:",
     suggestions: withVerb(verb, parts),
   }
