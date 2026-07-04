@@ -5,7 +5,11 @@ import { processAggregatedStopResults, processBlockingResults } from "./blocking
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
 import { writeResponse } from "./engine.ts"
-import { applyPreToolHumanisedContext, preparePreToolHints } from "./preToolUseStrategy.ts"
+import {
+  applyPreToolHumanisedContext,
+  preparePreToolHints,
+  shouldDowngradeFileEditDenies,
+} from "./preToolUseStrategy.ts"
 
 /** Capture everything writeResponse emits to stdout for a single call. */
 function captureWriteResponse(response: Record<string, any>): string {
@@ -23,6 +27,61 @@ function captureWriteResponse(response: Record<string, any>): string {
   }
   return captured
 }
+
+describe("shouldDowngradeFileEditDenies", () => {
+  const recentSkillUsage = (skill: string) => ({
+    toolNames: ["Skill"],
+    skillInvocations: [skill],
+    events: [
+      { kind: "skill", value: skill, turnIndex: 5, timestamp: new Date().toISOString() },
+      { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
+    ],
+  })
+
+  it("downgrades denies for a file edit when a skill is recently active", async () => {
+    const payload = {
+      tool_name: "Edit",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: recentSkillUsage("commit"),
+    }
+    expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(true)
+  })
+
+  it("does not downgrade for a file edit with no recent skill", async () => {
+    const payload = {
+      tool_name: "Write",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: { toolNames: ["Bash"], skillInvocations: [], events: [] },
+    }
+    expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(false)
+  })
+
+  it("does not downgrade for non-edit tools even when a skill is recently active", async () => {
+    const payload = {
+      tool_name: "Bash",
+      tool_input: { command: "bun test" },
+      _currentSessionToolUsage: recentSkillUsage("commit"),
+    }
+    expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(false)
+  })
+
+  it("does not downgrade when the skill invocation is outside the recency window", async () => {
+    const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const payload = {
+      tool_name: "Edit",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: {
+        toolNames: ["Skill"],
+        skillInvocations: ["commit"],
+        events: [
+          { kind: "skill", value: "commit", turnIndex: 1, timestamp: stale },
+          { kind: "tool", value: "Read", turnIndex: 90, timestamp: new Date().toISOString() },
+        ],
+      },
+    }
+    expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(false)
+  })
+})
 
 describe("writeResponse JSON validity", () => {
   // Regression: the agent rejects PreToolUse stdout with "hook returned invalid

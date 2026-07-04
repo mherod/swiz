@@ -1,5 +1,6 @@
 import { merge } from "lodash-es"
 import { hookOutputSchema } from "../schemas.ts"
+import { isFileEditTool } from "../tool-matchers.ts"
 import { getHookSpecificOutput, hsoPreToolUseMergedAllow } from "../utils/hook-specific-output.ts"
 import { extractAllowReason, extractContext, type HookExecution, isDeny, log } from "./engine.ts"
 import {
@@ -87,6 +88,78 @@ function classifyAllowHint(
   return true
 }
 
+/** Deny reason from any of the shapes hooks use for PreToolUse denials. */
+function extractDenyReason(resp: Record<string, any>): string | null {
+  const hso = getHookSpecificOutput(resp)
+  const candidates = [hso?.permissionDecisionReason, resp.reason, resp.stopReason]
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
+  }
+  return null
+}
+
+/**
+ * File edits are never blocked while a skill is recently active in the current
+ * session — the agent is following skill instructions, and edit gates firing
+ * mid-skill create catch-22s. Denies are downgraded to advisory context instead.
+ */
+export async function shouldDowngradeFileEditDenies(
+  payload: Record<string, any>,
+  cwd: string
+): Promise<boolean> {
+  const toolName = payload.tool_name ?? payload.toolName
+  if (typeof toolName !== "string" || !isFileEditTool(toolName)) return false
+  try {
+    const { getRecentlyInvokedSkillsForCurrentSession, resolveSkillRecencyOptions } = await import(
+      "../skill-utils.ts"
+    )
+    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
+    const skills = await getRecentlyInvokedSkillsForCurrentSession(payload, recencyOptions)
+    return skills.length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Fold hook results into hints/contexts, honouring the deny-downgrade mode.
+ * Merges the first surviving deny into `finalResponse` and stops there.
+ */
+interface PreToolAccumulator {
+  hints: string[]
+  contexts: string[]
+  downgradeDenies: boolean
+  finalResponse: Record<string, any>
+}
+
+function collectPreToolResults(
+  results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
+  executions: HookExecution[],
+  acc: PreToolAccumulator
+): void {
+  const { hints, contexts, downgradeDenies, finalResponse } = acc
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped" || execution.status === "aborted") {
+      executions.push(execution)
+      continue
+    }
+    if (downgradeDenies && resp && isDeny(resp)) {
+      execution.status = "allow-with-reason"
+      const reason = extractDenyReason(resp)
+      if (reason) contexts.push(reason)
+      log(`   ~ ${execution.file} (deny downgraded: skill recently active, file edit)`)
+      executions.push(execution)
+      continue
+    }
+    const classification = classifyPreToolResult(execution, resp, hints, contexts)
+    executions.push(execution)
+    if (classification === "deny") {
+      merge(finalResponse, resp)
+      break
+    }
+  }
+}
+
 function classifyPreToolResult(
   execution: HookExecution,
   resp: Record<string, any> | null,
@@ -141,64 +214,69 @@ export function applyPreToolHumanisedContext(
   }
 }
 
+/**
+ * Humanise the merged allow response's context, unless humanisation is off or
+ * we are inside the post-user-message grace window — the mechanical context
+ * voice stays visually distinct from the user's own messages while they are
+ * actively present.
+ */
+async function maybeHumanisePreToolContexts(
+  response: Record<string, any>,
+  payload: Record<string, any>,
+  contexts: readonly string[]
+): Promise<void> {
+  if (contexts.length === 0) return
+  let humaniseEnabled = false
+  let sessionId: string | undefined
+  let transcriptPath: string | undefined
+  let withinGrace = false
+  try {
+    humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
+    sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+    transcriptPath =
+      typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
+    const { isWithinUserMessageGrace } = await import("../tasks/task-governance-grace.ts")
+    withinGrace = await isWithinUserMessageGrace(payload)
+  } catch {}
+
+  if (!humaniseEnabled || withinGrace) return
+  const rawContext = contexts.join("\n\n").trim()
+  if (!rawContext) return
+  const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import("../utils/humanise.ts")
+  const humanised = await humaniseText(rawContext, {
+    systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
+    sessionId,
+    transcriptPath,
+  })
+  applyPreToolHumanisedContext(response, humanised)
+}
+
 export class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const hints: string[] = []
     const contexts: string[] = []
     const finalResponse: Record<string, any> = {}
 
+    let payload: Record<string, any> = {}
+    try {
+      payload = JSON.parse(ctx.enrichedPayloadStr)
+    } catch {}
+    const downgradeDenies = await shouldDowngradeFileEditDenies(payload, ctx.cwd)
+
     return runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
-        if (result.parsed && isDeny(result.parsed)) abort()
+        if (!downgradeDenies && result.parsed && isDeny(result.parsed)) abort()
       },
       processResults: async (results, executions) => {
-        for (const { execution, parsed: resp } of results) {
-          if (execution.status === "skipped" || execution.status === "aborted") {
-            executions.push(execution)
-            continue
-          }
-          const classification = classifyPreToolResult(execution, resp, hints, contexts)
-          executions.push(execution)
-          if (classification === "deny") {
-            merge(finalResponse, resp)
-            break
-          }
-        }
+        collectPreToolResults(results, executions, {
+          hints,
+          contexts,
+          downgradeDenies,
+          finalResponse,
+        })
         if (!isDeny(finalResponse)) {
           const response = buildPreToolResponse(hints, contexts)
-
-          let humaniseEnabled = false
-          let sessionId: string | undefined
-          let transcriptPath: string | undefined
-          let withinGrace = false
-          try {
-            const payload = JSON.parse(ctx.enrichedPayloadStr)
-            humaniseEnabled = payload._effectiveSettings?.humaniseAutoSteer ?? false
-            sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
-            transcriptPath =
-              typeof payload.transcript_path === "string" ? payload.transcript_path : undefined
-            const { isWithinUserMessageGrace } = await import("../tasks/task-governance-grace.ts")
-            withinGrace = await isWithinUserMessageGrace(payload)
-          } catch {}
-
-          // Skip humanisation inside the post-user-message grace window so the
-          // mechanical context voice stays visually distinct from the user's own
-          // messages while they are actively present.
-          if (humaniseEnabled && !withinGrace && contexts.length > 0) {
-            const rawContext = contexts.join("\n\n").trim()
-            if (rawContext) {
-              const { humaniseText, STRATEGY_HUMANISE_SYSTEM_PROMPT } = await import(
-                "../utils/humanise.ts"
-              )
-              const humanised = await humaniseText(rawContext, {
-                systemPrompt: STRATEGY_HUMANISE_SYSTEM_PROMPT,
-                sessionId,
-                transcriptPath,
-              })
-              applyPreToolHumanisedContext(response, humanised)
-            }
-          }
-
+          await maybeHumanisePreToolContexts(response, payload, contexts)
           merge(finalResponse, response)
         }
         return finalResponse
