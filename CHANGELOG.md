@@ -1,9 +1,39 @@
 # Changelog
 
+## 2026-07-04
+
+### Features
+
+- **File edits never blocked while a skill is active** — the PreToolUse
+  dispatch strategy now downgrades denies to advisory context when the tool
+  call is a file edit (Edit/Write/NotebookEdit/apply_patch) and any skill was
+  invoked within the session's recency window (default: last 30 turns and 20
+  minutes). Skill-driven edit flows no longer hit gate catch-22s; the deny
+  reason still surfaces as context, and non-edit tools keep full blocking
+  behaviour. Covers every current and future edit-blocking hook at the
+  dispatch layer, in both daemon and CLI paths. (1b467585)
+
+## 2026-07-03
+
+### Fixes
+
+- **Edit tool governance relaxed in task-governance gates** — the canonical
+  TaskList-sync staleness check no longer denies file-edit tools (Bash still
+  gates), SKILL.md-only file edits skip preToolUse blockers entirely, and
+  Codex `functions.apply_patch` is recognised across the EDIT/WRITE/NOTEBOOK
+  tool sets. (776c113c)
+
 ## 2026-07-02
 
 ### Fixes
 
+- **Concurrent test-suite state bleed (#680, targeted-scope wave)** — removed
+  global CWD mutation from tasks/status commands by threading an explicit
+  `cwd` parameter (080be0e5), replaced the process-global console spy and
+  shared module-scoped tempDir in `status.test.ts` with dependency injection
+  and per-test isolation (bf6095b3), and cleared `process.exitCode` leaked by
+  in-process `runTasks` error branches so the pre-push suite exits 0 when all
+  tests pass (ceea5d01).
 - **Issue-sync repo/cwd invariant enforced** — `syncUpstreamState` now refuses
   to sync when the target repo does not match the origin slug of its `cwd`. The
   default gh client resolves the repo from `cwd`, so a mismatch stored one
