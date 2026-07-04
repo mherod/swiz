@@ -99,22 +99,45 @@ function extractDenyReason(resp: Record<string, any>): string | null {
 }
 
 /**
- * File edits are never blocked while a skill is recently active in the current
- * session — the agent is following skill instructions, and edit gates firing
- * mid-skill create catch-22s. Denies are downgraded to advisory context instead.
+ * How file-edit denies are softened for the current call:
+ * - "skill-active": a skill is driving the session; every edit deny downgrades
+ *   (edit gates firing mid-skill create catch-22s).
+ * - "edit-protected": any other file edit; denies downgrade to advisory context
+ *   except from skill-enforcement gates, whose mandates keep blocking.
  */
+export type FileEditDenyDowngrade = "skill-active" | "edit-protected" | null
+
+/** Hooks that enforce "a skill must be invoked for this pattern" — their denies
+ * survive the edit-protected downgrade so skill mandates keep working. */
+const SKILL_GATE_HOOK_RE = /skill|update-memory/
+
+export function isSkillGateHook(hookFile: string): boolean {
+  return SKILL_GATE_HOOK_RE.test(hookFile)
+}
+
+/**
+ * File edits are never hard-blocked. While a skill is recently active every
+ * deny downgrades; otherwise all denies downgrade except skill-enforcement
+ * gates, which must keep their invoke-the-skill-first mandate.
+ */
+export async function resolveFileEditDenyDowngrade(
+  payload: Record<string, any>,
+  cwd: string
+): Promise<FileEditDenyDowngrade> {
+  const toolName = payload.tool_name ?? payload.toolName
+  if (typeof toolName !== "string" || !isFileEditTool(toolName)) return null
+  try {
+    const { isAnySkillRecentlyActive } = await import("../skill-utils.ts")
+    if (await isAnySkillRecentlyActive(payload, cwd)) return "skill-active"
+  } catch {}
+  return "edit-protected"
+}
+
 export async function shouldDowngradeFileEditDenies(
   payload: Record<string, any>,
   cwd: string
 ): Promise<boolean> {
-  const toolName = payload.tool_name ?? payload.toolName
-  if (typeof toolName !== "string" || !isFileEditTool(toolName)) return false
-  try {
-    const { isAnySkillRecentlyActive } = await import("../skill-utils.ts")
-    return await isAnySkillRecentlyActive(payload, cwd)
-  } catch {
-    return false
-  }
+  return (await resolveFileEditDenyDowngrade(payload, cwd)) === "skill-active"
 }
 
 /**
@@ -124,8 +147,14 @@ export async function shouldDowngradeFileEditDenies(
 interface PreToolAccumulator {
   hints: string[]
   contexts: string[]
-  downgradeDenies: boolean
+  downgradeMode: FileEditDenyDowngrade
   finalResponse: Record<string, any>
+}
+
+function downgradesDeny(mode: FileEditDenyDowngrade, hookFile: string): boolean {
+  if (mode === "skill-active") return true
+  if (mode === "edit-protected") return !isSkillGateHook(hookFile)
+  return false
 }
 
 function collectPreToolResults(
@@ -133,17 +162,17 @@ function collectPreToolResults(
   executions: HookExecution[],
   acc: PreToolAccumulator
 ): void {
-  const { hints, contexts, downgradeDenies, finalResponse } = acc
+  const { hints, contexts, downgradeMode, finalResponse } = acc
   for (const { execution, parsed: resp } of results) {
     if (execution.status === "skipped" || execution.status === "aborted") {
       executions.push(execution)
       continue
     }
-    if (downgradeDenies && resp && isDeny(resp)) {
+    if (resp && isDeny(resp) && downgradesDeny(downgradeMode, execution.file)) {
       execution.status = "allow-with-reason"
       const reason = extractDenyReason(resp)
       if (reason) contexts.push(reason)
-      log(`   ~ ${execution.file} (deny downgraded: skill recently active, file edit)`)
+      log(`   ~ ${execution.file} (deny downgraded: ${downgradeMode}, file edit)`)
       executions.push(execution)
       continue
     }
@@ -257,17 +286,20 @@ export class PreToolUseStrategy implements HookExecutionStrategy {
     try {
       payload = JSON.parse(ctx.enrichedPayloadStr)
     } catch {}
-    const downgradeDenies = await shouldDowngradeFileEditDenies(payload, ctx.cwd)
+    const downgradeMode = await resolveFileEditDenyDowngrade(payload, ctx.cwd)
 
     return runStrategyPipeline(ctx, {
       onResult: (result, abort) => {
-        if (!downgradeDenies && result.parsed && isDeny(result.parsed)) abort()
+        // Only abort early when no downgrade mode could rescue any deny; in
+        // edit-protected mode a skill-gate deny may still win, but hooks are
+        // cheap relative to a wrongly-cancelled downgrade pass.
+        if (!downgradeMode && result.parsed && isDeny(result.parsed)) abort()
       },
       processResults: async (results, executions) => {
         collectPreToolResults(results, executions, {
           hints,
           contexts,
-          downgradeDenies,
+          downgradeMode,
           finalResponse,
         })
         if (!isDeny(finalResponse)) {

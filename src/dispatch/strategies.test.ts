@@ -12,7 +12,9 @@ import type { HookExecution } from "./engine.ts"
 import { writeResponse } from "./engine.ts"
 import {
   applyPreToolHumanisedContext,
+  isSkillGateHook,
   preparePreToolHints,
+  resolveFileEditDenyDowngrade,
   shouldDowngradeFileEditDenies,
 } from "./preToolUseStrategy.ts"
 
@@ -85,6 +87,53 @@ describe("shouldDowngradeFileEditDenies", () => {
       },
     }
     expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(false)
+  })
+})
+
+describe("resolveFileEditDenyDowngrade", () => {
+  it("returns skill-active when a skill is recently active", async () => {
+    const payload = {
+      tool_name: "Edit",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: {
+        toolNames: ["Skill"],
+        skillInvocations: ["commit"],
+        events: [
+          { kind: "skill", value: "commit", turnIndex: 5, timestamp: new Date().toISOString() },
+          { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
+        ],
+      },
+    }
+    expect(await resolveFileEditDenyDowngrade(payload, process.cwd())).toBe("skill-active")
+  })
+
+  it("returns edit-protected for a file edit with no recent skill", async () => {
+    const payload = {
+      tool_name: "Write",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: { toolNames: ["Bash"], skillInvocations: [], events: [] },
+    }
+    expect(await resolveFileEditDenyDowngrade(payload, process.cwd())).toBe("edit-protected")
+  })
+
+  it("returns null for non-edit tools", async () => {
+    const payload = { tool_name: "Bash", tool_input: { command: "bun test" } }
+    expect(await resolveFileEditDenyDowngrade(payload, process.cwd())).toBe(null)
+  })
+})
+
+describe("isSkillGateHook", () => {
+  it("keeps skill-enforcement gates blocking in edit-protected mode", () => {
+    expect(isSkillGateHook("pretooluse-skill-invocation-gate.ts")).toBe(true)
+    expect(isSkillGateHook("pretooluse-claude-md-update-memory-gate.ts")).toBe(true)
+    expect(isSkillGateHook("pretooluse-update-memory-enforcement.ts")).toBe(true)
+    expect(isSkillGateHook("pretooluse-commit-skill-gate.ts")).toBe(true)
+  })
+
+  it("does not spare non-skill gates", () => {
+    expect(isSkillGateHook("pretooluse-require-tasks.ts")).toBe(false)
+    expect(isSkillGateHook("pretooluse-todo-tracker.ts")).toBe(false)
+    expect(isSkillGateHook("pretooluse-task-governance.ts")).toBe(false)
   })
 })
 
