@@ -403,6 +403,25 @@ export async function getRecentlyUsedToolsForCurrentSession(
   return getRecentToolsUsedForCurrentSession(source, options)
 }
 
+/**
+ * True when any skill was invoked recently in the current session, using the
+ * project-configured recency window. Dispatch consults this to relax hook
+ * gating while the agent is following skill instructions. Fails closed
+ * (returns false) so gating stays intact when recency cannot be determined.
+ */
+export async function isAnySkillRecentlyActive(
+  source: CurrentSessionUsageSource,
+  cwd: string
+): Promise<boolean> {
+  try {
+    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
+    const skills = await getRecentlyInvokedSkillsForCurrentSession(source, recencyOptions)
+    return skills.length > 0
+  } catch {
+    return false
+  }
+}
+
 export async function wasSkillRecentlyInvokedInCurrentSession(
   source: CurrentSessionUsageSource,
   skillName: string,

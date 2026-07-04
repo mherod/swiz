@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { processAggregatedStopResults, processBlockingResults } from "./blockingStrategy.ts"
+import {
+  processAggregatedStopResults,
+  processBlockingResults,
+  shouldSkipPostToolUseHooks,
+} from "./blockingStrategy.ts"
 import { orderHookContexts } from "./context-order.ts"
 import type { HookExecution } from "./engine.ts"
 import { writeResponse } from "./engine.ts"
@@ -80,6 +84,52 @@ describe("shouldDowngradeFileEditDenies", () => {
       },
     }
     expect(await shouldDowngradeFileEditDenies(payload, process.cwd())).toBe(false)
+  })
+})
+
+describe("shouldSkipPostToolUseHooks", () => {
+  const recentSkillUsage = (skill: string) => ({
+    toolNames: ["Skill"],
+    skillInvocations: [skill],
+    events: [
+      { kind: "skill", value: skill, turnIndex: 5, timestamp: new Date().toISOString() },
+      { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
+    ],
+  })
+
+  it("skips postToolUse hooks when a skill is recently active", async () => {
+    const payload = {
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'x'" },
+      _currentSessionToolUsage: recentSkillUsage("commit"),
+    }
+    expect(await shouldSkipPostToolUseHooks(payload, process.cwd())).toBe(true)
+  })
+
+  it("runs postToolUse hooks when no skill is recently active", async () => {
+    const payload = {
+      tool_name: "Bash",
+      tool_input: { command: "bun test" },
+      _currentSessionToolUsage: { toolNames: ["Bash"], skillInvocations: [], events: [] },
+    }
+    expect(await shouldSkipPostToolUseHooks(payload, process.cwd())).toBe(false)
+  })
+
+  it("runs postToolUse hooks when the skill invocation is outside the recency window", async () => {
+    const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const payload = {
+      tool_name: "Edit",
+      tool_input: { file_path: "/tmp/example.ts" },
+      _currentSessionToolUsage: {
+        toolNames: ["Skill"],
+        skillInvocations: ["commit"],
+        events: [
+          { kind: "skill", value: "commit", turnIndex: 1, timestamp: stale },
+          { kind: "tool", value: "Read", turnIndex: 90, timestamp: new Date().toISOString() },
+        ],
+      },
+    }
+    expect(await shouldSkipPostToolUseHooks(payload, process.cwd())).toBe(false)
   })
 })
 

@@ -110,12 +110,8 @@ export async function shouldDowngradeFileEditDenies(
   const toolName = payload.tool_name ?? payload.toolName
   if (typeof toolName !== "string" || !isFileEditTool(toolName)) return false
   try {
-    const { getRecentlyInvokedSkillsForCurrentSession, resolveSkillRecencyOptions } = await import(
-      "../skill-utils.ts"
-    )
-    const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
-    const skills = await getRecentlyInvokedSkillsForCurrentSession(payload, recencyOptions)
-    return skills.length > 0
+    const { isAnySkillRecentlyActive } = await import("../skill-utils.ts")
+    return await isAnySkillRecentlyActive(payload, cwd)
   } catch {
     return false
   }

@@ -173,6 +173,24 @@ async function tryAutoSteerStopBlock(
   merge(finalResponse, { decision: "allow" })
 }
 
+/**
+ * PostToolUse hooks are skipped entirely while a skill is recently active in
+ * the current session — the agent is mid-skill and following its instructions,
+ * so post-tool governance nudges are noise that derails the skill flow.
+ * Fails closed (hooks run) when recency cannot be determined.
+ */
+export async function shouldSkipPostToolUseHooks(
+  payload: Record<string, any>,
+  cwd: string
+): Promise<boolean> {
+  try {
+    const { isAnySkillRecentlyActive } = await import("../skill-utils.ts")
+    return await isAnySkillRecentlyActive(payload, cwd)
+  } catch {
+    return false
+  }
+}
+
 /** Minimum time (ms) to collect stop hook responses before processing.
  * Slower hooks (e.g. `stop-personal-repo-issues` which queries the GitHub API)
  * are valuable for long-term session guidance but get starved when a faster
@@ -307,6 +325,26 @@ export class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, any>> {
     const { canonicalEvent, enrichedPayloadStr } = ctx
     const isStop = canonicalEvent === "stop"
+
+    // postToolUse: skip all hooks while a skill is recently active.
+    if (canonicalEvent === "postToolUse") {
+      let payload: Record<string, any> = {}
+      try {
+        payload = JSON.parse(enrichedPayloadStr)
+      } catch {}
+      if (await shouldSkipPostToolUseHooks(payload, ctx.cwd)) {
+        log(`   postToolUse: skill recently active — skipping hooks`)
+        const response: Record<string, any> = {}
+        coerceDispatchAgentEnvelopeInPlace(
+          response,
+          ctx.canonicalEvent,
+          ctx.hookEventName,
+          ctx.agentId
+        )
+        writeResponse(response)
+        return response
+      }
+    }
 
     // on_session_stop: short-circuit all stop hooks if pending messages exist.
     if (isStop) {
