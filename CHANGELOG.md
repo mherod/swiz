@@ -4,6 +4,12 @@
 
 ### Features
 
+- **File edits never hard-blocked, skill mandates excepted** — outside an
+  active skill, PreToolUse denies on file-edit tools now downgrade to
+  advisory context regardless of task-governance state. The one exception is
+  skill-enforcement gates (`/commit`, `/update-memory`, and other
+  invoke-the-skill-first mandates), whose denies still block so skill
+  patterns keep being applied. (b72472c8)
 - **File edits never blocked while a skill is active** — the PreToolUse
   dispatch strategy now downgrades denies to advisory context when the tool
   call is a file edit (Edit/Write/NotebookEdit/apply_patch) and any skill was
