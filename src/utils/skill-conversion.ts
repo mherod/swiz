@@ -69,25 +69,27 @@ function remapToken(
  */
 function remapToolList(
   list: string,
-  remap: (tool: string) => string
+  remap: (tool: string) => string,
+  isAvailable?: (tool: string) => boolean
 ): { result: string; unmapped: string[] } {
   const unmapped: string[] = []
-  const result = list
-    .split(",")
-    .map((raw) => {
-      if (!raw.trim()) return raw
-      const { token, unmapped: u } = remapToken(raw, remap)
-      if (u) unmapped.push(u)
-      return token
-    })
-    .join(", ")
-  return { result, unmapped }
+  const filtered: string[] = []
+  for (const raw of list.split(",")) {
+    if (!raw.trim()) continue
+    const { token, unmapped: u } = remapToken(raw, remap)
+    if (u) unmapped.push(u)
+    if (!isAvailable || isAvailable(token)) {
+      filtered.push(token)
+    }
+  }
+  return { result: filtered.join(", "), unmapped }
 }
 
 function remapAllowedToolsBlock(
   frontmatterLines: string[],
   startIndex: number,
-  remap: (tool: string) => string
+  remap: (tool: string) => string,
+  isAvailable?: (tool: string) => boolean
 ): { lines: string[]; nextIndex: number; unmapped: string[] } {
   const lines: string[] = []
   const unmapped: string[] = []
@@ -100,7 +102,9 @@ function remapAllowedToolsBlock(
 
     const { mappedRaw, unmapped: unmatchedTool } = remapPossiblyQuotedTool(itemMatch[2]!, remap)
     if (unmatchedTool) unmapped.push(unmatchedTool)
-    lines.push(`${itemMatch[1]}${mappedRaw}`)
+    if (!isAvailable || isAvailable(mappedRaw)) {
+      lines.push(`${itemMatch[1]}${mappedRaw}`)
+    }
     index++
   }
 
@@ -109,7 +113,8 @@ function remapAllowedToolsBlock(
 
 export function remapAllowedToolsFrontmatter(
   content: string,
-  remap: (tool: string) => string
+  remap: (tool: string) => string,
+  isAvailable?: (tool: string) => boolean
 ): { result: string; unmapped: string[] } {
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---([ \t]*\n?)/)
   if (!frontmatterMatch) return { result: content, unmapped: [] }
@@ -124,7 +129,11 @@ export function remapAllowedToolsFrontmatter(
     const line = frontmatterLines[i]!
     const inlineMatch = line.match(/^(allowed-tools\s*:\s*)(.+)$/)
     if (inlineMatch) {
-      const { result: remapped, unmapped: inlineUnmapped } = remapToolList(inlineMatch[2]!, remap)
+      const { result: remapped, unmapped: inlineUnmapped } = remapToolList(
+        inlineMatch[2]!,
+        remap,
+        isAvailable
+      )
       for (const u of inlineUnmapped) unmapped.push(u)
       remappedLines.push(`${inlineMatch[1]}${remapped}`)
       continue
@@ -137,7 +146,7 @@ export function remapAllowedToolsFrontmatter(
     }
 
     remappedLines.push(line)
-    const blockResult = remapAllowedToolsBlock(frontmatterLines, i + 1, remap)
+    const blockResult = remapAllowedToolsBlock(frontmatterLines, i + 1, remap, isAvailable)
     remappedLines.push(...blockResult.lines)
     unmapped.push(...blockResult.unmapped)
     i = blockResult.nextIndex - 1
@@ -242,6 +251,62 @@ export function convertSkillContent(
     conversionSupplement.TaskGet = taskCreateTarget
   }
 
+  function buildTargetAgentAvailableTools(
+    toAgent: {
+      id: string
+      toolAliases: Record<string, string>
+      taskToolAliases?: Record<string, string | null>
+    },
+    taskCreateTarget?: string
+  ): Set<string> {
+    const tools = new Set<string>()
+    if (toAgent.id === "claude") {
+      const CLAUDE_EMITTED_TOOL_NAMES = [
+        "Bash",
+        "Edit",
+        "Write",
+        "Read",
+        "Grep",
+        "Glob",
+        "Task",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet",
+        "NotebookEdit",
+        "Skill",
+      ]
+      for (const t of CLAUDE_EMITTED_TOOL_NAMES) {
+        tools.add(t)
+      }
+    } else {
+      for (const t of Object.values(toAgent.toolAliases)) {
+        tools.add(t)
+      }
+      if (toAgent.taskToolAliases) {
+        for (const t of Object.values(toAgent.taskToolAliases)) {
+          if (t) tools.add(t)
+        }
+      }
+      if (taskCreateTarget) {
+        tools.add(taskCreateTarget)
+      }
+      if ((toAgent as any).tasksEnabled) {
+        tools.add("TaskList")
+        tools.add("TaskGet")
+      }
+    }
+    return tools
+  }
+
+  const toAgentAvailableTools = buildTargetAgentAvailableTools(toAgent, taskCreateTarget)
+
+  const isAvailable = (tool: string): boolean => {
+    const cleanTool = tool.replace(/^["']|["']$/g, "").trim()
+    const { base } = splitToolSpecifier(cleanTool)
+    return toAgentAvailableTools.has(base)
+  }
+
   /** Resolve a single tool name: source-specific → canonical → target-specific */
   function remapName(tool: string): string {
     const canonical = reverseFrom[tool] ?? tool
@@ -267,7 +332,7 @@ export function convertSkillContent(
 
   // ── Rewrite frontmatter allowed-tools field ──────────────────────────────
   // Supports both inline and YAML-list forms.
-  const remappedFrontmatter = remapAllowedToolsFrontmatter(content, remap)
+  const remappedFrontmatter = remapAllowedToolsFrontmatter(content, remap, isAvailable)
   // Report base names for specifier tokens: `ImaginaryTool(x)` → `ImaginaryTool`.
   for (const u of remappedFrontmatter.unmapped) unmappedSet.add(splitToolSpecifier(u).base)
   let result = remappedFrontmatter.result

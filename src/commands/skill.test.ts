@@ -537,17 +537,34 @@ describe("convertSkillContent", () => {
   })
 
   test("surface unmapped tool names without data loss", () => {
-    // NotebookEdit has no Gemini equivalent (maps to 'NotebookEdit' itself)
-    const content = "---\nallowed-tools: Bash, NotebookEdit\n---\n"
+    // NotebookEdit has no Gemini equivalent (maps to 'NotebookEdit' itself).
+    // It is kept in allowed-tools (since Gemini defines NotebookEdit: NotebookEdit in toolAliases)
+    // and preserved in body.
+    const content =
+      "---\nallowed-tools: Bash, NotebookEdit\n---\nUse NotebookEdit to edit notebooks.\n"
     const claude = getAgent("claude")!
     const gemini = getAgent("gemini")!
     const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
     expect(result).toContain("run_shell_command")
-    // NotebookEdit preserved as-is (no Gemini equivalent)
-    expect(result).toContain("NotebookEdit")
-    // No unmapped warning for NotebookEdit since it maps to itself
-    // (identity mapping is not surfaced as unmapped — only truly ambiguous tokens are)
+    expect(result).toContain("allowed-tools: run_shell_command, NotebookEdit")
+    // NotebookEdit preserved as-is in the body
+    expect(result).toContain("Use NotebookEdit")
     expect(Array.isArray(unmapped)).toBe(true)
+  })
+
+  test("filters out unavailable tools from frontmatter allowed-tools list", () => {
+    const content =
+      '---\nallowed-tools:\n  - "Bash"\n  - "Skill"\n  - "NotebookEdit"\n  - "Edit"\n---\n'
+    const claude = getAgent("claude")!
+    const gemini = getAgent("gemini")!
+    const { content: result } = convertSkillContent(content, claude, gemini, AGENTS)
+    // run_shell_command (from Bash) and replace (from Edit) should be present
+    expect(result).toContain("run_shell_command")
+    expect(result).toContain("replace")
+    // NotebookEdit should be present (identity mapped in Gemini toolAliases)
+    expect(result).toContain("NotebookEdit")
+    // Skill (unavailable in Gemini) should be filtered out
+    expect(result).not.toContain("Skill")
   })
 
   test("converts codex tool names to claude (codex → claude)", () => {
@@ -580,11 +597,12 @@ describe("convertSkillContent", () => {
   })
 
   test("reports the base name when a specifier tool has no target equivalent", () => {
-    const content = "---\nallowed-tools: ImaginaryTool(x:*)\n---\n"
+    const content = "---\nallowed-tools: ImaginaryTool(x:*)\n---\nUse ImaginaryTool(x:*).\n"
     const claude = getAgent("claude")!
     const gemini = getAgent("gemini")!
     const { content: result, unmapped } = convertSkillContent(content, claude, gemini, AGENTS)
-    expect(result).toContain("ImaginaryTool(x:*)")
+    expect(result).not.toContain("allowed-tools: ImaginaryTool(x:*)")
+    expect(result).toContain("Use ImaginaryTool(x:*)")
     expect(unmapped).toEqual(["ImaginaryTool"])
   })
 })
