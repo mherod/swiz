@@ -15,7 +15,10 @@
 //   2. No in_progress transition for this task found in the current session
 //      transcript. Fail-open; we can only verify what the transcript contains.
 
-import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
+import {
+  agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromHookPayload,
+} from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -142,8 +145,15 @@ function scanTranscript(lines: string[], taskId: string): ScanResult {
   return { workCallCount: countWorkCallsFrom(lines, anchorIndex), anchorFound: true }
 }
 
-function buildDenialMessage(taskId: string, sessionId: string | undefined): string {
-  return buildTaskGovernanceMessage({ kind: "phantom-completion", taskId, sessionId })
+function buildDenialMessage(
+  input: Record<string, any>,
+  taskId: string,
+  sessionId: string | undefined
+): string {
+  return buildTaskGovernanceMessage(
+    { kind: "phantom-completion", taskId, sessionId },
+    { translationAgent: detectCurrentAgentFromHookPayload(input) }
+  )
 }
 
 export async function evaluatePretooluseNoPhantomTaskCompletion(
@@ -225,7 +235,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  return preToolUseDeny(buildDenialMessage(taskId, safeSessionId))
+  return preToolUseDeny(buildDenialMessage(raw as Record<string, any>, taskId, safeSessionId))
 }
 
 const pretooluseNoPhantomTaskCompletion: SwizToolHook = {

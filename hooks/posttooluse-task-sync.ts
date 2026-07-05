@@ -13,7 +13,10 @@
 import { appendFile, mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
+import {
+  agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromHookPayload,
+} from "../src/agent-paths.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
@@ -249,11 +252,17 @@ function formatSyncSummary(
   return `TaskList sync: ${parts.join(", ")} (${total} task(s) in response).`
 }
 
-function formatDuplicateSubjectNotice(tasks: NormalizedTask[]): string | null {
+function formatDuplicateSubjectNotice(
+  input: Record<string, any>,
+  tasks: NormalizedTask[]
+): string | null {
   const groups = findDuplicateSubjectGroups(tasks)
   if (groups.length === 0) return null
 
-  return buildTaskGovernanceMessage({ kind: "tasklist-duplicate-subject-notice", groups })
+  return buildTaskGovernanceMessage(
+    { kind: "tasklist-duplicate-subject-notice", groups },
+    { translationAgent: detectCurrentAgentFromHookPayload(input) }
+  )
 }
 
 export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
@@ -298,7 +307,10 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   const countContext = buildCountSummaryFromTasks(resolved.tasks)
 
   const syncSummary = formatSyncSummary(syncResult, resolved.tasks.length)
-  const duplicateContext = formatDuplicateSubjectNotice(resolved.tasks)
+  const duplicateContext = formatDuplicateSubjectNotice(
+    hookInput as Record<string, any>,
+    resolved.tasks
+  )
   const combinedContext = [syncSummary, duplicateContext, countContext].filter(Boolean).join("\n\n")
   if (!combinedContext) return {}
 

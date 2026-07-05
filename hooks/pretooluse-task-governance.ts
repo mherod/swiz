@@ -12,8 +12,10 @@
 // Original files are thin wrappers for standalone subprocess execution.
 
 import {
+  agentDefinitelySupportsTaskList,
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromHookPayload,
 } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
@@ -150,8 +152,20 @@ function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresho
   return GOVERNANCE_THRESHOLDS[mode] ?? GOVERNANCE_THRESHOLDS.strict
 }
 
-function denyTaskGovernance(request: TaskGovernanceMessageRequest): SwizHookOutput {
-  const reason = buildTaskGovernanceMessage(request)
+function taskGovernanceMessage(
+  input: Record<string, any>,
+  request: TaskGovernanceMessageRequest
+): string {
+  return buildTaskGovernanceMessage(request, {
+    translationAgent: detectCurrentAgentFromHookPayload(input),
+  })
+}
+
+function denyTaskGovernance(
+  request: TaskGovernanceMessageRequest,
+  input?: Record<string, any>
+): SwizHookOutput {
+  const reason = input ? taskGovernanceMessage(input, request) : buildTaskGovernanceMessage(request)
   const preview = buildTaskGovernancePreview(request)
   if (preview) return preToolUseDenyWithSystemMessage(reason, preview)
   return preToolUseDeny(reason)
@@ -523,7 +537,9 @@ async function checkTaskStaleness(
     `Use ${taskCreateToolName()} to create at least one further task for the next concrete step based on the work underway.`,
     stateStep,
   ]
-  const stalePlanSteps: (string | string[])[] = agentHasTaskListToolForHookPayload(input)
+  const stalePlanSteps: (string | string[])[] = agentDefinitelySupportsTaskList(
+    detectCurrentAgentFromHookPayload(input)
+  )
     ? [TASKLIST_STABILITY_STEP, ...staleTaskSteps, TASKLIST_CONFIRM_STEP]
     : staleTaskSteps
   const sid = (input as Record<string, any>).session_id as string | undefined
@@ -531,7 +547,7 @@ async function checkTaskStaleness(
   return await denyAutoSteerOrBlock(
     sessionId,
     cwd,
-    buildTaskGovernanceMessage({
+    taskGovernanceMessage(input, {
       kind: "stale-tasks",
       callsSinceLastTaskTool,
       toolName,
@@ -559,7 +575,7 @@ async function checkCanonicalTaskListSync(
   }
 
   return preToolUseDeny(
-    buildTaskGovernanceMessage({
+    taskGovernanceMessage(input, {
       kind: "canonical-tasklist-stale",
       toolName,
     })
@@ -835,7 +851,9 @@ async function runTaskStateChecks(
     !isTaskListTool(toolName) &&
     agentHasTaskListToolForHookPayload(input)
   ) {
-    return preToolUseDeny(buildTaskGovernanceMessage({ kind: "reconciliation-required", toolName }))
+    return preToolUseDeny(
+      taskGovernanceMessage(input, { kind: "reconciliation-required", toolName })
+    )
   }
 
   const taskListSyncOutcome = await checkCanonicalTaskListSync(toolName, sessionId, input)
@@ -1140,6 +1158,7 @@ async function handleTaskDeletionCompletion(
 }
 
 async function handleTaskCompletion(
+  input: Record<string, any>,
   taskId: string,
   sessionId: string,
   cwd: string | undefined
@@ -1188,10 +1207,13 @@ async function handleTaskCompletion(
       (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
 
     if (violatesThresholds) {
-      return denyTaskGovernance({
-        kind: "completion-threshold",
-        taskId,
-      })
+      return denyTaskGovernance(
+        {
+          kind: "completion-threshold",
+          taskId,
+        },
+        input
+      )
     }
 
     // Optimistically record in event state + cache for parallel TOCTOU safety.
@@ -1414,6 +1436,7 @@ function checkUpdatePlanInProgressCap(projection: UpdatePlanProjection): SwizHoo
 }
 
 function checkUpdatePlanFinalTaskState(
+  input: Record<string, any>,
   projection: UpdatePlanProjection,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | null {
@@ -1423,11 +1446,14 @@ function checkUpdatePlanFinalTaskState(
 
   const pendingShortcut = findPendingCompletionShortcut(projection)
   if (pendingShortcut) {
-    return denyTaskGovernance({
-      kind: "pending-completion-shortcut",
-      taskId: pendingShortcut.id,
-      subject: pendingShortcut.subject,
-    })
+    return denyTaskGovernance(
+      {
+        kind: "pending-completion-shortcut",
+        taskId: pendingShortcut.id,
+        subject: pendingShortcut.subject,
+      },
+      input
+    )
   }
 
   const capOutcome = checkUpdatePlanInProgressCap(projection)
@@ -1478,7 +1504,7 @@ async function evaluateUpdatePlanGovernance(
     // Fall through with strict defaults.
   }
 
-  const stateDenied = checkUpdatePlanFinalTaskState(projection, thresholds)
+  const stateDenied = checkUpdatePlanFinalTaskState(input, projection, thresholds)
   if (stateDenied) return stateDenied
 
   const summary = buildIncompleteTaskSummary(projection.finalTasks)
@@ -1556,14 +1582,17 @@ async function checkNativeTaskUpdateCompletion(
   const allTasks = await readSessionTasks(sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
-    return denyTaskGovernance({
-      kind: "pending-completion-shortcut",
-      taskId,
-      subject: currentTask.subject,
-    })
+    return denyTaskGovernance(
+      {
+        kind: "pending-completion-shortcut",
+        taskId,
+        subject: currentTask.subject,
+      },
+      input
+    )
   }
 
-  const completionDenied = await handleTaskCompletion(taskId, sessionId, cwd)
+  const completionDenied = await handleTaskCompletion(input, taskId, sessionId, cwd)
   if (completionDenied) return completionDenied
   return "continue"
 }

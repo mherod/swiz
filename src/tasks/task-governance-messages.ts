@@ -1,6 +1,10 @@
-import { type ActionPlanItem, formatActionPlan } from "../action-plan.ts"
-import { resolveTranslationAgent, taskToolNameForCurrentAgent } from "../agent-paths.ts"
-import { agentSupportsTool } from "../agents.ts"
+import { type ActionPlanItem, filterTaskListActionSteps, formatActionPlan } from "../action-plan.ts"
+import {
+  agentDefinitelySupportsTaskList,
+  resolveTranslationAgent,
+  taskToolNameForCurrentAgent,
+} from "../agent-paths.ts"
+import type { AgentDef } from "../agents.ts"
 import { selectStableHookVariant } from "../hook-message-rephrasing.ts"
 import { replaceTaskGovernanceSynonyms } from "./task-governance-rephrasing.ts"
 import {
@@ -9,6 +13,15 @@ import {
 } from "./task-subject-duplicates.ts"
 
 const PLENTY_PENDING_THRESHOLD = 2
+
+let governanceTranslationAgent: AgentDef | null | undefined
+
+function resolveGovernanceTranslationAgent(): AgentDef | null {
+  if (governanceTranslationAgent !== undefined) {
+    return governanceTranslationAgent
+  }
+  return resolveTranslationAgent()
+}
 
 export const TASKLIST_STABILITY_STEP = "Run TaskList now."
 
@@ -96,14 +109,16 @@ function formatTranslatedActionPlan(
   steps: ActionPlanItem[],
   options: { header?: string; taskListFirst?: boolean; confirm?: boolean } = {}
 ): string {
-  const agent = resolveTranslationAgent()
-  const hasTaskList = agent ? agentSupportsTool(agent, "TaskList") : true
-  const actionSteps =
+  const agent = resolveGovernanceTranslationAgent()
+  const hasTaskList = agentDefinitelySupportsTaskList(agent)
+  const prefixedSteps =
     options.taskListFirst && hasTaskList
       ? buildTaskListRepairPlan(steps, { confirm: options.confirm })
       : steps
+  const actionSteps = filterTaskListActionSteps(prefixedSteps, hasTaskList)
   return formatActionPlan(actionSteps, {
     translateToolNames: true,
+    agent,
     ...(options.header ? { header: options.header } : {}),
   })
 }
@@ -338,8 +353,9 @@ function buildStaleTasksMessage(r: Req<"stale-tasks">): string {
 }
 
 function buildCanonicalTasklistStaleMessage(r: Req<"canonical-tasklist-stale">): string {
+  const lead = `Sync task state before ${r.toolName}.`
   return (
-    `Run TaskList to sync task state before ${r.toolName}.\n\n` +
+    `${lead}\n\n` +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
   )
 }
@@ -352,8 +368,8 @@ function buildTaskDeletionThresholdMessage(r: Req<"task-deletion-threshold">): s
 }
 
 function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
-  const agent = resolveTranslationAgent()
-  const hasTaskList = agent ? agentSupportsTool(agent, "TaskList") : true
+  const agent = resolveGovernanceTranslationAgent()
+  const hasTaskList = agentDefinitelySupportsTaskList(agent)
   if (!hasTaskList) {
     const taskUpdateName = taskUpdateToolName()
     return (
@@ -365,7 +381,7 @@ function buildPendingOverflowMessage(r: Req<"pending-overflow">): string {
     )
   }
   return (
-    `Run TaskList to clear the task state, then retry ${r.toolName}.\n\n` +
+    `Clear the task state, then retry ${r.toolName}.\n\n` +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
   )
 }
@@ -418,7 +434,7 @@ function buildDuplicateSubjectUpdateMessage(r: Req<"duplicate-subject-update">):
 
 function buildReconciliationRequiredMessage(r: Req<"reconciliation-required">): string {
   return (
-    `Run TaskList to refresh task state before ${r.toolName}.\n\n` +
+    `Refresh task state before ${r.toolName}.\n\n` +
     formatTranslatedActionPlan([TASKLIST_STABILITY_STEP, retryAfterTaskList(r.toolName)])
   )
 }
@@ -558,8 +574,19 @@ const MESSAGE_BUILDERS: {
   "tasklist-duplicate-subject-notice": buildTasklistDuplicateSubjectNoticeMessage,
 }
 
-export function buildTaskGovernanceMessage(request: TaskGovernanceMessageRequest): string {
-  return (MESSAGE_BUILDERS[request.kind] as (r: TaskGovernanceMessageRequest) => string)(request)
+export function buildTaskGovernanceMessage(
+  request: TaskGovernanceMessageRequest,
+  options?: { translationAgent?: AgentDef | null }
+): string {
+  const saved = governanceTranslationAgent
+  if (options && "translationAgent" in options) {
+    governanceTranslationAgent = options.translationAgent
+  }
+  try {
+    return (MESSAGE_BUILDERS[request.kind] as (r: TaskGovernanceMessageRequest) => string)(request)
+  } finally {
+    governanceTranslationAgent = saved
+  }
 }
 
 function taskVoiceVariant(key: string, variants: readonly string[]): string {

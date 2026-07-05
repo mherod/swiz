@@ -5,8 +5,8 @@
  */
 
 import { join } from "node:path"
-import { resolveTranslationAgent } from "./agent-paths.ts"
-import { type AgentDef, translateTaskToolName } from "./agents.ts"
+import { agentDefinitelySupportsTaskList, resolveTranslationAgent } from "./agent-paths.ts"
+import { type AgentDef, agentSupportsTool, translateTaskToolName } from "./agents.ts"
 import { readSwizSettings } from "./settings/persistence.ts"
 import {
   extractStepsFromSkill,
@@ -18,6 +18,26 @@ import { type MergeIntoTasksOptions, type MergeStep, mergeIntoTasks } from "./ta
 
 /** A step can be a plain string or an array of sub-steps (recursively nested). */
 export type ActionPlanItem = string | ActionPlanItem[]
+
+const TASK_READER_ACTION_RE = /\b(TaskList|TaskGet)\b/
+
+/** Drop action-plan steps that instruct unavailable task-reader tools. */
+export function filterTaskListActionSteps(
+  steps: ActionPlanItem[],
+  hasTaskList: boolean
+): ActionPlanItem[] {
+  if (hasTaskList) return steps
+  const filtered: ActionPlanItem[] = []
+  for (const item of steps) {
+    if (typeof item === "string") {
+      if (!TASK_READER_ACTION_RE.test(item)) filtered.push(item)
+    } else {
+      const nested = filterTaskListActionSteps(item, false)
+      if (nested.length > 0) filtered.push(nested)
+    }
+  }
+  return filtered
+}
 
 /**
  * Format a numbered action plan string from a list of steps.
@@ -40,7 +60,12 @@ export function formatActionPlan(
         observedToolNames: options?.observedToolNames,
       })
     : null
-  const lines = renderItems(steps, agent, 1, "  ")
+  const planSteps =
+    options?.translateToolNames === true
+      ? filterTaskListActionSteps(steps, agentDefinitelySupportsTaskList(agent))
+      : steps
+  if (planSteps.length === 0) return ""
+  const lines = renderItems(planSteps, agent, 1, "  ")
   if (!lines.trim()) return ""
   const header = options?.header ?? "Action plan:"
   return `${header}\n${lines}\n`
@@ -87,9 +112,17 @@ function renderSubItems(items: ActionPlanItem[], agent: AgentDef | null, indent:
   return lines
 }
 
-function translateActionPlanText(text: string, agent: AgentDef): string | null {
+function translateActionPlanText(text: string, agent: AgentDef | null): string | null {
+  if (!agent) {
+    return TASK_READER_ACTION_RE.test(text) ? null : text
+  }
+
   let omittedUnavailableTaskTool = false
   const translated = text.replace(/\b\w+\b/g, (tok) => {
+    if ((tok === "TaskList" || tok === "TaskGet") && !agentSupportsTool(agent, tok)) {
+      omittedUnavailableTaskTool = true
+      return tok
+    }
     const taskAlias = translateTaskToolName(tok, agent)
     if (taskAlias === null) {
       omittedUnavailableTaskTool = true

@@ -175,13 +175,23 @@ export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined):
 }
 
 /**
- * Check whether the hook payload's originating agent has a TaskList-capable
- * surface. Unknown callers default to true to preserve Claude-style behavior.
+ * True only when the agent is definitely Claude with a TaskList-capable surface.
+ * Unknown callers return false — TaskList must not appear in action-plan steps.
+ */
+export function agentDefinitelySupportsTaskList(agent: AgentDef | null | undefined): boolean {
+  return agent != null && agent.id === "claude" && agentSupportsTool(agent, "TaskList")
+}
+
+/**
+ * Check whether the hook payload's originating agent has a TaskList-capable surface.
+ * Unknown callers default to true so Claude-style sync enforcement still applies when
+ * agent detection is inconclusive; use {@link agentDefinitelySupportsTaskList} for
+ * action-plan copy.
  */
 export function agentHasTaskListToolForHookPayload(input: HookPayload | undefined): boolean {
   const agent = detectCurrentAgentFromHookPayload(input)
   if (!agent) return true
-  return agent.id === "claude" && agentSupportsTool(agent, "TaskList")
+  return agentDefinitelySupportsTaskList(agent)
 }
 
 /**

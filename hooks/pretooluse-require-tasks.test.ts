@@ -498,6 +498,7 @@ describe("pretooluse-require-tasks", () => {
       toolName: "Bash",
       sessionId,
       seedFreshTaskListSync: false,
+      payloadEnv: { CLAUDECODE: "1" },
     })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("task state before Bash")
@@ -580,6 +581,7 @@ describe("pretooluse-require-tasks", () => {
       toolName: "Bash",
       sessionId,
       seedFreshTaskListSync: false,
+      payloadEnv: { CLAUDECODE: "1" },
     })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("task state before Bash")
