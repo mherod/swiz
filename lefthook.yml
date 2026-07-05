@@ -48,8 +48,10 @@ pre-push:
           BUN_BIN="bun"
         fi
 
-        TARGETED=$($BUN_BIN run scripts/get-test-scope.ts)
-        if [ -n "$TARGETED" ]; then
+        TARGETED=$($BUN_BIN run scripts/get-test-scope.ts {push_files})
+        if [ "$TARGETED" = "no-tests-affected" ]; then
+          echo "No affected tests. Skipping pre-push tests."
+        elif [ -n "$TARGETED" ]; then
           echo "Running targeted tests: $TARGETED"
           timeout 600 $BUN_BIN test --concurrent --timeout=60000 --max-concurrency=8 $TARGETED
         else

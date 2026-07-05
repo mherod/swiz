@@ -37,7 +37,12 @@ function resolveBase(): string {
 }
 
 const base = resolveBase()
-const changedFiles = getGitOutput(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean)
+const args = process.argv.slice(2).filter(Boolean)
+const isTargetedByArgs = args.length > 0
+
+const changedFiles = isTargetedByArgs
+  ? args
+  : getGitOutput(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean)
 
 const testFiles = new Set<string>()
 // Test files the developer changed directly. These must always run, even when
@@ -160,6 +165,8 @@ const filteredTests = Array.from(testFiles).filter(
 
 if (filteredTests.length > 0 && filteredTests.length <= 15) {
   process.stdout.write(filteredTests.join(" "))
+} else if (isTargetedByArgs && filteredTests.length === 0) {
+  process.stdout.write("no-tests-affected")
 } else {
   // Too many or no direct tests -> fallback to the "safe subset" strategy
   // We'll let lefthook handle the full list if this script outputs nothing.

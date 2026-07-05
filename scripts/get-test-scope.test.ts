@@ -202,3 +202,23 @@ describe("get-test-scope parent-bundle lookup", () => {
     expect(result.stdout).toContain("hooks/my-bundle.test.ts")
   })
 })
+
+describe("get-test-scope argument passing", () => {
+  test("returns target test when source file passed as argument", () => {
+    const proc = spawnSync("bun", ["run", SCOPE_SCRIPT, "scripts/get-test-scope.ts"], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+    })
+    expect(proc.status).toBe(0)
+    expect(proc.stdout.trim()).toBe("scripts/get-test-scope.test.ts")
+  })
+
+  test("returns no-tests-affected when unrelated file passed as argument", () => {
+    const proc = spawnSync("bun", ["run", SCOPE_SCRIPT, "README.md"], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+    })
+    expect(proc.status).toBe(0)
+    expect(proc.stdout.trim()).toBe("no-tests-affected")
+  })
+})
