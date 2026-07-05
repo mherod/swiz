@@ -25,10 +25,20 @@ function splitToolSpecifier(tool: string): { base: string; specifier: string | n
  * Claude's toolAliases is `{}`, so for Claude as source the reverse map is empty
  * (agent name == canonical name already).
  */
-export function buildReverseMap(toolAliases: Record<string, string>): Record<string, string> {
+export function buildReverseMap(
+  toolAliases: Record<string, string>,
+  taskToolAliases?: Record<string, string | null>
+): Record<string, string> {
   const rev: Record<string, string> = {}
   for (const [canonical, agentSpecific] of Object.entries(toolAliases)) {
     rev[agentSpecific] = canonical
+  }
+  if (taskToolAliases) {
+    for (const [canonical, agentSpecific] of Object.entries(taskToolAliases)) {
+      if (agentSpecific) {
+        rev[agentSpecific] = canonical
+      }
+    }
   }
   return rev
 }
@@ -143,16 +153,31 @@ export function remapAllowedToolsFrontmatter(
 // ─── Body-level tool name rewriting ──────────────────────────────────────────
 
 function collectSourceToolNames(
-  fromAgent: { toolAliases: Record<string, string> },
+  fromAgent: {
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  },
   supplement: Record<string, string>,
-  allAgents: { toolAliases: Record<string, string> }[]
+  allAgents: {
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  }[]
 ): Set<string> {
   const names = new Set<string>([
     ...Object.keys(fromAgent.toolAliases),
     ...Object.values(fromAgent.toolAliases),
   ])
+  if (fromAgent.taskToolAliases) {
+    for (const [canonical, agentSpecific] of Object.entries(fromAgent.taskToolAliases)) {
+      names.add(canonical)
+      if (agentSpecific) names.add(agentSpecific)
+    }
+  }
   for (const agent of allAgents) {
     for (const canonical of Object.keys(agent.toolAliases)) names.add(canonical)
+    if (agent.taskToolAliases) {
+      for (const canonical of Object.keys(agent.taskToolAliases)) names.add(canonical)
+    }
   }
   for (const canonical of Object.keys(supplement)) names.add(canonical)
   return names
@@ -160,9 +185,15 @@ function collectSourceToolNames(
 
 function rewriteBodyToolNames(
   text: string,
-  fromAgent: { toolAliases: Record<string, string> },
+  fromAgent: {
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  },
   supplement: Record<string, string>,
-  allAgents: { toolAliases: Record<string, string> }[],
+  allAgents: {
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  }[],
   remapFn: (tool: string) => string
 ): string {
   let result = text
@@ -179,28 +210,50 @@ function rewriteBodyToolNames(
 
 export function convertSkillContent(
   content: string,
-  fromAgent: { id: string; toolAliases: Record<string, string> },
-  toAgent: { id: string; toolAliases: Record<string, string> },
-  allAgents: { toolAliases: Record<string, string> }[]
+  fromAgent: {
+    id: string
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  },
+  toAgent: {
+    id: string
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  },
+  allAgents: {
+    toolAliases: Record<string, string>
+    taskToolAliases?: Record<string, string | null>
+  }[]
 ): ConversionResult {
   if (fromAgent.id === toAgent.id) return { content, unmapped: [] }
 
-  const reverseFrom = buildReverseMap(fromAgent.toolAliases)
+  const reverseFrom = buildReverseMap(fromAgent.toolAliases, fromAgent.taskToolAliases)
   const toAliases = toAgent.toolAliases
+  const toTaskAliases = toAgent.taskToolAliases
 
   // Conversion-only supplement: read-only task tools (TaskList, TaskGet) are
   // intentionally absent from toolAliases (they must pass through in hook
   // contexts) but should be remapped during skill conversion to the same
   // target as TaskCreate, if one exists.
-  const taskCreateTarget = toAliases.TaskCreate
-  const conversionSupplement: Record<string, string> = taskCreateTarget
-    ? { TaskList: taskCreateTarget, TaskGet: taskCreateTarget }
-    : {}
+  const taskCreateTarget = toAliases.TaskCreate ?? toTaskAliases?.TaskCreate ?? undefined
+  const conversionSupplement: Record<string, string> = {}
+  if (taskCreateTarget) {
+    conversionSupplement.TaskList = taskCreateTarget
+    conversionSupplement.TaskGet = taskCreateTarget
+  }
 
   /** Resolve a single tool name: source-specific → canonical → target-specific */
   function remapName(tool: string): string {
     const canonical = reverseFrom[tool] ?? tool
-    return toAliases[canonical] ?? conversionSupplement[canonical] ?? canonical
+    if (toTaskAliases && toTaskAliases[canonical] === null) {
+      return canonical
+    }
+    const mapped =
+      toAliases[canonical] ??
+      toTaskAliases?.[canonical] ??
+      conversionSupplement[canonical] ??
+      canonical
+    return mapped !== null ? mapped : canonical
   }
 
   /** Remap a tool token, handling `Tool(specifier)` forms like `Bash(git add:*)`. */

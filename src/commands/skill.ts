@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { cp, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { orderBy } from "lodash-es"
-import { AGENTS, getAgent } from "../agents.ts"
+import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
@@ -145,6 +145,56 @@ function yamlScalar(value: string): string {
 
 // ─── Single-skill conversion (reads file, converts, writes) ──────────────────
 
+async function convertSupplementaryEntry(
+  entry: import("node:fs").Dirent,
+  srcDir: string,
+  destDir: string,
+  fromAgent: AgentDef,
+  toAgent: AgentDef,
+  dryRun: boolean
+): Promise<void> {
+  if (entry.name === "SKILL.md" || entry.name.startsWith(".")) return
+  const srcPath = join(srcDir, entry.name)
+  const destPath = join(destDir, entry.name)
+
+  if (entry.isDirectory()) {
+    if (entry.name === "node_modules") return
+    if (!dryRun) {
+      await mkdir(destPath, { recursive: true })
+    }
+    await convertSupplementaryFiles(srcPath, destPath, fromAgent, toAgent, dryRun)
+  } else if (entry.isFile()) {
+    if (entry.name.endsWith(".md")) {
+      const original = await Bun.file(srcPath).text()
+      const { content } = convertSkillContent(original, fromAgent, toAgent, AGENTS)
+      if (!dryRun) {
+        await Bun.write(destPath, content)
+      }
+    } else if (!dryRun) {
+      await cp(srcPath, destPath, { recursive: true, force: true })
+    }
+  }
+}
+
+async function convertSupplementaryFiles(
+  srcDir: string,
+  destDir: string,
+  fromAgent: AgentDef,
+  toAgent: AgentDef,
+  dryRun: boolean
+): Promise<void> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(srcDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+
+  for (const entry of entries) {
+    await convertSupplementaryEntry(entry, srcDir, destDir, fromAgent, toAgent, dryRun)
+  }
+}
+
 async function convertSingleSkill(opts: {
   fromSkillsDir: string
   name: string
@@ -154,16 +204,20 @@ async function convertSingleSkill(opts: {
   dryRun: boolean
 }): Promise<{ unmapped: string[]; warnSuffix: string }> {
   const original = await Bun.file(join(opts.fromSkillsDir, opts.name, "SKILL.md")).text()
-  const { content, unmapped } = convertSkillContent(
-    original,
-    getAgent(opts.from)!,
-    getAgent(opts.to)!,
-    AGENTS
-  )
+  const fromAgent = getAgent(opts.from)!
+  const toAgent = getAgent(opts.to)!
+  const { content, unmapped } = convertSkillContent(original, fromAgent, toAgent, AGENTS)
   const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
   if (!opts.dryRun) {
     await mkdir(opts.targetDir, { recursive: true })
     await Bun.write(join(opts.targetDir, "SKILL.md"), content)
+    await convertSupplementaryFiles(
+      join(opts.fromSkillsDir, opts.name),
+      opts.targetDir,
+      fromAgent,
+      toAgent,
+      opts.dryRun
+    )
   }
   return { unmapped, warnSuffix }
 }
@@ -384,6 +438,57 @@ async function syncSkills(options: {
 
 // ─── Flag parsing and routing ───────────────────────────────────────────────
 
+async function exportSingleSkillToCommand(opts: {
+  fromSkillsDir: string
+  skillName: string
+  targetFile: string
+  targetExists: boolean
+  fromAgent: AgentDef
+  toAgent: AgentDef
+  dryRun: boolean
+  allUnmapped: Set<string>
+}): Promise<"exported" | "overwritten"> {
+  const original = await Bun.file(join(opts.fromSkillsDir, opts.skillName, "SKILL.md")).text()
+  const { content: convertedContent, unmapped } = convertSkillContent(
+    original,
+    opts.fromAgent,
+    opts.toAgent,
+    AGENTS
+  )
+  const description = parseFrontmatterField(original, "description") || ""
+  let convertedBody = stripFrontmatter(convertedContent).trim()
+
+  // Transform skill variables to default command values
+  convertedBody = eliminatePositionalArgs(convertedBody)
+  convertedBody = unwrapInlineCommands(convertedBody)
+
+  const frontmatter = ["---", `name: ${opts.skillName}`, `description: ${yamlScalar(description)}`]
+
+  const allowedTools = extractMandatedSkillTools(convertedContent)
+  if (allowedTools.length > 0) {
+    frontmatter.push(`allowed-tools: ${allowedTools.join(", ")}`)
+  }
+
+  frontmatter.push("---")
+
+  const commandContent = [...frontmatter, "", convertedBody, ""].join("\n")
+
+  if (!opts.dryRun) {
+    await Bun.write(opts.targetFile, commandContent)
+  }
+
+  for (const u of unmapped) opts.allUnmapped.add(u)
+  const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
+  const action = logSkillAction(
+    `${opts.skillName}.md${warnSuffix}`,
+    opts.targetExists,
+    opts.dryRun,
+    "exported",
+    "export"
+  )
+  return action === "overwrite" ? "overwritten" : "exported"
+}
+
 async function exportCommand(options: {
   from: string
   to: string
@@ -401,7 +506,7 @@ async function exportCommand(options: {
     : await discoverSkillNames(fromSkillsDir)
 
   if (orderedSkillNames.length === 0) {
-    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
+    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}..`)
     return
   }
 
@@ -428,46 +533,17 @@ async function exportCommand(options: {
     }
 
     try {
-      const original = await Bun.file(join(fromSkillsDir, skillName, "SKILL.md")).text()
-      const { content: convertedContent, unmapped } = convertSkillContent(
-        original,
+      const action = await exportSingleSkillToCommand({
+        fromSkillsDir,
+        skillName,
+        targetFile,
+        targetExists,
         fromAgent,
         toAgent,
-        AGENTS
-      )
-      const description = parseFrontmatterField(original, "description") || ""
-      let convertedBody = stripFrontmatter(convertedContent).trim()
-
-      // Transform skill variables to default command values
-      convertedBody = eliminatePositionalArgs(convertedBody)
-      convertedBody = unwrapInlineCommands(convertedBody)
-
-      const frontmatter = ["---", `name: ${skillName}`, `description: ${yamlScalar(description)}`]
-
-      const allowedTools = extractMandatedSkillTools(convertedContent)
-      if (allowedTools.length > 0) {
-        frontmatter.push(`allowed-tools: ${allowedTools.join(", ")}`)
-      }
-
-      frontmatter.push("---")
-
-      const commandContent = [...frontmatter, "", convertedBody, ""].join("\n")
-
-      if (!dryRun) {
-        await Bun.write(targetFile, commandContent)
-      }
-
-      for (const u of unmapped) allUnmapped.add(u)
-      const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
-      if (
-        logSkillAction(
-          `${skillName}.md${warnSuffix}`,
-          targetExists,
-          dryRun,
-          "exported",
-          "export"
-        ) === "overwrite"
-      ) {
+        dryRun,
+        allUnmapped,
+      })
+      if (action === "overwritten") {
         overwritten++
       } else {
         exported++

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
@@ -510,17 +511,18 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskGet")
   })
 
-  test("leaves YAML-list allowed-tools Task* entries unchanged when converting to codex (post-#570)", () => {
+  test("translates TaskCreate and TaskUpdate to update_plan, leaving TaskList and TaskGet as canonical when converting to codex", () => {
     const content =
       '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
     const claude = getAgent("claude")!
     const codex = getAgent("codex")!
     const { content: result } = convertSkillContent(content, claude, codex, AGENTS)
-    // Codex has no exact Task* aliases; canonical Task* entries pass through.
-    expect(result).toContain('"TaskCreate"')
+    expect(result).toContain('"update_plan"')
     expect(result).toContain('"TaskList"')
     expect(result).toContain('"TaskGet"')
-    expect(result).toContain('"TaskUpdate"')
+    expect(result).toContain("update_plan")
+    expect(result).toContain("TaskList")
+    expect(result).toContain("TaskGet")
   })
 
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {
@@ -712,5 +714,83 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     await proc.exited
     expect(stdout).toContain("!`echo should-not-appear`")
     expect(stdout).not.toContain("should-not-appear\n")
+  })
+})
+
+// ─── convert with supplementary files ──────────────────────────────────────────
+
+describe("swiz skill --convert with supplementary files", () => {
+  test("recursively converts markdown and copies other files", async () => {
+    const fakeHome = await createTempDir()
+    const claudeSkillsDir = join(fakeHome, ".claude", "skills")
+    const geminiSkillsDir = join(fakeHome, ".gemini", "skills")
+
+    // 1. Create a dummy skill for Claude with supplementary files
+    const skillDir = join(claudeSkillsDir, "test-supplementary-skill")
+    await mkdir(join(skillDir, "references"), { recursive: true })
+    await mkdir(join(skillDir, "scripts"), { recursive: true })
+
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nallowed-tools: Bash, Edit\n---\nUse Bash to run command.\n"
+    )
+    await writeFile(
+      join(skillDir, "references", "guide.md"),
+      "Detailed guides to call Edit on a file.\n"
+    )
+    await writeFile(join(skillDir, "scripts", "run.sh"), "#!/bin/bash\n# Will run a script\n")
+
+    // 2. Run the convert command
+    const proc = Bun.spawn(
+      [
+        "bun",
+        "run",
+        "index.ts",
+        "skill",
+        "--convert",
+        "--from",
+        "claude",
+        "--to",
+        "gemini",
+        "test-supplementary-skill",
+      ],
+      {
+        cwd: process.cwd(),
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: fakeHome },
+      }
+    )
+    const [, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    expect(proc.exitCode).toBe(0)
+    expect(stderr).toBe("")
+
+    // 3. Verify files converted/copied in target directory
+    const targetDir = join(geminiSkillsDir, "test-supplementary-skill")
+    const targetSkill = join(targetDir, "SKILL.md")
+    const targetGuide = join(targetDir, "references", "guide.md")
+    const targetScript = join(targetDir, "scripts", "run.sh")
+
+    expect(existsSync(targetSkill)).toBe(true)
+    expect(existsSync(targetGuide)).toBe(true)
+    expect(existsSync(targetScript)).toBe(true)
+
+    // Verify SKILL.md tool names mapped (Bash -> run_shell_command)
+    const skillContent = await Bun.file(targetSkill).text()
+    expect(skillContent).toContain("run_shell_command")
+    expect(skillContent).not.toContain("Bash")
+
+    // Verify references/guide.md tool names mapped (Edit -> replace)
+    const guideContent = await Bun.file(targetGuide).text()
+    expect(guideContent).toContain("replace")
+    expect(guideContent).not.toContain("Edit")
+
+    // Verify scripts/run.sh copied as-is
+    const scriptContent = await Bun.file(targetScript).text()
+    expect(scriptContent).toContain("# Will run a script")
   })
 })
