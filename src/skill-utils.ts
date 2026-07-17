@@ -35,7 +35,7 @@ export function getSkillDirs(cwd?: string): string[] {
   const dirs = [join(spawnCwd, ".skills"), ...getAllProviderSkillDirs()]
   const local = join(localCwd, ".skills")
   if (!dirs.includes(local)) dirs.unshift(local)
-  return dirs
+  return uniq(dirs)
 }
 
 // Skills live in .skills/ (project-local) and provider-specific global directories.
@@ -754,13 +754,30 @@ export async function findSkillConflicts(
   const byName = new Map<string, SkillConflictEntry[]>()
   for (const dir of skillDirs) await scanSkillDir(dir, byName)
 
+  const { listProviderAdapters } = await import("./provider-adapters.ts")
+  const adapters = listProviderAdapters()
+
   const conflicts: SkillConflict[] = []
+  const seenConflictPairs = new Set<string>()
+
   for (const name of orderBy([...byName.keys()], [(n) => n], ["asc"])) {
     const entries = byName.get(name) ?? []
     if (entries.length <= 1) continue
-    const [active, ...overridden] = entries
-    if (!active) continue
-    conflicts.push({ name, active, overridden })
+
+    for (const adapter of adapters) {
+      const agentDirs = adapter.getSkillDirs()
+      const agentEntries = entries.filter((e) => agentDirs.includes(e.dir))
+      if (agentEntries.length > 1) {
+        const [active, ...overridden] = agentEntries
+        if (active) {
+          const key = `${name}:${active.path} -> ${overridden.map((o) => o.path).join(",")}`
+          if (!seenConflictPairs.has(key)) {
+            seenConflictPairs.add(key)
+            conflicts.push({ name, active, overridden })
+          }
+        }
+      }
+    }
   }
   return conflicts
 }

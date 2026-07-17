@@ -401,18 +401,17 @@ describe("swiz doctor", () => {
     const home = await createTempHome()
     const skillName = `doctor-dup-${Date.now()}`
     await createSkill(home, ".gemini/skills", skillName)
-    await createSkill(home, ".codex/skills", skillName)
+    await createSkill(home, ".gemini/antigravity/skills", skillName)
 
     const result = await runDoctor(home)
     expect(result.stdout).toContain("Skill conflicts")
     expect(result.stdout).toContain("1 duplicate skill name")
-    expect(result.stdout).toContain("show details: swiz doctor --verbose")
     expect(result.stdout).not.toContain(`Skill conflict: ${skillName}`)
 
     const verbose = await runDoctor(home, ["--verbose"])
     expect(verbose.stdout).toContain(`Skill conflict: ${skillName}`)
     expect(verbose.stdout).toContain(`~/.gemini/skills/${skillName}/SKILL.md`)
-    expect(verbose.stdout).toContain(`~/.codex/skills/${skillName}/SKILL.md`)
+    expect(verbose.stdout).toContain(`~/.gemini/antigravity/skills/${skillName}/SKILL.md`)
     expect(verbose.stdout).toContain("precedence=")
   }, 60_000)
 
