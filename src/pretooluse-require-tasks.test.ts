@@ -172,7 +172,7 @@ describe("pretooluse-require-tasks hook", () => {
       expect(hookOutput?.permissionDecision).toBe("deny")
       // Hook now blocks on stale task sync before checking cap.
       expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
-        "Run TaskList to sync task state before Bash"
+        "Sync task state before Bash"
       )
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
