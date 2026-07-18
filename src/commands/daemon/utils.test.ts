@@ -134,6 +134,15 @@ describe("captureSessionToolCall", () => {
     expect(map.get("sess1")!).toHaveLength(2)
   })
 
+  test("preserves full JSON detail for TaskUpdate calls", () => {
+    const map = new Map<string, CapturedToolCall[]>()
+    const now = Date.now()
+    captureSessionToolCall(map, "sess1", "TaskUpdate", { taskId: "3", status: "completed" }, now)
+
+    const call = map.get("sess1")![0]!
+    expect(JSON.parse(call.detail)).toEqual({ taskId: "3", status: "completed" })
+  })
+
   test("respects MAX_CAPTURED_TOOL_CALLS_PER_SESSION limit (400)", () => {
     const map = new Map<string, CapturedToolCall[]>()
     const now = Date.now()
@@ -503,6 +512,38 @@ describe("extractToolCalls", () => {
     expect(result).toHaveLength(1)
     // formatToolInputForDisplay returns "" for undefined input
     expect(result[0]!.detail).toBe("")
+  })
+
+  test("preserves full JSON for TaskUpdate input instead of collapsing to a summary string", () => {
+    const content = [
+      {
+        type: "tool_use",
+        name: "TaskUpdate",
+        input: { taskId: "3", status: "in_progress" },
+      },
+    ]
+
+    const result = extractToolCalls(content)
+
+    expect(result[0]!.detail).toBe(JSON.stringify({ taskId: "3", status: "in_progress" }))
+    expect(JSON.parse(result[0]!.detail)).toEqual({ taskId: "3", status: "in_progress" })
+  })
+
+  test("preserves full JSON for TaskCreate input", () => {
+    const content = [
+      {
+        type: "tool_use",
+        name: "TaskCreate",
+        input: { subject: "Fix bug", description: "Investigate and fix" },
+      },
+    ]
+
+    const result = extractToolCalls(content)
+
+    expect(JSON.parse(result[0]!.detail)).toEqual({
+      subject: "Fix bug",
+      description: "Investigate and fix",
+    })
   })
 })
 

@@ -14,6 +14,7 @@ import {
   formatSkillToolInputDetail,
 } from "../../skill-usage.ts"
 import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
+import { isTaskTool } from "../../tool-matchers.ts"
 import { extractText } from "../../transcript-utils.ts"
 
 export interface TranscriptWatchPath {
@@ -99,22 +100,26 @@ const capturedToolCallSchema = z.object({
   timestamp: z.string(),
 })
 
-function formatToolInputForDisplay(input: Record<string, any> | undefined): string {
-  return summarizeToolInput(input)
+function formatToolInputForDisplay(name: string, input: Record<string, any> | undefined): string {
+  return summarizeToolInput(input, name)
 }
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
 }
 
-function summarizeTaskInput(input: Record<string, any>): string | null {
-  if (typeof input.subject === "string") return truncate(input.subject, 60)
-  if (typeof input.taskId === "string") {
-    const parts = [`#${input.taskId}`]
-    if (typeof input.status === "string") parts.push(input.status)
-    return parts.join(" -> ")
+/**
+ * Task tool inputs (taskId, status, subject, description, activeForm) are small
+ * and bounded, so we keep the full JSON rather than collapsing to a one-line
+ * summary — the dashboard's TaskToolDisplay parses this JSON back out to show
+ * per-field state instead of just the action name.
+ */
+function taskToolDetail(input: Record<string, any>): string {
+  try {
+    return JSON.stringify(input)
+  } catch {
+    return ""
   }
-  return null
 }
 
 function extractPathValue(input: Record<string, any>): string | undefined {
@@ -137,9 +142,10 @@ function summarizeFileOrCommandInput(input: Record<string, any>): string | null 
   return null
 }
 
-export function summarizeToolInput(input: Record<string, any> | undefined): string {
+export function summarizeToolInput(input: Record<string, any> | undefined, name?: string): string {
   if (!input) return ""
-  return summarizeTaskInput(input) ?? summarizeFileOrCommandInput(input) ?? ""
+  if (name && isTaskTool(name)) return taskToolDetail(input)
+  return summarizeFileOrCommandInput(input) ?? ""
 }
 
 export function captureSessionToolCall(
@@ -164,7 +170,7 @@ function buildCapturedToolCall(
 ): CapturedToolCall {
   return {
     name: toolName,
-    detail: summarizeToolInput(toolInput),
+    detail: summarizeToolInput(toolInput, toolName),
     timestamp: new Date(nowMs).toISOString(),
   }
 }
@@ -378,7 +384,7 @@ export function extractToolCalls(content: unknown): ToolCallSummary[] {
     )
     .map((block) => {
       const name = block.name!
-      return { name, detail: formatToolInputForDisplay(block.input) }
+      return { name, detail: formatToolInputForDisplay(name, block.input) }
     })
 }
 
