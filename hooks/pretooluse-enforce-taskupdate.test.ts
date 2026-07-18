@@ -182,7 +182,9 @@ describe("pretooluse-enforce-taskupdate", () => {
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("still pending")
         expect(result.reason).toContain("Starting a task before closing it")
-        expect(result.reason).toContain("Run TaskList now")
+        // The "Run TaskList now" step is gated on the agent detected from the
+        // payload; this payload carries no agent identity, so it is filtered out.
+        expect(result.reason).not.toContain("Run TaskList now")
         expect(result.reason).not.toContain("drift")
         expect(result.reason).not.toContain("recent context")
         expect(result.reason).not.toContain("Required transition")

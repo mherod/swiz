@@ -144,15 +144,10 @@ describe("pretooluse-no-phantom-task-completion", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("needs substantive work before it can close")
 
-    const { detectCurrentAgent } = await import("../src/detect.ts")
-    const { agentDefinitelySupportsTaskList } = await import("../src/agent-paths.ts")
-    const agent = detectCurrentAgent()
-    const supportsTaskList = !agent || agentDefinitelySupportsTaskList(agent)
-    if (supportsTaskList) {
-      expect(result.reason).toContain("Run TaskList now")
-    } else {
-      expect(result.reason).not.toContain("Run TaskList now")
-    }
+    // The hook gates the "Run TaskList now" step on the agent detected from the
+    // payload (detectCurrentAgentFromHookPayload), not the host process env. This
+    // payload carries no agent identity, so the Claude-only step is filtered out.
+    expect(result.reason).not.toContain("Run TaskList now")
   })
 
   test("allows completion if only 1 other task is in_progress but transcript HAS work", async () => {
