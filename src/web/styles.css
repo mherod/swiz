@@ -2626,8 +2626,12 @@ tbody tr:hover {
 .dock-fixed {
   position: fixed;
   bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-  left: 50%;
-  transform: translateX(-50%);
+  /* Center without transform: motion.nav resets transform to identity,
+     which would leave a translateX(-50%) uncentered and overflowing right. */
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin-inline: auto;
   z-index: 100;
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.4),
