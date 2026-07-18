@@ -1269,6 +1269,8 @@ tbody tr:hover {
 .project-issues-count-pill {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   border-radius: var(--radius-pill);
   border: 1px solid rgba(129, 168, 255, 0.36);
   background: rgba(49, 85, 157, 0.26);
@@ -3429,6 +3431,17 @@ tbody tr:hover {
 
   .bento-dashboard-secondary > .project-issues-card {
     max-height: min(34rem, calc(100dvh - 11rem));
+  }
+
+  /* The secondary column narrows to ~17.5rem here, too tight for the
+     two-column hero (repo badge) introduced at 900px — stack it back
+     to a single column so the badge doesn't crowd the title. */
+  .bento-dashboard-secondary .project-issues-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bento-dashboard-secondary .project-issues-controls {
+    justify-content: flex-start;
   }
 }
 
