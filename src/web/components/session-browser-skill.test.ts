@@ -104,3 +104,76 @@ describe("skillExchangeMergeAt", () => {
     expect(skillExchangeMergeAt(grouped, 0)).toBeNull()
   })
 })
+
+describe("groupMessages", () => {
+  test("merges tool calls from consecutive tool-only assistant rows instead of dropping all but the first", () => {
+    const reads = [
+      {
+        role: "assistant" as const,
+        timestamp: "2026-07-18T18:57:07Z",
+        text: "",
+        toolCalls: [{ name: "Read", detail: JSON.stringify({ file_path: "/repo/a.ts" }) }],
+      },
+      {
+        role: "assistant" as const,
+        timestamp: "2026-07-18T18:57:08Z",
+        text: "",
+        toolCalls: [{ name: "Read", detail: JSON.stringify({ file_path: "/repo/b.ts" }) }],
+      },
+      {
+        role: "assistant" as const,
+        timestamp: "2026-07-18T18:57:09Z",
+        text: "",
+        toolCalls: [{ name: "Read", detail: JSON.stringify({ file_path: "/repo/c.ts" }) }],
+      },
+    ]
+
+    const grouped = groupMessages(reads)
+
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]!.count).toBe(3)
+    expect(grouped[0]!.message.toolCalls).toEqual([
+      { name: "Read", detail: JSON.stringify({ file_path: "/repo/a.ts" }) },
+      { name: "Read", detail: JSON.stringify({ file_path: "/repo/b.ts" }) },
+      { name: "Read", detail: JSON.stringify({ file_path: "/repo/c.ts" }) },
+    ])
+  })
+
+  test("dedupes identical repeated tool calls so exact repeats still show once", () => {
+    const sameRead = {
+      name: "Read",
+      detail: JSON.stringify({ file_path: "/repo/a.ts" }),
+    }
+    const repeated = [
+      {
+        role: "assistant" as const,
+        timestamp: "2026-07-18T18:57:07Z",
+        text: "",
+        toolCalls: [sameRead],
+      },
+      {
+        role: "assistant" as const,
+        timestamp: "2026-07-18T18:57:08Z",
+        text: "",
+        toolCalls: [sameRead],
+      },
+    ]
+
+    const grouped = groupMessages(repeated)
+
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]!.count).toBe(2)
+    expect(grouped[0]!.message.toolCalls).toEqual([sameRead])
+  })
+
+  test("does not merge messages that already differ by text", () => {
+    const messages = [
+      { role: "assistant" as const, timestamp: "2026-07-18T18:57:07Z", text: "Reading files" },
+      { role: "assistant" as const, timestamp: "2026-07-18T18:57:08Z", text: "Editing files" },
+    ]
+
+    const grouped = groupMessages(messages)
+
+    expect(grouped).toHaveLength(2)
+  })
+})
