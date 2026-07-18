@@ -120,8 +120,9 @@ describe("captureSessionToolCall", () => {
     const call = map.get("sess1")![0]!
     expect(call.name).toBe("Read")
     expect(call.timestamp).toBe(new Date(now).toISOString())
-    // summarizeToolInput extracts path via summarizeFileOrCommandInput
-    expect(call.detail).toBe("/test")
+    // Read is a file tool, so its detail keeps full JSON (file_path) rather
+    // than collapsing to a bare path string.
+    expect(call.detail).toBe(JSON.stringify({ file_path: "/test" }))
   })
 
   test("appends to existing session calls", () => {
@@ -141,6 +142,25 @@ describe("captureSessionToolCall", () => {
 
     const call = map.get("sess1")![0]!
     expect(JSON.parse(call.detail)).toEqual({ taskId: "3", status: "completed" })
+  })
+
+  test("preserves full JSON detail for Edit calls", () => {
+    const map = new Map<string, CapturedToolCall[]>()
+    const now = Date.now()
+    captureSessionToolCall(
+      map,
+      "sess1",
+      "Edit",
+      { file_path: "/repo/foo.ts", old_string: "a", new_string: "b" },
+      now
+    )
+
+    const call = map.get("sess1")![0]!
+    expect(JSON.parse(call.detail)).toEqual({
+      file_path: "/repo/foo.ts",
+      old_string: "a",
+      new_string: "b",
+    })
   })
 
   test("respects MAX_CAPTURED_TOOL_CALLS_PER_SESSION limit (400)", () => {
@@ -192,7 +212,11 @@ describe("captured session tool call persistence", () => {
 
       const entries = await readPersistedSessionToolCalls(cwd, "sess:1", 10, homeDir)
       expect(entries).toEqual([
-        { name: "Read", detail: "/tmp/file.txt", timestamp: new Date(now).toISOString() },
+        {
+          name: "Read",
+          detail: JSON.stringify({ file_path: "/tmp/file.txt" }),
+          timestamp: new Date(now).toISOString(),
+        },
         { name: "Bash", detail: "ls -la", timestamp: new Date(now + 1).toISOString() },
       ])
     } finally {
@@ -496,12 +520,55 @@ describe("extractToolCalls", () => {
     expect(result[0]!.name).toBe("Valid")
   })
 
-  test("formats detail from input using JSON.stringify with 2-space indent", () => {
+  test("preserves full JSON for Read input instead of collapsing to a path string", () => {
     const content = [{ type: "tool_use", name: "Read", input: { path: "/test/file.txt" } }]
 
     const result = extractToolCalls(content)
 
-    expect(result[0]!.detail).toBe("/test/file.txt")
+    expect(result[0]!.detail).toBe(JSON.stringify({ file_path: "/test/file.txt" }))
+  })
+
+  test("preserves file path plus bounded diff JSON for Edit input", () => {
+    const content = [
+      {
+        type: "tool_use",
+        name: "Edit",
+        input: { file_path: "/test/file.txt", old_string: "before", new_string: "after" },
+      },
+    ]
+
+    const result = extractToolCalls(content)
+
+    expect(JSON.parse(result[0]!.detail)).toEqual({
+      file_path: "/test/file.txt",
+      old_string: "before",
+      new_string: "after",
+    })
+  })
+
+  test("truncates very long old_string/new_string in Edit detail", () => {
+    const longString = "x".repeat(5000)
+    const content = [
+      {
+        type: "tool_use",
+        name: "Edit",
+        input: { file_path: "/test/file.txt", old_string: longString, new_string: "y" },
+      },
+    ]
+
+    const result = extractToolCalls(content)
+    const parsed = JSON.parse(result[0]!.detail)
+
+    expect(parsed.old_string.length).toBeLessThan(longString.length)
+    expect(parsed.old_string.endsWith("...")).toBe(true)
+  })
+
+  test("keeps generic path summary for non-file tools", () => {
+    const content = [{ type: "tool_use", name: "Bash", input: { command: "ls -la" } }]
+
+    const result = extractToolCalls(content)
+
+    expect(result[0]!.detail).toBe("ls -la")
   })
 
   test("handles tool_use with undefined input", () => {

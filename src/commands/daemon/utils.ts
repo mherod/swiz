@@ -14,7 +14,7 @@ import {
   formatSkillToolInputDetail,
 } from "../../skill-usage.ts"
 import { isIncompleteTaskStatus } from "../../tasks/task-repository.ts"
-import { isTaskTool } from "../../tool-matchers.ts"
+import { isCodeChangeTool, isTaskTool, READ_TOOLS } from "../../tool-matchers.ts"
 import { extractText } from "../../transcript-utils.ts"
 
 export interface TranscriptWatchPath {
@@ -127,6 +127,37 @@ function extractPathValue(input: Record<string, any>): string | undefined {
   return typeof v === "string" ? v : undefined
 }
 
+function isFileTool(name: string): boolean {
+  return READ_TOOLS.has(name) || isCodeChangeTool(name)
+}
+
+const FILE_DETAIL_STRING_TRUNCATE = 2000
+
+/**
+ * File tool inputs (Read/Edit/Write/NotebookEdit) keep their path plus a bounded
+ * slice of any diff strings, instead of collapsing to a path-only summary — the
+ * dashboard's FileToolDisplay parses this JSON to show offset/limit and the
+ * old/new diff, not just the tool name.
+ */
+function fileToolDetail(input: Record<string, any>): string {
+  const pathVal = extractPathValue(input)
+  if (pathVal === undefined) return summarizeFileOrCommandInput(input) ?? ""
+  const payload: Record<string, unknown> = { file_path: pathVal }
+  if (typeof input.offset === "number") payload.offset = input.offset
+  if (typeof input.limit === "number") payload.limit = input.limit
+  if (typeof input.old_string === "string") {
+    payload.old_string = truncate(input.old_string, FILE_DETAIL_STRING_TRUNCATE)
+  }
+  if (typeof input.new_string === "string") {
+    payload.new_string = truncate(input.new_string, FILE_DETAIL_STRING_TRUNCATE)
+  }
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return summarizeFileOrCommandInput(input) ?? ""
+  }
+}
+
 function summarizeFileOrCommandInput(input: Record<string, any>): string | null {
   const skillDetail = formatSkillToolInputDetail(input)
   if (skillDetail) return skillDetail
@@ -145,6 +176,7 @@ function summarizeFileOrCommandInput(input: Record<string, any>): string | null 
 export function summarizeToolInput(input: Record<string, any> | undefined, name?: string): string {
   if (!input) return ""
   if (name && isTaskTool(name)) return taskToolDetail(input)
+  if (name && isFileTool(name)) return fileToolDetail(input)
   return summarizeFileOrCommandInput(input) ?? ""
 }
 
