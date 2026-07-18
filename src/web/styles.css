@@ -1159,6 +1159,12 @@ tbody tr:hover {
   .session-filter-input {
     min-height: 44px;
   }
+
+  .project-issues-repo-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
 }
 
 /* ── Messages ── */
