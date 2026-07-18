@@ -155,7 +155,10 @@ body::before {
 }
 
 #app {
-  height: 100dvh;
+  /* Mobile/tablet: flow layout — the shell grows with content and the page
+     scrolls. The fixed-viewport app shell (height: 100dvh) is restored at
+     >=900px, where the nav becomes an independently scrolling sidebar. */
+  min-height: 100dvh;
   width: 100%;
   display: flex;
   justify-content: center;
@@ -173,7 +176,10 @@ body::before {
   display: grid;
   gap: var(--gap);
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+  /* Stacked mobile layout: nav sizes to content and the page scrolls.
+     A dvh cap here would crush the primary navigation into a nested
+     scroller — the fixed-height cap only makes sense at >=900px. */
+  grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-areas:
     "title"
     "nav"
@@ -493,7 +499,6 @@ tbody tr:hover {
 .bento-nav {
   grid-area: nav;
   overflow-y: auto;
-  max-height: 34dvh;
   gap: var(--space-2);
 }
 
@@ -1140,6 +1145,19 @@ tbody tr:hover {
   .session-actions {
     grid-auto-flow: row;
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Touch and narrow viewports: meet the 44px minimum target size
+   (Apple HIG / WCAG 2.2). Coarse pointer covers real touch devices;
+   the width fallback covers phone-sized viewports whatever the pointer. */
+@media (pointer: coarse), (max-width: 640px) {
+  .session-action-btn {
+    min-height: 44px;
+  }
+
+  .session-filter-input {
+    min-height: 44px;
   }
 }
 
@@ -3265,10 +3283,6 @@ tbody tr:hover {
       "nav    nav"
       "settings settings"
       "settings settings";
-  }
-
-  .bento-nav {
-    max-height: 30dvh;
   }
 
   .bento-messages {
