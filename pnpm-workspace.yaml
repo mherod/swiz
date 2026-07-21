@@ -2,7 +2,7 @@ allowBuilds:
   esbuild: true
   protobufjs: true
 overrides:
-  protobufjs: '>=8.0.1'
+  protobufjs: '>=8.6.6 <9'
   undici: '>=7.28.0'
   fast-uri: '>=3.1.2'
   fast-xml-parser: '>=5.5.6'
