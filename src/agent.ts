@@ -18,6 +18,7 @@ export function detectBestAgentCli(): AgentBackend | null {
  * Return "agent" if the Cursor Agent CLI is installed, null otherwise.
  */
 export function detectAgentCli(): AgentBackend | null {
+  if (process.env.AI_TEST_NO_BACKEND === "1") return null
   return Bun.which("agent") ? "agent" : null
 }
 export interface PromptAgentOptions extends Pick<PromptOptions, "signal" | "timeout"> {

@@ -6,6 +6,19 @@ describe("agent.ts", () => {
     it("function is exported and callable", () => {
       expect(typeof detectAgentCli).toBe("function")
     })
+
+    it("returns null when tests disable external AI backends", () => {
+      const original = process.env.AI_TEST_NO_BACKEND
+      process.env.AI_TEST_NO_BACKEND = "1"
+
+      try {
+        expect(detectAgentCli()).toBeNull()
+        expect(detectBestAgentCli()).toBeNull()
+      } finally {
+        if (original === undefined) delete process.env.AI_TEST_NO_BACKEND
+        else process.env.AI_TEST_NO_BACKEND = original
+      }
+    })
   })
 
   describe("detectBestAgentCli", () => {
