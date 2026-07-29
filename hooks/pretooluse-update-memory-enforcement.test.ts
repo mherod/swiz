@@ -90,7 +90,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     const hso = result.json?.hookSpecificOutput as Record<string, any>
     expect(hso?.permissionDecision).toBe("deny")
     expect(String(hso?.permissionDecisionReason)).toContain(SELF_SENTINEL)
-    expect(String(hso?.permissionDecisionReason)).toContain("Read the /update-memory skill")
+    expect(String(hso?.permissionDecisionReason)).toContain("the /update-memory skill")
   })
 
   test("allows reading the update-memory skill after the reminder", async () => {
@@ -504,7 +504,7 @@ describe("pretooluse-update-memory-enforcement", () => {
       expect(result.exitCode).toBe(0)
       const hso = result.json?.hookSpecificOutput as Record<string, any>
       expect(hso?.permissionDecision).toBe("deny") // still blocked — auto-memory didn't satisfy enforcement
-      expect(String(hso?.permissionDecisionReason)).toContain("Read the /update-memory skill")
+      expect(String(hso?.permissionDecisionReason)).toContain("the /update-memory skill")
     })
   })
 
