@@ -32,24 +32,40 @@ interface SyncEntry {
 }
 
 type RepoSlugResolver = (cwd: string) => Promise<string | null>
+type ForkTopologyResolver = (cwd: string) => Promise<{ upstreamSlug: string } | null>
+type SyncRunner = typeof syncUpstreamState
 
 export class UpstreamSyncRegistry {
   private entries = new Map<string, SyncEntry>()
   private readonly intervalMs: number
   private readonly timeoutMs: number
   private readonly resolveSlug: RepoSlugResolver
+  private readonly resolveFork: ForkTopologyResolver
+  private readonly sync: SyncRunner
   private readonly store: IssueStore | null
 
   constructor(opts?: {
     intervalMs?: number
     timeoutMs?: number
     resolveSlug?: RepoSlugResolver
+    resolveFork?: ForkTopologyResolver
+    sync?: SyncRunner
     store?: IssueStore
   }) {
-    this.intervalMs = opts?.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS
-    this.timeoutMs = opts?.timeoutMs ?? DEFAULT_SYNC_TIMEOUT_MS
-    this.resolveSlug = opts?.resolveSlug ?? defaultResolveSlug
-    this.store = opts?.store ?? null
+    const {
+      intervalMs = DEFAULT_SYNC_INTERVAL_MS,
+      timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+      resolveSlug = defaultResolveSlug,
+      resolveFork = defaultResolveFork,
+      sync = syncUpstreamState,
+      store = null,
+    } = opts ?? {}
+    this.intervalMs = intervalMs
+    this.timeoutMs = timeoutMs
+    this.resolveSlug = resolveSlug
+    this.resolveFork = resolveFork
+    this.sync = sync
+    this.store = store
   }
 
   /** Register a project for periodic upstream sync. Idempotent.
@@ -78,8 +94,7 @@ export class UpstreamSyncRegistry {
     this.scheduleSync(cwd)
 
     // Fork workflow: also register the upstream repo for issue/label/milestone sync
-    const { detectForkTopology } = await import("../../git-helpers.ts")
-    const fork = await detectForkTopology(cwd)
+    const fork = await this.resolveFork(cwd)
     if (fork && fork.upstreamSlug !== repo) {
       const upstreamKey = `${cwd}::upstream`
       if (!this.entries.has(upstreamKey)) {
@@ -114,7 +129,7 @@ export class UpstreamSyncRegistry {
   async syncNow(cwd: string): Promise<UpstreamSyncResult | null> {
     const entry = this.entries.get(cwd)
     if (!entry) return null
-    return this.doSync(entry)
+    return this.doSync(cwd, entry)
   }
 
   listActive(): UpstreamSyncStatus[] {
@@ -127,14 +142,18 @@ export class UpstreamSyncRegistry {
     }))
   }
 
-  /** Stop the periodic sync timer and remove a single project. */
+  /** Stop periodic sync timers and remove a project plus its fork-upstream entry. */
   unregister(cwd: string): boolean {
-    const entry = this.entries.get(cwd)
-    if (!entry) return false
-    if (entry.timer) clearTimeout(entry.timer)
-    entry.timer = null
-    this.entries.delete(cwd)
-    return true
+    let removed = false
+    for (const entryKey of [cwd, `${cwd}::upstream`]) {
+      const entry = this.entries.get(entryKey)
+      if (!entry) continue
+      if (entry.timer) clearTimeout(entry.timer)
+      entry.timer = null
+      this.entries.delete(entryKey)
+      removed = true
+    }
+    return removed
   }
 
   close(): void {
@@ -145,32 +164,32 @@ export class UpstreamSyncRegistry {
     this.entries.clear()
   }
 
-  private scheduleSync(cwd: string): void {
-    const entry = this.entries.get(cwd)
+  private scheduleSync(entryKey: string): void {
+    const entry = this.entries.get(entryKey)
     if (!entry) return
     entry.timer = setTimeout(() => {
-      void this.doSync(entry).then(() => this.scheduleSync(cwd))
+      void this.doSync(entryKey, entry).then(() => this.scheduleSync(entryKey))
     }, this.intervalMs)
   }
 
   // In-flight coalescing: concurrent doSync calls for the same entry share one computation.
   private inFlightSyncs = new Map<string, Promise<UpstreamSyncResult>>()
 
-  private async doSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
+  private async doSync(entryKey: string, entry: SyncEntry): Promise<UpstreamSyncResult> {
     // Join existing in-flight computation rather than firing a duplicate gh call.
-    const inflight = this.inFlightSyncs.get(entry.cwd)
+    const inflight = this.inFlightSyncs.get(entryKey)
     if (inflight) return inflight
 
     const computation = this.runSync(entry)
-    this.inFlightSyncs.set(entry.cwd, computation)
-    return computation.finally(() => this.inFlightSyncs.delete(entry.cwd))
+    this.inFlightSyncs.set(entryKey, computation)
+    return computation.finally(() => this.inFlightSyncs.delete(entryKey))
   }
 
   private async runSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
     entry.syncing = true
     try {
       const result = await Promise.race([
-        syncUpstreamState(entry.repo, entry.cwd, { store: this.store ?? undefined }),
+        this.sync(entry.repo, entry.cwd, { store: this.store ?? undefined }),
         new Promise<UpstreamSyncResult>((_, reject) =>
           setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
         ),
@@ -221,4 +240,9 @@ async function defaultResolveSlug(cwd: string): Promise<string | null> {
   if (!hasGhCli()) return null
   if (!(await isGitRepo(cwd))) return null
   return getRepoSlug(cwd)
+}
+
+async function defaultResolveFork(cwd: string): Promise<{ upstreamSlug: string } | null> {
+  const { detectForkTopology } = await import("../../git-helpers.ts")
+  return detectForkTopology(cwd)
 }
