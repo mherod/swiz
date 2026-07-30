@@ -13,6 +13,11 @@ import {
   skillExistsForHookPayload,
 } from "../src/utils/hook-utils.ts"
 import {
+  findGitCommitAttribution,
+  hasGhFlag,
+  hasGitNoVerifyFlag,
+  hasGitTrailerFlag,
+  hasUnsafeGitPushForceFlag,
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,
   SHELL_PROC_SUB_WRITE_RE,
@@ -324,28 +329,46 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
         "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.\n\nInstead:\n  • Use the Edit tool to undo specific changes in a file\n  • Read the file, identify what to revert, then apply a targeted edit\n  • `git revert <hash>`  — undo an entire commit safely",
     },
     {
-      match: (c) => /git\s+commit\b.*--no-verify/.test(c) || /git\s+push\b.*--no-verify/.test(c),
+      useRawCommand: true,
+      match: hasGitNoVerifyFlag,
       message:
         "Do not use `--no-verify`. It bypasses pre-commit hooks and safety mechanisms.\n\nAddress the underlying issue flagged by the hooks instead of circumventing them.",
     },
     {
-      match: (c) => /git\s+.*--trailer/.test(c),
+      useRawCommand: true,
+      match: hasGitTrailerFlag,
       message:
         "Do not use `--trailer` with git. AI tools use this to inject co-authorship signatures.\n\nCreate commits without trailer attribution.",
     },
     {
       useRawCommand: true,
-      match: (c) => {
-        const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/)
-        return mMatch ? /Co-authored-by:/i.test(mMatch[1] ?? "") : false
-      },
+      match: hasUnsafeGitPushForceFlag,
+      message:
+        "Do not use `git push --force` or `git push -f`.\n\nUse `git push --force-with-lease` instead so the push refuses to overwrite remote work you have not seen.",
+    },
+    {
+      useRawCommand: true,
+      match: (c) => findGitCommitAttribution(c) === "co-author",
       message:
         "Do not include `Co-authored-by:` in commit messages.\n\nCreate commits without co-author attribution.",
     },
     {
-      match: (c) => /gh\s+.*--admin/.test(c),
+      useRawCommand: true,
+      match: (c) => findGitCommitAttribution(c) === "claude-code",
+      message:
+        "Do not include AI-generation signatures in commit messages.\n\nWrite the commit message without a `Generated with Claude Code` attribution.",
+    },
+    {
+      useRawCommand: true,
+      match: (c) => hasGhFlag(c, "--admin"),
       message:
         "Do not use `gh --admin`. It bypasses repository protection rules and required checks.\n\nEnsure PRs pass all required checks and obtain proper approvals.",
+    },
+    {
+      useRawCommand: true,
+      match: (c) => hasGhFlag(c, "--skip-status-check"),
+      message:
+        "Do not use `gh --skip-status-check`. It bypasses required CI/CD status checks.\n\nWait for every required check to pass before merging.",
     },
     {
       useRawCommand: true,

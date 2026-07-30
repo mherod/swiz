@@ -1,9 +1,8 @@
 #!/usr/bin/env bun
 
-// CommitMsg hook: Scrub "Co-authored-by" trailers from the commit message.
+// CommitMsg hook: Scrub co-author and AI-generation attribution from commit messages.
 // Dispatched by lefthook commit-msg via `swiz dispatch commitMsg`.
 
-import { readFileSync, writeFileSync } from "node:fs"
 import { z } from "zod"
 import { isGitRepo } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
@@ -14,7 +13,12 @@ const commitMsgHookInputSchema = z.looseObject({
   commit_msg_file: z.string().optional(),
 })
 
-const CO_AUTHORED_BY_RE = /^Co-authored-by:.*$/gim
+function isProhibitedAttributionLine(line: string): boolean {
+  const normalized = line.normalize("NFKC")
+  return (
+    /^Co-authored-by:.*$/i.test(normalized) || /generated.*with.*claude.*code/i.test(normalized)
+  )
+}
 
 export async function evaluateCommitMsgScrubCoauthors(input: unknown): Promise<SwizHookOutput> {
   try {
@@ -24,16 +28,19 @@ export async function evaluateCommitMsgScrubCoauthors(input: unknown): Promise<S
 
     if (!(await isGitRepo(cwd)) || !msgFile) return {}
 
-    const content = readFileSync(msgFile, "utf-8")
-    if (CO_AUTHORED_BY_RE.test(content)) {
-      const scrubbed = content.replace(CO_AUTHORED_BY_RE, "").trim()
-      writeFileSync(msgFile, `${scrubbed}\n`, "utf-8")
-      return {
-        systemMessage: "Scrubbed 'Co-authored-by' trailers from commit message.",
-      }
-    }
+    const messageFile = Bun.file(msgFile)
+    if (!(await messageFile.exists())) return {}
 
-    return {}
+    const content = await messageFile.text()
+    const lines = content.split(/\r?\n/)
+    const scrubbedLines = lines.filter((line) => !isProhibitedAttributionLine(line))
+    if (scrubbedLines.length === lines.length) return {}
+
+    const scrubbed = scrubbedLines.join("\n").trim()
+    await Bun.write(msgFile, `${scrubbed}\n`)
+    return {
+      systemMessage: "Scrubbed prohibited commit attribution.",
+    }
   } catch {
     return {}
   }

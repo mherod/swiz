@@ -129,12 +129,13 @@ alwaysApply: false
 - Solo repo (`mherod/swiz`); push to `main`. Run `swiz settings show --project` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` authoritative for collab/trunk policy.
 - CI `paths-ignore`: `.claude/**`, `docs/**`; markdown triggers CI.
 - Pre-push: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
-- No `--no-verify`. Pre-push: `bun test`; CI: `lint → typecheck → test`. On `proc.stdin.write` TypeError/`ReferenceError: Cannot access 'default' before initialization`, isolate failing test then retry.
-- After push: verify with `gh run view --json`; `in_progress` acceptable. Update tasks before stop.
-- `github.base_ref` empty on `push` events; use only on `pull_request`/`pull_request_target`. Push parsing must distinguish `git push --force` vs `git push -- --force`, including `-C <path>`.
+- Pre-push: `bun test`; CI: `lint → typecheck → test`. On `proc.stdin.write` TypeError/`ReferenceError: Cannot access 'default' before initialization`, isolate and retry the failing test.
+- Verify post-push via `gh run view --json`; `in_progress` acceptable. Update tasks before stop.
+- `github.base_ref` empty on `push`; use only on `pull_request`/`pull_request_target`.
+- **Git security enforcement**: Synchronize `src/utils/shell-patterns.ts`, `hooks/pretooluse-banned-commands.ts`, `hooks/commitmsg-scrub-coauthors.ts`, `hooks/shim.sh`, and regression tests. Block `--no-verify`, `--trailer`, unsafe `git push --force`/`-f`, `gh --admin`, `gh --skip-status-check`, `Co-Authored-By`, and `Generated with Claude Code`; allow `--force-with-lease`, `--force-if-includes`, plus force-looking post-`--` refspecs.
 - DON'T: `TaskUpdate`/`TaskList` after push starts; stop with unpushed commits; push `main`/`master` without collab guard; run branch/collab/PR checks after push.
 - `swiz settings` CI tests flaky (20–30s), pre-existing, dep bumps not at fault. No branch protection: `gh pr merge N --squash` not `--auto` (returns "enablePullRequestAutoMerge" error).
-- Never add `Co-Authored-By` trailers. Never use destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Exception: read-only `stash list`/`stash show`.
+- No destructive git (`revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`); use `reflog`. Read-only `stash list`/`stash show` allowed.
 - Commit preservation: on `/commit`, `$commit`, or "commit everything", commit each `git status --short` entry unless the user requests scope. Never label files unrelated/pre-existing; after a scoped commit, commit remaining worktree before reporting done.
 - DO: Read full file before reverting edits — Biome reformats other sections.
 ## Daemon
