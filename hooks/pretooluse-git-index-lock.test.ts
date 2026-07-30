@@ -208,7 +208,6 @@ describe("pretooluse-git-index-lock", () => {
       expect(active).toBe(true)
       expect(harness.processCalls).toHaveLength(1)
     })
-
     test("fails safe when a process inspection command cannot start", async () => {
       const harness = createHarness({
         activeGit: true,
@@ -307,7 +306,6 @@ describe("pretooluse-git-index-lock", () => {
       expect(result.reason).toContain("Auto-removed")
       expect(harness.lockExists()).toBe(false)
     })
-
     test("denies safely when process inspection times out", async () => {
       const harness = createHarness({ processInspectionTimesOut: true })
       const result = await runHook("git status", harness)

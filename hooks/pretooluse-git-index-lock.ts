@@ -337,6 +337,7 @@ async function spawnForProcessInspection(
     return null
   }
 }
+}
 
 /**
  * Inspect running Git processes without allowing subprocess work to exceed the
