@@ -22,7 +22,7 @@ import {
   preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
-import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import { type SpawnWithTimeoutResult, spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -38,12 +38,49 @@ export interface GitIndexLockEvaluationOptions {
   lockReleaseTimeoutMs?: number
   waitIntervalMs?: number
   removeRetryDelayMs?: number
+  runtime?: Partial<GitIndexLockRuntime>
+}
+
+/** External operations injected into the evaluator for deterministic tests. */
+export interface GitIndexLockRuntime {
+  git(args: string[], cwd: string): Promise<string>
+  fileExists(path: string): Promise<boolean>
+  unlink(path: string): Promise<void>
+  fileMtimeMs(path: string): Promise<number>
+  spawn(
+    cmd: string[],
+    options: { cwd?: string; timeoutMs?: number; stdin?: string }
+  ): Promise<SpawnWithTimeoutResult>
+  sleep(ms: number): Promise<void>
+  now(): number
+  pid(): number
+  ppid(): number
+}
+
+const defaultRuntime: GitIndexLockRuntime = {
+  git,
+  fileExists: async (path) => await Bun.file(path).exists(),
+  unlink,
+  fileMtimeMs: async (path) => (await Bun.file(path).stat()).mtimeMs,
+  spawn: spawnWithTimeout,
+  sleep: async (ms) => {
+    if (ms <= 0) return
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  },
+  now: Date.now,
+  pid: () => process.pid,
+  ppid: () => process.ppid,
+}
+
+function resolveRuntime(overrides: Partial<GitIndexLockRuntime> = {}): GitIndexLockRuntime {
+  return { ...defaultRuntime, ...overrides }
 }
 
 // ── Validation & resolution ─────────────────────────────────────────────────
 
 async function validateMainInputs(
-  input: ShellHookInput
+  input: ShellHookInput,
+  runtime: GitIndexLockRuntime
 ): Promise<{ repoRoot: string; lockPath: string } | null> {
   // Only applies to shell tools running git commands.
   if (!isShellTool(input.tool_name ?? "")) return null
@@ -54,15 +91,15 @@ async function validateMainInputs(
   const cwd = input.cwd || process.cwd()
 
   // Find the repo root — handles subdirectories and worktrees.
-  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
+  const repoRoot = await runtime.git(["rev-parse", "--show-toplevel"], cwd)
   if (!repoRoot) return null // Not in a git repo; let git itself report the error.
 
-  const gitDir = await git(["rev-parse", "--absolute-git-dir"], cwd)
+  const gitDir = await runtime.git(["rev-parse", "--absolute-git-dir"], cwd)
   if (!gitDir) return null
   const lockPath = join(gitDir, GIT_INDEX_LOCK)
 
   // Quick exit if no lock exists
-  if (!(await Bun.file(lockPath).exists())) return null
+  if (!(await runtime.fileExists(lockPath))) return null
 
   return { repoRoot, lockPath }
 }
@@ -70,19 +107,21 @@ async function validateMainInputs(
 async function handleLockResolution(
   lockPath: string,
   repoRoot: string,
-  options: GitIndexLockEvaluationOptions = {}
+  options: GitIndexLockEvaluationOptions,
+  runtime: GitIndexLockRuntime
 ): Promise<SwizHookOutput> {
   const lockReleaseTimeoutMs = options.lockReleaseTimeoutMs ?? LOCK_RELEASE_TIMEOUT_MS
   const waitIntervalMs = options.waitIntervalMs ?? WAIT_INTERVAL_MS
   const removeRetryDelayMs = options.removeRetryDelayMs ?? REMOVE_RETRY_DELAY_MS
-  const releaseDeadlineMs = Date.now() + lockReleaseTimeoutMs
+  const releaseDeadlineMs = runtime.now() + lockReleaseTimeoutMs
 
   // Wait for lock to resolve or git process to finish
   const { lockExists, gitActive } = await waitForLockResolution(
     lockPath,
     repoRoot,
     releaseDeadlineMs,
-    waitIntervalMs
+    waitIntervalMs,
+    runtime
   )
 
   if (!lockExists) {
@@ -94,19 +133,21 @@ async function handleLockResolution(
       lockPath,
       releaseDeadlineMs,
       removeRetryDelayMs,
-      lockReleaseTimeoutMs
+      lockReleaseTimeoutMs,
+      runtime
     )
   }
 
   // Git process appears active, but the lock may be stale if it's old enough.
   // Attempt removal for aged locks — pgrep false-positives are common.
-  const lockAge = await getLockAgeMs(lockPath)
+  const lockAge = await getLockAgeMs(lockPath, runtime)
   if (lockAge >= STALE_LOCK_AGE_MS) {
     return await autoRemoveStaleLock(
       lockPath,
       releaseDeadlineMs,
       removeRetryDelayMs,
-      lockReleaseTimeoutMs
+      lockReleaseTimeoutMs,
+      runtime
     )
   }
 
@@ -134,26 +175,27 @@ async function autoRemoveStaleLock(
   lockPath: string,
   releaseDeadlineMs: number,
   removeRetryDelayMs: number,
-  lockReleaseTimeoutMs: number
+  lockReleaseTimeoutMs: number,
+  runtime: GitIndexLockRuntime
 ): Promise<SwizHookOutput> {
   let attempt = 0
 
   // Retry until the shared release deadline to handle transient permissions,
   // racing cleanup, and short-lived lock recreation.
-  while (attempt === 0 || Date.now() < releaseDeadlineMs) {
+  while (attempt === 0 || runtime.now() < releaseDeadlineMs) {
     attempt++
     try {
       // Lock may have already been removed by another process or a prior attempt.
-      if (!(await Bun.file(lockPath).exists())) {
+      if (!(await runtime.fileExists(lockPath))) {
         return preToolUseAllow(
           `\`${LOCK_RELATIVE_PATH}\` resolved (attempt ${attempt}) — proceeding.`
         )
       }
 
-      await unlink(lockPath)
+      await runtime.unlink(lockPath)
 
       // Verify removal succeeded (race condition: another process may have recreated it).
-      if (!(await Bun.file(lockPath).exists())) {
+      if (!(await runtime.fileExists(lockPath))) {
         return preToolUseAllow(
           `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` on attempt ${attempt} — proceeding.`
         )
@@ -162,19 +204,19 @@ async function autoRemoveStaleLock(
       // Lock reappeared — retry if attempts remain.
     } catch {
       // ENOENT (lock vanished between exists() and unlink()) — that's fine.
-      if (!(await Bun.file(lockPath).exists())) {
+      if (!(await runtime.fileExists(lockPath))) {
         return preToolUseAllow(`\`${LOCK_RELATIVE_PATH}\` disappeared during cleanup — proceeding.`)
       }
       // Permission error or similar — retry if attempts remain.
     }
 
-    const remainingMs = releaseDeadlineMs - Date.now()
+    const remainingMs = releaseDeadlineMs - runtime.now()
     if (remainingMs <= 0) break
-    await sleep(Math.min(removeRetryDelayMs, remainingMs))
+    await runtime.sleep(Math.min(removeRetryDelayMs, remainingMs))
   }
 
   // All retries exhausted — do NOT let the git command through if the lock still exists.
-  if (!(await Bun.file(lockPath).exists())) {
+  if (!(await runtime.fileExists(lockPath))) {
     return preToolUseAllow(`Auto-removed stale \`${LOCK_RELATIVE_PATH}\` — proceeding.`)
   }
 
@@ -201,34 +243,28 @@ async function waitForLockResolution(
   lockPath: string,
   repoRoot: string,
   releaseDeadlineMs: number,
-  waitIntervalMs: number
+  waitIntervalMs: number,
+  runtime: GitIndexLockRuntime
 ) {
   let gitActive = true
   let lockExists = true
 
-  while (Date.now() < releaseDeadlineMs) {
-    lockExists = await Bun.file(lockPath).exists()
+  while (runtime.now() < releaseDeadlineMs) {
+    lockExists = await runtime.fileExists(lockPath)
     if (!lockExists) break
 
-    gitActive = await isGitProcessActiveForRepo(repoRoot)
+    gitActive = await inspectGitProcessesForRepo(repoRoot, releaseDeadlineMs, runtime)
     if (!gitActive) break
 
-    await sleep(Math.min(waitIntervalMs, releaseDeadlineMs - Date.now()))
+    await runtime.sleep(Math.min(waitIntervalMs, releaseDeadlineMs - runtime.now()))
   }
 
   return { lockExists, gitActive }
 }
 
-async function sleep(ms: number): Promise<void> {
-  if (ms <= 0) return
-  await new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function getLockAgeMs(lockPath: string): Promise<number> {
+async function getLockAgeMs(lockPath: string, runtime: GitIndexLockRuntime): Promise<number> {
   try {
-    const file = Bun.file(lockPath)
-    const stat = await file.stat()
-    return Date.now() - stat.mtimeMs
+    return runtime.now() - (await runtime.fileMtimeMs(lockPath))
   } catch {
     return 0
   }
@@ -243,40 +279,7 @@ async function getLockAgeMs(lockPath: string): Promise<number> {
  *      (e.g., git push -> pre-push hook -> bun -> this hook).
  *   2. Repo scope: exclude git processes whose CWD is outside our repo root.
  */
-async function isGitProcessActiveForRepo(repoRoot: string): Promise<boolean> {
-  const gitPids = await getRunningGitPids()
-  if (gitPids.length === 0) return false
-
-  const ancestors = await getAncestorPids()
-
-  // Filter out ancestor PIDs and this process itself.
-  const nonAncestorPids = gitPids.filter((pid) => pid !== process.pid && !ancestors.has(pid))
-  if (nonAncestorPids.length === 0) return false
-
-  // Check each remaining pid individually so one slow/unresponsive process
-  // does not force a global timeout classification.
-  for (const pid of nonAncestorPids) {
-    if (await isPidUsingRepoDir(pid, repoRoot)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-// ── Low-Level Utilities ──────────────────────────────────────────────────────
-
-async function getRunningGitPids(): Promise<number[]> {
-  const result = await spawnWithTimeout(["pgrep", "-f", "git"], { timeoutMs: 3_000 })
-  if (result.timedOut || result.exitCode !== 0) return []
-  return compact(result.stdout.trim().split("\n").map(Number))
-}
-
-async function buildParentMap(): Promise<Map<number, number>> {
-  const result = await spawnWithTimeout(["ps", "-eo", "pid,ppid"], { timeoutMs: 3_000 })
-  if (result.timedOut) return new Map<number, number>()
-  const out = result.stdout
-
+function parseParentMap(out: string): Map<number, number> {
   const parentMap = new Map<number, number>()
   for (const line of out.trim().split("\n").slice(1)) {
     const parts = line.trim().split(/\s+/)
@@ -288,9 +291,9 @@ async function buildParentMap(): Promise<Map<number, number>> {
   return parentMap
 }
 
-function walkAncestry(parentMap: Map<number, number>): Set<number> {
+function walkAncestry(parentMap: Map<number, number>, startPpid: number): Set<number> {
   const ancestors = new Set<number>()
-  let cur = process.ppid
+  let cur = startPpid
   for (let i = 0; i < MAX_ANCESTRY_DEPTH && cur > 1; i++) {
     ancestors.add(cur)
     const ppid = parentMap.get(cur)
@@ -300,27 +303,74 @@ function walkAncestry(parentMap: Map<number, number>): Set<number> {
   return ancestors
 }
 
-async function getAncestorPids(): Promise<Set<number>> {
-  const parentMap = await buildParentMap()
-  return walkAncestry(parentMap)
+function boundedTimeoutMs(
+  deadlineMs: number,
+  maximumMs: number,
+  runtime: Pick<GitIndexLockRuntime, "now">
+): number | null {
+  const remainingMs = deadlineMs - runtime.now()
+  if (remainingMs <= 0) return null
+  return Math.max(1, Math.min(maximumMs, remainingMs))
 }
 
-async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean> {
-  try {
-    const result = await spawnWithTimeout(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      timeoutMs: LSOF_TIMEOUT_MS,
-    })
+function lsofOutputUsesRepo(stdout: string, repoRoot: string): boolean {
+  const repoPrefix = repoRoot.endsWith("/") ? repoRoot : `${repoRoot}/`
+  return stdout.split("\n").some((line) => {
+    if (!line.startsWith("n")) return false
+    const path = line.slice(1)
+    return path === repoRoot || path.startsWith(repoPrefix)
+  })
+}
 
-    if (result.timedOut) return false
+type ProcessInspectionRuntime = Pick<GitIndexLockRuntime, "now" | "pid" | "ppid" | "spawn">
 
-    return result.stdout
+/**
+ * Inspect running Git processes without allowing subprocess work to exceed the
+ * lock-release deadline. Candidate PIDs are checked in one lsof invocation so
+ * long-lived fsmonitor daemons cannot multiply the timeout.
+ */
+export async function inspectGitProcessesForRepo(
+  repoRoot: string,
+  deadlineMs: number,
+  runtime: ProcessInspectionRuntime = defaultRuntime
+): Promise<boolean> {
+  const pgrepTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
+  if (pgrepTimeoutMs === null) return true
+  const pgrepResult = await runtime.spawn(["pgrep", "-f", "git"], {
+    timeoutMs: pgrepTimeoutMs,
+  })
+  if (pgrepResult.timedOut) return true
+  if (pgrepResult.exitCode !== 0) return false
+
+  const gitPids = compact(
+    pgrepResult.stdout
+      .trim()
       .split("\n")
-      .some((line) => line.startsWith("n") && line.slice(1).startsWith(repoRoot))
-  } catch {
-    // If lsof fails or is not in PATH, we cannot safely determine the process's working directory.
-    // Assume it might be using this repo to prevent concurrent index modification.
-    return true
-  }
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0)
+  )
+  if (gitPids.length === 0) return false
+
+  const psTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
+  if (psTimeoutMs === null) return true
+  const psResult = await runtime.spawn(["ps", "-eo", "pid,ppid"], {
+    timeoutMs: psTimeoutMs,
+  })
+  if (psResult.timedOut || psResult.exitCode !== 0) return true
+
+  const ancestors = walkAncestry(parseParentMap(psResult.stdout), runtime.ppid())
+  const currentPid = runtime.pid()
+  const nonAncestorPids = gitPids.filter((pid) => pid !== currentPid && !ancestors.has(pid))
+  if (nonAncestorPids.length === 0) return false
+
+  const lsofTimeoutMs = boundedTimeoutMs(deadlineMs, LSOF_TIMEOUT_MS, runtime)
+  if (lsofTimeoutMs === null) return true
+  const lsofResult = await runtime.spawn(
+    ["lsof", "-a", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"],
+    { timeoutMs: lsofTimeoutMs }
+  )
+  if (lsofResult.timedOut || lsofResult.exitCode !== 0) return true
+  return lsofOutputUsesRepo(lsofResult.stdout, repoRoot)
 }
 
 export async function evaluatePretooluseGitIndexLock(
@@ -328,10 +378,11 @@ export async function evaluatePretooluseGitIndexLock(
   options: GitIndexLockEvaluationOptions = {}
 ): Promise<SwizHookOutput> {
   try {
+    const runtime = resolveRuntime(options.runtime)
     const parsed = shellHookInputSchema.parse(input)
-    const validated = await validateMainInputs(parsed)
+    const validated = await validateMainInputs(parsed, runtime)
     if (!validated) return {}
-    return await handleLockResolution(validated.lockPath, validated.repoRoot, options)
+    return await handleLockResolution(validated.lockPath, validated.repoRoot, options, runtime)
   } catch (err: unknown) {
     const message = messageFromUnknownError(err)
     return preToolUseDeny(
