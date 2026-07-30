@@ -4,6 +4,7 @@ import { debugLog, stderrLog } from "../debug.ts"
 import { SWIZ_ROOT } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { isDaemonReady } from "./daemon/daemon-admin.ts"
+import { type AggressiveHookReplacement, replaceAgentHooksWithSwiz } from "./doctor/aggressive.ts"
 import { runDoctorChecks } from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import {
@@ -67,6 +68,7 @@ async function runWithTimeout<T>(
 
 interface AutoFixContext {
   fix: boolean
+  aggressive: boolean
   results: CheckResult[]
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
@@ -134,22 +136,38 @@ async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
 
 interface AutoFixDependencies {
   fixStaleConfigs: typeof fixStaleConfigs
+  replaceAgentHooksWithSwiz: typeof replaceAgentHooksWithSwiz
   autoCleanup: typeof autoCleanup
+}
+
+function reportAggressiveHookReplacement(replacements: AggressiveHookReplacement[]): void {
+  console.log(`  ${BOLD}Replacing all agent hooks with swiz hooks...${RESET}\n`)
+  for (const replacement of replacements) {
+    console.log(
+      `  ${GREEN}✓${RESET} ${replacement.agentName}: removed ${replacement.removedHookCount}, installed ${replacement.installedHookCount} swiz hook(s)`
+    )
+  }
+  console.log()
 }
 
 async function handleAutoFixes(
   ctx: AutoFixContext,
   dependencies: AutoFixDependencies
 ): Promise<void> {
-  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
+  const { fix, aggressive, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
   const hasStaleConfigs = results.some(
     (r) =>
       r.name.endsWith("config sync") &&
       r.status === "warn" &&
       (r.detail.includes(" missing:") || r.detail.includes("outdated (no --agent)"))
   )
+  if (aggressive) {
+    const replacements = await dependencies.replaceAgentHooksWithSwiz()
+    reportAggressiveHookReplacement(replacements)
+    if (!fix) return
+  }
   if (fix) {
-    await dependencies.fixStaleConfigs(results)
+    if (!aggressive) await dependencies.fixStaleConfigs(results)
     await fixMissingConfigs()
     const skillConflictMessages = await fixSkillConflicts(skillConflicts, fix)
     if (skillConflictMessages.length > 0) {
@@ -223,15 +241,21 @@ export interface DoctorCommandOptions {
   allChecks?: DiagnosticCheck[]
   autoCleanup?: typeof autoCleanup
   fixStaleConfigs?: typeof fixStaleConfigs
+  replaceAgentHooksWithSwiz?: typeof replaceAgentHooksWithSwiz
   notifyDaemon?: typeof notifyDaemon
 }
 
 export const doctorCommand: Command<DoctorCommandOptions> = {
   name: "doctor",
   description: "Check environment health, fix issues, and clean up old session data",
-  usage: "swiz doctor [--fix] [--verbose] | swiz doctor clean [--older-than <time>] [--dry-run]",
+  usage:
+    "swiz doctor [--fix] [--aggressive] [--verbose] | swiz doctor clean [--older-than <time>] [--dry-run]",
   options: [
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
+    {
+      flags: "--aggressive",
+      description: "Replace all existing agent hook entries with swiz hooks",
+    },
     { flags: "--verbose", description: "Show every diagnostic row instead of grouped summaries" },
     { flags: "--clean", description: "Alias for swiz doctor clean" },
     {
@@ -258,6 +282,8 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
         handleAutoFixes: (context) =>
           handleAutoFixes(context, {
             fixStaleConfigs: options?.fixStaleConfigs ?? fixStaleConfigs,
+            replaceAgentHooksWithSwiz:
+              options?.replaceAgentHooksWithSwiz ?? replaceAgentHooksWithSwiz,
             autoCleanup: options?.autoCleanup ?? autoCleanup,
           }),
         notifyDaemon: options?.notifyDaemon ?? notifyDaemon,

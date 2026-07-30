@@ -6,6 +6,7 @@ import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
 import { type DoctorCommandOptions, doctorCommand } from "./doctor.ts"
+import { collectCommands } from "./install/config-helpers.ts"
 
 const { create: createTempHome } = useTempDir("swiz-doctor-test-")
 
@@ -186,6 +187,36 @@ describe("swiz doctor", () => {
     const { stat: statFn } = await import("node:fs/promises")
     const s = await statFn(scriptPath)
     expect(s.mode & 0o100).not.toBe(0)
+  }, 60_000)
+
+  test("doctor --aggressive replaces user hooks and preserves unrelated settings", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    const settingsPath = join(claudeDir, "settings.json")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        model: "opus",
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "echo user-hook" }] }],
+        },
+      })
+    )
+
+    const result = await runDoctor(home, ["--aggressive"])
+    const settings = (await Bun.file(settingsPath).json()) as Record<string, any>
+    const backup = (await Bun.file(`${settingsPath}.bak`).json()) as Record<string, any>
+    const commands = [...collectCommands(settings.hooks)]
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Replacing all agent hooks with swiz hooks")
+    expect(result.stdout).toContain("Claude Code")
+    expect(settings.model).toBe("opus")
+    expect(commands.length).toBeGreaterThan(0)
+    expect(commands.every((command) => command.includes("swiz dispatch --agent claude"))).toBe(true)
+    expect(commands).not.toContain("echo user-hook")
+    expect([...collectCommands(backup.hooks)]).toContain("echo user-hook")
   }, 60_000)
 
   test("reports OPENROUTER_API_KEY presence in daemon LaunchAgent config without printing it", async () => {

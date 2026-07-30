@@ -13,10 +13,18 @@ export function extractOldHooks(
 export function buildProposedAgentSettings(
   existing: Record<string, any>,
   agent: AgentDef,
-  config: Record<string, unknown[]>
+  config: Record<string, unknown[]>,
+  options: { replaceAllHookEntries?: boolean } = {}
 ): string {
-  const proposed = agent.wrapsHooks
-    ? { ...agent.wrapsHooks, hooks: config }
-    : { ...existing, [agent.hooksKey]: config }
+  let proposed: Record<string, unknown>
+  if (agent.wrapsHooks) {
+    proposed = { ...agent.wrapsHooks, hooks: config }
+  } else if (options.replaceAllHookEntries && agent.configStyle === "flat-lifecycle") {
+    // Antigravity's hooks.json is a map of named hook groups. In aggressive
+    // mode, discard every group except swiz rather than preserving siblings.
+    proposed = { [agent.hooksKey]: config }
+  } else {
+    proposed = { ...existing, [agent.hooksKey]: config }
+  }
   return JSON.stringify(proposed, null, 2)
 }

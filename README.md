@@ -840,11 +840,13 @@ Check environment health and prerequisites. Reports the status of each detected 
 ```bash
 swiz doctor                                 # show health report
 swiz doctor --fix                          # auto-fix stale configs + move lower-priority duplicate skills aside
+swiz doctor --aggressive                   # replace every existing agent hook entry with swiz hooks
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--fix` | Auto-fix stale agent configs by running `swiz install`, fix invalid skill entries, and report skill conflicts |
+| `--aggressive` | Back up agent config files, remove all existing hook entries, and install only swiz hooks |
 
 Skill conflict warnings include both skill file paths, the currently active (winning) path, and the deterministic precedence order used to choose it.
 

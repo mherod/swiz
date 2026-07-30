@@ -30,6 +30,7 @@ export interface DoctorCheckResults {
 
 interface AutoFixContext {
   fix: boolean
+  aggressive: boolean
   results: CheckResult[]
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
@@ -144,6 +145,7 @@ function formatSummaryCounts(
 
 export async function runDoctorChecks(args: string[], deps: DoctorCheckRunnerDeps): Promise<void> {
   const fix = args.includes("--fix")
+  const aggressive = args.includes("--aggressive")
   const verbose = args.includes("--verbose")
   console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
@@ -163,6 +165,7 @@ export async function runDoctorChecks(args: string[], deps: DoctorCheckRunnerDep
 
   await deps.handleAutoFixes({
     fix,
+    aggressive,
     results,
     skillConflicts,
     invalidSkillEntries,
