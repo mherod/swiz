@@ -12,6 +12,7 @@ import {
   createSessionTask,
   mergeActionPlanIntoTasks,
 } from "../../src/utils/hook-utils.ts"
+import { completeSessionTask } from "../../src/utils/session-task-io.ts"
 import { collectGitWorkflowStop, markPushPrompted } from "../stop-git-status.ts"
 import { updateCooldown } from "../stop-personal-repo-issues/cooldown.ts"
 import { collectPersonalRepoIssuesStopParsed } from "../stop-personal-repo-issues/evaluate.ts"
@@ -19,6 +20,9 @@ import { formatStopMessage } from "./action-plan.ts"
 import { collectCiWorkflow } from "./ci-workflow.ts"
 import { resolveShipChecklistContext } from "./context.ts"
 import type { ShipChecklistResult, WorkflowStep } from "./types.ts"
+
+const SHIP_CHECKLIST_TASK_SUBJECT = "Complete ship checklist before stopping"
+const SHIP_CHECKLIST_COMPLETION_EVIDENCE = "note:ship checklist passed"
 
 /**
  * Evaluate all three ship checklist workflows in parallel and unify results.
@@ -63,7 +67,7 @@ export async function collectShipChecklistStopParsed(
     })
   }
 
-  if (steps.length === 0) return null
+  if (steps.length === 0) return { blocked: false, steps: [] }
 
   return {
     blocked: true,
@@ -78,7 +82,9 @@ export async function collectShipChecklistStopParsed(
 export async function evaluateStopShipChecklist(input: StopHookInput): Promise<SwizHookOutput> {
   try {
     const result = await collectShipChecklistStopParsed(input)
-    if (!result || !result.blocked || result.steps.length === 0) {
+    if (!result) return {}
+    if (!result.blocked || result.steps.length === 0) {
+      await settleShipChecklistTask(input, result)
       return {}
     }
 
@@ -92,7 +98,7 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
       await createSessionTask(
         sessionId,
         "stop-ship-checklist-task-created",
-        "Complete ship checklist before stopping",
+        SHIP_CHECKLIST_TASK_SUBJECT,
         "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes."
       )
 
@@ -129,4 +135,22 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
     // Fail-open: any unhandled errors don't block stop
     return {}
   }
+}
+
+type CompleteShipChecklistTask = typeof completeSessionTask
+
+/** Complete the hook-owned task only after a successfully evaluated clean checklist. */
+export async function settleShipChecklistTask(
+  input: StopHookInput,
+  result: ShipChecklistResult | null,
+  completeTask: CompleteShipChecklistTask = completeSessionTask
+): Promise<boolean> {
+  if (!result || result.blocked || result.steps.length > 0 || !input.session_id) {
+    return false
+  }
+
+  return await completeTask(input.session_id, SHIP_CHECKLIST_TASK_SUBJECT, {
+    cwd: input.cwd ?? process.cwd(),
+    evidence: SHIP_CHECKLIST_COMPLETION_EVIDENCE,
+  })
 }

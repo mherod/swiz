@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { buildUnifiedActionPlan, formatStopMessage } from "./stop-ship-checklist/action-plan.ts"
+import { settleShipChecklistTask } from "./stop-ship-checklist/evaluate.ts"
 import type { WorkflowStep } from "./stop-ship-checklist/types.ts"
 
 describe("stop-ship-checklist modular structure", () => {
@@ -97,5 +98,58 @@ describe("stop-ship-checklist composition with personal-repo issue steps (#619)"
     expect(gitStep.kind).not.toBe("issues")
     expect(ciStep.kind).not.toBe("issues")
     expect(issuesStep.kind).toBe("issues")
+  })
+})
+
+describe("stop-ship-checklist task lifecycle", () => {
+  test("completes the hook-owned task after a clean checklist", async () => {
+    const calls: unknown[][] = []
+    const completeTask = (...args: unknown[]) => {
+      calls.push(args)
+      return Promise.resolve(true)
+    }
+
+    const completed = await settleShipChecklistTask(
+      {
+        session_id: "session-1",
+        cwd: "/workspace",
+      },
+      { blocked: false, steps: [] },
+      completeTask
+    )
+
+    expect(completed).toBe(true)
+    expect(calls).toEqual([
+      [
+        "session-1",
+        "Complete ship checklist before stopping",
+        {
+          cwd: "/workspace",
+          evidence: "note:ship checklist passed",
+        },
+      ],
+    ])
+  })
+
+  test("does not complete the task when evaluation failed or remains blocked", async () => {
+    let calls = 0
+    const completeTask = () => {
+      calls++
+      return Promise.resolve(true)
+    }
+    const input = { session_id: "session-1", cwd: "/workspace" }
+
+    expect(await settleShipChecklistTask(input, null, completeTask)).toBe(false)
+    expect(
+      await settleShipChecklistTask(
+        input,
+        {
+          blocked: true,
+          steps: [{ kind: "git", summary: "Push required.", planSteps: [] }],
+        },
+        completeTask
+      )
+    ).toBe(false)
+    expect(calls).toBe(0)
   })
 })

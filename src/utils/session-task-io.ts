@@ -10,6 +10,13 @@
 import { join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
+import {
+  isIncompleteTaskStatus,
+  readTasks,
+  type TaskStatus,
+  writeAudit,
+  writeTask,
+} from "../tasks/task-repository.ts"
 import { sessionTaskSentinelPath } from "../temp-paths.ts"
 import { messageFromUnknownError } from "./hook-json-helpers.ts"
 
@@ -116,4 +123,51 @@ export async function createSessionTask(
     )
     await createTaskViaSubprocess(subject, description, sessionId ?? "", sentinel)
   }
+}
+
+/**
+ * Complete an incomplete session task selected by its exact subject.
+ *
+ * Stop hooks own the lifecycle of tasks they create. When their blocking
+ * condition clears, this quiet in-process path closes the task without emitting
+ * CLI output into hook stdout. Pending tasks transition through in_progress so
+ * the task audit remains valid.
+ */
+export async function completeSessionTask(
+  sessionId: string | undefined,
+  subject: string,
+  options: { cwd?: string; evidence: string }
+): Promise<boolean> {
+  if (!isValidSessionId(sessionId) || !subject.trim()) return false
+
+  const tasks = await readTasks(sessionId)
+  const task = tasks.find(
+    (candidate) => candidate.subject === subject && isIncompleteTaskStatus(candidate.status)
+  )
+  if (!task) return false
+
+  const { applyStatusTransition } = await import("../tasks/task-service.ts")
+  const cwd = options.cwd ?? process.cwd()
+
+  const transition = async (newStatus: TaskStatus): Promise<void> => {
+    const oldStatus = task.status
+    applyStatusTransition(task, newStatus)
+    if (newStatus === "completed") {
+      task.completionEvidence = options.evidence
+    }
+    await writeTask(sessionId, task, cwd)
+    await writeAudit(sessionId, {
+      timestamp: new Date().toISOString(),
+      taskId: task.id,
+      action: "status_change",
+      oldStatus,
+      newStatus,
+      ...(newStatus === "completed" ? { evidence: options.evidence } : {}),
+      subject: task.subject,
+    })
+  }
+
+  if (task.status === "pending") await transition("in_progress")
+  await transition("completed")
+  return true
 }
