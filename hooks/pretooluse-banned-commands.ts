@@ -1,8 +1,13 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block banned Bash commands and guide to safe alternatives.
 // Rules with severity "warn" allow the command through with a gentle nudge.
 // Rules with severity "deny" (default) block the command entirely.
 
+import {
+  findNonCanonicalGitInvocation,
+  type NonCanonicalGitInvocation,
+} from "../src/command-utils.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
@@ -419,6 +424,18 @@ function checkBunTestReporter(command: string): SwizHookOutput | null {
   return null
 }
 
+function buildNonCanonicalGitMessage(invocation: NonCanonicalGitInvocation): string {
+  const context =
+    invocation.kind === "nested-shell"
+      ? "Git was invoked through a nested shell."
+      : "Git was invoked through a path, wrapper, environment prefix, or shell substitution."
+  return (
+    `${context}\n\n` +
+    "Invoke Git directly as `git` followed by its subcommand at the shell command boundary. " +
+    "Profile rules only accept this canonical form, so alternate invocation paths are blocked."
+  )
+}
+
 type RuleEvalResult = { ok: true; warnings: string[] } | { ok: false; output: SwizHookOutput }
 
 function evaluateRules(rules: Rule[], command: string, strippedCommand: string): RuleEvalResult {
@@ -499,6 +516,11 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
 
   const ruleResult = evaluateRules(effectiveRules, command, strippedCommand)
   if (!ruleResult.ok) return ruleResult.output
+
+  const nonCanonicalGit = findNonCanonicalGitInvocation(command)
+  if (nonCanonicalGit) {
+    return preToolUseDeny(buildNonCanonicalGitMessage(nonCanonicalGit))
+  }
 
   if (ruleResult.warnings.length > 0) {
     return preToolUseAllow(ruleResult.warnings.join("\n\n"))
