@@ -17,6 +17,15 @@ export interface TranscriptIndex {
   computedAt: number
 }
 
+export interface TranscriptIndexCacheDependencies {
+  readMetadata?: (transcriptPath: string) => Promise<{ mtimeMs: number; size: number } | null>
+  buildIndex?: (
+    transcriptPath: string,
+    fileSize: number,
+    mtimeMs: number
+  ) => Promise<TranscriptIndex | null>
+}
+
 function extractToolResultText(block: { content?: string | unknown[] }): string {
   const blockContent = block.content
   if (typeof blockContent === "string") return blockContent
@@ -86,11 +95,17 @@ export class TranscriptIndexCache {
   private _hits = 0
   private _misses = 0
 
+  constructor(private readonly dependencies: TranscriptIndexCacheDependencies = {}) {}
+
   async get(transcriptPath: string): Promise<TranscriptIndex | null> {
     try {
       const transcriptFile = Bun.file(transcriptPath)
-      const stat = await transcriptFile.stat()
-      const mtimeMs = stat.mtimeMs ?? 0
+      const metadata = this.dependencies.readMetadata
+        ? await this.dependencies.readMetadata(transcriptPath)
+        : await transcriptFile.stat()
+      if (!metadata) return null
+
+      const mtimeMs = metadata.mtimeMs ?? 0
       const cached = this.entries.get(transcriptPath)
       if (cached && cached.mtimeMs === mtimeMs) {
         cached.computedAt = Date.now()
@@ -98,15 +113,16 @@ export class TranscriptIndexCache {
         return cached
       }
 
-      if (!(await transcriptFile.exists())) return null
-
       const inFlightKey = `${transcriptPath}\0${mtimeMs}`
       const existing = this.inFlight.get(inFlightKey)
       if (existing) return await existing
 
       this._misses++
       let computation: Promise<TranscriptIndex | null>
-      computation = this.buildIndex(transcriptFile, stat.size, mtimeMs)
+      const build = this.dependencies.buildIndex
+        ? this.dependencies.buildIndex(transcriptPath, metadata.size, mtimeMs)
+        : this.buildIndex(transcriptFile, metadata.size, mtimeMs)
+      computation = build
         .then((index) => {
           if (index && this.inFlight.get(inFlightKey) === computation) {
             this.entries.set(transcriptPath, index)

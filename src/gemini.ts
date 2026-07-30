@@ -6,8 +6,6 @@
 // promptGeminiStreamText(prompt, ...)     — streamed text generation via streamText().
 // hasGeminiApiKey()                       — synchronous check (env var only) for early-exit gates.
 
-import { generateText, Output, streamText } from "ai"
-import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
 import type { BaseAiPromptOptions } from "./ai-prompt-options.ts"
 import { resolveSignal } from "./ai-signal.ts"
@@ -58,7 +56,8 @@ export interface PromptGeminiStreamOptions extends PromptGeminiOptions {
   onTextPart?: (textPart: string) => void
 }
 
-function createProvider() {
+async function createProvider() {
+  const { createGeminiProvider } = await import("ai-sdk-provider-gemini-cli")
   if (process.env.GEMINI_API_KEY) {
     return createGeminiProvider({
       authType: "api-key",
@@ -101,7 +100,7 @@ export async function promptGemini(prompt: string, options?: PromptGeminiOptions
     return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
   }
 
-  const gemini = createProvider()
+  const [{ generateText }, gemini] = await Promise.all([import("ai"), createProvider()])
   const { signal, cleanup } = resolveSignal(options)
   try {
     const { text } = await generateText({
@@ -134,7 +133,7 @@ export async function promptGeminiStreamText(
     return testResponse.trim()
   }
 
-  const gemini = createProvider()
+  const [{ streamText }, gemini] = await Promise.all([import("ai"), createProvider()])
   const { signal, cleanup } = resolveSignal(options)
   try {
     const result = streamText({
@@ -194,7 +193,7 @@ export async function promptGeminiObject<T>(
     return JSON.parse(process.env.GEMINI_TEST_RESPONSE) as T
   }
   // ── Real implementation ──────────────────────────────────────────────────
-  const gemini = createProvider()
+  const [{ generateText, Output }, gemini] = await Promise.all([import("ai"), createProvider()])
   const { signal, cleanup } = resolveSignal(options)
   try {
     const { output } = await generateText({
