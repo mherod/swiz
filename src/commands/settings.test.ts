@@ -106,7 +106,7 @@ describe("swiz settings", () => {
 
     test("shows default auto-continue state", () => {
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toMatch(/auto-continue:\s+enabled/)
+      expect(result.stdout).toMatch(/auto-continue:\s+disabled/)
       expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
       expect(result.stdout).toMatch(/update-memory-footer:\s+disabled/)
       expect(result.stdout).toContain("(user)")
@@ -290,7 +290,7 @@ describe("swiz settings", () => {
       sessions?: Record<string, { autoContinue?: boolean }>
     }
 
-    expect(json.autoContinue).toBe(true)
+    expect(json.autoContinue).toBe(false)
     expect(json.sessions?.[sessionId]?.autoContinue).toBe(false)
   })
 

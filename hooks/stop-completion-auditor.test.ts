@@ -217,8 +217,12 @@ async function runAuditor(
     finalEnvOverrides.CLAUDECODE = "1"
   }
 
+  const projectDir = join(home, "project")
+  await mkdir(join(projectDir, ".swiz"), { recursive: true })
+  await writeFile(join(projectDir, ".swiz", "config.json"), JSON.stringify({ autoContinue: true }))
+
   const payload = JSON.stringify({
-    cwd: process.cwd(),
+    cwd: projectDir,
     session_id: SESSION_ID,
     transcript_path: transcriptPath,
     _env: finalEnvOverrides,

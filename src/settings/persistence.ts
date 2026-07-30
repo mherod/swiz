@@ -529,11 +529,16 @@ function invalidateProjectSettingsCache(path: string): void {
 
 // ─── Project settings I/O ────────────────────────────────────────────────────
 
-export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {
+export async function readProjectSettings(
+  cwd: string,
+  options: ReadOptions = {}
+): Promise<ProjectSwizSettings | null> {
   const path = getProjectSettingsPath(cwd)
 
-  const cached = _projectSettingsCache.get(path)
-  if (cached && Date.now() < cached.expiresAt) return cached.value
+  if (!options.strict) {
+    const cached = _projectSettingsCache.get(path)
+    if (cached && Date.now() < cached.expiresAt) return cached.value
+  }
 
   const file = Bun.file(path)
   if (!(await file.exists())) {

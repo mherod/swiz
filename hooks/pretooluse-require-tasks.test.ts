@@ -1534,11 +1534,25 @@ describe("task-file block bypass regression tests", () => {
     const homeDir = await createTempHome()
     await mkdir(join(homeDir, ".swiz"), { recursive: true })
     await writeFile(join(homeDir, ".swiz", "settings.json"), JSON.stringify({ autoContinue: true }))
+    const projectDir = await createTempHome()
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(projectDir, ".swiz", "config.json"),
+      JSON.stringify({ autoContinue: true })
+    )
+    await writeFile(join(projectDir, "CLAUDE.md"), "# Test\n")
+    await mkdir(join(projectDir, ".git"), { recursive: true })
     const sessionId = "session-strict-autocontinue-true"
     // Only 1 in_progress task, 0 pending tasks
     await writeTask(homeDir, sessionId, { id: "1", subject: "Current task", status: "in_progress" })
 
-    const result = await runHook({ homeDir, toolName: "Edit", sessionId, filePath: "src/foo.ts" })
+    const result = await runHook({
+      homeDir,
+      cwd: projectDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: "src/foo.ts",
+    })
     // Denied because minPending is 1 when autoContinue is true
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("Task queue needs at least")

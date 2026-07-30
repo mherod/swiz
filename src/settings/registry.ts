@@ -183,7 +183,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["humanise-auto-steer", "humanize-auto-steer", "humanise_auto_steer"],
     kind: "boolean",
     scopes: ["global"],
-    default: true,
+    default: false,
     docs: {
       description: "Rewrite scheduled steer messages into a natural paragraph before delivery",
       effectExplanation:

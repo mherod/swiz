@@ -70,7 +70,7 @@ async function setupAutoSteerHome(settings: Record<string, unknown> = {}): Promi
   mkdirSync(join(home, ".swiz"), { recursive: true })
   await Bun.write(
     join(home, ".swiz", "settings.json"),
-    `${JSON.stringify({ autoSteer: true, mcpChannels: true, ...settings })}\n`
+    `${JSON.stringify({ autoSteer: true, mcpChannels: true, humaniseAutoSteer: true, ...settings })}\n`
   )
   return home
 }

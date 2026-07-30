@@ -611,7 +611,7 @@ async function emitSlowTaskWarning(
   try {
     const [settings, projectSettings] = await Promise.all([
       readSwizSettings({ strict: true }),
-      readProjectSettings(cwd),
+      readProjectSettings(cwd, { strict: true }),
     ])
     const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
     const slowTaskWarning = buildSlowTaskWarning(
@@ -935,7 +935,7 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   try {
     const [settings, projectSettings] = await Promise.all([
       readSwizSettings({ strict: true }),
-      readProjectSettings(cwd),
+      readProjectSettings(cwd, { strict: true }),
     ])
     const effectiveSettings =
       (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
