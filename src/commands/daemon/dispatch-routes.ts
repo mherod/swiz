@@ -15,13 +15,23 @@ import {
   schedulePayloadJsonlAppend,
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
-import { isStopLikeDispatchEvent } from "../../dispatch/stop-response.ts"
+import {
+  DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
+  isStopLikeDispatchEvent,
+} from "../../dispatch/stop-response.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
+import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
+import {
+  ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
+  formatLifecycleTaskAdvisory,
+  type LifecycleTaskPayload,
+  type LifecycleTaskRegistry,
+} from "./lifecycle-task-registry.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import {
   type DaemonMetrics,
@@ -74,6 +84,7 @@ export interface DispatchRoutesContext {
   transcriptIndex: TranscriptIndexCache
   lastUserMessageCache: LastUserMessageCache
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
+  lifecycleTaskRegistry: LifecycleTaskRegistry
   recentHookAllowMessages: CappedMap<string, string>
 }
 
@@ -95,6 +106,7 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     transcriptIndex: ctx.transcriptIndex,
     lastUserMessageCache: ctx.lastUserMessageCache,
     taskStateCache: ctx.taskStateCache,
+    lifecycleTaskRegistry: ctx.lifecycleTaskRegistry,
     recentHookAllowMessages: ctx.recentHookAllowMessages,
   }
 }
@@ -342,6 +354,153 @@ function daemonDispatchSchemaFailureResponse(e: unknown): Response | null {
   return null
 }
 
+interface LifecycleTaskFields {
+  hook_event_name?: unknown
+  session_id?: unknown
+  cwd?: unknown
+  task_id?: unknown
+  task_subject?: unknown
+  task_description?: unknown
+  teammate_name?: unknown
+  team_name?: unknown
+}
+
+interface ParsedLifecycleTaskDispatch {
+  sessionId: string
+  cwd: string
+  task: LifecycleTaskPayload
+}
+
+interface LifecycleTaskDispatchPreparation {
+  failOpen: boolean
+  payloadChanged: boolean
+  advisory?: string
+}
+
+function nonBlankString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null
+}
+
+function lifecycleTaskFromFields(
+  fields: LifecycleTaskFields,
+  expectedEvent: "TaskCreated" | "TaskCompleted"
+): ParsedLifecycleTaskDispatch | null {
+  if (fields.hook_event_name !== expectedEvent) return null
+  const sessionId = nonBlankString(fields.session_id)
+  if (!sessionId) return null
+  const cwd = nonBlankString(fields.cwd)
+  if (!cwd) return null
+  const taskId = nonBlankString(fields.task_id)
+  if (!taskId) return null
+  const subject = nonBlankString(fields.task_subject)
+  if (!subject) return null
+
+  const task: LifecycleTaskPayload = { taskId, subject }
+  if (typeof fields.task_description === "string") task.description = fields.task_description
+  if (typeof fields.teammate_name === "string") task.teammateName = fields.teammate_name
+  if (typeof fields.team_name === "string") task.teamName = fields.team_name
+  return { sessionId, cwd, task }
+}
+
+function lifecycleTaskPayload(
+  canonicalEvent: string,
+  payload: Record<string, unknown>
+): ParsedLifecycleTaskDispatch | null {
+  if (canonicalEvent === "taskCreated") {
+    const parsed = taskCreatedHookInputSchema.safeParse(payload)
+    return parsed.success ? lifecycleTaskFromFields(parsed.data, "TaskCreated") : null
+  }
+  if (canonicalEvent === "taskCompleted") {
+    const parsed = taskCompletedHookInputSchema.safeParse(payload)
+    return parsed.success ? lifecycleTaskFromFields(parsed.data, "TaskCompleted") : null
+  }
+  return null
+}
+
+function isTaskLifecycleEvent(canonicalEvent: string): boolean {
+  return canonicalEvent === "taskCreated" || canonicalEvent === "taskCompleted"
+}
+
+async function prepareTaskLifecycleDispatch(
+  ctx: DispatchRoutesContext,
+  canonicalEvent: string,
+  payload: Record<string, unknown> | null
+): Promise<LifecycleTaskDispatchPreparation> {
+  if (!payload) return { failOpen: true, payloadChanged: false }
+  const lifecycle = lifecycleTaskPayload(canonicalEvent, payload)
+  if (!lifecycle) return { failOpen: true, payloadChanged: false }
+  const projectCwd = await registerProjectAndTouch(ctx, lifecycle.cwd)
+  if (!projectCwd) return { failOpen: true, payloadChanged: false }
+
+  if (canonicalEvent === "taskCreated") {
+    ctx.lifecycleTaskRegistry.recordCreated(projectCwd, lifecycle.sessionId, lifecycle.task)
+  } else {
+    ctx.lifecycleTaskRegistry.recordCompleted(
+      projectCwd,
+      lifecycle.sessionId,
+      lifecycle.task.taskId
+    )
+  }
+  return { failOpen: false, payloadChanged: false }
+}
+
+async function prepareSessionLifecycleDispatch(
+  ctx: DispatchRoutesContext,
+  canonicalEvent: string,
+  payload: Record<string, unknown> | null
+): Promise<LifecycleTaskDispatchPreparation> {
+  if (!payload) return { failOpen: false, payloadChanged: false }
+  const sessionId = nonBlankString(payload.session_id)
+  const cwd = nonBlankString(payload.cwd)
+  if (!sessionId || !cwd) return { failOpen: false, payloadChanged: false }
+  const projectCwd = await registerProjectAndTouch(ctx, cwd)
+  if (!projectCwd) return { failOpen: false, payloadChanged: false }
+
+  if (canonicalEvent === "sessionEnd") {
+    ctx.lifecycleTaskRegistry.clearProjectSession(projectCwd, sessionId)
+    return { failOpen: false, payloadChanged: false }
+  }
+  if (canonicalEvent !== "stop") return { failOpen: false, payloadChanged: false }
+
+  const activeTasks = ctx.lifecycleTaskRegistry.listActive(projectCwd, sessionId)
+  if (activeTasks.length === 0) return { failOpen: false, payloadChanged: false }
+  payload[ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY] = activeTasks
+  const advisory = formatLifecycleTaskAdvisory(activeTasks)
+  return {
+    failOpen: false,
+    payloadChanged: true,
+    ...(advisory ? { advisory } : {}),
+  }
+}
+
+export async function prepareLifecycleTaskDispatch(
+  ctx: DispatchRoutesContext,
+  canonicalEvent: string,
+  payload: Record<string, unknown> | null
+): Promise<LifecycleTaskDispatchPreparation> {
+  return isTaskLifecycleEvent(canonicalEvent)
+    ? prepareTaskLifecycleDispatch(ctx, canonicalEvent, payload)
+    : prepareSessionLifecycleDispatch(ctx, canonicalEvent, payload)
+}
+
+function mergeLifecycleStopAdvisory(
+  response: Record<string, any>,
+  advisory: string | undefined
+): void {
+  if (!advisory) return
+  const existingSystemMessage =
+    typeof response.systemMessage === "string" ? response.systemMessage.trim() : ""
+  if (!existingSystemMessage.includes(advisory)) {
+    response.systemMessage = existingSystemMessage
+      ? `${existingSystemMessage}\n\n${advisory}`
+      : advisory
+  }
+  if (response.reason === DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT) {
+    response.reason = advisory
+    response.stopReason = advisory
+  }
+}
+
 export async function handleDispatchRoute(
   req: Request,
   url: URL,
@@ -353,6 +512,7 @@ export async function handleDispatchRoute(
     return Response.json({ error: "Missing required query param: event" }, { status: 400 })
   }
   const payloadStr = await req.text()
+  let dispatchPayloadStr = payloadStr
   const start = performance.now()
   let parsedPayload: Record<string, unknown> | null = null
 
@@ -376,6 +536,16 @@ export async function handleDispatchRoute(
     // Best-effort — don't block dispatch if payload parsing or seeding fails
   }
 
+  const lifecyclePreparation = await prepareLifecycleTaskDispatch(
+    ctx,
+    canonicalEvent,
+    parsedPayload
+  )
+  if (lifecyclePreparation.failOpen) return Response.json({})
+  if (lifecyclePreparation.payloadChanged && parsedPayload) {
+    dispatchPayloadStr = JSON.stringify(parsedPayload)
+  }
+
   const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
 
   // Daemon-level AbortController — when the request timeout fires, this
@@ -392,7 +562,7 @@ export async function handleDispatchRoute(
       executeDispatch({
         canonicalEvent,
         hookEventName,
-        payloadStr,
+        payloadStr: dispatchPayloadStr,
         daemonContext: true,
         signal: requestAbort.signal,
         currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
@@ -434,7 +604,7 @@ export async function handleDispatchRoute(
 
   const durationMs = performance.now() - start
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
-  await updateParsedPayloadMetrics(ctx, payloadStr, canonicalEvent, durationMs)
+  await updateParsedPayloadMetrics(ctx, dispatchPayloadStr, canonicalEvent, durationMs)
 
   try {
     const response = parseValidatedAgentDispatchWireJson(
@@ -442,6 +612,7 @@ export async function handleDispatchRoute(
       canonicalEvent,
       hookEventName
     )
+    mergeLifecycleStopAdvisory(response, lifecyclePreparation.advisory)
     maybeSuppressDuplicateAllowMessage(ctx, parsedPayload, canonicalEvent, hookEventName, response)
     return Response.json(response)
   } catch (e) {

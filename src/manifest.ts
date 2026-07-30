@@ -136,6 +136,7 @@ import stopGdprDataModels from "../hooks/stop-gdpr-data-models.ts"
 import stopGitStatus from "../hooks/stop-git-status.ts"
 import stopIncompleteTasks from "../hooks/stop-incomplete-tasks.ts"
 import stopLargeFiles from "../hooks/stop-large-files.ts"
+import stopLifecycleTasks from "../hooks/stop-lifecycle-tasks.ts"
 import stopLintStaged from "../hooks/stop-lint-staged.ts"
 import stopLockfileDrift from "../hooks/stop-lockfile-drift.ts"
 import stopMemorySize from "../hooks/stop-memory-size.ts"
@@ -249,6 +250,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: stopQualityChecks },
       { hook: stopLintStaged },
       { hook: stopLargeFiles },
+      { hook: stopLifecycleTasks },
       { hook: stopTodoTracker },
 
       // Git state & branch policy
@@ -539,6 +541,14 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [],
   },
   {
+    event: "taskCreated",
+    hooks: [],
+  },
+  {
+    event: "taskCompleted",
+    hooks: [],
+  },
+  {
     event: "sessionEnd",
     hooks: [],
   },
@@ -692,6 +702,8 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   preCompact: 15,
   postCompact: 10,
   permissionRequest: 10,
+  taskCreated: 10,
+  taskCompleted: 10,
   userPromptSubmit: 15,
   preCommit: 30,
   commitMsg: 10,

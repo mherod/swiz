@@ -26,6 +26,8 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   notification: "context",
   subagentStart: "context",
   subagentStop: "blocking",
+  taskCreated: "context",
+  taskCompleted: "context",
   sessionEnd: "blocking",
   preCommit: "blocking",
   commitMsg: "blocking",

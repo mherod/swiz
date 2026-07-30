@@ -89,6 +89,7 @@ import {
   StopInputSchema as PkgStopInputSchema,
   SubagentStartInputSchema as PkgSubagentStartInputSchema,
   SubagentStopInputSchema as PkgSubagentStopInputSchema,
+  TaskCompletedInputSchema as PkgTaskCompletedInputSchema,
   TaskCreatedInputSchema as PkgTaskCreatedInputSchema,
   TeammateIdleInputSchema as PkgTeammateIdleInputSchema,
   UserPromptSubmitInputSchema as PkgUserPromptSubmitInputSchema,
@@ -732,10 +733,26 @@ export const subagentStartHookInputSchema = allOptional(PkgSubagentStartInputSch
 export type SubagentStartHookInput = z.infer<typeof subagentStartHookInputSchema>
 
 /**
- * TaskCreated / TaskCompleted hook input envelope.
+ * TaskCreated hook input envelope.
  * Backed by `TaskCreatedInputSchema` from `agent-hook-schemas/claude`.
  */
-export const taskEventHookInputSchema = allOptional(PkgTaskCreatedInputSchema)
+export const taskCreatedHookInputSchema = allOptional(PkgTaskCreatedInputSchema)
+
+export type TaskCreatedHookInput = z.infer<typeof taskCreatedHookInputSchema>
+
+/**
+ * TaskCompleted hook input envelope.
+ * Backed by the distinct `TaskCompletedInputSchema` from `agent-hook-schemas/claude`.
+ */
+export const taskCompletedHookInputSchema = allOptional(PkgTaskCompletedInputSchema)
+
+export type TaskCompletedHookInput = z.infer<typeof taskCompletedHookInputSchema>
+
+/** Union retained for consumers that handle either lifecycle event. */
+export const taskEventHookInputSchema = z.union([
+  taskCreatedHookInputSchema,
+  taskCompletedHookInputSchema,
+])
 
 export type TaskEventHookInput = z.infer<typeof taskEventHookInputSchema>
 

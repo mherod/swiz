@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
 import type { SwizHook } from "../../SwizHook.ts"
 import { CappedMap } from "./cache/capped-map.ts"
@@ -9,8 +10,13 @@ import {
   type DispatchRoutesContext,
   handleDispatchActive,
   handleDispatchRoute,
+  prepareLifecycleTaskDispatch,
   reapStaleDispatches,
 } from "./dispatch-routes.ts"
+import {
+  ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY,
+  LifecycleTaskRegistry,
+} from "./lifecycle-task-registry.ts"
 import type { ActiveHookDispatch } from "./types.ts"
 import type { DaemonWebServerContext } from "./web-server-context.ts"
 import { DaemonWorkerRuntime } from "./worker-runtime.ts"
@@ -32,6 +38,7 @@ const DISPATCH_CONTEXT_KEYS = [
   "transcriptIndex",
   "lastUserMessageCache",
   "taskStateCache",
+  "lifecycleTaskRegistry",
   "recentHookAllowMessages",
 ] as const satisfies readonly (keyof DispatchRoutesContext)[]
 
@@ -85,6 +92,7 @@ function createDispatchContext(manifest: HookGroup[] = []): DispatchRoutesContex
     taskStateCache: {
       watchSession: () => {},
     } as unknown as DispatchRoutesContext["taskStateCache"],
+    lifecycleTaskRegistry: new LifecycleTaskRegistry(),
     recentHookAllowMessages: new CappedMap(10),
   }
 }
@@ -165,6 +173,27 @@ describe("handleDispatchRoute", () => {
     expect(body.issues).not.toHaveLength(0)
   })
 
+  test("fails open for malformed lifecycle payloads", async () => {
+    const ctx = createDispatchContext()
+    const url = new URL("http://daemon/dispatch?event=taskCreated&hookEventName=TaskCreated")
+    const response = await handleDispatchRoute(
+      new Request(url, {
+        method: "POST",
+        body: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "session-1",
+          hook_event_name: "TaskCreated",
+        }),
+      }),
+      url,
+      ctx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({})
+    expect(ctx.lifecycleTaskRegistry.size).toBe(0)
+  })
+
   test("suppresses repeated non-blocking hook messages", async () => {
     const allowHook: SwizHook = {
       name: "test-repeated-allow-message",
@@ -205,5 +234,119 @@ describe("handleDispatchRoute", () => {
     expect(first.systemMessage).toContain("Repeated daemon hint")
     expect(second.systemMessage).toBeUndefined()
     expect(second.hookSpecificOutput?.additionalContext).toBeUndefined()
+  })
+})
+
+describe("prepareLifecycleTaskDispatch", () => {
+  test("tracks create/complete at the daemon boundary and injects Stop snapshots", async () => {
+    const ctx = createDispatchContext()
+    const projectCwd = process.cwd()
+    const created = {
+      cwd: projectCwd,
+      session_id: "session-1",
+      hook_event_name: "TaskCreated",
+      task_id: "task-1",
+      task_subject: "Compile assets",
+      task_description: "Build the production bundle",
+      teammate_name: "worker-a",
+      team_name: "frontend",
+    }
+
+    expect(await prepareLifecycleTaskDispatch(ctx, "taskCreated", created)).toEqual({
+      failOpen: false,
+      payloadChanged: false,
+    })
+
+    const stopPayload: Record<string, unknown> = {
+      cwd: projectCwd,
+      session_id: "session-1",
+      hook_event_name: "Stop",
+    }
+    expect(await prepareLifecycleTaskDispatch(ctx, "stop", stopPayload)).toEqual({
+      failOpen: false,
+      payloadChanged: true,
+      advisory: expect.stringContaining("task-1: Compile assets"),
+    })
+    expect(stopPayload[ACTIVE_LIFECYCLE_TASKS_PAYLOAD_KEY]).toEqual([
+      expect.objectContaining({
+        taskId: "task-1",
+        subject: "Compile assets",
+        description: "Build the production bundle",
+        teammateName: "worker-a",
+        teamName: "frontend",
+      }),
+    ])
+
+    expect(
+      await prepareLifecycleTaskDispatch(ctx, "taskCompleted", {
+        ...created,
+        hook_event_name: "TaskCompleted",
+      })
+    ).toEqual({ failOpen: false, payloadChanged: false })
+    expect(ctx.lifecycleTaskRegistry.size).toBe(0)
+  })
+
+  test("clears the matching project/session on sessionEnd", async () => {
+    const ctx = createDispatchContext()
+    const payload = {
+      cwd: process.cwd(),
+      session_id: "session-1",
+      hook_event_name: "TaskCreated",
+      task_id: "task-1",
+      task_subject: "Compile assets",
+    }
+    await prepareLifecycleTaskDispatch(ctx, "taskCreated", payload)
+
+    expect(
+      await prepareLifecycleTaskDispatch(ctx, "sessionEnd", {
+        cwd: process.cwd(),
+        session_id: "session-1",
+        hook_event_name: "SessionEnd",
+      })
+    ).toEqual({ failOpen: false, payloadChanged: false })
+    expect(ctx.lifecycleTaskRegistry.size).toBe(0)
+  })
+
+  test("surfaces the lifecycle advisory through the full daemon Stop response", async () => {
+    const ctx = createDispatchContext([
+      { event: "taskCreated", hooks: [] },
+      { event: "stop", hooks: [{ hook: stopLifecycleTasks }] },
+    ])
+    const projectCwd = process.cwd()
+    const createUrl = new URL("http://daemon/dispatch?event=taskCreated&hookEventName=TaskCreated")
+    await handleDispatchRoute(
+      new Request(createUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          cwd: projectCwd,
+          session_id: "session-advisory",
+          hook_event_name: "TaskCreated",
+          task_id: "task-1",
+          task_subject: "Compile assets",
+        }),
+      }),
+      createUrl,
+      ctx
+    )
+
+    const stopUrl = new URL("http://daemon/dispatch?event=stop&hookEventName=Stop")
+    const response = await handleDispatchRoute(
+      new Request(stopUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          cwd: projectCwd,
+          session_id: "session-advisory",
+          hook_event_name: "Stop",
+        }),
+      }),
+      stopUrl,
+      ctx
+    )
+    const body = (await response.json()) as Record<string, unknown>
+
+    expect(response.status).toBe(200)
+    expect(body.continue).toBe(true)
+    expect(body.reason).toEqual(expect.stringContaining("task-1: Compile assets"))
+    expect(body.systemMessage).toEqual(expect.stringContaining("advisory only"))
   })
 })

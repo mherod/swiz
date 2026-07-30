@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**150 hooks. 15 event types. Every agent. Zero compromises.**
+**151 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -87,9 +87,9 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 123 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
+The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
-### Stop (27)
+### Stop (28)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -111,6 +111,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-todo-tracker.ts`           | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high.                                                                                                                                                                                                                                                                     |
 | `stop-non-default-branch.ts`     | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it.                                                                                                                                                                                                  |
 | `stop-incomplete-tasks.ts`       | Blocks stop when any session task is still pending or in-progress. Deduplicates stale tasks against completed ones first, then blocks with a task list if any remain incomplete. Fast, focused, and first in line. Task files are always read from `~/.claude/tasks/<session_id>/` regardless of which agent is active — see [Codex and Task Storage](docs/ai-providers.md#codex-and-task-storage) for troubleshooting details. |
+| `stop-lifecycle-tasks.ts`        | Advises when Claude background lifecycle tasks remain active. Reads the daemon-injected project/session snapshot, lists task IDs and subjects, and always allows Stop to continue. Lifecycle state stays separate from planning/TODO tasks. |
 | `stop-completion-auditor.ts`     | Verifies task creation thresholds and CI evidence after all tasks are complete. If a push happened but no task carries CI-green evidence, blocks until the agent proves CI passed.                                                                                                                                                                                                                       |
 | `stop-upstream-branch-count.ts`  | Blocks stop when the remote has more than 40 branches. Stale branches accumulate silently — this surfaces the cleanup work before it becomes unmanageable. Runs with a 2-hour cooldown so it doesn't interrupt every session.                                                                                                                                                                            |
 | `stop-memory-size.ts`            | Scans `CLAUDE.md` and `MEMORY.md` files against the configured line and word thresholds. Blocks stop with file-level details and `/compact-memory` guidance when any file is over threshold.                                                                                                                                                                                                             |

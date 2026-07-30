@@ -69,6 +69,8 @@ const PUBLIC_HOOK_EVENTS_BY_AGENT: Record<string, Set<string>> = {
     "Notification",
     "SubagentStart",
     "SubagentStop",
+    "TaskCreated",
+    "TaskCompleted",
   ]),
   cursor: new Set([
     "stop",
@@ -177,6 +179,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       notification: "Notification",
       subagentStart: "SubagentStart",
       subagentStop: "SubagentStop",
+      taskCreated: "TaskCreated",
+      taskCompleted: "TaskCompleted",
     },
   },
   // ⚠ Cursor CLI (cursor-agent) only supports beforeShellExecution and
@@ -227,7 +231,13 @@ export const AGENTS: AgentDef[] = registerAgents([
     // Cursor has no distinct tool-failure event; failures surface via postToolUse.
     // Cursor has no post-compaction hook; only preCompact fires.
     // Cursor has no permission-request hook event.
-    unsupportedEvents: ["postToolUseFailure", "postCompact", "permissionRequest"],
+    unsupportedEvents: [
+      "postToolUseFailure",
+      "postCompact",
+      "permissionRequest",
+      "taskCreated",
+      "taskCompleted",
+    ],
   },
   {
     id: "gemini",
@@ -268,6 +278,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       "permissionRequest",
       "subagentStart",
       "subagentStop",
+      "taskCreated",
+      "taskCompleted",
     ],
   },
   {
@@ -318,6 +330,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       "notification",
       "subagentStart",
       "subagentStop",
+      "taskCreated",
+      "taskCompleted",
     ],
   },
   // Antigravity CLI (`agy`, Google's Gemini-based agent). Hooks live in a
@@ -368,6 +382,8 @@ export const AGENTS: AgentDef[] = registerAgents([
       "notification",
       "subagentStart",
       "subagentStop",
+      "taskCreated",
+      "taskCompleted",
     ],
   },
 ])

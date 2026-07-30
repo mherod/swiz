@@ -19,6 +19,7 @@ import { WorkerTranscriptMonitor } from "./daemon/cache/worker-transcript-monito
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import { logPseudoHook } from "./daemon/daemon-logging.ts"
+import { LifecycleTaskRegistry } from "./daemon/lifecycle-task-registry.ts"
 import {
   CappedMap,
   CooldownRegistry,
@@ -172,6 +173,7 @@ function createDaemonCaches() {
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
   const taskStateCache = new TaskStateCache()
+  const lifecycleTaskRegistry = new LifecycleTaskRegistry()
 
   return {
     watchers,
@@ -188,6 +190,7 @@ function createDaemonCaches() {
     manifestCache,
     snapshots,
     taskStateCache,
+    lifecycleTaskRegistry,
   }
 }
 
@@ -278,6 +281,7 @@ function setupWatchers(
     // Do NOT unregister from upstreamSyncRegistry here — background sync continues
     // for idle projects so the issue store stays fresh without needing external triggers.
     caches.cooldownRegistry.invalidateProject(cwd)
+    caches.lifecycleTaskRegistry.clearProject(cwd)
     deleteProjectSnapshots(snapshots, cwd)
   }
 
@@ -391,7 +395,10 @@ function createPruner(
     sessionDataCache.pruneOlderThan(cutoffMs)
     caches.transcriptIndex.pruneOlderThan(cutoffMs)
     for (const [sessionId, activity] of state.sessionActivity) {
-      if (activity.lastSeen < cutoffMs) state.sessionActivity.delete(sessionId)
+      if (activity.lastSeen < cutoffMs) {
+        state.sessionActivity.delete(sessionId)
+        caches.lifecycleTaskRegistry.clearSession(sessionId)
+      }
     }
     sessionDataCache.pruneSessionsPerProject(3)
     for (const [sessionId, toolCalls] of state.sessionToolCalls) {
@@ -522,6 +529,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     caches.workerRuntime.close()
     process.stderr.write("Worker runtime... ")
     caches.taskStateCache.close()
+    caches.lifecycleTaskRegistry.clear()
     setGlobalTaskStateCache(null)
     process.stderr.write("Task cache... ")
     process.stderr.write("Done.\n")
@@ -596,6 +604,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     snapshots: caches.snapshots,
     workerRuntime: caches.workerRuntime,
     taskStateCache: caches.taskStateCache,
+    lifecycleTaskRegistry: caches.lifecycleTaskRegistry,
   })
 
   // Register initial project for periodic upstream sync

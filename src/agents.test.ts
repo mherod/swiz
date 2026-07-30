@@ -560,6 +560,8 @@ describe("agents.ts", () => {
         "notification",
         "subagentStart",
         "subagentStop",
+        "taskCreated",
+        "taskCompleted",
       ])
     })
 

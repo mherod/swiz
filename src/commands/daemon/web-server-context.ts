@@ -16,6 +16,7 @@ import type { CiRoutesContext } from "./ci-routes.ts"
 import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import type { ComplianceRoutesContext } from "./compliance-routes.ts"
 import type { IssueRoutesContext } from "./issue-routes.ts"
+import type { LifecycleTaskRegistry } from "./lifecycle-task-registry.ts"
 import type { MetricsRoutesContext } from "./metrics-routes.ts"
 import type {
   CooldownRegistry,
@@ -79,6 +80,7 @@ export interface DaemonWebServerContext {
   snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
   workerRuntime: DaemonWorkerRuntime
   taskStateCache: import("../../tasks/task-state-cache.ts").TaskStateCache
+  lifecycleTaskRegistry: LifecycleTaskRegistry
   recentHookAllowMessages: CappedMap<string, string>
   sessionComplianceState: CappedMap<
     string,

@@ -35,8 +35,8 @@ install against it yet.
 | `Notification` | Mapped | `notification` | Daemon-driven TTS for watched-session messages. |
 | `SubagentStart` | Mapped | `subagentStart` | Subagent lifecycle context. |
 | `SubagentStop` | Mapped | `subagentStop` | Subagent completion handling. |
-| `TaskCreated` | Reserved | — | Background-task lifecycle; mapping tracked in issue #691. |
-| `TaskCompleted` | Reserved | — | Background-task lifecycle; mapping tracked in issue #691. |
+| `TaskCreated` | Mapped | `taskCreated` | Records daemon-owned background-task lifecycle state without touching planning/TODO tasks. |
+| `TaskCompleted` | Mapped | `taskCompleted` | Removes the matching daemon-owned lifecycle task; unknown completions fail open. |
 | `Stop` | Mapped | `stop` | The main stop-gate surface (ship checklist, incomplete tasks, quality checks). |
 | `StopFailure` | Reserved | — | Fires when a Stop hook itself errors; swiz has no recovery behaviour to attach. |
 | `TeammateIdle` | Reserved | — | Multi-agent teammate idleness; outside swiz's single-session scope. |

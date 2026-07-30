@@ -98,6 +98,8 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "commitMsg",
   "prePush",
   "notification",
+  "taskCreated",
+  "taskCompleted",
 ])
 
 export function parsePayload(payloadStr: string): {
