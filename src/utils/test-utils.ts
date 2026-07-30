@@ -770,6 +770,9 @@ export async function acquireEnvLock(): Promise<void> {
     release = resolve
   })
   await previous
+  // Publish only the callback for the lock that has actually been acquired.
+  // A queued caller must not replace the active holder's release callback
+  // while it is still waiting for that holder to finish.
   releaseEnvLock = release
 }
 

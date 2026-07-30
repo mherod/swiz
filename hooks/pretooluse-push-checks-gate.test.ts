@@ -5,8 +5,13 @@ import { join } from "node:path"
 import {
   type AdvisoryHookResult,
   buildEffectiveTestSettings,
+  buildTestSettings,
   runHookInProcess,
 } from "../src/utils/test-utils.ts"
+import {
+  evaluatePretoolusePushChecksGate,
+  type PushChecksGateDependencies,
+} from "./pretooluse-push-checks-gate.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,6 +56,29 @@ function makeOldTranscript(...commands: string[]): string {
     .join("\n")
 }
 
+const UNIT_DEPENDENCIES: PushChecksGateDependencies = {
+  spawn: () =>
+    Promise.resolve({
+      stdout: "",
+      stderr: "not a git repository",
+      exitCode: 128,
+      timedOut: false,
+    }),
+  detectForkTopology: () => Promise.resolve(null),
+  readGlobalSettings: () => Promise.resolve(buildTestSettings()),
+  readProjectSettings: () => Promise.resolve(null),
+}
+
+function parseHookOutput(output: Record<string, any>): AdvisoryHookResult {
+  const hso = output.hookSpecificOutput
+  const decision = hso?.permissionDecision ?? output.decision
+  return {
+    blocked: decision === "deny",
+    reason: hso?.permissionDecisionReason ?? output.reason ?? "",
+    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
+  }
+}
+
 async function runHook(opts: {
   command: string
   transcriptContent?: string
@@ -74,17 +102,8 @@ async function runHook(opts: {
     _effectiveSettings: buildEffectiveTestSettings(opts.effectiveSettings ?? {}),
   }
 
-  const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-
-  if (!out.trim()) return { blocked: false, reason: "", advisory: false }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
-  const decision = hso?.permissionDecision ?? parsed?.decision
-  return {
-    blocked: decision === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
-    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
-  }
+  const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
+  return parseHookOutput(output)
 }
 
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
@@ -426,16 +445,8 @@ describe("CI check advisory — prHooksActive modes", () => {
       session_id: "test",
       _effectiveSettings: buildEffectiveTestSettings({ collaborationMode: mode, ignoreCi: false }),
     }
-    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-    if (!out.trim()) return { blocked: false, reason: "", advisory: false }
-    const parsed = JSON.parse(out.trim())
-    const hso = parsed?.hookSpecificOutput
-    const decision = hso?.permissionDecision ?? parsed?.decision
-    return {
-      blocked: decision === "deny",
-      reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
-      advisory: decision === "allow" && !!hso?.permissionDecisionReason,
-    }
+    const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
+    return parseHookOutput(output)
   }
 
   test("relaxed-collab without swiz ci-wait triggers CI check advisory", async () => {
@@ -501,10 +512,8 @@ describe("CI check advisory — prHooksActive modes", () => {
         ignoreCi: true,
       }),
     }
-    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-    expect(out.trim()).toBeTruthy()
-    const parsed = JSON.parse(out.trim())
-    const reason = parsed?.hookSpecificOutput?.permissionDecisionReason ?? ""
+    const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
+    const reason = parseHookOutput(output).reason
     expect(reason).toContain("All pre-push checks found")
     expect(reason).not.toContain("swiz ci-wait")
   })
