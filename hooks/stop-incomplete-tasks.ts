@@ -21,10 +21,14 @@ import { stopHookInputSchema } from "../src/schemas.ts"
 import { getRecentlyUsedToolsForCurrentSession } from "../src/skill-utils.ts"
 import { buildTaskListBeforeStopMessage } from "../src/tasks/task-governance-messages.ts"
 import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
-import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
+import {
+  evaluateStopIncompleteTasks,
+  type StopIncompleteTasksDependencies,
+} from "./stop-incomplete-tasks/evaluate.ts"
 
 export async function evaluateStopIncompleteTasksHook(
-  input: StopHookInput
+  input: StopHookInput,
+  dependencies: StopIncompleteTasksDependencies = {}
 ): Promise<SwizHookOutput> {
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   try {
@@ -61,7 +65,7 @@ export async function evaluateStopIncompleteTasksHook(
     }
   }
 
-  return await evaluateStopIncompleteTasks(parsed)
+  return await evaluateStopIncompleteTasks(parsed, dependencies)
 }
 
 const stopIncompleteTasks: SwizStopHook = {

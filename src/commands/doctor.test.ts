@@ -3,33 +3,40 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../agents.ts"
 import { hookIdentifier, isInlineHookDef, manifest } from "../manifest.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
+import { type DoctorCommandOptions, doctorCommand } from "./doctor.ts"
 
 const { create: createTempHome } = useTempDir("swiz-doctor-test-")
 
-const INDEX_PATH = join(process.cwd(), "index.ts")
-
 type DoctorResult = { stdout: string; stderr: string; exitCode: number | null }
+
+const DOCTOR_TEST_OPTIONS: DoctorCommandOptions = {
+  allChecks: DIAGNOSTIC_CHECKS.map((check) =>
+    check.name === "gh-auth"
+      ? {
+          name: "gh-auth",
+          async run() {
+            return { name: "GitHub CLI auth", status: "pass", detail: "mocked" }
+          },
+        }
+      : check
+  ),
+  autoCleanup: async () => {},
+  fixStaleConfigs: async () => {},
+  notifyDaemon: async () => {},
+}
 
 async function runDoctor(
   home: string,
   args: string[] = [],
   cwd: string = process.cwd()
 ): Promise<DoctorResult> {
-  const proc = Bun.spawn(["bun", "run", INDEX_PATH, "doctor", ...args], {
+  return runCommandInProcess(doctorCommand, args, {
+    commandOptions: DOCTOR_TEST_OPTIONS,
     cwd,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: home },
+    env: { HOME: home },
   })
-  void proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
 }
 
 async function createSkill(home: string, relativeRoot: string, skillName: string): Promise<void> {
@@ -62,7 +69,7 @@ function buildExpectedHooks() {
 }
 
 describe("swiz doctor", () => {
-  // ── Clean-home tests: share a single subprocess call ──────────────────
+  // ── Clean-home tests: share a single command invocation ───────────────
   describe("clean home checks", () => {
     let result: DoctorResult
 

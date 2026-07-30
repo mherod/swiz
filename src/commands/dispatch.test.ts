@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+// PROCESS_CONTRACT_TEST: verifies dispatch stdin timeouts, fallbacks, daemon routing, and replay.
 let cliQueue: Promise<void> = Promise.resolve()
 
 async function runCliSerialized<T>(run: () => Promise<T>): Promise<T> {

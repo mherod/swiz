@@ -28,6 +28,7 @@ import { existsSync } from "node:fs"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import { runFileEditHook } from "../src/utils/test-utils.ts"
 
 const KW_IGNORE = ["ts", "ignore"].join("-")
 
@@ -165,32 +166,11 @@ beforeAll(async () => {
     CANDIDATES.map(async ({ cp }) => {
       const char = String.fromCodePoint(cp)
       const directiveLine = `//${char}@${KW_IGNORE}`
-      const payload = JSON.stringify({
-        tool_name: "Edit",
-        tool_input: {
-          file_path: "src/app.ts",
-          new_string: `${directiveLine}\nconst _: string = 1;\n`,
-        },
+      const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+        filePath: "src/app.ts",
+        newString: `${directiveLine}\nconst _: string = 1;\n`,
       })
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-      const rawOutput = await new Response(proc.stdout).text()
-      await proc.exited
-
-      let blocked = false
-      if (rawOutput.trim()) {
-        try {
-          const parsed = JSON.parse(rawOutput.trim())
-          const hso = parsed.hookSpecificOutput
-          blocked = (hso?.permissionDecision ?? parsed.decision) === "deny"
-        } catch {}
-      }
-      hookBlocks.set(cp, blocked)
+      hookBlocks.set(cp, result.decision === "deny")
     })
   )
 })
@@ -358,28 +338,11 @@ describe("pretooluse-no-ts-ignore: JSDoc block comment differential (coverage pr
     await Promise.all(
       JSDOC_CANDIDATES.map(async ({ commentBlock, label }) => {
         const newString = `${commentBlock}\nconst x: string = 1;\n`
-        const payload = JSON.stringify({
-          tool_name: "Edit",
-          tool_input: { file_path: "src/app.ts", new_string: newString },
+        const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+          filePath: "src/app.ts",
+          newString,
         })
-        const p = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        await p.stdin.write(payload)
-        await p.stdin.end()
-        const raw = await new Response(p.stdout).text()
-        await p.exited
-        let blocked = false
-        if (raw.trim()) {
-          try {
-            const parsed = JSON.parse(raw.trim())
-            const hso = parsed.hookSpecificOutput
-            blocked = (hso?.permissionDecision ?? parsed.decision) === "deny"
-          } catch {}
-        }
-        jsdocHookBlocks.set(label, blocked)
+        jsdocHookBlocks.set(label, result.decision === "deny")
       })
     )
 

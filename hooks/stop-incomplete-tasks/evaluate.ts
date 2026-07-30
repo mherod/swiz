@@ -7,7 +7,7 @@
 import {
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
-  isCurrentAgent,
+  detectCurrentAgentFromHookPayload,
   taskToolNameForHookPayload,
 } from "../../src/agent-paths.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
@@ -21,19 +21,26 @@ import {
   stripDeferralPrefix,
 } from "./incomplete-check-validator.ts"
 
+export interface StopIncompleteTasksDependencies {
+  homeDir?: string
+}
+
 /**
  * Evaluate incomplete tasks and return blocking output or empty object.
  */
-export async function evaluateStopIncompleteTasks(input: StopHookInput): Promise<SwizHookOutput> {
+export async function evaluateStopIncompleteTasks(
+  input: StopHookInput,
+  dependencies: StopIncompleteTasksDependencies = {}
+): Promise<SwizHookOutput> {
   // CLI fast path already scanned tasks and found no blockers — skip redundant disk read
   if ((input as Record<string, unknown>)._fastPathTaskScanComplete) return {}
 
-  const ctx = await resolveTaskCheckContext(input)
+  const ctx = await resolveTaskCheckContext(input, dependencies.homeDir)
   if (!ctx) return {}
 
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   // Gemini agent exemption
-  if (isCurrentAgent("gemini")) return {}
+  if (detectCurrentAgentFromHookPayload(input as Record<string, any>)?.id === "gemini") return {}
   const taskListAvailable = agentHasTaskListToolForHookPayload(input as Record<string, any>)
   const taskListToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskList")
   const taskUpdateToolName = taskToolNameForHookPayload(input as Record<string, any>, "TaskUpdate")

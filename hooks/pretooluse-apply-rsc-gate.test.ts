@@ -3,21 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearSkillCache } from "../src/skill-utils.ts"
-import { runHookInProcess } from "../src/utils/test-utils.ts"
+import { neutralAgentEnvOverrides, runHookInProcess } from "../src/utils/test-utils.ts"
 import { isRscGatedFile } from "./pretooluse-apply-rsc-gate.ts"
 
 const HOOK_SCRIPT = "hooks/pretooluse-apply-rsc-gate.ts"
-const HOOK_ABS = join(import.meta.dir, "pretooluse-apply-rsc-gate.ts")
-
-const AGENT_ENV_KEYS = [
-  "CLAUDECODE",
-  "CURSOR_TRACE_ID",
-  "CURSOR_SANDBOX_ENV_RESTORE",
-  "GEMINI_CLI",
-  "GEMINI_PROJECT_DIR",
-  "CODEX_MANAGED_BY_NPM",
-  "CODEX_THREAD_ID",
-] as const
 
 function makeSummary(sessionLines: string[] = []) {
   return {
@@ -42,7 +31,6 @@ function skillInvocationLine(skillName: string, msAgo = 1000): string {
   })
 }
 
-// Subprocess helper — needed for CLAUDECODE env isolation (skill detection reads process env)
 async function runWithSkillInstalled(
   filePath: string,
   sessionLines: string[] = []
@@ -53,36 +41,21 @@ async function runWithSkillInstalled(
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "# apply-rsc\n")
 
-    const env: Record<string, string> = { ...(process.env as Record<string, string>) }
-    env.CLAUDECODE = "1"
-    for (const key of AGENT_ENV_KEYS) {
-      if (key !== "CLAUDECODE") delete env[key]
-    }
-
-    const proc = Bun.spawn(["bun", HOOK_ABS], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: projectDir,
-      env,
-    })
-    await proc.stdin.write(
-      JSON.stringify({
+    const result = await runHookInProcess(
+      HOOK_SCRIPT,
+      {
         tool_name: "Edit",
         tool_input: { file_path: filePath },
         transcript_path: "fake.json",
         cwd: projectDir,
         _transcriptSummary: makeSummary(sessionLines),
-      })
+      },
+      {
+        cwd: projectDir,
+        env: neutralAgentEnvOverrides({ CLAUDECODE: "1" }),
+      }
     )
-    await proc.stdin.end()
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    if (!stdout.trim()) return {}
-    return JSON.parse(stdout) as Record<string, any>
+    return result.json ?? {}
   } finally {
     await rm(projectDir, { recursive: true, force: true })
   }
@@ -227,18 +200,11 @@ describe("isRscGatedFile", () => {
 // ─── In-process pass-through (no skill check needed) ───────────────────────
 
 describe("pretooluse-apply-rsc-gate (in-process)", () => {
-  const savedEnv = new Map(AGENT_ENV_KEYS.map((k) => [k, process.env[k]]))
-
   beforeEach(() => {
     clearSkillCache()
-    for (const key of AGENT_ENV_KEYS) delete process.env[key]
   })
 
   afterEach(() => {
-    for (const [k, v] of savedEnv) {
-      if (v === undefined) delete process.env[k]
-      else process.env[k] = v
-    }
     clearSkillCache()
   })
 
@@ -267,20 +233,19 @@ describe("pretooluse-apply-rsc-gate (in-process)", () => {
     // skillFileExists(). Use a temp HOME so the globally-installed apply-rsc skill is
     // not found, simulating an environment where the skill is absent.
     const fakeHome = await mkdtemp(join(tmpdir(), "rsc-gate-noskill-"))
-    const savedHome = process.env.HOME
-    process.env.HOME = fakeHome
-    clearSkillCache()
     try {
-      const result = await runHookInProcess(HOOK_SCRIPT, {
-        tool_name: "Edit",
-        tool_input: { file_path: "app/dashboard/page.tsx" },
-        transcript_path: "fake.json",
-        _transcriptSummary: makeSummary(),
-      })
+      const result = await runHookInProcess(
+        HOOK_SCRIPT,
+        {
+          tool_name: "Edit",
+          tool_input: { file_path: "app/dashboard/page.tsx" },
+          transcript_path: "fake.json",
+          _transcriptSummary: makeSummary(),
+        },
+        { env: neutralAgentEnvOverrides({ HOME: fakeHome }) }
+      )
       expect(result.decision).toBeUndefined()
     } finally {
-      if (savedHome === undefined) delete process.env.HOME
-      else process.env.HOME = savedHome
       clearSkillCache()
       await rm(fakeHome, { recursive: true, force: true })
     }
@@ -297,7 +262,7 @@ describe("pretooluse-apply-rsc-gate (in-process)", () => {
   })
 })
 
-// ─── Subprocess tests (env isolation for CLAUDECODE skill detection) ────────
+// ─── Skill-installed behavior tests ────────────────────────────────────────
 
 describe("pretooluse-apply-rsc-gate (with skill installed)", () => {
   it("blocks edit to app/**/page.tsx when apply-rsc not recently invoked", async () => {

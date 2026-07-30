@@ -108,7 +108,7 @@ async function injectEffectiveSettingsIfMissing(input: Record<string, any>): Pro
     // hooks that fail-closed on parse errors must see missing _effectiveSettings.
     const [rawSettings, projectSettings] = await Promise.all([
       readSwizSettings({ strict: true }),
-      readProjectSettings(cwd).catch(() => null),
+      readProjectSettings(cwd, { strict: true }).catch(() => null),
     ])
     input._effectiveSettings = getEffectiveSwizSettings(
       rawSettings,

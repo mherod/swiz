@@ -9,6 +9,7 @@ import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
   createEnforcementProjectDir,
   type HookResult,
+  runHookInProcess,
   useTempDir,
 } from "../src/utils/test-utils.ts"
 
@@ -29,27 +30,7 @@ async function runHook(
   stdinPayload: Record<string, any>,
   extraEnv?: Record<string, string>
 ): Promise<HookResult> {
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, ...extraEnv },
-  })
-  await proc.stdin.write(JSON.stringify(stdinPayload))
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  let json: Record<string, any> | null = null
-  try {
-    if (stdout.trim()) json = JSON.parse(stdout.trim())
-  } catch {}
-
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
+  return await runHookInProcess(HOOK, stdinPayload, { env: extraEnv })
 }
 
 function hookFeedback(text: string): Record<string, any> {

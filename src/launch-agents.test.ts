@@ -1,24 +1,57 @@
 import { describe, expect, it } from "vitest"
-import { bootoutLaunchAgent, isLaunchAgentLoaded, killLaunchAgentProcesses } from "./launch-agents"
+import {
+  bootoutLaunchAgent,
+  isLaunchAgentLoaded,
+  killLaunchAgentProcesses,
+  type LaunchAgentRuntime,
+} from "./launch-agents"
 
 describe("launch-agents robustness", () => {
-  it("isLaunchAgentLoaded should return a boolean", async () => {
-    // We can't easily mock Bun.spawn here without complex setup,
-    // but we can check if the function returns a boolean.
-    // In a real environment, com.apple.Finder should exist.
-    const result = await isLaunchAgentLoaded("com.apple.Finder")
-    expect(typeof result).toBe("boolean")
+  function runtime(
+    result: { exitCode: number; stdout?: string },
+    calls: string[][] = [],
+    killed: number[] = []
+  ): LaunchAgentRuntime {
+    return {
+      run(command) {
+        calls.push(command)
+        return Promise.resolve({ exitCode: result.exitCode, stdout: result.stdout ?? "" })
+      },
+      kill(pid) {
+        killed.push(pid)
+      },
+      getUid() {
+        return 42
+      },
+    }
+  }
+
+  it("isLaunchAgentLoaded maps the mocked launchctl status to a boolean", async () => {
+    const calls: string[][] = []
+    const result = await isLaunchAgentLoaded("com.apple.Finder", runtime({ exitCode: 0 }, calls))
+
+    expect(result).toBe(true)
+    expect(calls).toEqual([["launchctl", "list", "com.apple.Finder"]])
   })
 
-  it("bootoutLaunchAgent should return a number", async () => {
-    // This will likely fail to bootout a random label, but should return a non-zero exit code.
-    const result = await bootoutLaunchAgent("non-existent-label")
-    expect(typeof result).toBe("number")
+  it("bootoutLaunchAgent returns the mocked exit code and user domain", async () => {
+    const calls: string[][] = []
+    const result = await bootoutLaunchAgent("non-existent-label", runtime({ exitCode: 3 }, calls))
+
+    expect(result).toBe(3)
+    expect(calls).toEqual([["launchctl", "bootout", "gui/42/non-existent-label"]])
   })
 
-  it("killLaunchAgentProcesses should not throw if pgrep fails or returns nothing", async () => {
-    // Should handle cases where no processes match.
-    // We expect it to resolve without throwing.
-    await killLaunchAgentProcesses("non-existent-label-xyz-123")
+  it("killLaunchAgentProcesses kills only PIDs returned by the mocked pgrep", async () => {
+    const calls: string[][] = []
+    const killed: number[] = []
+
+    await killLaunchAgentProcesses(
+      "swiz-daemon",
+      runtime({ exitCode: 0, stdout: "123\n456\n" }, calls, killed)
+    )
+
+    expect(calls).toEqual([["pgrep", "-f", "swiz-daemon"]])
+    expect(killed).toEqual([123, 456])
   })
 })

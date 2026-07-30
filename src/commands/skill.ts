@@ -28,15 +28,14 @@ import { convertSkillContent } from "../utils/skill-conversion.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
-const HOME = getHomeDir()
-
 function primarySkillDir(agentId: string): string {
-  if (agentId === "agents") return join(HOME, ".agents")
+  const home = getHomeDir()
+  if (agentId === "agents") return join(home, ".agents")
   const adapter = getProviderAdapter(agentId)
   const primary = adapter?.getSkillDirs()[0]
   if (primary) return primary
 
-  return join(HOME, `.${agentId}`, "skills")
+  return join(home, `.${agentId}`, "skills")
 }
 
 type AgentLike = { id: string; name: string }
@@ -76,7 +75,8 @@ async function readSkill(
   name: string,
   raw: boolean,
   noFrontMatter: boolean,
-  positionalArgs: string[] = []
+  positionalArgs: string[] = [],
+  expandCommands: typeof expandInlineCommands = expandInlineCommands
 ) {
   const skills = await findSkills()
   const skill = skills.find((s) => s.name === name)
@@ -93,7 +93,7 @@ async function readSkill(
   }
   content = substituteArgs(content, positionalArgs)
   if (!raw) {
-    content = await expandInlineCommands(content)
+    content = await expandCommands(content)
   }
 
   const scanBody = stripFrontmatter(content)
@@ -118,7 +118,8 @@ async function readSkill(
 }
 
 function displayPath(path: string): string {
-  return path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
+  const home = getHomeDir()
+  return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }
 
 /** Positional (non-flag) args, excluding values consumed by --from/--to. */
@@ -500,7 +501,7 @@ async function exportCommand(options: {
   const { fromAgent, toAgent } = resolveAgentPair(from, to)
 
   const fromSkillsDir = primarySkillDir(from)
-  const commandsDir = join(HOME, `.${toAgent.id}`, "commands")
+  const commandsDir = join(getHomeDir(), `.${toAgent.id}`, "commands")
   const orderedSkillNames = name
     ? [await requireSkillName(fromSkillsDir, name)]
     : await discoverSkillNames(fromSkillsDir)
@@ -629,7 +630,11 @@ async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
 
 // ─── Command registration ───────────────────────────────────────────────────
 
-export const skillCommand: Command = {
+export interface SkillCommandOptions {
+  expandInlineCommands?: typeof expandInlineCommands
+}
+
+export const skillCommand: Command<SkillCommandOptions> = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
@@ -670,7 +675,7 @@ export const skillCommand: Command = {
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
   ],
-  async run(args) {
+  async run(args, options) {
     const handled = await handleSkillTransferArgs(args)
     if (handled) return
 
@@ -688,7 +693,7 @@ export const skillCommand: Command = {
     if (!name) {
       await listSkills()
     } else {
-      await readSkill(name, raw, noFrontMatter, positionals.slice(1))
+      await readSkill(name, raw, noFrontMatter, positionals.slice(1), options?.expandInlineCommands)
     }
   },
 }

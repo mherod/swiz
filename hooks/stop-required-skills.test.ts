@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
-const HOOK = join(import.meta.dir, "stop-required-skills.ts")
+const HOOK = "hooks/stop-required-skills.ts"
 
 const tmp = useTempDir("swiz-stop-required-skills-")
 
@@ -21,53 +21,26 @@ async function runHookWithInput(
   transcriptPath: string,
   extraInput: Record<string, unknown> = {}
 ): Promise<HookResult> {
-  const env: Record<string, string | undefined> = { ...process.env }
+  const env: Record<string, string | undefined> = {}
   env.HOME = cwd
   for (const agent of AGENTS) {
     for (const v of agent.envVars ?? []) env[v] = ""
   }
   // CLAUDECODE is required for Skill tool support detection in skill-utils.ts
   env.CLAUDECODE = "1"
-  env.DEBUG_SKILLS = "1"
-  env.DEBUG_REQUIRED_SKILLS = "1"
   // Unset other agent vars to ensure detectCurrentAgent() picks Claude
   env.ANTHROPIC_EXEC_VERSION = "1.0.0"
 
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd,
-    env: env as Record<string, string>,
-  })
-  await proc.stdin.write(
-    JSON.stringify({
+  return await runHookInProcess(
+    HOOK,
+    {
       cwd,
       session_id: "test-session",
       transcript_path: transcriptPath,
       ...extraInput,
-    })
+    },
+    { cwd, env }
   )
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  let decision: string | undefined
-  let reason: string | undefined
-  const trimmed = stdout.trim()
-  if (trimmed) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, any>
-      decision = parsed.decision as string | undefined
-      reason = parsed.reason as string | undefined
-    } catch {}
-  }
-
-  return { exitCode: proc.exitCode, stdout: trimmed, stderr, decision, reason }
 }
 
 async function runHook(cwd: string, transcriptPath: string): Promise<HookResult> {
@@ -463,24 +436,22 @@ describe("stop-required-skills", () => {
     const dir = await tmp.create()
     const transcriptPath = await createTranscript(dir)
 
-    // Run without CLAUDECODE env
-    const proc = Bun.spawn(["bun", HOOK], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: dir,
-      env: { ...process.env, CLAUDECODE: "" },
-    })
-    await proc.stdin.write(
-      JSON.stringify({
+    const result = await runHookInProcess(
+      HOOK,
+      {
         cwd: dir,
         session_id: "test-session",
         transcript_path: transcriptPath,
-      })
+      },
+      {
+        cwd: dir,
+        env: {
+          CLAUDECODE: undefined,
+          ANTHROPIC_EXEC_VERSION: undefined,
+        },
+      }
     )
-    await proc.stdin.end()
-    await proc.exited
 
-    expect(proc.exitCode).toBe(0)
+    expect(result.exitCode).toBe(0)
   })
 })

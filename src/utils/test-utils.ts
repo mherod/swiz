@@ -8,12 +8,86 @@ import { projectKeyFromCwd } from "../project-key.ts"
 import { DEFAULT_SETTINGS } from "../settings/persistence.ts"
 import type { EffectiveSwizSettings, SwizSettings } from "../settings/types.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
+import type { Command } from "../types.ts"
 import { extractPreToolSurfaceDecision, getHookSpecificOutput } from "./hook-specific-output.ts"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 
 /** Shared type alias for loosely-typed JSON objects in tests. */
 export type JsonObject = Record<string, any>
+
+export interface InProcessCommandResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
+/**
+ * Run a command through its public `Command.run()` boundary.
+ *
+ * CLI subprocesses belong in the small set of tests that verify process-level
+ * contracts. Command behavior tests use this helper so Bun startup, environment
+ * setup, and unrelated CLI module initialization are not repeated per case.
+ */
+export async function runCommandInProcess<TOptions>(
+  command: Command<TOptions>,
+  args: string[],
+  options: {
+    commandOptions?: TOptions
+    cwd?: string
+    env?: Record<string, string | undefined>
+  } = {}
+): Promise<InProcessCommandResult> {
+  await acquireEnvLock()
+  const originalEnv = new Map<string, string | undefined>()
+  const originalCwd = process.cwd()
+  const originalExitCode = process.exitCode
+  const commandConsole = globalThis.console
+  const originalLog = commandConsole.log
+  const originalError = commandConsole.error
+  const stdout: string[] = []
+  const stderr: string[] = []
+
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    originalEnv.set(key, process.env[key])
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+
+  commandConsole.log = (...values: unknown[]) => {
+    stdout.push(values.map(String).join(" "))
+  }
+  commandConsole.error = (...values: unknown[]) => {
+    stderr.push(values.map(String).join(" "))
+  }
+
+  let exitCode: 0 | 1 = 0
+  try {
+    if (options.cwd) process.chdir(options.cwd)
+    process.exitCode = 0
+    await command.run(args, options.commandOptions)
+    exitCode = process.exitCode === 0 ? 0 : 1
+  } catch (error) {
+    exitCode = 1
+    stderr.push(error instanceof Error ? error.message : String(error))
+  } finally {
+    commandConsole.log = originalLog
+    commandConsole.error = originalError
+    process.chdir(originalCwd)
+    process.exitCode = originalExitCode
+    for (const [key, value] of originalEnv) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    releaseEnvLockFn()
+  }
+
+  return {
+    stdout: stdout.length > 0 ? `${stdout.join("\n")}\n` : "",
+    stderr: stderr.length > 0 ? `${stderr.join("\n")}\n` : "",
+    exitCode,
+  }
+}
 
 /**
  * Build a full SwizSettings object for test fixtures.
@@ -210,6 +284,21 @@ export function neutralAgentEnv(
 }
 
 /**
+ * Build process-env overrides that remove every ambient agent signal.
+ *
+ * Unlike `neutralAgentEnv`, this returns only the keys that must be changed, so
+ * `runHookInProcess` can apply and restore them under its environment lock.
+ */
+export function neutralAgentEnvOverrides(
+  overrides: Record<string, string | undefined> = {}
+): Record<string, string | undefined> {
+  return {
+    ...Object.fromEntries(AGENT_ENV_KEYS.map((key) => [key, undefined])),
+    ...overrides,
+  }
+}
+
+/**
  * Run a SwizHook default-export in-process without spawning a subprocess.
  *
  * Dynamic-imports the script, invokes `hook.run(payload)` inside
@@ -217,47 +306,71 @@ export function neutralAgentEnv(
  * `emitContext`, …) redirect via `SwizHookExit` instead of calling
  * `process.exit`. Returns the same shape as the subprocess `runHook`.
  *
- * Only safe for hooks that default-export a SwizHook AND don't need env
- * overrides — mutating `process.env` under `--concurrent` would leak across
- * test files. Use `runHook` (subprocess) when either condition fails.
+ * Environment and cwd overrides are serialized and restored by this helper.
+ * Hooks that resolve environment values at module initialization still need a
+ * subprocess contract test; ordinary behavior tests should use this boundary.
  */
 // eslint-disable-next-line complexity
 export async function runHookInProcess(
   script: string,
-  stdinPayload: Record<string, any>
+  stdinPayload: Record<string, any>,
+  options: {
+    cwd?: string
+    env?: Record<string, string | undefined>
+  } = {}
 ): Promise<HookResult> {
-  const { withInlineSwizHookRun, SwizHookExit } = await import("../inline-hook-context.ts")
-  const absPath = resolve(REPO_ROOT, script)
-  const mod = (await import(absPath)) as { default?: { run?: (input: any) => Promise<any> } }
-  const hook = mod.default
-  if (!hook || typeof hook.run !== "function") {
-    throw new Error(`${script} does not default-export a SwizHook; use runHook() instead`)
-  }
-  let output: Record<string, any> | null = null
+  await acquireEnvLock()
+  const originalCwd = process.cwd()
+  const originalEnv = new Map<string, string | undefined>()
   try {
-    const result = await withInlineSwizHookRun(() => hook.run!(stdinPayload))
-    if (result && typeof result === "object") {
-      output = result as Record<string, any>
+    for (const [key, value] of Object.entries(options.env ?? {})) {
+      originalEnv.set(key, process.env[key])
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
     }
-  } catch (err) {
-    if (err instanceof SwizHookExit) {
-      output = err.output as Record<string, any>
-    } else {
-      throw err
+    if (options.cwd) process.chdir(options.cwd)
+
+    const { withInlineSwizHookRun, SwizHookExit } = await import("../inline-hook-context.ts")
+    const absPath = resolve(REPO_ROOT, script)
+    const mod = (await import(absPath)) as { default?: { run?: (input: any) => Promise<any> } }
+    const hook = mod.default
+    if (!hook || typeof hook.run !== "function") {
+      throw new Error(`${script} does not default-export a SwizHook; use runHook() instead`)
     }
+    let output: Record<string, any> | null = null
+    try {
+      const result = await withInlineSwizHookRun(() => hook.run!(stdinPayload))
+      if (result && typeof result === "object") {
+        output = result as Record<string, any>
+      }
+    } catch (err) {
+      if (err instanceof SwizHookExit) {
+        output = err.output as Record<string, any>
+      } else {
+        throw err
+      }
+    }
+    const hasOutput = output !== null && Object.keys(output).length > 0
+    const stdout = hasOutput ? JSON.stringify(output) : ""
+    let decision: string | undefined
+    let reason: string | undefined
+    let json: Record<string, any> | null = null
+    if (hasOutput && output) {
+      json = output
+      const surface = extractPreToolSurfaceDecision(output)
+      decision =
+        surface.decision ?? (typeof output.decision === "string" ? output.decision : undefined)
+      reason = surface.reason ?? (typeof output.reason === "string" ? output.reason : undefined)
+    }
+    return { exitCode: 0, stdout, stderr: "", json, decision, reason }
+  } finally {
+    process.chdir(originalCwd)
+    for (const [key, value] of originalEnv) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    releaseEnvLockFn()
   }
-  const hasOutput = output !== null && Object.keys(output).length > 0
-  const stdout = hasOutput ? JSON.stringify(output) : ""
-  let decision: string | undefined
-  let reason: string | undefined
-  let json: Record<string, any> | null = null
-  if (hasOutput && output) {
-    json = output
-    const surface = extractPreToolSurfaceDecision(output)
-    decision = surface.decision
-    reason = surface.reason
-  }
-  return { exitCode: 0, stdout, stderr: "", json, decision, reason }
 }
 
 /**
@@ -265,9 +378,8 @@ export async function runHookInProcess(
  * Returns parsed hookSpecificOutput decision if present.
  *
  * Prefer `runHookInProcess` for new tests — it avoids the Bun cold-start cost.
- * This function stays on the subprocess path so existing tests that rely on
- * subprocess-specific semantics (env isolation, process.cwd inheritance,
- * fire-and-forget side effects) keep working.
+ * This function stays on the subprocess path when env isolation is part of the
+ * contract because some legacy hooks still resolve HOME at module load.
  */
 export async function runHook(
   script: string,
@@ -282,7 +394,7 @@ export async function runHook(
   const env = neutralAgentEnv(envOverrides)
   const absPath = resolve(REPO_ROOT, script)
 
-  const proc = Bun.spawn(["bun", absPath], {
+  const proc = Bun.spawn([process.execPath, absPath], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -658,6 +770,9 @@ export async function acquireEnvLock(): Promise<void> {
     release = resolve
   })
   await previous
+  // Publish only the callback for the lock that has actually been acquired.
+  // A queued caller must not replace the active holder's release callback
+  // while it is still waiting for that holder to finish.
   releaseEnvLock = release
 }
 

@@ -4,9 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearSkillCache } from "../src/skill-utils.ts"
 import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
+import { runHookInProcess } from "../src/utils/test-utils.ts"
 import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
 
-const HOOK = join(import.meta.dir, "pretooluse-skill-invocation-gate.ts")
+const HOOK = "hooks/pretooluse-skill-invocation-gate.ts"
 
 describe("pretooluse-skill-invocation-gate", () => {
   const agentEnvKeys = [
@@ -88,30 +89,15 @@ describe("pretooluse-skill-invocation-gate", () => {
       await writeFile(join(skillDir, "SKILL.md"), `# ${skillName}\n`)
       await setupProject?.(projectDir)
 
-      const env: Record<string, string> = { ...process.env, CLAUDECODE: "1" } as Record<
-        string,
-        string
-      >
+      const env: Record<string, string | undefined> = { CLAUDECODE: "1" }
       for (const key of agentEnvKeys) {
-        if (key !== "CLAUDECODE" && key !== "HOME") delete env[key]
+        if (key !== "CLAUDECODE") env[key] = undefined
       }
-
-      const proc = Bun.spawn(["bun", HOOK], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
+      const result = await runHookInProcess(HOOK, payload as Record<string, any>, {
         cwd: projectDir,
         env,
       })
-      await proc.stdin.write(JSON.stringify(payload))
-      await proc.stdin.end()
-      const [stdout] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      if (!stdout.trim()) return {}
-      return JSON.parse(stdout) as Record<string, any>
+      return result.json ?? {}
     } finally {
       await rm(projectDir, { recursive: true, force: true })
     }

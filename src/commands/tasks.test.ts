@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
+import { runCommandInProcess } from "../utils/test-utils.ts"
 import {
   compareTaskIds,
   findTaskAcrossSessions,
@@ -21,7 +22,6 @@ const TMP = join(tmpdir(), `swiz-tasks-test-${process.pid}-${Date.now()}`)
 const TASKS = join(TMP, "tasks")
 const PROJECTS = join(TMP, "projects")
 const FILTER_CWD = "/Users/test/Development/myproject"
-const INDEX_PATH = join(process.cwd(), "index.ts")
 
 // Serialize tests that modify process.env.HOME or process.chdir
 let _queue: Promise<unknown> = Promise.resolve()
@@ -39,27 +39,10 @@ async function runTasksCli(
   await mkdir(cwd, { recursive: true })
   await setup?.(cwd)
 
-  const env: Record<string, string> = { ...process.env, AI_TEST_NO_BACKEND: "1" }
-  for (const [key, value] of Object.entries(envOverrides)) {
-    if (value === undefined) {
-      delete env[key]
-    } else {
-      env[key] = value
-    }
-  }
-
-  const proc = Bun.spawn([process.execPath, INDEX_PATH, "tasks"], {
+  return runCommandInProcess(tasksCommand, [], {
     cwd,
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
+    env: { AI_TEST_NO_BACKEND: "1", ...envOverrides },
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const exitCode = await proc.exited
-  return { exitCode, stdout, stderr }
 }
 
 // Session IDs

@@ -2,14 +2,21 @@ import { existsSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { useTempDir } from "../utils/test-utils.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { skillCommand } from "./skill.ts"
 
 const { create: createTempDir } = useTempDir("swiz-skill-command-test-")
+
+async function runSkillToCommand(args: string[], home: string) {
+  return runCommandInProcess(skillCommand, args, {
+    cwd: home,
+    env: { HOME: home },
+  })
+}
 
 describe("skill to-command", () => {
   it("should export a skill to an agent command", async () => {
     const home = await createTempDir()
-    const indexPath = join(process.cwd(), "index.ts")
     const claudeSkillsDir = join(home, ".claude", "skills")
 
     // 1. Create a dummy skill for Claude
@@ -28,19 +35,9 @@ allowed-tools: Bash, Edit
 
     // 2. Run the export command
     // Usage: swiz skill --to-command --from claude [skill-name]
-    const proc = Bun.spawn(
-      ["bun", "run", indexPath, "skill", "--to-command", "--from", "claude", "test-skill"],
-      {
-        cwd: home,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: home },
-      }
-    )
-    const stderr = await new Response(proc.stderr).text()
-    await proc.exited
-    expect(proc.exitCode).toBe(0)
-    expect(stderr).toBe("")
+    const result = await runSkillToCommand(["--to-command", "--from", "claude", "test-skill"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
 
     // 3. Verify the command was created in ~/.claude/commands/test-skill.md
     const commandPath = join(home, ".claude", "commands", "test-skill.md")
@@ -57,7 +54,6 @@ allowed-tools: Bash, Edit
 
   it("should remap tool names when exporting (e.g. from Gemini)", async () => {
     const home = await createTempDir()
-    const indexPath = join(process.cwd(), "index.ts")
 
     // 1. Create a dummy skill for Gemini
     const geminiSkillsDir = join(home, ".gemini", "skills")
@@ -75,30 +71,12 @@ To use this skill, call run_shell_command.
     await writeFile(join(skillDir, "SKILL.md"), skillContent)
 
     // 2. Run the export command
-    const proc = Bun.spawn(
-      [
-        "bun",
-        "run",
-        indexPath,
-        "skill",
-        "--to-command",
-        "--from",
-        "gemini",
-        "--to",
-        "claude",
-        "gemini-skill",
-      ],
-      {
-        cwd: home,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: home },
-      }
+    const result = await runSkillToCommand(
+      ["--to-command", "--from", "gemini", "--to", "claude", "gemini-skill"],
+      home
     )
-    const stderr = await new Response(proc.stderr).text()
-    await proc.exited
-    expect(proc.exitCode).toBe(0)
-    expect(stderr).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
 
     // 3. Verify the command was created and tools remapped to canonical names.
     const commandPath = join(home, ".claude", "commands", "gemini-skill.md")
@@ -113,26 +91,17 @@ To use this skill, call run_shell_command.
 
   it("should error when the named skill does not exist", async () => {
     const home = await createTempDir()
-    const indexPath = join(process.cwd(), "index.ts")
 
-    const proc = Bun.spawn(
-      ["bun", "run", indexPath, "skill", "--to-command", "--from", "claude", "no-such-skill-xyz"],
-      {
-        cwd: home,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: home },
-      }
+    const result = await runSkillToCommand(
+      ["--to-command", "--from", "claude", "no-such-skill-xyz"],
+      home
     )
-    const stderr = await new Response(proc.stderr).text()
-    await proc.exited
-    expect(proc.exitCode).not.toBe(0)
-    expect(stderr).toContain("Skill not found: no-such-skill-xyz")
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain("Skill not found: no-such-skill-xyz")
   })
 
   it("should quote descriptions that would break YAML, and summarise unmapped tools", async () => {
     const home = await createTempDir()
-    const indexPath = join(process.cwd(), "index.ts")
 
     const skillDir = join(home, ".claude", "skills", "yaml-edge-skill")
     await mkdir(skillDir, { recursive: true })
@@ -145,39 +114,18 @@ Body.
 `
     await writeFile(join(skillDir, "SKILL.md"), skillContent)
 
-    const proc = Bun.spawn(
-      [
-        "bun",
-        "run",
-        indexPath,
-        "skill",
-        "--to-command",
-        "--from",
-        "claude",
-        "--to",
-        "gemini",
-        "yaml-edge-skill",
-      ],
-      {
-        cwd: home,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: home },
-      }
+    const result = await runSkillToCommand(
+      ["--to-command", "--from", "claude", "--to", "gemini", "yaml-edge-skill"],
+      home
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    expect(proc.exitCode).toBe(0)
-    expect(stderr).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
 
     const commandPath = join(home, ".gemini", "commands", "yaml-edge-skill.md")
     const commandContent = await readFile(commandPath, "utf-8")
     expect(commandContent).toContain('description: "Deploy: fast and safe #1"')
     // Aggregated unmapped summary appears after the per-skill lines.
-    expect(stdout).toContain("Unmapped tool names")
-    expect(stdout).toContain("ImaginaryTool")
+    expect(result.stdout).toContain("Unmapped tool names")
+    expect(result.stdout).toContain("ImaginaryTool")
   })
 })

@@ -2,9 +2,8 @@ import { describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildUsageReport, parseUsageArgs } from "./usage.ts"
-
-const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
+import { runCommandInProcess } from "../utils/test-utils.ts"
+import { buildUsageReport, parseUsageArgs, usageCommand } from "./usage.ts"
 
 const FIXTURE = {
   numStartups: 12,
@@ -62,17 +61,7 @@ async function makeTempDir(prefix = "swiz-usage-test-"): Promise<string> {
 async function runUsage(
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn([process.execPath, INDEX_PATH, "usage", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env,
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
+  return runCommandInProcess(usageCommand, args)
 }
 
 describe("parseUsageArgs", () => {

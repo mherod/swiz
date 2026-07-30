@@ -17,12 +17,16 @@ import {
   swizMcpChannelStatusPath,
 } from "../temp-paths.ts"
 import { isAutoSteerDeferredForForegroundAppName } from "./auto-steer-foreground.ts"
-import {
-  clearHumaniseCache,
-  DEFAULT_HUMANISE_SYSTEM_PROMPT,
-  fallbackHumaniseText,
-  humaniseText,
-} from "./humanise.ts"
+
+type HumaniseModule = typeof import("./humanise.ts")
+
+let loadedHumaniseModule: HumaniseModule | null = null
+
+async function loadHumaniseModule(): Promise<HumaniseModule> {
+  if (loadedHumaniseModule) return loadedHumaniseModule
+  loadedHumaniseModule = await import("./humanise.ts")
+  return loadedHumaniseModule
+}
 
 /**
  * Touch the MCP channel notify sentinel so the `swiz mcp` drain loop wakes
@@ -186,8 +190,6 @@ export interface AutoSteerRequest {
 /** Hard cap on how long humanisation may block a hook before using the local rewrite. */
 const HUMANISE_TIMEOUT_MS = 8_000
 
-const HUMANISE_SYSTEM_PROMPT = DEFAULT_HUMANISE_SYSTEM_PROMPT
-
 const MECHANICAL_AUTO_STEER_LINE_RE =
   /^(?:[-*_]{3,}|action required:?.*|stop is blocked by .*|resolve them in the order shown\.?|git status|ship checklist|repository|incomplete tasks|you must act on this now\.?|do not try to stop again.*|this hook will block every stop attempt.*|if you believe this is a false positive.*|task files?:\s.*)$/i
 
@@ -201,7 +203,10 @@ function stripMechanicalAutoSteerLine(line: string): string {
   return text.replace(/\s+/g, " ")
 }
 
-function fallbackHumaniseAutoSteerMessage(message: string): string {
+function fallbackHumaniseAutoSteerMessage(
+  message: string,
+  fallbackHumaniseText: HumaniseModule["fallbackHumaniseText"]
+): string {
   return fallbackHumaniseText(message, {
     stripLine: stripMechanicalAutoSteerLine,
   })
@@ -219,16 +224,17 @@ function fallbackHumaniseAutoSteerMessage(message: string): string {
  * not delivered when humanisation is enabled.
  */
 export async function humaniseAutoSteerMessage(message: string): Promise<string> {
-  return humaniseText(message, {
-    systemPrompt: HUMANISE_SYSTEM_PROMPT,
+  const humanise = await loadHumaniseModule()
+  return humanise.humaniseText(message, {
+    systemPrompt: humanise.DEFAULT_HUMANISE_SYSTEM_PROMPT,
     timeoutMs: HUMANISE_TIMEOUT_MS,
-    fallback: fallbackHumaniseAutoSteerMessage,
+    fallback: (text) => fallbackHumaniseAutoSteerMessage(text, humanise.fallbackHumaniseText),
     stripLine: stripMechanicalAutoSteerLine,
   })
 }
 
 export function clearAutoSteerHumanisationCache(): void {
-  clearHumaniseCache()
+  loadedHumaniseModule?.clearHumaniseCache()
 }
 
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])

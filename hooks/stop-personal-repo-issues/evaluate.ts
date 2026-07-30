@@ -24,6 +24,12 @@ export type PersonalRepoIssuesCollect = {
   shouldUpdateCooldown: boolean
 }
 
+export interface PersonalRepoIssuesEvaluationDependencies {
+  collect?: (parsed: StopHookInput) => Promise<PersonalRepoIssuesCollect | null>
+  mergeTasks?: typeof mergeActionPlanIntoTasks
+  updateCooldown?: typeof updateCooldown
+}
+
 export async function collectPersonalRepoIssuesStopParsed(
   parsed: StopHookInput
 ): Promise<PersonalRepoIssuesCollect | null> {
@@ -78,20 +84,25 @@ export async function collectPersonalRepoIssuesStopParsed(
   }
 }
 
-async function runPersonalRepoIssuesBody(input: StopHookInput): Promise<SwizHookOutput> {
+async function runPersonalRepoIssuesBody(
+  input: StopHookInput,
+  dependencies: PersonalRepoIssuesEvaluationDependencies = {}
+): Promise<SwizHookOutput> {
   try {
     const parsed = stopHookInputSchema.parse(input)
-    const collected = await collectPersonalRepoIssuesStopParsed(parsed)
+    const collected = await (dependencies.collect ?? collectPersonalRepoIssuesStopParsed)(parsed)
     if (!collected) return {}
 
     const { stopCtx, planSteps, sessionId, cwd, shouldMergeTasks, shouldUpdateCooldown } = collected
     const reason = formatStopReason(planSteps, stopCtx)
 
     if (sessionId && shouldMergeTasks) {
-      await mergeActionPlanIntoTasks(planSteps, sessionId, cwd)
+      await (dependencies.mergeTasks ?? mergeActionPlanIntoTasks)(planSteps, sessionId, cwd)
     }
 
-    if (shouldUpdateCooldown) await updateCooldown(sessionId, cwd)
+    if (shouldUpdateCooldown) {
+      await (dependencies.updateCooldown ?? updateCooldown)(sessionId, cwd)
+    }
 
     return blockStopObj(reason)
   } catch {
@@ -100,7 +111,8 @@ async function runPersonalRepoIssuesBody(input: StopHookInput): Promise<SwizHook
 }
 
 export async function evaluateStopPersonalRepoIssues(
-  input: StopHookInput
+  input: StopHookInput,
+  dependencies: PersonalRepoIssuesEvaluationDependencies = {}
 ): Promise<SwizHookOutput> {
-  return await runPersonalRepoIssuesBody(input)
+  return await runPersonalRepoIssuesBody(input, dependencies)
 }

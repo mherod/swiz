@@ -1,11 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { rm, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { swizEmergencyBypassPath } from "../temp-paths.ts"
-import { isEmergencyBypassActive } from "./emergency-bypass.ts"
-
-/** Absolute path to the CLI entry point, resolved once at import time. */
-const INDEX_PATH = resolve(join(import.meta.dir, "..", "..", "index.ts"))
+import { runCommandInProcess } from "../utils/test-utils.ts"
+import { emergencyBypassCommand, isEmergencyBypassActive } from "./emergency-bypass.ts"
 
 const KEYS_TO_CLEAN: string[] = []
 
@@ -69,18 +67,11 @@ describe("emergency-bypass command", () => {
     const { mkdtemp } = await import("node:fs/promises")
     const { tmpdir } = await import("node:os")
     const tempDir = await mkdtemp(join(tmpdir(), "swiz-bypass-test-"))
-    const proc = Bun.spawn(["bun", INDEX_PATH, "emergency-bypass", "--status"], {
+    const result = await runCommandInProcess(emergencyBypassCommand, ["--status"], {
       cwd: tempDir,
-      stdout: "pipe",
-      stderr: "pipe",
       env: { ...process.env, SWIZ_DIRECT: "1", AI_TEST_NO_BACKEND: "1" },
     })
-    const [, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    expect(stderr).toContain("inactive")
+    expect(result.stderr).toContain("inactive")
     await rm(tempDir, { recursive: true, force: true })
   })
 })

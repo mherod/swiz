@@ -4,18 +4,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearFrameworkCache } from "../src/detect-frameworks.ts"
 import { clearSkillCache } from "../src/skill-utils.ts"
+import { neutralAgentEnvOverrides, runHookInProcess } from "../src/utils/test-utils.ts"
 
-const HOOK_ABS = join(import.meta.dir, "pretooluse-require-convert-to-kotlin.ts")
-
-const AGENT_ENV_KEYS = [
-  "CLAUDECODE",
-  "CURSOR_TRACE_ID",
-  "CURSOR_SANDBOX_ENV_RESTORE",
-  "GEMINI_CLI",
-  "GEMINI_PROJECT_DIR",
-  "CODEX_MANAGED_BY_NPM",
-  "CODEX_THREAD_ID",
-] as const
+const HOOK_SCRIPT = "hooks/pretooluse-require-convert-to-kotlin.ts"
 
 function makeSummaryForKotlin(sessionLines: string[] = []) {
   return {
@@ -41,7 +32,6 @@ function skillInvocationLine(skillName: string, msAgo = 1000): string {
   })
 }
 
-// Subprocess helper — needed for CLAUDECODE env isolation (skill detection reads process env)
 async function runWithProjectAndSkill(
   filePath: string,
   createIndicatorFiles: string[],
@@ -65,37 +55,21 @@ async function runWithProjectAndSkill(
       await writeFile(join(skillDir, "SKILL.md"), "# convert-to-kotlin\n")
     }
 
-    const env: Record<string, string> = { ...(process.env as Record<string, string>) }
-    env.CLAUDECODE = "1"
-    env.HOME = fakeHome
-    for (const key of AGENT_ENV_KEYS) {
-      if (key !== "CLAUDECODE") delete env[key]
-    }
-
-    const proc = Bun.spawn(["bun", HOOK_ABS], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: projectDir,
-      env,
-    })
-    await proc.stdin.write(
-      JSON.stringify({
+    const result = await runHookInProcess(
+      HOOK_SCRIPT,
+      {
         tool_name: "Edit",
         tool_input: { file_path: filePath },
         transcript_path: "fake.json",
         cwd: projectDir,
         _transcriptSummary: makeSummaryForKotlin(sessionLines),
-      })
+      },
+      {
+        cwd: projectDir,
+        env: neutralAgentEnvOverrides({ CLAUDECODE: "1", HOME: fakeHome }),
+      }
     )
-    await proc.stdin.end()
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    if (!stdout.trim()) return {}
-    return JSON.parse(stdout) as Record<string, any>
+    return result.json ?? {}
   } finally {
     await rm(projectDir, { recursive: true, force: true })
     await rm(fakeHome, { recursive: true, force: true })

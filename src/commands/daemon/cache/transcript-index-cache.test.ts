@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
-import { TranscriptIndexCache } from "./transcript-index-cache.ts"
+import { type TranscriptIndex, TranscriptIndexCache } from "./transcript-index-cache.ts"
 
 const TEST_TRANSCRIPT = testTranscript("1")
 
@@ -88,36 +88,52 @@ describe("TranscriptIndexCache", () => {
   })
 
   test("shares in-flight index builds for concurrent callers", async () => {
-    const lines = [
-      JSON.stringify({ type: "system", content: "Compacted" }),
-      JSON.stringify({ type: "user", message: { content: "Next" } }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }],
-        },
-      }),
-    ]
-    const testPath = testTranscript("concurrent")
-    await Bun.write(testPath, lines.join("\n"))
+    let releaseBuild!: () => void
+    const buildGate = new Promise<void>((resolve) => {
+      releaseBuild = resolve
+    })
+    let buildCalls = 0
+    const builtIndex: TranscriptIndex = {
+      summary: {
+        toolNames: ["Bash"],
+        toolCallCount: 1,
+        bashCommands: ["git status"],
+        skillInvocations: [],
+        hasGitPush: false,
+        sessionLines: [],
+        sessionDurationMs: 0,
+        successfulTestRuns: 0,
+        lastVerificationTime: null,
+        sessionScope: "small-fix",
+      },
+      blockedToolUseIds: [],
+      mtimeMs: 123,
+      computedAt: Date.now(),
+    }
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ mtimeMs: 123, size: 100 }),
+      async buildIndex() {
+        buildCalls++
+        await buildGate
+        return builtIndex
+      },
+    })
+    const testPath = "/mock/transcript.jsonl"
 
-    const cache = new TranscriptIndexCache()
-    const [first, second, third] = await Promise.all([
-      cache.get(testPath),
-      cache.get(testPath),
-      cache.get(testPath),
-    ])
+    const pending = [cache.get(testPath), cache.get(testPath), cache.get(testPath)] as const
+    await Promise.resolve()
+    releaseBuild()
+    const [first, second, third] = await Promise.all([...pending])
 
     expect(first).not.toBeNull()
     expect(second).toBe(first)
     expect(third).toBe(first)
+    expect(buildCalls).toBe(1)
     expect(cache.misses).toBe(1)
 
     const cached = await cache.get(testPath)
     expect(cached).toBe(first)
     expect(cache.hits).toBe(1)
-
-    void rm(testPath, { force: true }).catch(() => {})
   })
 
   test("does not store pre-boundary lines in memory", async () => {

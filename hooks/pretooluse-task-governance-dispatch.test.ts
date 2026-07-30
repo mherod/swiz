@@ -2,8 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { StopHookInput } from "../src/schemas.ts"
+import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import { type Task, writeTask as writeRepositoryTask } from "../src/tasks/task-repository.ts"
-import { writeTask } from "../src/utils/test-utils.ts"
+import { buildEffectiveTestSettings, writeTask } from "../src/utils/test-utils.ts"
 import pretooluseTaskGovernance, {
   evaluateBlockedTaskFilesPrecheck,
   evaluateNativeTaskUpdatePath,
@@ -12,6 +14,7 @@ import pretooluseTaskGovernance, {
   evaluateTaskCreatePath,
   getInProgressCap,
 } from "./pretooluse-task-governance.ts"
+import { evaluateStopIncompleteTasks } from "./stop-incomplete-tasks/evaluate.ts"
 
 const TASK_HOME = join(
   tmpdir(),
@@ -84,6 +87,10 @@ function updatePlanInput(
     tool_input: toolInput,
     _taskHome: TASK_HOME,
     _env: { CODEX_THREAD_ID: "test-codex-thread" },
+    _effectiveSettings: buildEffectiveTestSettings({
+      auditStrictness: "strict",
+      autoContinue: true,
+    }),
   }
 }
 
@@ -315,6 +322,48 @@ describe("evaluateNativeTaskUpdatePath", () => {
       const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
       const result = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
       expect(permissionDecision(result)).not.toBe("deny")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+
+  test("allows all-terminal update_plan then keeps repeated Codex Stop evaluations unblocked", async () => {
+    const sessionId = uniqueSessionId("update-plan-terminal-stop")
+    const terminalPlan: Array<{ step: string; status: Task["status"] }> = [
+      { step: "Implement closeout", status: "completed" },
+      { step: "Verify closeout", status: "completed" },
+      { step: "Document closeout", status: "completed" },
+    ]
+    try {
+      await cleanupSession(sessionId)
+      for (let index = 0; index < terminalPlan.length; index++) {
+        await seedCodexTask(sessionId, {
+          id: `codex-${index + 1}`,
+          subject: terminalPlan[index]?.step ?? "",
+          status: "in_progress",
+        })
+      }
+
+      const input = updatePlanInput(sessionId, terminalPlan)
+      const parsed = input as unknown as Parameters<typeof evaluateNativeTaskUpdatePath>[2]
+      const preToolUseResult = await evaluateNativeTaskUpdatePath(input, input.tool_input, parsed)
+      expect(permissionDecision(preToolUseResult)).not.toBe("deny")
+
+      await syncCodexUpdatePlanSnapshot(
+        sessionId,
+        { plan: terminalPlan },
+        { cwd: process.cwd(), tasksDir: CODEX_TASKS_DIR }
+      )
+
+      const stopInput = {
+        session_id: sessionId,
+        _env: { CODEX_THREAD_ID: "test-codex-thread" },
+      } as unknown as StopHookInput
+      const firstStop = await evaluateStopIncompleteTasks(stopInput, { homeDir: TASK_HOME })
+      const repeatedStop = await evaluateStopIncompleteTasks(stopInput, { homeDir: TASK_HOME })
+
+      expect(firstStop).toEqual({})
+      expect(repeatedStop).toEqual({})
     } finally {
       await cleanupSession(sessionId)
     }

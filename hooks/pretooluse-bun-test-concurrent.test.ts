@@ -12,33 +12,33 @@ describe("pretooluse-bun-test-concurrent", () => {
   test("blocks plain bun test", async () => {
     const result = await runHook("bun test")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("--concurrent")
+    expect(result.reason).toContain("--parallel=4")
   })
 
-  test("allows bun test with a single test file (--concurrent unnecessary)", async () => {
+  test("allows bun test with a single test file", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --reporter=dots")
     expect(result.decision).toBe("allow")
   })
 
-  test("allows bun test with --concurrent", async () => {
-    const result = await runHook("bun test --concurrent")
+  test("allows bun test with bounded file workers", async () => {
+    const result = await runHook("bun test --parallel=4")
     expect(result.decision).toBe("allow")
   })
 
-  test("blocks single file with --concurrent", async () => {
+  test("blocks --concurrent for a single file", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --concurrent")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Don't use `--concurrent`")
+    expect(result.reason).toContain("makes every test concurrent")
   })
 
-  test("blocks single file with --concurrent=<value>", async () => {
+  test("blocks --concurrent=<value>", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --concurrent=4")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("Don't use `--concurrent`")
+    expect(result.reason).toContain("makes every test concurrent")
   })
 
-  test("allows chained: multi-file with --concurrent then single-file without", async () => {
-    const result = await runHook("bun test --concurrent && bun test hooks/b.test.ts")
+  test("allows chained bounded multi-file then focused single-file runs", async () => {
+    const result = await runHook("bun test --parallel=4 && bun test hooks/b.test.ts")
     expect(result.decision).toBe("allow")
   })
 
@@ -70,7 +70,7 @@ describe("pretooluse-bun-test-concurrent", () => {
   test("blocks actual bun test after a pipe", async () => {
     const result = await runHook("rg foo hooks | bun test")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("--concurrent")
+    expect(result.reason).toContain("--parallel=4")
   })
 
   test("allows single test file with stderr redirection", async () => {
@@ -116,15 +116,33 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.reason).toContain("bun test src/foo.test.ts --timeout 5000")
   })
 
-  test("blocks multi-file bun test without --concurrent", async () => {
-    const result = await runHook("bun test src/foo.test.ts src/bar.test.ts")
+  test("blocks a single file with worker parallelism", async () => {
+    const result = await runHook("bun test src/foo.test.ts --parallel=4 --timeout 5000")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("--concurrent")
+    expect(result.reason).toContain("bun test src/foo.test.ts --timeout 5000")
   })
 
-  test("blocks glob pattern bun test without --concurrent", async () => {
+  test("blocks multi-file bun test without bounded workers", async () => {
+    const result = await runHook("bun test src/foo.test.ts src/bar.test.ts")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("--parallel=4")
+  })
+
+  test("blocks glob pattern bun test without bounded workers", async () => {
     const result = await runHook("bun test src/")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("--concurrent")
+    expect(result.reason).toContain("--parallel=4")
+  })
+
+  test("blocks an unbounded --parallel flag", async () => {
+    const result = await runHook("bun test --parallel")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("between 1 and 8")
+  })
+
+  test("blocks an excessive worker count", async () => {
+    const result = await runHook("bun test --parallel=20")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("between 1 and 8")
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runBashHook } from "../src/utils/test-utils.ts"
+import { runBashHook, runHookInProcess } from "../src/utils/test-utils.ts"
 import {
   extractBothRedirectTarget,
   extractNumberedRedirectTarget,
@@ -964,19 +964,13 @@ describe("pretooluse-banned-commands", () => {
 
   describe("non-Bash tools are ignored", () => {
     test("Edit tool exits silently", async () => {
-      const payload = JSON.stringify({ tool_name: "Edit", tool_input: { command: "rm -rf /" } })
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-banned-commands.ts"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, SWIZ_DAEMON_PORT: "19999" },
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-      const out = await new Response(proc.stdout).text()
-      await proc.exited
-      expect(out.trim()).toBe("")
-      expect(proc.exitCode).toBe(0)
+      const result = await runHookInProcess(
+        "hooks/pretooluse-banned-commands.ts",
+        { tool_name: "Edit", tool_input: { command: "rm -rf /" } },
+        { env: { SWIZ_DAEMON_PORT: "19999" } }
+      )
+      expect(result.stdout).toBe("")
+      expect(result.exitCode).toBe(0)
     })
   })
 })

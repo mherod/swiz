@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runHookInProcess, type SimpleHookResult } from "../src/utils/test-utils.ts"
+import {
+  neutralAgentEnvOverrides,
+  runHookInProcess,
+  type SimpleHookResult,
+} from "../src/utils/test-utils.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -60,26 +64,12 @@ async function runHook(opts: {
     }
   }
 
-  const payload = JSON.stringify(input)
-
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-push-when-instructed.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: opts.home },
+  const result = await runHookInProcess("hooks/pretooluse-no-push-when-instructed.ts", input, {
+    env: neutralAgentEnvOverrides({ HOME: opts.home }),
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return { blocked: false, reason: "" }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
-  const decision = hso?.permissionDecision ?? parsed?.decision
   return {
-    blocked: decision === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    blocked: result.decision === "deny",
+    reason: result.reason ?? "",
   }
 }
 

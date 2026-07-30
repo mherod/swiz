@@ -1,3 +1,4 @@
+import { getAgentSettingsPath } from "../../../agent-paths.ts"
 import { type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../../../agents.ts"
 import { manifest } from "../../../manifest.ts"
 import {
@@ -111,7 +112,12 @@ export const agentConfigSyncCheck: DiagnosticCheck = {
   async run() {
     const results: CheckResult[] = []
     for (const agent of CONFIGURABLE_AGENTS) {
-      results.push(await checkAgentConfigSync(agent))
+      results.push(
+        await checkAgentConfigSync({
+          ...agent,
+          settingsPath: getAgentSettingsPath(agent.id),
+        })
+      )
     }
     return results
   },

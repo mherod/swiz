@@ -39,8 +39,25 @@ import {
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
+export interface PushChecksGateDependencies {
+  spawn: typeof spawnWithTimeout
+  detectForkTopology: typeof detectForkTopology
+  readGlobalSettings: typeof readSwizSettings
+  readProjectSettings: typeof readProjectSettings
+}
+
+const DEFAULT_DEPENDENCIES: PushChecksGateDependencies = {
+  spawn: spawnWithTimeout,
+  detectForkTopology,
+  readGlobalSettings: readSwizSettings,
+  readProjectSettings,
+}
+
 // eslint-disable-next-line complexity
-export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<SwizHookOutput> {
+export async function evaluatePretoolusePushChecksGate(
+  input: unknown,
+  dependencies: PushChecksGateDependencies = DEFAULT_DEPENDENCIES
+): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
   if (!isShellTool(hookInput.tool_name ?? "")) return {}
 
@@ -52,10 +69,10 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
 
   const cwd: string = (hookInput.tool_input?.cwd as string) ?? hookInput.cwd ?? process.cwd()
 
-  const behindBlock = await checkLocalBehind(cwd, hasGitPushForceFlag(command))
+  const behindBlock = await checkLocalBehind(cwd, hasGitPushForceFlag(command), dependencies.spawn)
   if (behindBlock) return behindBlock
 
-  const forkInfo = await detectForkTopology(cwd)
+  const forkInfo = await dependencies.detectForkTopology(cwd)
   if (forkInfo && !forkInfo.hasUpstreamRemote) {
     return preToolUseAllow(
       `Fork detected — \`origin\` is a fork of \`${forkInfo.upstreamSlug}\`.\n\n` +
@@ -67,19 +84,19 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
     )
   }
 
-  const wipBlock = await checkWipCommits(cwd)
+  const wipBlock = await checkWipCommits(cwd, dependencies.spawn)
   if (wipBlock) return wipBlock
 
   const [diffResult, fileNamesResult, priorCommandsResult, globalSettings, projectSettings] =
     await Promise.all([
-      spawnWithTimeout(["git", "diff", "@{upstream}..HEAD"], { cwd, timeoutMs: 10000 }),
-      spawnWithTimeout(["git", "diff", "--name-only", "@{upstream}..HEAD"], {
+      dependencies.spawn(["git", "diff", "@{upstream}..HEAD"], { cwd, timeoutMs: 10000 }),
+      dependencies.spawn(["git", "diff", "--name-only", "@{upstream}..HEAD"], {
         cwd,
         timeoutMs: 5000,
       }),
       getRecentBashCommandsUsedForCurrentSession(hookInput as Record<string, any>),
-      readSwizSettings(),
-      readProjectSettings(cwd),
+      dependencies.readGlobalSettings(),
+      dependencies.readProjectSettings(cwd),
     ])
 
   const eff =
@@ -102,9 +119,13 @@ export async function evaluatePretoolusePushChecksGate(input: unknown): Promise<
   return checkMissingPriorChecks(priorCommandsResult, eff, largeFileResult.warn)
 }
 
-async function checkLocalBehind(cwd: string, isForcePush: boolean): Promise<SwizHookOutput | null> {
+async function checkLocalBehind(
+  cwd: string,
+  isForcePush: boolean,
+  spawn: typeof spawnWithTimeout
+): Promise<SwizHookOutput | null> {
   if (isForcePush) return null
-  const result = await spawnWithTimeout(["git", "rev-list", "--count", "HEAD..@{upstream}"], {
+  const result = await spawn(["git", "rev-list", "--count", "HEAD..@{upstream}"], {
     cwd,
     timeoutMs: 5000,
   })
@@ -124,12 +145,15 @@ async function checkLocalBehind(cwd: string, isForcePush: boolean): Promise<Swiz
   return null
 }
 
-async function checkWipCommits(cwd: string): Promise<SwizHookOutput | null> {
+async function checkWipCommits(
+  cwd: string,
+  spawn: typeof spawnWithTimeout
+): Promise<SwizHookOutput | null> {
   const WIP_SUBJECT_RE = /^(wip[:\s]|fixup!|squash!)/i
-  const subjectsResult = await spawnWithTimeout(
-    ["git", "log", "@{upstream}..HEAD", "--format=%s"],
-    { cwd, timeoutMs: 5000 }
-  )
+  const subjectsResult = await spawn(["git", "log", "@{upstream}..HEAD", "--format=%s"], {
+    cwd,
+    timeoutMs: 5000,
+  })
   if (subjectsResult.exitCode === 0 && subjectsResult.stdout.trim()) {
     const offending = subjectsResult.stdout
       .trim()

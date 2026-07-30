@@ -1,16 +1,16 @@
 import { mkdir, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import { runCommandInProcess } from "../utils/test-utils.ts"
 import {
   buildDaemonLaunchAgentPlist,
   DAEMON_OPENROUTER_API_KEY_ENV,
   daemonLaunchAgentPlistHasOpenRouterApiKey,
   redactDaemonLaunchAgentPlistSecrets,
 } from "./install/daemon-helpers.ts"
+import { installCommand } from "./install.ts"
 
-const INDEX_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "index.ts")
 const SWIZ_DISPATCH_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop"
 const STATUS_LINE_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz status-line"
 
@@ -27,18 +27,14 @@ async function runInstall(
   args: string[],
   home: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", INDEX_PATH, "install", ...args], {
+  return runCommandInProcess(installCommand, args, {
+    commandOptions: {
+      bunAvailable: () => true,
+      homeDir: home,
+    },
     cwd: home,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1" },
+    env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
 }
 
 describe("daemon LaunchAgent environment", () => {

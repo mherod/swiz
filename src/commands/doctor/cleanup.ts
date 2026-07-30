@@ -29,7 +29,6 @@ import {
   walkDecode,
 } from "./cleanup-path.ts"
 
-const CLEANUP_HOME = getHomeDir()
 const DAEMON_LABEL = SWIZ_DAEMON_LABEL
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -608,14 +607,14 @@ async function scanProjects(
   return results
 }
 
-async function markStaleProjects(results: ProjectResult[]): Promise<void> {
-  const encodedHome = projectKeyFromCwd(CLEANUP_HOME)
+async function markStaleProjects(results: ProjectResult[], homeDir: string): Promise<void> {
+  const encodedHome = projectKeyFromCwd(homeDir)
   for (let i = 0; i < results.length; i++) {
     const name = results[i]!.name
     if (!name.startsWith(encodedHome)) continue
     const encodedRest = name.slice(encodedHome.length)
     if (!encodedRest) continue
-    if ((await walkDecode(CLEANUP_HOME, encodedRest)) === null) {
+    if ((await walkDecode(homeDir, encodedRest)) === null) {
       results[i]!.stale = true
       results[i]!.old = [...results[i]!.old, ...results[i]!.keep]
       results[i]!.keep = []
@@ -1116,7 +1115,7 @@ async function gatherCleanupData(cleanupArgs: CleanupArgs) {
   const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
   if (projectNames) {
     const claudeResults = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
-    await markStaleProjects(claudeResults)
+    await markStaleProjects(claudeResults, homeDir)
     results = results.concat(claudeResults)
   }
 

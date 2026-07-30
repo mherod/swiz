@@ -1,3 +1,4 @@
+import { getAgentSettingsPath } from "../agent-paths.ts"
 import { AGENTS, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
@@ -45,7 +46,7 @@ function checkBunAvailable(): boolean {
   }
 }
 
-function parseInstallRunOptions(args: string[]): InstallRunOptions {
+function parseInstallRunOptions(args: string[], homeDir: string | null): InstallRunOptions {
   const jsonOutput = args.includes("--json")
   const daemon = args.includes("--daemon")
   const portIdx = args.indexOf("--port")
@@ -60,7 +61,10 @@ function parseInstallRunOptions(args: string[]): InstallRunOptions {
     statusLine: args.includes("--status-line"),
     daemon,
     daemonPort,
-    targets: getAgentByFlag(args),
+    targets: getAgentByFlag(args).map((agent) => ({
+      ...agent,
+      settingsPath: homeDir ? getAgentSettingsPath(agent.id, homeDir) : agent.settingsPath,
+    })),
   }
 }
 
@@ -293,7 +297,12 @@ async function uninstallProjectHooks(dryRun: boolean): Promise<void> {
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
-export const installCommand: Command = {
+export interface InstallCommandOptions {
+  bunAvailable?: () => boolean
+  homeDir?: string | null
+}
+
+export const installCommand: Command<InstallCommandOptions> = {
   name: "install",
   description: "Install swiz hooks into agent settings",
   usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--merge-tool] [--daemon [--port <n>]] [--uninstall]`,
@@ -312,10 +321,10 @@ export const installCommand: Command = {
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
-  async run(args) {
-    const opts = parseInstallRunOptions(args)
+  async run(args, dependencies = {}) {
+    const opts = parseInstallRunOptions(args, dependencies.homeDir ?? getHomeDirOrNull())
 
-    if (!checkBunAvailable()) {
+    if (!(dependencies.bunAvailable ?? checkBunAvailable)()) {
       throw new Error(
         `\n  ${RED}✗ bun is not installed or not on PATH.${RESET}\n` +
           `  swiz hooks require bun to run. Install it first:\n\n` +

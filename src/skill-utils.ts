@@ -696,8 +696,9 @@ export interface SkillConflict {
 export async function findSkills(): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
   const seen = new Set<string>()
+  const skillDirs = getSkillDirs()
 
-  for (const dir of SKILL_PRECEDENCE) {
+  for (const dir of skillDirs) {
     let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -721,7 +722,7 @@ export async function findSkills(): Promise<SkillInfo[]> {
       skills.push({
         name,
         description,
-        source: dir === SKILL_PRECEDENCE[0] ? "local" : "global",
+        source: dir === skillDirs[0] ? "local" : "global",
         path: skillPath,
       })
       seen.add(name)
@@ -749,7 +750,7 @@ async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[
 }
 
 export async function findSkillConflicts(
-  skillDirs: string[] = SKILL_PRECEDENCE
+  skillDirs: string[] = getSkillDirs()
 ): Promise<SkillConflict[]> {
   const byName = new Map<string, SkillConflictEntry[]>()
   for (const dir of skillDirs) await scanSkillDir(dir, byName)

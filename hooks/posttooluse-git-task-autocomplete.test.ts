@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { detectCurrentAgentFromEnv } from "../src/agent-paths.ts"
 import { AGENTS } from "../src/agents.ts"
-import { IssueStore } from "../src/issue-store.ts"
+import { IssueStore, resetIssueStore } from "../src/issue-store.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
+import { sanitizeHookOutputForAgent } from "../src/utils/hook-output-agent-compat.ts"
+import { neutralAgentEnvOverrides, runHookInProcess } from "../src/utils/test-utils.ts"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -40,42 +43,36 @@ async function runHook(
   cwd = "/tmp"
 ): Promise<HookResult> {
   const testHome = await getTestHome()
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: toolName,
     tool_input: { command },
     cwd,
     session_id: sessionId,
-  })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: testHome }
-  for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
   }
-
-  const proc = Bun.spawn(["bun", "hooks/posttooluse-git-task-autocomplete.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...env, ...envOverrides },
+  const agentEnvOverrides: Record<string, string | undefined> = {}
+  for (const agent of AGENTS) {
+    for (const envVar of agent.envVars ?? []) agentEnvOverrides[envVar] = undefined
+  }
+  if (envOverrides.HOME !== undefined) resetIssueStore()
+  const result = await runHookInProcess("hooks/posttooluse-git-task-autocomplete.ts", payload, {
+    env: neutralAgentEnvOverrides({
+      ...agentEnvOverrides,
+      HOME: testHome,
+      ...envOverrides,
+    }),
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const rawOutput = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const exitedCleanly = proc.exitCode === 0
+  if (envOverrides.HOME !== undefined) resetIssueStore()
+  const agent = detectCurrentAgentFromEnv(envOverrides)
+  const parsed = result.json ? sanitizeHookOutputForAgent(result.json, agent?.id) : null
+  const rawOutput = parsed ? JSON.stringify(parsed) : result.stdout
+  const exitedCleanly = result.exitCode === 0
   if (!rawOutput.trim()) return { rawOutput, exitedCleanly }
 
-  try {
-    const parsed = JSON.parse(rawOutput.trim())
-    return {
-      additionalContext: parsed.hookSpecificOutput?.additionalContext,
-      systemMessage: parsed.systemMessage,
-      rawOutput,
-      exitedCleanly,
-    }
-  } catch {
-    return { rawOutput, exitedCleanly }
+  return {
+    additionalContext: parsed?.hookSpecificOutput?.additionalContext,
+    systemMessage: parsed?.systemMessage,
+    rawOutput,
+    exitedCleanly,
   }
 }
 

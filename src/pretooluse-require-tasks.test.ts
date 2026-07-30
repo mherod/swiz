@@ -4,10 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AGENTS } from "./agents.ts"
 import { taskListSyncSentinelPath } from "./temp-paths.ts"
+import { neutralAgentEnvOverrides, runHookInProcess } from "./utils/test-utils.ts"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-require-tasks.ts")
+const HOOK_SCRIPT = "hooks/pretooluse-require-tasks.ts"
 
-// ── Integration tests for the hook subprocess ─────────────────────────────────
+// ── Hook behavior tests ───────────────────────────────────────────────────────
 
 interface HookResult {
   stdout: string
@@ -19,42 +21,17 @@ async function runHook(
   payload: Record<string, any>,
   env?: Record<string, string | undefined>
 ): Promise<HookResult> {
-  const mergedEnv: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) mergedEnv[key] = value
-  }
-  for (const agent of AGENTS) {
-    for (const envVar of agent.envVars ?? []) {
-      delete mergedEnv[envVar]
-    }
-  }
-  for (const [key, value] of Object.entries(env ?? {})) {
-    if (value === undefined) {
-      delete mergedEnv[key]
-    } else {
-      mergedEnv[key] = value
-    }
-  }
-
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: process.cwd(),
-    env: mergedEnv,
+  const agentEnvOverrides = Object.fromEntries(
+    AGENTS.flatMap((agent) => (agent.envVars ?? []).map((envVar) => [envVar, undefined]))
+  )
+  const result = await runHookInProcess(HOOK_SCRIPT, payload, {
+    env: neutralAgentEnvOverrides({ ...agentEnvOverrides, ...env }),
   })
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  let parsed = null
-  try {
-    parsed = JSON.parse(stdout.trim())
-  } catch {}
-  return { stdout: stdout.trim(), exitCode: proc.exitCode, parsed }
+  return {
+    stdout: result.stdout.trim(),
+    exitCode: result.exitCode,
+    parsed: result.json ?? null,
+  }
 }
 
 describe("pretooluse-require-tasks hook", () => {
@@ -221,7 +198,8 @@ describe("pretooluse-require-tasks hook", () => {
   })
 
   test("denies (fail-closed) when hook receives malformed JSON stdin", async () => {
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
+    // PROCESS_CONTRACT_TEST: malformed stdin must fail closed at the executable boundary.
+    const proc = Bun.spawn([process.execPath, HOOK_PATH], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

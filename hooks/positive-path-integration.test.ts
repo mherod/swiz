@@ -10,7 +10,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { type HookResult, makeTempGitRepo, useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import {
+  buildEffectiveTestSettings,
+  type HookResult,
+  makeTempGitRepo,
+  neutralAgentEnvOverrides,
+  runHookInProcess,
+  useTempDir,
+  writeTask,
+} from "../src/utils/test-utils.ts"
 
 setDefaultTimeout(30_000)
 
@@ -23,7 +31,10 @@ async function runHook(
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  const finalPayload = { ...stdinPayload }
+  const finalPayload: Record<string, any> = {
+    _effectiveSettings: buildEffectiveTestSettings(),
+    ...stdinPayload,
+  }
   if (!finalPayload._agent && !finalPayload._env) {
     const hasOtherAgent = Object.keys(envOverrides).some((key) =>
       AGENTS.some((a) => a.id !== "claude" && a.envVars?.includes(key))
@@ -32,38 +43,12 @@ async function runHook(
       finalPayload._agent = "claude"
     }
   }
-  const payload = JSON.stringify(finalPayload)
-  const env: Record<string, string | undefined> = { ...process.env }
-  // Neutralize all agent env vars — set to empty string rather than delete,
-  // because Bun.spawn re-injects vars from the parent even when they're
-  // absent from the explicit env object.
-  for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
-  }
-  // Force daemon connection failure — prevents 2s timeout per attempt under CI load
-  env.SWIZ_DAEMON_PORT = "19999"
-
-  const proc = Bun.spawn(["bun", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...env, ...envOverrides },
+  return await runHookInProcess(script, finalPayload, {
+    env: neutralAgentEnvOverrides({
+      SWIZ_DAEMON_PORT: "19999",
+      ...envOverrides,
+    }),
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const exitCode = await proc.exited
-
-  let json: Record<string, any> | null = null
-  try {
-    if (stdout.trim()) json = JSON.parse(stdout.trim())
-  } catch {}
-
-  return { exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 /** Run a git command and wait for it to finish. */
@@ -1003,6 +988,7 @@ describe("stop-large-files: positive paths", () => {
 
 describe("stop-completion-auditor: positive paths", () => {
   const HOOK = "hooks/stop-completion-auditor.ts"
+  const completionSettings = buildEffectiveTestSettings({ autoContinue: true })
 
   test("all tasks completed allows stop", async () => {
     const homeDir = await createTempDir()
@@ -1022,7 +1008,12 @@ describe("stop-completion-auditor: positive paths", () => {
     const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
+      {
+        cwd: process.cwd(),
+        session_id: sessionId,
+        transcript_path: transcript,
+        _effectiveSettings: completionSettings,
+      },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -1047,7 +1038,12 @@ describe("stop-completion-auditor: positive paths", () => {
     const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
+      {
+        cwd: process.cwd(),
+        session_id: sessionId,
+        transcript_path: transcript,
+        _effectiveSettings: completionSettings,
+      },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -1074,7 +1070,12 @@ describe("stop-completion-auditor: positive paths", () => {
     const transcript = await createTranscript(tmp, ["TaskCreate", "TaskList"])
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: transcript },
+      {
+        cwd: process.cwd(),
+        session_id: sessionId,
+        transcript_path: transcript,
+        _effectiveSettings: completionSettings,
+      },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)
@@ -1103,7 +1104,12 @@ describe("stop-completion-auditor: positive paths", () => {
     const transcript = await createTranscript(tmp, tools)
     const r = await runHook(
       HOOK,
-      { cwd: process.cwd(), session_id: "test-no-tasks", transcript_path: transcript },
+      {
+        cwd: process.cwd(),
+        session_id: "test-no-tasks",
+        transcript_path: transcript,
+        _effectiveSettings: completionSettings,
+      },
       { HOME: homeDir }
     )
     expect(r.exitCode).toBe(0)

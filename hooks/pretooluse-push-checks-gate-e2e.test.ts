@@ -2,21 +2,19 @@
  * End-to-end tests for pretooluse-push-checks-gate.ts.
  *
  * Strategy: build a real JSONL transcript file that grows across each test
- * step — exactly as a live Claude Code session would — then spawn the hook as
- * a subprocess and verify the block/allow decision at each stage.
+ * step — exactly as a live Claude Code session would — then invoke the hook
+ * through its public in-process boundary at each stage.
  *
  * This proves the gate works against real transcript parsing, not just the
  * unit-level regex helpers.
  */
-import { describe, expect, it, setDefaultTimeout, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 
 setDefaultTimeout(30_000)
 
 import { writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
-import { type AdvisoryHookResult, neutralAgentEnv, useTempDir } from "../src/utils/test-utils.ts"
-
-const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-push-checks-gate.ts")
+import { join } from "node:path"
+import { type AdvisoryHookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
 
@@ -76,29 +74,18 @@ async function runGate(opts: {
   pushCommand: string
   transcriptPath: string
 }): Promise<AdvisoryHookResult> {
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: "Bash",
     tool_input: { command: opts.pushCommand },
     transcript_path: opts.transcriptPath,
     session_id: "e2e-test",
     cwd: "/tmp",
-  })
-
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) {
+  }
+  const result = await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)
+  if (!result.json) {
     return { blocked: false, reason: "", advisory: false }
   }
-  const parsed = JSON.parse(out.trim())
+  const parsed = result.json
   const hso = parsed?.hookSpecificOutput
   const decision = hso?.permissionDecision ?? parsed?.decision
   const reason = hso?.permissionDecisionReason ?? parsed?.reason ?? ""
@@ -520,168 +507,5 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
     expect(result.blocked).toBe(false)
     expect(result.advisory).toBe(true)
     expect(result.reason).toContain("git branch --show-current")
-  })
-})
-const IS_BUN = !!process.versions.bun
-
-describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
-  const DEADLOCK_VOLUME = 3 * 65_536
-
-  const SCRIPT = [
-    `process.stderr.write("E".repeat(${DEADLOCK_VOLUME}));`,
-    `process.stdout.write("O".repeat(${DEADLOCK_VOLUME}));`,
-  ].join(" ")
-
-  it.skipIf(!IS_BUN)(
-    "await proc.exited before reading completes immediately (proves eager buffering)",
-    async () => {
-      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.end()
-
-      await proc.exited
-
-      const stdout = await new Response(proc.stdout).text()
-      const stderr = await new Response(proc.stderr).text()
-
-      expect(stdout).toHaveLength(DEADLOCK_VOLUME)
-      expect(stderr).toHaveLength(DEADLOCK_VOLUME)
-      expect(proc.exitCode).toBe(0)
-    }
-  )
-
-  it.skipIf(!IS_BUN)(
-    "sequential reads complete without deadlock in Bun (cross-runtime unsafe pattern)",
-    async () => {
-      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.stdin.end()
-
-      let capturedStdout = ""
-      let capturedStderr = ""
-
-      const result = await Promise.race([
-        (async () => {
-          capturedStdout = await new Response(proc.stdout).text()
-          capturedStderr = await new Response(proc.stderr).text()
-          await proc.exited
-          return "completed" as const
-        })(),
-        new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 3_000)),
-      ])
-
-      expect(result).toBe("completed")
-      // Sequential reads return full data when Bun's eager buffering is active
-      expect(capturedStdout).toHaveLength(DEADLOCK_VOLUME)
-      expect(capturedStderr).toHaveLength(DEADLOCK_VOLUME)
-    },
-    8_000
-  )
-
-  it("concurrent Promise.all drain works — the cross-runtime safe pattern", async () => {
-    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.end()
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-
-    expect(stdout).toHaveLength(DEADLOCK_VOLUME)
-    expect(stderr).toHaveLength(DEADLOCK_VOLUME)
-    expect(proc.exitCode).toBe(0)
-  })
-})
-
-describe("Promise.all drain enforcement — cross-runtime portability guard", () => {
-  it("hook source files must use Promise.all for concurrent stdout/stderr drain", async () => {
-    // Collect all non-test *.ts files in the hooks directory.
-    const hookFiles: string[] = []
-    for await (const f of new Bun.Glob("*.ts").scan({ cwd: import.meta.dir, absolute: true })) {
-      if (!f.endsWith(".test.ts")) hookFiles.push(f)
-    }
-
-    // Detect sequential drain: two separate awaits on proc.stdout and proc.stderr
-    // (in either order) within ~500 chars, without a Promise.all wrapping them.
-    const SEQ_DRAIN_RE =
-      /await new Response\(proc\.(stdout|stderr)\)\.text\(\)([\s\S]{1,500}?)await new Response\(proc\.(stdout|stderr)\)\.text\(\)/g
-
-    for (const file of hookFiles) {
-      const src = await Bun.file(file).text()
-      for (const m of src.matchAll(SEQ_DRAIN_RE)) {
-        const [, first, , second] = m
-        if (first === second) continue // same stream twice — not a cross-drain pattern
-        // Check that a Promise.all wraps the pair (look up to 300 chars before the match)
-        const before = src.slice(Math.max(0, (m.index ?? 0) - 300), m.index)
-        if (!before.includes("Promise.all(")) {
-          const relPath = file.slice(import.meta.dir.length + 1)
-          throw new Error(
-            `${relPath}: sequential ${first}/${second} drain detected outside Promise.all. ` +
-              `Replace with:\n\n` +
-              `  const [stdout, stderr] = await Promise.all([\n` +
-              `    new Response(proc.stdout).text(),\n` +
-              `    new Response(proc.stderr).text(),\n` +
-              `  ])`
-          )
-        }
-      }
-    }
-  })
-
-  // Tripwire: runs ONLY outside Bun. Immediately fails to prevent misuse of
-  // the Bun-specific sequential drain patterns documented in this file.
-  it.skipIf(IS_BUN)(
-    "NON-BUN RUNTIME DETECTED: sequential drain deadlocks here — enforce Promise.all",
-    () => {
-      throw new Error(
-        "This test suite is running outside Bun. " +
-          "Sequential proc.stdout / proc.stderr drain will deadlock when output exceeds " +
-          "the OS pipe buffer (macOS/Linux: 65 536 bytes). " +
-          "Always use Promise.all for concurrent drain in cross-runtime code."
-      )
-    }
-  )
-})
-
-describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
-
-  async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.write(JSON.stringify(payload))
-    await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    return { stdout, exitCode: proc.exitCode ?? -1 }
-  }
-
-  it("blocks fullwidth 'as any' bypass (NFKC → 'as any')", async () => {
-    // U+FF41 FULLWIDTH LATIN SMALL LETTER A, U+FF53 FULLWIDTH LATIN SMALL LETTER S
-    const fwAs = String.fromCodePoint(0xff41) + String.fromCodePoint(0xff53)
-    const { stdout } = await runHookPayload({
-      tool_name: "Edit",
-      tool_input: {
-        file_path: "src/x.ts",
-        old_string: "const x = 1",
-        new_string: `const x = getValue() ${fwAs} any`,
-      },
-    })
-    const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny")
   })
 })

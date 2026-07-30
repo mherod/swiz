@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { parseReflectArgs } from "./reflect.ts"
+import { runCommandInProcess } from "../utils/test-utils.ts"
+import { parseReflectArgs, type ReflectCommandOptions, reflectCommand } from "./reflect.ts"
 
 const STRUCTURED_REFLECTION_FIXTURE = {
   mistakes: [
@@ -35,8 +37,6 @@ const STRUCTURED_REFLECTION_FIXTURE = {
     },
   ],
 }
-
-const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
 
 async function makeTempDir(prefix = "swiz-reflect-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
@@ -88,17 +88,24 @@ async function runReflect(
   args: string[],
   env: Record<string, string>
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", INDEX_PATH, "reflect", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, ...env },
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
+  const commandOptions: ReflectCommandOptions = {
+    hasAiProvider: () => true,
+    async promptStreamText(prompt, options) {
+      const capturePath = env.GEMINI_TEST_CAPTURE_FILE
+      if (capturePath) await Bun.write(capturePath, prompt)
+      if (env.GEMINI_TEST_THROW) throw new Error("mocked provider failure")
+      const response = env.GEMINI_TEST_RESPONSE ?? JSON.stringify(STRUCTURED_REFLECTION_FIXTURE)
+      options?.onTextPart?.(response)
+      return response
+    },
+    createStreamBufferReporter(options) {
+      return createStreamBufferReporter({
+        ...options,
+        write: (text) => console.error(text.trimEnd()),
+      })
+    },
+  }
+  return runCommandInProcess(reflectCommand, args, { commandOptions, env })
 }
 
 describe("parseReflectArgs", () => {

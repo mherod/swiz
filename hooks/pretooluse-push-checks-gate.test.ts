@@ -5,8 +5,13 @@ import { join } from "node:path"
 import {
   type AdvisoryHookResult,
   buildEffectiveTestSettings,
+  buildTestSettings,
   runHookInProcess,
 } from "../src/utils/test-utils.ts"
+import {
+  evaluatePretoolusePushChecksGate,
+  type PushChecksGateDependencies,
+} from "./pretooluse-push-checks-gate.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,12 +56,36 @@ function makeOldTranscript(...commands: string[]): string {
     .join("\n")
 }
 
+const UNIT_DEPENDENCIES: PushChecksGateDependencies = {
+  spawn: () =>
+    Promise.resolve({
+      stdout: "",
+      stderr: "not a git repository",
+      exitCode: 128,
+      timedOut: false,
+    }),
+  detectForkTopology: () => Promise.resolve(null),
+  readGlobalSettings: () => Promise.resolve(buildTestSettings()),
+  readProjectSettings: () => Promise.resolve(null),
+}
+
+function parseHookOutput(output: Record<string, any>): AdvisoryHookResult {
+  const hso = output.hookSpecificOutput
+  const decision = hso?.permissionDecision ?? output.decision
+  return {
+    blocked: decision === "deny",
+    reason: hso?.permissionDecisionReason ?? output.reason ?? "",
+    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
+  }
+}
+
 async function runHook(opts: {
   command: string
   transcriptContent?: string
   transcriptPath?: string
   cwd?: string
   effectiveSettings?: Record<string, unknown>
+  dependencies?: PushChecksGateDependencies
 }): Promise<AdvisoryHookResult> {
   let tPath = opts.transcriptPath ?? ""
 
@@ -74,17 +103,11 @@ async function runHook(opts: {
     _effectiveSettings: buildEffectiveTestSettings(opts.effectiveSettings ?? {}),
   }
 
-  const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-
-  if (!out.trim()) return { blocked: false, reason: "", advisory: false }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
-  const decision = hso?.permissionDecision ?? parsed?.decision
-  return {
-    blocked: decision === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
-    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
-  }
+  const output = await evaluatePretoolusePushChecksGate(
+    payload,
+    opts.dependencies ?? UNIT_DEPENDENCIES
+  )
+  return parseHookOutput(output)
 }
 
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
@@ -426,16 +449,8 @@ describe("CI check advisory — prHooksActive modes", () => {
       session_id: "test",
       _effectiveSettings: buildEffectiveTestSettings({ collaborationMode: mode, ignoreCi: false }),
     }
-    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-    if (!out.trim()) return { blocked: false, reason: "", advisory: false }
-    const parsed = JSON.parse(out.trim())
-    const hso = parsed?.hookSpecificOutput
-    const decision = hso?.permissionDecision ?? parsed?.decision
-    return {
-      blocked: decision === "deny",
-      reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
-      advisory: decision === "allow" && !!hso?.permissionDecisionReason,
-    }
+    const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
+    return parseHookOutput(output)
   }
 
   test("relaxed-collab without swiz ci-wait triggers CI check advisory", async () => {
@@ -501,10 +516,8 @@ describe("CI check advisory — prHooksActive modes", () => {
         ignoreCi: true,
       }),
     }
-    const out = (await runHookInProcess("hooks/pretooluse-push-checks-gate.ts", payload)).stdout
-    expect(out.trim()).toBeTruthy()
-    const parsed = JSON.parse(out.trim())
-    const reason = parsed?.hookSpecificOutput?.permissionDecisionReason ?? ""
+    const output = await evaluatePretoolusePushChecksGate(payload, UNIT_DEPENDENCIES)
+    const reason = parseHookOutput(output).reason
     expect(reason).toContain("All pre-push checks found")
     expect(reason).not.toContain("swiz ci-wait")
   })
@@ -625,7 +638,14 @@ describe("parametric: git branch --show-current variant regression matrix", () =
 
 async function gitCmd(args: string[], cwd: string): Promise<void> {
   const p = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr] = await Promise.all([
+    new Response(p.stdout).text(),
+    new Response(p.stderr).text(),
+  ])
   await p.exited
+  if (p.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${stderr || stdout}`)
+  }
 }
 
 /**
@@ -887,49 +907,30 @@ describe("wip/fixup/squash commit subject check", () => {
 // ─── Behind-remote / force-push bypass ───────────────────────────────────────
 
 describe("behind-remote force-push bypass", () => {
-  /**
-   * Creates a work repo where the remote is ahead by 1 commit (simulating a
-   * post-rebase state where `HEAD..@{upstream}` is non-zero).
-   */
-  async function makeRepoWithRemoteAhead(): Promise<string> {
-    const repoDir = await mkdtemp(join(tmpDir, "force-work-"))
-    const bareDir = await mkdtemp(join(tmpDir, "force-bare-"))
-    await makeGitRepoWithUpstream(repoDir, bareDir)
-
-    // Push an extra commit via a second clone so the bare remote advances
-    const clone2 = await mkdtemp(join(tmpDir, "force-clone2-"))
-    await gitCmd(["clone", bareDir, clone2], tmpDir)
-    for (const [k, v] of [
-      ["user.email", "test@example.com"],
-      ["user.name", "Test"],
-      ["commit.gpgsign", "false"],
-    ] as [string, string][]) {
-      await gitCmd(["config", k, v], clone2)
+  function dependenciesWithRemoteAhead(): PushChecksGateDependencies {
+    return {
+      ...UNIT_DEPENDENCIES,
+      spawn: (command) =>
+        Promise.resolve({
+          stdout:
+            command[0] === "git" && command[1] === "rev-list" && command[2] === "--count"
+              ? "1\n"
+              : "",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+        }),
     }
-    await Bun.write(join(clone2, "remote-only.txt"), "remote advance")
-    await gitCmd(["add", "."], clone2)
-    await gitCmd(["commit", "-m", "remote: advance beyond local"], clone2)
-    await gitCmd(["push", "origin", "HEAD:main"], clone2)
-
-    // Fetch in repoDir so @{upstream} reflects the remote advance
-    await gitCmd(["fetch", "origin"], repoDir)
-
-    return repoDir
   }
 
   test("plain push is blocked when remote is ahead", async () => {
-    const repoDir = await makeRepoWithRemoteAhead()
-    await Bun.write(join(repoDir, "local.txt"), "local content")
-    await gitCmd(["add", "."], repoDir)
-    await gitCmd(["commit", "-m", "feat: local commit after rebase"], repoDir)
-
-    const result = await runHookInRepo({
-      repoDir,
+    const result = await runHook({
       command: "git push origin main",
       transcriptContent: makeTranscript(
         "git branch --show-current",
         "gh pr list --state open --head main"
       ),
+      dependencies: dependenciesWithRemoteAhead(),
     })
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain("Remote is ahead")
@@ -937,49 +938,34 @@ describe("behind-remote force-push bypass", () => {
   })
 
   test("--force-with-lease bypasses the behind-remote block", async () => {
-    const repoDir = await makeRepoWithRemoteAhead()
-    await Bun.write(join(repoDir, "local.txt"), "rebased content")
-    await gitCmd(["add", "."], repoDir)
-    await gitCmd(["commit", "-m", "feat: post-rebase commit"], repoDir)
-
-    const result = await runHookInRepo({
-      repoDir,
+    const result = await runHook({
       command: "git push origin main --force-with-lease",
       transcriptContent: makeTranscript(
         "git branch --show-current",
         "gh pr list --state open --head main"
       ),
+      dependencies: dependenciesWithRemoteAhead(),
     })
     expect(result.blocked).toBe(false)
   })
 
   test("--force bypasses the behind-remote block", async () => {
-    const repoDir = await makeRepoWithRemoteAhead()
-    await Bun.write(join(repoDir, "local2.txt"), "rebased content")
-    await gitCmd(["add", "."], repoDir)
-    await gitCmd(["commit", "-m", "feat: post-rebase commit"], repoDir)
-
-    const result = await runHookInRepo({
-      repoDir,
+    const result = await runHook({
       command: "git push origin main --force",
       transcriptContent: makeTranscript(
         "git branch --show-current",
         "gh pr list --state open --head main"
       ),
+      dependencies: dependenciesWithRemoteAhead(),
     })
     expect(result.blocked).toBe(false)
   })
 
   test("--force-with-lease still emits advisory when prior checks are missing", async () => {
-    const repoDir = await makeRepoWithRemoteAhead()
-    await Bun.write(join(repoDir, "local3.txt"), "content")
-    await gitCmd(["add", "."], repoDir)
-    await gitCmd(["commit", "-m", "feat: rebased"], repoDir)
-
-    const result = await runHookInRepo({
-      repoDir,
+    const result = await runHook({
       command: "git push origin main --force-with-lease",
       transcriptContent: "",
+      dependencies: dependenciesWithRemoteAhead(),
     })
     expect(result.blocked).toBe(false)
     expect(result.advisory).toBe(true)

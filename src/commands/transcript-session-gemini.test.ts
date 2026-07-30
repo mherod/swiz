@@ -1,56 +1,63 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
+import { turnsToDisplayTurns } from "../transcript-turns.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { continueCommand } from "./continue.ts"
+import { sessionCommand } from "./session.ts"
+import { type TranscriptCommandOptions, transcriptCommand } from "./transcript.ts"
 
 const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
 
-// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
-setDefaultTimeout(20_000)
+const transcriptOptions: TranscriptCommandOptions = {
+  async runListMode(sessions) {
+    for (const session of sessions) console.log(session.id)
+  },
+  async runDisplayMode(turns, _sessionId, debugEvents) {
+    const { displayTurns, trailingDebug } = turnsToDisplayTurns(turns, debugEvents)
+    for (const turn of displayTurns) {
+      for (const line of turn.debugLines ?? []) console.log(`│ ${line.time} ${line.text}`)
+      console.log(turn.role.toUpperCase())
+      if (turn.text) console.log(turn.text)
+      for (const block of turn.blocks ?? []) {
+        if (block.text) console.log(block.text)
+        if (block.toolLabel) console.log(block.toolLabel)
+      }
+    }
+    for (const line of trailingDebug) console.log(`│ ${line.time} ${line.text}`)
+  },
+}
 
 async function runSwiz(
   args: string[],
   home: string,
   envOverrides: Record<string, string | undefined> = {}
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const env = {
+    HOME: home,
+    CLAUDECODE: undefined,
+    GEMINI_CLI: undefined,
+    GEMINI_PROJECT_DIR: undefined,
+    CODEX_MANAGED_BY_NPM: undefined,
+    CODEX_THREAD_ID: undefined,
+    ...envOverrides,
   }
-  for (const key of [
-    "CLAUDECODE",
-    "GEMINI_CLI",
-    "GEMINI_PROJECT_DIR",
-    "CODEX_MANAGED_BY_NPM",
-    "CODEX_THREAD_ID",
-  ]) {
-    delete env[key]
+  const [commandName, ...commandArgs] = args
+  if (commandName === "transcript") {
+    return runCommandInProcess(transcriptCommand, commandArgs, {
+      commandOptions: transcriptOptions,
+      env,
+    })
   }
-  env.HOME = home
-  for (const [key, value] of Object.entries(envOverrides)) {
-    if (value === undefined) {
-      delete env[key]
-    } else {
-      env[key] = value
-    }
+  if (commandName === "session") {
+    return runCommandInProcess(sessionCommand, commandArgs, { env })
   }
-
-  const proc = Bun.spawn([process.execPath, "run", "index.ts", ...args], {
-    cwd: process.cwd(),
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  })
-  void proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
+  if (commandName === "continue") {
+    return runCommandInProcess(continueCommand, commandArgs, { env })
+  }
+  throw new Error(`Unsupported test command: ${commandName ?? "(none)"}`)
 }
 
 function stripAnsi(text: string): string {

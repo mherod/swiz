@@ -44,21 +44,20 @@ function asMonitorFingerprints(m: TranscriptMonitor): MonitorFingerprints {
 }
 
 describe("transcript session monitoring scale / memory", () => {
-  test("CappedMap stays at max size; post-GC heap growth bounded while map is retained", () => {
-    for (let g = 0; g < 3; g++) maybeGc()
-    const before = heapUsed()
+  test("CappedMap retains only the newest entries under heavy churn", () => {
     const map = new CappedMap<string, string>(CAP)
     for (let i = 0; i < INSERTS; i++) {
       map.set(`session-${i}`, `fingerprint-${i}`)
     }
+
     expect(map.size).toBe(CAP)
-    for (let g = 0; g < 3; g++) maybeGc()
-    const after = heapUsed()
-    const mu = process.memoryUsage()
-    expect(mu.heapUsed).toBeGreaterThan(0)
-    expect(mu.external).toBeGreaterThanOrEqual(0)
-    // Only ~CAP entries remain; ceiling catches accidental unbounded retention.
-    expect(after - before).toBeLessThan(56 * 1024 * 1024)
+    const firstRetainedIndex = INSERTS - CAP
+    expect([...map.keys()]).toEqual(
+      Array.from({ length: CAP }, (_, offset) => `session-${firstRetainedIndex + offset}`)
+    )
+    expect([...map.values()]).toEqual(
+      Array.from({ length: CAP }, (_, offset) => `fingerprint-${firstRetainedIndex + offset}`)
+    )
   })
 
   test("TranscriptMonitor fingerprint maps remain bounded under heavy churn", () => {

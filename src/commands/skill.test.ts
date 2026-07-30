@@ -4,8 +4,8 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
-import { useTempDir } from "../utils/test-utils.ts"
-import { parseFrontmatterField, stripFrontmatter } from "./skill.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { parseFrontmatterField, skillCommand, stripFrontmatter } from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────
 
@@ -121,6 +121,13 @@ describe("stripFrontmatter", () => {
 
 const { create: createTempDir } = useTempDir("swiz-skill-test-")
 
+async function expandInlineCommandsForTest(content: string): Promise<string> {
+  return content.replace(/!`([^`]+)`/g, (_match, command: string) => {
+    const echo = command.match(/^echo\s+(.+)$/)
+    return echo?.[1] ?? ""
+  })
+}
+
 /** Write a skill with frontmatter to a temp .skills dir and run swiz skill against it. */
 async function runSkillCmd(
   skillContent: string,
@@ -133,22 +140,11 @@ async function runSkillCmd(
   const skillDir = join(fakeHome, ".claude", "skills", skillName)
   await mkdir(skillDir, { recursive: true })
   await writeFile(join(skillDir, "SKILL.md"), skillContent)
-  const skillsDir = fakeHome
-
-  const proc = Bun.spawn(["bun", "run", "index.ts", "skill", ...extraArgs, skillName], {
+  return runCommandInProcess(skillCommand, [...extraArgs, skillName], {
+    commandOptions: { expandInlineCommands: expandInlineCommandsForTest },
     cwd: process.cwd(),
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: skillsDir, ...envOverrides },
+    env: { HOME: fakeHome, ...envOverrides },
   })
-  void proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
 }
 
 describe("swiz skill --no-front-matter", () => {
@@ -212,20 +208,12 @@ async function runListCmd(
   args: string[],
   fakeHome: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const indexPath = join(process.cwd(), "index.ts")
   const tempCwd = await createTempDir()
-  const proc = Bun.spawn(["bun", "run", indexPath, "skill", ...args], {
+  return runCommandInProcess(skillCommand, args, {
+    commandOptions: { expandInlineCommands: expandInlineCommandsForTest },
     cwd: tempCwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome },
+    env: { HOME: fakeHome },
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
 }
 
 async function runSkillCli(
@@ -679,17 +667,7 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     const skillDir = join(fakeHome, ".claude", "skills", "inline-skill-xyz")
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "Output: !`echo hello-world`\n")
-    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "inline-skill-xyz"], {
-      cwd: process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, HOME: fakeHome },
-    })
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
+    const { stdout } = await runSkillCli(["inline-skill-xyz"], fakeHome)
     expect(stdout).toContain("hello-world")
     expect(stdout).not.toContain("!`echo hello-world`")
   })
@@ -699,17 +677,7 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     const skillDir = join(fakeHome, ".claude", "skills", "multi-inline-xyz")
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "A: !`echo alpha-val` B: !`echo beta-val`\n")
-    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "multi-inline-xyz"], {
-      cwd: process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, HOME: fakeHome },
-    })
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
+    const { stdout } = await runSkillCli(["multi-inline-xyz"], fakeHome)
     expect(stdout).toContain("alpha-val")
     expect(stdout).toContain("beta-val")
   })
@@ -719,17 +687,7 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     const skillDir = join(fakeHome, ".claude", "skills", "raw-inline-xyz")
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "Cmd: !`echo should-not-appear`\n")
-    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "--raw", "raw-inline-xyz"], {
-      cwd: process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, HOME: fakeHome },
-    })
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
+    const { stdout } = await runSkillCli(["--raw", "raw-inline-xyz"], fakeHome)
     expect(stdout).toContain("!`echo should-not-appear`")
     expect(stdout).not.toContain("should-not-appear\n")
   })
@@ -759,33 +717,12 @@ describe("swiz skill --convert with supplementary files", () => {
     await writeFile(join(skillDir, "scripts", "run.sh"), "#!/bin/bash\n# Will run a script\n")
 
     // 2. Run the convert command
-    const proc = Bun.spawn(
-      [
-        "bun",
-        "run",
-        "index.ts",
-        "skill",
-        "--convert",
-        "--from",
-        "claude",
-        "--to",
-        "gemini",
-        "test-supplementary-skill",
-      ],
-      {
-        cwd: process.cwd(),
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: fakeHome },
-      }
+    const result = await runSkillCli(
+      ["--convert", "--from", "claude", "--to", "gemini", "test-supplementary-skill"],
+      fakeHome
     )
-    const [, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    expect(proc.exitCode).toBe(0)
-    expect(stderr).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
 
     // 3. Verify files converted/copied in target directory
     const targetDir = join(geminiSkillsDir, "test-supplementary-skill")

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import type { StopHookInput } from "../src/schemas.ts"
+import { type Task, writeTask as writeRepositoryTask } from "../src/tasks/task-repository.ts"
 import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import { evaluateStopIncompleteTasksHook } from "./stop-incomplete-tasks.ts"
 
 interface HookResult {
   decision?: string
@@ -15,12 +17,14 @@ async function runHook({
   sessionId = "session-123",
   envOverrides = {},
   transcriptPath,
+  autoContinue = true,
 }: {
   homeDir: string
   cwd?: string
   sessionId?: string
   envOverrides?: Record<string, string | undefined>
   transcriptPath?: string
+  autoContinue?: boolean
 }): Promise<HookResult> {
   const hasOtherAgent = Object.keys(envOverrides).some((key) =>
     AGENTS.some((a) => a.id !== "claude" && a.envVars?.includes(key))
@@ -30,41 +34,23 @@ async function runHook({
     finalEnvOverrides.CLAUDECODE = "1"
   }
 
-  const defaultProjectDir = await createTempHome()
-  const defaultSwizDir = join(defaultProjectDir, ".swiz")
-  await mkdir(defaultSwizDir, { recursive: true })
-  await writeFile(join(defaultSwizDir, "config.json"), JSON.stringify({ autoContinue: true }))
-
-  const payload = JSON.stringify({
+  const payload = {
     session_id: sessionId,
-    cwd: cwd ?? defaultProjectDir,
+    cwd: cwd ?? process.cwd(),
     hook_event_name: "Stop",
     ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
     _env: finalEnvOverrides,
-  })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
-  for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
+    _effectiveSettings: { autoContinue },
   }
-  env.SWIZ_DAEMON_PORT = "19999"
-  const proc = Bun.spawn(["bun", "hooks/stop-incomplete-tasks.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...env, ...envOverrides },
+
+  const parsed = await evaluateStopIncompleteTasksHook(payload as unknown as StopHookInput, {
+    homeDir,
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (!out.trim()) return {}
-
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
+  const record = parsed as Record<string, any>
+  const hso = record.hookSpecificOutput as Record<string, any> | undefined
   return {
-    decision: (hso?.decision ?? parsed.decision) as string | undefined,
-    reason: (hso?.reason ?? parsed.reason) as string | undefined,
+    decision: (hso?.decision ?? record.decision) as string | undefined,
+    reason: (hso?.reason ?? record.reason) as string | undefined,
   }
 }
 
@@ -263,11 +249,19 @@ describe("stop-incomplete-tasks", () => {
   test("blocks Codex stop on incomplete tasks without requiring TaskList", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-codex-transcript"
-    await writeTask(homeDir, sessionId, {
-      id: "1",
-      subject: "Codex work",
-      status: "in_progress",
-    })
+    await writeRepositoryTask(
+      sessionId,
+      {
+        id: "1",
+        subject: "Codex work",
+        description: "",
+        status: "in_progress",
+        blocks: [],
+        blockedBy: [],
+      } satisfies Task,
+      process.cwd(),
+      join(homeDir, ".codex", "tasks")
+    )
 
     const result = await runHook({
       homeDir,
@@ -312,12 +306,6 @@ describe("stop-incomplete-tasks", () => {
 
   test("allows stop when autoContinue is disabled in project settings", async () => {
     const homeDir = await createTempHome()
-    const projectDir = await createTempHome()
-    await mkdir(join(projectDir, ".swiz"), { recursive: true })
-    await writeFile(
-      join(projectDir, ".swiz", "config.json"),
-      JSON.stringify({ autoContinue: false })
-    )
     const sessionId = "session-autocontinue-disabled"
 
     await writeTask(homeDir, sessionId, {
@@ -326,7 +314,7 @@ describe("stop-incomplete-tasks", () => {
       status: "in_progress",
     })
 
-    const result = await runHook({ homeDir, cwd: projectDir, sessionId })
+    const result = await runHook({ homeDir, sessionId, autoContinue: false })
     expect(result.decision).toBeUndefined()
   })
 })

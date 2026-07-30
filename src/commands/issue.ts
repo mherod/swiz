@@ -1,7 +1,12 @@
 import { getRepoSlug } from "../git-helpers.ts"
 import { getIssueStore } from "../issue-store.ts"
 import type { Command } from "../types.ts"
-import { closeIssue, commentOnIssue, resolveIssue } from "./issue/operations.ts"
+import {
+  closeIssue,
+  commentOnIssue,
+  type IssueOperationDependencies,
+  resolveIssue,
+} from "./issue/operations.ts"
 import { handleList, handleSync } from "./issue/sync-display.ts"
 
 export type { ResolveResult } from "./issue/operations.ts"
@@ -40,7 +45,11 @@ async function handleCacheBust(args: string[]): Promise<void> {
   }
 }
 
-export const issueCommand: Command = {
+export interface IssueCommandOptions {
+  operationDependencies?: IssueOperationDependencies
+}
+
+export const issueCommand: Command<IssueCommandOptions> = {
   name: "issue",
   description: "Interact with GitHub issues and store (guards against operating on closed issues)",
   usage: "swiz issue <subcommand> [options]",
@@ -75,7 +84,7 @@ export const issueCommand: Command = {
         "List open issues and pull requests. Use --mine to filter to issues assigned to you.",
     },
   ],
-  async run(args: string[]) {
+  async run(args: string[], options = {}) {
     const sub = args[0]
     if (sub === "cache-bust") return handleCacheBust(args)
     if (sub === "sync") return handleSync(args)
@@ -83,15 +92,15 @@ export const issueCommand: Command = {
 
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
-    if (sub === "close") return closeIssue(number)
+    if (sub === "close") return closeIssue(number, options.operationDependencies)
 
     const body = parseBodyArg(args)
     if (sub === "comment") {
       if (!body) throw new Error(`--body is required for the comment subcommand.\n${usage()}`)
-      return commentOnIssue(number, body)
+      return commentOnIssue(number, body, options.operationDependencies)
     }
     if (sub === "resolve") {
-      await resolveIssue(number, body)
+      await resolveIssue(number, body, options.operationDependencies)
       return
     }
 

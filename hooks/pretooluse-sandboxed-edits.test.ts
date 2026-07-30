@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { type HookResult, useTempDir } from "../src/utils/test-utils.ts"
+import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 
@@ -89,11 +89,11 @@ async function runHook(
     )
   }
 
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: toolName,
     cwd,
     tool_input: { file_path: filePath },
-  })
+  }
 
   // Override TMPDIR so the hook's tmpdir() returns a path that test fixture dirs
   // are NOT inside — otherwise allowedRoots includes the real tmpdir and all
@@ -103,29 +103,9 @@ async function runHook(
   const fakeTmpDir = join(fakeHome, "tmp")
   await mkdir(fakeTmpDir, { recursive: true })
 
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  return await runHookInProcess(HOOK, payload, {
     env: neutralAgentEnv({ HOME: fakeHome, TMPDIR: fakeTmpDir }),
-    // No cwd override — run from project root so the relative HOOK path resolves.
-    // The agent's session cwd is passed via the stdin JSON payload instead.
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  let json: Record<string, any> | null = null
-  try {
-    if (stdout.trim()) json = JSON.parse(stdout.trim())
-  } catch {}
-
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 describe("pretooluse-sandboxed-edits", () => {
@@ -445,40 +425,22 @@ describe("pretooluse-sandboxed-edits", () => {
         JSON.stringify(trunkMode ? { trunkMode: true, defaultBranch } : {})
       )
 
-      const payload = JSON.stringify({
+      const payload = {
         tool_name: "Edit",
         cwd,
         tool_input: { file_path: filePath },
-      })
+      }
 
       const fakeTmpDir = join(fakeHome, "tmp")
       await mkdir(fakeTmpDir, { recursive: true })
 
-      const proc = Bun.spawn(["bun", HOOK], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
+      return await runHookInProcess(HOOK, payload, {
         env: neutralAgentEnv({
           HOME: fakeHome,
           TMPDIR: fakeTmpDir,
           SWIZ_DAEMON_PORT: "19999",
         }),
       })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-
-      let json: Record<string, any> | null = null
-      try {
-        if (stdout.trim()) json = JSON.parse(stdout.trim())
-      } catch {}
-
-      return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
     }
 
     test("allows edits on non-default branch when trunk mode is enabled but warns with context", async () => {

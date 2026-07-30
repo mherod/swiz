@@ -175,6 +175,7 @@ export function Header({
         <img key={mascotSrc} src={mascotSrc} alt="swiz" className="title-mascot" />
         <h1 className="topbar-title">swiz daemon</h1>
         <output className="status-pill" aria-label="Daemon live">
+          <span className="status-pulse-dot" aria-hidden="true" />
           <span className="status-symbol" aria-hidden="true">
             ✓
           </span>
