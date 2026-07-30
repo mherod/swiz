@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { bunTestArgSegments, isSingleFileBunTestArgs } from "./command-utils.ts"
+import {
+  bunTestArgSegments,
+  findNonCanonicalGitInvocation,
+  isSingleFileBunTestArgs,
+} from "./command-utils.ts"
 
 describe("bunTestArgSegments", () => {
   test("extracts real bun test invocations from shell segments", () => {
@@ -26,5 +30,60 @@ describe("isSingleFileBunTestArgs", () => {
   test("rejects multiple test files and directory runs", () => {
     expect(isSingleFileBunTestArgs(" src/foo.test.ts src/bar.test.ts")).toBe(false)
     expect(isSingleFileBunTestArgs(" src/")).toBe(false)
+  })
+})
+
+describe("findNonCanonicalGitInvocation", () => {
+  test("accepts canonical Git commands at shell segment boundaries", () => {
+    expect(
+      findNonCanonicalGitInvocation(
+        "git status && git -C /tmp/repo -c color.ui=false log --oneline"
+      )
+    ).toBeNull()
+  })
+
+  test("classifies direct Git binary paths", () => {
+    expect(findNonCanonicalGitInvocation("/usr/bin/git status")?.kind).toBe("binary-path")
+    expect(findNonCanonicalGitInvocation("./git status")?.kind).toBe("binary-path")
+  })
+
+  test("classifies command and environment wrappers", () => {
+    expect(findNonCanonicalGitInvocation("env git status")?.kind).toBe("command-wrapper")
+    expect(findNonCanonicalGitInvocation("GIT_OPTIONAL_LOCKS=0 git status")?.kind).toBe(
+      "command-wrapper"
+    )
+    expect(findNonCanonicalGitInvocation("printf x | xargs git status")?.kind).toBe(
+      "command-wrapper"
+    )
+    expect(findNonCanonicalGitInvocation("if git status; then echo ready; fi")?.kind).toBe(
+      "command-wrapper"
+    )
+    expect(findNonCanonicalGitInvocation("(git status)")?.kind).toBe("command-wrapper")
+  })
+
+  test("classifies nested shell invocations recursively", () => {
+    expect(findNonCanonicalGitInvocation("/bin/zsh -lc 'git status'")?.kind).toBe("nested-shell")
+    expect(findNonCanonicalGitInvocation("zsh -lc 'bash -c \"git status\"'")?.kind).toBe(
+      "nested-shell"
+    )
+    expect(findNonCanonicalGitInvocation("/usr/bin/env zsh -lc 'git status'")?.kind).toBe(
+      "nested-shell"
+    )
+    expect(findNonCanonicalGitInvocation("sudo sh -c 'git status'")?.kind).toBe("nested-shell")
+  })
+
+  test("classifies command and process substitutions", () => {
+    expect(findNonCanonicalGitInvocation('echo "$(git status)"')?.kind).toBe("shell-substitution")
+    expect(findNonCanonicalGitInvocation("diff <(git status) expected")?.kind).toBe(
+      "shell-substitution"
+    )
+    expect(findNonCanonicalGitInvocation("echo `git status`")?.kind).toBe("shell-substitution")
+  })
+
+  test("ignores Git text that is not executed", () => {
+    expect(findNonCanonicalGitInvocation("echo '/usr/bin/git status'")).toBeNull()
+    expect(findNonCanonicalGitInvocation("rg 'git status' docs/")).toBeNull()
+    expect(findNonCanonicalGitInvocation(`/bin/zsh -lc 'echo "git status"'`)).toBeNull()
+    expect(findNonCanonicalGitInvocation("echo '`git status`'")).toBeNull()
   })
 })
