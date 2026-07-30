@@ -222,3 +222,78 @@ describe("get-test-scope argument passing", () => {
     expect(proc.stdout.trim()).toBe("no-tests-affected")
   })
 })
+
+describe("get-test-scope diff-mode no-tests-affected", () => {
+  function git(args: string[], cwd: string) {
+    return spawnSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "test",
+        GIT_AUTHOR_EMAIL: "test@test.com",
+        GIT_COMMITTER_NAME: "test",
+        GIT_COMMITTER_EMAIL: "test@test.com",
+      },
+    })
+  }
+
+  test("a docs-only diff emits no-tests-affected without args (CI path)", () => {
+    // CI invokes the script with no arguments, so the changed-file list comes
+    // from the diff rather than argv. Before this was fixed, the sentinel was
+    // gated on args alone, so CI could never reach it: a docs-only change
+    // produced empty stdout, which the workflow reads as "scope too broad"
+    // and escalates to the full flaky suite (#680). Every docs-only and
+    // deps-only PR therefore landed red regardless of its content.
+    const dir = join(
+      tmpdir(),
+      `swiz-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(join(dir, "src"), { recursive: true })
+    writeFileSync(join(dir, "README.md"), "# fixture\n")
+    writeFileSync(join(dir, "src", "thing.ts"), "// no sibling test\n")
+    git(["init"], dir)
+    git(["add", "."], dir)
+    git(["commit", "--allow-empty-message", "-m", "init"], dir)
+    const baseCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).stdout.trim()
+
+    writeFileSync(join(dir, "README.md"), "# fixture (documented)\n")
+    git(["add", "."], dir)
+    git(["commit", "-m", "docs only"], dir)
+
+    const proc = spawnSync("bun", ["run", SCOPE_SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, CI_BASE: baseCommit },
+    })
+    expect(proc.status).toBe(0)
+    expect((proc.stdout ?? "").trim()).toBe("no-tests-affected")
+  })
+
+  test("an unresolvable base still falls through to the full run", () => {
+    // The empty-output path must stay reachable: when we cannot compute a
+    // changed-file list at all, "run everything" remains the safe answer.
+    const dir = join(
+      tmpdir(),
+      `swiz-scope-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, "README.md"), "# fixture\n")
+    git(["init"], dir)
+    git(["add", "."], dir)
+    git(["commit", "--allow-empty-message", "-m", "init"], dir)
+
+    // No CI_BASE, no origin/main, and no HEAD~4 in a single-commit repo, so
+    // the diff yields nothing and changedFiles is empty.
+    const proc = spawnSync("bun", ["run", SCOPE_SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, CI_BASE: "" },
+    })
+    expect(proc.status).toBe(0)
+    expect((proc.stdout ?? "").trim()).toBe("")
+  })
+})

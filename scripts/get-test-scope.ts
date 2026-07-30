@@ -165,9 +165,16 @@ const filteredTests = Array.from(testFiles).filter(
 
 if (filteredTests.length > 0 && filteredTests.length <= 15) {
   process.stdout.write(filteredTests.join(" "))
-} else if (isTargetedByArgs && filteredTests.length === 0) {
+} else if (changedFiles.length > 0 && filteredTests.length === 0) {
+  // A changed-file list we actually computed — whether it arrived as args
+  // (lefthook) or from the diff (CI) — that maps to zero tests is a real
+  // "nothing to run" answer, not an unknown scope. Gating this on args
+  // alone left CI unable to ever reach it, so every docs-only and
+  // deps-only change fell through to the flaky full run (#680).
   process.stdout.write("no-tests-affected")
 } else {
-  // Too many or no direct tests -> fallback to the "safe subset" strategy
-  // We'll let lefthook handle the full list if this script outputs nothing.
+  // Too many tests, or the changed-file list came back empty because we
+  // could not resolve a base at all -> fall back to the "safe subset"
+  // strategy. We'll let lefthook handle the full list if this script
+  // outputs nothing.
 }

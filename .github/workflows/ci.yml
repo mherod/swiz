@@ -91,13 +91,19 @@ jobs:
         run: |
           # Delegate to the same scope script lefthook uses so the two
           # gates never drift. The script prints a space-separated list of
-          # test files when it finds a targeted scope, or empty when the
-          # diff is too broad / too narrow to target — in which case CI
-          # runs the full suite.
+          # test files when it finds a targeted scope, the literal
+          # "no-tests-affected" when the change touches nothing testable,
+          # or empty when the scope is too broad to target — in which case
+          # CI runs the full suite. Handle all three branches exactly as
+          # lefthook.yml does; treating "no-tests-affected" as a targeted
+          # scope would try to run it as a filename.
           TARGETED=$(bun run scripts/get-test-scope.ts)
           echo "CI_BASE: $CI_BASE"
           echo "Targeted: $TARGETED"
-          if [ -n "$TARGETED" ]; then
+          if [ "$TARGETED" = "no-tests-affected" ]; then
+            echo "scope=none" >> "$GITHUB_OUTPUT"
+            echo "→ No affected tests; skipping the test run"
+          elif [ -n "$TARGETED" ]; then
             echo "scope=targeted" >> "$GITHUB_OUTPUT"
             echo "test_files=$TARGETED" >> "$GITHUB_OUTPUT"
             echo "→ Running targeted tests only"
@@ -110,7 +116,9 @@ jobs:
         env:
           SWIZ_NO_DAEMON: "1"
         run: |
-          if [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
+          if [ "${{ steps.test-scope.outputs.scope }}" = "none" ]; then
+            echo "No affected tests for this change; skipping"
+          elif [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
             echo "Running full test suite"
             bun test --concurrent --timeout=60000
           else
