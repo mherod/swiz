@@ -3,15 +3,21 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getAgent } from "./agents.ts"
 import {
+  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
+  DEFAULT_SKILL_RECENCY_MAX_TURNS,
+} from "./settings/resolution.ts"
+import {
   buildSkillAgentToolEnvironmentFooter,
   clearSkillCache,
   extractMandatedSkillTools,
   extractReferencedToolsFromSkillText,
   extractStepsFromSkill,
   filterQualitySteps,
+  formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
+  resolveSkillRecencyOptions,
   SKILL_DIRS,
   skillAdvice,
   skillExists,
@@ -26,6 +32,51 @@ setDefaultTimeout(20_000)
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 const { create: createTempDir } = useTempDir("swiz-skill-utils-test-")
+
+// ─── resolveSkillRecencyOptions ───────────────────────────────────────────────
+
+describe("resolveSkillRecencyOptions", () => {
+  test("returns default recency values and matching window text", async () => {
+    const fakeHome = await createTempDir()
+    const projectDir = await createTempDir()
+    const originalHome = process.env.HOME
+
+    try {
+      process.env.HOME = fakeHome
+      const result = await resolveSkillRecencyOptions(projectDir)
+
+      expect(result.recencyOptions).toEqual({
+        maxTurns: DEFAULT_SKILL_RECENCY_MAX_TURNS,
+        maxAgeMs: DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES * 60_000,
+      })
+      expect(result.windowText).toBe(formatCurrentSessionUsageWindow(result.recencyOptions))
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+    }
+  })
+
+  test("honors project recency overrides and derives maxAgeMs", async () => {
+    const projectDir = await createTempDir()
+    const configDir = join(projectDir, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await Bun.write(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        skillRecencyMaxTurns: 12,
+        skillRecencyMaxAgeMinutes: 7,
+      })
+    )
+
+    const result = await resolveSkillRecencyOptions(projectDir)
+
+    expect(result.recencyOptions).toEqual({
+      maxTurns: 12,
+      maxAgeMs: 7 * 60_000,
+    })
+    expect(result.windowText).toBe(formatCurrentSessionUsageWindow(result.recencyOptions))
+  })
+})
 
 // ─── SKILL_DIRS ───────────────────────────────────────────────────────────────
 
