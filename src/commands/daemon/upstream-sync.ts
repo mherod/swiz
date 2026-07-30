@@ -8,6 +8,7 @@ import {
   syncUpstreamState,
   type UpstreamSyncResult,
 } from "../../issue-store.ts"
+import { canonicalizePath, isPathWithinRoot, resolveProjectRoot } from "../../project-identity.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import { isRegisterableProjectCwd } from "./route-helpers.ts"
 
@@ -24,6 +25,7 @@ export interface UpstreamSyncStatus {
 
 interface SyncEntry {
   repo: string
+  /** Canonical repository root this entry is keyed on — never a raw caller cwd. */
   cwd: string
   lastSyncAt: number | null
   lastResult: UpstreamSyncResult | null
@@ -35,8 +37,21 @@ type RepoSlugResolver = (cwd: string) => Promise<string | null>
 type ForkTopologyResolver = (cwd: string) => Promise<{ upstreamSlug: string } | null>
 type SyncRunner = typeof syncUpstreamState
 
+function toSyncStatus(entry: SyncEntry): UpstreamSyncStatus {
+  return {
+    repo: entry.repo,
+    cwd: entry.cwd,
+    lastSyncAt: entry.lastSyncAt,
+    lastResult: entry.lastResult,
+    syncing: entry.syncing,
+  }
+}
+
 export class UpstreamSyncRegistry {
   private entries = new Map<string, SyncEntry>()
+  // Registration coalescing: concurrent register() calls for cwd variants that
+  // resolve to one root share a single computation. See register().
+  private inFlightRegistrations = new Map<string, Promise<{ deduped: boolean }>>()
   private readonly intervalMs: number
   private readonly timeoutMs: number
   private readonly resolveSlug: RepoSlugResolver
@@ -77,30 +92,55 @@ export class UpstreamSyncRegistry {
     // a duplicate loop, and a persisted "." cursor would resurrect it on every
     // startup via restoreKnownRepos (#716).
     if (!isRegisterableProjectCwd(cwd)) return { deduped: false }
-    if (this.entries.has(cwd)) return { deduped: true }
 
-    const repo = await this.resolveSlug(cwd)
+    // Key on the repository root, not the cwd we happened to be handed. `/path`,
+    // `/path/`, a symlink alias, and `/path/subdir` all name one project; keying
+    // raw gave each its own independent 2-minute sync loop (#717).
+    const canonicalRoot = await resolveProjectRoot(cwd)
+    if (this.entries.has(canonicalRoot)) return { deduped: true }
+
+    // restoreKnownRepos() registers every stored cursor concurrently, so two
+    // legacy cwd variants collapsing to the same root can both clear the check
+    // above before either writes its entry. Share one registration per root so
+    // the loser dedupes instead of spawning a rival loop.
+    const inflight = this.inFlightRegistrations.get(canonicalRoot)
+    if (inflight) {
+      await inflight
+      return { deduped: this.entries.has(canonicalRoot) }
+    }
+
+    const registration = this.performRegister(canonicalRoot)
+    this.inFlightRegistrations.set(canonicalRoot, registration)
+    try {
+      return await registration
+    } finally {
+      this.inFlightRegistrations.delete(canonicalRoot)
+    }
+  }
+
+  private async performRegister(canonicalRoot: string): Promise<{ deduped: boolean }> {
+    const repo = await this.resolveSlug(canonicalRoot)
     if (!repo) return { deduped: false }
 
     const entry: SyncEntry = {
       repo,
-      cwd,
+      cwd: canonicalRoot,
       lastSyncAt: null,
       lastResult: null,
       syncing: false,
       timer: null,
     }
-    this.entries.set(cwd, entry)
-    this.scheduleSync(cwd)
+    this.entries.set(canonicalRoot, entry)
+    this.scheduleSync(canonicalRoot)
 
     // Fork workflow: also register the upstream repo for issue/label/milestone sync
-    const fork = await this.resolveFork(cwd)
+    const fork = await this.resolveFork(canonicalRoot)
     if (fork && fork.upstreamSlug !== repo) {
-      const upstreamKey = `${cwd}::upstream`
+      const upstreamKey = `${canonicalRoot}::upstream`
       if (!this.entries.has(upstreamKey)) {
         const upstreamEntry: SyncEntry = {
           repo: fork.upstreamSlug,
-          cwd,
+          cwd: canonicalRoot,
           lastSyncAt: null,
           lastResult: null,
           syncing: false,
@@ -125,27 +165,51 @@ export class UpstreamSyncRegistry {
     await Promise.all(known.map(({ cwd }) => this.register(cwd)))
   }
 
-  /** Trigger an immediate sync for a project. */
+  /** Trigger an immediate sync for a project. Accepts any cwd inside it. */
   async syncNow(cwd: string): Promise<UpstreamSyncResult | null> {
-    const entry = this.entries.get(cwd)
+    const canonicalRoot = await resolveProjectRoot(cwd)
+    const entry = this.entries.get(canonicalRoot)
     if (!entry) return null
-    return this.doSync(cwd, entry)
+    return this.doSync(canonicalRoot, entry)
   }
 
   listActive(): UpstreamSyncStatus[] {
-    return [...this.entries.values()].map((e) => ({
-      repo: e.repo,
-      cwd: e.cwd,
-      lastSyncAt: e.lastSyncAt,
-      lastResult: e.lastResult,
-      syncing: e.syncing,
-    }))
+    return [...this.entries.values()].map((entry) => toSyncStatus(entry))
+  }
+
+  /**
+   * Map any cwd inside a registered project back to the root its entries are
+   * keyed on. Sync — one realpath, no `.git` walk — so hot callers such as the
+   * status-line staleness read stay cheap.
+   */
+  findEntryRoot(cwd: string): string | null {
+    const canonical = canonicalizePath(cwd)
+    if (this.entries.has(canonical)) return canonical
+    for (const entry of this.entries.values()) {
+      if (isPathWithinRoot(canonical, entry.cwd)) return entry.cwd
+    }
+    return null
+  }
+
+  /**
+   * Status of the sync entry owning `cwd`, for any cwd inside the project.
+   * Callers used to match with `listActive().find((e) => e.cwd === cwd)`, which
+   * missed on any string variation and reported the absence as "no staleness
+   * data" — indistinguishable from healthy sync (#717).
+   */
+  findActiveForCwd(cwd: string): UpstreamSyncStatus | null {
+    const root = this.findEntryRoot(cwd)
+    if (!root) return null
+    const entry = this.entries.get(root)
+    return entry ? toSyncStatus(entry) : null
   }
 
   /** Stop periodic sync timers and remove a project plus its fork-upstream entry. */
   unregister(cwd: string): boolean {
+    const canonicalRoot = this.findEntryRoot(cwd)
+    if (!canonicalRoot) return false
     let removed = false
-    for (const entryKey of [cwd, `${cwd}::upstream`]) {
+    for (const entryKey of [canonicalRoot, `${canonicalRoot}::upstream`]) {
       const entry = this.entries.get(entryKey)
       if (!entry) continue
       if (entry.timer) clearTimeout(entry.timer)

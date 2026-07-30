@@ -102,7 +102,10 @@ export async function handleStatusLineSnapshot(
   const complianceDurationSeconds = sessionId
     ? resolveComplianceDurationSeconds(sessionId, ctx.sessionComplianceState)
     : null
-  const syncEntry = ctx.upstreamSyncRegistry.listActive().find((e) => e.cwd === body.cwd)
+  // Match on canonical project root, not raw string equality — the status line
+  // reports from whatever cwd the session is in, which is often a subdirectory
+  // of the registered repo root (#717).
+  const syncEntry = ctx.upstreamSyncRegistry.findActiveForCwd(body.cwd)
   const issueSyncStale = syncEntry
     ? syncEntry.lastSyncAt === null || Date.now() - syncEntry.lastSyncAt > STALE_SYNC_THRESHOLD_MS
     : null

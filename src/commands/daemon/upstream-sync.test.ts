@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { IssueStore, type UpstreamSyncResult } from "../../issue-store.ts"
 import { UpstreamSyncRegistry } from "./upstream-sync.ts"
 
@@ -80,6 +83,144 @@ describe("UpstreamSyncRegistry fork entries", () => {
     } finally {
       registry.close()
       store.close()
+    }
+  })
+})
+
+/**
+ * A real on-disk project so realpath, the `.git` walk, and symlink aliasing are
+ * exercised for real rather than mocked. `mkdtemp` lands under a symlinked
+ * `/var` on macOS, so the fixture root is itself an alias — assertions compare
+ * against what the registry reports, never a hardcoded path.
+ */
+async function createProjectFixture(): Promise<{
+  root: string
+  nested: string
+  alias: string
+  sibling: string
+  cleanup: () => Promise<void>
+}> {
+  const base = await mkdtemp(join(tmpdir(), "swiz-project-identity-"))
+  const root = join(base, "repo")
+  const sibling = `${root}-backup`
+  const alias = join(base, "alias")
+  await mkdir(join(root, ".git"), { recursive: true })
+  await mkdir(join(root, "src", "nested"), { recursive: true })
+  await mkdir(join(sibling, ".git"), { recursive: true })
+  await symlink(root, alias)
+  return {
+    root,
+    nested: join(root, "src", "nested"),
+    alias,
+    sibling,
+    cleanup: () => rm(base, { recursive: true, force: true }),
+  }
+}
+
+function createRegistry(store: IssueStore): UpstreamSyncRegistry {
+  return new UpstreamSyncRegistry({
+    intervalMs: 60_000,
+    resolveSlug: async () => "owner/repo",
+    resolveFork: async () => null,
+    sync: async () => createSyncResult(),
+    store,
+  })
+}
+
+describe("UpstreamSyncRegistry project identity", () => {
+  test("collapses trailing-slash, subdirectory, and symlink cwds onto one entry", async () => {
+    const fixture = await createProjectFixture()
+    const store = new IssueStore(":memory:")
+    const registry = createRegistry(store)
+
+    try {
+      expect((await registry.register(fixture.root)).deduped).toBe(false)
+      expect((await registry.register(`${fixture.root}/`)).deduped).toBe(true)
+      expect((await registry.register(fixture.nested)).deduped).toBe(true)
+      expect((await registry.register(fixture.alias)).deduped).toBe(true)
+      expect(registry.listActive()).toHaveLength(1)
+    } finally {
+      registry.close()
+      store.close()
+      await fixture.cleanup()
+    }
+  })
+
+  test("dedupes legacy cwd variants restored concurrently on startup", async () => {
+    // restoreKnownRepos() replays every stored cursor through Promise.all, so
+    // variants of one root arrive concurrently and must not each win a loop.
+    const fixture = await createProjectFixture()
+    const store = new IssueStore(":memory:")
+    const registry = createRegistry(store)
+
+    try {
+      const results = await Promise.all([
+        registry.register(fixture.root),
+        registry.register(`${fixture.root}/`),
+        registry.register(fixture.nested),
+        registry.register(fixture.alias),
+      ])
+
+      expect(registry.listActive()).toHaveLength(1)
+      expect(results.filter((result) => !result.deduped)).toHaveLength(1)
+    } finally {
+      registry.close()
+      store.close()
+      await fixture.cleanup()
+    }
+  })
+
+  test("resolves sync status from any cwd inside the project", async () => {
+    const fixture = await createProjectFixture()
+    const store = new IssueStore(":memory:")
+    const registry = createRegistry(store)
+
+    try {
+      await registry.register(fixture.root)
+
+      expect(registry.findActiveForCwd(fixture.nested)?.repo).toBe("owner/repo")
+      expect(registry.findActiveForCwd(`${fixture.root}/`)?.repo).toBe("owner/repo")
+      expect(registry.findActiveForCwd(fixture.alias)?.repo).toBe("owner/repo")
+    } finally {
+      registry.close()
+      store.close()
+      await fixture.cleanup()
+    }
+  })
+
+  test("does not match a sibling project sharing a path prefix", async () => {
+    // `<root>-backup` starts with `<root>` as a string but is its own project.
+    const fixture = await createProjectFixture()
+    const store = new IssueStore(":memory:")
+    const registry = createRegistry(store)
+
+    try {
+      await registry.register(fixture.root)
+
+      expect(registry.findActiveForCwd(fixture.sibling)).toBeNull()
+      expect(registry.unregister(fixture.sibling)).toBe(false)
+      expect(registry.listActive()).toHaveLength(1)
+    } finally {
+      registry.close()
+      store.close()
+      await fixture.cleanup()
+    }
+  })
+
+  test("unregisters from a subdirectory cwd", async () => {
+    const fixture = await createProjectFixture()
+    const store = new IssueStore(":memory:")
+    const registry = createRegistry(store)
+
+    try {
+      await registry.register(fixture.root)
+
+      expect(registry.unregister(fixture.nested)).toBe(true)
+      expect(registry.listActive()).toHaveLength(0)
+    } finally {
+      registry.close()
+      store.close()
+      await fixture.cleanup()
     }
   })
 })
