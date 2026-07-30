@@ -9,10 +9,9 @@ import { scanDiffForSecrets } from "./stop-secret-scanner.ts"
 const tmp = useTempDir("swiz-secret-scanner-")
 const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 const mockDiffs = new Map<string, string>()
-let nextRepoId = 0
 
 function makeRepo(): string {
-  const cwd = `/mock/swiz-secret-scanner-${++nextRepoId}`
+  const cwd = `/mock/swiz-secret-scanner-${crypto.randomUUID()}`
   mockDiffs.set(cwd, "")
   return cwd
 }
