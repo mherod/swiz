@@ -1,11 +1,27 @@
-import { type FSWatcher, watch } from "node:fs"
+import { watch } from "node:fs"
+
+export interface FileWatcherHandle {
+  close(): void
+}
+
+export interface FileWatcherRuntime {
+  /** Watch and scheduling boundaries are injectable so debounce behavior stays deterministic in tests. */
+  watch(
+    path: string,
+    options: { recursive: boolean },
+    listener: (event: string, filename: string | Buffer | null) => void
+  ): FileWatcherHandle
+  schedule(callback: () => void, delayMs: number): unknown
+  cancel(timer: unknown): void
+  now(): number
+}
 
 export interface WatchEntry {
   path: string
   label: string
   callbacks: Set<() => void>
-  watchers: FSWatcher[]
-  debounceTimer: ReturnType<typeof setTimeout> | null
+  watchers: FileWatcherHandle[]
+  debounceTimer: unknown | null
   lastInvalidation: number | null
   invalidationCount: number
   recursive?: boolean
@@ -13,6 +29,13 @@ export interface WatchEntry {
 }
 
 const WATCH_INVALIDATION_DEBOUNCE_MS = 50
+
+const defaultRuntime: FileWatcherRuntime = {
+  watch: (path, options, listener) => watch(path, options, listener),
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  cancel: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  now: () => Date.now(),
+}
 
 /**
  * Registry of file-system watchers that trigger cache invalidation callbacks.
@@ -29,6 +52,11 @@ const WATCH_INVALIDATION_DEBOUNCE_MS = 50
  */
 export class BaseFileWatcherRegistry {
   private entries = new Map<string, WatchEntry>()
+  private runtime: FileWatcherRuntime
+
+  constructor(runtime: Partial<FileWatcherRuntime> = {}) {
+    this.runtime = { ...defaultRuntime, ...runtime }
+  }
 
   register(
     path: string,
@@ -62,7 +90,7 @@ export class BaseFileWatcherRegistry {
 
       const flush = () => {
         entry.debounceTimer = null
-        entry.lastInvalidation = Date.now()
+        entry.lastInvalidation = this.runtime.now()
         entry.invalidationCount += 1
         for (const cb of entry.callbacks) {
           try {
@@ -73,24 +101,28 @@ export class BaseFileWatcherRegistry {
         }
       }
       const fire = () => {
-        if (entry.debounceTimer) return
-        entry.debounceTimer = setTimeout(flush, WATCH_INVALIDATION_DEBOUNCE_MS)
+        if (entry.debounceTimer !== null) return
+        entry.debounceTimer = this.runtime.schedule(flush, WATCH_INVALIDATION_DEBOUNCE_MS)
       }
 
       if (entry.recursive && entry.depth !== 0) {
         try {
-          const watcher = watch(entry.path, { recursive: true }, (_event, filename) => {
-            const rel = filename == null ? "" : `${filename}`
-            if (this.shouldIgnoreRelativePath(rel)) return
-            fire()
-          })
+          const watcher = this.runtime.watch(
+            entry.path,
+            { recursive: true },
+            (_event, filename) => {
+              const rel = filename == null ? "" : `${filename}`
+              if (this.shouldIgnoreRelativePath(rel)) return
+              fire()
+            }
+          )
           entry.watchers.push(watcher)
         } catch {
           // path may not exist yet — that's fine
         }
       } else {
         try {
-          const watcher = watch(entry.path, { recursive: false }, fire)
+          const watcher = this.runtime.watch(entry.path, { recursive: false }, fire)
           entry.watchers.push(watcher)
         } catch {
           // path may not exist yet — that's fine
@@ -134,8 +166,8 @@ export class BaseFileWatcherRegistry {
     let removed = 0
     for (const [path, entry] of this.entries) {
       if (entry.label.endsWith(suffix)) {
-        if (entry.debounceTimer) {
-          clearTimeout(entry.debounceTimer)
+        if (entry.debounceTimer !== null) {
+          this.runtime.cancel(entry.debounceTimer)
           entry.debounceTimer = null
         }
         for (const w of entry.watchers) {
@@ -151,8 +183,8 @@ export class BaseFileWatcherRegistry {
 
   close(): void {
     for (const entry of this.entries.values()) {
-      if (entry.debounceTimer) {
-        clearTimeout(entry.debounceTimer)
+      if (entry.debounceTimer !== null) {
+        this.runtime.cancel(entry.debounceTimer)
         entry.debounceTimer = null
       }
       for (const w of entry.watchers) {

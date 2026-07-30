@@ -69,27 +69,43 @@ describe("file-watcher-registry exclusion", () => {
   })
 
   test("debounces burst invalidations", async () => {
-    const base = join("/tmp/swiz-watcher-test-debounce", `run-${Date.now()}`)
-    mkdirSync(base, { recursive: true })
-    const registry = new FileWatcherRegistry()
+    const captured: {
+      emitChange?: (event: string, filename: string | null) => void
+      flushDebounce?: () => void
+    } = {}
+    const registry = new FileWatcherRegistry({
+      watch: (_path, _options, listener) => {
+        captured.emitChange = listener
+        return { close: () => {} }
+      },
+      schedule: (callback) => {
+        captured.flushDebounce = callback
+        return Symbol("debounce-timer")
+      },
+      cancel: () => {},
+      now: () => 1234,
+    })
     let invalidations = 0
     try {
-      registry.register(join(base, "/"), "test-debounce", () => {
+      registry.register("/virtual/project/", "test-debounce", () => {
         invalidations += 1
       })
       await registry.start()
 
-      const watchedFile = join(base, "watched.txt")
-      await Bun.write(watchedFile, "one")
-      await Bun.write(watchedFile, "two")
-      await Bun.write(watchedFile, "three")
-      await Bun.sleep(200)
+      expect(captured.emitChange).toBeDefined()
+      captured.emitChange?.("change", "watched.txt")
+      captured.emitChange?.("change", "watched.txt")
+      captured.emitChange?.("change", "watched.txt")
+      expect(invalidations).toBe(0)
+
+      expect(captured.flushDebounce).toBeDefined()
+      captured.flushDebounce?.()
 
       expect(invalidations).toBe(1)
       expect(registry.status()[0]?.invalidationCount).toBe(1)
+      expect(registry.status()[0]?.lastInvalidation).toBe(1234)
     } finally {
       registry.close()
-      safeRemove(base)
     }
   })
 })
