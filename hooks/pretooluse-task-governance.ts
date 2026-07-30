@@ -470,7 +470,7 @@ async function checkDirectMergeIntent(
   const mergePrTasks = incompleteTasks.filter((t) => DIRECT_MERGE_INTENT_RE.test(t.subject))
   if (mergePrTasks.length === 0) return undefined
   try {
-    const settings = await readSwizSettings()
+    const settings = await readSwizSettings({ strict: true })
     if (!settings.strictNoDirectMain) return undefined
     const taskList = mergePrTasks.map((t) => `  • #${t.id} (${t.status}): ${t.subject}`).join("\n")
     return await denyAutoSteerOrBlock(
@@ -610,7 +610,7 @@ async function emitSlowTaskWarning(
 ): Promise<SwizHookOutput | undefined> {
   try {
     const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
+      readSwizSettings({ strict: true }),
       readProjectSettings(cwd),
     ])
     const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
@@ -934,7 +934,7 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
     const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
+      readSwizSettings({ strict: true }),
       readProjectSettings(cwd),
     ])
     const effectiveSettings =
@@ -1119,7 +1119,7 @@ async function checkNativeTaskDeletionGovernance(
 ): Promise<SwizHookOutput | null> {
   try {
     const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
+      readSwizSettings({ strict: true }),
       cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
     ])
     // Overlay in-memory event state for TOCTOU safety on parallel deletions.
@@ -1204,7 +1204,7 @@ async function handleTaskCompletion(
     let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
     try {
       const [settings, projectSettings] = await Promise.all([
-        readSwizSettings(),
+        readSwizSettings({ strict: true }),
         cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
       ])
       const effective =
@@ -1285,8 +1285,37 @@ async function checkInProgressTransitionCap(
 
 type NativeTaskUpdateResult = SwizHookOutput | "early_exit" | "continue"
 
-const UPDATE_PLAN_ALLOWED_FIELDS = new Set(["explanation", "plan"])
+const UPDATE_PLAN_ALLOWED_FIELDS = new Set([
+  "explanation",
+  "plan",
+  "thought",
+  "notes",
+  "summary",
+  "rationale",
+  "call_id",
+  "id",
+])
 const UPDATE_PLAN_STATUSES = new Set(["pending", "in_progress", "completed", "cancelled"])
+const UPDATE_PLAN_STATUS_ALIASES: Record<string, string> = {
+  done: "completed",
+  "in-progress": "in_progress",
+  canceled: "cancelled",
+}
+
+function normalizeUpdatePlanStatus(rawStatus: unknown): string | null {
+  if (typeof rawStatus !== "string") return null
+  const lower = rawStatus.trim().toLowerCase()
+  const mapped = UPDATE_PLAN_STATUS_ALIASES[lower] ?? lower
+  return UPDATE_PLAN_STATUSES.has(mapped) ? mapped : null
+}
+
+function extractUpdatePlanStep(record: Record<string, any>): string | null {
+  const value = record.step ?? record.subject ?? record.description ?? record.title
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim()
+  }
+  return null
+}
 
 interface UpdatePlanTaskInput {
   step: string
@@ -1317,10 +1346,12 @@ function validateUpdatePlanItem(item: unknown, index: number): string | null {
     return `update_plan item ${index + 1} must be an object.`
   }
   const record = item as Record<string, any>
-  if (typeof record.step !== "string" || record.step.trim().length === 0) {
+  const step = extractUpdatePlanStep(record)
+  if (!step) {
     return `update_plan item ${index + 1} requires a non-empty \`step\`.`
   }
-  if (typeof record.status !== "string" || !UPDATE_PLAN_STATUSES.has(record.status)) {
+  const status = normalizeUpdatePlanStatus(record.status)
+  if (!status) {
     return `update_plan item ${index + 1} has unsupported status \`${String(record.status ?? "")}\`.`
   }
   return null
@@ -1350,8 +1381,8 @@ function validateUpdatePlanInput(toolInput: Record<string, any>): SwizHookOutput
 
 function parseUpdatePlanTasks(toolInput: Record<string, any>): UpdatePlanTaskInput[] {
   return (toolInput.plan as Record<string, any>[]).map((item) => ({
-    step: String(item.step).trim(),
-    status: String(item.status),
+    step: extractUpdatePlanStep(item) ?? "",
+    status: normalizeUpdatePlanStatus(item.status) ?? String(item.status),
   }))
 }
 
@@ -1417,16 +1448,6 @@ async function readUpdatePlanProjection(
   }
 }
 
-function findPendingCompletionShortcut(
-  projection: UpdatePlanProjection
-): ProjectedPlanTask | undefined {
-  const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
-  return projection.finalTasks.find((task) => {
-    const existing = existingById.get(task.id)
-    return existing?.status === "pending" && task.status === "completed"
-  })
-}
-
 function findCompletedTransitions(projection: UpdatePlanProjection): ProjectedPlanTask[] {
   const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
   return projection.finalTasks.filter((task) => {
@@ -1459,25 +1480,12 @@ function checkUpdatePlanInProgressCap(projection: UpdatePlanProjection): SwizHoo
 }
 
 function checkUpdatePlanFinalTaskState(
-  input: Record<string, any>,
   projection: UpdatePlanProjection,
   thresholds: GovernanceThresholds
 ): SwizHookOutput | null {
   const duplicateGroups = findDuplicateSubjectGroups(projection.finalTasks)
   if (duplicateGroups.length > 0)
     return buildDuplicateSubjectStateBlock("update_plan", duplicateGroups)
-
-  const pendingShortcut = findPendingCompletionShortcut(projection)
-  if (pendingShortcut) {
-    return denyTaskGovernance(
-      {
-        kind: "pending-completion-shortcut",
-        taskId: pendingShortcut.id,
-        subject: pendingShortcut.subject,
-      },
-      input
-    )
-  }
 
   const capOutcome = checkUpdatePlanInProgressCap(projection)
   if (capOutcome) return capOutcome
@@ -1518,7 +1526,7 @@ async function evaluateUpdatePlanGovernance(
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {
     const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
+      readSwizSettings({ strict: true }),
       readProjectSettings(cwd).catch(() => null),
     ])
     const effective =
@@ -1529,7 +1537,7 @@ async function evaluateUpdatePlanGovernance(
     // Fall through with strict defaults.
   }
 
-  const stateDenied = checkUpdatePlanFinalTaskState(input, projection, thresholds)
+  const stateDenied = checkUpdatePlanFinalTaskState(projection, thresholds)
   if (stateDenied) return stateDenied
 
   const summary = buildIncompleteTaskSummary(projection.finalTasks)

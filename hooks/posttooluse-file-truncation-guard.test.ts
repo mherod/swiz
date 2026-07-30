@@ -30,8 +30,13 @@ async function createRepoWithFile(
   return { cwd, filePath }
 }
 
-function makeInput(filePath: string, cwd: string, toolName = "Edit") {
-  return { tool_name: toolName, tool_input: { file_path: filePath }, cwd, session_id: "test" }
+function makeInput(
+  filePath: string,
+  cwd: string,
+  toolName = "Edit",
+  pathKey: "file_path" | "filePath" | "notebook_path" | "notebookPath" = "file_path"
+) {
+  return { tool_name: toolName, tool_input: { [pathKey]: filePath }, cwd, session_id: "test" }
 }
 
 function makeApplyPatchInput(command: string, cwd: string) {
@@ -101,6 +106,21 @@ describe("posttooluse-file-truncation-guard", () => {
     const result = await evaluateFileTruncationGuard(makeInput(filePath, cwd, "Write"))
     const hso = (result as Record<string, any>).hookSpecificOutput as Record<string, any>
     expect(hso?.additionalContext).toContain("lost")
+  })
+
+  test.each([
+    "filePath",
+    "notebook_path",
+    "notebookPath",
+  ] as const)("%s edit target triggers warning on truncation", async (pathKey) => {
+    const { cwd, filePath } = await createRepoWithFile(lines(200))
+    await Bun.write(filePath, "// truncated through alternate path key\n")
+    const result = await evaluateFileTruncationGuard(
+      makeInput(filePath, cwd, "NotebookEdit", pathKey)
+    )
+    const hso = (result as Record<string, any>).hookSpecificOutput as Record<string, any>
+    expect(hso?.additionalContext).toContain("lost")
+    expect(hso?.additionalContext).toContain("target.ts")
   })
 
   test("apply_patch command extracts updated file path and triggers warning", async () => {

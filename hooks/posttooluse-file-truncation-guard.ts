@@ -10,50 +10,10 @@ import { git } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { extractFileEditTargetPaths } from "../src/tool-matchers.ts"
 
 const MIN_NET_LINE_LOSS = 50
 const MIN_PCT_LINE_LOSS = 0.5
-const APPLY_PATCH_FILE_PREFIXES = [
-  "*** Update File: ",
-  "*** Delete File: ",
-  "*** Add File: ",
-  "*** Move to: ",
-]
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
-function addNonEmptyPath(paths: Set<string>, value: unknown): void {
-  if (typeof value !== "string") return
-  const trimmed = value.trim()
-  if (trimmed) paths.add(trimmed)
-}
-
-function extractApplyPatchFilePaths(command: string): string[] {
-  const paths = new Set<string>()
-  for (const line of command.split("\n")) {
-    const prefix = APPLY_PATCH_FILE_PREFIXES.find((candidate) => line.startsWith(candidate))
-    if (!prefix) continue
-    addNonEmptyPath(paths, line.slice(prefix.length))
-  }
-  return Array.from(paths)
-}
-
-function extractEditedFilePaths(toolInput: unknown): string[] {
-  if (!isRecord(toolInput)) return []
-
-  const paths = new Set<string>()
-  addNonEmptyPath(paths, toolInput.file_path)
-
-  if (typeof toolInput.command === "string") {
-    for (const filePath of extractApplyPatchFilePaths(toolInput.command)) {
-      paths.add(filePath)
-    }
-  }
-
-  return Array.from(paths)
-}
 
 function resolveEditedPath(cwd: string, filePath: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath)
@@ -117,7 +77,7 @@ async function buildTruncationContext(filePath: string, cwd: string): Promise<st
 export async function evaluateFileTruncationGuard(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
-  const filePaths = extractEditedFilePaths(hookInput.tool_input)
+  const filePaths = extractFileEditTargetPaths(hookInput.tool_input)
   if (filePaths.length === 0) return {}
 
   const contexts: string[] = []
@@ -134,7 +94,7 @@ export async function evaluateFileTruncationGuard(input: unknown): Promise<SwizH
 const posttooluseFileTruncationGuard: SwizHook<Record<string, any>> = {
   name: "posttooluse-file-truncation-guard",
   event: "postToolUse",
-  matcher: "Edit|Write",
+  matcher: "Edit|Write|NotebookEdit",
   timeout: 5,
   run(input) {
     return evaluateFileTruncationGuard(input)

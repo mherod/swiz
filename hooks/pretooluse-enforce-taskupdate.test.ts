@@ -35,19 +35,22 @@ function runCodexHook(command: string) {
 async function withTaskHome(
   sessionId: string,
   tasks: Array<{ id: string; subject: string; status: string }>,
-  fn: (home: string) => Promise<void>
+  fn: (home: string, projectDir: string) => Promise<void>
 ): Promise<void> {
   const home = join(
     tmpdir(),
     `swiz-taskupdate-${Date.now()}-${Math.random().toString(36).slice(2)}`
   )
+  const projectDir = join(home, "project")
+  await mkdir(join(projectDir, ".swiz"), { recursive: true })
+  await writeFile(join(projectDir, ".swiz", "config.json"), JSON.stringify({ autoContinue: true }))
   const tasksDir = join(home, ".claude", "tasks", sessionId)
   await mkdir(tasksDir, { recursive: true })
   for (const task of tasks) {
     await writeFile(join(tasksDir, `${task.id}.json`), JSON.stringify(task))
   }
   try {
-    await fn(home)
+    await fn(home, projectDir)
   } finally {
     await rm(home, { recursive: true, force: true })
   }
@@ -141,12 +144,13 @@ describe("pretooluse-enforce-taskupdate", () => {
         { id: "1", subject: "Resolve task state", status: "pending" },
         { id: "2", subject: "Write regression tests", status: "pending" },
       ],
-      async (home) => {
+      async (home, projectDir) => {
         const result = await runHook(
           HOOK,
           {
             tool_name: "TaskUpdate",
             session_id: sessionId,
+            cwd: projectDir,
             tool_input: { taskId: "2", subject: "Resolve task state" },
           },
           { HOME: home, CLAUDECODE: "1" }
@@ -168,12 +172,13 @@ describe("pretooluse-enforce-taskupdate", () => {
         { id: "2", subject: "Verify checkout fix", status: "pending" },
         { id: "3", subject: "Document checkout fix", status: "pending" },
       ],
-      async (home) => {
+      async (home, projectDir) => {
         const result = await runHook(
           HOOK,
           {
             tool_name: "TaskUpdate",
             session_id: sessionId,
+            cwd: projectDir,
             tool_input: { taskId: "1", status: "completed" },
           },
           { HOME: home, CLAUDECODE: "1" }
@@ -201,12 +206,13 @@ describe("pretooluse-enforce-taskupdate", () => {
         { id: "1", subject: "Implement checkout fix", status: "in_progress" },
         { id: "2", subject: "Verify checkout fix", status: "pending" },
       ],
-      async (home) => {
+      async (home, projectDir) => {
         const result = await runHook(
           HOOK,
           {
             tool_name: "TaskUpdate",
             session_id: sessionId,
+            cwd: projectDir,
             tool_input: { taskId: "1", status: "deleted" },
           },
           { HOME: home, CLAUDECODE: "1" }
@@ -235,12 +241,13 @@ describe("pretooluse-enforce-taskupdate", () => {
         { id: "1", subject: "Resolve task state", status: "pending" },
         { id: "2", subject: "Resolve task state", status: "pending" },
       ],
-      async (home) => {
+      async (home, projectDir) => {
         const result = await runHook(
           HOOK,
           {
             tool_name: "TaskUpdate",
             session_id: sessionId,
+            cwd: projectDir,
             tool_input: { taskId: "2", subject: "Write regression tests" },
           },
           { HOME: home, CLAUDECODE: "1" }

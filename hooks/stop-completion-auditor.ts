@@ -18,6 +18,21 @@ import { evaluateStopCompletionAuditor } from "./stop-completion-auditor/evaluat
 export async function evaluateStopCompletionAuditorHook(
   input: StopHookInput
 ): Promise<SwizHookOutput> {
+  try {
+    const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(
+      "../src/settings.ts"
+    )
+    const rawInput = input as Record<string, any>
+    const cwd = typeof rawInput.cwd === "string" ? rawInput.cwd : process.cwd()
+    const rawSettings = await readSwizSettings({ strict: true })
+    const projectSettings = await readProjectSettings(cwd).catch(() => null)
+    const effective =
+      (rawInput._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(rawSettings, input.session_id, projectSettings ?? undefined)
+    if (effective.autoContinue === false) return {}
+  } catch {
+    // Fail open
+  }
   const parsed = stopHookInputSchema.parse(input)
   return await evaluateStopCompletionAuditor(parsed)
 }
@@ -26,6 +41,7 @@ const stopCompletionAuditor: SwizStopHook = {
   name: "stop-completion-auditor",
   event: "stop",
   timeout: 10,
+  requiredSettings: ["autoContinue"],
 
   run(input) {
     return evaluateStopCompletionAuditorHook(input)

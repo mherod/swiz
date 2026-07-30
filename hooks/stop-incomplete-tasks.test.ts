@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
@@ -28,9 +30,14 @@ async function runHook({
     finalEnvOverrides.CLAUDECODE = "1"
   }
 
+  const defaultProjectDir = await createTempHome()
+  const defaultSwizDir = join(defaultProjectDir, ".swiz")
+  await mkdir(defaultSwizDir, { recursive: true })
+  await writeFile(join(defaultSwizDir, "config.json"), JSON.stringify({ autoContinue: true }))
+
   const payload = JSON.stringify({
     session_id: sessionId,
-    cwd: cwd ?? process.cwd(),
+    cwd: cwd ?? defaultProjectDir,
     hook_event_name: "Stop",
     ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
     _env: finalEnvOverrides,
@@ -301,5 +308,25 @@ describe("stop-incomplete-tasks", () => {
     const endpointIdx = result.reason?.indexOf("Implement API endpoint") ?? -1
     const testIdx = result.reason?.indexOf("Add unit tests for validation") ?? -1
     expect(endpointIdx).toBeLessThan(testIdx)
+  })
+
+  test("allows stop when autoContinue is disabled in project settings", async () => {
+    const homeDir = await createTempHome()
+    const projectDir = await createTempHome()
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(projectDir, ".swiz", "config.json"),
+      JSON.stringify({ autoContinue: false })
+    )
+    const sessionId = "session-autocontinue-disabled"
+
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Unfinished work",
+      status: "in_progress",
+    })
+
+    const result = await runHook({ homeDir, cwd: projectDir, sessionId })
+    expect(result.decision).toBeUndefined()
   })
 })

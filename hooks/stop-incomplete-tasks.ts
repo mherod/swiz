@@ -27,6 +27,21 @@ export async function evaluateStopIncompleteTasksHook(
   input: StopHookInput
 ): Promise<SwizHookOutput> {
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
+  try {
+    const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(
+      "../src/settings.ts"
+    )
+    const rawInput = input as Record<string, any>
+    const cwd = typeof rawInput.cwd === "string" ? rawInput.cwd : process.cwd()
+    const rawSettings = await readSwizSettings({ strict: true })
+    const projectSettings = await readProjectSettings(cwd).catch(() => null)
+    const effective =
+      (rawInput._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(rawSettings, input.session_id, projectSettings ?? undefined)
+    if (effective.autoContinue === false) return {}
+  } catch {
+    // Fail open on settings error
+  }
   const parsed = stopHookInputSchema.parse(input)
 
   // Require TaskList before stop when the session has used task tools and is running inside Claude.
@@ -53,6 +68,7 @@ const stopIncompleteTasks: SwizStopHook = {
   name: "stop-incomplete-tasks",
   event: "stop",
   timeout: 10,
+  requiredSettings: ["autoContinue"],
 
   run(input) {
     return evaluateStopIncompleteTasksHook(input)

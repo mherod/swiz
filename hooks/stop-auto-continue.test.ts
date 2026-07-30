@@ -77,10 +77,12 @@ async function runHook({
 
   // Isolate HOME so the hook reads autoContinue: true from a temp settings file
   // instead of the real ~/.swiz/settings.json (which may have autoContinue: false).
-  const fakeHome = await createTempDir()
+  const fakeHome = extraEnv.HOME ?? (await createTempDir())
   const fakeSwizDir = join(fakeHome, ".swiz")
-  await mkdir(fakeSwizDir, { recursive: true })
-  await writeFile(join(fakeSwizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
+  if (!extraEnv.HOME) {
+    await mkdir(fakeSwizDir, { recursive: true })
+    await writeFile(join(fakeSwizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
+  }
 
   // Strip CLAUDECODE (would alter agent detection) and GEMINI_API_KEY (tests control it).
   const { CLAUDECODE: _cc, GEMINI_API_KEY: _gk, ...cleanEnv } = process.env
@@ -91,6 +93,7 @@ async function runHook({
     env: {
       ...cleanEnv,
       HOME: fakeHome,
+      ...extraEnv,
       // Never talk to the real daemon from tests.
       SWIZ_NO_DAEMON: "1",
       // Mock all external AI backends by default so tests never spawn real CLIs.

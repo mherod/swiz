@@ -121,7 +121,7 @@ export type ToolMatcherValue =
 
 export type ToolMatcherRecord = { [key: string]: ToolMatcherValue }
 
-function isRecord(value: ToolMatcherValue): value is ToolMatcherRecord {
+function isRecord(value: ToolMatcherValue | object): value is ToolMatcherRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
@@ -150,7 +150,7 @@ export function extractApplyPatchFilePaths(command: string): string[] {
   return [...paths]
 }
 
-export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | undefined): string[] {
+export function extractFileEditTargetPaths(toolInput: ToolMatcherValue | object): string[] {
   if (!isRecord(toolInput)) return []
 
   const paths = new Set<string>()
