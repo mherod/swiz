@@ -47,8 +47,6 @@ function buildTranscript(toolCallCount: number, userMessage = "What is the statu
   return `${lines.join("\n")}\n`
 }
 
-let sessionCounter = 0
-
 async function runHook({
   transcriptContent,
   stopHookActive = false,
@@ -71,7 +69,7 @@ async function runHook({
   const payload = JSON.stringify({
     transcript_path: transcriptPath,
     stop_hook_active: stopHookActive,
-    session_id: sessionId ?? `test-session-${++sessionCounter}`,
+    session_id: sessionId ?? `test-session-${crypto.randomUUID()}`,
     cwd: hookCwd,
   })
 
