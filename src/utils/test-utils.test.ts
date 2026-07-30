@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { acquireEnvLock, releaseEnvLockFn } from "./test-utils.ts"
+import { acquireEnvLock, neutralAgentEnv, releaseEnvLockFn } from "./test-utils.ts"
+
+test("missing HOME subprocesses disable Bun's relative transpiler cache", () => {
+  const env = neutralAgentEnv({ HOME: undefined })
+
+  expect(env.HOME).toBe("")
+  expect(env.BUN_RUNTIME_TRANSPILER_CACHE_PATH).toBe("0")
+})
 
 test("environment lock releases queued callers in acquisition order", async () => {
   const order: string[] = []

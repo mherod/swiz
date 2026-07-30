@@ -12,7 +12,12 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 setDefaultTimeout(30_000)
 
 import { join } from "node:path"
-import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  type HookResult,
+  runHookInProcess,
+  runHook as runHookWithEnvContract,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -24,6 +29,11 @@ async function runHook(
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
+  // A missing HOME is a process-start contract. Importing hook modules after
+  // deleting HOME makes Bun place its transpiler cache under the repository.
+  if (Object.hasOwn(envOverrides, "HOME") && envOverrides.HOME === undefined) {
+    return await runHookWithEnvContract(script, stdinPayload, envOverrides)
+  }
   return await runHookInProcess(script, stdinPayload, { env: envOverrides })
 }
 

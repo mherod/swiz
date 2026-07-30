@@ -11,7 +11,7 @@ setDefaultTimeout(30_000)
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
-import { runHook, useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import { neutralAgentEnv, runHook, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -279,7 +279,7 @@ describe("createSessionTask input sanitization", () => {
     const proc = Bun.spawn(["bun", "-e", script], {
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, HOME: "" },
+      env: neutralAgentEnv({ HOME: undefined }),
     })
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
