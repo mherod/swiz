@@ -58,3 +58,4 @@ output.txt
 
 # Local scratch/exploration files
 scratch/
+*.pile
