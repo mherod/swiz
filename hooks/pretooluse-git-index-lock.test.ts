@@ -20,6 +20,8 @@ interface HarnessOptions {
   unlinkFailures?: number
   unlinkAlwaysFails?: boolean
   processInspectionTimesOut?: boolean
+  processInspectionThrowsOn?: "pgrep" | "ps" | "lsof"
+  lsofExitCode?: number
 }
 
 interface Harness {
@@ -74,6 +76,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
     },
     spawn(cmd) {
       processCalls.push(cmd)
+      if (cmd[0] === options.processInspectionThrowsOn) {
+        throw new Error(`synthetic ${cmd[0]} spawn failure`)
+      }
       if (options.processInspectionTimesOut) {
         now += 100
         return Promise.resolve(processResult("", { timedOut: true }))
@@ -87,6 +92,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
         return Promise.resolve(processResult("PID PPID\n200 1\n100 50\n50 1"))
       }
       if (cmd[0] === "lsof") {
+        if (options.lsofExitCode !== undefined) {
+          return Promise.resolve(processResult("", { exitCode: options.lsofExitCode }))
+        }
         return Promise.resolve(
           processResult(options.activeGit ? `p200\nn${REPO_ROOT}` : "p200\nn/other")
         )
@@ -200,6 +208,25 @@ describe("pretooluse-git-index-lock", () => {
       expect(active).toBe(true)
       expect(harness.processCalls).toHaveLength(1)
     })
+
+    test("fails safe when a process inspection command cannot start", async () => {
+      const harness = createHarness({
+        activeGit: true,
+        processInspectionThrowsOn: "lsof",
+      })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(true)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+    })
+
+    test("treats an empty non-zero lsof result as a vanished candidate", async () => {
+      const harness = createHarness({ activeGit: true, lsofExitCode: 1 })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(false)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+    })
   })
 
   describe("stale lock resolution", () => {
@@ -261,6 +288,19 @@ describe("pretooluse-git-index-lock", () => {
 
     test("removes an old lock despite a matching long-lived process", async () => {
       const harness = createHarness({ activeGit: true, lockOld: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("Auto-removed")
+      expect(harness.lockExists()).toBe(false)
+    })
+
+    test("removes an old lock when process inspection cannot start", async () => {
+      const harness = createHarness({
+        activeGit: true,
+        lockOld: true,
+        processInspectionThrowsOn: "lsof",
+      })
       const result = await runHook("git status", harness)
 
       expect(result.decision).toBe("allow")

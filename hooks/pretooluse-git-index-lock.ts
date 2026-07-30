@@ -324,6 +324,18 @@ function lsofOutputUsesRepo(stdout: string, repoRoot: string): boolean {
 
 type ProcessInspectionRuntime = Pick<GitIndexLockRuntime, "now" | "pid" | "ppid" | "spawn">
 
+async function spawnForProcessInspection(
+  runtime: ProcessInspectionRuntime,
+  cmd: string[],
+  timeoutMs: number
+): Promise<SpawnWithTimeoutResult | null> {
+  try {
+    return await runtime.spawn(cmd, { timeoutMs })
+  } catch {
+    return null
+  }
+}
+
 /**
  * Inspect running Git processes without allowing subprocess work to exceed the
  * lock-release deadline. Candidate PIDs are checked in one lsof invocation so
@@ -336,9 +348,12 @@ export async function inspectGitProcessesForRepo(
 ): Promise<boolean> {
   const pgrepTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
   if (pgrepTimeoutMs === null) return true
-  const pgrepResult = await runtime.spawn(["pgrep", "-f", "git"], {
-    timeoutMs: pgrepTimeoutMs,
-  })
+  const pgrepResult = await spawnForProcessInspection(
+    runtime,
+    ["pgrep", "-f", "git"],
+    pgrepTimeoutMs
+  )
+  if (pgrepResult === null) return true
   if (pgrepResult.timedOut) return true
   if (pgrepResult.exitCode !== 0) return false
 
@@ -353,9 +368,8 @@ export async function inspectGitProcessesForRepo(
 
   const psTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
   if (psTimeoutMs === null) return true
-  const psResult = await runtime.spawn(["ps", "-eo", "pid,ppid"], {
-    timeoutMs: psTimeoutMs,
-  })
+  const psResult = await spawnForProcessInspection(runtime, ["ps", "-eo", "pid,ppid"], psTimeoutMs)
+  if (psResult === null) return true
   if (psResult.timedOut || psResult.exitCode !== 0) return true
 
   const ancestors = walkAncestry(parseParentMap(psResult.stdout), runtime.ppid())
@@ -365,12 +379,15 @@ export async function inspectGitProcessesForRepo(
 
   const lsofTimeoutMs = boundedTimeoutMs(deadlineMs, LSOF_TIMEOUT_MS, runtime)
   if (lsofTimeoutMs === null) return true
-  const lsofResult = await runtime.spawn(
+  const lsofResult = await spawnForProcessInspection(
+    runtime,
     ["lsof", "-a", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"],
-    { timeoutMs: lsofTimeoutMs }
+    lsofTimeoutMs
   )
-  if (lsofResult.timedOut || lsofResult.exitCode !== 0) return true
-  return lsofOutputUsesRepo(lsofResult.stdout, repoRoot)
+  if (lsofResult === null || lsofResult.timedOut) return true
+  if (lsofOutputUsesRepo(lsofResult.stdout, repoRoot)) return true
+  if (lsofResult.stdout.trim().length > 0 || lsofResult.exitCode === 0) return false
+  return lsofResult.stderr.trim().length > 0
 }
 
 export async function evaluatePretooluseGitIndexLock(
