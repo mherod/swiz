@@ -38,7 +38,7 @@ import {
 
 function checkBunAvailable(): boolean {
   try {
-    const proc = Bun.spawnSync(["bun", "--version"])
+    const proc = Bun.spawnSync([process.execPath, "--version"])
     return proc.exitCode === 0
   } catch {
     return false

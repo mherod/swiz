@@ -82,7 +82,7 @@ async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
   )
   if (staleConfigs.length === 0) return
   console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
-  const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
+  const proc = Bun.spawn([process.execPath, "run", join(SWIZ_ROOT, "index.ts"), "install"], {
     stdout: "inherit",
     stderr: "inherit",
   })
