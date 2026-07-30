@@ -1,17 +1,34 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdir, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { writeProjectState } from "../src/settings.ts"
-import { createTestRepo } from "../src/utils/test-utils.ts"
+import { describe, expect, test } from "bun:test"
+import { evaluatePretooluseTrunkModeBranchGate } from "./pretooluse-trunk-mode-branch-gate.ts"
 
-setDefaultTimeout(30_000)
+const trunkModeRepos = new Set<string>()
+const projectStates = new Map<string, string>()
+const openPrCounts = new Map<string, number>()
+let nextRepoId = 0
 
-const BUN_EXE = Bun.which("bun") ?? "bun"
-const WORKSPACE_ROOT = process.cwd()
+function createTestRepo(
+  _remote: string,
+  _options: { featureBranch?: string } = {}
+): Promise<string> {
+  nextRepoId += 1
+  return Promise.resolve(`/test/trunk-mode-repo-${nextRepoId}`)
+}
 
-async function enableTrunkMode(repo: string): Promise<void> {
-  await mkdir(join(repo, ".swiz"), { recursive: true })
-  await writeFile(join(repo, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
+function enableTrunkMode(repo: string): Promise<void> {
+  trunkModeRepos.add(repo)
+  return Promise.resolve()
+}
+
+function writeProjectState(repo: string, state: string): Promise<void> {
+  projectStates.set(repo, state)
+  return Promise.resolve()
+}
+
+function cleanupTestPath(path: string): Promise<void> {
+  trunkModeRepos.delete(path)
+  projectStates.delete(path)
+  openPrCounts.delete(path)
+  return Promise.resolve()
 }
 
 async function runHook(
@@ -20,59 +37,49 @@ async function runHook(
   toolName = "Bash",
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<{ raw: string; parsed: Record<string, any> | null; decision?: string }> {
-  const payload = JSON.stringify({
-    tool_name: toolName,
-    tool_input: { command, cwd },
-    cwd,
-  })
-
-  const proc = Bun.spawn([BUN_EXE, "hooks/pretooluse-trunk-mode-branch-gate.ts"], {
-    cwd: WORKSPACE_ROOT,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, ...envOverrides },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const [rawOutput, stderrOutput] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const exitCode = await proc.exited
-  const raw = rawOutput.trim()
-  const stderr = stderrOutput.trim()
-  if (exitCode !== 0) {
-    throw new Error(`hook exited with ${exitCode}: ${stderr || "(no stderr)"}`)
-  }
-  if (!raw) return { raw, parsed: null }
-  const parsed = JSON.parse(raw) as Record<string, any>
-  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
-  const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
+  const output = await evaluatePretooluseTrunkModeBranchGate(
+    {
+      tool_name: toolName,
+      tool_input: { command, cwd },
+      cwd,
+    },
+    {
+      runtime: {
+        isGitRepo: () => Promise.resolve(true),
+        readProjectSettings: (repo) =>
+          Promise.resolve(trunkModeRepos.has(repo) ? { trunkMode: true } : null),
+        readProjectState: (repo) => Promise.resolve(projectStates.get(repo) ?? null),
+        getDefaultBranch: () => Promise.resolve("main"),
+        hasOpenPullRequests: () => {
+          const mockBin = [...openPrCounts.keys()].find((path) =>
+            envOverrides.PATH?.startsWith(`${path}:`)
+          )
+          return Promise.resolve(mockBin ? (openPrCounts.get(mockBin) ?? 0) > 0 : false)
+        },
+      },
+    }
+  )
+  const parsed = Object.keys(output).length > 0 ? (output as Record<string, any>) : null
+  const raw = parsed ? JSON.stringify(parsed) : ""
+  const hso = parsed?.hookSpecificOutput as Record<string, any> | undefined
+  const decision =
+    (hso?.permissionDecision as string) ?? (parsed?.decision as string | undefined) ?? undefined
   return { raw, parsed, decision }
 }
 
-async function createMockGhBin(openPrCount: number): Promise<string> {
-  const dir = await Bun.$`mktemp -d`.text()
-  const binDir = dir.trim()
-  const ghPath = join(binDir, "gh")
-  await writeFile(
-    ghPath,
-    `#!/bin/sh
-if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  if [ "${openPrCount}" = "0" ]; then
-    echo "[]"
-  else
-    echo '[{"number":42}]'
-  fi
-  exit 0
-fi
-echo "[]"
-exit 0
-`
-  )
-  await Bun.$`chmod +x ${ghPath}`
-  return binDir
+function createMockGhBin(openPrCount: number): Promise<string> {
+  const binDir = `/test/mock-gh-${openPrCounts.size + 1}`
+  openPrCounts.set(binDir, openPrCount)
+  return Promise.resolve(binDir)
+}
+
+async function cleanupRepoAndMock(repo: string, mockGhBin?: string): Promise<void> {
+  if (mockGhBin) await cleanupTestPath(mockGhBin)
+  await cleanupTestPath(repo)
+}
+
+async function cleanupRepo(repo: string): Promise<void> {
+  await cleanupTestPath(repo)
 }
 
 describe("pretooluse-trunk-mode-branch-gate", () => {
@@ -82,7 +89,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout -b feat/off")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -96,7 +103,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("feat/trunk-block")
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -109,7 +116,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout main")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -128,7 +135,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         const result = await runHook(repo, command)
         expect(result.parsed).toBeNull()
       } finally {
-        await rm(repo, { recursive: true, force: true })
+        await cleanupRepo(repo)
       }
     })
   }
@@ -142,7 +149,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout -b main")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -172,7 +179,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         const hso = result.parsed?.hookSpecificOutput as Record<string, any>
         expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
       } finally {
-        await rm(repo, { recursive: true, force: true })
+        await cleanupRepo(repo)
       }
     })
   }
@@ -189,7 +196,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         const result = await runHook(repo, command)
         expect(result.parsed).toBeNull()
       } finally {
-        await rm(repo, { recursive: true, force: true })
+        await cleanupRepo(repo)
       }
     })
   }
@@ -201,7 +208,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout main && git checkout -b feat/second")
       expect(result.decision).toBe("deny")
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -214,7 +221,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -230,8 +237,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       })
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(mockGhBin, { recursive: true, force: true })
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepoAndMock(repo, mockGhBin)
     }
   })
 
@@ -247,8 +253,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       })
       expect(result.decision).toBe("deny")
     } finally {
-      await rm(mockGhBin, { recursive: true, force: true })
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepoAndMock(repo, mockGhBin)
     }
   })
 
@@ -266,8 +271,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
       expect(String(hso?.permissionDecisionReason ?? "")).toContain("developing")
     } finally {
-      await rm(mockGhBin, { recursive: true, force: true })
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepoAndMock(repo, mockGhBin)
     }
   })
 
@@ -281,7 +285,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
       expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/trunk mode/i)
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -291,7 +295,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "gh pr create --fill")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -302,7 +306,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout -b feat/x", "Read")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 
@@ -313,7 +317,7 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git status")
       expect(result.parsed).toBeNull()
     } finally {
-      await rm(repo, { recursive: true, force: true })
+      await cleanupRepo(repo)
     }
   })
 })

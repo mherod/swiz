@@ -1,293 +1,401 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, realpathSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
-import { neutralAgentEnv } from "../src/utils/test-utils.ts"
-import { evaluatePretooluseGitIndexLock } from "./pretooluse-git-index-lock.ts"
+import { GIT_INDEX_LOCK } from "../src/git-helpers.ts"
+import { runGit, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  evaluatePretooluseGitIndexLock,
+  type GitIndexLockRuntime,
+  inspectGitProcessesForRepo,
+} from "./pretooluse-git-index-lock.ts"
 
-// Create isolated temp git repos for testing.
-// Use realpathSync after creation to resolve macOS /var → /private/var symlink
-// so paths match what `git rev-parse --show-toplevel` returns in the hook subprocess.
-let TMP = ""
-let REPO_WITHOUT_LOCK = ""
+const REPO_ROOT = "/repo"
+const GIT_DIR = `${REPO_ROOT}/.git`
 
-/** Create a fresh git repo with a lock file, returning the resolved path. */
-async function createLockedRepo(name: string): Promise<string> {
-  const rawDir = join(TMP, name)
-  mkdirSync(rawDir, { recursive: true })
-  await runCommandOutput(["git", "init"], rawDir)
-  const resolved = realpathSync(rawDir)
-  await Bun.write(joinGitPath(resolved, GIT_INDEX_LOCK), "")
-  return resolved
+interface HarnessOptions {
+  activeGit?: boolean
+  lockExists?: boolean
+  lockOld?: boolean
+  disappearAfterValidation?: boolean
+  unlinkFailures?: number
+  unlinkAlwaysFails?: boolean
+  processInspectionTimesOut?: boolean
+  processInspectionThrowsOn?: "pgrep" | "ps" | "lsof"
+  lsofExitCode?: number
 }
 
-async function runCommandOutput(args: string[], cwd: string): Promise<string> {
-  const proc = Bun.spawn(args, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (proc.exitCode !== 0) {
-    throw new Error(`${args.join(" ")} failed: ${stderr}`)
+interface Harness {
+  runtime: GitIndexLockRuntime
+  gitCalls: string[][]
+  processCalls: string[][]
+  lockExists(): boolean
+  unlinkCalls(): number
+}
+
+function processResult(stdout: string, options: { exitCode?: number; timedOut?: boolean } = {}) {
+  return {
+    stdout,
+    stderr: "",
+    exitCode: options.exitCode ?? 0,
+    timedOut: options.timedOut ?? false,
   }
-  return stdout.trim()
 }
 
-async function createLockedWorktree(name: string): Promise<{ worktree: string; lockPath: string }> {
-  const mainRaw = join(TMP, `${name}-main`)
-  const worktreeRaw = join(TMP, `${name}-worktree`)
-  mkdirSync(mainRaw, { recursive: true })
-  await runCommandOutput(["git", "init"], mainRaw)
-  await runCommandOutput(
-    [
-      "git",
-      "-c",
-      "user.name=Swiz Test",
-      "-c",
-      "user.email=swiz-test@example.invalid",
-      "commit",
-      "--allow-empty",
-      "-m",
-      "init",
-    ],
-    mainRaw
-  )
-  await runCommandOutput(["git", "worktree", "add", worktreeRaw], mainRaw)
+function createHarness(options: HarnessOptions = {}): Harness {
+  let now = 1_000
+  let lockExists = options.lockExists ?? true
+  let fileExistsCalls = 0
+  let unlinkCalls = 0
+  const gitCalls: string[][] = []
+  const processCalls: string[][] = []
 
-  const worktree = realpathSync(worktreeRaw)
-  const gitDir = await runCommandOutput(["git", "rev-parse", "--absolute-git-dir"], worktree)
-  const lockPath = join(gitDir, GIT_INDEX_LOCK)
-  await Bun.write(lockPath, "")
-  return { worktree, lockPath }
-}
-
-beforeAll(async () => {
-  const rawTmp = join(tmpdir(), `swiz-git-lock-test-${process.pid}`)
-  const rawClean = join(rawTmp, "repo-clean")
-  mkdirSync(rawClean, { recursive: true })
-  await runCommandOutput(["git", "init"], rawClean)
-  TMP = realpathSync(rawTmp)
-  REPO_WITHOUT_LOCK = realpathSync(rawClean)
-})
-
-afterAll(async () => {
-  if (TMP) {
-    // Clear immutable flags before cleanup to avoid EPERM.
-    try {
-      await Bun.spawn(["chflags", "-R", "nouchg", TMP]).exited
-    } catch {
-      // ignore if no immutable files exist
-    }
-    try {
-      await Bun.file(TMP).delete()
-    } catch {
-      // best-effort cleanup
-    }
+  const runtime: GitIndexLockRuntime = {
+    git(args) {
+      gitCalls.push(args)
+      if (args[1] === "--show-toplevel") return Promise.resolve(REPO_ROOT)
+      if (args[1] === "--absolute-git-dir") return Promise.resolve(GIT_DIR)
+      return Promise.resolve("")
+    },
+    fileExists() {
+      fileExistsCalls++
+      if (options.disappearAfterValidation && fileExistsCalls >= 2) {
+        lockExists = false
+      }
+      return Promise.resolve(lockExists)
+    },
+    unlink() {
+      unlinkCalls++
+      if (options.unlinkAlwaysFails || unlinkCalls <= (options.unlinkFailures ?? 0)) {
+        throw new Error("synthetic unlink failure")
+      }
+      lockExists = false
+      return Promise.resolve()
+    },
+    fileMtimeMs() {
+      return Promise.resolve(options.lockOld ? now - 20_000 : now)
+    },
+    spawn(cmd) {
+      processCalls.push(cmd)
+      if (cmd[0] === options.processInspectionThrowsOn) {
+        throw new Error(`synthetic ${cmd[0]} spawn failure`)
+      }
+      if (options.processInspectionTimesOut) {
+        now += 100
+        return Promise.resolve(processResult("", { timedOut: true }))
+      }
+      if (cmd[0] === "pgrep") {
+        return Promise.resolve(
+          options.activeGit ? processResult("200") : processResult("", { exitCode: 1 })
+        )
+      }
+      if (cmd[0] === "ps") {
+        return Promise.resolve(processResult("PID PPID\n200 1\n100 50\n50 1"))
+      }
+      if (cmd[0] === "lsof") {
+        if (options.lsofExitCode !== undefined) {
+          return Promise.resolve(processResult("", { exitCode: options.lsofExitCode }))
+        }
+        return Promise.resolve(
+          processResult(options.activeGit ? `p200\nn${REPO_ROOT}` : "p200\nn/other")
+        )
+      }
+      throw new Error(`Unexpected process command: ${cmd.join(" ")}`)
+    },
+    sleep(ms) {
+      now += ms
+      return Promise.resolve()
+    },
+    now: () => now,
+    pid: () => 100,
+    ppid: () => 50,
   }
-})
+
+  return {
+    runtime,
+    gitCalls,
+    processCalls,
+    lockExists: () => lockExists,
+    unlinkCalls: () => unlinkCalls,
+  }
+}
+
+interface DecisionOutput {
+  decision?: string
+  reason?: string
+  hookSpecificOutput?: {
+    permissionDecision?: string
+    permissionDecisionReason?: string
+  }
+}
+
+function decisionFrom(result: DecisionOutput): { decision?: string; reason?: string } {
+  return {
+    decision: result.hookSpecificOutput?.permissionDecision ?? result.decision,
+    reason: result.hookSpecificOutput?.permissionDecisionReason ?? result.reason,
+  }
+}
 
 async function runHook(
   command: string,
-  cwd: string
+  harness: Harness,
+  input: { tool_name: string; tool_input: Record<string, unknown> } = {
+    tool_name: "Bash",
+    tool_input: { command },
+  }
 ): Promise<{ decision?: string; reason?: string }> {
   const result = await evaluatePretooluseGitIndexLock(
-    {
-      tool_name: "Bash",
-      tool_input: { command },
-      cwd,
-    },
+    { ...input, cwd: REPO_ROOT },
     {
       lockReleaseTimeoutMs: 100,
       waitIntervalMs: 5,
       removeRetryDelayMs: 5,
+      runtime: harness.runtime,
     }
   )
-  const hookSpecificOutput = (result as Record<string, any>).hookSpecificOutput
-  return {
-    decision: hookSpecificOutput?.permissionDecision ?? (result as Record<string, any>).decision,
-    reason: hookSpecificOutput?.permissionDecisionReason ?? (result as Record<string, any>).reason,
-  }
+  return decisionFrom(result)
 }
 
 describe("pretooluse-git-index-lock", () => {
-  // Each auto-resolve test uses its own isolated repo to avoid concurrent lock contention.
-  describe("auto-resolves stale locks (no active git process)", () => {
-    test(
-      "git status is allowed after stale lock auto-removal",
-      async () => {
-        const repo = await createLockedRepo("auto-resolve-status")
-        const result = await runHook("git status", repo)
+  describe("process inspection", () => {
+    test("bounds process inspection and checks candidate pids in one lsof call", async () => {
+      let now = 1_000
+      const calls: Array<{ cmd: string[]; timeoutMs?: number }> = []
+      const candidatePids = Array.from({ length: 184 }, (_, index) => index + 200)
+
+      const active = await inspectGitProcessesForRepo("/repo", now + 100, {
+        now: () => now,
+        pid: () => 100,
+        ppid: () => 50,
+        spawn: (cmd, options) => {
+          calls.push({ cmd, timeoutMs: options.timeoutMs })
+          now += 25
+          if (cmd[0] === "pgrep") {
+            return Promise.resolve(processResult(candidatePids.join("\n")))
+          }
+          if (cmd[0] === "ps") {
+            return Promise.resolve(processResult("PID PPID\n100 50\n50 1"))
+          }
+          return Promise.resolve(processResult(""))
+        },
+      })
+
+      expect(active).toBe(false)
+      expect(calls).toHaveLength(3)
+      expect(calls[2]?.cmd).toEqual([
+        "lsof",
+        "-a",
+        "-p",
+        candidatePids.join(","),
+        "-d",
+        "cwd",
+        "-Fn",
+      ])
+      expect(calls.map((call) => call.timeoutMs)).toEqual([100, 75, 50])
+    })
+
+    test("detects a candidate process using the repository", async () => {
+      const harness = createHarness({ activeGit: true })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(true)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+    })
+
+    test("fails safe when process inspection exceeds the deadline", async () => {
+      const harness = createHarness({ processInspectionTimesOut: true })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(true)
+      expect(harness.processCalls).toHaveLength(1)
+    })
+
+    test("fails safe when a process inspection command cannot start", async () => {
+      const harness = createHarness({
+        activeGit: true,
+        processInspectionThrowsOn: "lsof",
+      })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(true)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+    })
+
+    test("treats an empty non-zero lsof result as a vanished candidate", async () => {
+      const harness = createHarness({ activeGit: true, lsofExitCode: 1 })
+      const active = await inspectGitProcessesForRepo(REPO_ROOT, 1_100, harness.runtime)
+
+      expect(active).toBe(false)
+      expect(harness.processCalls.map((cmd) => cmd[0])).toEqual(["pgrep", "ps", "lsof"])
+    })
+  })
+
+  describe("stale lock resolution", () => {
+    for (const command of [
+      "git status",
+      'git commit -m "test"',
+      "git add .",
+      "echo hello | git log",
+    ]) {
+      test(`allows ${command} after stale lock removal`, async () => {
+        const harness = createHarness()
+        const result = await runHook(command, harness)
+
         expect(result.decision).toBe("allow")
         expect(result.reason).toContain("Auto-removed")
-        expect(result.reason).toContain("index.lock")
-      },
-      { timeout: 30_000 }
-    )
+        expect(harness.lockExists()).toBe(false)
+        expect(harness.unlinkCalls()).toBe(1)
+      })
+    }
 
-    test(
-      "git commit is allowed after stale lock auto-removal",
-      async () => {
-        const repo = await createLockedRepo("auto-resolve-commit")
-        const result = await runHook('git commit -m "test"', repo)
-        expect(result.decision).toBe("allow")
-        expect(result.reason).toContain("Auto-removed")
-      },
-      { timeout: 30_000 }
-    )
+    test("retries a transient unlink failure", async () => {
+      const harness = createHarness({ unlinkFailures: 1 })
+      const result = await runHook("git status", harness)
 
-    test(
-      "git add is allowed after stale lock auto-removal",
-      async () => {
-        const repo = await createLockedRepo("auto-resolve-add")
-        const result = await runHook("git add .", repo)
-        expect(result.decision).toBe("allow")
-      },
-      { timeout: 30_000 }
-    )
-
-    test(
-      "piped git command is allowed after stale lock auto-removal",
-      async () => {
-        const repo = await createLockedRepo("auto-resolve-piped")
-        const result = await runHook("echo hello | git log", repo)
-        expect(result.decision).toBe("allow")
-      },
-      { timeout: 30_000 }
-    )
-
-    test(
-      "lock file is actually removed after auto-resolution",
-      async () => {
-        const repo = await createLockedRepo("auto-resolve-verify")
-        await runHook("git status", repo)
-        const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
-        const exists = await Bun.file(lockPath).exists()
-        expect(exists).toBe(false)
-      },
-      { timeout: 30_000 }
-    )
-
-    test(
-      "worktree lock is resolved from the dispatching directory git dir",
-      async () => {
-        const { worktree, lockPath } = await createLockedWorktree("auto-resolve-worktree")
-        const result = await runHook("git status", worktree)
-        expect(result.decision).toBe("allow")
-        expect(await Bun.file(lockPath).exists()).toBe(false)
-      },
-      { timeout: 30_000 }
-    )
-  })
-
-  describe("denies when lock cannot be removed", () => {
-    test(
-      "git command is allowed when transient permissions release before deadline",
-      async () => {
-        const repo = await createLockedRepo("transient-permission-release")
-        const gitDir = join(repo, ".git")
-        Bun.spawnSync(["chmod", "500", gitDir])
-        const restorePermissions = (async () => {
-          await Bun.sleep(20)
-          Bun.spawnSync(["chmod", "755", gitDir])
-        })()
-
-        try {
-          const result = await runHook("git status", repo)
-          expect(result.decision).toBe("allow")
-          expect(result.reason).toContain("Auto-removed")
-        } finally {
-          Bun.spawnSync(["chmod", "755", gitDir])
-          await restorePermissions
-        }
-      },
-      { timeout: 30_000 }
-    )
-
-    test(
-      "git command is denied after retries on an immutable lock",
-      async () => {
-        const repo = await createLockedRepo("deny-immutable")
-        const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
-        const gitDir = join(repo, ".git")
-        // Make the lock file immutable so unlink will fail.
-        // macOS: chflags uchg; Linux: chmod 000 on parent directory.
-        try {
-          const chflagsProc = Bun.spawn(["chflags", "uchg", lockPath], {
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          await chflagsProc.exited
-          if (chflagsProc.exitCode !== 0) throw new Error("chflags failed")
-        } catch {
-          // Linux fallback: restrict the parent .git directory.
-          Bun.spawnSync(["chmod", "500", gitDir])
-        }
-        const result = await runHook("git status", repo)
-        expect(result.decision).toBe("deny")
-        expect(result.reason).toContain("index.lock")
-        expect(result.reason).toContain("retrying for up to")
-        // Restore permissions so cleanup can remove the repo.
-        try {
-          Bun.spawnSync(["chflags", "nouchg", lockPath])
-        } catch {
-          Bun.spawnSync(["chmod", "755", gitDir])
-        }
-      },
-      { timeout: 30_000 }
-    )
-  })
-
-  describe("allows git commands when no lock", () => {
-    test("git status is allowed", async () => {
-      const result = await runHook("git status", REPO_WITHOUT_LOCK)
-      expect(result.decision).toBeUndefined()
+      expect(result.decision).toBe("allow")
+      expect(harness.unlinkCalls()).toBe(2)
+      expect(harness.lockExists()).toBe(false)
     })
 
-    test("git commit is allowed", async () => {
-      const result = await runHook('git commit -m "test"', REPO_WITHOUT_LOCK)
-      expect(result.decision).toBeUndefined()
+    test("denies when every unlink attempt fails", async () => {
+      const harness = createHarness({ unlinkAlwaysFails: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("index.lock")
+      expect(result.reason).toContain("retrying for up to")
+      expect(harness.lockExists()).toBe(true)
+    })
+
+    test("allows when the lock disappears during inspection", async () => {
+      const harness = createHarness({ disappearAfterValidation: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("resolved automatically")
+      expect(harness.unlinkCalls()).toBe(0)
     })
   })
 
-  describe("handles lock disappearing during check", () => {
-    test("allows when lock is removed before hook runs", async () => {
-      const repo = await createLockedRepo("disappear-before-hook")
-      // Remove the lock before running the hook — simulates another process clearing it.
-      await Bun.file(joinGitPath(repo, GIT_INDEX_LOCK)).delete()
-      const result = await runHook("git status", repo)
-      // No lock → early exit with no output
-      expect(result.decision).toBeUndefined()
+  describe("active process handling", () => {
+    test("denies a recent lock while a repository git process is active", async () => {
+      const harness = createHarness({ activeGit: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("active git process")
+      expect(harness.unlinkCalls()).toBe(0)
+    })
+
+    test("removes an old lock despite a matching long-lived process", async () => {
+      const harness = createHarness({ activeGit: true, lockOld: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("Auto-removed")
+      expect(harness.lockExists()).toBe(false)
+    })
+
+    test("removes an old lock when process inspection cannot start", async () => {
+      const harness = createHarness({
+        activeGit: true,
+        lockOld: true,
+        processInspectionThrowsOn: "lsof",
+      })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("Auto-removed")
+      expect(harness.lockExists()).toBe(false)
+    })
+
+    test("denies safely when process inspection times out", async () => {
+      const harness = createHarness({ processInspectionTimesOut: true })
+      const result = await runHook("git status", harness)
+
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("active git process")
+      expect(harness.unlinkCalls()).toBe(0)
     })
   })
 
-  describe("passes through non-git commands", () => {
-    test("bun test passes through", async () => {
-      const repo = await createLockedRepo("passthrough-bun")
-      const result = await runHook("bun test", repo)
-      expect(result.decision).toBeUndefined()
-    })
+  describe("early exits", () => {
+    for (const command of ["git status", 'git commit -m "test"']) {
+      test(`allows ${command} when no lock exists`, async () => {
+        const harness = createHarness({ lockExists: false })
+        const result = await runHook(command, harness)
 
-    test("ls passes through", async () => {
-      const repo = await createLockedRepo("passthrough-ls")
-      const result = await runHook("ls -la", repo)
-      expect(result.decision).toBeUndefined()
-    })
+        expect(result.decision).toBeUndefined()
+        expect(harness.processCalls).toHaveLength(0)
+      })
+    }
 
-    test("non-shell tools pass through", async () => {
-      const repo = await createLockedRepo("passthrough-read")
-      const result = await evaluatePretooluseGitIndexLock({
+    for (const command of ["bun test", "ls -la"]) {
+      test(`passes through ${command}`, async () => {
+        const harness = createHarness()
+        const result = await runHook(command, harness)
+
+        expect(result.decision).toBeUndefined()
+        expect(harness.gitCalls).toHaveLength(0)
+        expect(harness.processCalls).toHaveLength(0)
+      })
+    }
+
+    test("passes through non-shell tools", async () => {
+      const harness = createHarness()
+      const result = await runHook("unused", harness, {
         tool_name: "Read",
         tool_input: { file_path: "/some/file" },
-        cwd: repo,
       })
-      expect(result).toEqual({})
+
+      expect(result.decision).toBeUndefined()
+      expect(harness.gitCalls).toHaveLength(0)
+      expect(harness.processCalls).toHaveLength(0)
+    })
+  })
+
+  describe("real Git contract", () => {
+    const tmp = useTempDir("swiz-git-index-lock-contract-")
+
+    test("resolves a worktree lock from the dispatching git directory", async () => {
+      const parent = await tmp.create()
+      const main = join(parent, "main")
+      const worktree = join(parent, "worktree")
+      await mkdir(main, { recursive: true })
+      await runGit(main, ["init"])
+      await runGit(main, [
+        "-c",
+        "user.name=Swiz Test",
+        "-c",
+        "user.email=swiz-test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+      ])
+      await runGit(main, ["worktree", "add", worktree])
+
+      const gitDir = await runGit(worktree, ["rev-parse", "--absolute-git-dir"])
+      const lockPath = join(gitDir, GIT_INDEX_LOCK)
+      await Bun.write(lockPath, "")
+
+      const result = await evaluatePretooluseGitIndexLock(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "git status" },
+          cwd: worktree,
+        },
+        {
+          lockReleaseTimeoutMs: 100,
+          waitIntervalMs: 5,
+          removeRetryDelayMs: 5,
+          runtime: {
+            spawn: () => Promise.resolve(processResult("", { exitCode: 1 })),
+          },
+        }
+      )
+
+      expect(decisionFrom(result).decision).toBe("allow")
+      expect(await Bun.file(lockPath).exists()).toBe(false)
     })
   })
 })

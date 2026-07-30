@@ -1,16 +1,6 @@
-import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-
-// Subprocess tests need extra headroom under concurrent test suite load
-setDefaultTimeout(30_000)
-
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, test } from "bun:test"
 import { makeTranscript, type SimpleHookResult } from "../src/utils/test-utils.ts"
-
-const BUN_EXE = Bun.which("bun") ?? "bun"
-const WORKSPACE_ROOT = process.cwd()
-const HOOK_SCRIPT = join(WORKSPACE_ROOT, "hooks/pretooluse-block-preexisting-dismissals.ts")
+import { evaluatePretooluseBlockPreexistingDismissals } from "./pretooluse-block-preexisting-dismissals.ts"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -84,62 +74,37 @@ async function runHook(opts: {
   toolName?: string
   command?: string
   transcriptContent: string
+  isGitRepo?: boolean
 }): Promise<SimpleHookResult> {
-  const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
-  await Bun.write(tPath, opts.transcriptContent)
-
   const toolName = opts.toolName ?? "Bash"
   const toolInput =
     toolName === "Bash"
       ? { command: opts.command ?? "echo hello" }
       : { file_path: "/tmp/test.ts", old_string: "a", new_string: "b" }
 
-  const payload = JSON.stringify({
-    tool_name: toolName,
-    tool_input: toolInput,
-    transcript_path: tPath,
-    session_id: "test",
-    cwd: tmpDir,
-  })
-
-  const proc = Bun.spawn([BUN_EXE, HOOK_SCRIPT], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: WORKSPACE_ROOT,
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const [out] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  if (!out.trim()) return { blocked: false, reason: "" }
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed?.hookSpecificOutput
-  const decision = hso?.permissionDecision ?? parsed?.decision
+  const output = await evaluatePretooluseBlockPreexistingDismissals(
+    {
+      tool_name: toolName,
+      tool_input: toolInput,
+      transcript_path: "/test/transcript.jsonl",
+      session_id: "test",
+      cwd: "/test/repo",
+    },
+    {
+      runtime: {
+        isGitRepo: () => Promise.resolve(opts.isGitRepo ?? true),
+        readTranscriptLines: () => Promise.resolve(opts.transcriptContent.split("\n")),
+      },
+    }
+  )
+  const parsed = output as Record<string, any>
+  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
+  const decision = hso?.permissionDecision ?? parsed.decision
   return {
     blocked: decision === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    reason: String(hso?.permissionDecisionReason ?? parsed.reason ?? ""),
   }
 }
-
-// ─── Temp dir lifecycle ──────────────────────────────────────────────────────
-
-let tmpDir: string
-
-beforeAll(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "preexisting-dismissals-test-"))
-  // Init a git repo so isGitRepo check passes
-  const proc = Bun.spawn(["git", "init"], { cwd: tmpDir, stdout: "pipe", stderr: "pipe" })
-  await proc.exited
-})
-
-afterAll(async () => {
-  await rm(tmpDir, { recursive: true })
-})
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -405,41 +370,15 @@ describe("pretooluse-block-preexisting-dismissals", () => {
     })
 
     test("non-git directory is not blocked", async () => {
-      const nonGitDir = await mkdtemp(join(tmpdir(), "nongit-"))
-      const tPath = join(nonGitDir, "transcript.jsonl")
-      await Bun.write(
-        tPath,
-        makeTranscript(
+      const result = await runHook({
+        isGitRepo: false,
+        transcriptContent: makeTranscript(
           shellCommandEntry("bun run lint"),
           toolResultEntry("error: something failed"),
           assistantTextEntry("This is pre-existing.")
-        )
-      )
-
-      const payload = JSON.stringify({
-        tool_name: "Bash",
-        tool_input: { command: "echo hello" },
-        transcript_path: tPath,
-        session_id: "test",
-        cwd: nonGitDir,
+        ),
       })
-
-      const proc = Bun.spawn([BUN_EXE, HOOK_SCRIPT], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: WORKSPACE_ROOT,
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-      const [out] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-
-      expect(out.trim()).toBe("")
-      await rm(nonGitDir, { recursive: true })
+      expect(result.blocked).toBe(false)
     })
   })
 

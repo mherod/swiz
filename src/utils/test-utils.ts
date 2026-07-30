@@ -248,7 +248,8 @@ export const AGENT_ENV_KEYS = [
 /**
  * Merge `process.env` with overrides. Keys set to `undefined` are removed.
  * `HOME: undefined` becomes `HOME: ""` because Bun.spawn re-injects the real
- * home from the OS when `HOME` is omitted from the env object.
+ * home from the OS when `HOME` is omitted from the env object. Its transpiler
+ * cache is disabled in that case so Bun does not create a relative `Library/`.
  */
 function mergeHookEnv(overrides: Record<string, string | undefined>): Record<string, string> {
   const env: Record<string, string> = {}
@@ -264,6 +265,9 @@ function mergeHookEnv(overrides: Record<string, string | undefined>): Record<str
   }
   if (Object.hasOwn(overrides, "HOME") && overrides.HOME === undefined) {
     env.HOME = ""
+    if (!Object.hasOwn(overrides, "BUN_RUNTIME_TRANSPILER_CACHE_PATH")) {
+      env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0"
+    }
   }
   return env
 }

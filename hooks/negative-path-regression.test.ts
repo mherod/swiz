@@ -12,37 +12,29 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 setDefaultTimeout(30_000)
 
 import { join } from "node:path"
-import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  type HookResult,
+  runHookInProcess,
+  runHook as runHookWithEnvContract,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
 const { create: createTempDir } = useTempDir("swiz-negpath-")
 
-/**
- * Run a hook script as a subprocess with controlled stdin and env.
- */
+/** Run hook behavior in-process with isolated environment overrides. */
 async function runHook(
   script: string,
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
-
-  const proc = Bun.spawn(["bun", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr }
+  // A missing HOME is a process-start contract. Importing hook modules after
+  // deleting HOME makes Bun place its transpiler cache under the repository.
+  if (Object.hasOwn(envOverrides, "HOME") && envOverrides.HOME === undefined) {
+    return await runHookWithEnvContract(script, stdinPayload, envOverrides)
+  }
+  return await runHookInProcess(script, stdinPayload, { env: envOverrides })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
