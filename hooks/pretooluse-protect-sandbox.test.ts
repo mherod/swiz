@@ -1,14 +1,11 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
-
-setDefaultTimeout(30_000)
-
+import { describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import {
-  extractPreToolSurfaceDecision,
-  getHookSpecificOutput,
-} from "../src/utils/hook-specific-output.ts"
-import { neutralAgentEnv, runFileEditHook } from "../src/utils/test-utils.ts"
+  neutralAgentEnvOverrides,
+  runFileEditHook,
+  runHookInProcess,
+} from "../src/utils/test-utils.ts"
 import { isSandboxDisableCommand, isTrunkModeDisableCommand } from "./pretooluse-protect-sandbox.ts"
 
 const HOOK = "hooks/pretooluse-protect-sandbox.ts"
@@ -18,39 +15,19 @@ async function runPinnedHomeBashHook(
   command: string,
   opts: { agent?: "codex"; cwd?: string } = {}
 ): Promise<{ decision?: string; stdout: string }> {
-  const proc = Bun.spawn(["bun", resolve(process.cwd(), HOOK)], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: opts.cwd,
-    env: neutralAgentEnv({ HOME: TEST_HOME, SWIZ_DAEMON_PORT: "19999" }),
-  })
-  await proc.stdin.write(
-    JSON.stringify({
+  const result = await runHookInProcess(
+    HOOK,
+    {
       ...(opts.agent ? { _agent: opts.agent } : {}),
       tool_name: "Bash",
       tool_input: { command },
-    })
-  )
-  await proc.stdin.end()
-
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const stdout = out.trim()
-  if (!stdout) return { stdout }
-
-  try {
-    const parsed = JSON.parse(stdout) as Record<string, any>
-    const surface = extractPreToolSurfaceDecision(parsed)
-    if (surface.decision || surface.reason) {
-      return { ...surface, stdout }
+    },
+    {
+      cwd: opts.cwd,
+      env: neutralAgentEnvOverrides({ HOME: TEST_HOME, SWIZ_DAEMON_PORT: "19999" }),
     }
-    const hso = getHookSpecificOutput(parsed)
-    return hso?.hookEventName === "PreToolUse" ? { decision: "allow", stdout } : { stdout }
-  } catch {
-    return { stdout }
-  }
+  )
+  return { decision: result.decision, stdout: result.stdout.trim() }
 }
 
 describe("isSandboxDisableCommand", () => {
