@@ -24,14 +24,9 @@ import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import {
-  type CooldownRegistry,
   type DaemonMetrics,
-  type GhQueryCache,
-  type GitStateCache,
-  type HookEligibilityCache,
   type LastUserMessageCache,
   type ManifestCache,
-  type ProjectSettingsCache,
   recordDispatch,
   type TranscriptIndexCache,
 } from "./runtime-cache.ts"
@@ -44,6 +39,7 @@ import {
   persistSessionToolCall,
   seedSessionToolUsage,
 } from "./utils.ts"
+import type { DaemonWebServerContext } from "./web-server-context.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
 /** Hard request-level timeout for daemon dispatch (ms).
@@ -81,18 +77,7 @@ export interface DispatchRoutesContext {
   recentHookAllowMessages: CappedMap<string, string>
 }
 
-/** Superset of DispatchRoutesContext consumed by buildDispatchRoutesContext. */
-export interface DispatchRoutesSourceContext extends DispatchRoutesContext {
-  ghCache: GhQueryCache
-  eligibilityCache: HookEligibilityCache
-  cooldownRegistry: CooldownRegistry
-  gitStateCache: GitStateCache
-  projectSettingsCache: ProjectSettingsCache
-}
-
-export function buildDispatchRoutesContext(
-  ctx: DispatchRoutesSourceContext
-): DispatchRoutesContext {
+export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): DispatchRoutesContext {
   return {
     projectMetrics: ctx.projectMetrics,
     getProjectMetrics: ctx.getProjectMetrics,

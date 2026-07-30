@@ -11,7 +11,6 @@ import {
 } from "./compliance-routes.ts"
 import {
   buildDispatchRoutesContext,
-  type DispatchRoutesSourceContext,
   handleDispatchActive,
   handleDispatchRoute,
   reapStaleDispatches,
@@ -163,9 +162,9 @@ type TopRouteHandler = (
 
 const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /dispatch": (req, url, ctx) =>
-    handleDispatchRoute(req, url, buildDispatchRoutesContext(ctx as DispatchRoutesSourceContext)),
+    handleDispatchRoute(req, url, buildDispatchRoutesContext(ctx)),
   "GET /dispatch/active": (_req, url, ctx) =>
-    handleDispatchActive(url, buildDispatchRoutesContext(ctx as DispatchRoutesSourceContext)),
+    handleDispatchActive(url, buildDispatchRoutesContext(ctx)),
   "GET /metrics": (_req, url, ctx) => handleMetricsRoute(url, buildMetricsRoutesContext(ctx)),
   "GET /api/hook-logs": (_req, url) => handleHookLogs(url),
   "GET /api/gh-rate-limit": () => handleGhRateLimit(),
