@@ -47,7 +47,7 @@ const pretooluseRequireConvertToKotlin: SwizFileEditHook = {
 
     if (isKt) {
       const absolutePath = resolve(cwd, filePath)
-      const javaPath = absolutePath.slice(0, -3) + ".java"
+      const javaPath = `${absolutePath.slice(0, -3)}.java`
       const [javaExists, ktExists] = await Promise.all([
         Bun.file(javaPath).exists(),
         Bun.file(absolutePath).exists(),

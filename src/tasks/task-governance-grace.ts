@@ -15,7 +15,7 @@ import { findLastUserMessageMsFromTranscript } from "../commands/daemon/cache/la
 export const USER_MESSAGE_GRACE_MS = 3 * 60 * 1000
 
 /** Read the daemon-injected last user-message time (epoch ms) from the hook payload, if present. */
-export function lastUserMessageAtFromPayload(input: Record<string, any>): number | null {
+export function lastUserMessageAtFromPayload(input: Record<string, unknown>): number | null {
   const value = input?._lastUserMessageAt
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
@@ -24,7 +24,9 @@ export function lastUserMessageAtFromPayload(input: Record<string, any>): number
  * Resolve the last user-message time (epoch ms): the daemon-injected payload field
  * when available, otherwise a transcript tail scan. Returns null when neither yields a time.
  */
-export async function resolveLastUserMessageAt(input: Record<string, any>): Promise<number | null> {
+export async function resolveLastUserMessageAt(
+  input: Record<string, unknown>
+): Promise<number | null> {
   const injected = lastUserMessageAtFromPayload(input)
   if (injected !== null) return injected
   const transcriptPath = typeof input?.transcript_path === "string" ? input.transcript_path : ""
@@ -37,7 +39,7 @@ export async function resolveLastUserMessageAt(input: Record<string, any>): Prom
  * Fails closed (false) when no user-message time can be resolved.
  */
 export async function isWithinUserMessageGrace(
-  input: Record<string, any>,
+  input: Record<string, unknown>,
   nowMs: number = Date.now()
 ): Promise<boolean> {
   const at = await resolveLastUserMessageAt(input)
