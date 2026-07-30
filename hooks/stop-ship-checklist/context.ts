@@ -38,6 +38,13 @@ export async function resolveShipChecklistContext(
 
     const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
 
+    // Disabling auto-continue makes an explicit stop final. Ship gates remain
+    // available when auto-continue is enabled, but must not manufacture a new
+    // work cycle after the user has opted out.
+    if (effective.autoContinue === false) {
+      return null
+    }
+
     const gates: WorkflowGates = {
       git: effective.gitStatusGate ?? true,
       ci: effective.githubCiGate ?? false,

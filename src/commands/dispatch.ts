@@ -43,6 +43,7 @@ import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import type { Command } from "../types.ts"
+import { getEffectiveSwizSettingsForToolHook } from "../utils/hook-effective-settings.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { sanitizeHookOutputForCurrentAgent } from "../utils/hook-output-agent-compat.ts"
 import { checkIncompleteTasks } from "../utils/stop-incomplete-tasks-core.ts"
@@ -431,6 +432,45 @@ async function tryStopFastPath(
   return true
 }
 
+/**
+ * Explicitly disabled auto-continue means a stop request is final. Resolve the
+ * setting before the incomplete-task fast path so task and ship gates cannot
+ * turn that stop into another work cycle.
+ */
+async function tryAutoContinueDisabledFastPath(
+  timing: DispatchTiming,
+  payload: Record<string, any>,
+  hookEventName: string
+): Promise<boolean> {
+  if (!isStopLikeEvent(timing.canonicalEvent)) return false
+
+  try {
+    const effective = await getEffectiveSwizSettingsForToolHook({
+      cwd: timing.cwd,
+      session_id: timing.sessionId,
+      payload,
+    })
+    if (effective.autoContinue !== false) return false
+  } catch {
+    return false
+  }
+
+  log(`   ⏭ autoContinue disabled, allowing explicit stop`)
+  const response: Record<string, any> = {}
+  normalizeStopDispatchResponseInPlace(response, hookEventName)
+  coerceDispatchAgentEnvelopeInPlace(response, timing.canonicalEvent, hookEventName, payload._agent)
+  process.stdout.write(`${JSON.stringify(response)}\n`)
+  markDispatchResponseWritten()
+  const totalMs = Math.round(performance.now() - timing.t0)
+  void appendCliTimingLog({
+    ...timing,
+    totalMs,
+    daemonMs: 0,
+    route: "local",
+  })
+  return true
+}
+
 /** Non-git directories shouldn't run hooks (not a project target); return allow quickly. */
 async function tryNonGitFastPath(timing: DispatchTiming, hookEventName: string): Promise<boolean> {
   if (await isGitRepo(timing.cwd)) return false
@@ -524,14 +564,16 @@ async function runDispatch(
     stdinMs,
   }
 
+  // ── Fast path: skip hook execution in non-git directories ──
+  if (await tryNonGitFastPath(timing, hookEventName)) return
+  // ── Fast path: an explicit stop is final when auto-continue is disabled ──
+  if (await tryAutoContinueDisabledFastPath(timing, payload, hookEventName)) return
   // ── Fast path: in-process incomplete-tasks check for stop events ──
   if (await tryStopFastPath(timing, payload)) return
   // Signal to hooks that the fast path already scanned tasks (no blockers found)
   if (isStopLikeEvent(canonicalEvent) && sessionId) {
     payload._fastPathTaskScanComplete = true
   }
-  // ── Fast path: skip hook execution in non-git directories ──
-  if (await tryNonGitFastPath(timing, hookEventName)) return
 
   // ── Try daemon first, fall back to local execution ──
   const tDaemon = performance.now()

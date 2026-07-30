@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { ZodError } from "zod"
 import { preToolUseDeny, type SwizHook } from "../SwizHook.ts"
+import { useTempDir } from "../utils/test-utils.ts"
 import {
   coerceDispatchAgentEnvelopeInPlace,
   DispatchPayloadValidationError,
@@ -9,6 +10,7 @@ import { type DispatchRequest, executeDispatch, resolveLifecycleRequestId } from
 import { DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT } from "./stop-response.ts"
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const tempDirs = useTempDir("swiz-dispatch-auto-continue-")
 
 describe("resolveLifecycleRequestId", () => {
   it("returns caller request_id when non-empty string", () => {
@@ -204,6 +206,42 @@ describe("dispatch execute integration", () => {
       } finally {
         process.env.HOME = originalHome
       }
+    })
+
+    it("allows stop without running blockers when autoContinue is disabled", async () => {
+      const { getSwizSettingsPath, invalidateSettingsCache, readSwizSettings, writeSwizSettings } =
+        await import("../settings.ts")
+      const tempHome = await tempDirs.create()
+      const defaults = await readSwizSettings({ home: tempHome })
+      await writeSwizSettings({ ...defaults, autoContinue: false }, { home: tempHome })
+      const settingsPath = getSwizSettingsPath(tempHome)
+      if (settingsPath) invalidateSettingsCache(settingsPath)
+
+      let blockerRan = false
+      const blocker: SwizHook = {
+        name: "test-stop-blocker",
+        event: "stop",
+        run: () => {
+          blockerRan = true
+          return { decision: "block", reason: "should not run" }
+        },
+      }
+
+      const result = await executeDispatch({
+        canonicalEvent: "stop",
+        hookEventName: "Stop",
+        settingsHomeOverride: tempHome,
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "explicit-stop-session",
+        }),
+        manifestProvider: async () => [{ event: "stop", hooks: [{ hook: blocker }] }],
+        daemonContext: true,
+      })
+
+      expect(blockerRan).toBe(false)
+      expect(result.response.continue).toBe(true)
+      expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
     })
 
     it("rejects stop dispatch with invalid JSON stdin", async () => {

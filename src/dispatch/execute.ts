@@ -585,7 +585,7 @@ async function injectEffectiveSettings(
   projectSettings: ProjectSwizSettings | null
 ): Promise<void> {
   const [globalSettings, projectState] = await Promise.all([
-    readSwizSettings(),
+    readSwizSettings(ctx.settingsHomeOverride ? { home: ctx.settingsHomeOverride } : undefined),
     readProjectState(ctx.cwd),
   ])
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
@@ -593,6 +593,12 @@ async function injectEffectiveSettings(
   const enrichedCtx = ctx as { payload: EnrichedDispatchPayload }
   enrichedCtx.payload._effectiveSettings = effectiveSettings
   enrichedCtx.payload._projectState = projectState
+}
+
+function shouldAllowExplicitStop(ctx: DispatchContext): boolean {
+  if (!isStopLikeDispatchEvent(ctx.canonicalEvent)) return false
+  const effective = (ctx.payload as EnrichedDispatchPayload)._effectiveSettings
+  return effective?.autoContinue === false
 }
 
 async function prepareDispatchGroups(
@@ -717,6 +723,13 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   }
 
   await injectEffectiveSettings(ctx, projectSettings ?? null)
+
+  if (shouldAllowExplicitStop(ctx)) {
+    log(`   ⏭ autoContinue disabled, allowing explicit stop`)
+    const response = buildSkipResponse(ctx, req.daemonContext)
+    assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
+    return { response }
+  }
 
   const lifecycleRequestId = resolveLifecycleRequestId(ctx.payload)
   const lifecycleStartedAt = Date.now()
