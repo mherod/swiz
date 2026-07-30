@@ -131,6 +131,66 @@ describe("pretooluse-banned-commands", () => {
       })
     })
 
+    describe("noncanonical Git invocation", () => {
+      for (const command of [
+        "/usr/bin/git status",
+        "/opt/homebrew/bin/git push origin main",
+        "./git status",
+      ]) {
+        test(`blocks direct Git binary path: ${command}`, async () => {
+          const result = await runHook(command)
+          expect(result.decision).toBe("deny")
+          expect(result.reason).toContain("directly as `git`")
+        })
+      }
+
+      for (const command of [
+        "env git status",
+        "/usr/bin/env git status",
+        "command git status",
+        "exec git status",
+        "sudo git status",
+        "GIT_OPTIONAL_LOCKS=0 git status",
+        "printf '%s\\n' src/file.ts | xargs git status --short",
+        "if git status; then echo ready; fi",
+        "(git status)",
+      ]) {
+        test(`blocks Git behind a command wrapper: ${command}`, async () => {
+          const result = await runHook(command)
+          expect(result.decision).toBe("deny")
+          expect(result.reason).toContain("directly as `git`")
+        })
+      }
+
+      for (const command of [
+        "/bin/zsh -lc 'git status'",
+        'bash -c "git push origin main"',
+        "sh -c 'git checkout -b feat/wrapped'",
+        "zsh -lc 'echo ready && git worktree add /tmp/wrapped'",
+        "/bin/zsh -lc 'bash -c \"git status\"'",
+        "/usr/bin/env zsh -lc 'git status'",
+        "sudo sh -c 'git status'",
+      ]) {
+        test(`blocks Git inside a nested shell: ${command}`, async () => {
+          const result = await runHook(command)
+          expect(result.decision).toBe("deny")
+          expect(result.reason).toContain("nested shell")
+        })
+      }
+
+      for (const command of [
+        'echo "$(git status)"',
+        "diff <(git status) expected.txt",
+        "echo `git status`",
+      ]) {
+        test(`blocks Git inside shell substitution: ${command}`, async () => {
+          const result = await runHook(command)
+          expect(result.decision).toBe("deny")
+          expect(result.reason).toContain("directly as `git`")
+        })
+      }
+    })
+
     test("cd is blocked", async () => {
       const result = await runHook("cd /tmp && ls")
       expect(result.decision).toBe("deny")
@@ -509,6 +569,26 @@ describe("pretooluse-banned-commands", () => {
       const result = await runHook("git checkout feature/my-branch")
       expect(result.decision).toBeUndefined()
     })
+
+    test("canonical Git commands with global options and compounds pass through", async () => {
+      const result = await runHook(
+        "git -C /tmp/repo status --short && git -c color.ui=false log --oneline"
+      )
+      expect(result.decision).toBeUndefined()
+    })
+
+    for (const command of [
+      "echo '/usr/bin/git status'",
+      "rg 'git status' docs/",
+      `git commit -m "docs: mention /usr/bin/git without invoking it"`,
+      `/bin/zsh -lc 'echo "git status"'`,
+      "echo '`git status`'",
+    ]) {
+      test(`allows non-executable Git prose: ${command}`, async () => {
+        const result = await runHook(command)
+        expect(result.decision).toBeUndefined()
+      })
+    }
 
     test("echo passes through", async () => {
       const result = await runHook("echo hello")
