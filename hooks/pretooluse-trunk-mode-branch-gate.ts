@@ -44,7 +44,7 @@ function denyPrCreateWhenTrunk(command: string, defaultBranch: string): SwizHook
   )
 }
 
-async function hasOpenPullRequests(cwd: string): Promise<boolean> {
+async function queryOpenPullRequests(cwd: string): Promise<boolean> {
   const prs = await ghJson<Array<{ number?: number }>>(
     ["pr", "list", "--state", "open", "--json", "number", "--limit", "1"],
     cwd
@@ -52,14 +52,36 @@ async function hasOpenPullRequests(cwd: string): Promise<boolean> {
   return Array.isArray(prs) && prs.length > 0
 }
 
+export interface TrunkModeBranchGateRuntime {
+  isGitRepo(cwd: string): Promise<boolean>
+  readProjectSettings(cwd: string): Promise<{ trunkMode?: boolean } | null>
+  readProjectState(cwd: string): Promise<string | null>
+  getDefaultBranch(cwd: string): Promise<string>
+  hasOpenPullRequests(cwd: string): Promise<boolean>
+}
+
+export interface TrunkModeBranchGateOptions {
+  /** Override process, settings, and repository boundaries for deterministic evaluation. */
+  runtime?: Partial<TrunkModeBranchGateRuntime>
+}
+
+const defaultRuntime: TrunkModeBranchGateRuntime = {
+  isGitRepo,
+  readProjectSettings,
+  readProjectState,
+  getDefaultBranch,
+  hasOpenPullRequests: queryOpenPullRequests,
+}
+
 async function denyPrCheckoutWhenTrunk(
   command: string,
   defaultBranch: string,
   cwd: string,
-  projectState: string | null
+  projectState: string | null,
+  runtime: TrunkModeBranchGateRuntime
 ): Promise<SwizHookOutput | null> {
   if (!GH_PR_CHECKOUT_RE.test(command)) return null
-  if (projectState === "reviewing" && (await hasOpenPullRequests(cwd))) return null
+  if (projectState === "reviewing" && (await runtime.hasOpenPullRequests(cwd))) return null
 
   if (projectState === "developing") {
     return preToolUseDeny(
@@ -121,19 +143,21 @@ function resolveTrunkShellRequest(input: unknown): TrunkShellRequest {
 
 async function shouldEnforceTrunkMode(
   request: TrunkShellRequest,
-  branchChanges: GitBranchChange[]
+  branchChanges: GitBranchChange[],
+  runtime: TrunkModeBranchGateRuntime
 ): Promise<boolean> {
   if (!isShellTool(request.toolName)) return false
   if (!isTrunkModeRelevantShellCommand(request.command, branchChanges)) return false
-  if (!(await isGitRepo(request.cwd))) return false
-  return (await readProjectSettings(request.cwd))?.trunkMode === true
+  if (!(await runtime.isGitRepo(request.cwd))) return false
+  return (await runtime.readProjectSettings(request.cwd))?.trunkMode === true
 }
 
 async function selectTrunkModeDenial(
   request: TrunkShellRequest,
   branchChanges: GitBranchChange[],
   defaultBranch: string,
-  projectState: string | null
+  projectState: string | null,
+  runtime: TrunkModeBranchGateRuntime
 ): Promise<SwizHookOutput | null> {
   const prCreate = denyPrCreateWhenTrunk(request.command, defaultBranch)
   if (prCreate) return prCreate
@@ -142,21 +166,27 @@ async function selectTrunkModeDenial(
     request.command,
     defaultBranch,
     request.cwd,
-    projectState
+    projectState,
+    runtime
   )
   return prCheckout ?? denyBranchChangesWhenTrunk(branchChanges, defaultBranch)
 }
 
 export async function evaluatePretooluseTrunkModeBranchGate(
-  input: unknown
+  input: unknown,
+  options: TrunkModeBranchGateOptions = {}
 ): Promise<SwizHookOutput> {
+  const runtime = { ...defaultRuntime, ...options.runtime }
   const request = resolveTrunkShellRequest(input)
   const branchChanges = collectGitBranchChanges(request.command)
-  if (!(await shouldEnforceTrunkMode(request, branchChanges))) return {}
+  if (!(await shouldEnforceTrunkMode(request, branchChanges, runtime))) return {}
 
-  const projectState = await readProjectState(request.cwd)
-  const defaultBranch = await getDefaultBranch(request.cwd)
-  return (await selectTrunkModeDenial(request, branchChanges, defaultBranch, projectState)) ?? {}
+  const projectState = await runtime.readProjectState(request.cwd)
+  const defaultBranch = await runtime.getDefaultBranch(request.cwd)
+  return (
+    (await selectTrunkModeDenial(request, branchChanges, defaultBranch, projectState, runtime)) ??
+    {}
+  )
 }
 
 const pretooluseTrunkModeBranchGate: SwizToolHook = {
