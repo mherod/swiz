@@ -14,6 +14,8 @@ import {
   gitSubcommandRe,
   shellStatementCommandRe,
   shellTokenCommandRe,
+  splitShellSegments,
+  tokenizeShellSegment,
 } from "./shell-patterns.ts"
 
 export {
@@ -522,6 +524,205 @@ export function collectCheckoutNewBranchNames(command: string): string[] {
     `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+-[bB]\\s+([^\\s;|&]+)`,
     `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+-[cC]\\s+([^\\s;|&]+)`
   )
+}
+
+export type GitBranchChangeKind =
+  | "create"
+  | "force-create"
+  | "orphan"
+  | "copy"
+  | "rename"
+  | "worktree-add"
+
+export interface GitBranchChange {
+  kind: GitBranchChangeKind
+  target: string | null
+}
+
+const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"])
+
+const SAFE_BRANCH_LONG_OPTIONS = new Set([
+  "--all",
+  "--color",
+  "--column",
+  "--contains",
+  "--edit-description",
+  "--format",
+  "--ignore-case",
+  "--list",
+  "--merged",
+  "--no-color",
+  "--no-column",
+  "--no-contains",
+  "--no-merged",
+  "--omit-empty",
+  "--points-at",
+  "--remotes",
+  "--set-upstream-to",
+  "--show-current",
+  "--sort",
+  "--unset-upstream",
+])
+
+interface ParsedGitCommand {
+  subcommand: string
+  args: string[]
+}
+
+function parseGitCommand(segment: string): ParsedGitCommand | null {
+  const tokens = tokenizeShellSegment(segment)
+  if (tokens[0] !== "git") return null
+
+  let index = 1
+  while (index < tokens.length && tokens[index]!.startsWith("-")) {
+    const option = tokens[index]!
+    index++
+    if (GIT_GLOBAL_VALUE_OPTIONS.has(option) && !option.includes("=")) index++
+  }
+
+  const subcommand = tokens[index]
+  if (!subcommand) return null
+  return { subcommand, args: tokens.slice(index + 1) }
+}
+
+function flagTarget(args: string[], shortFlag: string, longFlag: string): string | null {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!
+    if (arg === shortFlag || arg === longFlag) return args[index + 1] ?? null
+    if (arg.startsWith(`${longFlag}=`)) return arg.slice(longFlag.length + 1) || null
+    if (arg.startsWith(shortFlag) && arg.length > shortFlag.length) {
+      return arg.slice(shortFlag.length)
+    }
+  }
+  return null
+}
+
+function checkoutOrSwitchChange(command: ParsedGitCommand): GitBranchChange | null {
+  const { subcommand, args } = command
+  if (subcommand === "checkout") {
+    const orphan = flagTarget(args, "--orphan", "--orphan")
+    if (orphan) return { kind: "orphan", target: orphan }
+    const forceCreate = flagTarget(args, "-B", "--force-create")
+    if (forceCreate) return { kind: "force-create", target: forceCreate }
+    const create = flagTarget(args, "-b", "--create")
+    if (create) return { kind: "create", target: create }
+  }
+
+  if (subcommand === "switch") {
+    const orphan = flagTarget(args, "--orphan", "--orphan")
+    if (orphan) return { kind: "orphan", target: orphan }
+    const forceCreate = flagTarget(args, "-C", "--force-create")
+    if (forceCreate) return { kind: "force-create", target: forceCreate }
+    const create = flagTarget(args, "-c", "--create")
+    if (create) return { kind: "create", target: create }
+  }
+
+  return null
+}
+
+function hasShortBranchFlag(args: string[], flag: string): boolean {
+  return args.some((arg) => /^-[^-]/.test(arg) && arg.slice(1).includes(flag))
+}
+
+function hasLongBranchFlag(args: string[], ...flags: string[]): boolean {
+  return args.some((arg) => flags.some((flag) => arg === flag || arg.startsWith(`${flag}=`)))
+}
+
+function branchPositionals(args: string[]): string[] {
+  return args.filter((arg) => arg !== "--" && !arg.startsWith("-"))
+}
+
+function isBranchDeletion(args: string[]): boolean {
+  return (
+    hasShortBranchFlag(args, "d") ||
+    hasShortBranchFlag(args, "D") ||
+    hasLongBranchFlag(args, "--delete")
+  )
+}
+
+function branchRenameChange(args: string[], positionals: string[]): GitBranchChange | null {
+  if (hasShortBranchFlag(args, "m") || hasShortBranchFlag(args, "M")) {
+    return { kind: "rename", target: positionals.at(-1) ?? null }
+  }
+  if (hasLongBranchFlag(args, "--move")) {
+    return { kind: "rename", target: positionals.at(-1) ?? null }
+  }
+  return null
+}
+
+function branchCopyChange(args: string[], positionals: string[]): GitBranchChange | null {
+  if (hasShortBranchFlag(args, "c") || hasShortBranchFlag(args, "C")) {
+    return { kind: "copy", target: positionals.at(-1) ?? null }
+  }
+  if (hasLongBranchFlag(args, "--copy")) {
+    return { kind: "copy", target: positionals.at(-1) ?? null }
+  }
+  return null
+}
+
+function branchForceChange(args: string[], positionals: string[]): GitBranchChange | null {
+  if (hasShortBranchFlag(args, "f") || hasLongBranchFlag(args, "--force")) {
+    return { kind: "force-create", target: positionals[0] ?? null }
+  }
+  return null
+}
+
+function hasSafeBranchAction(args: string[]): boolean {
+  return (
+    hasShortBranchFlag(args, "a") ||
+    hasShortBranchFlag(args, "l") ||
+    hasShortBranchFlag(args, "r") ||
+    hasShortBranchFlag(args, "u") ||
+    args.some((arg) => {
+      const option = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg
+      return SAFE_BRANCH_LONG_OPTIONS.has(option)
+    })
+  )
+}
+
+function branchChange(args: string[]): GitBranchChange | null {
+  const positionals = branchPositionals(args)
+  if (positionals.length === 0 || isBranchDeletion(args)) return null
+
+  const mutation =
+    branchRenameChange(args, positionals) ??
+    branchCopyChange(args, positionals) ??
+    branchForceChange(args, positionals)
+  if (mutation) return mutation
+  if (hasSafeBranchAction(args)) return null
+
+  return { kind: "create", target: positionals[0] ?? null }
+}
+
+/**
+ * Collect branch/worktree operations that can move a repository away from trunk compliance.
+ * Plain checkout/switch commands and cleanup operations are intentionally excluded.
+ */
+export function collectGitBranchChanges(command: string): GitBranchChange[] {
+  const changes: GitBranchChange[] = []
+
+  for (const segment of splitShellSegments(command)) {
+    const parsed = parseGitCommand(segment)
+    if (!parsed) continue
+
+    const checkoutSwitch = checkoutOrSwitchChange(parsed)
+    if (checkoutSwitch) {
+      changes.push(checkoutSwitch)
+      continue
+    }
+
+    if (parsed.subcommand === "branch") {
+      const change = branchChange(parsed.args)
+      if (change) changes.push(change)
+      continue
+    }
+
+    if (parsed.subcommand === "worktree" && parsed.args[0] === "add") {
+      changes.push({ kind: "worktree-add", target: null })
+    }
+  }
+
+  return changes
 }
 
 /**

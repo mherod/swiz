@@ -258,6 +258,11 @@ function _tokenize(segment: string): string[] {
   return state.tokens
 }
 
+/** Tokenize one shell segment while preserving quoted argument contents. */
+export function tokenizeShellSegment(segment: string): string[] {
+  return _tokenize(segment)
+}
+
 function _skipGitOpts(tokens: string[], i: number): number {
   while (i < tokens.length && tokens[i]!.startsWith("-")) {
     if (_GIT_VALUE_OPTS.has(tokens[i]!)) i++

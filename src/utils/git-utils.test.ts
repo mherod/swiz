@@ -4,6 +4,7 @@ import {
   CI_WAIT_RE,
   classifyChangeScope,
   collectCheckoutNewBranchNames,
+  collectGitBranchChanges,
   collectPlainCheckoutSwitchTargets,
   extractCheckoutBranch,
   extractCheckoutNewBranchName,
@@ -640,6 +641,50 @@ describe("collectCheckoutNewBranchNames", () => {
   })
   test("returns empty for no matches", () => {
     expect(collectCheckoutNewBranchNames("git push")).toEqual([])
+  })
+})
+
+describe("collectGitBranchChanges", () => {
+  test("collects branch and worktree creation across compound commands", () => {
+    const command = "git checkout -b feat/one && git switch feat/existing; git worktree add /tmp/wt"
+    expect(collectGitBranchChanges(command)).toEqual([
+      { kind: "create", target: "feat/one" },
+      { kind: "worktree-add", target: null },
+    ])
+  })
+
+  test("classifies force-create, orphan, copy, and rename operations", () => {
+    const command = [
+      "git checkout -Bfeat/reset",
+      "git switch --orphan=feat/orphan",
+      "git branch --copy main feat/copy",
+      "git branch --move main feat/renamed",
+      "git branch --force feat/forced main",
+    ].join(" && ")
+    expect(collectGitBranchChanges(command)).toEqual([
+      { kind: "force-create", target: "feat/reset" },
+      { kind: "orphan", target: "feat/orphan" },
+      { kind: "copy", target: "feat/copy" },
+      { kind: "rename", target: "feat/renamed" },
+      { kind: "force-create", target: "feat/forced" },
+    ])
+  })
+
+  test("handles quoted git global option values", () => {
+    expect(
+      collectGitBranchChanges('git -C "/tmp/repo with spaces" branch --track feat/new origin/main')
+    ).toEqual([{ kind: "create", target: "feat/new" }])
+  })
+
+  test("excludes existing-branch switching and cleanup operations", () => {
+    const command = [
+      "git checkout feat/existing",
+      "git switch origin/feat/existing",
+      "git branch -d feat/merged",
+      "git branch --list 'feat/*'",
+      "git worktree remove /tmp/old-worktree",
+    ].join(" && ")
+    expect(collectGitBranchChanges(command)).toEqual([])
   })
 })
 

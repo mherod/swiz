@@ -113,6 +113,26 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     }
   })
 
+  for (const command of [
+    "git checkout feat/existing",
+    "git switch feat/existing",
+    "git checkout origin/feat/existing",
+    "git switch --detach origin/feat/existing",
+  ]) {
+    test(`allows switching to an existing branch with ${command}`, async () => {
+      const repo = await createTestRepo("https://github.com/mherod/repo.git", {
+        featureBranch: "feat/existing",
+      })
+      await enableTrunkMode(repo)
+      try {
+        const result = await runHook(repo, command)
+        expect(result.parsed).toBeNull()
+      } finally {
+        await rm(repo, { recursive: true, force: true })
+      }
+    })
+  }
+
   test("allows git checkout -b main when trunk mode is on", async () => {
     const repo = await createTestRepo("https://github.com/mherod/repo.git", {
       featureBranch: "feat/side",
@@ -125,6 +145,54 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       await rm(repo, { recursive: true, force: true })
     }
   })
+
+  for (const command of [
+    "git branch feat/direct",
+    "git branch --track feat/tracked origin/main",
+    "git -C . branch feat/global-option",
+    "git checkout --orphan feat/orphan",
+    "git switch --orphan feat/orphan",
+    "git checkout -B feat/force-reset",
+    "git switch -C feat/force-reset",
+    "git switch --create=feat/long-form",
+    "git branch -c main feat/copied",
+    "git branch --copy main feat/copied-long",
+    "git branch -m main feat/renamed",
+    "git branch --move main feat/renamed-long",
+    "git branch --force feat/force-updated main",
+    "git worktree add /tmp/swiz-feature-worktree",
+    "git worktree add -b feat/worktree /tmp/swiz-feature-worktree",
+  ]) {
+    test(`blocks branch or worktree creation with ${command}`, async () => {
+      const repo = await createTestRepo("https://github.com/mherod/repo.git")
+      await enableTrunkMode(repo)
+      try {
+        const result = await runHook(repo, command)
+        expect(result.decision).toBe("deny")
+        const hso = result.parsed?.hookSpecificOutput as Record<string, any>
+        expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
+      } finally {
+        await rm(repo, { recursive: true, force: true })
+      }
+    })
+  }
+
+  for (const command of [
+    "git branch -d feat/merged",
+    "git branch --delete feat/merged",
+    "git worktree remove /tmp/swiz-old-worktree",
+  ]) {
+    test(`allows cleanup toward trunk compliance with ${command}`, async () => {
+      const repo = await createTestRepo("https://github.com/mherod/repo.git")
+      await enableTrunkMode(repo)
+      try {
+        const result = await runHook(repo, command)
+        expect(result.parsed).toBeNull()
+      } finally {
+        await rm(repo, { recursive: true, force: true })
+      }
+    })
+  }
 
   test("blocks compound command that creates a non-default branch", async () => {
     const repo = await createTestRepo("https://github.com/mherod/repo.git")
