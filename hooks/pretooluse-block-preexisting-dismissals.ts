@@ -248,6 +248,21 @@ async function getAllTranscriptLines(
   return summary?.sessionLines ?? []
 }
 
+export interface PreexistingDismissalRuntime {
+  isGitRepo(cwd: string): Promise<boolean>
+  readTranscriptLines(raw: Record<string, any>, transcriptPath: string): Promise<string[]>
+}
+
+export interface PreexistingDismissalOptions {
+  /** Override repository and transcript boundaries for deterministic evaluation. */
+  runtime?: Partial<PreexistingDismissalRuntime>
+}
+
+const defaultRuntime: PreexistingDismissalRuntime = {
+  isGitRepo,
+  readTranscriptLines: getAllTranscriptLines,
+}
+
 function buildBlockMessage(state: ScanState): string {
   const diagnosticSnippet = extractDiagnosticSnippet(state.lastDiagnosticOutput)
   return (
@@ -276,23 +291,26 @@ function resolveAllowReason(state: ScanState): string | null {
 
 async function resolveTranscriptContext(
   raw: Record<string, any>,
-  input: ReturnType<typeof toolHookInputSchema.parse>
+  input: ReturnType<typeof toolHookInputSchema.parse>,
+  runtime: PreexistingDismissalRuntime
 ): Promise<string[] | null> {
   const cwd = input.cwd ?? process.cwd()
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await runtime.isGitRepo(cwd))) return null
   const toolName = input.tool_name ?? ""
   if (shouldSkipTool(toolName, input.tool_input ?? {})) return null
-  const lines = await getAllTranscriptLines(raw, input.transcript_path ?? "")
+  const lines = await runtime.readTranscriptLines(raw, input.transcript_path ?? "")
   return lines.length > 0 ? lines : null
 }
 
 export async function evaluatePretooluseBlockPreexistingDismissals(
-  input: unknown
+  input: unknown,
+  options: PreexistingDismissalOptions = {}
 ): Promise<SwizHookOutput> {
+  const runtime = { ...defaultRuntime, ...options.runtime }
   const raw = input as Record<string, any>
   const parsed = toolHookInputSchema.parse(raw)
 
-  const lines = await resolveTranscriptContext(raw, parsed)
+  const lines = await resolveTranscriptContext(raw, parsed, runtime)
   if (!lines) return {}
 
   const state = scanTranscript(lines)
