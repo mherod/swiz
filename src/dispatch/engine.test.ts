@@ -483,6 +483,52 @@ describe("runEntry inline hook errors", () => {
   })
 })
 
+describe("runEntry inline hook self-repair", () => {
+  function failingHook(name: string): HookDef {
+    return {
+      hook: {
+        name,
+        event: "preToolUse",
+        async run() {
+          throw new Error("broken hook")
+        },
+      },
+    }
+  }
+
+  async function runFailingHook(toolName: string, toolInput: Record<string, string>) {
+    const hook = failingHook("pretooluse-broken-inline.ts")
+    const payload = JSON.stringify({ tool_name: toolName, tool_input: toolInput })
+    return runEntry({ hook, matcher: undefined }, payload, process.cwd())
+  }
+
+  it("allows direct file_path edits targeting the failed hook", async () => {
+    const result = await runFailingHook("Edit", {
+      file_path: "/repo/hooks/pretooluse-broken-inline.ts",
+    })
+
+    expect(result.execution.status).toBe("ok")
+  })
+
+  it("allows functions.apply_patch edits targeting the failed hook", async () => {
+    const result = await runFailingHook("functions.apply_patch", {
+      command:
+        "*** Begin Patch\n*** Update File: hooks/pretooluse-broken-inline.ts\n@@\n-old\n+new\n*** End Patch",
+    })
+
+    expect(result.execution.status).toBe("ok")
+  })
+
+  it("keeps failures for apply_patch edits targeting another file", async () => {
+    const result = await runFailingHook("apply_patch", {
+      command:
+        "*** Begin Patch\n*** Update File: hooks/pretooluse-other.ts\n@@\n-old\n+new\n*** End Patch",
+    })
+
+    expect(result.execution.status).toBe("error")
+  })
+})
+
 describe("logSlowHook", () => {
   it("returns true when duration strictly exceeds threshold", () => {
     expect(logSlowHook("test-hook.ts", 5000, 3000)).toBe(true)

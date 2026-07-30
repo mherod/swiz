@@ -110,7 +110,7 @@ const APPLY_PATCH_FILE_PREFIXES = [
   "*** Move to: ",
 ]
 
-type ToolMatcherValue =
+export type ToolMatcherValue =
   | string
   | number
   | boolean
@@ -119,7 +119,7 @@ type ToolMatcherValue =
   | ToolMatcherValue[]
   | { [key: string]: ToolMatcherValue }
 
-type ToolMatcherRecord = { [key: string]: ToolMatcherValue }
+export type ToolMatcherRecord = { [key: string]: ToolMatcherValue }
 
 function isRecord(value: ToolMatcherValue): value is ToolMatcherRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)

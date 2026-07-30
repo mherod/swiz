@@ -17,6 +17,7 @@ import { hookBaseSchema, hookOutputSchema } from "../schemas.ts"
 import { CODEX_UPDATE_PLAN_TOOL_NAMES } from "../tasks/codex-update-plan.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
+  extractFileEditTargetPaths,
   isEditTool,
   isNotebookTool,
   isShellTool,
@@ -26,6 +27,7 @@ import {
   isTaskTool,
   isTaskUpdateTool,
   isWriteTool,
+  type ToolMatcherRecord,
 } from "../tool-matchers.ts"
 import { hasNonEmptyHookOutput, messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
@@ -507,14 +509,16 @@ export async function runHook(
  */
 function isEditTargetingSelf(payloadStr: string, hookSourceFile: string): boolean {
   try {
-    const payload = JSON.parse(payloadStr) as Record<string, unknown>
+    const payload = JSON.parse(payloadStr) as ToolMatcherRecord
     const toolName = String(payload.tool_name ?? "")
     if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
-    const toolInput = payload.tool_input as Record<string, unknown> | undefined
-    const filePath = String(toolInput?.file_path ?? "")
-    if (!filePath) return false
-    // Match by hook filename — the file_path is absolute, hookSourceFile is a basename or name
-    return filePath.includes(`/hooks/${hookSourceFile}`) || filePath.endsWith(hookSourceFile)
+    const targetPaths = extractFileEditTargetPaths(payload.tool_input)
+    // Match by hook filename — direct edit paths may be absolute while
+    // apply_patch headers are commonly relative to the project root.
+    return targetPaths.some(
+      (filePath) =>
+        filePath.includes(`/hooks/${hookSourceFile}`) || filePath.endsWith(hookSourceFile)
+    )
   } catch {
     return false
   }
