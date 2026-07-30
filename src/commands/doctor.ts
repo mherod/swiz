@@ -144,8 +144,17 @@ function reportAggressiveHookReplacement(replacements: AggressiveHookReplacement
   console.log(`  ${BOLD}Replacing all agent hooks with swiz hooks...${RESET}\n`)
   for (const replacement of replacements) {
     console.log(
-      `  ${GREEN}✓${RESET} ${replacement.agentName}: removed ${replacement.removedHookCount}, installed ${replacement.installedHookCount} swiz hook(s)`
+      `  ${GREEN}✓${RESET} ${replacement.agentName}: removed ${replacement.removedHookCount} hook(s) from ${replacement.cleanedSourceCount} source(s), installed ${replacement.installedHookCount} swiz hook(s)`
     )
+    if (replacement.retainedHookCount > 0) {
+      console.log(
+        `    ${YELLOW}Retained ${replacement.retainedHookCount} managed, plugin, or session hook(s): ${replacement.retainedHookSources.join(", ")}${RESET}`
+      )
+    } else if (!replacement.hookDiscoveryComplete) {
+      console.log(
+        `    ${DIM}Codex runtime hook audit unavailable; use /hooks to inspect managed, plugin, and session hooks.${RESET}`
+      )
+    }
   }
   console.log()
 }
@@ -254,7 +263,7 @@ export const doctorCommand: Command<DoctorCommandOptions> = {
     { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
     {
       flags: "--aggressive",
-      description: "Replace all existing agent hook entries with swiz hooks",
+      description: "Replace writable hook layers with swiz hooks and report retained sources",
     },
     { flags: "--verbose", description: "Show every diagnostic row instead of grouped summaries" },
     { flags: "--clean", description: "Alias for swiz doctor clean" },

@@ -36,7 +36,7 @@ async function runDoctor(
   return runCommandInProcess(doctorCommand, args, {
     commandOptions: DOCTOR_TEST_OPTIONS,
     cwd,
-    env: { HOME: home },
+    env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
   })
 }
 
