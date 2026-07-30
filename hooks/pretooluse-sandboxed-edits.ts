@@ -8,6 +8,7 @@
 
 import { tmpdir } from "node:os"
 import { dirname } from "node:path"
+import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import { git, isGitHubHost, isGitRepo, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
@@ -28,6 +29,7 @@ const AUTO_MEMORY_PATH_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/
 import { buildIssueGuidance } from "../src/utils/inline-hook-helpers.ts"
 import {
   buildProtectedTaskStorageDenyReason,
+  isCodexHomePath,
   isHiddenTopLevelHomePath,
   isProtectedTaskStoragePath,
   resolveCanonical,
@@ -211,6 +213,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
 
   async run(input): Promise<SwizHookOutput> {
     const parsed = fileEditHookInputSchema.parse(input)
+    const allowCodexHome = detectCurrentAgentFromHookPayload(parsed)?.id === "codex"
 
     if (!isFileEditTool(parsed.tool_name ?? "")) return preToolUseAllow("")
 
@@ -242,7 +245,19 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     // operates in a uniform canonical namespace — no mix of logical and real paths.
     const cwd = await resolveCanonical(hookCwd)
 
-    // 3a. Auto-memory writes are always allowed — outside cwd but owned by the agent.
+    // 3a. Codex owns its home directory and may update its configuration and skills.
+    const homeDir = getHomeDirOrNull()
+    if (allowCodexHome && homeDir) {
+      const canonicalHome = await resolveCanonical(homeDir)
+      if (isCodexHomePath(target, canonicalHome)) {
+        return preToolUseAllowWithContext(
+          "Codex home-directory edit allowed: within ~/.codex.",
+          SAFE_READ_ONLY_INSPECTION_HINT
+        )
+      }
+    }
+
+    // 3b. Auto-memory writes are always allowed — outside cwd but owned by the agent.
     if (AUTO_MEMORY_PATH_RE.test(target.replace(/\\/g, "/"))) {
       return preToolUseAllowWithContext(
         "Auto-memory write allowed: within agent memory directory.",

@@ -16,7 +16,7 @@ const TEST_HOME = homedir()
 
 async function runPinnedHomeBashHook(
   command: string,
-  opts: { cwd?: string } = {}
+  opts: { agent?: "codex"; cwd?: string } = {}
 ): Promise<{ decision?: string; stdout: string }> {
   const proc = Bun.spawn(["bun", resolve(process.cwd(), HOOK)], {
     stdin: "pipe",
@@ -27,6 +27,7 @@ async function runPinnedHomeBashHook(
   })
   await proc.stdin.write(
     JSON.stringify({
+      ...(opts.agent ? { _agent: opts.agent } : {}),
       tool_name: "Bash",
       tool_input: { command },
     })
@@ -178,6 +179,28 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
     const result = await runPinnedHomeBashHook(
       `node -e "const fs=require('fs'),path=require('path'),os=require('os');const dir=path.join(os.homedir(),'.Codex','tasks');console.log(fs.readdirSync(dir));"`
     )
+    expect(result.decision).toBe("deny")
+  })
+
+  test("allows Codex shell commands to write within ~/.codex", async () => {
+    const result = await runPinnedHomeBashHook(
+      `bun -e "await Bun.write('${join(TEST_HOME, ".codex", "config.toml")}', '')"`,
+      { agent: "codex" }
+    )
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("still blocks non-Codex shell commands that write within ~/.codex", async () => {
+    const result = await runPinnedHomeBashHook(
+      `bun -e "await Bun.write('${join(TEST_HOME, ".codex", "config.toml")}', '')"`
+    )
+    expect(result.decision).toBe("deny")
+  })
+
+  test("still blocks Codex shell commands that directly access task storage", async () => {
+    const result = await runPinnedHomeBashHook("cat ~/.codex/tasks/session/1.json", {
+      agent: "codex",
+    })
     expect(result.decision).toBe("deny")
   })
 

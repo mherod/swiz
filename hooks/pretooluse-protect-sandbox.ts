@@ -12,12 +12,14 @@
 
 import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
+import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseAllowWithContext, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 import {
   buildProtectedTaskStorageDenyReason,
+  isCodexHomePath,
   isHiddenTopLevelHomePath,
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
@@ -135,13 +137,15 @@ async function normalizeShellPath(
 async function isHiddenHomePathInCommand(
   rawPath: string,
   cwd: string,
-  homeDir: string
+  homeDir: string,
+  allowCodexHome: boolean
 ): Promise<boolean> {
   const resolved = await normalizeShellPath(rawPath, cwd, homeDir)
   if (!resolved) return false
   // The session's own persisted tool-result/output files live under a hidden
   // home dir but are the agent's own working data — never block reading them.
   if (isSessionToolResultsPath(resolved)) return false
+  if (allowCodexHome && isCodexHomePath(resolved, homeDir)) return false
   if (!isHiddenTopLevelHomePath(resolved, homeDir)) return false
 
   const normalizedCwd = cwd.replace(/\\/g, "/")
@@ -154,7 +158,8 @@ async function isHiddenHomePathInCommand(
 
 async function shouldBlockShellCommand(
   command: string,
-  cwd: string
+  cwd: string,
+  allowCodexHome: boolean
 ): Promise<BlockedShellPath | null> {
   const homeDir = homedir()
   if (!homeDir || !command) return null
@@ -194,13 +199,20 @@ async function shouldBlockShellCommand(
       if (resolvedCandidate && isProtectedTaskStoragePath(resolvedCandidate)) {
         return { kind: "task-storage", path: resolvedCandidate }
       }
-      if (await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir)) {
+      if (
+        await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir, allowCodexHome)
+      ) {
         return { kind: "hidden-home", path: candidate }
       }
       if (
         hasHomeReference &&
         hasPathBuilder &&
-        (await isHiddenHomePathInCommand(candidate, canonicalHomeDir, canonicalHomeDir))
+        (await isHiddenHomePathInCommand(
+          candidate,
+          canonicalHomeDir,
+          canonicalHomeDir,
+          allowCodexHome
+        ))
       ) {
         return { kind: "hidden-home", path: candidate }
       }
@@ -254,6 +266,7 @@ const pretoolUseProtectSandbox: SwizToolHook = {
     const input = rawInput as Record<string, any>
     const toolName: string = (input.tool_name as string) ?? ""
     const toolInput = input.tool_input as Record<string, string> | undefined
+    const allowCodexHome = detectCurrentAgentFromHookPayload(input)?.id === "codex"
 
     if (isShellTool(toolName)) {
       const command: string = (toolInput?.command ?? "").normalize("NFKC")
@@ -279,7 +292,11 @@ const pretoolUseProtectSandbox: SwizToolHook = {
         )
       }
 
-      const blocked = await shouldBlockShellCommand(command, input.cwd ?? process.cwd())
+      const blocked = await shouldBlockShellCommand(
+        command,
+        input.cwd ?? process.cwd(),
+        allowCodexHome
+      )
       if (blocked) {
         if (blocked.kind === "task-storage") {
           return preToolUseDeny(buildProtectedTaskStorageDenyReason(blocked.path))

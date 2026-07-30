@@ -73,9 +73,10 @@ async function runHook(
   toolName: string,
   filePath: string,
   {
+    agent,
     sandboxedEdits = true,
     fakeHomeOverride,
-  }: { sandboxedEdits?: boolean; fakeHomeOverride?: string } = {}
+  }: { agent?: "codex"; sandboxedEdits?: boolean; fakeHomeOverride?: string } = {}
 ): Promise<HookResult> {
   // Build an env with a fake HOME so we can control whether sandboxedEdits is on/off.
   // readSwizSettings() reads from HOME/.swiz/settings.json.
@@ -90,6 +91,7 @@ async function runHook(
   }
 
   const payload = {
+    ...(agent ? { _agent: agent } : {}),
     tool_name: toolName,
     cwd,
     tool_input: { file_path: filePath },
@@ -192,6 +194,42 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(msg).toContain("Hidden home-directory edits are blocked")
     expect(msg).toContain("read-only shell command")
     expect(msg).not.toContain("/update-memory")
+  })
+
+  test("allows Codex edits within ~/.codex", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const configPath = join(fakeHome, ".codex", "config.toml")
+    const result = await runHook(cwd, "Write", configPath, {
+      agent: "codex",
+      fakeHomeOverride: fakeHome,
+    })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
+  })
+
+  test("still blocks non-Codex edits within ~/.codex", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const configPath = join(fakeHome, ".codex", "config.toml")
+    const result = await runHook(cwd, "Write", configPath, { fakeHomeOverride: fakeHome })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
+  })
+
+  test("still blocks Codex edits to task storage", async () => {
+    const cwd = await createTempDir()
+    const fakeHome = await createTempDir()
+    const taskPath = join(fakeHome, ".codex", "tasks", "session", "1.json")
+    const result = await runHook(cwd, "Write", taskPath, {
+      agent: "codex",
+      fakeHomeOverride: fakeHome,
+    })
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, any> | undefined
+    expect(hso?.permissionDecision).toBe("deny")
   })
 
   test("allows hidden home-directory edits when dispatch is inside that hidden root", async () => {

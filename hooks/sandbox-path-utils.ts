@@ -189,3 +189,10 @@ export function isHiddenTopLevelHomePath(target: string, homeDir: string): boole
   const firstSegment = relative.split("/")[0] ?? ""
   return firstSegment.startsWith(".")
 }
+
+export function isCodexHomePath(target: string, homeDir: string): boolean {
+  const normalizedTarget = target.replace(/\\/g, "/")
+  const normalizedHome = homeDir.replace(/\\/g, "/").replace(/\/$/, "")
+  const codexRoot = `${normalizedHome}/.codex`
+  return normalizedTarget === codexRoot || normalizedTarget.startsWith(`${codexRoot}/`)
+}
