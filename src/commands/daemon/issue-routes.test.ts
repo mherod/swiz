@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -14,7 +14,7 @@ import { UpstreamSyncRegistry } from "./upstream-sync.ts"
 const cleanups: Array<() => Promise<void>> = []
 const registries: UpstreamSyncRegistry[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   for (const registry of registries.splice(0)) registry.close()
   for (const cleanup of cleanups.splice(0)) await cleanup()
 })

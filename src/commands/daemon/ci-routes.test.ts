@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
 import type { CiRoutesContext } from "./ci-routes.ts"
 import { CiWatchRegistry } from "./ci-watch-registry.ts"
 
@@ -18,7 +18,7 @@ beforeAll(async () => {
   routes = await import("./ci-routes.ts")
 })
 
-afterEach(() => {
+afterAll(() => {
   for (const registry of registries.splice(0)) registry.close()
 })
 
