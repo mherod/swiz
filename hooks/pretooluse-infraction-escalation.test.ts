@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { isDeny } from "../src/dispatch/engine.ts"
-import { COOLDOWN_MARKER } from "../src/infractions.ts"
+import { COOLDOWN_MARKER, INFRACTION_DENIAL_MARKER } from "../src/infractions.ts"
 import { evaluatePretooluseInfractionEscalation } from "./pretooluse-infraction-escalation.ts"
 
 const DENY_FOOTER = "You must act on this now"
@@ -88,6 +88,7 @@ describe("pretooluse-infraction-escalation", () => {
     )
     expect(isDeny(out)).toBe(true)
     expect(JSON.stringify(out)).toContain("re-assess")
+    expect(JSON.stringify(out)).toContain(INFRACTION_DENIAL_MARKER)
   })
 
   it("ignores denials of a different command", async () => {

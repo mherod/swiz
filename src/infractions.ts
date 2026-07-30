@@ -40,6 +40,9 @@ export const INFRACTION_WINDOW_MS = 20 * 60 * 1000
  */
 export const COOLDOWN_MARKER = "cooling off after a hard block"
 
+/** Stable marker for a denial emitted by the retry-after-block detector itself. */
+export const INFRACTION_DENIAL_MARKER = "retry-after-block enforcement"
+
 /**
  * Wanted level, GTA-style: rises with repeated bad behaviour, falls with good.
  *   - none     → ☆0  clear
@@ -73,6 +76,8 @@ interface ToolResultRecord {
   denied: boolean
   /** True when this denial was our own cooldown hold (carries COOLDOWN_MARKER). */
   isCooldown: boolean
+  /** True when the retry-after-block detector itself emitted the denial. */
+  isInfractionDenial: boolean
 }
 
 /** A tool_use whose result was a denial, reduced to a comparable key. */
@@ -82,6 +87,8 @@ interface BlockedAttempt {
   timestampMs: number | null
   /** True when the denial was our cooldown hold, not a real block. */
   isCooldown: boolean
+  /** True when the retry-after-block detector itself emitted the denial. */
+  isInfractionDenial: boolean
 }
 
 /** The most recent tool call that has a settled result, with how it resolved. */
@@ -187,6 +194,7 @@ function collectResults(lines: string[]): Map<string, ToolResultRecord> {
         timestampMs: parseTimestampMs(block.timestamp) ?? entryTimestampMs,
         denied: isDenialText(text),
         isCooldown: text.includes(COOLDOWN_MARKER),
+        isInfractionDenial: text.includes(INFRACTION_DENIAL_MARKER),
       })
     }
   }
@@ -210,6 +218,7 @@ function blockedAttemptFromBlock(
     key,
     timestampMs: result.timestampMs ?? entryTimestampMs,
     isCooldown: result.isCooldown,
+    isInfractionDenial: result.isInfractionDenial,
   }
 }
 
@@ -277,6 +286,7 @@ export function assessInfraction(
   const priorDenialCount = blockedAttempts.filter(
     (attempt) =>
       !attempt.isCooldown &&
+      !attempt.isInfractionDenial &&
       attempt.key === current.key &&
       (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
   ).length
@@ -299,6 +309,7 @@ function denialCountForKey(
   return blockedAttempts.filter(
     (attempt) =>
       !attempt.isCooldown &&
+      !attempt.isInfractionDenial &&
       attempt.key === key &&
       (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
   ).length

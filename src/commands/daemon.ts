@@ -59,6 +59,21 @@ const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
 const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 60 * 1000 // 1 min
 const PROJECT_IDLE_EVICTION_MS = 3 * 60 * 1000 // 3 mins
 const MAX_WATCHED_PROJECTS = 2
+const SNAPSHOT_KEY_SEPARATOR = "\x00"
+
+export function snapshotCacheKey(cwd: string, sessionId: string | null | undefined): string {
+  return `${cwd}${SNAPSHOT_KEY_SEPARATOR}${sessionId ?? ""}`
+}
+
+export function deleteProjectSnapshots(
+  snapshots: { keys(): Iterable<string>; delete(key: string): unknown },
+  cwd: string
+): void {
+  const prefix = snapshotCacheKey(cwd, null)
+  for (const key of snapshots.keys()) {
+    if (key.startsWith(prefix)) snapshots.delete(key)
+  }
+}
 
 async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
   if (args.includes("status")) {
@@ -177,9 +192,6 @@ function createDaemonCaches() {
 }
 
 function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
-  const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
-    `${cwd}\x00${sessionId ?? ""}`
-
   // In-flight coalescing: concurrent requests for the same cwd+session share one computation.
   const inFlight = new Map<string, Promise<WarmStatusLineSnapshot>>()
 
@@ -187,7 +199,7 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
     cwd: string,
     sessionId: string | null | undefined
   ): Promise<WarmStatusLineSnapshot> => {
-    const key = cacheKey(cwd, sessionId)
+    const key = snapshotCacheKey(cwd, sessionId)
 
     // Coalesce concurrent callers before doing any expensive work.
     const inflight = inFlight.get(key)
@@ -266,9 +278,7 @@ function setupWatchers(
     // Do NOT unregister from upstreamSyncRegistry here — background sync continues
     // for idle projects so the issue store stays fresh without needing external triggers.
     caches.cooldownRegistry.invalidateProject(cwd)
-    for (const key of snapshots.keys()) {
-      if (key.startsWith(cwd)) snapshots.delete(key)
-    }
+    deleteProjectSnapshots(snapshots, cwd)
   }
 
   const invalidateProject = (cwd: string) => {
@@ -281,9 +291,7 @@ function setupWatchers(
     sessionDataCache.invalidateProject(cwd)
     invalidateTurnsCache(cwd)
     caches.cooldownRegistry.invalidateProject(cwd)
-    for (const key of snapshots.keys()) {
-      if (key.startsWith(cwd)) snapshots.delete(key)
-    }
+    deleteProjectSnapshots(snapshots, cwd)
   }
 
   const registerProjectWatchers = (cwd: string) => {

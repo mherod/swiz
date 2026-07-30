@@ -130,6 +130,15 @@ async function writeTask(
   )
 }
 
+async function enableAutoContinue(homeDir: string): Promise<void> {
+  const { getSwizSettingsPath, invalidateSettingsCache, readSwizSettings, writeSwizSettings } =
+    await import("../settings.ts")
+  const defaults = await readSwizSettings({ home: homeDir })
+  await writeSwizSettings({ ...defaults, autoContinue: true }, { home: homeDir })
+  const settingsPath = getSwizSettingsPath(homeDir)
+  if (settingsPath) invalidateSettingsCache(settingsPath)
+}
+
 describe("dispatch output formats", () => {
   test("preToolUse deny uses hookSpecificOutput.permissionDecision", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
@@ -191,6 +200,7 @@ describe("dispatch output formats", () => {
 
   test("stop block uses top-level decision + reason", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
+    await enableAutoContinue(homeDir)
     const repoDir = await _tmp.create("swiz-dispatch-repo-")
     const transcriptPath = join(repoDir, "transcript.jsonl")
     await writeFile(

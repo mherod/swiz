@@ -364,7 +364,11 @@ describe("dispatch execute integration", () => {
           tool_input: { file_path: "/repo/.agents/skills/push/SKILL.md", content: "# Push\n" },
         },
         {
-          tool_name: "functions.apply_patch",
+          tool_name: "Edit",
+          toolInput: { filePath: "/repo/.codex/skills/commit/SKILL.md" },
+        },
+        {
+          tool_name: "apply_patch",
           tool_input: {
             command: [
               "*** Begin Patch",
@@ -414,6 +418,7 @@ describe("dispatch execute integration", () => {
       }
       const payloads = [
         { tool_name: "Edit", tool_input: { file_path: "/repo/src/main.ts" } },
+        { tool_name: "apply_patch", tool_input: { command: "no extractable patch target" } },
         {
           tool_name: "apply_patch",
           tool_input: {

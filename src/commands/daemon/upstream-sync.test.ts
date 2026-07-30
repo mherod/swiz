@@ -87,6 +87,60 @@ describe("UpstreamSyncRegistry fork entries", () => {
   })
 })
 
+describe("UpstreamSyncRegistry lifecycle", () => {
+  test("keeps a timed-out sync in flight so the next interval cannot overlap it", async () => {
+    const releaseSync = deferred()
+    let syncCalls = 0
+    const store = new IssueStore(":memory:")
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 10,
+      timeoutMs: 5,
+      resolveSlug: async () => "owner/repo",
+      resolveFork: async () => null,
+      sync: async () => {
+        syncCalls++
+        await releaseSync.promise
+        return createSyncResult()
+      },
+      store,
+    })
+
+    try {
+      await registry.register("/virtual/repo")
+      await Bun.sleep(40)
+
+      expect(syncCalls).toBe(1)
+      expect(registry.listActive()[0]?.syncing).toBe(true)
+    } finally {
+      registry.close()
+      releaseSync.resolve()
+      await Bun.sleep(0)
+      store.close()
+    }
+  })
+
+  test("prunes a stored cwd cursor when startup registration fails", async () => {
+    const store = new IssueStore(":memory:")
+    store.setSyncCursor("owner/deleted", "cwd", "/deleted/repo")
+    const registry = new UpstreamSyncRegistry({
+      intervalMs: 60_000,
+      resolveSlug: async () => null,
+      resolveFork: async () => null,
+      store,
+    })
+
+    try {
+      await registry.restoreKnownRepos()
+
+      expect(store.getSyncCursor("owner/deleted", "cwd")).toBeNull()
+      expect(registry.listActive()).toHaveLength(0)
+    } finally {
+      registry.close()
+      store.close()
+    }
+  })
+})
+
 /**
  * A real on-disk project so realpath, the `.git` walk, and symlink aliasing are
  * exercised for real rather than mocked. `mkdtemp` lands under a symlinked

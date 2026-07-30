@@ -23,7 +23,27 @@ import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
 import type { CapturedToolCall, SessionToolUsageState } from "./daemon/utils.ts"
 import { resolveComplianceDurationLabel } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
-import { hydratePersistedSessionToolState } from "./daemon.ts"
+import {
+  deleteProjectSnapshots,
+  hydratePersistedSessionToolState,
+  snapshotCacheKey,
+} from "./daemon.ts"
+
+describe("project snapshot eviction", () => {
+  it("keeps sibling project snapshots that share a path prefix", () => {
+    const snapshots = new Map<string, object>([
+      [snapshotCacheKey("/workspace/app", "session-a"), {}],
+      [snapshotCacheKey("/workspace/app", "session-b"), {}],
+      [snapshotCacheKey("/workspace/app-api", "session-c"), {}],
+    ])
+
+    deleteProjectSnapshots(snapshots, "/workspace/app")
+
+    expect(snapshots.has(snapshotCacheKey("/workspace/app", "session-a"))).toBeFalse()
+    expect(snapshots.has(snapshotCacheKey("/workspace/app", "session-b"))).toBeFalse()
+    expect(snapshots.has(snapshotCacheKey("/workspace/app-api", "session-c"))).toBeTrue()
+  })
+})
 
 describe("snapshot resolver .finally() cleanup", () => {
   it("cleans up inFlight map after successful snapshot computation", async () => {

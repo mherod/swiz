@@ -1136,6 +1136,11 @@ export class IssueStore {
       .run(repo, kind, value, Date.now())
   }
 
+  /** Delete one per-repo sync cursor without clearing the repo's other cached state. */
+  deleteSyncCursor(repo: string, kind: string): void {
+    this.db.query("DELETE FROM sync_cursors WHERE repo = ? AND kind = ?").run(repo, kind)
+  }
+
   /** Return all repos that have a stored `cwd`, so the daemon can re-register them for sync on startup. */
   listKnownRepoCwds(): { repo: string; cwd: string }[] {
     return this.db

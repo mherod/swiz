@@ -91,11 +91,53 @@ function classifyAllowHint(
 /** Deny reason from any of the shapes hooks use for PreToolUse denials. */
 function extractDenyReason(resp: Record<string, any>): string | null {
   const hso = getHookSpecificOutput(resp)
-  const candidates = [hso?.permissionDecisionReason, resp.reason, resp.stopReason]
+  const candidates = [
+    hso?.permissionDecisionReason,
+    resp.reason,
+    resp.stopReason,
+    resp.systemMessage,
+    hso?.additionalContext,
+  ]
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim()
   }
   return null
+}
+
+function hasTopLevelReason(resp: Record<string, any>): boolean {
+  return typeof resp.reason === "string" && !!resp.reason.trim()
+}
+
+function hasCanonicalDenyReason(hso: Record<string, any> | undefined, reason: string): boolean {
+  return hso?.permissionDecision === "deny" && hso.permissionDecisionReason === reason
+}
+
+/**
+ * Ensure every accepted PreToolUse deny shape has an agent-visible reason.
+ * Existing reasons remain byte-for-byte unchanged; only incomplete legacy or
+ * external outputs receive the deterministic hook-naming fallback.
+ */
+export function normalizePreToolDenyReason(
+  resp: Record<string, any>,
+  hookFile: string
+): string | null {
+  if (!isDeny(resp)) return null
+
+  const hso = getHookSpecificOutput(resp)
+  const existing = extractDenyReason(resp)
+  const reason =
+    existing ??
+    `Blocked by ${hookFile}. The hook supplied no retry guidance; resolve this hook's requirement before retrying.`
+
+  if (!existing) {
+    resp.reason = reason
+    resp.systemMessage = reason
+    if (hso?.permissionDecision === "deny") hso.permissionDecisionReason = reason
+  } else if (!hasTopLevelReason(resp) && !hasCanonicalDenyReason(hso, reason)) {
+    resp.reason = reason
+  }
+
+  return reason
 }
 
 /**
@@ -157,7 +199,7 @@ function downgradesDeny(mode: FileEditDenyDowngrade, hookFile: string): boolean 
   return false
 }
 
-function collectPreToolResults(
+export function collectPreToolResults(
   results: Array<{ execution: HookExecution; parsed: Record<string, any> | null }>,
   executions: HookExecution[],
   acc: PreToolAccumulator
@@ -168,6 +210,7 @@ function collectPreToolResults(
       executions.push(execution)
       continue
     }
+    if (resp) normalizePreToolDenyReason(resp, execution.file)
     if (resp && isDeny(resp) && downgradesDeny(downgradeMode, execution.file)) {
       execution.status = "allow-with-reason"
       const reason = extractDenyReason(resp)

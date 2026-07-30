@@ -36,6 +36,7 @@ interface SyncEntry {
 type RepoSlugResolver = (cwd: string) => Promise<string | null>
 type ForkTopologyResolver = (cwd: string) => Promise<{ upstreamSlug: string } | null>
 type SyncRunner = typeof syncUpstreamState
+type RegistrationResult = { deduped: boolean; registered: boolean }
 
 function toSyncStatus(entry: SyncEntry): UpstreamSyncStatus {
   return {
@@ -51,7 +52,7 @@ export class UpstreamSyncRegistry {
   private entries = new Map<string, SyncEntry>()
   // Registration coalescing: concurrent register() calls for cwd variants that
   // resolve to one root share a single computation. See register().
-  private inFlightRegistrations = new Map<string, Promise<{ deduped: boolean }>>()
+  private inFlightRegistrations = new Map<string, Promise<RegistrationResult>>()
   private readonly intervalMs: number
   private readonly timeoutMs: number
   private readonly resolveSlug: RepoSlugResolver
@@ -86,18 +87,18 @@ export class UpstreamSyncRegistry {
   /** Register a project for periodic upstream sync. Idempotent.
    *  For fork workflows, also registers the upstream (parent) repo so
    *  its issues, labels, and milestones are synced alongside the fork's PRs/CI. */
-  async register(cwd: string): Promise<{ deduped: boolean }> {
+  async register(cwd: string): Promise<RegistrationResult> {
     // Placeholder/relative cwds (e.g. "." from DaemonBackedIssueStore) must not
     // become sync entries — they resolve against the daemon's own cwd and spawn
     // a duplicate loop, and a persisted "." cursor would resurrect it on every
     // startup via restoreKnownRepos (#716).
-    if (!isRegisterableProjectCwd(cwd)) return { deduped: false }
+    if (!isRegisterableProjectCwd(cwd)) return { deduped: false, registered: false }
 
     // Key on the repository root, not the cwd we happened to be handed. `/path`,
     // `/path/`, a symlink alias, and `/path/subdir` all name one project; keying
     // raw gave each its own independent 2-minute sync loop (#717).
     const canonicalRoot = await resolveProjectRoot(cwd)
-    if (this.entries.has(canonicalRoot)) return { deduped: true }
+    if (this.entries.has(canonicalRoot)) return { deduped: true, registered: true }
 
     // restoreKnownRepos() registers every stored cursor concurrently, so two
     // legacy cwd variants collapsing to the same root can both clear the check
@@ -106,7 +107,10 @@ export class UpstreamSyncRegistry {
     const inflight = this.inFlightRegistrations.get(canonicalRoot)
     if (inflight) {
       await inflight
-      return { deduped: this.entries.has(canonicalRoot) }
+      return {
+        deduped: this.entries.has(canonicalRoot),
+        registered: this.entries.has(canonicalRoot),
+      }
     }
 
     const registration = this.performRegister(canonicalRoot)
@@ -118,9 +122,9 @@ export class UpstreamSyncRegistry {
     }
   }
 
-  private async performRegister(canonicalRoot: string): Promise<{ deduped: boolean }> {
+  private async performRegister(canonicalRoot: string): Promise<RegistrationResult> {
     const repo = await this.resolveSlug(canonicalRoot)
-    if (!repo) return { deduped: false }
+    if (!repo) return { deduped: false, registered: false }
 
     const entry: SyncEntry = {
       repo,
@@ -151,7 +155,7 @@ export class UpstreamSyncRegistry {
       }
     }
 
-    return { deduped: false }
+    return { deduped: false, registered: true }
   }
 
   /**
@@ -160,9 +164,14 @@ export class UpstreamSyncRegistry {
    * for every repo in the issue store without waiting for a dispatch to arrive.
    */
   async restoreKnownRepos(): Promise<void> {
-    const { getIssueStore } = await import("../../issue-store.ts")
-    const known = getIssueStore().listKnownRepoCwds()
-    await Promise.all(known.map(({ cwd }) => this.register(cwd)))
+    const store = this.store ?? getIssueStore()
+    const known = store.listKnownRepoCwds()
+    await Promise.all(
+      known.map(async ({ repo, cwd }) => {
+        const result = await this.register(cwd)
+        if (!result.registered) store.deleteSyncCursor(repo, "cwd")
+      })
+    )
   }
 
   /** Trigger an immediate sync for a project. Accepts any cwd inside it. */
@@ -246,18 +255,38 @@ export class UpstreamSyncRegistry {
 
     const computation = this.runSync(entry)
     this.inFlightSyncs.set(entryKey, computation)
-    return computation.finally(() => this.inFlightSyncs.delete(entryKey))
+    void computation.finally(() => {
+      if (this.inFlightSyncs.get(entryKey) === computation) {
+        this.inFlightSyncs.delete(entryKey)
+      }
+    })
+    return this.waitForSync(entry, computation)
+  }
+
+  private async waitForSync(
+    entry: SyncEntry,
+    computation: Promise<UpstreamSyncResult>
+  ): Promise<UpstreamSyncResult> {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        computation,
+        new Promise<UpstreamSyncResult>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
+        }),
+      ])
+    } catch (err) {
+      debugLog(`[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${messageFromUnknownError(err)}`)
+      return entry.lastResult ?? createEmptySyncResult()
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
   }
 
   private async runSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
     entry.syncing = true
     try {
-      const result = await Promise.race([
-        this.sync(entry.repo, entry.cwd, { store: this.store ?? undefined }),
-        new Promise<UpstreamSyncResult>((_, reject) =>
-          setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
-        ),
-      ])
+      const result = await this.sync(entry.repo, entry.cwd, { store: this.store ?? undefined })
       // Only stamp lastSyncAt on a real success — a sync where every fetch
       // returned null must not report as fresh to status/staleness consumers (#715).
       if (result.fetchOk) entry.lastSyncAt = Date.now()
@@ -275,27 +304,29 @@ export class UpstreamSyncRegistry {
       return result
     } catch (err) {
       debugLog(`[swiz] UPSTREAM_SYNC_ERROR repo=${entry.repo} ${messageFromUnknownError(err)}`)
-      const emptyBucket = () => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
-      const emptyTracked = () => ({ upserted: 0, changes: [] })
-      return (
-        entry.lastResult ?? {
-          issues: emptyBucket(),
-          pullRequests: emptyBucket(),
-          ciStatuses: emptyTracked(),
-          comments: { upserted: 0 },
-          labels: emptyBucket(),
-          milestones: emptyBucket(),
-          branchCi: emptyTracked(),
-          prBranchDetail: emptyTracked(),
-          branchProtection: emptyTracked(),
-          events: { inserted: 0, cursor: null },
-          restCache: { requests: 0, notModified: 0, writes: 0 },
-          fetchOk: false,
-        }
-      )
+      return entry.lastResult ?? createEmptySyncResult()
     } finally {
       entry.syncing = false
     }
+  }
+}
+
+function createEmptySyncResult(): UpstreamSyncResult {
+  const emptyBucket = () => ({ upserted: 0, removed: 0, skipped: 0, changes: [] })
+  const emptyTracked = () => ({ upserted: 0, changes: [] })
+  return {
+    issues: emptyBucket(),
+    pullRequests: emptyBucket(),
+    ciStatuses: emptyTracked(),
+    comments: { upserted: 0 },
+    labels: emptyBucket(),
+    milestones: emptyBucket(),
+    branchCi: emptyTracked(),
+    prBranchDetail: emptyTracked(),
+    branchProtection: emptyTracked(),
+    events: { inserted: 0, cursor: null },
+    restCache: { requests: 0, notModified: 0, writes: 0 },
+    fetchOk: false,
   }
 }
 

@@ -569,6 +569,47 @@ describe("dispatch replay", () => {
     }
   }, 60_000)
 
+  test("SKILL.md-only replay bypasses preToolUse blocker groups", async () => {
+    const result = await replay(
+      "preToolUse",
+      {
+        tool_name: "apply_patch",
+        tool_input: {
+          command: [
+            "*** Begin Patch",
+            "*** Update File: .codex/skills/commit/SKILL.md",
+            "*** End Patch",
+          ].join("\n"),
+        },
+      },
+      ["--json"]
+    )
+
+    expect(result.exitCode).toBe(0)
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
+    expect(parsed.matched_groups).toBe(0)
+    expect(parsed.hooks).toEqual([])
+    expect((parsed.result as Record<string, any>).blocked).toBe(false)
+  }, 60_000)
+
+  test("non-SKILL.md replay keeps preToolUse blocker groups active", async () => {
+    const result = await replay(
+      "preToolUse",
+      {
+        tool_name: "apply_patch",
+        tool_input: {
+          command: "*** Begin Patch\n*** Update File: src/main.ts\n*** End Patch",
+        },
+      },
+      ["--json"]
+    )
+
+    expect(result.exitCode).toBe(0)
+    const parsed = JSON.parse(result.stdout) as Record<string, any>
+    expect(parsed.matched_groups).toBeGreaterThan(0)
+    expect((parsed.hooks as Array<Record<string, any>>).length).toBeGreaterThan(0)
+  }, 60_000)
+
   test("replay outputs human-readable trace to stderr (non-JSON mode)", async () => {
     const result = await replay("preToolUse", {
       tool_name: "Bash",
