@@ -1503,6 +1503,7 @@ function checkUpdatePlanFinalTaskState(
   if (pendingOverflowOutcome) return pendingOverflowOutcome
 
   const summary = buildIncompleteTaskSummary(projection.finalTasks)
+  if (summary.allTasksDone) return null
   return checkTaskMinimums("update_plan", summary, thresholds) ?? null
 }
 
@@ -1571,11 +1572,14 @@ async function evaluateUpdatePlanGovernance(
 
   const completedTransitions = findCompletedTransitions(projection)
   const beforeSummary = buildIncompleteTaskSummary(projection.existingTasks)
-  const rateLimited = checkCompletionRateLimitForCount(sessionId, completedTransitions.length, {
-    pending: beforeSummary.pendingTasks.length,
-    inProgress: beforeSummary.inProgressTasks.length,
-  })
-  if (rateLimited) return rateLimited
+  const finalSummary = buildIncompleteTaskSummary(projection.finalTasks)
+  if (!finalSummary.allTasksDone) {
+    const rateLimited = checkCompletionRateLimitForCount(sessionId, completedTransitions.length, {
+      pending: beforeSummary.pendingTasks.length,
+      inProgress: beforeSummary.inProgressTasks.length,
+    })
+    if (rateLimited) return rateLimited
+  }
 
   return "continue"
 }
