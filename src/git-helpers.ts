@@ -588,7 +588,10 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
   }
   if (!branch) return null
 
-  const statusOut = gitSpawnSyncLines(["status", "--porcelain=2", "--branch"], gitPaths.workTree)
+  const statusOut = gitSpawnSyncLines(
+    ["--no-optional-locks", "status", "--porcelain=2", "--branch"],
+    gitPaths.workTree
+  )
   let changedFallback = 0
   let counts: StatusCounts
 
@@ -605,7 +608,10 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
       upstream: null,
       upstreamAbSeen: false,
     }
-    const fallbackOut = gitSpawnSyncLines(["status", "--porcelain"], gitPaths.workTree)
+    const fallbackOut = gitSpawnSyncLines(
+      ["--no-optional-locks", "status", "--porcelain"],
+      gitPaths.workTree
+    )
     changedFallback = fallbackOut ? fallbackOut.split("\n").length : 0
   }
 

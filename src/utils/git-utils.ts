@@ -372,7 +372,7 @@ export function parseGitStatusV2Output(out: string): GitStatusV2 | null {
  * ahead/behind counts, and file-change breakdown. Replaces five separate git calls.
  */
 export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
-  const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
+  const out = await git(["--no-optional-locks", "status", "--porcelain=v2", "--branch"], cwd)
   return parseGitStatusV2Output(out)
 }
 
