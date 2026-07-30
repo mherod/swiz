@@ -69,6 +69,7 @@ async function runWithTimeout<T>(
 interface AutoFixContext {
   fix: boolean
   aggressive: boolean
+  verbose: boolean
   results: CheckResult[]
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
@@ -140,7 +141,39 @@ interface AutoFixDependencies {
   autoCleanup: typeof autoCleanup
 }
 
-function reportAggressiveHookReplacement(replacements: AggressiveHookReplacement[]): void {
+function singleLineHookText(value: string): string {
+  const printable = Array.from(value, (character) => {
+    const code = character.charCodeAt(0)
+    return code < 32 || code === 127 ? " " : character
+  }).join("")
+  return printable.replace(/\s+/g, " ").trim()
+}
+
+function hookTextPreview(value: string, maxLength: number): string {
+  const text = singleLineHookText(value)
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`
+}
+
+function reportRetainedHooks(replacement: AggressiveHookReplacement, verbose: boolean): void {
+  for (const hook of replacement.retainedHooks ?? []) {
+    const matcher = hook.matcher ? ` matcher=${JSON.stringify(hook.matcher)}` : ""
+    const state = hook.enabled ? "enabled" : "disabled"
+    const trust = hook.trustStatus ?? (hook.isManaged ? "managed" : "untrusted")
+    const status = hook.statusMessage ? ` — ${hookTextPreview(hook.statusMessage, 160)}` : ""
+    console.log(
+      `      ${YELLOW}↳${RESET} ${hook.eventName} ${hook.handlerType}${matcher} [${trust}, ${state}]${status}`
+    )
+    console.log(`        ${DIM}source: ${hook.sourcePath}${RESET}`)
+    if (verbose && hook.command) {
+      console.log(`        ${DIM}command: ${hookTextPreview(hook.command, 320)}${RESET}`)
+    }
+  }
+}
+
+function reportAggressiveHookReplacement(
+  replacements: AggressiveHookReplacement[],
+  verbose: boolean
+): void {
   console.log(`  ${BOLD}Replacing all agent hooks with swiz hooks...${RESET}\n`)
   for (const replacement of replacements) {
     console.log(
@@ -150,6 +183,7 @@ function reportAggressiveHookReplacement(replacements: AggressiveHookReplacement
       console.log(
         `    ${YELLOW}Retained ${replacement.retainedHookCount} managed, plugin, or session hook(s): ${replacement.retainedHookSources.join(", ")}${RESET}`
       )
+      reportRetainedHooks(replacement, verbose)
     } else if (!replacement.hookDiscoveryComplete) {
       console.log(
         `    ${DIM}Codex runtime hook audit unavailable; use /hooks to inspect managed, plugin, and session hooks.${RESET}`
@@ -163,7 +197,15 @@ async function handleAutoFixes(
   ctx: AutoFixContext,
   dependencies: AutoFixDependencies
 ): Promise<void> {
-  const { fix, aggressive, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
+  const {
+    fix,
+    aggressive,
+    verbose,
+    results,
+    skillConflicts,
+    invalidSkillEntries,
+    pluginCacheInfos,
+  } = ctx
   const hasStaleConfigs = results.some(
     (r) =>
       r.name.endsWith("config sync") &&
@@ -172,7 +214,7 @@ async function handleAutoFixes(
   )
   if (aggressive) {
     const replacements = await dependencies.replaceAgentHooksWithSwiz()
-    reportAggressiveHookReplacement(replacements)
+    reportAggressiveHookReplacement(replacements, verbose)
     if (!fix) return
   }
   if (fix) {

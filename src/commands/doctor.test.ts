@@ -219,6 +219,62 @@ describe("swiz doctor", () => {
     expect([...collectCommands(backup.hooks)]).toContain("echo user-hook")
   }, 60_000)
 
+  test("doctor --aggressive surfaces retained deep hook details", async () => {
+    const home = await createTempHome()
+    const replacement = {
+      agentName: "Codex CLI",
+      settingsPath: join(home, ".codex", "hooks.json"),
+      removedHookCount: 5,
+      installedHookCount: 5,
+      cleanedSourceCount: 1,
+      retainedHookCount: 1,
+      retainedHookSources: ["managed:cloudRequirements"],
+      retainedHooks: [
+        {
+          key: "/<enterprise-managed:Baseline>/requirements.toml:pre_tool_use:0:0",
+          eventName: "preToolUse",
+          handlerType: "command",
+          matcher: "^Bash$",
+          command:
+            "python3 -c 'blocked=(\"PUSHPATROL_BYPASS\" in cmd); sys.exit(2 if blocked else 0)'",
+          timeoutSec: 10,
+          statusMessage: "Checking PushPatrol bypass policy",
+          sourcePath: "/<enterprise-managed:Baseline>/requirements.toml",
+          source: "cloudRequirements",
+          isManaged: true,
+          pluginId: null,
+          enabled: true,
+          trustStatus: "managed",
+          currentHash: "sha256:managed",
+        },
+      ],
+      hookDiscoveryComplete: true,
+    }
+    const commandOptions: DoctorCommandOptions = {
+      ...DOCTOR_TEST_OPTIONS,
+      replaceAgentHooksWithSwiz: async () => [replacement],
+    }
+
+    const normal = await runCommandInProcess(doctorCommand, ["--aggressive"], {
+      commandOptions,
+      cwd: process.cwd(),
+      env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
+    })
+    const verbose = await runCommandInProcess(doctorCommand, ["--aggressive", "--verbose"], {
+      commandOptions,
+      cwd: process.cwd(),
+      env: { HOME: home, AI_TEST_NO_BACKEND: "1" },
+    })
+
+    expect(normal.stdout).toContain("managed:cloudRequirements")
+    expect(normal.stdout).toContain('preToolUse command matcher="^Bash$" [managed, enabled]')
+    expect(normal.stdout).toContain("Checking PushPatrol bypass policy")
+    expect(normal.stdout).toContain("source: /<enterprise-managed:Baseline>/requirements.toml")
+    expect(normal.stdout).not.toContain("PUSHPATROL_BYPASS")
+    expect(verbose.stdout).toContain("command: python3 -c")
+    expect(verbose.stdout).toContain("PUSHPATROL_BYPASS")
+  }, 60_000)
+
   test("reports OPENROUTER_API_KEY presence in daemon LaunchAgent config without printing it", async () => {
     const home = await createTempHome()
     const launchAgentsDir = join(home, "Library", "LaunchAgents")

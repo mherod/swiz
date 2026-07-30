@@ -31,6 +31,7 @@ export interface DoctorCheckResults {
 interface AutoFixContext {
   fix: boolean
   aggressive: boolean
+  verbose: boolean
   results: CheckResult[]
   skillConflicts: SkillConflict[]
   invalidSkillEntries: InvalidSkillEntry[]
@@ -166,6 +167,7 @@ export async function runDoctorChecks(args: string[], deps: DoctorCheckRunnerDep
   await deps.handleAutoFixes({
     fix,
     aggressive,
+    verbose,
     results,
     skillConflicts,
     invalidSkillEntries,

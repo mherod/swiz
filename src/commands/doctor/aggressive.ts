@@ -18,6 +18,7 @@ export interface AggressiveHookReplacement {
   cleanedSourceCount: number
   retainedHookCount: number
   retainedHookSources: string[]
+  retainedHooks: DiscoveredCodexHook[]
   hookDiscoveryComplete: boolean
 }
 
@@ -302,6 +303,7 @@ async function clearCodexSupplementalSources(
   cleanedSourceCount: number
   retainedHookCount: number
   retainedHookSources: string[]
+  retainedHooks: DiscoveredCodexHook[]
   hookDiscoveryComplete: boolean
 }> {
   const discovered = await discoverHooks(cwd, homeDir)
@@ -324,6 +326,7 @@ async function clearCodexSupplementalSources(
     cleanedSourceCount,
     retainedHookCount: retained.length,
     retainedHookSources: uniqueRetainedSources(retained),
+    retainedHooks: retained,
     hookDiscoveryComplete: discovered !== null,
   }
 }
@@ -360,6 +363,7 @@ export async function replaceAgentHooksWithSwiz(
     let cleanedSourceCount = 1
     let retainedHookCount = 0
     let retainedHookSources: string[] = []
+    let retainedHooks: DiscoveredCodexHook[] = []
     let hookDiscoveryComplete = true
 
     await mkdir(dirname(resolvedAgent.settingsPath), { recursive: true })
@@ -376,6 +380,7 @@ export async function replaceAgentHooksWithSwiz(
       cleanedSourceCount += supplemental.cleanedSourceCount
       retainedHookCount = supplemental.retainedHookCount
       retainedHookSources = supplemental.retainedHookSources
+      retainedHooks = supplemental.retainedHooks
       hookDiscoveryComplete = supplemental.hookDiscoveryComplete
     } else {
       const supplemental = await clearSupplementalJsonSources(resolvedAgent, homeDir, cwd)
@@ -391,6 +396,7 @@ export async function replaceAgentHooksWithSwiz(
       cleanedSourceCount,
       retainedHookCount,
       retainedHookSources,
+      retainedHooks,
       hookDiscoveryComplete,
     })
   }

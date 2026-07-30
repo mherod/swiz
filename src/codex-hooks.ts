@@ -2,17 +2,37 @@ import { join } from "node:path"
 import { z } from "zod"
 
 export interface DiscoveredCodexHook {
+  key: string | null
+  eventName: string
+  handlerType: string
+  matcher: string | null
+  command: string | null
+  timeoutSec: number | null
+  statusMessage: string | null
   sourcePath: string
   source: string
   isManaged: boolean
   pluginId: string | null
+  enabled: boolean
+  trustStatus: string | null
+  currentHash: string | null
 }
 
 const discoveredCodexHookSchema = z.looseObject({
+  key: z.string().nullable().default(null),
+  eventName: z.string().default("unknown"),
+  handlerType: z.string().default("unknown"),
+  matcher: z.string().nullable().default(null),
+  command: z.string().nullable().default(null),
+  timeoutSec: z.number().nullable().default(null),
+  statusMessage: z.string().nullable().default(null),
   sourcePath: z.string(),
   source: z.string(),
-  isManaged: z.boolean().optional(),
-  pluginId: z.string().nullable().optional(),
+  isManaged: z.boolean().default(false),
+  pluginId: z.string().nullable().default(null),
+  enabled: z.boolean().default(true),
+  trustStatus: z.string().nullable().default(null),
+  currentHash: z.string().nullable().default(null),
 })
 
 const hooksListResponseSchema = z.looseObject({
@@ -30,6 +50,7 @@ const hooksListEnvelopeSchema = z.looseObject({
   result: hooksListResponseSchema.optional(),
 })
 
+type CodexHookRecord = z.infer<typeof discoveredCodexHookSchema>
 type HooksListResponse = z.infer<typeof hooksListResponseSchema>
 
 const HOOK_DISCOVERY_TIMEOUT_MS = 8_000
@@ -90,18 +111,32 @@ async function readHooksListResponse(
   return null
 }
 
+function normalizeHook(hook: CodexHookRecord): DiscoveredCodexHook {
+  return {
+    key: hook.key,
+    eventName: hook.eventName,
+    handlerType: hook.handlerType,
+    matcher: hook.matcher,
+    command: hook.command,
+    timeoutSec: hook.timeoutSec,
+    statusMessage: hook.statusMessage,
+    sourcePath: hook.sourcePath,
+    source: hook.source,
+    isManaged: hook.isManaged,
+    pluginId: hook.pluginId,
+    enabled: hook.enabled,
+    trustStatus: hook.trustStatus,
+    currentHash: hook.currentHash,
+  }
+}
+
 function normalizeHooks(response: HooksListResponse | null): DiscoveredCodexHook[] | null {
   if (!response?.data) return null
 
   const hooks: DiscoveredCodexHook[] = []
   for (const entry of response.data) {
     for (const hook of entry.hooks ?? []) {
-      hooks.push({
-        sourcePath: hook.sourcePath,
-        source: hook.source,
-        isManaged: hook.isManaged === true,
-        pluginId: typeof hook.pluginId === "string" ? hook.pluginId : null,
-      })
+      hooks.push(normalizeHook(hook))
     }
   }
   return hooks

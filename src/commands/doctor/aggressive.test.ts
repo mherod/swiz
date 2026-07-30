@@ -122,22 +122,52 @@ describe("replaceAgentHooksWithSwiz", () => {
       cwd: nestedCwd,
       discoverCodexHooks: async () => [
         {
+          key: `${projectHooksPath}:stop:0:0`,
+          eventName: "stop",
+          handlerType: "command",
+          matcher: null,
+          command: "echo project-hook",
+          timeoutSec: 10,
+          statusMessage: null,
           sourcePath: projectHooksPath,
           source: "project",
           isManaged: false,
           pluginId: null,
+          enabled: true,
+          trustStatus: "trusted",
+          currentHash: "sha256:project",
         },
         {
+          key: "/<enterprise-managed:Baseline>/requirements.toml:pre_tool_use:0:0",
+          eventName: "preToolUse",
+          handlerType: "command",
+          matcher: "^Bash$",
+          command: "python3 pushpatrol.py",
+          timeoutSec: 10,
+          statusMessage: "Checking PushPatrol bypass policy",
           sourcePath: "/<enterprise-managed:Baseline>/requirements.toml",
           source: "cloudRequirements",
           isManaged: true,
           pluginId: null,
+          enabled: true,
+          trustStatus: "managed",
+          currentHash: "sha256:managed",
         },
         {
+          key: "/plugins/policy/hooks/hooks.json:stop:0:0",
+          eventName: "stop",
+          handlerType: "command",
+          matcher: null,
+          command: "bun plugin-hook.ts",
+          timeoutSec: null,
+          statusMessage: null,
           sourcePath: "/plugins/policy/hooks/hooks.json",
           source: "plugin",
           isManaged: false,
           pluginId: "policy",
+          enabled: true,
+          trustStatus: "trusted",
+          currentHash: "sha256:plugin",
         },
       ],
     })
@@ -169,6 +199,17 @@ describe("replaceAgentHooksWithSwiz", () => {
     expect(replacement.cleanedSourceCount).toBe(5)
     expect(replacement.retainedHookCount).toBe(2)
     expect(replacement.retainedHookSources).toEqual(["managed:cloudRequirements", "plugin:policy"])
+    expect(replacement.retainedHooks).toEqual([
+      expect.objectContaining({
+        eventName: "preToolUse",
+        matcher: "^Bash$",
+        statusMessage: "Checking PushPatrol bypass policy",
+      }),
+      expect.objectContaining({
+        eventName: "stop",
+        pluginId: "policy",
+      }),
+    ])
     expect(replacement.hookDiscoveryComplete).toBe(true)
   })
 
