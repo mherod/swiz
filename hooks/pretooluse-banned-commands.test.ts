@@ -871,6 +871,39 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("--no-verify")
     })
 
+    test("git global options do not bypass --no-verify enforcement", async () => {
+      const result = await runHook("git -C /tmp/repo commit --no-verify -m test")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--no-verify")
+    })
+
+    test("git push --force is blocked", async () => {
+      const result = await runHook("git push --force origin main")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--force-with-lease")
+    })
+
+    test("git push -f with global options is blocked", async () => {
+      const result = await runHook("git -C /tmp/repo push -f origin main")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--force-with-lease")
+    })
+
+    test("git push --force-with-lease is allowed by the security rule", async () => {
+      const result = await runHook("git push --force-with-lease origin main")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("git push --force-if-includes is allowed by the security rule", async () => {
+      const result = await runHook("git push --force-if-includes origin main")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("force-looking refspecs after -- are not treated as flags", async () => {
+      const result = await runHook("git push origin -- --force")
+      expect(result.decision).toBeUndefined()
+    })
+
     test("git clean -n (dry run) is still blocked", async () => {
       // The rule blocks all git clean usage regardless of flags
       const result = await runHook("git clean -n")
@@ -884,12 +917,37 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("--admin")
     })
 
+    test("gh --skip-status-check is blocked", async () => {
+      const result = await runHook("gh pr merge 123 --skip-status-check")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--skip-status-check")
+    })
+
     test("Co-authored-by in commit message is blocked", async () => {
       const result = await runHook(
         'git commit -m "feat: add feature\n\nCo-authored-by: Bot <bot@example.com>"'
       )
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("Co-authored-by")
+    })
+
+    test("Co-authored-by in a long-form commit message is blocked", async () => {
+      const result = await runHook(
+        'git -C /tmp/repo commit --message="fix: bug\n\nCo-authored-by: Bot <bot@example.com>"'
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Co-authored-by")
+    })
+
+    test("Claude Code generation signatures in commit messages are blocked", async () => {
+      const result = await runHook('git commit -am "fix: bug\n\nGenerated with Claude Code"')
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("AI-generation")
+    })
+
+    test("security tokens inside an echo argument are not treated as commands", async () => {
+      const result = await runHook('echo "git push --force && gh pr merge --admin"')
+      expect(result.decision).toBeUndefined()
     })
 
     test("git checkout -- . (whole directory) is blocked", async () => {

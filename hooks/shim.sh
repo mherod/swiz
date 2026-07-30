@@ -292,22 +292,60 @@ git() {
   done
   set -- "${args[@]}"
 
+  # Identify the git subcommand after global options such as `-C <dir>`.
+  local git_cmd="" git_cmd_index=0
+  local i=1 arg
+  while [[ $i -le $# ]]; do
+    arg="${!i}"
+    case "$arg" in
+      -C|-c|--git-dir|--work-tree|--namespace|--config-env)
+        i=$((i + 2))
+        continue
+        ;;
+      --git-dir=*|--work-tree=*|--namespace=*|--config-env=*|--exec-path=*|-*)
+        i=$((i + 1))
+        continue
+        ;;
+      *)
+        git_cmd="$arg"
+        git_cmd_index=$i
+        break
+        ;;
+    esac
+  done
+
   # Block --no-verify on commit and push
-  if [[ "$1" == "commit" || "$1" == "push" ]]; then
-    case "$*" in
-      *--no-verify*)
-        printf 'swiz: git %s --no-verify is blocked.\n' "$1" >&2
+  if [[ "$git_cmd" == "commit" || "$git_cmd" == "push" ]]; then
+    for ((i = git_cmd_index + 1; i <= $#; i++)); do
+      arg="${!i}"
+      [[ "$arg" == "--" ]] && break
+      if [[ "$arg" == "--no-verify" || "$arg" == --no-verify=* ]]; then
+        printf 'swiz: git %s --no-verify is blocked.\n' "$git_cmd" >&2
         printf 'This flag bypasses pre-commit hooks and other safety mechanisms.\n' >&2
         printf 'Address the underlying issue flagged by the hooks instead.\n' >&2
         return 1
-        ;;
-    esac
+      fi
+    done
+  fi
+
+  # Block unsafe force pushes while allowing lease-based safety flags.
+  if [[ "$git_cmd" == "push" ]]; then
+    for ((i = git_cmd_index + 1; i <= $#; i++)); do
+      arg="${!i}"
+      [[ "$arg" == "--" ]] && break
+      if [[ "$arg" == "--force" || ( "$arg" == -[^-]* && "${arg#-}" == *f* ) ]]; then
+        printf 'swiz: git push --force is blocked.\n' >&2
+        printf 'Use --force-with-lease to avoid overwriting unseen remote work.\n' >&2
+        return 1
+      fi
+    done
   fi
 
   # Block dangerous git subcommands
-  case "$1" in
+  case "$git_cmd" in
     stash)
-      case "$2" in
+      local stash_arg_index=$((git_cmd_index + 1))
+      case "${!stash_arg_index}" in
         list|show)
           # Read-only inspection — allow
           ;;
@@ -331,7 +369,7 @@ git() {
   esac
 
   # Block git reset --hard
-  if [[ "$1" == "reset" ]]; then
+  if [[ "$git_cmd" == "reset" ]]; then
     case "$*" in
       *--hard*)
         printf 'swiz: Do not use `git reset --hard`. It destroys uncommitted changes.\n' >&2
@@ -342,7 +380,7 @@ git() {
   fi
 
   # Block git checkout -- <file> (discards changes)
-  if [[ "$1" == "checkout" ]]; then
+  if [[ "$git_cmd" == "checkout" ]]; then
     case "$*" in
       *" -- "*)
         printf 'swiz: Do not use `git checkout -- <file>`. It discards file changes.\n' >&2
@@ -353,28 +391,43 @@ git() {
   fi
 
   # Block co-authored and AI-signed commits
-  if [[ "$1" == "commit" ]]; then
+  if [[ "$git_cmd" == "commit" ]]; then
     local commit_msg=""
-    local i=1
-    while [[ $i -le $# ]]; do
-      eval "local arg=\${$i}"
-      if [[ "$arg" == "-m" ]]; then
-        i=$((i + 1))
-        eval "commit_msg=\${$i}"
-        break
+    local message_value=""
+    for ((i = git_cmd_index + 1; i <= $#; i++)); do
+      arg="${!i}"
+      [[ "$arg" == "--" ]] && break
+      message_value=""
+      case "$arg" in
+        -m|--message)
+          i=$((i + 1))
+          [[ $i -le $# ]] && message_value="${!i}"
+          ;;
+        --message=*)
+          message_value="${arg#--message=}"
+          ;;
+        -[^-]*m*)
+          if [[ "$arg" =~ ^-[^-]*m(.*)$ ]]; then
+            message_value="${BASH_REMATCH[1]}"
+            if [[ -z "$message_value" ]]; then
+              i=$((i + 1))
+              [[ $i -le $# ]] && message_value="${!i}"
+            fi
+          fi
+          ;;
+      esac
+      if [[ -n "$message_value" ]]; then
+        commit_msg="${commit_msg}${commit_msg:+$'\n\n'}${message_value}"
       fi
-      i=$((i + 1))
     done
 
     if [[ -n "$commit_msg" ]]; then
-      case "$commit_msg" in
-        *Co-authored-by:*)
-          printf 'swiz: Co-authored commits are blocked.\n' >&2
-          printf 'Create commits without co-author attribution.\n' >&2
-          return 1
-          ;;
-      esac
-      if echo "$commit_msg" | command grep -qiE "generated.*with.*claude.*code"; then
+      if printf '%s' "$commit_msg" | command grep -qi "Co-authored-by:"; then
+        printf 'swiz: Co-authored commits are blocked.\n' >&2
+        printf 'Create commits without co-author attribution.\n' >&2
+        return 1
+      fi
+      if printf '%s' "$commit_msg" | command grep -qisE "generated.*with.*claude.*code"; then
         printf 'swiz: AI-generation signatures in commit messages are blocked.\n' >&2
         printf 'Write your own commit messages.\n' >&2
         return 1
@@ -405,14 +458,24 @@ git() {
 gh() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command gh "$@"; return $?; }
 
-  case "$*" in
-    *--admin*)
-      printf 'swiz: gh --admin is blocked.\n' >&2
-      printf 'This flag bypasses repository protection rules and required checks.\n' >&2
-      printf 'Ensure PRs pass all required checks and obtain proper approvals.\n' >&2
-      return 1
-      ;;
-  esac
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == "--" ]] && break
+    case "$arg" in
+      --admin|--admin=*)
+        printf 'swiz: gh --admin is blocked.\n' >&2
+        printf 'This flag bypasses repository protection rules and required checks.\n' >&2
+        printf 'Ensure PRs pass all required checks and obtain proper approvals.\n' >&2
+        return 1
+        ;;
+      --skip-status-check|--skip-status-check=*)
+        printf 'swiz: gh --skip-status-check is blocked.\n' >&2
+        printf 'This flag bypasses required CI/CD status checks.\n' >&2
+        printf 'Wait for every required check to pass before merging.\n' >&2
+        return 1
+        ;;
+    esac
+  done
 
   _swiz_run_gh "$@"
 }

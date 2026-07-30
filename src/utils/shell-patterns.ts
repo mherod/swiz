@@ -182,11 +182,11 @@ export function shellTokenCommandRe(pattern: string, flags = ""): RegExp {
 /**
  * Optional git global options that may appear between `git` and the subcommand.
  * Handles: `-C <dir>`, `-c <key>=<val>`, `--git-dir <path>`, `--work-tree <path>`,
- * `--namespace <ns>`, and short flags like `--bare`, `--no-pager`, `-P`, etc.
- * Value-taking options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`)
- * consume the next whitespace-delimited token as well.
+ * `--namespace <ns>`, `--config-env <name>=<envvar>`, and flags like `--bare`,
+ * `--no-pager`, `-P`, etc. Value-taking options consume the next
+ * whitespace-delimited token as well.
  */
-export const GIT_GLOBAL_OPTS = String.raw`(?:(?:-[Cc]\s+\S+|--(?:git-dir|work-tree|namespace)(?:=\S+|\s+\S+)|--?\S+)\s+)*`
+export const GIT_GLOBAL_OPTS = String.raw`(?:(?:-[Cc]\s+\S+|--(?:git-dir|work-tree|namespace|config-env)(?:=\S+|\s+\S+)|--?\S+)\s+)*`
 
 /**
  * Build a regex that matches `git [global-opts] <subcmd>` at a shell statement boundary.
@@ -209,7 +209,14 @@ export const GIT_COMMIT_RE = gitSubcommandRe("commit\\b")
 // ── Token-based git push force-flag detection ─────────────────────────────────
 
 const _FORCE_LONG_FLAGS = new Set(["--force", "--force-with-lease", "--force-if-includes"])
-const _GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
+const _GIT_VALUE_OPTS = new Set([
+  "-C",
+  "-c",
+  "--work-tree",
+  "--git-dir",
+  "--namespace",
+  "--config-env",
+])
 
 function _isForceToken(token: string): boolean {
   if (!token.startsWith("-")) return false
@@ -271,6 +278,46 @@ function _skipGitOpts(tokens: string[], i: number): number {
   return i
 }
 
+interface _ParsedGitInvocation {
+  subcommand: string
+  args: string[]
+}
+
+function _commandStart(tokens: string[], command: string): number | null {
+  let index = 0
+  if (tokens[index] === "command") index++
+  return tokens[index] === command ? index : null
+}
+
+function _parseGitInvocation(segment: string): _ParsedGitInvocation | null {
+  const tokens = _tokenize(segment)
+  const gitIndex = _commandStart(tokens, "git")
+  if (gitIndex === null) return null
+
+  const subcommandIndex = _skipGitOpts(tokens, gitIndex + 1)
+  const subcommand = tokens[subcommandIndex]
+  if (!subcommand) return null
+  return { subcommand, args: tokens.slice(subcommandIndex + 1) }
+}
+
+function _gitInvocations(command: string): _ParsedGitInvocation[] {
+  const invocations: _ParsedGitInvocation[] = []
+  for (const segment of splitShellSegments(command)) {
+    const parsed = _parseGitInvocation(segment)
+    if (parsed) invocations.push(parsed)
+  }
+  return invocations
+}
+
+function _argsBeforeDoubleDash(args: string[]): string[] {
+  const separatorIndex = args.indexOf("--")
+  return separatorIndex === -1 ? args : args.slice(0, separatorIndex)
+}
+
+function _hasLongFlag(args: string[], flag: string): boolean {
+  return _argsBeforeDoubleDash(args).some((arg) => arg === flag || arg.startsWith(`${flag}=`))
+}
+
 function _checkPushTokens(tokens: string[], i: number): boolean {
   while (i < tokens.length) {
     const t = tokens[i]!
@@ -282,20 +329,8 @@ function _checkPushTokens(tokens: string[], i: number): boolean {
 }
 
 function _checkSegmentForForce(segment: string): boolean {
-  const tokens = _tokenize(segment)
-  let i = 0
-  while (i < tokens.length) {
-    if (tokens[i] !== "git") {
-      i++
-      continue
-    }
-    i++
-    i = _skipGitOpts(tokens, i)
-    if (tokens[i] !== "push") continue
-    i++
-    if (_checkPushTokens(tokens, i)) return true
-  }
-  return false
+  const parsed = _parseGitInvocation(segment)
+  return parsed?.subcommand === "push" && _checkPushTokens(parsed.args, 0)
 }
 
 /**
@@ -303,12 +338,87 @@ function _checkSegmentForForce(segment: string): boolean {
  * Handles `git push -- --force` (refspec, not flag), `-C /path push -f`, etc.
  */
 export function hasGitPushForceFlag(command: string): boolean {
-  const segments = command
-    .split(/&&|\|\||;|\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  for (const segment of segments) {
+  for (const segment of splitShellSegments(command)) {
     if (_checkSegmentForForce(segment)) return true
+  }
+  return false
+}
+
+function _isUnsafeForceToken(token: string): boolean {
+  if (token === "--force") return true
+  return token.startsWith("-") && !token.startsWith("--") && token.slice(1).includes("f")
+}
+
+/** Detect an unsafe `--force`/`-f` on `git push`, excluding lease-based safety flags. */
+export function hasUnsafeGitPushForceFlag(command: string): boolean {
+  return _gitInvocations(command).some(
+    ({ subcommand, args }) =>
+      subcommand === "push" && _argsBeforeDoubleDash(args).some(_isUnsafeForceToken)
+  )
+}
+
+/** Detect `--no-verify` on the commit and push subcommands where it bypasses hooks. */
+export function hasGitNoVerifyFlag(command: string): boolean {
+  return _gitInvocations(command).some(
+    ({ subcommand, args }) =>
+      (subcommand === "commit" || subcommand === "push") && _hasLongFlag(args, "--no-verify")
+  )
+}
+
+/** Detect Git's trailer injection flag before the `--` argument separator. */
+export function hasGitTrailerFlag(command: string): boolean {
+  return _gitInvocations(command).some(({ args }) => _hasLongFlag(args, "--trailer"))
+}
+
+function _collectCommitMessages(args: string[]): string[] {
+  const messages: string[] = []
+  const commandArgs = _argsBeforeDoubleDash(args)
+
+  for (let index = 0; index < commandArgs.length; index++) {
+    const arg = commandArgs[index]!
+    if (arg === "-m" || arg === "--message") {
+      const value = commandArgs[++index]
+      if (value !== undefined) messages.push(value)
+      continue
+    }
+    if (arg.startsWith("--message=")) {
+      messages.push(arg.slice("--message=".length))
+      continue
+    }
+    const shortMessage = arg.match(/^-[^-]*m(.*)$/)
+    if (!shortMessage) continue
+    const inlineValue = shortMessage[1]
+    if (inlineValue) {
+      messages.push(inlineValue)
+    } else {
+      const value = commandArgs[++index]
+      if (value !== undefined) messages.push(value)
+    }
+  }
+
+  return messages
+}
+
+export type GitCommitAttribution = "co-author" | "claude-code"
+
+/** Find prohibited attribution in inline `git commit` message arguments. */
+export function findGitCommitAttribution(command: string): GitCommitAttribution | null {
+  for (const { subcommand, args } of _gitInvocations(command)) {
+    if (subcommand !== "commit") continue
+    const message = _collectCommitMessages(args).join("\n\n")
+    if (/co-authored-by:/i.test(message)) return "co-author"
+    if (/generated[\s\S]*with[\s\S]*claude[\s\S]*code/i.test(message)) return "claude-code"
+  }
+  return null
+}
+
+/** Detect a flag on a real `gh` invocation, ignoring quoted examples and args after `--`. */
+export function hasGhFlag(command: string, flag: string): boolean {
+  for (const segment of splitShellSegments(command)) {
+    const tokens = _tokenize(segment)
+    const ghIndex = _commandStart(tokens, "gh")
+    if (ghIndex === null) continue
+    if (_hasLongFlag(tokens.slice(ghIndex + 1), flag)) return true
   }
   return false
 }
