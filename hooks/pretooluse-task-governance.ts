@@ -67,8 +67,6 @@ import {
   applyCacheTaskUpdate,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
-  readSessionTasks,
-  readSessionTasksFresh,
 } from "../src/tasks/task-recovery.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
@@ -141,6 +139,15 @@ function taskCreateToolName(): string {
 function taskHomeForInput(input: Record<string, any>): string | undefined {
   const value = input._taskHome
   return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+function taskStoreForInput(input: Record<string, any>) {
+  const home = taskHomeForInput(input)
+  return home ? createTaskStoreForHookPayload(input, home) : createTaskStoreForHookPayload(input)
+}
+
+async function readTasksForInput(input: Record<string, any>, sessionId: string) {
+  return await readTasks(sessionId, taskStoreForInput(input).tasksDir)
 }
 
 function hasTaskGovernanceSurface(input: Record<string, any>, toolName: string): boolean {
@@ -262,10 +269,7 @@ async function sessionHasHealthyPendingTaskBuffer(input: Record<string, any>): P
   try {
     const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
     if (!sessionId) return false
-    const allTasks = overlayEventState(
-      await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
-      sessionId
-    )
+    const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
     return hasHealthyPendingTaskBuffer(allTasks)
   } catch {
     return false
@@ -799,10 +803,10 @@ function checkDuplicateSubjectResolution(
 }
 
 async function readTaskSubjectEntries(
-  sessionId: string,
-  home?: string
+  input: Record<string, any>,
+  sessionId: string
 ): Promise<TaskSubjectEntry[]> {
-  return overlayEventState(await readSessionTasksFresh(sessionId, home), sessionId)
+  return overlayEventState(await readTasksForInput(input, sessionId), sessionId)
 }
 
 async function checkTaskCreateSubjectGovernance(
@@ -812,7 +816,7 @@ async function checkTaskCreateSubjectGovernance(
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   if (!sessionId) return undefined
 
-  const allTasks = await readTaskSubjectEntries(sessionId, taskHomeForInput(input))
+  const allTasks = await readTaskSubjectEntries(input, sessionId)
   const duplicateState = checkDuplicateSubjectResolution(
     String(input.tool_name ?? "TaskCreate"),
     input,
@@ -829,7 +833,7 @@ async function checkTaskUpdateSubjectGovernance(
   input: Record<string, any>,
   sessionId: string
 ): Promise<SwizHookOutput | undefined> {
-  const allTasks = await readTaskSubjectEntries(sessionId, taskHomeForInput(input))
+  const allTasks = await readTaskSubjectEntries(input, sessionId)
   const duplicateState = checkDuplicateSubjectResolution("TaskUpdate", input, allTasks)
   if (duplicateState) return duplicateState
 
@@ -948,10 +952,7 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
     // Settings read failure → use strict thresholds as default
   }
 
-  const allTasks = overlayEventState(
-    await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
-    sessionId
-  )
+  const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
@@ -1113,6 +1114,7 @@ function checkCompletionRateLimit(
 }
 
 async function checkNativeTaskDeletionGovernance(
+  input: Record<string, any>,
   taskId: string,
   sessionId: string,
   cwd: string | undefined
@@ -1123,7 +1125,7 @@ async function checkNativeTaskDeletionGovernance(
       cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
     ])
     // Overlay in-memory event state for TOCTOU safety on parallel deletions.
-    const diskTasks = await readSessionTasks(sessionId)
+    const diskTasks = await readTasksForInput(input, sessionId)
     const allTasks = overlayEventState(diskTasks, sessionId)
     const effectiveSettings = getEffectiveSwizSettings(
       settings,
@@ -1170,11 +1172,12 @@ async function checkNativeTaskDeletionGovernance(
 }
 
 async function handleTaskDeletionCompletion(
+  input: Record<string, any>,
   taskId: string,
   sessionId: string,
   cwd: string | undefined
 ): Promise<SwizHookOutput | null> {
-  return await checkNativeTaskDeletionGovernance(taskId, sessionId, cwd)
+  return await checkNativeTaskDeletionGovernance(input, taskId, sessionId, cwd)
 }
 
 async function handleTaskCompletion(
@@ -1184,7 +1187,7 @@ async function handleTaskCompletion(
   cwd: string | undefined
 ): Promise<SwizHookOutput | null> {
   // Read tasks first so counts are available for the rate-limit bypass check.
-  const diskTasks = await readSessionTasks(sessionId)
+  const diskTasks = await readTasksForInput(input, sessionId)
   const allTasks = overlayEventState(diskTasks, sessionId)
 
   const incompleteBefore = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
@@ -1250,9 +1253,9 @@ async function handleTaskCompletion(
 async function checkInProgressTransitionCap(
   taskId: string,
   sessionId: string,
-  home?: string
+  input: Record<string, any>
 ): Promise<SwizHookOutput | null> {
-  const allTasks = await readSessionTasks(sessionId, home)
+  const allTasks = await readTasksForInput(input, sessionId)
   const inProgressCount = allTasks.filter((t) => t.status === "in_progress").length
   const currentTask = allTasks.find((t) => t.id === taskId)
 
@@ -1433,11 +1436,7 @@ async function readUpdatePlanProjection(
   sessionId: string,
   plan: UpdatePlanTaskInput[]
 ): Promise<UpdatePlanProjection> {
-  const home = taskHomeForInput(input)
-  const taskStore = home
-    ? createTaskStoreForHookPayload(input, home)
-    : createTaskStoreForHookPayload(input)
-  const existingTasks = (await readTasks(sessionId, taskStore.tasksDir)).map((task) => ({
+  const existingTasks = (await readTasksForInput(input, sessionId)).map((task) => ({
     id: task.id,
     subject: task.subject,
     status: task.status,
@@ -1589,11 +1588,10 @@ async function handleNativeInProgressUpdate(
   sessionId: string,
   input: Record<string, any>
 ): Promise<NativeTaskUpdateResult> {
-  const taskHome = taskHomeForInput(input)
-  const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, taskHome)
+  const transitionDenied = await checkInProgressTransitionCap(taskId, sessionId, input)
   if (transitionDenied) return transitionDenied
   // Optimistically record in event state + cache for parallel TOCTOU safety.
-  const allTasks = await readSessionTasks(sessionId, taskHome)
+  const allTasks = await readTasksForInput(input, sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status !== "in_progress") {
     applyTaskUpdateEvent(sessionId, taskId, { status: "in_progress" })
@@ -1622,7 +1620,7 @@ async function checkNativeTaskUpdateCompletion(
   if (duplicateSubjectDenied) return duplicateSubjectDenied
 
   if (toolInput.status === "deleted") {
-    const deletionDenied = await handleTaskDeletionCompletion(taskId, sessionId, cwd)
+    const deletionDenied = await handleTaskDeletionCompletion(input, taskId, sessionId, cwd)
     if (deletionDenied) return deletionDenied
     return "continue"
   }
@@ -1636,7 +1634,7 @@ async function checkNativeTaskUpdateCompletion(
   // Reject shortcut completion from a merely planned task. The user-facing
   // message deliberately describes the behavior being prevented rather than
   // handing over a mechanical transition recipe.
-  const allTasks = await readSessionTasks(sessionId)
+  const allTasks = await readTasksForInput(input, sessionId)
   const currentTask = allTasks.find((t) => t.id === taskId)
   if (currentTask && currentTask.status === "pending") {
     return denyTaskGovernance(
@@ -1768,7 +1766,7 @@ export async function evaluatePendingOverflowGuard(
   if (!sessionId) return null
   if (!(await isTaskEnforcementProject(cwd))) return null
 
-  const allTasks = overlayEventState(await readSessionTasksFresh(sessionId), sessionId)
+  const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   return checkPendingOverflow(toolName, allTasks) ?? null
 }
 
@@ -1982,10 +1980,7 @@ async function readTaskCountsForTrace(
   total: number
 }> {
   if (!sessionId) return { allTasks: [], pending: 0, inProgress: 0, total: 0 }
-  const allTasks = overlayEventState(
-    await readSessionTasksFresh(sessionId, taskHomeForInput(input)),
-    sessionId
-  )
+  const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   let pending = 0
   let inProgress = 0
   for (const t of allTasks) {

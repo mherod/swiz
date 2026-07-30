@@ -476,6 +476,43 @@ describe("evaluateNativeTaskUpdatePath", () => {
   })
 })
 
+describe("Codex task-store integration", () => {
+  test("allows Bash after update_plan tasks are persisted to the Codex task store", async () => {
+    const sessionId = uniqueSessionId("codex-plan-bash")
+    try {
+      await cleanupSession(sessionId)
+      await syncCodexUpdatePlanSnapshot(
+        sessionId,
+        {
+          plan: [
+            { step: "Implement provider-aware task reads", status: "in_progress" },
+            { step: "Verify provider-aware task reads", status: "pending" },
+          ],
+        },
+        { cwd: process.cwd(), tasksDir: CODEX_TASKS_DIR }
+      )
+
+      const result = await pretooluseTaskGovernance.run({
+        session_id: sessionId,
+        tool_name: "Bash",
+        tool_input: { command: "git status --short" },
+        transcript_path: "",
+        cwd: process.cwd(),
+        _taskHome: TASK_HOME,
+        _env: { CODEX_THREAD_ID: "test-codex-thread" },
+        _effectiveSettings: buildEffectiveTestSettings({
+          auditStrictness: "strict",
+          autoContinue: true,
+        }),
+      })
+
+      expect(permissionDecision(result)).toBe("allow")
+    } finally {
+      await cleanupSession(sessionId)
+    }
+  })
+})
+
 describe("evaluateTaskCreatePath", () => {
   test("denies an obviously compound subject when no session task buffer exists", async () => {
     // Use a session id that maps to no on-disk tasks so the duplicate check is a no-op

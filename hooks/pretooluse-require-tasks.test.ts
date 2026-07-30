@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import { syncCodexUpdatePlanSnapshot } from "../src/tasks/codex-update-plan.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import {
@@ -389,16 +390,16 @@ describe("pretooluse-require-tasks", () => {
   test("stale-task check skips when in_progress task exists even with agent aliases", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-stale-codex"
-    await writeTask(homeDir, sessionId, {
-      id: "1",
-      subject: "Active task",
-      status: "in_progress",
-    })
-    await writeTask(homeDir, sessionId, {
-      id: "2",
-      subject: "Next step",
-      status: "pending",
-    })
+    await syncCodexUpdatePlanSnapshot(
+      sessionId,
+      {
+        plan: [
+          { step: "Active task", status: "in_progress" },
+          { step: "Next step", status: "pending" },
+        ],
+      },
+      { cwd: PROJECT_ROOT, tasksDir: join(homeDir, ".codex", "tasks") }
+    )
 
     const lines: string[] = []
     const makeEntry = (toolName: string) =>
@@ -530,16 +531,16 @@ describe("pretooluse-require-tasks", () => {
   test("allows Codex when canonical TaskList sync is missing because TaskList is unavailable", async () => {
     const homeDir = await createTempHome()
     const sessionId = `session-codex-no-tasklist-sync-${Date.now()}`
-    await writeTask(homeDir, sessionId, {
-      id: "1",
-      subject: "Active task",
-      status: "in_progress",
-    })
-    await writeTask(homeDir, sessionId, {
-      id: "2",
-      subject: "Next step",
-      status: "pending",
-    })
+    await syncCodexUpdatePlanSnapshot(
+      sessionId,
+      {
+        plan: [
+          { step: "Active task", status: "in_progress" },
+          { step: "Next step", status: "pending" },
+        ],
+      },
+      { cwd: PROJECT_ROOT, tasksDir: join(homeDir, ".codex", "tasks") }
+    )
 
     const result = await runHook({
       homeDir,
