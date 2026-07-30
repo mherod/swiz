@@ -121,11 +121,9 @@ alwaysApply: false
 - Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
-- Stop requires no uncommitted changes (`stop-git-status.sh`).
 - **Task completion**: `TaskUpdate` `taskId` + `status: completed`; evidence in `description`: `commit:`, `pr:`, `file:`, `test:`, `note:`.
 - **Subject changes**: `TaskUpdate` `subject`/`description` — not the CLI.
 - **DON'T**: Assume CI success from partial output. Confirm every job: `gh run view <run-id> --json conclusion,status,jobs`.
-- Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `TaskUpdate`.
 - Run `git diff <files>` before `git add`; `git status` after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` near threshold.
@@ -142,13 +140,12 @@ alwaysApply: false
   4. `TaskUpdate` -> `completed`.
   5. `SHA=$(git rev-parse HEAD)`.
   6. `git log origin/main..HEAD --oneline`.
-  7. `swiz push-wait origin main`.
+  7. Run `/push`, then `swiz push-wait origin <permitted-branch>` using the branch path selected by the live collaboration guard.
   8. `swiz ci-wait $SHA --timeout 300`.
   9. Confirm CI success; if failed, fix and re-push.
   10. Announce result.
 - Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
-- Capture SHA before push; CI checks must reference it.
-- Use `swiz push-wait`; no fixed sleeps, no `--force-with-lease`.
+- Use `swiz push-wait` for pushes and cooldowns; no fixed sleeps or `--force-with-lease`.
 - Use `swiz ci-wait`; no manual watch/view loops.
 - Don't call `TaskUpdate`/`TaskList` during steps 7-10.
 - Don't stop after step 3; stop hook requires origin current.
@@ -158,9 +155,8 @@ alwaysApply: false
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
-- Repo is solo (`mherod/swiz`); push to `main`.
 - **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
-- **DO**: Treat `.swiz/config.json` as authoritative for collaboration/trunk/branch policy; stay on `main` in solo+trunk mode.
+- **DO**: Treat `.swiz/config.json` as the baseline policy for `mherod/swiz` (solo + trunk). Live `/push` signals override it: if `OPEN_PRS_FROM_OTHERS>0`, other contributors are active, or collaboration state is unknown, create a feature branch and PR. Output such as `Open PRs from others: 1` for PR #732 is a signal, not an exception.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
@@ -168,24 +164,20 @@ alwaysApply: false
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
-  4. `git push origin main` (lefthook pre-push runs full `bun test`).
+  4. `git push origin <permitted-branch>` (lefthook pre-push runs full `bun test`); use `main` only when Step 0 reports no collaboration signal.
   5. **CI** run id from `gh run list --commit "$SHA" --limit 15`—row `[0]` may be Dependabot (**MEMORY.md**).
   6. `gh run watch <run-id> --exit-status`.
   7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'`.
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
-- During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
+- If `bun test --reporter=dots --concurrent` produces widespread cross-file `mock.module` or process-state failures, DON'T rerun the entire suite serially. Run each failing file in a fresh Bun process, await every process, then run the exact lefthook pre-push selection.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
 - **DO**: Before **stop** after push: **MEMORY.md** triad (CI **completed** + jobs, **TaskUpdate** if shipped). **DON'T** skip for **`task #unkn-1`** / **missing or unstructured workflow**.
 - DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
 - `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
 - Push-command parsing: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
-- DO NOT call `TaskUpdate` or `TaskList` after push starts.
-- DO NOT stop with unpushed commits.
-- DO NOT push to `main`/`master` without the Step 0 collaboration guard.
-- DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
 - DO NOT use destructive git: `revert`, `restore`, `stash`, `reset --hard`, `checkout -- <file>`; use `reflog`. Exception: `stash list`/`stash show` (read-only).
@@ -231,6 +223,7 @@ alwaysApply: false
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
+- **DO**: In `src/commands/daemon/ci-routes.test.ts` and `src/commands/daemon/issue-routes.test.ts`, use per-test cleanup ownership or `afterAll` for shared registries and temporary repositories. **DON'T** drain module-level cleanup arrays or delete shared temporary `cwd` paths in `afterEach`; multi-file execution can resolve a webhook count as `0` instead of `1` or make `Bun.spawn(["git", ...])` fail with `ENOENT`.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file` blocked; `sed -n` pipelines allowed. Use Read `offset`/`limit`.
@@ -244,7 +237,6 @@ alwaysApply: false
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DO**: After every commit, `git log origin/main..HEAD --oneline` before stop; `/push` if unpushed. **DON'T** use `git status` alone for unpushed detection.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
 - **DON'T**: Declare commit or push success before reading tool output confirming it.
