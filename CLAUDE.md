@@ -174,7 +174,7 @@ alwaysApply: false
 - DON'T: Write merge/fallback/defensive logic to mask a parser bug — Read live data first, fix the mismatch.
 - DON'T: Retry after a hook block — instrument the hook's detection logic against current transcript_path first.
 - Biome rule changes: `biome check .` (not `biome check src/`); add overrides for valid-console dirs.
-- Bun test: `--reporter=dots`. Multi-file runs require `--concurrent`; single-file rejects it. Run once; piped re-runs trigger repeated-test hook.
+- Bun test: `--reporter=dots`. Multi-file runs require bounded isolated workers (`--parallel=<1-8>`); never use `--concurrent`, which marks every test concurrent. Single-file runs reject worker flags. Run once; piped re-runs trigger repeated-test hook.
 - DO: Edit a file between `bun run format` and `bun run lint` — hook detects no-change consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file`, `awk > file` blocked; read-only pipelines OK. Use `bun -e` or `jq` (not `python`). Use `trash` (not `rm`).

@@ -34,6 +34,12 @@ const MAX_ANCESTRY_DEPTH = 20
 const REMOVE_RETRY_DELAY_MS = 200
 const STALE_LOCK_AGE_MS = 10_000
 
+export interface GitIndexLockEvaluationOptions {
+  lockReleaseTimeoutMs?: number
+  waitIntervalMs?: number
+  removeRetryDelayMs?: number
+}
+
 // ── Validation & resolution ─────────────────────────────────────────────────
 
 async function validateMainInputs(
@@ -61,14 +67,22 @@ async function validateMainInputs(
   return { repoRoot, lockPath }
 }
 
-async function handleLockResolution(lockPath: string, repoRoot: string): Promise<SwizHookOutput> {
-  const releaseDeadlineMs = Date.now() + LOCK_RELEASE_TIMEOUT_MS
+async function handleLockResolution(
+  lockPath: string,
+  repoRoot: string,
+  options: GitIndexLockEvaluationOptions = {}
+): Promise<SwizHookOutput> {
+  const lockReleaseTimeoutMs = options.lockReleaseTimeoutMs ?? LOCK_RELEASE_TIMEOUT_MS
+  const waitIntervalMs = options.waitIntervalMs ?? WAIT_INTERVAL_MS
+  const removeRetryDelayMs = options.removeRetryDelayMs ?? REMOVE_RETRY_DELAY_MS
+  const releaseDeadlineMs = Date.now() + lockReleaseTimeoutMs
 
   // Wait for lock to resolve or git process to finish
   const { lockExists, gitActive } = await waitForLockResolution(
     lockPath,
     repoRoot,
-    releaseDeadlineMs
+    releaseDeadlineMs,
+    waitIntervalMs
   )
 
   if (!lockExists) {
@@ -76,14 +90,24 @@ async function handleLockResolution(lockPath: string, repoRoot: string): Promise
   }
 
   if (!gitActive) {
-    return await autoRemoveStaleLock(lockPath, releaseDeadlineMs)
+    return await autoRemoveStaleLock(
+      lockPath,
+      releaseDeadlineMs,
+      removeRetryDelayMs,
+      lockReleaseTimeoutMs
+    )
   }
 
   // Git process appears active, but the lock may be stale if it's old enough.
   // Attempt removal for aged locks — pgrep false-positives are common.
   const lockAge = await getLockAgeMs(lockPath)
   if (lockAge >= STALE_LOCK_AGE_MS) {
-    return await autoRemoveStaleLock(lockPath, releaseDeadlineMs)
+    return await autoRemoveStaleLock(
+      lockPath,
+      releaseDeadlineMs,
+      removeRetryDelayMs,
+      lockReleaseTimeoutMs
+    )
   }
 
   // A relevant git process IS active and lock is recent — block to prevent corruption.
@@ -108,7 +132,9 @@ async function handleLockResolution(lockPath: string, repoRoot: string): Promise
 
 async function autoRemoveStaleLock(
   lockPath: string,
-  releaseDeadlineMs: number
+  releaseDeadlineMs: number,
+  removeRetryDelayMs: number,
+  lockReleaseTimeoutMs: number
 ): Promise<SwizHookOutput> {
   let attempt = 0
 
@@ -144,7 +170,7 @@ async function autoRemoveStaleLock(
 
     const remainingMs = releaseDeadlineMs - Date.now()
     if (remainingMs <= 0) break
-    await sleep(Math.min(REMOVE_RETRY_DELAY_MS, remainingMs))
+    await sleep(Math.min(removeRetryDelayMs, remainingMs))
   }
 
   // All retries exhausted — do NOT let the git command through if the lock still exists.
@@ -154,7 +180,7 @@ async function autoRemoveStaleLock(
 
   return preToolUseDeny(
     [
-      `\`${LOCK_RELATIVE_PATH}\` still present after retrying for up to ${LOCK_RELEASE_TIMEOUT_MS / 1000}s.`,
+      `\`${LOCK_RELATIVE_PATH}\` still present after retrying for up to ${lockReleaseTimeoutMs / 1000}s.`,
       "",
       "This lock will cause your git command to fail with:",
       `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
@@ -174,7 +200,8 @@ async function autoRemoveStaleLock(
 async function waitForLockResolution(
   lockPath: string,
   repoRoot: string,
-  releaseDeadlineMs: number
+  releaseDeadlineMs: number,
+  waitIntervalMs: number
 ) {
   let gitActive = true
   let lockExists = true
@@ -186,7 +213,7 @@ async function waitForLockResolution(
     gitActive = await isGitProcessActiveForRepo(repoRoot)
     if (!gitActive) break
 
-    await sleep(Math.min(WAIT_INTERVAL_MS, releaseDeadlineMs - Date.now()))
+    await sleep(Math.min(waitIntervalMs, releaseDeadlineMs - Date.now()))
   }
 
   return { lockExists, gitActive }
@@ -296,32 +323,39 @@ async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean
   }
 }
 
+export async function evaluatePretooluseGitIndexLock(
+  input: unknown,
+  options: GitIndexLockEvaluationOptions = {}
+): Promise<SwizHookOutput> {
+  try {
+    const parsed = shellHookInputSchema.parse(input)
+    const validated = await validateMainInputs(parsed)
+    if (!validated) return {}
+    return await handleLockResolution(validated.lockPath, validated.repoRoot, options)
+  } catch (err: unknown) {
+    const message = messageFromUnknownError(err)
+    return preToolUseDeny(
+      `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
+        `Error: ${message}\n\n` +
+        formatActionPlan(
+          [
+            "Check that the hook file and its dependencies are intact.",
+            "If the error persists, inspect the hook source at hooks/pretooluse-git-index-lock.ts.",
+          ],
+          { header: "To resolve:" }
+        )
+    )
+  }
+}
+
 const pretooluseGitIndexLock: SwizShellHook = {
   name: "pretooluse-git-index-lock",
   event: "preToolUse",
   matcher: "Bash",
   timeout: 12,
 
-  async run(input) {
-    try {
-      const parsed = shellHookInputSchema.parse(input)
-      const validated = await validateMainInputs(parsed)
-      if (!validated) return {}
-      return await handleLockResolution(validated.lockPath, validated.repoRoot)
-    } catch (err: unknown) {
-      const message = messageFromUnknownError(err)
-      return preToolUseDeny(
-        `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
-          `Error: ${message}\n\n` +
-          formatActionPlan(
-            [
-              "Check that the hook file and its dependencies are intact.",
-              "If the error persists, inspect the hook source at hooks/pretooluse-git-index-lock.ts.",
-            ],
-            { header: "To resolve:" }
-          )
-      )
-    }
+  run(input) {
+    return evaluatePretooluseGitIndexLock(input)
   },
 }
 

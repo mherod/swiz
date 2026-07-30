@@ -296,7 +296,14 @@ async function streamAutoReply(
 
 export { parseTranscriptArgs, type TranscriptArgs } from "../transcript-args.ts"
 
-export const transcriptCommand: Command = {
+export interface TranscriptCommandOptions {
+  detectAgent?: typeof detectCurrentAgent
+  runListMode?: typeof runListMode
+  runDisplayMode?: typeof runDisplayMode
+  runAutoReplyMode?: typeof runAutoReplyMode
+}
+
+export const transcriptCommand: Command<TranscriptCommandOptions> = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
@@ -339,14 +346,18 @@ export const transcriptCommand: Command = {
     { flags: "--gemini", description: "Show Gemini/Antigravity sessions only" },
     { flags: "--codex", description: "Show Codex sessions only" },
   ],
-  async run(args: string[]) {
+  async run(args: string[], options) {
+    const detectAgent = options?.detectAgent ?? detectCurrentAgent
+    const listMode = options?.runListMode ?? runListMode
+    const displayMode = options?.runDisplayMode ?? runDisplayMode
+    const autoReplyMode = options?.runAutoReplyMode ?? runAutoReplyMode
     const parsed = parseTranscriptArgs(args)
     validateTranscriptArgs(parsed)
 
     const selectedAgents = resolveSelectedAgents(
       parsed.allAgents,
       parsed.explicitAgents,
-      detectCurrentAgent()
+      detectAgent()
     )
     const selectedProviders = getSelectedProviders(selectedAgents)
     validateProviders(selectedProviders, selectedAgents)
@@ -361,7 +372,7 @@ export const transcriptCommand: Command = {
       return
     }
     if (parsed.listOnly) {
-      await runListMode(sessions, parsed.targetDir)
+      await listMode(sessions, parsed.targetDir)
       return
     }
 
@@ -375,9 +386,9 @@ export const transcriptCommand: Command = {
     )
 
     if (parsed.autoReply) {
-      await runAutoReplyMode(turns, session.id, debugEvents)
+      await autoReplyMode(turns, session.id, debugEvents)
     } else {
-      await runDisplayMode(turns, session.id, debugEvents)
+      await displayMode(turns, session.id, debugEvents)
     }
   },
 }

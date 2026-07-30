@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { formatActionPlan } from "../src/action-plan.ts"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 // ─── formatActionPlan unit tests ─────────────────────────────────────────────
 
@@ -150,7 +150,7 @@ describe("formatActionPlan", () => {
 // calls (above TOOL_CALL_THRESHOLD=10) is provided so the fallback blockStop
 // fires when the hook doesn't return early.
 
-const HOOK_PATH = resolve(process.cwd(), "hooks/stop-completion-auditor.ts")
+const HOOK_PATH = "hooks/stop-completion-auditor.ts"
 const SESSION_ID = "test-auditor-session-abc123"
 
 const tmp = useTempDir()
@@ -221,35 +221,25 @@ async function runAuditor(
   await mkdir(join(projectDir, ".swiz"), { recursive: true })
   await writeFile(join(projectDir, ".swiz", "config.json"), JSON.stringify({ autoContinue: true }))
 
-  const payload = JSON.stringify({
+  const payload = {
     cwd: projectDir,
     session_id: SESSION_ID,
     transcript_path: transcriptPath,
     _env: finalEnvOverrides,
-  })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  }
+  const env: Record<string, string | undefined> = { HOME: home }
   for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
+    for (const v of agent.envVars ?? []) env[v] = undefined
   }
   env.SWIZ_DAEMON_PORT = "19999"
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(HOOK_PATH, payload, {
+    cwd: projectDir,
     env: { ...env, ...envOverrides },
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const raw = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const trimmed = raw.trim()
-  if (!trimmed) return { blocked: false, raw: "" }
-  try {
-    const parsed = JSON.parse(trimmed)
-    return { blocked: parsed.decision === "block", reason: parsed.reason, raw: trimmed }
-  } catch {
-    return { blocked: false, raw: trimmed }
+  return {
+    blocked: result.decision === "block",
+    reason: result.reason,
+    raw: result.stdout,
   }
 }
 
@@ -599,28 +589,21 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     )
 
     // Run auditor with the custom session ID
-    const payload = JSON.stringify({
+    const payload = {
       cwd: process.cwd(),
       session_id: CURRENT_SESSION,
       transcript_path: currentTranscript,
-    })
-    const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+    }
+    const env: Record<string, string | undefined> = { HOME: home }
     for (const agent of AGENTS) {
-      for (const v of agent.envVars ?? []) delete env[v]
+      for (const v of agent.envVars ?? []) env[v] = undefined
     }
 
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+    const result = await runHookInProcess(HOOK_PATH, payload, {
       env,
     })
-    await proc.stdin.write(payload)
-    await proc.stdin.end()
-    const raw = await new Response(proc.stdout).text()
-    await proc.exited
 
-    const trimmed = raw.trim()
+    const trimmed = result.stdout.trim()
     if (trimmed) {
       const parsed = JSON.parse(trimmed)
       expect(parsed.decision).not.toBe("block")

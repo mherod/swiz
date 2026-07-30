@@ -4,11 +4,11 @@ setDefaultTimeout(30_000)
 
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { IssueStore } from "../src/issue-store.ts"
+import { IssueStore, resetIssueStore } from "../src/issue-store.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import { neutralAgentEnvOverrides, runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
-const HOOK = join(import.meta.dir, "posttooluse-mid-session-prompt.ts")
+const HOOK = "hooks/posttooluse-mid-session-prompt.ts"
 
 const tmp = useTempDir("swiz-mid-session-prompt-")
 
@@ -29,42 +29,31 @@ async function runHook(
   extraInput: Record<string, unknown> = {},
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd,
-    env: { ...process.env, ...envOverrides },
-  })
-  await proc.stdin.write(
-    JSON.stringify({
+  if (envOverrides.HOME !== undefined) resetIssueStore()
+  const result = await runHookInProcess(
+    HOOK,
+    {
       cwd,
       session_id: "test-session",
       transcript_path: transcriptPath,
       _effectiveSettings: { enforceMidSessionCheckin: true },
       ...extraInput,
-    })
+    },
+    {
+      cwd,
+      env: neutralAgentEnvOverrides(envOverrides),
+    }
   )
-  await proc.stdin.end()
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  let additionalContext: string | undefined
-  const trimmed = stdout.trim()
-  if (trimmed) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, any>
-      additionalContext =
-        (parsed.hookSpecificOutput?.additionalContext as string | undefined) ??
-        (parsed.systemMessage as string | undefined)
-    } catch {}
+  if (envOverrides.HOME !== undefined) resetIssueStore()
+  const additionalContext =
+    (result.json?.hookSpecificOutput?.additionalContext as string | undefined) ??
+    (result.json?.systemMessage as string | undefined)
+  return {
+    exitCode: result.exitCode,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr,
+    additionalContext,
   }
-
-  return { exitCode: proc.exitCode, stdout: trimmed, stderr, additionalContext }
 }
 
 async function initGitRepo(dir: string): Promise<void> {
@@ -257,30 +246,12 @@ describe("posttooluse-mid-session-prompt", () => {
     }
     const transcriptPath = await createTranscript(dir)
 
-    const proc = Bun.spawn(["bun", HOOK], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: dir,
-      env: { ...process.env },
+    const result = await runHook(dir, transcriptPath, {
+      _testSessionStartMs: OLD_START,
+      _effectiveSettings: { enforceMidSessionCheckin: false },
     })
-    await proc.stdin.write(
-      JSON.stringify({
-        cwd: dir,
-        session_id: "test-session",
-        transcript_path: transcriptPath,
-        _testSessionStartMs: OLD_START,
-        _effectiveSettings: { enforceMidSessionCheckin: false },
-      })
-    )
-    await proc.stdin.end()
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
 
-    expect(proc.exitCode).toBe(0)
-    expect(stdout.trim()).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
   })
 })

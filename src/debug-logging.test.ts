@@ -271,8 +271,10 @@ describe("debugLog enforcement", () => {
   })
 
   it("STDERR_ALLOWLIST files use stderrLog instead of bare console.error", async () => {
-    // src/debug.ts is exempt — it defines stderrLog itself using console.error
-    const EXEMPT = new Set(["src/debug.ts"])
+    const EXEMPT = new Set([
+      // Defines stderrLog itself using console.error.
+      "src/debug.ts",
+    ])
     const violations: string[] = []
 
     for (const rel of STDERR_ALLOWLIST.keys()) {

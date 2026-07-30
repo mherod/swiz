@@ -5,6 +5,7 @@ import { hookCooldownPath } from "../dispatch/filters.ts"
 import { getSessionTasksDir } from "../tasks/task-recovery.ts"
 import { neutralAgentEnv, useTempDir } from "../utils/test-utils.ts"
 
+// PROCESS_CONTRACT_TEST: verifies stdin-to-stdout hook envelopes through the public dispatch CLI.
 interface DispatchResult {
   stdout: string
   stderr: string

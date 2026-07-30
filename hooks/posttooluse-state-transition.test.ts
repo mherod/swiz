@@ -33,7 +33,9 @@ function createGitMock(state: GitState = {}): MockGitClient {
   return new MockGitClient((args) => {
     const command = args.join("\0")
     if (command === "rev-parse\0--git-dir") return ".git"
-    if (command === "status\0--porcelain=v2\0--branch") return statusV2(state)
+    if (command === "--no-optional-locks\0status\0--porcelain=v2\0--branch") {
+      return statusV2(state)
+    }
     if (command === "branch\0--show-current") return state.branch ?? "main"
     if (command === "remote\0get-url\0origin") {
       return state.originUrl ? state.originUrl : { exitCode: 1 }

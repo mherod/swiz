@@ -1,8 +1,9 @@
-import { describe, expect, it, setDefaultTimeout } from "bun:test"
+import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { parseManageArgs } from "./manage.ts"
+import { runCommandInProcess } from "../utils/test-utils.ts"
+import { manageCommand, parseManageArgs } from "./manage.ts"
 
 const DESKTOP_CONFIG_SUBPATH = join(
   "Library",
@@ -10,11 +11,6 @@ const DESKTOP_CONFIG_SUBPATH = join(
   "Claude",
   "claude_desktop_config.json"
 )
-
-const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
-
-// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
-setDefaultTimeout(20_000)
 
 async function makeTempHome(prefix = "swiz-manage-test-"): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix))
@@ -25,18 +21,14 @@ async function runManage(
   home: string,
   cwd?: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", INDEX_PATH, "manage", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: cwd ?? home,
-    env: { ...process.env, HOME: home },
+  return runCommandInProcess(manageCommand, args, {
+    commandOptions: {
+      cwd: cwd ?? home,
+      home,
+      which: (command) => `/mock/bin/${command}`,
+    },
+    env: { HOME: home },
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
 }
 
 describe("parseManageArgs", () => {

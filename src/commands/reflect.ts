@@ -347,7 +347,13 @@ function parseReflectionFromJsonText(text: string, count: number): SessionReflec
   return SessionReflectionSchema(count).parse(parsed)
 }
 
-export const reflectCommand: Command = {
+export interface ReflectCommandOptions {
+  hasAiProvider?: typeof hasAiProvider
+  promptStreamText?: typeof promptStreamText
+  createStreamBufferReporter?: typeof createStreamBufferReporter
+}
+
+export const reflectCommand: Command<ReflectCommandOptions> = {
   name: "reflect",
   description: "Use Gemini to reflect on mistakes in a session transcript",
   usage:
@@ -378,7 +384,7 @@ export const reflectCommand: Command = {
       description: 'AI provider override: "gemini", "codex", or "claude" (default: auto-select)',
     },
   ],
-  async run(args: string[]) {
+  async run(args: string[], dependencies = {}) {
     const { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt, provider } =
       parseReflectArgs(args)
     const transcript = await loadTranscriptContext(targetDir, sessionQuery)
@@ -398,32 +404,30 @@ export const reflectCommand: Command = {
       return
     }
 
-    if (!hasAiProvider()) {
+    if (!(dependencies.hasAiProvider ?? hasAiProvider)()) {
       throw new Error(
         "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
       )
     }
 
     let reflection: SessionReflection
-    const bufferReporter = createStreamBufferReporter({ enabled: !json })
+    const bufferReporter = (dependencies.createStreamBufferReporter ?? createStreamBufferReporter)({
+      enabled: !json,
+    })
     try {
       bufferReporter.startSubmitting()
-      const streamed = await promptStreamText(prompt, {
+      const streamed = await (dependencies.promptStreamText ?? promptStreamText)(prompt, {
         model,
         timeout: timeoutMs,
         provider,
         onTextPart: (textPart: string) => {
-          if (json) {
-            process.stdout.write(textPart)
-            return
-          }
-          bufferReporter.onChunk(textPart)
+          if (!json) bufferReporter.onChunk(textPart)
         },
       })
       bufferReporter.finish()
       reflection = parseReflectionFromJsonText(streamed, count)
       if (json) {
-        if (process.stdout.isTTY) process.stdout.write("\n")
+        console.log(JSON.stringify(reflection))
         return
       }
     } catch (error) {

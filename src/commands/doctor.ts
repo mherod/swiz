@@ -21,7 +21,7 @@ import {
   removeInvalidCategoryFields,
   type SkillConflict,
 } from "./doctor/fix.ts"
-import type { CheckResult } from "./doctor/types.ts"
+import type { CheckResult, DiagnosticCheck } from "./doctor/types.ts"
 
 export { checkAgentConfigSync } from "./doctor/checks/agent-config-sync.ts"
 export { truncateJsonlFile } from "./doctor/cleanup.ts"
@@ -132,7 +132,15 @@ async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
   }
 }
 
-async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
+interface AutoFixDependencies {
+  fixStaleConfigs: typeof fixStaleConfigs
+  autoCleanup: typeof autoCleanup
+}
+
+async function handleAutoFixes(
+  ctx: AutoFixContext,
+  dependencies: AutoFixDependencies
+): Promise<void> {
   const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
   const hasStaleConfigs = results.some(
     (r) =>
@@ -141,7 +149,7 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
       (r.detail.includes(" missing:") || r.detail.includes("outdated (no --agent)"))
   )
   if (fix) {
-    await fixStaleConfigs(results)
+    await dependencies.fixStaleConfigs(results)
     await fixMissingConfigs()
     const skillConflictMessages = await fixSkillConflicts(skillConflicts, fix)
     if (skillConflictMessages.length > 0) {
@@ -178,7 +186,7 @@ async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
       console.log()
     }
     try {
-      await runWithTimeout("auto-cleanup", AUTO_CLEANUP_TIMEOUT_MS, autoCleanup)
+      await runWithTimeout("auto-cleanup", AUTO_CLEANUP_TIMEOUT_MS, dependencies.autoCleanup)
     } catch (err) {
       const message =
         err instanceof DoctorTimeoutError
@@ -211,7 +219,14 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 // ─── Command ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export const doctorCommand: Command = {
+export interface DoctorCommandOptions {
+  allChecks?: DiagnosticCheck[]
+  autoCleanup?: typeof autoCleanup
+  fixStaleConfigs?: typeof fixStaleConfigs
+  notifyDaemon?: typeof notifyDaemon
+}
+
+export const doctorCommand: Command<DoctorCommandOptions> = {
   name: "doctor",
   description: "Check environment health, fix issues, and clean up old session data",
   usage: "swiz doctor [--fix] [--verbose] | swiz doctor clean [--older-than <time>] [--dry-run]",
@@ -232,16 +247,20 @@ export const doctorCommand: Command = {
       description: "Hard delete instead of moving to Trash (skips .bak backups)",
     },
   ],
-  async run(args) {
+  async run(args, options) {
     if (args[0] === "clean" || args[0] === "--clean") {
       await runCleanupCommand(args.slice(1))
       return
     }
     await runWithTimeout("diagnostic checks", DOCTOR_CHECK_TIMEOUT_MS, () =>
       runDoctorChecks(args, {
-        allChecks: DIAGNOSTIC_CHECKS,
-        handleAutoFixes,
-        notifyDaemon,
+        allChecks: options?.allChecks ?? DIAGNOSTIC_CHECKS,
+        handleAutoFixes: (context) =>
+          handleAutoFixes(context, {
+            fixStaleConfigs: options?.fixStaleConfigs ?? fixStaleConfigs,
+            autoCleanup: options?.autoCleanup ?? autoCleanup,
+          }),
+        notifyDaemon: options?.notifyDaemon ?? notifyDaemon,
       })
     )
   },

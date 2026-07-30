@@ -1,6 +1,6 @@
-import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { swizSettingsSchema } from "../settings/persistence.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
@@ -16,35 +16,35 @@ import {
   SETTINGS_REGISTRY,
 } from "../settings.ts"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
-import { buildTestSettings, useTempDir, writeClaudeSession } from "../utils/test-utils.ts"
-
-setDefaultTimeout(20_000)
+import {
+  buildTestSettings,
+  runCommandInProcess,
+  useTempDir,
+  writeClaudeSession,
+} from "../utils/test-utils.ts"
+import { createHelpCommand } from "./help.ts"
+import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
-const INDEX_PATH = resolve(import.meta.dir, "..", "..", "index.ts")
 async function createTempHome(): Promise<string> {
   return realpath(await _tmp.create())
 }
 
-/** Git repo with no `.swiz/` so project settings do not pick up the real checkout. */
+/** Directory with no `.swiz/` so project settings do not pick up the real checkout. */
 async function createIsolatedGitProject(parentDir: string): Promise<string> {
   const dir = join(parentDir, "isolated-repo")
   await mkdir(dir, { recursive: true })
-  const init = Bun.spawnSync(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  if (init.exitCode !== 0) {
-    throw new Error(`git init failed: ${new TextDecoder().decode(init.stderr)}`)
-  }
   return dir
 }
 
 /**
  * Run the settings command with a temporary HOME directory.
- * Uses a subprocess so HOME and console capture never leak across concurrent test files.
+ * The command boundary and filesystem behavior stay real; daemon I/O is mocked.
  */
 async function runSwiz(
   args: string[],
   home: string
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   // Scope is required by the CLI; tests that don't specify one default to --global.
   const SCOPE_FLAGS_RE = /^(--global|-g|--user|-u|--project|-p|--session|-s)$/
   const settingsArgs = args[0] === "settings" ? args.slice(1) : []
@@ -53,22 +53,31 @@ async function runSwiz(
   }
   const effectiveArgs = args[0] === "settings" ? ["settings", ...settingsArgs] : args
 
-  const proc = Bun.spawn(["bun", "run", INDEX_PATH, ...effectiveArgs], {
-    cwd: home,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: home, AI_TEST_NO_BACKEND: "1" },
-  })
-  void proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  const env = { HOME: home, AI_TEST_NO_BACKEND: "1" }
+  const result =
+    effectiveArgs[0] === "help"
+      ? await runCommandInProcess(
+          createHelpCommand(
+            new Map([
+              [
+                "settings",
+                {
+                  ...settingsCommand,
+                  run: () => {},
+                },
+              ],
+            ])
+          ),
+          effectiveArgs.slice(1),
+          { env }
+        )
+      : await runCommandInProcess(settingsCommand, effectiveArgs.slice(1), {
+          commandOptions: { daemonReady: async () => false },
+          env,
+        })
   const settingsPath = getSwizSettingsPath(home)
   if (settingsPath) invalidateSettingsCache(settingsPath)
-  return { stdout, stderr, exitCode: proc.exitCode }
+  return result
 }
 
 async function createGeminiSession(
@@ -94,7 +103,7 @@ async function createGeminiSession(
 }
 
 describe("swiz settings", () => {
-  // ── Default output: share one subprocess ──────────────────────────────
+  // ── Default output: share one command invocation ──────────────────────
   describe("default settings output", () => {
     let result: Awaited<ReturnType<typeof runSwiz>>
 
@@ -178,7 +187,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("path")
   })
 
-  // ── Boolean toggle persistence: run concurrently ──────────────────────
+  // ── Boolean toggle persistence ─────────────────────────────────────────
   test("boolean settings persist correctly via enable/disable", async () => {
     const cases: Array<{
       args: string[]
@@ -240,7 +249,6 @@ describe("swiz settings", () => {
     const sessionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
     const projectKey = realTargetDir.replace(/[/.\\:]/g, "-")
-    console.log("PROJECT KEY:", projectKey)
     const claudeDir = join(home, ".claude", "projects", projectKey)
     await mkdir(claudeDir, { recursive: true })
     await writeFile(join(claudeDir, `${sessionId}.jsonl`), "")
@@ -252,17 +260,6 @@ describe("swiz settings", () => {
       ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", realTargetDir],
       home
     )
-    if (showSession.exitCode !== 0) {
-      console.log("SHOW SESSION STDOUT:", showSession.stdout)
-      console.log("SHOW SESSION STDERR:", showSession.stderr)
-      console.log("TARGET DIR:", realTargetDir)
-      console.log("HOME DIR:", home)
-      console.log("CLAUDE DIR:", claudeDir)
-      const exists = await Bun.file(join(claudeDir, `${sessionId}.jsonl`)).exists()
-      console.log("SESSION FILE EXISTS:", exists)
-      const keyFromCode = realTargetDir.replace(/[/.\\:]/g, "-")
-      console.log("KEY FROM CODE MANUALLY:", keyFromCode)
-    }
     expect(showSession.exitCode).toBe(0)
     expect(showSession.stdout).toContain(`scope: session ${sessionId}`)
     expect(showSession.stdout).toMatch(/auto-continue:\s+disabled \(user\)/)
@@ -349,7 +346,7 @@ describe("swiz settings", () => {
     expect(result.stderr).toContain("No session matching")
   })
 
-  // ── Set-value tests: run concurrently ───────────────────────────────
+  // ── Set-value tests ───────────────────────────────────────────────────
   test("set-value settings persist correctly", async () => {
     const cases: Array<{
       args: string[]

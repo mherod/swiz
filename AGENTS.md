@@ -171,7 +171,7 @@ alwaysApply: false
 - DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Pre-push `bun test` may fail with `proc.stdin.write` TypeError under concurrent load (`Bun.spawn` exhaustion). Run failing test in isolation; if it passes, retry.
-- If `bun test --reporter=dots --concurrent` produces widespread cross-file `mock.module` or process-state failures, DON'T rerun the entire suite serially. Run each failing file in a fresh Bun process, await every process, then run the exact lefthook pre-push selection.
+- If a bounded `bun test --reporter=dots --parallel=4` run exposes file-isolated failures, run each failing file directly, await every process, then rerun the exact lefthook pre-push selection.
 - Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
 - **DO**: Before **stop** after push: **MEMORY.md** triad (CI **completed** + jobs, **TaskUpdate** if shipped). **DON'T** skip for **`task #unkn-1`** / **missing or unstructured workflow**.
 - DO NOT block waiting for CI. Check once with `gh run view`; `in_progress` is acceptable — pre-push ran full test suite.
@@ -222,7 +222,7 @@ alwaysApply: false
 - **DON'T**: Attribute feedback to "hooks", "systems", or "auto-steer" — all from the user. Act immediately.
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
-- Bun test reporter: `--reporter=dots --concurrent`. Run once without pipe — piped re-runs trigger repeated-test hook.
+- Bun test reporter: `--reporter=dots`. Multi-file runs use bounded isolated workers (`--parallel=<1-8>`); never use `--concurrent`, which marks every test concurrent. Run once without pipe — piped re-runs trigger repeated-test hook.
 - **DO**: In `src/commands/daemon/ci-routes.test.ts` and `src/commands/daemon/issue-routes.test.ts`, use per-test cleanup ownership or `afterAll` for shared registries and temporary repositories. **DON'T** drain module-level cleanup arrays or delete shared temporary `cwd` paths in `afterEach`; multi-file execution can resolve a webhook count as `0` instead of `1` or make `Bun.spawn(["git", ...])` fail with `ENOENT`.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.

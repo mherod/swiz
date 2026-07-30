@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { runCommandInProcess } from "../utils/test-utils.ts"
 import { decodeProjectPath, walkDecode } from "./doctor/cleanup-path.ts"
+import { doctorCommand } from "./doctor.ts"
 
 // ─── Fixture setup ────────────────────────────────────────────────────────────
 //
@@ -51,6 +53,17 @@ const CORRUPT_PROJECT = `${ENCODED_HOME}-corrupted-project`
 const CORRUPT_PROJECT_DIR = join(TMP_HOME, ".claude", "projects", CORRUPT_PROJECT)
 // Noise-only project: no UUID session directories at all.
 const NOISE_PROJECT = `${ENCODED_HOME}-only-noise`
+
+async function runCleanupForTest(
+  home: string,
+  args: string[],
+  cwd = join(import.meta.dir, "../..")
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return runCommandInProcess(doctorCommand, args, {
+    cwd,
+    env: { HOME: home },
+  })
+}
 
 beforeAll(async () => {
   await mkdir(join(TMP_HOME, "Development", "my-project"), { recursive: true })
@@ -202,7 +215,6 @@ describe("decodeProjectPath", () => {
 
 describe("cleanup with test-prefixed orphan sessions", () => {
   const TEST_TASK_DIR = join(TMP_HOME, ".claude", "tasks", "test-orphan-session")
-  const env = { ...process.env, HOME: TMP_HOME }
 
   beforeAll(async () => {
     await mkdir(TEST_TASK_DIR, { recursive: true })
@@ -213,21 +225,8 @@ describe("cleanup with test-prefixed orphan sessions", () => {
   })
 
   test("identifies and cleans up test-prefixed orphan sessions", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--older-than", "5d", "--dry-run"],
-      {
-        cwd: join(import.meta.dir, "../.."),
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const output = stdout + stderr
-    await proc.exited
+    const result = await runCleanupForTest(TMP_HOME, ["clean", "--older-than", "5d", "--dry-run"])
+    const output = result.stdout + result.stderr
 
     expect(output).toMatch(/\(orphaned tasks\)/)
     expect(output).toMatch(/1 trashable/)
@@ -238,30 +237,20 @@ describe("cleanup with test-prefixed orphan sessions", () => {
 
 // ─── Integration: CLI output format ──────────────────────────────────────────
 //
-// Spawns the real cleanup CLI with HOME=TMP_HOME so it reads the fake
-// ~/.claude/projects directory. This makes the tests self-contained and
-// CI-safe regardless of whether the runner has real Claude sessions.
+// Runs the cleanup command with HOME=TMP_HOME so it reads the fake
+// ~/.claude/projects directory. This keeps the tests self-contained and
+// CI-safe without paying for a CLI process per assertion.
 
 describe("cleanup --dry-run output", () => {
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: TMP_HOME }
 
   async function runCleanup(extraArgs: string[] = []): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", ...extraArgs],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      TMP_HOME,
+      ["clean", "--dry-run", ...extraArgs],
+      SWIZ_ROOT
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return stdout + stderr
+    return result.stdout + result.stderr
   }
 
   test("shows kept sizes in output", async () => {
@@ -293,22 +282,13 @@ describe("cleanup --dry-run output", () => {
   })
 
   test("accepts top-level doctor --clean alias with equals-style age", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "--clean", "--dry-run", "--older-than=48h"],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      TMP_HOME,
+      ["--clean", "--dry-run", "--older-than=48h"],
+      SWIZ_ROOT
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    expect(proc.exitCode).toBe(0)
-    expect(stdout + stderr).toMatch(/Agent Sessions/)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout + result.stderr).toMatch(/Agent Sessions/)
   })
 })
 
@@ -331,39 +311,23 @@ describe("cleanup with no .claude/projects directory", () => {
   })
 
   test("exits without error and prints informative message", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--dry-run"], {
-      cwd: join(import.meta.dir, "../.."),
-      env: { ...process.env, HOME: EMPTY_HOME },
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    const output = stdout + stderr
-    await proc.exited
-
-    expect(proc.exitCode).toBe(0)
+    const result = await runCleanupForTest(EMPTY_HOME, ["clean", "--dry-run"])
+    const output = result.stdout + result.stderr
+    expect(result.exitCode).toBe(0)
     expect(output).toMatch(/No session directories found/)
   })
 
   test("--project flag with missing projects dir exits without error", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", "--project", "anything"],
-      {
-        cwd: join(import.meta.dir, "../.."),
-        env: { ...process.env, HOME: EMPTY_HOME },
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    )
-    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-    await proc.exited
+    const result = await runCleanupForTest(EMPTY_HOME, [
+      "clean",
+      "--dry-run",
+      "--project",
+      "anything",
+    ])
 
     // Should exit non-zero because --project was specified but not found,
     // but must NOT throw an unhandled exception.
-    expect(proc.exitCode).not.toBeNull()
+    expect(result.exitCode).not.toBeNull()
   })
 })
 
@@ -376,23 +340,16 @@ describe("cleanup with no .claude/projects directory", () => {
 
 describe("cleanup with partially corrupted project directory", () => {
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: TMP_HOME }
 
   async function runCleanup(
     ...extraArgs: string[]
   ): Promise<{ output: string; exitCode: number | null }> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", ...extraArgs],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      TMP_HOME,
+      ["clean", "--dry-run", ...extraArgs],
+      SWIZ_ROOT
     )
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
-    return { output, exitCode: proc.exitCode }
+    return { output: result.stdout, exitCode: result.exitCode }
   }
 
   test("exits cleanly despite corrupted entries", async () => {
@@ -432,14 +389,7 @@ describe("cleanup with partially corrupted project directory", () => {
   })
 
   test("no stderr output on corrupted input", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--dry-run"], {
-      cwd: SWIZ_ROOT,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const stderr = await new Response(proc.stderr).text()
-    await proc.exited
+    const { stderr } = await runCleanupForTest(TMP_HOME, ["clean", "--dry-run"], SWIZ_ROOT)
     // We expect some stderr from doctorCommand now, but it should be just the header
     // so we check if it's mostly clean or doesn't contain unexpected errors.
     // Given stderrLog usage, it might contain "swiz doctor" header.
@@ -467,7 +417,6 @@ describe("cleanup stale-project detection", () => {
   const STALE_HOME = join(tmpdir(), `swiz-cleanup-stale-${process.pid}`)
   const STALE_ENCODED_HOME = STALE_HOME.replace(/[/.]/g, "-")
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: STALE_HOME }
 
   // Project with a literal hyphen: encoded name is ambiguous but walkDecode
   // must resolve it to the real directory via longest-match.
@@ -512,21 +461,12 @@ describe("cleanup stale-project detection", () => {
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", ...extraArgs],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      STALE_HOME,
+      ["clean", "--dry-run", ...extraArgs],
+      SWIZ_ROOT
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return stdout + stderr
+    return result.stdout + result.stderr
   }
 
   test("literal-hyphen project is not flagged stale when real directory exists", async () => {
@@ -579,7 +519,6 @@ describe("cleanup task directory handling", () => {
   const TASK_HOME = join(tmpdir(), `swiz-cleanup-tasks-${process.pid}`)
   const TASK_ENCODED_HOME = TASK_HOME.replace(/[/.]/g, "-")
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: TASK_HOME }
 
   // Session IDs for the fixtures
   const SESSION_WITH_TASKS = "00000000-0000-0000-0000-aaaaaaaaaaaa"
@@ -615,21 +554,12 @@ describe("cleanup task directory handling", () => {
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", ...extraArgs],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      TASK_HOME,
+      ["clean", "--dry-run", ...extraArgs],
+      SWIZ_ROOT
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return stdout + stderr
+    return result.stdout + result.stderr
   }
 
   test("dry-run includes task dir count in total when session has tasks", async () => {
@@ -671,7 +601,6 @@ describe("cleanup Gemini backup artifact detection", () => {
   const GEMINI_HOME = join(tmpdir(), `swiz-cleanup-gemini-${process.pid}`)
   const GEMINI_DIR = join(GEMINI_HOME, ".gemini")
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: GEMINI_HOME }
 
   beforeAll(async () => {
     // Create required .claude/projects directory (even empty, so command runs)
@@ -695,21 +624,12 @@ describe("cleanup Gemini backup artifact detection", () => {
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", ...extraArgs],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      GEMINI_HOME,
+      ["clean", "--dry-run", ...extraArgs],
+      SWIZ_ROOT
     )
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    return stdout + stderr
+    return result.stdout + result.stderr
   }
 
   test("detects Gemini backup artifacts", async () => {
@@ -745,16 +665,8 @@ describe("cleanup Gemini backup artifact detection", () => {
   })
 
   test("successfully exits on dry-run with Gemini backups", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", "clean", "--dry-run"], {
-      cwd: SWIZ_ROOT,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await new Response(proc.stdout).text()
-    await proc.exited
-
-    expect(proc.exitCode).toBe(0)
+    const result = await runCleanupForTest(GEMINI_HOME, ["clean", "--dry-run"], SWIZ_ROOT)
+    expect(result.exitCode).toBe(0)
   })
 
   test("dry-run shows Gemini file count and size separately from Claude sessions", async () => {
@@ -768,7 +680,6 @@ describe("cleanup old task files", () => {
   const TASK_FILE_HOME = join(tmpdir(), `swiz-cleanup-task-files-${process.pid}`)
   const TASK_FILE_ENCODED_HOME = TASK_FILE_HOME.replace(/[/.]/g, "-")
   const SWIZ_ROOT = join(import.meta.dir, "../..")
-  const env = { ...process.env, HOME: TASK_FILE_HOME }
   const PROJECT_NAME = `${TASK_FILE_ENCODED_HOME}-Development-task-file-project`
   const SESSION_ID = "00000000-0000-0000-0000-cccccccccccc"
   const NON_UUID_SESSION_ID = "session-legacy-123"
@@ -837,19 +748,14 @@ describe("cleanup old task files", () => {
   })
 
   test("dry-run reports old task files across task statuses", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "doctor", "clean", "--dry-run", "--task-older-than", "30d"],
-      {
-        cwd: SWIZ_ROOT,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const result = await runCleanupForTest(
+      TASK_FILE_HOME,
+      ["clean", "--dry-run", "--task-older-than", "30d"],
+      SWIZ_ROOT
     )
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
+    const output = result.stdout
 
-    expect(proc.exitCode).toBe(0)
+    expect(result.exitCode).toBe(0)
     expect(output).toMatch(/old task files/)
     expect(output).toMatch(/4 old task files/)
     expect(output).toMatch(/Task cleanup/)

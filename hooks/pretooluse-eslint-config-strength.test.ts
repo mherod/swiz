@@ -201,12 +201,11 @@ describe("countEnforcements", () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PreToolUse hook handler (via subprocess invocation)
+// PreToolUse hook handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Run the hook as a subprocess by invoking it with Bun.
- * Simulates the real PreToolUse environment.
+ * Run the hook through its exported behavior boundary.
  */
 async function invokeHook(input: {
   tool_name: string
@@ -445,7 +444,8 @@ describe("pretooluse-eslint-config-strength: hook handler logic", () => {
   })
 
   test("error handler catches malformed stdin and exits non-zero", async () => {
-    const proc = Bun.spawn(["bun", "hooks/pretooluse-eslint-config-strength.ts"], {
+    // PROCESS_CONTRACT_TEST: malformed stdin is owned by the executable wrapper.
+    const proc = Bun.spawn([process.execPath, "hooks/pretooluse-eslint-config-strength.ts"], {
       cwd: process.cwd(),
       stdin: "pipe",
       stdout: "pipe",

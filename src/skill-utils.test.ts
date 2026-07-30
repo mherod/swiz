@@ -1,7 +1,8 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getAgent } from "./agents.ts"
+import { skillCommand } from "./commands/skill.ts"
 import {
   DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
   DEFAULT_SKILL_RECENCY_MAX_TURNS,
@@ -24,10 +25,12 @@ import {
   skillExistsForHookPayload,
   stripFrontmatter,
 } from "./skill-utils.ts"
-import { useTempDir } from "./utils/test-utils.ts"
-
-// CLI subprocess cases can exceed Bun's default timeout during the full concurrent suite.
-setDefaultTimeout(20_000)
+import {
+  acquireEnvLock,
+  releaseEnvLockFn,
+  runCommandInProcess,
+  useTempDir,
+} from "./utils/test-utils.ts"
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -41,6 +44,7 @@ describe("resolveSkillRecencyOptions", () => {
     const projectDir = await createTempDir()
     const originalHome = process.env.HOME
 
+    await acquireEnvLock()
     try {
       process.env.HOME = fakeHome
       const result = await resolveSkillRecencyOptions(projectDir)
@@ -53,6 +57,7 @@ describe("resolveSkillRecencyOptions", () => {
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 
@@ -421,21 +426,16 @@ describe("buildSkillAgentToolEnvironmentFooter", () => {
 })
 
 // ─── findSkills ───────────────────────────────────────────────────────────────
-// findSkills reads SKILL_DIRS which bakes in process.cwd() at import time,
-// so we test it via the `swiz skill` CLI (which runs in the project root) and
-// compare the listed skills against what we create on disk.
+// Exercise the command boundary so listing output and dynamic provider paths
+// are covered together.
 
 /** Helper: run `swiz skill` from the project root with a controlled HOME. */
 async function runSwizSkillList(fakeHome: string): Promise<string> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", "skill"], {
+  const result = await runCommandInProcess(skillCommand, [], {
     cwd: process.cwd(),
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome },
+    env: { HOME: fakeHome },
   })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  return out
+  return result.stdout
 }
 
 describe("findSkills (via swiz skill CLI)", () => {

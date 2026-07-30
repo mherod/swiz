@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { neutralAgentEnv } from "../src/utils/test-utils.ts"
+import { neutralAgentEnvOverrides, runHookInProcess } from "../src/utils/test-utils.ts"
 import { initGitRepo } from "./_test-git-init.ts"
 
 async function writeTask(
@@ -35,32 +35,20 @@ async function runHook(
   transcriptPath?: string,
   toolName = "TaskUpdate"
 ): Promise<{ decision?: string; reason?: string }> {
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: toolName,
     tool_input: toolInput,
     cwd,
     session_id: sessionId,
     transcript_path: transcriptPath || "",
+  }
+  const result = await runHookInProcess("hooks/pretooluse-no-phantom-task-completion.ts", payload, {
+    cwd,
+    env: neutralAgentEnvOverrides({ CLAUDECODE: "1", HOME: home }),
   })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-phantom-task-completion.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv({ HOME: home }),
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  const err = await new Response(proc.stderr).text()
-  if (err) console.error(err)
-  await proc.exited
-
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
   return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
+    decision: result.decision,
+    reason: result.reason,
   }
 }
 

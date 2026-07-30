@@ -1,12 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 import { neutralAgentEnv } from "../src/utils/test-utils.ts"
-
-const REPO_ROOT = resolve(import.meta.dir, "..")
-const HOOK = join(REPO_ROOT, "hooks", "pretooluse-git-index-lock.ts")
+import { evaluatePretooluseGitIndexLock } from "./pretooluse-git-index-lock.ts"
 
 // Create isolated temp git repos for testing.
 // Use realpathSync after creation to resolve macOS /var → /private/var symlink
@@ -99,32 +97,22 @@ async function runHook(
   command: string,
   cwd: string
 ): Promise<{ decision?: string; reason?: string }> {
-  const payload = JSON.stringify({
-    tool_name: "Bash",
-    tool_input: { command },
-    cwd,
-  })
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: neutralAgentEnv(),
-    cwd: REPO_ROOT,
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-  const [out] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
+  const result = await evaluatePretooluseGitIndexLock(
+    {
+      tool_name: "Bash",
+      tool_input: { command },
+      cwd,
+    },
+    {
+      lockReleaseTimeoutMs: 100,
+      waitIntervalMs: 5,
+      removeRetryDelayMs: 5,
+    }
+  )
+  const hookSpecificOutput = (result as Record<string, any>).hookSpecificOutput
   return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
+    decision: hookSpecificOutput?.permissionDecision ?? (result as Record<string, any>).decision,
+    reason: hookSpecificOutput?.permissionDecisionReason ?? (result as Record<string, any>).reason,
   }
 }
 
@@ -205,18 +193,10 @@ describe("pretooluse-git-index-lock", () => {
         const repo = await createLockedRepo("transient-permission-release")
         const gitDir = join(repo, ".git")
         Bun.spawnSync(["chmod", "500", gitDir])
-        const restoreProc = Bun.spawn(
-          [
-            "bun",
-            "-e",
-            `await Bun.sleep(900); Bun.spawnSync(["chmod", "755", ${JSON.stringify(gitDir)}]);`,
-          ],
-          {
-            stdout: "ignore",
-            stderr: "ignore",
-            env: neutralAgentEnv(),
-          }
-        )
+        const restorePermissions = (async () => {
+          await Bun.sleep(20)
+          Bun.spawnSync(["chmod", "755", gitDir])
+        })()
 
         try {
           const result = await runHook("git status", repo)
@@ -224,7 +204,7 @@ describe("pretooluse-git-index-lock", () => {
           expect(result.reason).toContain("Auto-removed")
         } finally {
           Bun.spawnSync(["chmod", "755", gitDir])
-          await restoreProc.exited
+          await restorePermissions
         }
       },
       { timeout: 30_000 }
@@ -252,7 +232,7 @@ describe("pretooluse-git-index-lock", () => {
         const result = await runHook("git status", repo)
         expect(result.decision).toBe("deny")
         expect(result.reason).toContain("index.lock")
-        expect(result.reason).toContain("retrying for up to 10s")
+        expect(result.reason).toContain("retrying for up to")
         // Restore permissions so cleanup can remove the repo.
         try {
           Bun.spawnSync(["chflags", "nouchg", lockPath])
@@ -302,26 +282,12 @@ describe("pretooluse-git-index-lock", () => {
 
     test("non-shell tools pass through", async () => {
       const repo = await createLockedRepo("passthrough-read")
-      const payload = JSON.stringify({
+      const result = await evaluatePretooluseGitIndexLock({
         tool_name: "Read",
         tool_input: { file_path: "/some/file" },
         cwd: repo,
       })
-      const proc = Bun.spawn(["bun", HOOK], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: neutralAgentEnv(),
-        cwd: REPO_ROOT,
-      })
-      await proc.stdin.write(payload)
-      await proc.stdin.end()
-      const [out] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      expect(out.trim()).toBe("")
+      expect(result).toEqual({})
     })
   })
 })

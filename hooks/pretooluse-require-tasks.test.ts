@@ -4,7 +4,11 @@ import { join, resolve } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
-import { useTempDir } from "../src/utils/test-utils.ts"
+import {
+  buildEffectiveTestSettings,
+  runHookInProcess,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 import {
   DIRECT_MERGE_INTENT_RE,
   evaluatePretooluseRequireTasks,
@@ -18,7 +22,7 @@ interface HookResult {
 }
 
 const PROJECT_ROOT = resolve(import.meta.dir, "..")
-const HOOK = join(PROJECT_ROOT, "hooks", "pretooluse-require-tasks.ts")
+const HOOK = "hooks/pretooluse-require-tasks.ts"
 
 function hookResultFromOutput(parsed: Record<string, any>): HookResult {
   const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
@@ -48,6 +52,7 @@ async function runHook({
   seedFreshTaskListSync = true,
   envOverrides = {},
   payloadEnv,
+  effectiveSettings,
 }: {
   homeDir: string
   cwd?: string
@@ -61,44 +66,34 @@ async function runHook({
   seedFreshTaskListSync?: boolean
   envOverrides?: Record<string, string | undefined>
   payloadEnv?: Record<string, string | undefined>
+  effectiveSettings?: Record<string, any>
 }): Promise<HookResult> {
   const toolInput: Record<string, string> = {}
   if (command !== undefined) toolInput.command = command
   if (filePath !== undefined) toolInput.file_path = filePath
   if (newString !== undefined) toolInput.new_string = newString
   if (content !== undefined) toolInput.content = content
-  const payload = JSON.stringify({
+  const payload = {
     tool_name: toolName,
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
     tool_input: toolInput,
     ...(payloadEnv !== undefined ? { _env: payloadEnv } : {}),
+    ...(effectiveSettings !== undefined ? { _effectiveSettings: effectiveSettings } : {}),
     // cwd defaults to the swiz project root (a git repo with CLAUDE.md) when omitted
     cwd: cwd ?? PROJECT_ROOT,
-  })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
+  }
+  const env: Record<string, string | undefined> = { HOME: homeDir }
   for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
+    for (const v of agent.envVars ?? []) env[v] = undefined
   }
   if (seedFreshTaskListSync && sessionId) {
     await writeTaskListSyncSentinel(sessionId)
   }
-  const proc = Bun.spawn(["bun", HOOK], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: PROJECT_ROOT,
+  const result = await runHookInProcess(HOOK, payload, {
     env: { ...env, ...envOverrides },
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (!out.trim()) return {}
-
-  const parsed = JSON.parse(out.trim())
-  return hookResultFromOutput(parsed)
+  return result.json ? hookResultFromOutput(result.json) : {}
 }
 
 async function runMergedTaskGovernance(input: Record<string, any>): Promise<HookResult> {
@@ -1534,24 +1529,19 @@ describe("task-file block bypass regression tests", () => {
     const homeDir = await createTempHome()
     await mkdir(join(homeDir, ".swiz"), { recursive: true })
     await writeFile(join(homeDir, ".swiz", "settings.json"), JSON.stringify({ autoContinue: true }))
-    const projectDir = await createTempHome()
-    await mkdir(join(projectDir, ".swiz"), { recursive: true })
-    await writeFile(
-      join(projectDir, ".swiz", "config.json"),
-      JSON.stringify({ autoContinue: true })
-    )
-    await writeFile(join(projectDir, "CLAUDE.md"), "# Test\n")
-    await mkdir(join(projectDir, ".git"), { recursive: true })
     const sessionId = "session-strict-autocontinue-true"
     // Only 1 in_progress task, 0 pending tasks
     await writeTask(homeDir, sessionId, { id: "1", subject: "Current task", status: "in_progress" })
 
     const result = await runHook({
       homeDir,
-      cwd: projectDir,
       toolName: "Edit",
       sessionId,
       filePath: "src/foo.ts",
+      effectiveSettings: buildEffectiveTestSettings({
+        autoContinue: true,
+        auditStrictness: "strict",
+      }),
     })
     // Denied because minPending is 1 when autoContinue is true
     expect(result.decision).toBe("deny")

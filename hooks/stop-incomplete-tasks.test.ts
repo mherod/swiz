@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
-import { useTempDir, writeTask } from "../src/utils/test-utils.ts"
+import { runHookInProcess, useTempDir, writeTask } from "../src/utils/test-utils.ts"
 
 interface HookResult {
   decision?: string
@@ -35,36 +35,25 @@ async function runHook({
   await mkdir(defaultSwizDir, { recursive: true })
   await writeFile(join(defaultSwizDir, "config.json"), JSON.stringify({ autoContinue: true }))
 
-  const payload = JSON.stringify({
+  const payload = {
     session_id: sessionId,
     cwd: cwd ?? defaultProjectDir,
     hook_event_name: "Stop",
     ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
     _env: finalEnvOverrides,
-  })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
+  }
+  const env: Record<string, string | undefined> = { HOME: homeDir }
   for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
+    for (const v of agent.envVars ?? []) env[v] = undefined
   }
   env.SWIZ_DAEMON_PORT = "19999"
-  const proc = Bun.spawn(["bun", "hooks/stop-incomplete-tasks.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess("hooks/stop-incomplete-tasks.ts", payload, {
+    cwd: payload.cwd,
     env: { ...env, ...envOverrides },
   })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (!out.trim()) return {}
-
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput as Record<string, any> | undefined
   return {
-    decision: (hso?.decision ?? parsed.decision) as string | undefined,
-    reason: (hso?.reason ?? parsed.reason) as string | undefined,
+    decision: result.decision,
+    reason: result.reason,
   }
 }
 

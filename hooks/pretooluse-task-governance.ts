@@ -1456,6 +1456,15 @@ function findCompletedTransitions(projection: UpdatePlanProjection): ProjectedPl
   })
 }
 
+function findPendingCompletionShortcut(
+  projection: UpdatePlanProjection
+): ProjectedPlanTask | undefined {
+  const existingById = new Map(projection.existingTasks.map((task) => [task.id, task]))
+  return projection.finalTasks.find(
+    (task) => existingById.get(task.id)?.status === "pending" && task.status === "completed"
+  )
+}
+
 function checkUpdatePlanInProgressCap(projection: UpdatePlanProjection): SwizHookOutput | null {
   const existingInProgress = projection.existingTasks.filter(
     (task) => task.status === "in_progress"
@@ -1522,6 +1531,17 @@ async function evaluateUpdatePlanGovernance(
     }
   }
   const projection = await readUpdatePlanProjection(input, sessionId, plan)
+  const pendingCompletionShortcut = findPendingCompletionShortcut(projection)
+  if (pendingCompletionShortcut) {
+    return denyTaskGovernance(
+      {
+        kind: "pending-completion-shortcut",
+        taskId: pendingCompletionShortcut.id,
+        subject: pendingCompletionShortcut.subject,
+      },
+      input
+    )
+  }
 
   let thresholds: GovernanceThresholds = GOVERNANCE_THRESHOLDS.strict
   try {

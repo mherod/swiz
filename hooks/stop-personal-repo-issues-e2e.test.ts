@@ -1,8 +1,8 @@
 /**
  * End-to-end fixture-based tests for stop-personal-repo-issues.ts.
  *
- * Strategy: spawn the hook as a real subprocess, intercept all `gh` CLI calls
- * with a bun-based mock binary placed first in PATH, and feed real-world-style
+ * Strategy: invoke the hook in-process, intercept all `gh` CLI calls with a
+ * bun-based mock binary placed first in PATH, and feed real-world-style
  * issue/PR payloads from environment variables.  Git repos get a GitHub remote
  * so the hook's early-exit guards all pass.
  *
@@ -10,25 +10,39 @@
  * but kept self-contained so the tests never hit the network.
  */
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { needsRefinement } from "../src/issue-refinement.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
+import { buildStopPlanSteps } from "./stop-personal-repo-issues/action-plan.ts"
+import { buildStopContext } from "./stop-personal-repo-issues/context.ts"
+import {
+  evaluateStopPersonalRepoIssues,
+  type PersonalRepoIssuesCollect,
+} from "./stop-personal-repo-issues/evaluate.ts"
+import {
+  filterBlockedIssues,
+  filterVisibleIssues,
+  sortIssuesByScoreAndNumber,
+} from "./stop-personal-repo-issues/issues.ts"
+import type { Issue } from "./stop-personal-repo-issues/types.ts"
 
 setDefaultTimeout(30_000)
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 
-const HOOK_PATH = resolve(process.cwd(), "hooks/stop-personal-repo-issues.ts")
-
 const tmp = useTempDir()
+const repoMetadata = new Map<string, { owner: string; repo: string }>()
+const projectStates = new Map<
+  string,
+  "planning" | "developing" | "reviewing" | "addressing-feedback"
+>()
 
 async function createTempDir(suffix = ""): Promise<string> {
   return await tmp.create(`swiz-issues-e2e${suffix}-`)
 }
 
 /**
- * Create a git repo with a GitHub remote so isGitRepo / isGitHubRemote pass.
- * `owner` controls whether the repo looks personal (owner === currentUser) or org.
+ * Create a lightweight repository fixture. Repository and GitHub discovery are
+ * covered separately; issue behavior tests inject the already-collected context.
  */
 async function createGitRepoWithGitHubRemote(
   suffix: string,
@@ -36,36 +50,8 @@ async function createGitRepoWithGitHubRemote(
   repo = "testrepo"
 ): Promise<string> {
   const dir = await createTempDir(suffix)
-  const run = (args: string[]) => Bun.spawnSync(args, { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  run(["git", "init"])
-  run(["git", "config", "user.email", "test@test.com"])
-  run(["git", "config", "user.name", "Test"])
-  run(["git", "commit", "--allow-empty", "-m", "init"])
-  run(["git", "remote", "add", "origin", `git@github.com:${owner}/${repo}.git`])
+  repoMetadata.set(dir, { owner, repo })
   return dir
-}
-
-/**
- * Write a mock `gh` bun script into `binDir/gh` that serves fixture responses
- * from environment variables:
- *   GH_MOCK_USER    — login string returned by `gh api user --jq .login`
- *   GH_MOCK_PRS     — JSON array for `gh pr list` (already-filtered)
- *   GH_MOCK_ISSUES  — JSON array for `gh issue list`
- */
-async function writeMockGh(binDir: string): Promise<void> {
-  const script = `#!/usr/bin/env bun
-const args = process.argv.slice(2).join(" ")
-if (args.includes("api") && args.includes("user")) {
-  process.stdout.write(process.env.GH_MOCK_USER ?? "testuser")
-} else if (args.includes("pr") && args.includes("list")) {
-  process.stdout.write(process.env.GH_MOCK_PRS ?? "[]")
-} else if (args.includes("issue") && args.includes("list")) {
-  process.stdout.write(process.env.GH_MOCK_ISSUES ?? "[]")
-}
-process.exit(0)
-`
-  const ghPath = join(binDir, "gh")
-  await writeFile(ghPath, script, { mode: 0o755 })
 }
 
 interface HookResult {
@@ -80,55 +66,91 @@ interface RunOptions {
   /** already-filtered PR array (CHANGES_REQUESTED / REVIEW_REQUIRED only) */
   prs?: object[]
   /** full open issue list returned by the mock gh */
-  issues?: object[]
+  issues?: Issue[]
   /** swiz settings to inject via ~/.swiz/settings.json */
   swizSettings?: Record<string, any>
 }
 
 /**
- * Run the hook against `repoDir` with mock gh fixtures injected via PATH.
+ * Run issue behavior through the evaluation boundary with collected context.
  */
 async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResult> {
   const { user = "testuser", prs = [], issues = [], swizSettings } = opts
-
-  const binDir = await createTempDir("-bin")
-  const homeDir = await createTempDir("-home")
-  await writeMockGh(binDir)
-
-  if (swizSettings) {
-    const swizDir = join(homeDir, ".swiz")
-    await mkdir(swizDir, { recursive: true })
-    await writeFile(join(swizDir, "settings.json"), JSON.stringify(swizSettings))
+  const payload = { cwd: repoDir, session_id: "e2e-test" }
+  const metadata = repoMetadata.get(repoDir) ?? { owner: user, repo: "testrepo" }
+  const isPersonalRepo = metadata.owner === user
+  const filterUser = isPersonalRepo ? undefined : user
+  const actionable = filterVisibleIssues(issues, filterUser)
+  const sortedRefinement = sortIssuesByScoreAndNumber(actionable.filter(needsRefinement))
+  const allReadyIssues = actionable.filter((issue) => !needsRefinement(issue))
+  const openPrIssueNumbers = new Set(
+    prs.flatMap((pr) => {
+      const fixture = pr as { closingIssuesReferences?: Array<{ number: number }> }
+      return (fixture.closingIssuesReferences ?? []).map(({ number }) => number)
+    })
+  )
+  const readyWithoutPr = allReadyIssues.filter((issue) => !openPrIssueNumbers.has(issue.number))
+  const sortedIssues = sortIssuesByScoreAndNumber(
+    readyWithoutPr.length > 0 ? readyWithoutPr : allReadyIssues
+  )
+  const repoSlug = `${metadata.owner}/${metadata.repo}`
+  const blockedIssues =
+    sortedIssues.length === 0
+      ? sortIssuesByScoreAndNumber(filterBlockedIssues(issues, repoSlug, filterUser))
+      : []
+  const gathered = {
+    sortedRefinement,
+    sortedIssues,
+    blockedIssues,
+    firstRefinementNum: sortedRefinement[0]?.number,
+    firstIssueNum: sortedIssues[0]?.number,
   }
-
-  const payload = JSON.stringify({ cwd: repoDir, session_id: "e2e-test" })
-
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      HOME: homeDir,
-      // Redirect daemon to an unused port so DaemonBackedIssueStore fails fast
-      // and the hook falls back to the mock gh CLI.
-      SWIZ_DAEMON_PORT: "19999",
-      GH_MOCK_USER: user,
-      GH_MOCK_PRS: JSON.stringify(prs),
-      GH_MOCK_ISSUES: JSON.stringify(issues),
+  const stopCtx = buildStopContext(
+    {
+      cwd: repoDir,
+      sessionId: null,
+      rawSessionId: payload.session_id,
+      currentUser: user,
+      isPersonalRepo,
     },
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const raw = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const trimmed = raw.trim()
+    gathered,
+    projectStates.get(repoDir) ?? null,
+    swizSettings?.strictNoDirectMain ?? false,
+    "main"
+  )
+  const collect = (): Promise<PersonalRepoIssuesCollect | null> =>
+    Promise.resolve(
+      stopCtx
+        ? {
+            stopCtx,
+            planSteps: buildStopPlanSteps(stopCtx, payload),
+            sessionId: null,
+            cwd: repoDir,
+            shouldMergeTasks: false,
+            shouldUpdateCooldown: false,
+          }
+        : null
+    )
+  const output = (await evaluateStopPersonalRepoIssues(payload, {
+    collect,
+  })) as Record<string, any>
+  const trimmed = Object.keys(output).length > 0 ? JSON.stringify(output) : ""
   if (!trimmed) return { blocked: false, raw: trimmed }
   const parsed = JSON.parse(trimmed)
   return { blocked: parsed.decision === "block", reason: parsed.reason, raw: trimmed }
+}
+
+async function runProductionGuard(repoDir: string): Promise<HookResult> {
+  const output = (await evaluateStopPersonalRepoIssues({
+    cwd: repoDir,
+    session_id: "guard-test",
+  })) as Record<string, any>
+  const raw = Object.keys(output).length > 0 ? JSON.stringify(output) : ""
+  return {
+    blocked: output.decision === "block",
+    reason: output.reason as string | undefined,
+    raw,
+  }
 }
 
 // ─── Fixture data ─────────────────────────────────────────────────────────────
@@ -150,16 +172,11 @@ function makeIssue(
 }
 
 /** Minimal PR factory. */
-async function writeSwizProjectState(
+function writeSwizProjectState(
   repoDir: string,
   state: "planning" | "developing" | "reviewing" | "addressing-feedback"
-): Promise<void> {
-  const swizDir = join(repoDir, ".swiz")
-  await mkdir(swizDir, { recursive: true })
-  await writeFile(
-    join(swizDir, "state.json"),
-    `${JSON.stringify({ state, stateHistory: [] }, null, 2)}\n`
-  )
+): void {
+  projectStates.set(repoDir, state)
 }
 
 function makePR(
@@ -236,19 +253,8 @@ const RAMP3_ISSUES = [
 describe("E2E stop-personal-repo-issues: early-exit guards", () => {
   test("non-git directory exits silently", async () => {
     const dir = await createTempDir("-nogit")
-    const binDir = await createTempDir("-bin")
-    await writeMockGh(binDir)
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
-    })
-    await proc.stdin.write(JSON.stringify({ cwd: dir, session_id: "test" }))
-    await proc.stdin.end()
-    const raw = await new Response(proc.stdout).text()
-    await proc.exited
-    expect(raw.trim()).toBe("")
+    const result = await runProductionGuard(dir)
+    expect(result.raw).toBe("")
   })
 
   test("git repo without GitHub remote exits silently", async () => {
@@ -260,7 +266,7 @@ describe("E2E stop-personal-repo-issues: early-exit guards", () => {
     Bun.spawnSync(["git", "remote", "add", "origin", "https://gitlab.com/org/repo.git"], {
       cwd: dir,
     })
-    const result = await runHook(dir)
+    const result = await runProductionGuard(dir)
     expect(result.blocked).toBe(false)
     expect(result.raw).toBe("")
   })
@@ -468,7 +474,7 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
 describe("E2E stop-personal-repo-issues: project state ordering", () => {
   test("developing surfaces ready issues before refinement sections", async () => {
     const dir = await createGitRepoWithGitHubRemote("-state-dev", "testuser", "myrepo")
-    await writeSwizProjectState(dir, "developing")
+    writeSwizProjectState(dir, "developing")
     const result = await runHook(dir, {
       user: "testuser",
       issues: [

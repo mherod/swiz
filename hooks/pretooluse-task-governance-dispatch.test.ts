@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type Task, writeTask as writeRepositoryTask } from "../src/tasks/task-repository.ts"
-import { writeTask } from "../src/utils/test-utils.ts"
+import { buildEffectiveTestSettings, writeTask } from "../src/utils/test-utils.ts"
 import pretooluseTaskGovernance, {
   evaluateBlockedTaskFilesPrecheck,
   evaluateNativeTaskUpdatePath,
@@ -84,6 +84,10 @@ function updatePlanInput(
     tool_input: toolInput,
     _taskHome: TASK_HOME,
     _env: { CODEX_THREAD_ID: "test-codex-thread" },
+    _effectiveSettings: buildEffectiveTestSettings({
+      auditStrictness: "strict",
+      autoContinue: true,
+    }),
   }
 }
 

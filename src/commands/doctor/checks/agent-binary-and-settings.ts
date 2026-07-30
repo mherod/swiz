@@ -1,3 +1,4 @@
+import { getAgentSettingsPath } from "../../../agent-paths.ts"
 import { AGENTS, type AgentDef } from "../../../agents.ts"
 import type { CheckResult, DiagnosticCheck } from "../types.ts"
 import { whichExists } from "../utils.ts"
@@ -70,8 +71,12 @@ export const agentBinaryAndSettingsCheck: DiagnosticCheck = {
   async run() {
     const results: CheckResult[] = []
     for (const agent of AGENTS) {
-      results.push(await checkAgentBinary(agent))
-      results.push(await checkAgentSettings(agent))
+      const currentAgent = {
+        ...agent,
+        settingsPath: getAgentSettingsPath(agent.id),
+      }
+      results.push(await checkAgentBinary(currentAgent))
+      results.push(await checkAgentSettings(currentAgent))
     }
     return results
   },

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 import { collectUnknownOptionWarnings } from "./cli.ts"
 
+// PROCESS_CONTRACT_TEST: verifies command resolution, stderr, and exit codes at the CLI boundary.
 const INDEX_PATH = join(process.cwd(), "index.ts")
 
 async function runSwiz(

@@ -355,11 +355,16 @@ function validateServerShape(name: string, server: unknown, issues: string[]): v
   if (value.env !== undefined) validateServerEnv(name, value.env, issues)
 }
 
-function validateServerBinary(name: string, server: McpServerDef, issues: string[]): void {
+function validateServerBinary(
+  name: string,
+  server: McpServerDef,
+  issues: string[],
+  which: (command: string) => string | null
+): void {
   const command = server.command.trim()
   if (!command) return
   if (command.includes("/") || command.startsWith(".")) return
-  const found = Bun.which(command)
+  const found = which(command)
   if (!found) {
     issues.push(`Server "${name}" command "${command}" is not on PATH`)
   }
@@ -455,7 +460,11 @@ async function removeMcpServer(parsed: ParsedManageArgs, base: string): Promise<
   }
 }
 
-async function validateMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
+async function validateMcpServers(
+  parsed: ParsedManageArgs,
+  base: string,
+  which: (command: string) => string | null
+): Promise<void> {
   const issues: string[] = []
   for (const agentId of parsed.targetAgents) {
     const agent = getAgentConfig(agentId, parsed.project)
@@ -468,7 +477,7 @@ async function validateMcpServers(parsed: ParsedManageArgs, base: string): Promi
         const localIssues: string[] = []
         validateServerShape(name, server, localIssues)
         if (localIssues.length === 0) {
-          validateServerBinary(name, server as McpServerDef, localIssues)
+          validateServerBinary(name, server as McpServerDef, localIssues, which)
         }
         issues.push(...localIssues.map((msg) => prefixed + msg))
       }
@@ -617,7 +626,13 @@ export async function uninstallSwizAsMcpServer(
 /** Agent IDs that `manage mcp` knows how to configure globally. */
 export const MCP_MANAGED_AGENT_IDS: AgentId[] = GLOBAL_AGENTS.map((a) => a.id)
 
-export const manageCommand: Command = {
+export interface ManageCommandOptions {
+  cwd?: string
+  home?: string
+  which?: (command: string) => string | null
+}
+
+export const manageCommand: Command<ManageCommandOptions> = {
   name: "manage",
   description: "Manage shared swiz resources (MCP, etc.)",
   usage: "swiz manage mcp <list|show|add|remove|validate|merge> [options]",
@@ -648,9 +663,9 @@ export const manageCommand: Command = {
         "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json, .junie/mcp/mcp.json, .ai/mcp/mcp.json)",
     },
   ],
-  async run(args) {
+  async run(args, options) {
     const parsed = parseManageArgs(args)
-    const home = getHomeDirOrNull()
+    const home = options?.home ?? getHomeDirOrNull()
     if (!home) throw new Error("HOME is not set; cannot manage MCP configuration.")
 
     if (parsed.subject !== "mcp") {
@@ -658,7 +673,7 @@ export const manageCommand: Command = {
     }
 
     // Project-scoped actions resolve paths relative to cwd; global actions use home.
-    const base = parsed.project ? process.cwd() : home
+    const base = parsed.project ? (options?.cwd ?? process.cwd()) : home
 
     switch (parsed.action) {
       case "list":
@@ -670,7 +685,7 @@ export const manageCommand: Command = {
       case "remove":
         return removeMcpServer(parsed, base)
       case "validate":
-        return validateMcpServers(parsed, base)
+        return validateMcpServers(parsed, base, options?.which ?? Bun.which)
       case "merge":
         return mergeMcpServers(parsed, base)
     }

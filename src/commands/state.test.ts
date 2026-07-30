@@ -9,7 +9,8 @@ import {
   TERMINAL_STATES,
   writeProjectState,
 } from "../settings.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
+import { stateCommand } from "./state.ts"
 
 const { create: createTempDir } = useTempDir("swiz-state-test-")
 
@@ -17,21 +18,10 @@ async function runSwiz(
   args: string[],
   cwd: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const indexPath = join(process.cwd(), "index.ts")
-  const proc = Bun.spawn(["bun", "run", indexPath, ...args], {
+  return runCommandInProcess(stateCommand, args.slice(1), {
     cwd,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: cwd, SWIZ_DIRECT: "1" },
+    env: { HOME: cwd, SWIZ_DIRECT: "1" },
   })
-  void proc.stdin.end()
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
 }
 
 describe("PROJECT_STATES constant", () => {

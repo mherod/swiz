@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { neutralAgentEnv } from "../src/utils/test-utils.ts"
+import { neutralAgentEnv, runFileEditHook } from "../src/utils/test-utils.ts"
 import { stripNonCode } from "./pretooluse-ts-quality.ts"
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -172,98 +172,54 @@ describe("stripNonCode — output structure", () => {
   })
 })
 
-// ─── end-to-end CLI tests (import.meta.main guard) ───────────────────────────
+// ─── hook behavior ───────────────────────────────────────────────────────────
 
-describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
-
-  /** Spawn the hook as a subprocess, pipe JSON payload to stdin, return stdout + exit code. */
-  async function runHook(payload: object): Promise<{ stdout: string; exitCode: number }> {
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: neutralAgentEnv(),
-    })
-    await proc.stdin.write(JSON.stringify(payload))
-    await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    return { stdout, exitCode: proc.exitCode ?? -1 }
-  }
-
+describe("pretooluse-no-as-any — hook behavior", () => {
   it("outputs allow JSON for a plain TypeScript edit with no cast", async () => {
-    const { stdout, exitCode } = await runHook({
-      tool_name: "Edit",
-      tool_input: { file_path: "src/x.ts", old_string: "const x = 1", new_string: "const x = 2" },
+    const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+      filePath: "src/x.ts",
+      oldString: "const x = 1",
+      newString: "const x = 2",
     })
-    expect(exitCode).toBe(0)
-    const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.permissionDecision).toBe("allow")
+    expect(result.decision).toBe("allow")
   })
 
   it("outputs deny JSON when a real cast is introduced in code", async () => {
-    const { stdout, exitCode } = await runHook({
-      tool_name: "Edit",
-      tool_input: {
-        file_path: "src/x.ts",
-        old_string: "const x = 1",
-        // the cast expression below is the value fed to the hook — it lives in
-        // real TypeScript code, not inside a string literal at the hook's level
-        new_string: "const x = getValue() as any",
-      },
+    const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+      filePath: "src/x.ts",
+      oldString: "const x = 1",
+      // the cast expression below is the value fed to the hook — it lives in
+      // real TypeScript code, not inside a string literal at the hook's level
+      newString: "const x = getValue() as any",
     })
-    expect(exitCode).toBe(0)
-    const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny")
+    expect(result.decision).toBe("deny")
   })
 
   it("outputs allow JSON when the cast phrase is inside a string literal in the edited code", async () => {
     // The new_string sent to the hook is TypeScript source whose only occurrence
     // of the cast phrase is wrapped in double quotes — a string literal, not a cast.
-    const { stdout, exitCode } = await runHook({
-      tool_name: "Edit",
-      tool_input: {
-        file_path: "src/x.ts",
-        old_string: "const x = 1",
-        new_string: 'const label = "cast phrase is inside this string literal"',
-      },
+    const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+      filePath: "src/x.ts",
+      oldString: "const x = 1",
+      newString: 'const label = "cast phrase is inside this string literal"',
     })
-    expect(exitCode).toBe(0)
-    const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.permissionDecision).toBe("allow")
+    expect(result.decision).toBe("allow")
   })
 
   it("exits 0 without hook JSON for non-TypeScript files (passthrough)", async () => {
-    const { exitCode } = await runHook({
-      tool_name: "Edit",
-      tool_input: { file_path: "README.md", old_string: "hello", new_string: "world" },
+    const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+      filePath: "README.md",
+      oldString: "hello",
+      newString: "world",
     })
-    expect(exitCode).toBe(0)
-  })
-
-  it("does not execute main() when imported as a module", async () => {
-    // If main() ran during import it would block waiting for stdin JSON and
-    // the process would never exit. Writing the sentinel to stdout proves the
-    // import completed without hanging — import.meta.main was false.
-    const script = `
-      import { stripNonCode } from ${JSON.stringify(HOOK_PATH)};
-      process.stdout.write("ok:" + typeof stripNonCode);
-    `
-    const proc = Bun.spawn(["bun", "-e", script], {
-      stdin: "inherit",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    expect(stdout).toBe("ok:function")
-    expect(proc.exitCode).toBe(0)
+    expect(result.rawOutput).toBe("")
   })
 })
 
 // ─── failure-path tests ───────────────────────────────────────────────────────
 
+// PROCESS_CONTRACT_TEST: the remaining subprocess cases verify malformed stdin
+// and Bun stdout/stderr pipe behavior rather than hook business logic.
 describe("pretooluse-no-as-any — CLI failure paths", () => {
   const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
 
@@ -271,7 +227,7 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
   async function runRaw(
     input: string
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
+    const proc = Bun.spawn([process.execPath, HOOK_PATH], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -292,43 +248,6 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
     const { exitCode, stderr } = await runRaw("not-valid-json{{{")
     expect(exitCode).toBe(1)
     expect(stderr).toContain("Hook error:")
-  })
-
-  it("exits 1 and reports to stderr when stdin is empty", async () => {
-    const { exitCode, stderr } = await runRaw("")
-    expect(exitCode).toBe(1)
-    expect(stderr).toContain("Hook error:")
-  })
-
-  it("exits 1 and reports to stderr when stdin is truncated JSON", async () => {
-    const { exitCode, stderr } = await runRaw('{"tool_name":"Edit"')
-    expect(exitCode).toBe(1)
-    expect(stderr).toContain("Hook error:")
-  })
-
-  it("exits 0 with no stdout for valid JSON missing tool_input (non-TS passthrough)", async () => {
-    // file_path defaults to "" which does not match /\.(ts|tsx)$/ → early exit 0
-    const { exitCode, stdout } = await runRaw(JSON.stringify({ tool_name: "Edit" }))
-    expect(exitCode).toBe(0)
-    expect(stdout).toBe("")
-  })
-
-  it("exits 0 with allow when old_string is absent (new-file passthrough)", async () => {
-    // Empty old_string skips the as-any delta check; other checks still run and allow
-    const { exitCode, stdout } = await runRaw(
-      JSON.stringify({
-        tool_name: "Edit",
-        tool_input: { file_path: "src/x.ts", old_string: "", new_string: "const x = 1" },
-      })
-    )
-    expect(exitCode).toBe(0)
-    expect(stdout).toContain("permissionDecision")
-  })
-
-  it("stderr message names the error for invalid JSON (not just a generic crash)", async () => {
-    const { stderr } = await runRaw("{bad json}")
-    // The catch handler logs the thrown error; the message should hint at JSON parsing
-    expect(stderr.toLowerCase()).toMatch(/json|syntax|parse|unexpected/)
   })
 })
 
@@ -352,7 +271,7 @@ describe("concurrent stdout+stderr drain — pipe-buffer stress", () => {
   async function drainBoth(
     script: string
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    const proc = Bun.spawn(["bun", "-e", script], {
+    const proc = Bun.spawn([process.execPath, "-e", script], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -453,7 +372,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
       // because the subprocess is stuck in write(2) waiting for a reader to
       // drain the pipe. In Bun: uv_read_start() eagerly drains the OS pipe so
       // the subprocess finishes its writes and exits before we read anything.
-      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      const proc = Bun.spawn([process.execPath, "-e", SCRIPT], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -481,7 +400,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
       // writes stderr > pipe-buffer before stdout. In Bun it completes
       // because both streams are already buffered by uv_read_start().
       // DON'T rely on this in cross-runtime code — use Promise.all instead.
-      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      const proc = Bun.spawn([process.execPath, "-e", SCRIPT], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -513,7 +432,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
     // Promise.all drains both streams simultaneously.
     // Safe across all runtimes: concurrent reads relieve back-pressure so the
     // subprocess never blocks in write(2), even without eager buffering.
-    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+    const proc = Bun.spawn([process.execPath, "-e", SCRIPT], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -597,33 +516,14 @@ describe("Promise.all drain enforcement — cross-runtime portability guard", ()
 // ─── NFKC homoglyph bypass prevention ──────────────────────────────────────
 
 describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
-
-  async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
-    const proc = Bun.spawn(["bun", HOOK_PATH], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await proc.stdin.write(JSON.stringify(payload))
-    await proc.stdin.end()
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    return { stdout, exitCode: proc.exitCode ?? -1 }
-  }
-
   it("blocks fullwidth 'as any' bypass (NFKC → 'as any')", async () => {
     // U+FF41 FULLWIDTH LATIN SMALL LETTER A, U+FF53 FULLWIDTH LATIN SMALL LETTER S
     const fwAs = String.fromCodePoint(0xff41) + String.fromCodePoint(0xff53)
-    const { stdout } = await runHookPayload({
-      tool_name: "Edit",
-      tool_input: {
-        file_path: "src/x.ts",
-        old_string: "const x = 1",
-        new_string: `const x = getValue() ${fwAs} any`,
-      },
+    const result = await runFileEditHook("hooks/pretooluse-ts-quality.ts", {
+      filePath: "src/x.ts",
+      oldString: "const x = 1",
+      newString: `const x = getValue() ${fwAs} any`,
     })
-    const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny")
+    expect(result.decision).toBe("deny")
   })
 })

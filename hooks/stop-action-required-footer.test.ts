@@ -11,12 +11,17 @@
 
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
-import { commitFile, makeTempGitRepo, runGit, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  commitFile,
+  makeTempGitRepo,
+  runGit,
+  runHookInProcess,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 
-const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "You must act on this now."
 
 const tmp = useTempDir("swiz-stop-footer-")
@@ -31,34 +36,16 @@ async function runStopHook(
   payload: unknown,
   opts: { env?: Record<string, string>; cwd?: string } = {}
 ): Promise<HookResult> {
-  const env: Record<string, string | undefined> = { ...process.env }
+  const env: Record<string, string | undefined> = {}
   for (const agent of AGENTS) {
-    for (const v of agent.envVars ?? []) env[v] = ""
+    for (const v of agent.envVars ?? []) env[v] = undefined
   }
   Object.assign(env, opts.env)
-  const proc = Bun.spawn(["bun", join(HOOKS_DIR, hookFile)], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(`hooks/${hookFile}`, payload as Record<string, any>, {
     cwd: opts.cwd ?? process.cwd(),
-    env: env as Record<string, string>,
+    env,
   })
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
-  const raw = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const trimmed = raw.trim()
-  if (!trimmed) return { blocked: false }
-  try {
-    const parsed = JSON.parse(trimmed)
-    return {
-      blocked: parsed.decision === "block",
-      reason: parsed.reason as string | undefined,
-    }
-  } catch {
-    return { blocked: false }
-  }
+  return { blocked: result.decision === "block", reason: result.reason }
 }
 
 describe("stop hook ACTION REQUIRED footer regression", () => {
@@ -128,8 +115,14 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     )
     const result = await runStopHook(
       "stop-incomplete-tasks.ts",
-      { cwd: process.cwd(), session_id: sessionId, transcript_path: "" },
-      { env: { HOME: fakeHome } }
+      {
+        cwd: process.cwd(),
+        session_id: sessionId,
+        transcript_path: "",
+        _env: { CLAUDECODE: "1" },
+        _effectiveSettings: { autoContinue: true },
+      },
+      { env: { HOME: fakeHome, CLAUDECODE: "1" } }
     )
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)

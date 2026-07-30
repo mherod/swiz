@@ -6,6 +6,40 @@ import { syncUpstreamState } from "../../issue-store-sync.ts"
 
 const ONE_HOUR_MS = 60 * 60 * 1000
 
+interface GhCommandResult {
+  exitCode: number
+  stdout: string
+  stderr: string
+}
+
+export interface IssueOperationDependencies {
+  cwd?: string
+  getRepoSlug?: typeof getRepoSlug
+  issueState?: typeof issueState
+  acquireGhSlot?: typeof acquireGhSlot
+  runGh?: (args: string[], cwd: string) => Promise<GhCommandResult>
+}
+
+async function runGhCommand(args: string[], cwd: string): Promise<GhCommandResult> {
+  const proc = Bun.spawn(["gh", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { exitCode: proc.exitCode ?? 1, stdout, stderr }
+}
+
+function resolveDependencies(overrides: IssueOperationDependencies = {}) {
+  return {
+    cwd: overrides.cwd ?? process.cwd(),
+    getRepoSlug: overrides.getRepoSlug ?? getRepoSlug,
+    issueState: overrides.issueState ?? issueState,
+    acquireGhSlot: overrides.acquireGhSlot ?? acquireGhSlot,
+    runGh: overrides.runGh ?? runGhCommand,
+  }
+}
+
 /** Sync upstream state if the local store hasn't been refreshed in the last hour. */
 export async function ensureFreshData(repo: string, cwd: string): Promise<void> {
   const store = getIssueStore()
@@ -16,28 +50,19 @@ export async function ensureFreshData(repo: string, cwd: string): Promise<void> 
 }
 
 /** Close an issue via REST API fallback when GraphQL is rate-limited. */
-async function closeIssueViaRest(slug: string, number: string, cwd: string): Promise<boolean> {
+async function closeIssueViaRest(
+  slug: string,
+  number: string,
+  cwd: string,
+  runGh: (args: string[], cwd: string) => Promise<GhCommandResult>
+): Promise<boolean> {
   debugLog(`[swiz] REST_FALLBACK closing issue #${number} on ${slug}`)
-  const proc = Bun.spawn(
-    [
-      "gh",
-      "api",
-      "--include",
-      `repos/${slug}/issues/${number}`,
-      "-X",
-      "PATCH",
-      "-f",
-      "state=closed",
-    ],
-    { cwd, stdout: "pipe", stderr: "pipe" }
+  const result = await runGh(
+    ["api", "--include", `repos/${slug}/issues/${number}`, "-X", "PATCH", "-f", "state=closed"],
+    cwd
   )
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (stdout.trim()) observeGhApiIncludeOutput(stdout)
-  return proc.exitCode === 0
+  if (result.stdout.trim()) observeGhApiIncludeOutput(result.stdout)
+  return result.exitCode === 0
 }
 
 /** Comment on an issue via REST API fallback when GraphQL is rate-limited. */
@@ -45,20 +70,16 @@ async function commentViaRest(
   slug: string,
   number: string,
   body: string,
-  cwd: string
+  cwd: string,
+  runGh: (args: string[], cwd: string) => Promise<GhCommandResult>
 ): Promise<boolean> {
   debugLog(`[swiz] REST_FALLBACK commenting on issue #${number} on ${slug}`)
-  const proc = Bun.spawn(
-    ["gh", "api", "--include", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
-    { cwd, stdout: "pipe", stderr: "pipe" }
+  const result = await runGh(
+    ["api", "--include", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
+    cwd
   )
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (stdout.trim()) observeGhApiIncludeOutput(stdout)
-  return proc.exitCode === 0
+  if (result.stdout.trim()) observeGhApiIncludeOutput(result.stdout)
+  return result.exitCode === 0
 }
 
 function removeFromStore(slug: string | null, number: string): void {
@@ -73,10 +94,11 @@ async function handleCloseFailure(
   number: string,
   stderr: string,
   exitCode: number,
-  cwd: string
+  cwd: string,
+  runGh: (args: string[], cwd: string) => Promise<GhCommandResult>
 ): Promise<void> {
   if (isGraphQLRateLimited(stderr) && slug) {
-    if (await closeIssueViaRest(slug, number, cwd)) {
+    if (await closeIssueViaRest(slug, number, cwd, runGh)) {
       removeFromStore(slug, number)
       return
     }
@@ -89,57 +111,52 @@ async function handleCloseFailure(
   throw new Error(`gh issue close failed with exit code ${exitCode}`)
 }
 
-export async function closeIssue(number: string): Promise<void> {
-  const cwd = process.cwd()
-  const slug = await getRepoSlug(cwd)
+export async function closeIssue(
+  number: string,
+  overrides: IssueOperationDependencies = {}
+): Promise<void> {
+  const dependencies = resolveDependencies(overrides)
+  const { cwd } = dependencies
+  const slug = await dependencies.getRepoSlug(cwd)
   if (slug) await ensureFreshData(slug, cwd)
-  const state = await issueState(number, cwd)
+  const state = await dependencies.issueState(number, cwd)
   if (state !== "OPEN") {
     console.log(`  Issue #${number} is already ${state ?? "unknown"} — skipping close.`)
     return
   }
 
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "issue", "close", number], { cwd, stdout: "pipe", stderr: "pipe" })
-  const [, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  await dependencies.acquireGhSlot()
+  const result = await dependencies.runGh(["issue", "close", number], cwd)
 
-  if (proc.exitCode !== 0) {
-    await handleCloseFailure(slug, number, stderr, proc.exitCode ?? 1, cwd)
+  if (result.exitCode !== 0) {
+    await handleCloseFailure(slug, number, result.stderr, result.exitCode, cwd, dependencies.runGh)
     return
   }
   removeFromStore(slug, number)
 }
 
-export async function commentOnIssue(number: string, body: string): Promise<void> {
-  const cwd = process.cwd()
-  const slug = await getRepoSlug(cwd)
+export async function commentOnIssue(
+  number: string,
+  body: string,
+  overrides: IssueOperationDependencies = {}
+): Promise<void> {
+  const dependencies = resolveDependencies(overrides)
+  const { cwd } = dependencies
+  const slug = await dependencies.getRepoSlug(cwd)
   if (slug) await ensureFreshData(slug, cwd)
-  const state = await issueState(number, cwd)
+  const state = await dependencies.issueState(number, cwd)
 
   if (state !== "OPEN") {
     console.log(`  Issue #${number} is already ${state ?? "unknown"} — skipping comment.`)
     return
   }
 
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+  await dependencies.acquireGhSlot()
+  const result = await dependencies.runGh(["issue", "comment", number, "--body", body], cwd)
 
-  if (proc.exitCode !== 0) {
-    if (isGraphQLRateLimited(stderr) && slug) {
-      if (await commentViaRest(slug, number, body, cwd)) return
+  if (result.exitCode !== 0) {
+    if (isGraphQLRateLimited(result.stderr) && slug) {
+      if (await commentViaRest(slug, number, body, cwd, dependencies.runGh)) return
     }
 
     if (slug) {
@@ -147,7 +164,7 @@ export async function commentOnIssue(number: string, body: string): Promise<void
         getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
       } catch {}
     }
-    throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
+    throw new Error(`gh issue comment failed with exit code ${result.exitCode}`)
   }
 }
 
@@ -163,23 +180,15 @@ async function postComment(
   number: string,
   body: string,
   cwd: string,
-  slug: string | null
+  slug: string | null,
+  dependencies: ReturnType<typeof resolveDependencies>
 ): Promise<void> {
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (proc.exitCode === 0) return
+  await dependencies.acquireGhSlot()
+  const result = await dependencies.runGh(["issue", "comment", number, "--body", body], cwd)
+  if (result.exitCode === 0) return
 
-  if (isGraphQLRateLimited(stderr) && slug) {
-    if (await commentViaRest(slug, number, body, cwd)) return
+  if (isGraphQLRateLimited(result.stderr) && slug) {
+    if (await commentViaRest(slug, number, body, cwd, dependencies.runGh)) return
   }
 
   if (slug) {
@@ -187,25 +196,21 @@ async function postComment(
       getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
     } catch {}
   }
-  throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
+  throw new Error(`gh issue comment failed with exit code ${result.exitCode}`)
 }
 
-async function closeAndRemove(number: string, cwd: string, slug: string | null): Promise<void> {
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "issue", "close", number], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
+async function closeAndRemove(
+  number: string,
+  cwd: string,
+  slug: string | null,
+  dependencies: ReturnType<typeof resolveDependencies>
+): Promise<void> {
+  await dependencies.acquireGhSlot()
+  const result = await dependencies.runGh(["issue", "close", number], cwd)
 
-  if (proc.exitCode !== 0) {
-    if (isGraphQLRateLimited(stderr) && slug) {
-      if (await closeIssueViaRest(slug, number, cwd)) {
+  if (result.exitCode !== 0) {
+    if (isGraphQLRateLimited(result.stderr) && slug) {
+      if (await closeIssueViaRest(slug, number, cwd, dependencies.runGh)) {
         try {
           getIssueStore().removeIssue(slug, parseInt(number, 10))
         } catch {}
@@ -218,7 +223,7 @@ async function closeAndRemove(number: string, cwd: string, slug: string | null):
         getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
       } catch {}
     }
-    throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
+    throw new Error(`gh issue close failed with exit code ${result.exitCode}`)
   }
   if (slug) {
     try {
@@ -227,22 +232,27 @@ async function closeAndRemove(number: string, cwd: string, slug: string | null):
   }
 }
 
-export async function resolveIssue(number: string, body?: string): Promise<ResolveResult> {
-  const cwd = process.cwd()
-  const slug = await getRepoSlug(cwd)
+export async function resolveIssue(
+  number: string,
+  body?: string,
+  overrides: IssueOperationDependencies = {}
+): Promise<ResolveResult> {
+  const dependencies = resolveDependencies(overrides)
+  const { cwd } = dependencies
+  const slug = await dependencies.getRepoSlug(cwd)
   if (slug) await ensureFreshData(slug, cwd)
-  const state = await issueState(number, cwd)
+  const state = await dependencies.issueState(number, cwd)
   const alreadyClosed = state !== "OPEN"
 
   let commentPosted = false
   if (body) {
-    await postComment(number, body, cwd, slug)
+    await postComment(number, body, cwd, slug, dependencies)
     commentPosted = true
   }
 
   let closedNow = false
   if (!alreadyClosed) {
-    await closeAndRemove(number, cwd, slug)
+    await closeAndRemove(number, cwd, slug, dependencies)
     closedNow = true
   }
 

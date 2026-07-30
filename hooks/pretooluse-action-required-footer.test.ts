@@ -8,15 +8,15 @@
 
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import {
   createEnforcementProjectDir,
   neutralAgentEnv,
+  runHookInProcess,
   useTempDir,
 } from "../src/utils/test-utils.ts"
 
-const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "You must act on this now."
 
 // Keywords split to avoid self-triggering the pretooluse-no-eslint-disable hook
@@ -36,29 +36,12 @@ async function runHook(
   payload: unknown,
   opts: { env?: Record<string, string>; cwd?: string } = {}
 ): Promise<HookResult> {
-  const proc = Bun.spawn(["bun", join(HOOKS_DIR, hookFile)], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = await runHookInProcess(`hooks/${hookFile}`, payload as Record<string, any>, {
     cwd: opts.cwd ?? process.cwd(),
     env: neutralAgentEnv(opts.env),
   })
-  await proc.stdin.write(JSON.stringify(payload))
-  await proc.stdin.end()
-  const raw = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const trimmed = raw.trim()
-  if (!trimmed) return { denied: false }
-
-  try {
-    const parsed = JSON.parse(trimmed)
-    const hso = parsed.hookSpecificOutput
-    if (hso?.permissionDecision === "deny") {
-      return { denied: true, reason: hso.permissionDecisionReason as string }
-    }
-  } catch {
-    // non-JSON output means hook allowed
+  if (result.decision === "deny") {
+    return { denied: true, reason: result.reason }
   }
   return { denied: false }
 }

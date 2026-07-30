@@ -6,9 +6,9 @@ import { listProviderAdapters } from "../../provider-adapters.ts"
 import { defaultTrashPath } from "../../session-data-delete.ts"
 import {
   findSkillConflicts,
+  getSkillDirs,
   isSkillCandidateDir,
   parseFrontmatterField,
-  SKILL_PRECEDENCE,
   type SkillConflict,
   type SkillConflictEntry,
 } from "../../skill-utils.ts"
@@ -22,17 +22,18 @@ import type { CheckResult } from "./types.ts"
  * plugin cache synchronization. Keeping this logic out of `doctor.ts` lets the
  * command entry stay focused on orchestration and cleanup flows.
  */
-const HOME = getHomeDirWithFallback("")
-
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
 
 export function displayPath(path: string): string {
-  return HOME && path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
+  const home = getHomeDirWithFallback("")
+  return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }
 
 function formatSkillPrecedence(): string {
-  return SKILL_PRECEDENCE.map((dir) => displayPath(dir)).join(" > ")
+  return getSkillDirs()
+    .map((dir) => displayPath(dir))
+    .join(" > ")
 }
 
 export function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResult[] {
@@ -41,7 +42,7 @@ export function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResu
       {
         name: "Skill conflicts",
         status: "pass",
-        detail: `no duplicate skill names across ${SKILL_PRECEDENCE.length} skill directories`,
+        detail: `no duplicate skill names across ${getSkillDirs().length} skill directories`,
       },
     ]
   }
@@ -154,7 +155,7 @@ async function validateSkillEntry(
 
 export async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
   const invalid: InvalidSkillEntry[] = []
-  for (const skillDir of SKILL_PRECEDENCE) {
+  for (const skillDir of getSkillDirs()) {
     let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(skillDir, { withFileTypes: true })
@@ -175,7 +176,7 @@ export function buildInvalidSkillResults(entries: InvalidSkillEntry[]): CheckRes
       {
         name: "Invalid skill entries",
         status: "pass",
-        detail: `no invalid skill entries found across ${SKILL_PRECEDENCE.length} skill directories`,
+        detail: `no invalid skill entries found across ${getSkillDirs().length} skill directories`,
       },
     ]
   }
@@ -344,7 +345,12 @@ async function loadJsonFileSafe<T>(path: string): Promise<T | null> {
 
 export async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
   const swizRoot = dirname(Bun.main)
-  const installedPath = join(HOME, ".claude", "plugins", "installed_plugins.json")
+  const installedPath = join(
+    getHomeDirWithFallback(""),
+    ".claude",
+    "plugins",
+    "installed_plugins.json"
+  )
   type InstalledPlugins = { version?: number; plugins?: Record<string, { installPath: string }[]> }
   const installed = await loadJsonFileSafe<InstalledPlugins>(installedPath)
   if (!installed?.plugins) return []
@@ -428,7 +434,7 @@ export async function removeInvalidCategoryFields(): Promise<{
   const cleaned: string[] = []
   const failed: { skill: string; error: string }[] = []
 
-  for (const skillDir of SKILL_PRECEDENCE) {
+  for (const skillDir of getSkillDirs()) {
     let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(skillDir, { withFileTypes: true })

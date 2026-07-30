@@ -750,7 +750,11 @@ async function enforceBooleanSettingConflicts(
   }
 }
 
-async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
+async function setBooleanSetting(
+  enabled: boolean,
+  parsed: ParsedSettingsArgs,
+  daemonReady: () => Promise<boolean>
+): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (isNumericSetting(key) || isStringSetting(key)) {
     throw new Error(
@@ -762,7 +766,7 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
   const parsedWithResolvedScope = { ...parsed, scope: resolvedScope }
   await enforceBooleanSettingConflicts(key, enabled, parsedWithResolvedScope)
 
-  const path = await writeSettingToScope(parsedWithResolvedScope, key, enabled)
+  const path = await writeSettingToScope(parsedWithResolvedScope, key, enabled, daemonReady)
   const verb = enabled ? "Enabled" : "Disabled"
   const scopeLabel = await resolveWriteScopeLabel(parsedWithResolvedScope)
   printSettingChange({
@@ -816,7 +820,10 @@ function parseNumericSettingValue(raw: string): number {
   return Number(raw)
 }
 
-async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
+async function setValueSetting(
+  parsed: ParsedSettingsArgs,
+  daemonReady: () => Promise<boolean>
+): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (!parsed.settingValue) {
     throw new Error(
@@ -833,20 +840,23 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       const error = def.validate(parsed.settingValue)
       if (error) throw new Error(`${error}\n${usage()}`)
     }
-    const path = await writeSettingToScope(resolved, key, parsed.settingValue)
+    const path = await writeSettingToScope(resolved, key, parsed.settingValue, daemonReady)
     printSetConfirmation(resolved, key, parsed.settingValue, path, def)
     return
   }
 
   const value = parseNumericSettingValue(parsed.settingValue)
-  const path = await writeSettingToScope(resolved, key, value)
+  const path = await writeSettingToScope(resolved, key, value, daemonReady)
   const label = value === 0 ? "system default" : `${value}`
   printSetConfirmation(resolved, key, label, path, def)
 }
 
 /** Best-effort daemon notification after a settings write (issue #330). */
-async function notifyDaemon(jsonOutput: boolean): Promise<void> {
-  if (await isDaemonReady()) {
+async function notifyDaemon(
+  jsonOutput: boolean,
+  daemonReady: () => Promise<boolean>
+): Promise<void> {
+  if (await daemonReady()) {
     if (!jsonOutput) console.log("  Daemon notified of settings change.")
   }
 }
@@ -855,7 +865,8 @@ async function notifyDaemon(jsonOutput: boolean): Promise<void> {
 async function writeSettingToScope(
   parsed: ParsedSettingsArgs,
   key: string,
-  value: unknown
+  value: unknown,
+  daemonReady: () => Promise<boolean>
 ): Promise<string> {
   let path: string
   if (parsed.scope === "project") {
@@ -869,7 +880,7 @@ async function writeSettingToScope(
   // The daemon's file watcher detects changes and calls flushSnapshots(),
   // which now also invalidates the settings TTL cache. The health check
   // here just confirms the daemon is alive — no explicit restart needed.
-  await notifyDaemon(parsed.json)
+  await notifyDaemon(parsed.json, daemonReady)
   return path
 }
 
@@ -940,7 +951,11 @@ function isJsonHelpRequest(args: string[]): boolean {
   )
 }
 
-export const settingsCommand: Command = {
+export interface SettingsCommandOptions {
+  daemonReady?: () => Promise<boolean>
+}
+
+export const settingsCommand: Command<SettingsCommandOptions> = {
   name: "settings",
   description: "View and modify swiz global and per-session settings",
   usage:
@@ -975,7 +990,8 @@ export const settingsCommand: Command = {
       description: "Target project directory for project/session scope",
     },
   ],
-  async run(args) {
+  async run(args, options) {
+    const daemonReady = options?.daemonReady ?? isDaemonReady
     if (isJsonHelpRequest(args)) {
       const schema = SETTINGS_REGISTRY.map((def) => ({
         key: def.key,
@@ -991,11 +1007,11 @@ export const settingsCommand: Command = {
       case "show":
         return showSettings(parsed)
       case "enable":
-        return setBooleanSetting(true, parsed)
+        return setBooleanSetting(true, parsed, daemonReady)
       case "disable":
-        return setBooleanSetting(false, parsed)
+        return setBooleanSetting(false, parsed, daemonReady)
       case "set":
-        return setValueSetting(parsed)
+        return setValueSetting(parsed, daemonReady)
       case "disable-hook":
         return disableHook(parsed)
       case "enable-hook":
