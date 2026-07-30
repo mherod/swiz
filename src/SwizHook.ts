@@ -99,14 +99,21 @@ async function parseSwizHookStdin(
 async function injectEffectiveSettingsIfMissing(input: Record<string, any>): Promise<void> {
   if (input._effectiveSettings) return
   try {
-    const { getEffectiveSwizSettings, readSwizSettings } = await import("./settings.ts")
+    const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(
+      "./settings.ts"
+    )
     const sessionId = typeof input.session_id === "string" ? input.session_id : null
+    const cwd = typeof input.cwd === "string" ? input.cwd : process.cwd()
     // Strict parse: do not inject defaults over a present-but-corrupt settings file —
     // hooks that fail-closed on parse errors must see missing _effectiveSettings.
-    const rawSettings = await readSwizSettings({ strict: true })
+    const [rawSettings, projectSettings] = await Promise.all([
+      readSwizSettings({ strict: true }),
+      readProjectSettings(cwd).catch(() => null),
+    ])
     input._effectiveSettings = getEffectiveSwizSettings(
       rawSettings,
-      sessionId
+      sessionId,
+      projectSettings
     ) as unknown as Record<string, any>
   } catch {
     // Settings injection is best-effort; hooks that need settings will

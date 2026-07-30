@@ -375,7 +375,7 @@ async function validateMainInputsAndSettings(
 }> {
   const { input } = parseStopInput(hookRaw)
 
-  const settings = await readSwizSettings()
+  const settings = await readSwizSettings({ strict: true })
   const projectSettings = await readProjectSettings(cwd)
   const effective =
     (hookRaw._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
