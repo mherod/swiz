@@ -126,7 +126,7 @@ alwaysApply: false
 - Push task stays `in_progress` until `gh run view --json` confirms. No sleeps, no `--force-with-lease`, no `TaskUpdate`/`TaskList` during push/CI, no stop after unpushed commit. `TaskOutput` timeout ≤120000ms.
 - Close issues via `swiz issue resolve <number> --body "<text>"`; `Fixes #N` auto-closes on push. No `duplicate`/`wontfix` without evidence.
 ## Push and CI
-- Solo repo (`mherod/swiz`); push to `main`. Run `swiz settings` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` authoritative for collab/trunk policy.
+- Solo repo (`mherod/swiz`); push to `main`. Run `swiz settings show --project` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` authoritative for collab/trunk policy.
 - CI `paths-ignore`: `.claude/**`, `docs/**`; markdown triggers CI.
 - Pre-push: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
 - No `--no-verify`. Pre-push: `bun test`; CI: `lint → typecheck → test`. On `proc.stdin.write` TypeError/`ReferenceError: Cannot access 'default' before initialization`, isolate failing test then retry.
@@ -194,12 +194,12 @@ alwaysApply: false
 - DO: Answer user questions and execute requested actions before diagnostics; stop active loops when corrected.
 ## Output & Shell
 - Filter output with `tail` ≥10, or Read with offset/limit. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
-- Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`.
+- Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`; use repeated `git commit -m` flags for paragraphs, never literal `\n`.
 ## Issue Management
 - Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
 ## Testing
 - DON'T: use shared mutable `let` in concurrent tests (use local `const` per `it()`); mutate `process.env.HOME`/`globalThis.fetch`; run `bun test` in background; spawn `bun run index.ts` from tests (call `command.run()` in-process); re-run full suite with different filters after failure.
-- **Testing Performance**: Unit tests must not spawn hook subprocesses; use process helpers like `runHookInProcess`, `runBashHook`, or exported `evaluate*()` functions. Standalone `Bun.spawn` is only for malformed stdin or process-exit contract tests, requiring an explanatory comment. Mock `gh`, daemon HTTP, fs watchers, cold starts, and large files. Do not raise `setDefaultTimeout` to mask timeouts.
+- **Testing Performance**: Unit tests must not spawn hook subprocesses. Use `runHookInProcess`, `runBashHook`, exported `evaluate*()` functions, or inline `{ hook: SwizHook }` sentinels passed to `BlockingStrategy.execute()` in `src/dispatch/strategies.test.ts`; file-hook `{ file: ... }` entries launch real Bun subprocesses and cause timeouts. Mock process inspection, `gh`, daemon HTTP, fs watchers, cold starts, and large files. Standalone `Bun.spawn` is only for malformed stdin/process-exit contracts and needs an explanatory comment. Never raise `setDefaultTimeout` to hide slow dependencies.
 - Biome: break `expect()` chains after `.toBe(`, not `expect(`. Correct: `expect(longCall()).toBe(\n  x\n)`.
 ## Self-Referential Hook Editing
 - DON'T split edits to a live PreToolUse hook — broken intermediates block all tools; only `git checkout -- <file>` recovers. When swapping import+usage: add new import → swap call site → remove old import. Grep all callers before changing a shared function's return type.

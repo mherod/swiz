@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
+  BlockingStrategy,
   keepSideEffectPostToolGroups,
   processAggregatedStopResults,
   processBlockingResults,
@@ -161,8 +162,10 @@ describe("collectPreToolResults denial handling", () => {
   })
 })
 
-/** Capture everything writeResponse emits to stdout for a single call. */
-function captureWriteResponse(response: Record<string, any>): string {
+/** Capture everything written to stdout while an in-process callback runs. */
+async function captureStdout<T>(
+  callback: () => T | Promise<T>
+): Promise<{ output: string; value: T }> {
   const stdout = process.stdout as { write: (chunk: string | Uint8Array) => boolean }
   const original = stdout.write.bind(process.stdout)
   let captured = ""
@@ -171,23 +174,29 @@ function captureWriteResponse(response: Record<string, any>): string {
     return true
   }
   try {
-    writeResponse(response)
+    const value = await callback()
+    return { output: captured, value }
   } finally {
     process.stdout.write = original
   }
-  return captured
 }
 
-describe("shouldDowngradeFileEditDenies", () => {
-  const recentSkillUsage = (skill: string) => ({
-    toolNames: ["Skill"],
-    skillInvocations: [skill],
-    events: [
-      { kind: "skill", value: skill, turnIndex: 5, timestamp: new Date().toISOString() },
-      { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
-    ],
-  })
+/** Capture everything writeResponse emits to stdout for a single call. */
+async function captureWriteResponse(response: Record<string, any>): Promise<string> {
+  const { output } = await captureStdout(() => writeResponse(response))
+  return output
+}
 
+const recentSkillUsage = (skill: string) => ({
+  toolNames: ["Skill"],
+  skillInvocations: [skill],
+  events: [
+    { kind: "skill", value: skill, turnIndex: 5, timestamp: new Date().toISOString() },
+    { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
+  ],
+})
+
+describe("shouldDowngradeFileEditDenies", () => {
   it("downgrades denies for a file edit when a skill is recently active", async () => {
     const payload = {
       tool_name: "Edit",
@@ -281,15 +290,6 @@ describe("isSkillGateHook", () => {
 })
 
 describe("shouldSkipPostToolUseHooks", () => {
-  const recentSkillUsage = (skill: string) => ({
-    toolNames: ["Skill"],
-    skillInvocations: [skill],
-    events: [
-      { kind: "skill", value: skill, turnIndex: 5, timestamp: new Date().toISOString() },
-      { kind: "tool", value: "Skill", turnIndex: 5, timestamp: new Date().toISOString() },
-    ],
-  })
-
   it("skips postToolUse hooks when a skill is recently active", async () => {
     const payload = {
       tool_name: "Bash",
@@ -323,6 +323,83 @@ describe("shouldSkipPostToolUseHooks", () => {
       },
     }
     expect(await shouldSkipPostToolUseHooks(payload, process.cwd())).toBe(false)
+  })
+})
+
+describe("BlockingStrategy postToolUse skill-recency dispatch", () => {
+  function makeContext(payload: Record<string, any>, run: () => Record<string, never>) {
+    return {
+      filteredGroups: [
+        {
+          event: "postToolUse",
+          matcher: "Bash",
+          hooks: [
+            {
+              hook: {
+                name: "posttooluse-sentinel.ts",
+                event: "postToolUse",
+                run,
+              },
+            },
+          ],
+        },
+      ],
+      enrichedPayloadStr: JSON.stringify(payload),
+      canonicalEvent: "postToolUse",
+      hookEventName: "PostToolUse",
+      cwd: process.cwd(),
+      agentId: "claude",
+    }
+  }
+
+  it("short-circuits before running an advisory inline hook while a skill is active", async () => {
+    let runs = 0
+    const context = makeContext(
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m 'x'" },
+        _currentSessionToolUsage: recentSkillUsage("commit"),
+      },
+      () => {
+        runs++
+        return {}
+      }
+    )
+
+    const { output, value: response } = await captureStdout(() =>
+      new BlockingStrategy().execute(context)
+    )
+
+    expect(runs).toBe(0)
+    expect(response).toEqual({})
+    expect(output).toBe("{}\n")
+  })
+
+  it("runs the advisory inline hook when no skill is recently active", async () => {
+    let runs = 0
+    const context = makeContext(
+      {
+        tool_name: "Bash",
+        tool_input: { command: "bun test" },
+        _currentSessionToolUsage: { toolNames: ["Bash"], skillInvocations: [], events: [] },
+      },
+      () => {
+        runs++
+        return {}
+      }
+    )
+
+    const { output, value: response } = await captureStdout(() =>
+      new BlockingStrategy().execute(context)
+    )
+
+    expect(runs).toBe(1)
+    expect(response.hookExecutions).toHaveLength(1)
+    expect(response.hookExecutions[0]).toMatchObject({
+      file: "posttooluse-sentinel.ts",
+      status: "no-output",
+    })
+    expect(output).toBe("{}\n")
   })
 })
 
@@ -365,11 +442,11 @@ describe("writeResponse JSON validity", () => {
   // pre-tool-use JSON output" if any byte breaks JSON.parse. Reason/context
   // strings carry untrusted content (em-dash hints, multi-line tips, AI-humanised
   // text, subprocess snippets), so writeResponse must always emit parseable JSON.
-  it("emits JSON.parse-valid output for adversarial reason characters", () => {
+  it("emits JSON.parse-valid output for adversarial reason characters", async () => {
     const reason =
       "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore." +
       "\n  fd 'pattern'\twith tab\r and CR and lone surrogate \uD800 end"
-    const out = captureWriteResponse({
+    const out = await captureWriteResponse({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "allow",
@@ -384,8 +461,8 @@ describe("writeResponse JSON validity", () => {
     expect(out.trimEnd().includes("\n")).toBe(false)
   })
 
-  it("strips internal dispatch fields and stays valid with raw subprocess snippets", () => {
-    const out = captureWriteResponse({
+  it("strips internal dispatch fields and stays valid with raw subprocess snippets", async () => {
+    const out = await captureWriteResponse({
       hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
       hookExecutions: [{ stdoutSnippet: "junk\uD834ctl" }],
     })
