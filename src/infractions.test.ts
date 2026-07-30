@@ -7,6 +7,7 @@ import {
   complianceBaselineWantedLevel,
   DENY_FOOTER_MARKERS,
   evaluateInfraction,
+  INFRACTION_DENIAL_MARKER,
   INFRACTION_WINDOW_MS,
   lastSettledAttempt,
   resolveCurrentAttempt,
@@ -58,6 +59,17 @@ function deniedBashAttempt(id: string, command: string, ts?: string): string[] {
     toolResultLine({
       toolUseId: id,
       text: `Blocked: do the thing.\n\n${DENY_FOOTER}`,
+      timestamp: ts,
+    }),
+  ]
+}
+
+function infractionDeniedBashAttempt(id: string, command: string, ts?: string): string[] {
+  return [
+    toolUseLine({ id, name: "Bash", input: { command }, timestamp: ts }),
+    toolResultLine({
+      toolUseId: id,
+      text: `Blocked by ${INFRACTION_DENIAL_MARKER}.\n\n${DENY_FOOTER}`,
       timestamp: ts,
     }),
   ]
@@ -116,9 +128,16 @@ describe("collectBlockedAttempts", () => {
 function bk(
   key: string,
   timestampMs: number | null,
-  isCooldown = false
-): { toolName: string; key: string; timestampMs: number | null; isCooldown: boolean } {
-  return { toolName: "Bash", key, timestampMs, isCooldown }
+  isCooldown = false,
+  isInfractionDenial = false
+): {
+  toolName: string
+  key: string
+  timestampMs: number | null
+  isCooldown: boolean
+  isInfractionDenial: boolean
+} {
+  return { toolName: "Bash", key, timestampMs, isCooldown, isInfractionDenial }
 }
 
 describe("assessInfraction", () => {
@@ -155,9 +174,24 @@ describe("assessInfraction", () => {
     expect(assessInfraction(current, blocked, now).level).toBe("yellow")
   })
 
+  it("does not count the detector's own denial against the same retry budget", () => {
+    const now = Date.now()
+    const current = { toolName: "Bash", key: "git push" }
+    const blocked = [bk("git push", now - 1000), bk("git push", now - 500, false, true)]
+    expect(assessInfraction(current, blocked, now).level).toBe("yellow")
+  })
+
   it("does not count denials of a different action", () => {
     const current = { toolName: "Bash", key: "git push" }
-    const blocked = [{ toolName: "Edit", key: "/x.ts", timestampMs: Date.now(), isCooldown: false }]
+    const blocked = [
+      {
+        toolName: "Edit",
+        key: "/x.ts",
+        timestampMs: Date.now(),
+        isCooldown: false,
+        isInfractionDenial: false,
+      },
+    ]
     expect(assessInfraction(current, blocked).level).toBe("none")
   })
 
@@ -298,6 +332,17 @@ describe("evaluateInfraction — cooldown + de-escalation", () => {
       ...deniedBashAttempt("c", "git push", ETS),
     ]
     expect(evaluateInfraction(lines, bash("git push"), ENOW).level).toBe("red")
+  })
+
+  it("does not worsen the retry count when the preceding red denial came from this detector", () => {
+    const lines = [
+      ...deniedBashAttempt("a", "git push", ETS),
+      ...deniedBashAttempt("b", "git push", ETS),
+      ...infractionDeniedBashAttempt("c", "git push", ETS),
+    ]
+    const out = evaluateInfraction(lines, bash("git push"), ENOW)
+    expect(out.level).toBe("red")
+    expect(out.priorDenialCount).toBe(2)
   })
 
   it("passes yellow through when the current call is a first retry", () => {

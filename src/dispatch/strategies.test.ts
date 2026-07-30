@@ -12,11 +12,112 @@ import type { HookExecution } from "./engine.ts"
 import { writeResponse } from "./engine.ts"
 import {
   applyPreToolHumanisedContext,
+  collectPreToolResults,
   isSkillGateHook,
+  normalizePreToolDenyReason,
   preparePreToolHints,
   resolveFileEditDenyDowngrade,
   shouldDowngradeFileEditDenies,
 } from "./preToolUseStrategy.ts"
+
+describe("normalizePreToolDenyReason", () => {
+  it.each([
+    { decision: "deny" },
+    { decision: "block" },
+    { continue: false },
+    { hookSpecificOutput: { decision: "deny" } },
+    { hookSpecificOutput: { decision: "block" } },
+    {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+      },
+    },
+  ])("adds a hook-naming fallback for a reasonless deny shape", (response) => {
+    const output: Record<string, any> = response
+    const reason = normalizePreToolDenyReason(output, "pretooluse-example.ts")
+    expect(reason).toContain("pretooluse-example.ts")
+    expect(reason).toContain("resolve this hook's requirement before retrying")
+    expect(output.reason).toBe(reason)
+  })
+
+  it("promotes systemMessage retry guidance without rewriting it", () => {
+    const response: Record<string, any> = {
+      decision: "block",
+      systemMessage: "Retry after TaskList has refreshed the task state.",
+    }
+    expect(normalizePreToolDenyReason(response, "pretooluse-task-state.ts")).toBe(
+      response.systemMessage
+    )
+    expect(response.reason).toBe(response.systemMessage)
+  })
+
+  it("leaves canonical builder output unchanged", () => {
+    const response = {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Run the required skill.",
+      },
+    }
+    const before = structuredClone(response)
+    expect(normalizePreToolDenyReason(response, "pretooluse-skill-gate.ts")).toBe(
+      "Run the required skill."
+    )
+    expect(response).toEqual(before)
+  })
+
+  it("ignores non-deny responses", () => {
+    const response = { decision: "allow" }
+    expect(normalizePreToolDenyReason(response, "pretooluse-example.ts")).toBeNull()
+    expect(response).toEqual({ decision: "allow" })
+  })
+})
+
+describe("collectPreToolResults denial handling", () => {
+  it("normalizes and short-circuits on the first surviving generic deny", () => {
+    const first = makeHookExecution("pretooluse-first.ts")
+    const second = makeHookExecution("pretooluse-second.ts")
+    const executions: HookExecution[] = []
+    const finalResponse: Record<string, any> = {}
+
+    collectPreToolResults(
+      [
+        { execution: first, parsed: { continue: false } },
+        { execution: second, parsed: { decision: "block", reason: "later deny" } },
+      ],
+      executions,
+      { hints: [], contexts: [], downgradeMode: null, finalResponse }
+    )
+
+    expect(executions).toEqual([first])
+    expect(first.status).toBe("deny")
+    expect(finalResponse.reason).toContain("pretooluse-first.ts")
+    expect(finalResponse.reason).not.toContain("later deny")
+  })
+
+  it("turns a reasonless deny into named advisory context when downgraded", () => {
+    const denied = makeHookExecution("pretooluse-edit-guard.ts")
+    const passing = makeHookExecution("pretooluse-pass.ts")
+    const executions: HookExecution[] = []
+    const contexts: string[] = []
+    const finalResponse: Record<string, any> = {}
+
+    collectPreToolResults(
+      [
+        { execution: denied, parsed: { decision: "deny" } },
+        { execution: passing, parsed: {} },
+      ],
+      executions,
+      { hints: [], contexts, downgradeMode: "skill-active", finalResponse }
+    )
+
+    expect(executions).toEqual([denied, passing])
+    expect(denied.status).toBe("allow-with-reason")
+    expect(contexts[0]).toContain("pretooluse-edit-guard.ts")
+    expect(finalResponse).toEqual({})
+  })
+})
 
 /** Capture everything writeResponse emits to stdout for a single call. */
 function captureWriteResponse(response: Record<string, any>): string {

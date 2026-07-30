@@ -20,7 +20,12 @@
 // it does NOT fire on healthy-but-improvable advisory state — only on a concrete,
 // already-denied action being repeated. Pure transcript scan, no state files.
 
-import { COOLDOWN_MARKER, evaluateInfraction, resolveCurrentAttempt } from "../src/infractions.ts"
+import {
+  COOLDOWN_MARKER,
+  evaluateInfraction,
+  INFRACTION_DENIAL_MARKER,
+  resolveCurrentAttempt,
+} from "../src/infractions.ts"
 import {
   buildContextHookOutput,
   preToolUseDeny,
@@ -48,7 +53,7 @@ function yellowCardMessage(toolName: string, key: string): string {
 
 function redCardMessage(toolName: string, key: string, priorDenialCount: number): string {
   return (
-    `Blocked. You have retried ${describeAction(toolName, key)} ${priorDenialCount} times after it was denied, without taking the action the block required.\n\n` +
+    `Blocked by ${INFRACTION_DENIAL_MARKER}. You have retried ${describeAction(toolName, key)} ${priorDenialCount} times after it was denied, without taking the action the block required.\n\n` +
     `Stop retrying this call. Re-read the original deny message and take the action it asked for. ` +
     `If you genuinely believe the block is wrong, use the /re-assess skill rather than re-issuing the same call.`
   )
