@@ -377,7 +377,9 @@ async function validateMainInputsAndSettings(
 
   const settings = await readSwizSettings()
   const projectSettings = await readProjectSettings(cwd)
-  const effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
+  const effective =
+    (hookRaw._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+    getEffectiveSwizSettings(settings, input.session_id, projectSettings)
   if (!effective.autoContinue) {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
@@ -496,6 +498,7 @@ const stopAutoContinue: SwizStopHook = {
   name: "stop-auto-continue",
   event: "stop",
   timeout: 15,
+  requiredSettings: ["autoContinue"],
 
   run(input) {
     return evaluateStopAutoContinue(input)

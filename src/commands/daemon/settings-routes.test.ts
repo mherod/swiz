@@ -121,6 +121,19 @@ describe("settings routes", () => {
     expect(swizWrites).toEqual([{ prMergeMode: true }])
   })
 
+  test("accepts boolean autoContinue project setting update", async () => {
+    const ctx = createContext()
+    const req = post("/settings/project/update", {
+      cwd: "/repo",
+      updates: { autoContinue: false },
+    })
+
+    const response = await routes.handleSettingsRoutes(req, new URL(req.url), ctx)
+
+    expect(response?.status).toBe(200)
+    expect(projectWrites).toEqual([{ cwd: "/repo", updates: { autoContinue: false } }])
+  })
+
   test("returns null for unmatched settings routes", async () => {
     const ctx = createContext()
     const req = new Request("http://daemon/not-settings")

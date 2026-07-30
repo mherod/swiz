@@ -118,6 +118,7 @@ function normalizeProjectSettingsUpdates(
   }
 
   for (const boolKey of [
+    "autoContinue",
     "prMergeMode",
     "strictNoDirectMain",
     "autoSteerTranscriptWatching",
@@ -141,6 +142,7 @@ async function handleProjectSettingsUpdate(
   const body = (await req.json().catch(() => null)) as {
     cwd?: string
     updates?: {
+      autoContinue?: boolean
       collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
       prMergeMode?: boolean
       strictNoDirectMain?: boolean

@@ -147,9 +147,20 @@ function hasTaskGovernanceSurface(input: Record<string, any>, toolName: string):
   return agentHasTaskToolsForHookPayload(input) || isUpdatePlanTool(toolName)
 }
 
-function resolveGovernanceThresholds(auditStrictness: string): GovernanceThresholds {
+function resolveGovernanceThresholds(
+  auditStrictness: string,
+  autoContinue?: boolean
+): GovernanceThresholds {
   const mode = auditStrictness as keyof typeof GOVERNANCE_THRESHOLDS
-  return GOVERNANCE_THRESHOLDS[mode] ?? GOVERNANCE_THRESHOLDS.strict
+  const base = GOVERNANCE_THRESHOLDS[mode] ?? GOVERNANCE_THRESHOLDS.strict
+  if (autoContinue === false) {
+    return {
+      minIncomplete: Math.min(base.minIncomplete, 1),
+      minPending: 0,
+      minInProgress: base.minInProgress,
+    }
+  }
+  return base
 }
 
 function taskGovernanceMessage(
@@ -423,6 +434,7 @@ function checkTaskMinimums(
       kind: "missing-task-minimums",
       toolName,
       incompleteTaskList,
+      thresholds,
     })
   )
 }
@@ -925,8 +937,13 @@ async function runRequireTasksChecks(parsed: ParsedInput): Promise<SwizHookOutpu
       readSwizSettings(),
       readProjectSettings(cwd),
     ])
-    const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
-    thresholds = resolveGovernanceThresholds(effectiveSettings.auditStrictness)
+    const effectiveSettings =
+      (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(settings, sessionId, projectSettings)
+    thresholds = resolveGovernanceThresholds(
+      effectiveSettings.auditStrictness,
+      effectiveSettings.autoContinue
+    )
   } catch {
     // Settings read failure → use strict thresholds as default
   }
@@ -1113,7 +1130,10 @@ async function checkNativeTaskDeletionGovernance(
       sessionId,
       projectSettings ?? undefined
     )
-    const thresholds = resolveGovernanceThresholds(effectiveSettings.auditStrictness)
+    const thresholds = resolveGovernanceThresholds(
+      effectiveSettings.auditStrictness,
+      effectiveSettings.autoContinue
+    )
 
     const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
     const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
@@ -1187,8 +1207,10 @@ async function handleTaskCompletion(
         readSwizSettings(),
         cwd ? readProjectSettings(cwd).catch(() => null) : Promise.resolve(null),
       ])
-      const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
-      thresholds = resolveGovernanceThresholds(effective.auditStrictness)
+      const effective =
+        (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+        getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
+      thresholds = resolveGovernanceThresholds(effective.auditStrictness, effective.autoContinue)
     } catch {
       // Fall through with strict defaults
     }
@@ -1199,9 +1221,10 @@ async function handleTaskCompletion(
     const pendingAfter =
       taskBeingCompleted.status === "pending" ? pendingTasks.length - 1 : pendingTasks.length
 
-    // Allow early completion if at least 2 pending tasks remain (sufficient planning buffer).
-    // This relaxes the strict minIncomplete requirement while maintaining minPending threshold.
-    const allowEarlyCompletion = pendingAfter >= 2
+    // Allow early completion if at least 2 pending tasks remain (sufficient planning buffer)
+    // or if auto-continue is disabled (minPending === 0).
+    const allowEarlyCompletion =
+      pendingAfter >= 2 || (thresholds.minPending === 0 && incompleteAfter >= 0)
     const violatesThresholds =
       !allowEarlyCompletion &&
       (incompleteAfter < thresholds.minIncomplete || pendingAfter < thresholds.minPending)
@@ -1498,8 +1521,10 @@ async function evaluateUpdatePlanGovernance(
       readSwizSettings(),
       readProjectSettings(cwd).catch(() => null),
     ])
-    const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
-    thresholds = resolveGovernanceThresholds(effective.auditStrictness)
+    const effective =
+      (input._effectiveSettings as ReturnType<typeof getEffectiveSwizSettings> | undefined) ??
+      getEffectiveSwizSettings(settings, sessionId, projectSettings ?? undefined)
+    thresholds = resolveGovernanceThresholds(effective.auditStrictness, effective.autoContinue)
   } catch {
     // Fall through with strict defaults.
   }

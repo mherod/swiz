@@ -252,22 +252,45 @@ describe("stop-auto-continue", () => {
     expect(result.stderr).toContain("[stop-auto-continue:AUTO_CONTINUE_DISABLED]")
   })
 
-  test("session override takes precedence over global setting", async () => {
+  test("allows stop when auto-continue is disabled in project settings", async () => {
+    const homeDir = await createTempDir()
+    await mkdir(join(homeDir, ".swiz"), { recursive: true })
+    await writeFile(join(homeDir, ".swiz", "settings.json"), '{\n  "autoContinue": true\n}\n')
+
+    const projectDir = await createTempDir()
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(join(projectDir, ".swiz", "config.json"), '{\n  "autoContinue": false\n}\n')
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      cwd: projectDir,
+      extraEnv: { HOME: homeDir },
+    })
+
+    expect(result.decision).toBeUndefined()
+    expect(result.stderr).toContain("[stop-auto-continue:AUTO_CONTINUE_DISABLED]")
+  })
+
+  test("session override takes precedence over project setting", async () => {
     const homeDir = await createTempDir()
     await mkdir(join(homeDir, ".swiz"), { recursive: true })
     await writeFile(
       join(homeDir, ".swiz", "settings.json"),
-      '{\n  "autoContinue": false,\n  "sessions": {\n    "test-session": {\n      "autoContinue": true\n    }\n  }\n}\n'
+      '{\n  "autoContinue": true,\n  "sessions": {\n    "test-session": {\n      "autoContinue": true\n    }\n  }\n}\n'
     )
+
+    const projectDir = await createTempDir()
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(join(projectDir, ".swiz", "config.json"), '{\n  "autoContinue": false\n}\n')
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       sessionId: "test-session",
+      cwd: projectDir,
       extraEnv: { HOME: homeDir },
     })
 
-    // Session override enables auto-continue → blocks if filler/LLM produces a suggestion,
-    // skips gracefully if neither is available (no git context in temp dir, no API key in test)
+    // Session override enables auto-continue → blocks if filler/LLM produces a suggestion
     expect(result.decision === "block" || result.decision === undefined).toBe(true)
   })
 

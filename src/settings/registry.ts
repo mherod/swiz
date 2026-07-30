@@ -8,7 +8,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["auto-continue", "autocontinue", "auto_continue"],
     kind: "boolean",
     scopes: ["global", "project", "session"],
-    default: true,
+    default: false,
     docs: {
       description: "Automatically continue after a stop event instead of waiting for user input",
       effectExplanation:

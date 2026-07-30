@@ -160,6 +160,7 @@ export type TaskGovernanceMessageRequest =
       kind: "missing-task-minimums"
       toolName: string
       incompleteTaskList: string
+      thresholds?: GovernanceThresholds
     }
   | {
       kind: "too-many-in-progress"
@@ -290,8 +291,10 @@ function buildAllTasksCompletedMessage(r: Req<"all-tasks-completed">): string {
 function buildMissingTaskMinimumsMessage(r: Req<"missing-task-minimums">): string {
   const taskCreateName = taskCreateToolName()
   const taskUpdateName = taskUpdateToolName()
+  const minPending = r.thresholds?.minPending ?? 1
+  const pendingPrefix = minPending > 0 ? `${minPending} pending + ` : ""
   return (
-    `Task queue needs at least 1 pending + 1 in_progress before ${r.toolName} can continue.\n\n` +
+    `Task queue needs at least ${pendingPrefix}1 in_progress before ${r.toolName} can continue.\n\n` +
     "Keep real current work and follow-up work visible.\n\n" +
     `${r.incompleteTaskList ? `Current incomplete tasks:\n${r.incompleteTaskList}\n\n` : ""}` +
     formatTranslatedActionPlan(

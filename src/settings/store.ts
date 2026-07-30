@@ -69,7 +69,7 @@ export class SettingsStore {
         sessions: {
           ...current.sessions,
           [sessionId]: {
-            ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
+            ...(current.sessions[sessionId] ?? {}),
             [key]: value,
           },
         },

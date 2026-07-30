@@ -277,6 +277,7 @@ interface PrintSettingsOptions {
   path: string | null
   fileExists: boolean
   sessionId: string | null
+  autoContinueSource?: "global" | "project" | "session"
   ambitionSource?: "global" | "project" | "session"
   strictNoDirectMainSource?: "global" | "project"
   projectPolicyInfo?: ProjectPolicyInfo
@@ -378,11 +379,13 @@ function numericGlobalSettingsRows(
 
 function resolveGlobalScopes(
   effective: EffectiveSwizSettings,
+  autoContinueSource: "global" | "project" | "session" | undefined,
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined
-): { base: string; ambition: string; collaboration: string; strict: string } {
+): { autoContinue: string; base: string; ambition: string; collaboration: string; strict: string } {
   const base = effective.source === "session" ? "(session)" : "(user)"
   return {
+    autoContinue: resolveScopeLabel(autoContinueSource, "(user)"),
     base,
     ambition: resolveScopeLabel(ambitionSource, "(default)"),
     collaboration: effective.collaborationMode === "auto" ? "(default)" : base,
@@ -396,17 +399,23 @@ function descFor(key: string): string | undefined {
 
 function buildGlobalSettingsRows(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
+  autoContinueSource: "global" | "project" | "session" | undefined,
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined,
   rawSettings?: SwizSettings
 ): SettingsRow[] {
-  const scopes = resolveGlobalScopes(effective, ambitionSource, strictNoDirectMainSource)
+  const scopes = resolveGlobalScopes(
+    effective,
+    autoContinueSource,
+    ambitionSource,
+    strictNoDirectMainSource
+  )
 
   return [
     {
       label: "auto-continue:",
       value: boolToEnabledDisabled(effective.autoContinue),
-      scope: scopes.base,
+      scope: scopes.autoContinue,
       description: descFor("autoContinue"),
     },
     {
@@ -434,12 +443,14 @@ function buildGlobalSettingsRows(
 
 function printGlobalSettings(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
+  autoContinueSource: "global" | "project" | "session" | undefined,
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined,
   rawSettings?: SwizSettings
 ): void {
   const rows = buildGlobalSettingsRows(
     effective,
+    autoContinueSource,
     ambitionSource,
     strictNoDirectMainSource,
     rawSettings
@@ -518,6 +529,7 @@ function printSettings(opts: PrintSettingsOptions): void {
   printHeader(opts.path, opts.fileExists, opts.sessionId)
   printGlobalSettings(
     opts.effective,
+    opts.autoContinueSource,
     opts.ambitionSource,
     opts.strictNoDirectMainSource,
     opts.rawSettings
@@ -526,6 +538,16 @@ function printSettings(opts: PrintSettingsOptions): void {
     printProjectPolicy(opts.projectPolicyInfo, opts.detectedStacks)
   }
   console.log("")
+}
+
+function resolveAutoContinueSource(
+  sessionId: string | null,
+  settings: SwizSettings,
+  projectSettings: ProjectSwizSettings | null
+): "global" | "project" | "session" {
+  if (sessionId && settings.sessions[sessionId]?.autoContinue !== undefined) return "session"
+  if (projectSettings?.autoContinue !== undefined) return "project"
+  return "global"
 }
 
 function resolveAmbitionSource(
@@ -605,6 +627,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     path,
     fileExists,
     sessionId,
+    autoContinueSource: resolveAutoContinueSource(sessionId, settings, projectSettings),
     ambitionSource: resolveAmbitionSource(sessionId, settings, projectSettings),
     strictNoDirectMainSource:
       projectSettings?.strictNoDirectMain !== undefined ? "project" : "global",

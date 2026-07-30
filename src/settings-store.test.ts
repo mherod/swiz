@@ -81,7 +81,7 @@ describe("setSession", () => {
       expect(sess?.prMergeMode).toBe(false)
     }))
 
-  test("initialises session from global autoContinue when no session exists yet", () =>
+  test("does not pollute session object with global autoContinue when setting another session key", () =>
     withTmpHome(async (home) => {
       // Write a global setting first
       const settingsPath = join(home, ".swiz", "settings.json")
@@ -91,8 +91,8 @@ describe("setSession", () => {
       await store.setSession(sessionId, "prMergeMode", true)
       const settings = await store.readGlobal()
       const sess = settings.sessions[sessionId]
-      // autoContinue inherited from global (false), plus the new key
-      expect(sess?.autoContinue).toBe(false)
+      // autoContinue remains undefined on session so project/global scope fallback works
+      expect(sess?.autoContinue).toBeUndefined()
       expect(sess?.prMergeMode).toBe(true)
     }))
 })
@@ -237,5 +237,46 @@ describe("effective", () => {
       await store.setProject(projectDir, "strictNoDirectMain", true)
       const effective = await store.effective(projectDir)
       expect(effective.strictNoDirectMain).toBe(true)
+    }))
+
+  test("project autoContinue overrides global autoContinue", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      await store.setGlobal("autoContinue", true)
+      await store.setProject(projectDir, "autoContinue", false)
+
+      const effective = await store.effective(projectDir)
+      expect(effective.autoContinue).toBe(false)
+    }))
+
+  test("session autoContinue overrides project autoContinue", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      await store.setGlobal("autoContinue", true)
+      await store.setProject(projectDir, "autoContinue", false)
+      const sessionId = "session-override-project"
+      await store.setSession(sessionId, "autoContinue", true)
+
+      const effective = await store.effective(projectDir, sessionId)
+      expect(effective.autoContinue).toBe(true)
+    }))
+
+  test("session with non-autoContinue key respects project autoContinue", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      await store.setGlobal("autoContinue", true)
+      await store.setProject(projectDir, "autoContinue", false)
+      const sessionId = "session-other-key"
+      await store.setSession(sessionId, "speak", true)
+
+      const effective = await store.effective(projectDir, sessionId)
+      expect(effective.autoContinue).toBe(false)
+      expect(effective.speak).toBe(true)
     }))
 })
