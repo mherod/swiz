@@ -155,7 +155,7 @@ alwaysApply: false
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
-- **DO**: Run `swiz settings` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
+- **DO**: Run `swiz settings show --project` before `/commit`, `/push`, or `/rebase-and-merge-into-main`.
 - **DO**: Treat `.swiz/config.json` as the baseline policy for `mherod/swiz` (solo + trunk). Live `/push` signals override it: if `OPEN_PRS_FROM_OTHERS>0`, other contributors are active, or collaboration state is unknown, create a feature branch and PR. Output such as `Open PRs from others: 1` for PR #732 is a signal, not an exception.
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
