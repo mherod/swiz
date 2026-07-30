@@ -117,6 +117,48 @@ describe("collectPreToolResults denial handling", () => {
     expect(contexts[0]).toContain("pretooluse-edit-guard.ts")
     expect(finalResponse).toEqual({})
   })
+
+  it("collects later hints and passes after downgrading a deny", () => {
+    const denied = makeHookExecution("pretooluse-edit-guard.ts")
+    const hinted = makeHookExecution("pretooluse-hint.ts")
+    const passing = makeHookExecution("pretooluse-pass.ts")
+    const executions: HookExecution[] = []
+    const hints: string[] = []
+    const contexts: string[] = []
+    const finalResponse: Record<string, any> = {}
+
+    collectPreToolResults(
+      [
+        {
+          execution: denied,
+          parsed: { decision: "deny", reason: "Create a task before editing." },
+        },
+        {
+          execution: hinted,
+          parsed: {
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "Keep the change focused.",
+            },
+          },
+        },
+        { execution: passing, parsed: null },
+      ],
+      executions,
+      { hints, contexts, downgradeMode: "skill-active", finalResponse }
+    )
+
+    expect(executions).toEqual([denied, hinted, passing])
+    expect(executions.map((execution) => execution.status)).toEqual([
+      "allow-with-reason",
+      "allow-with-reason",
+      "ok",
+    ])
+    expect(contexts).toEqual(["Create a task before editing."])
+    expect(hints).toEqual(["Keep the change focused."])
+    expect(finalResponse).toEqual({})
+  })
 })
 
 /** Capture everything writeResponse emits to stdout for a single call. */
