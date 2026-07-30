@@ -49,16 +49,16 @@ export async function handleProjectPrsRoute(
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
 
-  registerProjectAndTouch(ctx, cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, cwd)) ?? cwd
 
-  const repo = await getRepoSlug(cwd)
+  const repo = await getRepoSlug(projectCwd)
   if (!repo) return Response.json({ repo: null, pullRequests: [] satisfies DashboardPrRecord[] })
 
   const limit = clampDashboardListLimit(body?.limit)
   const reader = getIssueStoreReader()
   let prs = await reader.listPullRequests<unknown>(repo)
 
-  const syncing = kickUpstreamSyncWhenEmpty(ctx, cwd, prs.length === 0)
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, prs.length === 0)
 
   if (prs.length === 0) {
     prs = await reader.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
@@ -86,9 +86,11 @@ export async function handleProjectSyncNow(
   if (typeof cwd !== "string" || !cwd) {
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
-  registerProjectAndTouch(ctx, cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, cwd)) ?? cwd
   // Register idempotently, then kick off sync in the background — returns immediately.
-  void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+  void ctx.upstreamSyncRegistry
+    .register(projectCwd)
+    .then(() => ctx.upstreamSyncRegistry.syncNow(projectCwd))
   return Response.json({ ok: true, started: true })
 }
 
@@ -105,16 +107,16 @@ export async function handleProjectIssuesRoute(
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
 
-  registerProjectAndTouch(ctx, cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, cwd)) ?? cwd
 
-  const repo = await getRepoSlug(cwd)
+  const repo = await getRepoSlug(projectCwd)
   if (!repo) return Response.json({ repo: null, issues: [] satisfies DashboardIssueRecord[] })
 
   const limit = clampDashboardListLimit(body?.limit)
   const reader = getIssueStoreReader()
   let issues = await reader.listIssues<unknown>(repo)
 
-  const syncing = kickUpstreamSyncWhenEmpty(ctx, cwd, issues.length === 0)
+  const syncing = kickUpstreamSyncWhenEmpty(ctx, projectCwd, issues.length === 0)
 
   if (issues.length === 0) {
     issues = await reader.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)

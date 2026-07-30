@@ -55,9 +55,9 @@ async function handleGhQuery(req: Request, ctx: CacheRoutesContext): Promise<Res
       { status: 400 }
     )
   }
-  registerProjectAndTouch(ctx, body.cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
   const ttlMs = typeof body?.ttlMs === "number" ? body.ttlMs : GH_QUERY_TTL_MS
-  const { hit, value } = await ctx.ghCache.get(body.args, body.cwd, ttlMs)
+  const { hit, value } = await ctx.ghCache.get(body.args, projectCwd, ttlMs)
   return Response.json({ hit, value })
 }
 
@@ -66,8 +66,8 @@ async function handleHooksEligible(req: Request, ctx: CacheRoutesContext): Promi
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  registerProjectAndTouch(ctx, body.cwd)
-  const snapshot = await ctx.eligibilityCache.compute(body.cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const snapshot = await ctx.eligibilityCache.compute(projectCwd)
   return Response.json(snapshot)
 }
 
@@ -134,8 +134,8 @@ async function handleGitState(req: Request, ctx: CacheRoutesContext): Promise<Re
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  registerProjectAndTouch(ctx, body.cwd)
-  const state = await ctx.gitStateCache.get(body.cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const state = await ctx.gitStateCache.get(projectCwd)
   if (!state) {
     return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })
   }
@@ -151,7 +151,7 @@ async function handleLastUserMessage(req: Request, ctx: CacheRoutesContext): Pro
   if (typeof body?.sessionId !== "string" || !body.sessionId) {
     return Response.json({ error: "Missing required field: sessionId" }, { status: 400 })
   }
-  if (typeof body.cwd === "string" && body.cwd) registerProjectAndTouch(ctx, body.cwd)
+  if (typeof body.cwd === "string" && body.cwd) await registerProjectAndTouch(ctx, body.cwd)
   const entry = await ctx.lastUserMessageCache.get(body.sessionId, body.transcriptPath)
   if (!entry) {
     return Response.json({ error: "No user message recorded for session" }, { status: 404 })

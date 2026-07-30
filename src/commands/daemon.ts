@@ -2,6 +2,7 @@ import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
 import { stderrLog } from "../debug.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
+import { resolveProjectRoot } from "../project-identity.ts"
 import {
   getProjectSettingsPath,
   getSwizSettingsPath,
@@ -524,7 +525,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   process.on("exit", () => cleanup("exit"))
 
   const cwd = process.cwd()
-  const hydratedSessions = await hydratePersistedSessionToolState(cwd, state)
+  const projectRoot = await resolveProjectRoot(cwd)
+  const hydratedSessions = await hydratePersistedSessionToolState(projectRoot, state)
   // Release file-cache entries accumulated during session discovery.
   // findAllProviderSessions reads prefixes of every session file across all
   // providers to match by cwd. Without clearing, these prefix strings remain
@@ -538,7 +540,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     )
   }
 
-  state.touchProject(cwd)
+  state.touchProject(projectRoot)
   // Re-register repos previously synced so the daemon resumes background sync
   // on startup without waiting for an active dispatch session.
   void caches.upstreamSyncRegistry.restoreKnownRepos()
@@ -550,6 +552,10 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     evictProject
   )
   const resolveSnapshot = buildSnapshotResolver(caches.snapshots)
+
+  // Register the canonical initial root before the web context exposes its
+  // known-project list, so raw process.cwd() aliases never leak into identity maps.
+  registerProjectWatchers(projectRoot)
 
   const server = startDaemonWebServer({
     port,
@@ -585,8 +591,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   })
 
   // Register initial project for periodic upstream sync
-  void caches.upstreamSyncRegistry.register(cwd)
-  registerProjectWatchers(cwd)
+  void caches.upstreamSyncRegistry.register(projectRoot)
 
   startTranscriptMonitoring(registeredProjects, transcriptMonitor, state.globalMetrics)
 

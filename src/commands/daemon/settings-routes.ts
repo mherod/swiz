@@ -59,8 +59,8 @@ async function handleProjectSettingsGet(
   if (typeof body?.cwd !== "string" || !body.cwd) {
     return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
   }
-  registerProjectAndTouch(ctx, body.cwd)
-  const cached = await ctx.projectSettingsCache.get(body.cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const cached = await ctx.projectSettingsCache.get(projectCwd)
   const globalSettings = await readSwizSettings()
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
 }
@@ -174,11 +174,11 @@ async function handleProjectSettingsUpdate(
     return Response.json({ error: "No supported updates provided" }, { status: 400 })
   }
 
-  registerProjectAndTouch(ctx, cwd)
-  await applyProjectSettingsUpdates(cwd, normalized)
-  ctx.projectSettingsCache.invalidateProject(cwd)
-  ctx.manifestCache.invalidateProject(cwd)
-  const cached = await ctx.projectSettingsCache.get(cwd)
+  const projectCwd = (await registerProjectAndTouch(ctx, cwd)) ?? cwd
+  await applyProjectSettingsUpdates(projectCwd, normalized)
+  ctx.projectSettingsCache.invalidateProject(projectCwd)
+  ctx.manifestCache.invalidateProject(projectCwd)
+  const cached = await ctx.projectSettingsCache.get(projectCwd)
   const globalSettings = await readSwizSettings()
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
 }

@@ -22,6 +22,7 @@ import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
+import { registerProjectAndTouch } from "./route-helpers.ts"
 import {
   type CooldownRegistry,
   type DaemonMetrics,
@@ -265,9 +266,10 @@ async function updateParsedPayloadMetrics(
 
   const nowMs = Date.now()
   if (parsed.cwd) {
-    ctx.touchProject(parsed.cwd)
-    recordDispatch(ctx.getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
-    ctx.registerProjectWatchers(parsed.cwd)
+    const projectCwd = await registerProjectAndTouch(ctx, parsed.cwd)
+    if (projectCwd) {
+      recordDispatch(ctx.getProjectMetrics(projectCwd), canonicalEvent, durationMs)
+    }
   }
   if (parsed.sessionId) {
     const prev = ctx.sessionActivity.get(parsed.sessionId)

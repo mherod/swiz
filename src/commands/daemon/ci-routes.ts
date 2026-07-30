@@ -25,8 +25,8 @@ async function handleCiWatchPost(req: Request, ctx: CiRoutesContext): Promise<Re
   if (global.ignoreCi) {
     return Response.json({ ignored: true })
   }
-  registerProjectAndTouch(ctx, body.cwd)
-  const started = ctx.ciWatchRegistry.start(body.cwd, body.sha)
+  const projectCwd = (await registerProjectAndTouch(ctx, body.cwd)) ?? body.cwd
+  const started = ctx.ciWatchRegistry.start(projectCwd, body.sha)
   return Response.json(started)
 }
 

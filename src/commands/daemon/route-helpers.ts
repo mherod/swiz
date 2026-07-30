@@ -5,6 +5,7 @@
  * reuse it without importing back from web-server.ts, which would create an
  * import cycle. web-server.ts and the domain route modules both import from here.
  */
+import { resolveProjectRoot } from "../../project-identity.ts"
 
 /**
  * True when `cwd` is a usable project identity — an absolute filesystem path.
@@ -17,13 +18,24 @@ export function isRegisterableProjectCwd(cwd: string): boolean {
   return typeof cwd === "string" && cwd.startsWith("/")
 }
 
-/** Watcher registration then touch — standard order for POST routes scoped to a project cwd. */
-export function registerProjectAndTouch(
+/** Resolve an absolute route cwd to the canonical repository root used for daemon bookkeeping. */
+export async function resolveRegisterableProjectCwd(cwd: string): Promise<string | null> {
+  if (!isRegisterableProjectCwd(cwd)) return null
+  return resolveProjectRoot(cwd)
+}
+
+/**
+ * Canonical watcher registration then touch — standard order for POST routes
+ * scoped to a project cwd. Returns the canonical root for downstream caches.
+ */
+export async function registerProjectAndTouch(
   ctx: { touchProject: (cwd: string) => void; registerProjectWatchers: (cwd: string) => void },
   cwd: string
-): void {
+): Promise<string | null> {
   // Ignore placeholder/relative cwds so they don't pollute project bookkeeping.
-  if (!isRegisterableProjectCwd(cwd)) return
-  ctx.registerProjectWatchers(cwd)
-  ctx.touchProject(cwd)
+  const projectCwd = await resolveRegisterableProjectCwd(cwd)
+  if (!projectCwd) return null
+  ctx.registerProjectWatchers(projectCwd)
+  ctx.touchProject(projectCwd)
+  return projectCwd
 }

@@ -1,3 +1,4 @@
+import { resolveRegisterableProjectCwd } from "./route-helpers.ts"
 import type { SessionPreview } from "./session-data.ts"
 import type { SessionMessage, SessionTaskSummary } from "./types.ts"
 import type { ProjectTaskPreview, SessionTaskPreview } from "./utils.ts"
@@ -186,7 +187,8 @@ async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): P
       { status: 400 }
     )
   }
-  ctx.touchProject(cwd)
+  const projectCwd = await resolveRegisterableProjectCwd(cwd)
+  if (projectCwd) ctx.touchProject(projectCwd)
   const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
   const data = await ctx.getSessionData(cwd, sessionId, limit)
   return Response.json({ messages: data.messages, toolStats: data.toolStats })
@@ -206,7 +208,8 @@ async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Prom
       { status: 400 }
     )
   }
-  ctx.touchProject(cwd)
+  const projectCwd = await resolveRegisterableProjectCwd(cwd)
+  if (projectCwd) ctx.touchProject(projectCwd)
   const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
   const data = await ctx.getSessionTasks(sessionId, limit)
   if (data === null) {
@@ -224,7 +227,8 @@ async function handleProjectTasks(req: Request, ctx: SessionRoutesContext): Prom
   if (typeof cwd !== "string" || cwd.length === 0) {
     return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
   }
-  ctx.touchProject(cwd)
+  const projectCwd = await resolveRegisterableProjectCwd(cwd)
+  if (projectCwd) ctx.touchProject(projectCwd)
   const limit = Math.max(1, Math.min(300, body?.limit ?? 120))
   const data = await ctx.getProjectTasks(cwd, limit)
   return Response.json(data)

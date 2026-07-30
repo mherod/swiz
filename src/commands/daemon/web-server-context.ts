@@ -141,9 +141,7 @@ export function buildCacheRoutesContext(ctx: DaemonWebServerContext): CacheRoute
 export function buildSessionRoutesContext(ctx: DaemonWebServerContext): SessionRoutesContext {
   return {
     touchProject: ctx.touchProject,
-    getKnownProjects: () => [
-      ...new Set([process.cwd(), ...ctx.registeredProjects, ...ctx.projectMetrics.keys()]),
-    ],
+    getKnownProjects: () => [...new Set([...ctx.registeredProjects, ...ctx.projectMetrics.keys()])],
     getProjectLastSeen: (cwd: string) => ctx.projectLastSeen.get(cwd) ?? 0,
     getProjectStatusLine: async (cwd: string, sessionId?: string) => {
       const snapshot = await ctx.resolveSnapshot(cwd, sessionId ?? null)
