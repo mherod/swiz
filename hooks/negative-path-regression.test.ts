@@ -18,31 +18,13 @@ import { type HookResult, runHookInProcess, useTempDir } from "../src/utils/test
 
 const { create: createTempDir } = useTempDir("swiz-negpath-")
 
-/**
- * Run a hook script as a subprocess with controlled stdin and env.
- */
+/** Run hook behavior in-process with isolated environment overrides. */
 async function runHook(
   script: string,
   stdinPayload: Record<string, any>,
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
-
-  const proc = Bun.spawn(["bun", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  })
-  await proc.stdin.write(payload)
-  await proc.stdin.end()
-
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr }
+  return await runHookInProcess(script, stdinPayload, { env: envOverrides })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
