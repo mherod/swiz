@@ -16,14 +16,9 @@ import { detectFrameworks } from "../src/detect-frameworks.ts"
 import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
 import {
-  DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
-  DEFAULT_SKILL_RECENCY_MAX_TURNS,
-  resolveNumericSetting,
-} from "../src/settings/resolution.ts"
-import {
-  formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
+  resolveSkillRecencyOptions,
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
@@ -72,19 +67,10 @@ const pretooluseRequireConvertToKotlin: SwizFileEditHook = {
       return {}
     }
 
-    const [maxTurns, maxAgeMinutes] = await Promise.all([
-      resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
-      resolveNumericSetting(
-        cwd,
-        "skillRecencyMaxAgeMinutes",
-        DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES
-      ),
-    ])
-    const recencyOptions = { maxTurns, maxAgeMs: maxAgeMinutes * 60 * 1000 }
+    const { recencyOptions, windowText: window } = await resolveSkillRecencyOptions(cwd)
 
     const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
     const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
-    const window = formatCurrentSessionUsageWindow(recencyOptions)
 
     if (invokedSkills.includes(SKILL_NAME)) {
       return preToolUseAllow(
