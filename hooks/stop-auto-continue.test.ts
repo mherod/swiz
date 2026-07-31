@@ -1,7 +1,13 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdir, readdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { commitFile, makeTempGitRepo, useTempDir } from "../src/utils/test-utils.ts"
+import {
+  acquireEnvLock,
+  commitFile,
+  makeTempGitRepo,
+  releaseEnvLockFn,
+  useTempDir,
+} from "../src/utils/test-utils.ts"
 import { checkChangelogStaleness } from "./stop-auto-continue/changelog-staleness.ts"
 import {
   __testOnly_DEDUP_MAX_FILES,
@@ -136,9 +142,10 @@ describe("stop-auto-continue", () => {
     const homeDir = await createTempDir()
     // HOME is not read by recordSuggestion, but getSuggestionsPath uses getHomeDirOrNull() which
     // derives from process.env.HOME — set it for this isolated unit test.
+    await acquireEnvLock()
     const prevHome = process.env.HOME
-    process.env.HOME = homeDir
     try {
+      process.env.HOME = homeDir
       const sessionId = `test-session-suggestions-${Date.now()}`
       const path = __testOnly_getSuggestionsPath(sessionId)
 
@@ -153,7 +160,9 @@ describe("stop-auto-continue", () => {
       const parsed = await Bun.file(path).json()
       expect(parsed).toEqual({ seen: { hello: 1 } })
     } finally {
-      process.env.HOME = prevHome
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+      releaseEnvLockFn()
     }
   })
 
@@ -169,12 +178,15 @@ describe("stop-auto-continue", () => {
       const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
       await utimes(stalePath, eightDaysAgo, eightDaysAgo)
 
+      await acquireEnvLock()
       const prevHome = process.env.HOME
-      process.env.HOME = homeDir
       try {
+        process.env.HOME = homeDir
         await __testOnly_pruneOldSuggestionLogs()
       } finally {
-        process.env.HOME = prevHome
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+        releaseEnvLockFn()
       }
 
       expect(await Bun.file(stalePath).exists()).toBe(false)
@@ -195,12 +207,15 @@ describe("stop-auto-continue", () => {
         await utimes(p, t, t)
       }
 
+      await acquireEnvLock()
       const prevHome = process.env.HOME
-      process.env.HOME = homeDir
       try {
+        process.env.HOME = homeDir
         await __testOnly_pruneOldSuggestionLogs()
       } finally {
-        process.env.HOME = prevHome
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+        releaseEnvLockFn()
       }
 
       const names = (await readdir(swizDir)).filter(
@@ -226,12 +241,15 @@ describe("stop-auto-continue", () => {
       const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
       await utimes(stalePath, eightDaysAgo, eightDaysAgo)
 
+      await acquireEnvLock()
       const prevHome = process.env.HOME
-      process.env.HOME = homeDir
       try {
+        process.env.HOME = homeDir
         await __testOnly_pruneOldSuggestionLogs()
       } finally {
-        process.env.HOME = prevHome
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+        releaseEnvLockFn()
       }
 
       expect(await Bun.file(otherPath).exists()).toBe(true)

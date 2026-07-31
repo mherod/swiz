@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { AGENTS } from "../agents.ts"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import { getMemorySources } from "./memory.ts"
 
 const SWIZ_ENTRY = join(import.meta.dir, "../../index.ts")
@@ -106,16 +107,19 @@ describe("getMemorySources", () => {
     await Bun.write(join(memDir, "debugging.md"), "# Debug notes\n")
     await Bun.write(join(memDir, "patterns.md"), "# Patterns\n")
 
-    // Override HOME for agent resolution
+    // Override HOME for agent resolution without leaking it to concurrent files.
+    await acquireEnvLock()
     const origHome = process.env.HOME
-    process.env.HOME = tmpHome
     try {
+      process.env.HOME = tmpHome
       const sources = await getMemorySources(getAgent("claude"), "/tmp/memproj")
       const labels = sources.map((s) => s.label)
       expect(labels).toContain("Project memory (debugging.md)")
       expect(labels).toContain("Project memory (patterns.md)")
     } finally {
-      process.env.HOME = origHome
+      if (origHome === undefined) delete process.env.HOME
+      else process.env.HOME = origHome
+      releaseEnvLockFn()
     }
   })
 

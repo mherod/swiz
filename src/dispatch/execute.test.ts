@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { ZodError } from "zod"
 import { preToolUseDeny, type SwizHook } from "../SwizHook.ts"
-import { useTempDir } from "../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../utils/test-utils.ts"
 import {
   coerceDispatchAgentEnvelopeInPlace,
   DispatchPayloadValidationError,
@@ -165,9 +165,10 @@ describe("dispatch execute integration", () => {
       // the developer's real session state. Use a random session id to ensure no
       // collision with a real tasks directory under concurrent execution.
       // We also isolate process.env.HOME to prevent fallback behavior.
+      await acquireEnvLock()
       const originalHome = process.env.HOME
-      process.env.HOME = `/tmp/swiz-dispatch-no-git-${Date.now()}`
       try {
+        process.env.HOME = `/tmp/swiz-dispatch-no-git-${Date.now()}`
         const req: DispatchRequest = {
           canonicalEvent: "stop",
           hookEventName: "Stop",
@@ -183,14 +184,17 @@ describe("dispatch execute integration", () => {
         expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
         expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       } finally {
-        process.env.HOME = originalHome
+        if (originalHome === undefined) delete process.env.HOME
+        else process.env.HOME = originalHome
+        releaseEnvLockFn()
       }
     })
 
     it("normalizes stop dispatch when manifest yields zero matching hook groups", async () => {
+      await acquireEnvLock()
       const originalHome = process.env.HOME
-      process.env.HOME = `/tmp/swiz-dispatch-empty-manifest-${Date.now()}`
       try {
+        process.env.HOME = `/tmp/swiz-dispatch-empty-manifest-${Date.now()}`
         const req: DispatchRequest = {
           canonicalEvent: "stop",
           hookEventName: "Stop",
@@ -204,7 +208,9 @@ describe("dispatch execute integration", () => {
         expect(result.response.reason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
         expect(result.response.stopReason).toBe(DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT)
       } finally {
-        process.env.HOME = originalHome
+        if (originalHome === undefined) delete process.env.HOME
+        else process.env.HOME = originalHome
+        releaseEnvLockFn()
       }
     })
 
@@ -569,9 +575,10 @@ describe("dispatch execute integration", () => {
     })
 
     it("skips dispatch for subagent payloads on stop", async () => {
+      await acquireEnvLock()
       const originalHome = process.env.HOME
-      process.env.HOME = `/tmp/swiz-subagent-stop-${Date.now()}`
       try {
+        process.env.HOME = `/tmp/swiz-subagent-stop-${Date.now()}`
         let providerCalled = false
         const req: DispatchRequest = {
           canonicalEvent: "stop",
@@ -592,7 +599,9 @@ describe("dispatch execute integration", () => {
         // Stop-like events still emit a normalized allow envelope
         expect(result.response.continue).toBe(true)
       } finally {
-        process.env.HOME = originalHome
+        if (originalHome === undefined) delete process.env.HOME
+        else process.env.HOME = originalHome
+        releaseEnvLockFn()
       }
     })
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { acquireEnvLock, releaseEnvLockFn } from "../utils/test-utils.ts"
 import {
   extractCodexUpdatePlanSnapshots,
   syncCodexUpdatePlanFromTranscriptSummary,
@@ -132,10 +133,11 @@ describe("codex-update-plan", () => {
   })
 
   it("syncs from a transcript summary for Codex payloads", async () => {
+    await acquireEnvLock()
     const originalHome = process.env.HOME
     const tempHome = join(tmpdir(), `swiz-codex-home-${crypto.randomUUID()}`)
-    process.env.HOME = tempHome
     try {
+      process.env.HOME = tempHome
       const sessionId = "codex-plan-summary"
       const sessionLines = [
         codexPlanLine({
@@ -176,14 +178,16 @@ describe("codex-update-plan", () => {
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 
   it("syncs from transcript_path when the daemon has no transcript summary", async () => {
+    await acquireEnvLock()
     const originalHome = process.env.HOME
     const tempHome = join(tmpdir(), `swiz-codex-home-${crypto.randomUUID()}`)
-    process.env.HOME = tempHome
     try {
+      process.env.HOME = tempHome
       const sessionId = "codex-plan-transcript-path"
       const transcriptPath = join(tempHome, ".codex", "sessions", "2026", "session.jsonl")
       await mkdir(join(tempHome, ".codex", "sessions", "2026"), { recursive: true })
@@ -215,6 +219,7 @@ describe("codex-update-plan", () => {
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 })

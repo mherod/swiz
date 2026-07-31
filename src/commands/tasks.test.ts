@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { runCommandInProcess } from "../utils/test-utils.ts"
+import { acquireEnvLock, releaseEnvLockFn, runCommandInProcess } from "../utils/test-utils.ts"
 import {
   compareTaskIds,
   findTaskAcrossSessions,
@@ -29,6 +29,17 @@ async function serial<T>(fn: () => Promise<T>): Promise<T> {
   const result = _queue.then(fn)
   _queue = result.catch(() => {})
   return result
+}
+
+async function serialEnv<T>(fn: () => Promise<T>): Promise<T> {
+  return serial(async () => {
+    await acquireEnvLock()
+    try {
+      return await fn()
+    } finally {
+      releaseEnvLockFn()
+    }
+  })
 }
 
 async function runTasksCli(
@@ -616,7 +627,7 @@ describe("complete --dry-run: resolveTaskById validation", () => {
 
 describe("tasks command regressions (#242)", () => {
   it("status updates without --state when explicit session is provided", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-242-home-status")
       const repoCwd = join(TMP, "issue-242-repo-status")
       const sessionId = "11111111-aaaa-bbbb-cccc-000000000001"
@@ -662,7 +673,7 @@ describe("tasks command regressions (#242)", () => {
 
 describe("task timing fields (#267)", () => {
   it("sets startedAt when a task enters in_progress", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-267-home-started-at")
       const repoCwd = join(TMP, "issue-267-repo-started-at")
       const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
@@ -710,7 +721,7 @@ describe("task timing fields (#267)", () => {
   })
 
   it("sets completedAt when a task enters completed", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-267-home-completed-at")
       const repoCwd = join(TMP, "issue-267-repo-completed-at")
       const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
@@ -773,7 +784,7 @@ describe("task timing fields (#267)", () => {
 
 describe("native task recovery paths (#271)", () => {
   it("complete creates placeholder stub when --subject is omitted", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-271-home-complete-placeholder")
       const repoCwd = join(TMP, "issue-271-repo-complete-placeholder")
       const sessionId = "44444444-aaaa-bbbb-cccc-000000000001"
@@ -818,7 +829,7 @@ describe("native task recovery paths (#271)", () => {
   })
 
   it("status creates stub from --subject for missing task", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-271-home-status")
       const repoCwd = join(TMP, "issue-271-repo-status")
       const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
@@ -864,7 +875,7 @@ describe("native task recovery paths (#271)", () => {
   })
 
   it("update creates stub from --subject for missing task", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "issue-271-home-update")
       const repoCwd = join(TMP, "issue-271-repo-update")
       const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
@@ -913,7 +924,7 @@ describe("native task recovery paths (#271)", () => {
 
 describe("recovered task output", () => {
   it("explains recovered sessions when task files have no matching transcript", async () => {
-    await serial(async () => {
+    await serialEnv(async () => {
       const home = join(TMP, "recovered-task-output-home")
       const repoCwd = join(TMP, "recovered-task-output-repo")
       const sessionId = "88888888-aaaa-bbbb-cccc-000000000001"
