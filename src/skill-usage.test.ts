@@ -77,6 +77,32 @@ describe("skill usage detection", () => {
     expect(extractSkillNameFromSlashPrompt("$refine-issue 123")).toBe("refine-issue")
   })
 
+  it("extracts explicitly attached Codex skills from user text", () => {
+    expect(
+      extractSkillNamesFromUserText(
+        "Use [$debug-iteratively](/Users/me/.codex/skills/debug-iteratively/SKILL.md)"
+      )
+    ).toEqual(["debug-iteratively"])
+    expect(
+      extractSkillNamesFromUserText(
+        "<skill>\n<name>forensic-code-analysis</name>\n<path>/Users/me/.codex/skills/forensic-code-analysis/SKILL.md</path>\n</skill>"
+      )
+    ).toEqual(["forensic-code-analysis"])
+  })
+
+  it("does not treat an ordinary SKILL.md link as an explicit invocation", () => {
+    expect(
+      extractSkillNamesFromUserText(
+        "See [the debugging skill](/Users/me/.codex/skills/debug-iteratively/SKILL.md)"
+      )
+    ).toEqual([])
+    expect(
+      extractSkillNamesFromUserText(
+        "[$debug-iteratively](/Users/me/.codex/skills/forensic-code-analysis/SKILL.md)"
+      )
+    ).toEqual([])
+  })
+
   it("extracts skill preambles for display stripping", () => {
     expect(
       extractSkillInvocationPreamble("Base directory for this skill: C:\\Users\\me\\skills\\commit")

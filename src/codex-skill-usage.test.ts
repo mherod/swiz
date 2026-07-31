@@ -16,6 +16,18 @@ function codexExecLine(input: string, name = "exec"): string {
   })
 }
 
+function codexUserLine(text: string): string {
+  return JSON.stringify({
+    timestamp: "2026-07-31T18:42:46.465Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text }],
+    },
+  })
+}
+
 function detectedSkills(lines: string[]): { summary: string[]; events: string[] } {
   return {
     summary: computeSummaryFromSessionLines(lines).skillInvocations,
@@ -55,5 +67,27 @@ describe("Codex skill usage detection", () => {
     )
 
     expect(detectedSkills([line])).toEqual({ summary: [], events: [] })
+  })
+
+  it("detects skills explicitly attached in a Codex user prompt", () => {
+    const line = codexUserLine(
+      "Investigate with [$debug-iteratively](/Users/me/.codex/skills/debug-iteratively/SKILL.md) and [$forensic-code-analysis](/Users/me/.codex/skills/forensic-code-analysis/SKILL.md)"
+    )
+
+    expect(detectedSkills([line])).toEqual({
+      summary: ["debug-iteratively", "forensic-code-analysis"],
+      events: ["debug-iteratively", "forensic-code-analysis"],
+    })
+  })
+
+  it("detects the persisted Codex skill expansion record", () => {
+    const line = codexUserLine(
+      "<skill>\n<name>debug-iteratively</name>\n<path>/Users/me/.codex/skills/debug-iteratively/SKILL.md</path>\n---\nname: debug-iteratively\n</skill>"
+    )
+
+    expect(detectedSkills([line])).toEqual({
+      summary: ["debug-iteratively"],
+      events: ["debug-iteratively"],
+    })
   })
 })

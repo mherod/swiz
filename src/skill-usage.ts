@@ -40,6 +40,9 @@ const CODEX_COMMAND_FIELD_RE =
 
 const COMMAND_NAME_RE = /<command-name>([a-z][a-z0-9-]*)<\/command-name>/g
 const QUEUED_SKILL_PROMPT_RE = /^\s*[/$]([a-z][a-z0-9-]*)\b/
+const CODEX_ATTACHED_SKILL_LINK_RE = /\[\$([a-z][a-z0-9-]*)\]\(\s*<?([^\n)>]+SKILL\.md)>?\s*\)/gi
+const CODEX_INJECTED_SKILL_RE =
+  /<skill>\s*<name>\s*([a-z][a-z0-9-]*)\s*<\/name>\s*<path>\s*([^<]+SKILL\.md)\s*<\/path>/gi
 const SKILL_DIR_BANNER_RE =
   /Base directory for this skill:\s*\S*?[\\/]skills[\\/]([a-z][a-z0-9-]*)\b/g
 const SKILL_BASE_DIR_RE = /^Base directory for this skill:\s*(.+)$/im
@@ -214,6 +217,20 @@ function extractSkillNamesFromActivationBanner(text: string): string[] {
   return skills
 }
 
+/** Accept app-attached skills only when the declared name matches the SKILL.md target path. */
+function extractSkillNamesFromCodexAttachments(text: string): string[] {
+  const skills: string[] = []
+  for (const pattern of [CODEX_ATTACHED_SKILL_LINK_RE, CODEX_INJECTED_SKILL_RE]) {
+    for (const match of text.matchAll(pattern)) {
+      const name = match[1]?.toLowerCase()
+      const path = match[2] ?? ""
+      if (!name || !extractSkillNamesFromSkillMdPathText(path).includes(name)) continue
+      pushUniqueSkill(skills, name)
+    }
+  }
+  return skills
+}
+
 export function extractSkillNameFromSlashPrompt(text: string | undefined | null): string | null {
   if (!text) return null
   const match = QUEUED_SKILL_PROMPT_RE.exec(text)
@@ -249,9 +266,11 @@ export function extractSkillInvocationPreamble(text: string): SkillInvocationPre
 }
 
 export function extractSkillNamesFromUserText(text: string): string[] {
-  const skills = extractSkillNamesFromActivationBanner(text)
-  skills.push(...extractSkillNamesFromLegacyCommandTags(text))
+  const skills: string[] = []
+  for (const skill of extractSkillNamesFromCodexAttachments(text)) pushUniqueSkill(skills, skill)
+  for (const skill of extractSkillNamesFromActivationBanner(text)) pushUniqueSkill(skills, skill)
+  for (const skill of extractSkillNamesFromLegacyCommandTags(text)) pushUniqueSkill(skills, skill)
   const promptedSkill = extractSkillNameFromSlashPrompt(text)
-  if (promptedSkill) skills.push(promptedSkill)
+  pushUniqueSkill(skills, promptedSkill ?? undefined)
   return skills
 }

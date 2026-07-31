@@ -36,7 +36,7 @@ export interface TranscriptSummary {
   toolCallCount: number
   /** Normalized shell commands from Bash/Shell tool calls. */
   bashCommands: string[]
-  /** Skill names invoked via the Skill tool. */
+  /** Skill names invoked through native tools, direct reads, or explicit user attachments. */
   skillInvocations: string[]
   /** Whether any Bash tool call contains `git push`. */
   hasGitPush: boolean
@@ -459,8 +459,7 @@ function extractUserSkillExpansions(line: string): string[] {
   if (entry.type === "response_item" && entry.payload?.type === "message") {
     if (entry.payload.role !== "user") return []
     const text = extractTextFromUserMessage(entry.payload.content)
-    const skill = extractSkillNameFromSlashPrompt(text)
-    return skill ? [skill] : []
+    return extractSkillNamesFromUserText(text)
   }
 
   // Skill content injected after the slash command resolves shows up in user
