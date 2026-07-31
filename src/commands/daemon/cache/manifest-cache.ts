@@ -1,33 +1,21 @@
 import type { HookGroup } from "../../../manifest.ts"
-import { CappedMap } from "./capped-map.ts"
+import { KeyedAsyncCache } from "../../../utils/keyed-async-cache.ts"
 import type { ProjectSettingsCache } from "./project-settings-cache.ts"
 
-export interface CachedManifest {
-  groups: HookGroup[]
-  cachedAt: number
-}
-
+/**
+ * Per-project combined hook manifest: builtins plus plugin and project-local
+ * groups. Entries live until the daemon invalidates them, so no TTL is set.
+ */
 export class ManifestCache {
-  private entries = new CappedMap<string, CachedManifest>(200)
-  private inFlight = new Map<string, Promise<HookGroup[]>>()
+  private readonly cache = new KeyedAsyncCache<HookGroup[]>()
   private projectSettingsCache: ProjectSettingsCache
 
   constructor(projectSettingsCache: ProjectSettingsCache) {
     this.projectSettingsCache = projectSettingsCache
   }
 
-  async get(cwd: string): Promise<HookGroup[]> {
-    const cached = this.entries.get(cwd)
-    if (cached) return cached.groups
-    const inflight = this.inFlight.get(cwd)
-    if (inflight) return inflight
-    const computation = this.build(cwd).then((groups) => {
-      this.entries.set(cwd, { groups, cachedAt: Date.now() })
-      this.inFlight.delete(cwd)
-      return groups
-    })
-    this.inFlight.set(cwd, computation)
-    return computation
+  get(cwd: string): Promise<HookGroup[]> {
+    return this.cache.get(cwd, (dir) => this.build(dir))
   }
 
   private async build(cwd: string): Promise<HookGroup[]> {
@@ -48,14 +36,14 @@ export class ManifestCache {
   }
 
   invalidateProject(cwd: string): void {
-    this.entries.delete(cwd)
+    this.cache.invalidate(cwd)
   }
 
   invalidateAll(): void {
-    this.entries.clear()
+    this.cache.invalidateAll()
   }
 
   get size(): number {
-    return this.entries.size
+    return this.cache.size
   }
 }

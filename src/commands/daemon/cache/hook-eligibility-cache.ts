@@ -15,7 +15,7 @@ import {
   resolveProjectHooks,
 } from "../../../settings.ts"
 import { getWorkflowIntent } from "../../../state-machine.ts"
-import { CappedMap } from "./capped-map.ts"
+import { KeyedAsyncCache } from "../../../utils/keyed-async-cache.ts"
 
 export interface EligibilitySnapshot {
   disabledHooks: string[]
@@ -26,36 +26,27 @@ export interface EligibilitySnapshot {
   computedAt: number
 }
 
+/**
+ * Per-project hook eligibility — disabled hooks, detected stacks, evaluated
+ * conditions. Entries live until the daemon invalidates them, so no TTL is set.
+ */
 export class HookEligibilityCache {
-  private entries = new CappedMap<string, EligibilitySnapshot>(200)
-  private inFlight = new Map<string, Promise<EligibilitySnapshot>>()
+  private readonly cache = new KeyedAsyncCache<EligibilitySnapshot>()
 
-  async compute(cwd: string): Promise<EligibilitySnapshot> {
-    const cached = this.entries.get(cwd)
-    if (cached) return cached
-
-    const inflight = this.inFlight.get(cwd)
-    if (inflight) return inflight
-
-    const computation = computeEligibility(cwd).then((snapshot) => {
-      this.entries.set(cwd, snapshot)
-      this.inFlight.delete(cwd)
-      return snapshot
-    })
-    this.inFlight.set(cwd, computation)
-    return computation
+  compute(cwd: string): Promise<EligibilitySnapshot> {
+    return this.cache.get(cwd, computeEligibility)
   }
 
   invalidateProject(cwd: string): void {
-    this.entries.delete(cwd)
+    this.cache.invalidate(cwd)
   }
 
   invalidateAll(): void {
-    this.entries.clear()
+    this.cache.invalidateAll()
   }
 
   get size(): number {
-    return this.entries.size
+    return this.cache.size
   }
 }
 

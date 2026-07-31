@@ -4,7 +4,7 @@ import {
   readProjectSettings,
   resolveProjectHooks,
 } from "../../../settings.ts"
-import { CappedMap } from "./capped-map.ts"
+import { KeyedAsyncCache } from "../../../utils/keyed-async-cache.ts"
 
 export interface CachedProjectSettings {
   settings: ProjectSwizSettings | null
@@ -13,46 +13,38 @@ export interface CachedProjectSettings {
   cachedAt: number
 }
 
+/**
+ * Per-project `.swiz` settings and their resolved hook groups.
+ *
+ * Entries live until the daemon invalidates them on a settings change, so no TTL
+ * is configured.
+ */
 export class ProjectSettingsCache {
-  private entries = new CappedMap<string, CachedProjectSettings>(200)
-  private inFlight = new Map<string, Promise<CachedProjectSettings>>()
+  private readonly cache = new KeyedAsyncCache<CachedProjectSettings>()
 
-  async get(cwd: string): Promise<CachedProjectSettings> {
-    const cached = this.entries.get(cwd)
-    if (cached) return cached
-    const inflight = this.inFlight.get(cwd)
-    if (inflight) return inflight
-    const computation = readProjectSettings(cwd).then((settings) => {
-      this.inFlight.delete(cwd)
+  get(cwd: string): Promise<CachedProjectSettings> {
+    return this.cache.get(cwd, async (dir) => {
+      const settings = await readProjectSettings(dir)
       let resolvedHooks: HookGroup[] = []
       let warnings: string[] = []
       if (settings?.hooks?.length) {
-        const result = resolveProjectHooks(settings.hooks, cwd)
+        const result = resolveProjectHooks(settings.hooks, dir)
         resolvedHooks = result.resolved
         warnings = result.warnings
       }
-      const entry: CachedProjectSettings = {
-        settings,
-        resolvedHooks,
-        warnings,
-        cachedAt: Date.now(),
-      }
-      this.entries.set(cwd, entry)
-      return entry
+      return { settings, resolvedHooks, warnings, cachedAt: Date.now() }
     })
-    this.inFlight.set(cwd, computation)
-    return computation
   }
 
   invalidateProject(cwd: string): void {
-    this.entries.delete(cwd)
+    this.cache.invalidate(cwd)
   }
 
   invalidateAll(): void {
-    this.entries.clear()
+    this.cache.invalidateAll()
   }
 
   get size(): number {
-    return this.entries.size
+    return this.cache.size
   }
 }
