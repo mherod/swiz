@@ -17,8 +17,10 @@ function repositoryCapability(overrides: Partial<RepositoryCapability> = {}): Re
   return {
     canonicalRoot: process.cwd(),
     repoKey: "test-repository-capability",
-    isGitRepo: true,
+    isRepo: true,
     repoSlug: "owner/repo",
+    hasGhCli: true,
+    resolvedAt: Date.now(),
     ...overrides,
   }
 }
@@ -191,7 +193,7 @@ describe("dispatch execute integration", () => {
           repositoryCapabilityProvider: async () =>
             repositoryCapability({
               canonicalRoot: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
-              isGitRepo: false,
+              isRepo: false,
               repoSlug: null,
             }),
           replayPendingMutations: async () => {
@@ -801,8 +803,10 @@ describe("dispatch execute integration", () => {
           _repositoryCapability: {
             canonicalRoot: "/agent-controlled",
             repoKey: "agent-controlled",
-            isGitRepo: false,
+            isRepo: false,
             repoSlug: "attacker/repo",
+            hasGhCli: false,
+            resolvedAt: 0,
           },
         }),
         repositoryCapabilityProvider: async () => trusted,

@@ -8,7 +8,14 @@ function identity(root: string, key = root): ProjectIdentityResolution {
 }
 
 function capability(project: ProjectIdentityResolution): RepositoryCapability {
-  return { ...project, repoSlug: "owner/repo" }
+  return {
+    canonicalRoot: project.canonicalRoot,
+    repoKey: project.repoKey,
+    isRepo: project.isGitRepo,
+    repoSlug: "owner/repo",
+    hasGhCli: true,
+    resolvedAt: Date.now(),
+  }
 }
 
 describe("RepositoryCapabilityCache", () => {

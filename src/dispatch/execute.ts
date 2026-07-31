@@ -422,7 +422,9 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
   // Resolve the repository once here so every downstream consumer — the non-git
   // short-circuit, pending-mutation replay, and the enriched payload handed to
   // hooks — reads the same verified answer instead of re-probing git.
-  const repositoryCapability = await resolveRepositoryCapability(cwd)
+  const repositoryCapability = req.repositoryCapabilityProvider
+    ? await req.repositoryCapabilityProvider(cwd)
+    : await resolveRepositoryCapability(cwd)
   // Assign unconditionally, overwriting anything the agent sent under this key.
   // A payload claiming `isRepo: false` would otherwise skip every hook.
   ;(payload as EnrichedDispatchPayload)._repositoryCapability = repositoryCapability
@@ -633,7 +635,7 @@ async function prepareDispatchGroups(
   replay: NonNullable<DispatchRequest["replayPendingMutations"]> = tryReplayPendingMutations
 ) {
   const tReplay = performance.now()
-  await tryReplayPendingMutations(ctx.cwd, ctx.repositoryCapability)
+  await replay(ctx.cwd, capability)
   log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
 
   const tManifest = performance.now()
@@ -710,9 +712,7 @@ function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Recor
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = await buildDispatchContext(req)
-  const repositoryCapability = req.repositoryCapabilityProvider
-    ? await req.repositoryCapabilityProvider(ctx.cwd)
-    : await resolveRepositoryCapability(ctx.cwd)
+  const repositoryCapability = ctx.repositoryCapability
 
   // Never trust agent-provided capability fields. This assignment overwrites
   // inbound data with a value resolved inside Swiz before any hook can read it.
@@ -720,7 +720,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   enrichedPayload._repositoryCapability = repositoryCapability
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
-  if (!ctx.repositoryCapability.isRepo) {
+  if (!repositoryCapability.isRepo) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)

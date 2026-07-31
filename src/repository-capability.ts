@@ -19,7 +19,7 @@
  */
 
 import { getRepoSlug, hasGhCli, isGitRepo } from "./git-helpers.ts"
-import { resolveProjectIdentity } from "./project-identity.ts"
+import { type ProjectIdentityResolution, resolveProjectIdentity } from "./project-identity.ts"
 import { KeyedAsyncCache } from "./utils/keyed-async-cache.ts"
 
 /**
@@ -59,7 +59,61 @@ export interface RepositoryCapabilityProbes {
   hasGhCli: () => boolean
 }
 
+export type GitRepoResolver = (cwd: string) => Promise<boolean>
+export type RepoSlugResolver = (cwd: string) => Promise<string | null>
+
 const DEFAULT_PROBES: RepositoryCapabilityProbes = { isGitRepo, getRepoSlug, hasGhCli }
+
+function isRepositoryCapability(value: unknown): value is RepositoryCapability {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  return (
+    typeof Reflect.get(value, "canonicalRoot") === "string" &&
+    typeof Reflect.get(value, "repoKey") === "string" &&
+    typeof Reflect.get(value, "isRepo") === "boolean" &&
+    (typeof Reflect.get(value, "repoSlug") === "string" ||
+      Reflect.get(value, "repoSlug") === null) &&
+    typeof Reflect.get(value, "hasGhCli") === "boolean" &&
+    Number.isFinite(Reflect.get(value, "resolvedAt"))
+  )
+}
+
+/**
+ * Reuse dispatcher-verified repository membership when present, otherwise
+ * resolve it through the canonical Git boundary used by standalone hooks.
+ */
+export async function isGitRepoForHookPayload(
+  input: object,
+  cwd: string,
+  resolveFallback: GitRepoResolver = isGitRepo
+): Promise<boolean> {
+  const capability = Reflect.get(input, "_repositoryCapability")
+  if (isRepositoryCapability(capability)) return capability.isRepo
+  return await resolveFallback(cwd)
+}
+
+/** Build a capability from an identity already resolved by the daemon cache. */
+export async function resolveRepositoryCapabilityFromIdentity(
+  identity: ProjectIdentityResolution,
+  resolveSlug: RepoSlugResolver = getRepoSlug
+): Promise<RepositoryCapability> {
+  let repoSlug: string | null = null
+  if (identity.isGitRepo) {
+    try {
+      repoSlug = await resolveSlug(identity.canonicalRoot)
+    } catch {
+      // Repository membership remains authoritative when origin lookup fails.
+    }
+  }
+
+  return {
+    canonicalRoot: identity.canonicalRoot,
+    repoKey: identity.repoKey,
+    isRepo: identity.isGitRepo,
+    repoSlug,
+    hasGhCli: hasGhCli(),
+    resolvedAt: Date.now(),
+  }
+}
 
 let capabilityCache = new KeyedAsyncCache<RepositoryCapability>({
   ttlMs: REPOSITORY_CAPABILITY_TTL_MS,
@@ -141,6 +195,4 @@ export function resetRepositoryCapabilityCacheForTests(
     ttlMs: options.ttlMs ?? REPOSITORY_CAPABILITY_TTL_MS,
     now: options.now,
   })
-}
-
 }

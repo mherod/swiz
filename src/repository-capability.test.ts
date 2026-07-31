@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "bun:test"
+import { join } from "node:path"
 import {
+  isGitRepoForHookPayload,
   REPOSITORY_CAPABILITY_TTL_MS,
+  type RepositoryCapability,
   type RepositoryCapabilityProbes,
   resetRepositoryCapabilityCacheForTests,
   resolveRepositoryCapability,
@@ -145,5 +148,69 @@ describe("resolveRepositoryCapability", () => {
   })
 })
 
+const repositoryCapability = (isRepo: boolean): RepositoryCapability => ({
+  canonicalRoot: "/repo",
+  repoKey: "repo-key",
+  isRepo,
+  repoSlug: isRepo ? "owner/repo" : null,
+  hasGhCli: true,
+  resolvedAt: Date.now(),
+})
+
+describe("isGitRepoForHookPayload", () => {
+  for (const expected of [true, false]) {
+    it(`reuses dispatcher-verified membership when isRepo=${expected}`, async () => {
+      let fallbackCalls = 0
+      const result = await isGitRepoForHookPayload(
+        { _repositoryCapability: repositoryCapability(expected) },
+        "/repo",
+        async () => {
+          fallbackCalls++
+          return !expected
+        }
+      )
+
+      expect(result).toBe(expected)
+      expect(fallbackCalls).toBe(0)
+    })
+  }
+
+  for (const [name, input] of [
+    ["absent", {}],
+    ["malformed", { _repositoryCapability: { isRepo: true } }],
+  ] as const) {
+    it(`uses the canonical fallback when capability is ${name}`, async () => {
+      const seenCwds: string[] = []
+      const result = await isGitRepoForHookPayload(input, "malformed-cwd", async (cwd) => {
+        seenCwds.push(cwd)
+        return true
+      })
+
+      expect(result).toBe(true)
+      expect(seenCwds).toEqual(["malformed-cwd"])
+    })
+  }
+
+  it("is the repository-membership boundary for every issue #753 gate", async () => {
+    const hookFiles = [
+      "pretooluse-pr-changes-branch-guard.ts",
+      "pretooluse-task-governance.ts",
+      "pretooluse-sandboxed-edits.ts",
+      "pretooluse-repeated-lint-test.ts",
+      "pretooluse-pr-comment-read-gate.ts",
+      "pretooluse-no-phantom-task-completion.ts",
+      "pretooluse-branch-intent-gate.ts",
+      "pretooluse-pr-head-checkout-gate.ts",
+      "pretooluse-update-memory-enforcement.ts",
+      "pretooluse-issue-workflow-gate.ts",
+      "pretooluse-block-preexisting-dismissals.ts",
+      "pretooluse-dirty-worktree-gate.ts",
+      "pretooluse-trunk-mode-branch-gate.ts",
+    ]
+
+    for (const hookFile of hookFiles) {
+      const source = await Bun.file(join(process.cwd(), "hooks", hookFile)).text()
+      expect(source, hookFile).toContain("isGitRepoForHookPayload(")
+    }
   })
 })

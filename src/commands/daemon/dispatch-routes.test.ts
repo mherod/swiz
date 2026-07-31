@@ -86,10 +86,12 @@ function createDispatchContext(manifest: HookGroup[] = []): DispatchRoutesContex
       get: async (cwd: string) => ({
         canonicalRoot: cwd,
         repoKey: "dispatch-route-test",
-        isGitRepo: true,
+        isRepo: true,
         repoSlug: "owner/repo",
+        hasGhCli: true,
+        resolvedAt: Date.now(),
       }),
-    } as DispatchRoutesContext["repositoryCapabilityCache"],
+    } as unknown as DispatchRoutesContext["repositoryCapabilityCache"],
     resolveSnapshot: async () => {
       throw new Error("snapshot resolution is not expected in dispatch route tests")
     },
@@ -176,11 +178,13 @@ describe("handleDispatchRoute", () => {
         return {
           canonicalRoot: cwd,
           repoKey: "daemon-cache-test",
-          isGitRepo: true,
+          isRepo: true,
           repoSlug: "owner/repo",
+          hasGhCli: true,
+          resolvedAt: Date.now(),
         }
       },
-    } as DispatchRoutesContext["repositoryCapabilityCache"]
+    } as unknown as DispatchRoutesContext["repositoryCapabilityCache"]
     const url = new URL(
       "http://daemon/dispatch?event=nonexistentEvent&hookEventName=NonexistentEvent"
     )

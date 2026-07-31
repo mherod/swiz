@@ -39,7 +39,6 @@ import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
-import { resolveRepositoryCapability } from "../repository-capability.ts"
 import { swizDispatchLogPath } from "../temp-paths.ts"
 import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import type { Command } from "../types.ts"
@@ -462,35 +461,6 @@ async function tryAutoContinueDisabledFastPath(
   process.stdout.write(`${JSON.stringify(response)}\n`)
   markDispatchResponseWritten()
   const totalMs = Math.round(performance.now() - timing.t0)
-  void appendCliTimingLog({
-    ...timing,
-    totalMs,
-    daemonMs: 0,
-    route: "local",
-  })
-  return true
-}
-
-/** Non-git directories shouldn't run hooks (not a project target); return allow quickly. */
-async function tryNonGitFastPath(timing: DispatchTiming, hookEventName: string): Promise<boolean> {
-  // Shared with the local-execution fallback below: when the daemon is down and
-  // dispatch runs in-process, `buildDispatchContext` reuses this same resolved
-  // capability rather than spawning a second `rev-parse`.
-  const capability = await resolveRepositoryCapability(timing.cwd)
-  if (capability.isRepo) return false
-
-  log(`   ⏱ cli:fastpath-non-git: skip hooks (no .git in cwd)`)
-
-  if (isStopLikeEvent(timing.canonicalEvent)) {
-    const response: Record<string, any> = {}
-    normalizeStopDispatchResponseInPlace(response, hookEventName)
-    coerceDispatchAgentEnvelopeInPlace(response, timing.canonicalEvent, hookEventName)
-    process.stdout.write(`${JSON.stringify(response)}\n`)
-    markDispatchResponseWritten()
-  }
-
-  const totalMs = Math.round(performance.now() - timing.t0)
-  log(`   ⏱ cli:total: ${totalMs}ms (fastpath non-git)`)
   void appendCliTimingLog({
     ...timing,
     totalMs,

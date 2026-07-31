@@ -126,7 +126,7 @@ describe("mutation replay wiring", () => {
     const src = await Bun.file(join(SRC, "src", "cli.ts")).text()
     expect(src).toContain("tryReplayPendingMutations")
     expect(src).toMatch(
-      /if\s*\(resolved\.name\s*!==\s*["']dispatch["']\)\s*await\s+tryReplayPendingMutations\(/
+      /if\s*\(resolved\.name\s*!==\s*["']dispatch["']\)\s*\{\s*await\s+tryReplayPendingMutations\(/
     )
   })
 
@@ -147,7 +147,9 @@ describe("mutation replay wiring", () => {
     const src = await Bun.file(join(SRC, "src", "dispatch", "execute.ts")).text()
     // Without the second argument the replay path re-probes gh/rev-parse/remote
     // that core dispatch already resolved (#752).
-    expect(src).toMatch(/tryReplayPendingMutations\(\s*ctx\.cwd,\s*ctx\.repositoryCapability\s*\)/)
+    expect(src).toMatch(
+      /prepareDispatchGroups\(\s*ctx,\s*repositoryCapability,\s*req\.manifestProvider,/
+    )
   })
 
   it("cli.ts skips the process-wide replay for dispatch invocations", async () => {
