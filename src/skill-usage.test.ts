@@ -4,7 +4,9 @@ import {
   extractSkillNameFromCapturedSkillDetail,
   extractSkillNameFromSkillMdPathText,
   extractSkillNameFromSlashPrompt,
+  extractSkillNamesFromCodexExecCode,
   extractSkillNamesFromShellSkillReadCommand,
+  extractSkillNamesFromShellSkillUsageCommand,
   extractSkillNamesFromUserText,
   formatSkillToolInputDetail,
 } from "./skill-usage.ts"
@@ -24,6 +26,38 @@ describe("skill usage detection", () => {
     expect(extractSkillNamesFromShellSkillReadCommand("cat ~/.../commit/SKILL.md")).toEqual([
       "commit",
     ])
+    expect(
+      extractSkillNamesFromShellSkillReadCommand(
+        "wc -l ~/.codex/skills/push/SKILL.md; sed -n '1,200p' ~/.codex/skills/push/SKILL.md"
+      )
+    ).toEqual(["push"])
+  })
+
+  it("treats swiz skill output as a skill invocation", () => {
+    expect(
+      extractSkillNamesFromShellSkillUsageCommand("swiz skill commit --no-front-matter")
+    ).toEqual(["commit"])
+    expect(
+      extractSkillNamesFromShellSkillUsageCommand("bun run index.ts skill --raw push")
+    ).toEqual(["push"])
+    expect(
+      extractSkillNamesFromShellSkillUsageCommand(
+        "swiz skill --sync --from claude --to codex --overwrite"
+      )
+    ).toEqual([])
+  })
+
+  it("extracts skill reads only from executed Codex wrapper commands", () => {
+    expect(
+      extractSkillNamesFromCodexExecCode(
+        'const r = await tools.exec_command({cmd:"cat ~/.codex/skills/commit/SKILL.md"}); text(r.output);'
+      )
+    ).toEqual(["commit"])
+    expect(
+      extractSkillNamesFromCodexExecCode(
+        'const note = "cat ~/.codex/skills/commit/SKILL.md"; text(note);'
+      )
+    ).toEqual([])
   })
 
   it("does not treat shell writes to SKILL.md files as skill invocations", () => {

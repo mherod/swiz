@@ -9,8 +9,9 @@ import {
   extractPathValuesFromToolInput,
   extractSkillNameFromSlashPrompt,
   extractSkillNameFromToolInput,
+  extractSkillNamesFromCodexExecCode,
   extractSkillNamesFromPathValues,
-  extractSkillNamesFromShellSkillReadCommand,
+  extractSkillNamesFromShellSkillUsageCommand,
   extractSkillNamesFromUserText,
   stripUserQueryWrapper,
 } from "./skill-usage.ts"
@@ -245,7 +246,7 @@ function parseCodexFunctionCallInput(
     if (toolName === "apply_patch" || toolName === "functions.apply_patch") {
       return { patch: rawArguments }
     }
-    if (toolName === "exec") return { code: rawArguments }
+    if (toolName === "exec" || toolName === "functions.exec") return { code: rawArguments }
     return { input: rawArguments }
   }
 }
@@ -322,9 +323,13 @@ function extractDirectSkillReadInvocations(block: ToolBlock, name: string): stri
     return extractSkillNamesFromPathValues(extractPathValuesFromToolInput(block.input))
   }
 
+  if (name === "exec" || name === "functions.exec") {
+    return extractSkillNamesFromCodexExecCode(block.input?.code ?? block.input?.input ?? "")
+  }
+
   if (!isShellTool(name)) return []
   const command = normalizeCommand(extractShellCommand(block, name)).trim()
-  return extractSkillNamesFromShellSkillReadCommand(command)
+  return extractSkillNamesFromShellSkillUsageCommand(command)
 }
 
 function appendSkillInvocations(skills: string[], acc: SummaryAccumulator): void {
