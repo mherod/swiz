@@ -3,8 +3,8 @@ import { basename, join, resolve } from "node:path"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import type { Session } from "./transcript-schemas.ts"
-import { getCachedFileJson, getCachedFileText, getCachedPrefix } from "./utils/file-cache.ts"
-import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
+import { getCachedFileJson, getCachedFileText } from "./utils/file-cache.ts"
+import { streamJsonlEntries } from "./utils/jsonl.ts"
 
 const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "cursor", "antigravity", "codex"] as const
 
@@ -162,15 +162,6 @@ export async function findGeminiSessions(
   return limitSessionList(sessions, limit)
 }
 
-const CODEX_SESSION_HEADER_BYTES = 38_000
-
-async function readFilePrefix(
-  path: string,
-  maxBytes = CODEX_SESSION_HEADER_BYTES
-): Promise<string> {
-  return getCachedPrefix(path, maxBytes)
-}
-
 function parseCodexIdFromFilename(name: string): string {
   const base = name.replace(/\.(jsonl|json)$/i, "")
   const uuidMatch = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
@@ -179,8 +170,7 @@ function parseCodexIdFromFilename(name: string): string {
 
 const CODEX_META_TYPES = new Set(["session_meta", "turn_context"])
 
-function extractCodexMetaPayload(line: string): Record<string, any> | null {
-  const parsed = tryParseJsonLine(line)
+function extractCodexMetaPayload(parsed: unknown): Record<string, any> | null {
   if (!parsed || typeof parsed !== "object") return null
   const record = parsed as Record<string, any>
   if (!CODEX_META_TYPES.has(record.type as string)) return null
@@ -194,25 +184,41 @@ function extractStringMeta(payload: Record<string, any>, key: string): string | 
   return typeof val === "string" && val.trim() ? (val as string) : null
 }
 
+type CodexSessionSource = "primary" | "thread_spawn" | "guardian" | "unknown"
+
+function classifyCodexSessionSource(payload: Record<string, any>): CodexSessionSource {
+  const source = payload.source
+  if (typeof source === "string") return "primary"
+  if (!source || typeof source !== "object") return "unknown"
+
+  const subagent = (source as Record<string, any>).subagent
+  if (!subagent || typeof subagent !== "object") return "unknown"
+  if ((subagent as Record<string, any>).other === "guardian") return "guardian"
+  if ((subagent as Record<string, any>).thread_spawn) return "thread_spawn"
+  return "unknown"
+}
+
 async function readCodexSessionMeta(
   sessionPath: string
-): Promise<{ id: string | null; cwd: string | null }> {
-  const prefix = await readFilePrefix(sessionPath)
-  if (!prefix) return { id: null, cwd: null }
-
+): Promise<{ id: string | null; cwd: string | null; source: CodexSessionSource }> {
   let id: string | null = null
   let cwd: string | null = null
+  let source: CodexSessionSource = "unknown"
+  let recordsRead = 0
 
-  for (const line of splitJsonlLines(prefix)) {
-    const payload = extractCodexMetaPayload(line)
+  for await (const record of streamJsonlEntries(sessionPath)) {
+    recordsRead++
+    const payload = extractCodexMetaPayload(record)
     if (!payload) continue
 
     id ??= extractStringMeta(payload, "id")
     cwd ??= extractStringMeta(payload, "cwd")
+    if (source === "unknown") source = classifyCodexSessionSource(payload)
     if (id && cwd) break
+    if (recordsRead >= 16) break
   }
 
-  return { id, cwd }
+  return { id, cwd, source }
 }
 
 async function processCodexFileEntry(
@@ -222,7 +228,8 @@ async function processCodexFileEntry(
   sessions: Session[],
   limit?: number
 ): Promise<void> {
-  const { id: parsedId, cwd } = await readCodexSessionMeta(entryPath)
+  const { id: parsedId, cwd, source } = await readCodexSessionMeta(entryPath)
+  if (source === "guardian") return
   if (!cwd || resolve(cwd) !== targetPath) return
   try {
     const s = await stat(entryPath)

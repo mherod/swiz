@@ -160,8 +160,8 @@ function classifySessionScope(bashCommands: string[]): SessionScope {
 /**
  * Extract session-boundary-aware lines from a full transcript text.
  * Mirrors readSessionLines() in hook-utils.ts: returns only lines after the
- * last {"type":"system"} entry (i.e. post-compaction) so pre-session content
- * is excluded from hook checks.
+ * last Claude or Codex compaction marker so pre-session content is excluded
+ * from hook checks.
  */
 export function extractSessionLines(jsonlText: string): string[] {
   const allLines = splitJsonlLines(jsonlText)
@@ -176,8 +176,13 @@ function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSy
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
     if (!raw?.trim()) continue
-    const parsed = tryParseJsonLine(raw) as { type?: string } | undefined
-    if (parsed?.type === "system") {
+    const parsed = tryParseJsonLine(raw) as
+      | { type?: string; payload?: { type?: string } }
+      | undefined
+    const isCodexCompaction =
+      parsed?.type === "compacted" ||
+      (parsed?.type === "event_msg" && parsed.payload?.type === "context_compacted")
+    if (parsed?.type === "system" || isCodexCompaction) {
       sessionStartIdx = i + 1
       break
     }
@@ -210,6 +215,9 @@ interface ToolBlock {
   input?: {
     command?: string
     cmd?: string
+    patch?: string
+    code?: string
+    input?: string
     file_path?: string
     path?: string
     paths?: string[]
@@ -221,10 +229,12 @@ interface CodexFunctionCallPayload {
   type?: string
   name?: string
   arguments?: string | ToolBlock["input"]
+  input?: string | ToolBlock["input"]
 }
 
 function parseCodexFunctionCallInput(
-  rawArguments: CodexFunctionCallPayload["arguments"]
+  rawArguments: CodexFunctionCallPayload["arguments"],
+  toolName?: string
 ): ToolBlock["input"] {
   if (!rawArguments) return undefined
   if (typeof rawArguments !== "string") return rawArguments
@@ -232,7 +242,11 @@ function parseCodexFunctionCallInput(
     const parsed = JSON.parse(rawArguments) as ToolBlock["input"]
     return parsed && typeof parsed === "object" ? parsed : undefined
   } catch {
-    return undefined
+    if (toolName === "apply_patch" || toolName === "functions.apply_patch") {
+      return { patch: rawArguments }
+    }
+    if (toolName === "exec") return { code: rawArguments }
+    return { input: rawArguments }
   }
 }
 
@@ -250,12 +264,17 @@ function parseAssistantToolBlocks(line: string): ToolBlock[] {
   }
 
   const payload = entry?.payload
-  if (entry?.type === "response_item" && payload?.type === "function_call" && payload.name) {
+  if (
+    entry?.type === "response_item" &&
+    (payload?.type === "function_call" || payload?.type === "custom_tool_call") &&
+    payload.name
+  ) {
+    const rawInput = payload.type === "custom_tool_call" ? payload.input : payload.arguments
     return [
       {
         type: "tool_use",
         name: payload.name,
-        input: parseCodexFunctionCallInput(payload.arguments),
+        input: parseCodexFunctionCallInput(rawInput, payload.name),
       },
     ]
   }
@@ -477,11 +496,19 @@ export function collectCurrentSessionUsageEvents(
   for (let i = 0; i < sessionLines.length; i++) {
     const line = sessionLines[i] ?? ""
     if (!line.trim()) continue
-    const entry = tryParseJsonLine(line) as { type?: string } | undefined
+    const entry = tryParseJsonLine(line) as
+      | { type?: string; payload?: { type?: string } }
+      | undefined
     // Treat each user/human message as a new turn so the turn-based recency
     // window means "last N user turns" rather than "last N raw JSONL lines"
     // (attachments, ai-title, and queue-operation entries shouldn't burn turns).
-    if (entry?.type === "user" || entry?.type === "human") turnIndex++
+    if (
+      entry?.type === "user" ||
+      entry?.type === "human" ||
+      (entry?.type === "event_msg" && entry.payload?.type === "user_message")
+    ) {
+      turnIndex++
+    }
     const timestamp = extractTimestamp(line)
     for (const block of parseAssistantToolBlocks(line)) {
       events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))

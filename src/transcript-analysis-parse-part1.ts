@@ -506,7 +506,7 @@ function extractCodexMessageText(content: unknown, textType: "input_text" | "out
   return texts.join("\n").trim()
 }
 
-function parseCodexToolInput(raw: unknown): Record<string, any> {
+function parseCodexToolInput(raw: unknown, toolName?: string): Record<string, any> {
   const normalize = (value: Record<string, any>): Record<string, any> => {
     if (typeof value.command !== "string" && typeof value.cmd === "string") {
       return { ...value, command: value.cmd }
@@ -524,7 +524,11 @@ function parseCodexToolInput(raw: unknown): Record<string, any> {
       return normalize(parsed)
     }
   } catch {}
-  return {}
+  if (toolName === "apply_patch" || toolName === "functions.apply_patch") {
+    return { patch: raw }
+  }
+  if (toolName === "exec") return { code: raw }
+  return { input: raw }
 }
 
 // ─── Codex record schemas ─────────────────────────────────────────────────────
@@ -559,6 +563,9 @@ const codexResponseItemSchema = z.looseObject({
     content: z.unknown().optional(),
     name: z.string().optional(),
     arguments: z.unknown().optional(),
+    input: z.unknown().optional(),
+    call_id: z.string().optional(),
+    id: z.string().optional(),
   }),
 })
 
@@ -595,7 +602,16 @@ function classifyCodexLine(
 
 interface CodexResponseData {
   timestamp?: string
-  payload: { type: string; role?: string; content?: unknown; name?: string; arguments?: unknown }
+  payload: {
+    type: string
+    role?: string
+    content?: unknown
+    name?: string
+    arguments?: unknown
+    input?: unknown
+    call_id?: string
+    id?: string
+  }
 }
 
 function classifyCodexResponseItem(
@@ -616,7 +632,8 @@ function classifyCodexResponseItem(
     }
     return
   }
-  if (payload.type === "function_call" && payload.name) {
+  if ((payload.type === "function_call" || payload.type === "custom_tool_call") && payload.name) {
+    const rawInput = payload.type === "custom_tool_call" ? payload.input : payload.arguments
     entries.push({
       type: "assistant",
       sessionId,
@@ -624,7 +641,12 @@ function classifyCodexResponseItem(
       message: {
         role: "assistant",
         content: [
-          { type: "tool_use", name: payload.name, input: parseCodexToolInput(payload.arguments) },
+          {
+            type: "tool_use",
+            id: payload.call_id ?? payload.id,
+            name: payload.name,
+            input: parseCodexToolInput(rawInput, payload.name),
+          },
         ],
       },
     })

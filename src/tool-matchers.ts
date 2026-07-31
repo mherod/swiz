@@ -26,6 +26,7 @@ export const SHELL_TOOLS = new Set([
 ])
 export const EDIT_TOOLS = new Set([
   "Edit",
+  "MultiEdit",
   "StrReplace",
   "replace",
   "apply_patch",

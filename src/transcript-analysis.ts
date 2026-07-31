@@ -1,3 +1,4 @@
+import { extractApplyPatchFilePaths, isFileEditTool, isShellTool } from "./tool-matchers.ts"
 import { isToolResultSummaryBlock, summarizeToolCalls } from "./transcript-analysis-parse-part1.ts"
 import { parseTranscriptEntries } from "./transcript-analysis-parse-part2.ts"
 import { extractToolResultText, isHookFeedback } from "./transcript-extract.ts"
@@ -305,8 +306,7 @@ export function isDocsOnlySession(editedPaths: Set<string>): boolean {
 // Use this in stop hooks instead of calling extractPlainTurns + extractEditedFilePaths
 // + countToolCalls separately to avoid three redundant full parses on large transcripts.
 
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
-const SHELL_TOOLS = new Set(["Bash", "Shell"])
+const PATCH_EDIT_TOOLS = new Set(["apply_patch", "functions.apply_patch"])
 
 function collectEditToolPath(
   input: Record<string, any> | undefined,
@@ -326,13 +326,25 @@ function collectShellToolPaths(
   }
 }
 
+function collectPatchToolPaths(
+  input: Record<string, any> | undefined,
+  editedPaths: Set<string>
+): void {
+  const patch = input?.patch ?? input?.input
+  if (typeof patch !== "string") return
+  for (const path of extractApplyPatchFilePaths(patch)) {
+    editedPaths.add(path)
+  }
+}
+
 function collectEditedPath(
   b: { name?: string; input?: Record<string, any> },
   editedPaths: Set<string>
 ): void {
   if (!b.name) return
-  if (EDIT_TOOLS.has(b.name)) collectEditToolPath(b.input, editedPaths)
-  else if (SHELL_TOOLS.has(b.name)) collectShellToolPaths(b.input, editedPaths)
+  if (PATCH_EDIT_TOOLS.has(b.name)) collectPatchToolPaths(b.input, editedPaths)
+  else if (isFileEditTool(b.name)) collectEditToolPath(b.input, editedPaths)
+  else if (isShellTool(b.name)) collectShellToolPaths(b.input, editedPaths)
 }
 
 function countAndCollectToolBlocks(content: unknown[], editedPaths: Set<string>): number {
