@@ -28,7 +28,7 @@ export interface DoctorCheckResults {
   pluginCacheInfos: PluginCacheInfo[]
 }
 
-interface AutoFixContext {
+export interface AutoFixContext {
   fix: boolean
   aggressive: boolean
   verbose: boolean

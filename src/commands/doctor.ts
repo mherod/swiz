@@ -5,7 +5,7 @@ import { SWIZ_ROOT } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 import { isDaemonReady } from "./daemon/daemon-admin.ts"
 import { type AggressiveHookReplacement, replaceAgentHooksWithSwiz } from "./doctor/aggressive.ts"
-import { runDoctorChecks } from "./doctor/check-runner.ts"
+import { type AutoFixContext, runDoctorChecks } from "./doctor/check-runner.ts"
 import { DIAGNOSTIC_CHECKS } from "./doctor/checks"
 import {
   findMissingConfigScriptPaths,
@@ -18,9 +18,7 @@ import {
   fixSkillConflicts,
   fixStalePluginCache,
   type InvalidSkillEntry,
-  type PluginCacheInfo,
   removeInvalidCategoryFields,
-  type SkillConflict,
 } from "./doctor/fix.ts"
 import type { CheckResult, DiagnosticCheck } from "./doctor/types.ts"
 
@@ -65,16 +63,6 @@ async function runWithTimeout<T>(
 }
 
 // ─── Auto-fix logic ─────────────────────────────────────────────────────────
-
-interface AutoFixContext {
-  fix: boolean
-  aggressive: boolean
-  verbose: boolean
-  results: CheckResult[]
-  skillConflicts: SkillConflict[]
-  invalidSkillEntries: InvalidSkillEntry[]
-  pluginCacheInfos: PluginCacheInfo[]
-}
 
 async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
   const staleConfigs = results.filter(
