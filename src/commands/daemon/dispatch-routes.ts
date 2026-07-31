@@ -38,6 +38,7 @@ import {
   type DaemonMetrics,
   type LastUserMessageCache,
   type ManifestCache,
+  type RepositoryCapabilityCache,
   recordDispatch,
   type TranscriptIndexCache,
 } from "./runtime-cache.ts"
@@ -77,6 +78,7 @@ export interface DispatchRoutesContext {
   touchProject: (cwd: string) => void
   registerProjectWatchers: (cwd: string) => void
   manifestCache: ManifestCache
+  repositoryCapabilityCache: RepositoryCapabilityCache
   resolveSnapshot: (
     cwd: string,
     sessionId: string | null | undefined
@@ -102,6 +104,7 @@ export function buildDispatchRoutesContext(ctx: DaemonWebServerContext): Dispatc
     touchProject: ctx.touchProject,
     registerProjectWatchers: ctx.registerProjectWatchers,
     manifestCache: ctx.manifestCache,
+    repositoryCapabilityCache: ctx.repositoryCapabilityCache,
     resolveSnapshot: ctx.resolveSnapshot,
     upstreamSyncRegistry: ctx.upstreamSyncRegistry,
     transcriptIndex: ctx.transcriptIndex,
@@ -572,6 +575,7 @@ export async function handleDispatchRoute(
           ctx.lastUserMessageCache.peek(sessionId)?.at ?? null,
         disableTranscriptSummaryFallback: true,
         manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
+        repositoryCapabilityProvider: async (cwd) => ctx.repositoryCapabilityCache.get(cwd),
         onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
       }),
       new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>

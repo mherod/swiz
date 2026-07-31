@@ -36,7 +36,6 @@ import {
   writeIncomingDispatchCapture,
 } from "../dispatch/incoming-capture.ts"
 import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
-import { isGitRepo } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
@@ -471,31 +470,6 @@ async function tryAutoContinueDisabledFastPath(
   return true
 }
 
-/** Non-git directories shouldn't run hooks (not a project target); return allow quickly. */
-async function tryNonGitFastPath(timing: DispatchTiming, hookEventName: string): Promise<boolean> {
-  if (await isGitRepo(timing.cwd)) return false
-
-  log(`   ⏱ cli:fastpath-non-git: skip hooks (no .git in cwd)`)
-
-  if (isStopLikeEvent(timing.canonicalEvent)) {
-    const response: Record<string, any> = {}
-    normalizeStopDispatchResponseInPlace(response, hookEventName)
-    coerceDispatchAgentEnvelopeInPlace(response, timing.canonicalEvent, hookEventName)
-    process.stdout.write(`${JSON.stringify(response)}\n`)
-    markDispatchResponseWritten()
-  }
-
-  const totalMs = Math.round(performance.now() - timing.t0)
-  log(`   ⏱ cli:total: ${totalMs}ms (fastpath non-git)`)
-  void appendCliTimingLog({
-    ...timing,
-    totalMs,
-    daemonMs: 0,
-    route: "local",
-  })
-  return true
-}
-
 // ─── Dispatch callback ─────────────────────────────────────────────────────
 
 async function runDispatch(
@@ -564,8 +538,6 @@ async function runDispatch(
     stdinMs,
   }
 
-  // ── Fast path: skip hook execution in non-git directories ──
-  if (await tryNonGitFastPath(timing, hookEventName)) return
   // ── Fast path: an explicit stop is final when auto-continue is disabled ──
   if (await tryAutoContinueDisabledFastPath(timing, payload, hookEventName)) return
   // ── Fast path: in-process incomplete-tasks check for stop events ──

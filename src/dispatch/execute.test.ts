@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { ZodError } from "zod"
+import type { RepositoryCapability } from "../repository-capability.ts"
 import { preToolUseDeny, type SwizHook } from "../SwizHook.ts"
 import { acquireEnvLock, releaseEnvLockFn, useTempDir } from "../utils/test-utils.ts"
 import {
@@ -11,6 +12,16 @@ import { DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT } from "./stop-response.ts"
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const tempDirs = useTempDir("swiz-dispatch-auto-continue-")
+
+function repositoryCapability(overrides: Partial<RepositoryCapability> = {}): RepositoryCapability {
+  return {
+    canonicalRoot: process.cwd(),
+    repoKey: "test-repository-capability",
+    isGitRepo: true,
+    repoSlug: "owner/repo",
+    ...overrides,
+  }
+}
 
 describe("resolveLifecycleRequestId", () => {
   it("returns caller request_id when non-empty string", () => {
@@ -177,6 +188,15 @@ describe("dispatch execute integration", () => {
             session_id: crypto.randomUUID(),
           }),
           daemonContext: true,
+          repositoryCapabilityProvider: async () =>
+            repositoryCapability({
+              canonicalRoot: `/tmp/swiz-dispatch-no-git-${Date.now()}`,
+              isGitRepo: false,
+              repoSlug: null,
+            }),
+          replayPendingMutations: async () => {
+            throw new Error("non-Git dispatch must not replay mutations")
+          },
         }
         const result = await executeDispatch(req)
         expect(result.response.continue).toBe(true)
@@ -720,6 +740,85 @@ describe("dispatch execute integration", () => {
         const settingsPath = getSwizSettingsPath(tempHome)
         if (settingsPath) invalidateSettingsCache(settingsPath)
       }
+    })
+  })
+
+  describe("repositoryCapabilityProvider", () => {
+    it("reuses one trusted capability for dispatch and mutation replay", async () => {
+      const capability = repositoryCapability()
+      let providerCalls = 0
+      let replayCalls = 0
+      let replayCapability: RepositoryCapability | undefined
+
+      const result = await executeDispatch({
+        canonicalEvent: "nonexistentEvent",
+        hookEventName: "NonexistentEvent",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "repository-capability-reuse",
+        }),
+        repositoryCapabilityProvider: async () => {
+          providerCalls++
+          return capability
+        },
+        replayPendingMutations: async (_cwd, resolved) => {
+          replayCalls++
+          replayCapability = resolved
+        },
+        manifestProvider: async () => [],
+        daemonContext: true,
+      })
+
+      expect(result.response).toEqual({})
+      expect(providerCalls).toBe(1)
+      expect(replayCalls).toBe(1)
+      expect(replayCapability).toBe(capability)
+    })
+
+    it("overwrites agent-supplied capability before hook execution", async () => {
+      const trusted = repositoryCapability()
+      let observed: RepositoryCapability | undefined
+      const observer: SwizHook = {
+        name: "test-repository-capability-observer",
+        event: "preToolUse",
+        matcher: "Bash",
+        run: (input) => {
+          observed = (input as Record<string, unknown>)._repositoryCapability as
+            | RepositoryCapability
+            | undefined
+          return {}
+        },
+      }
+
+      await executeDispatch({
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        payloadStr: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "repository-capability-trust",
+          tool_name: "Bash",
+          tool_input: { command: "true" },
+          _repositoryCapability: {
+            canonicalRoot: "/agent-controlled",
+            repoKey: "agent-controlled",
+            isGitRepo: false,
+            repoSlug: "attacker/repo",
+          },
+        }),
+        repositoryCapabilityProvider: async () => trusted,
+        replayPendingMutations: async () => {},
+        manifestProvider: async () => [
+          {
+            event: "preToolUse",
+            matcher: "Bash",
+            hooks: [{ hook: observer }],
+          },
+        ],
+        daemonContext: true,
+      })
+
+      expect(observed).toEqual(trusted)
+      expect(observed?.canonicalRoot).not.toBe("/agent-controlled")
     })
   })
 

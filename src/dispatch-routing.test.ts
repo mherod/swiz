@@ -122,16 +122,25 @@ describe("dispatch routing validation", () => {
 describe("mutation replay wiring", () => {
   const SRC = join(import.meta.dirname ?? ".", "..")
 
-  it("cli.ts imports and calls tryReplayPendingMutations", async () => {
+  it("cli.ts skips eager replay for dispatch commands", async () => {
     const src = await Bun.file(join(SRC, "src", "cli.ts")).text()
     expect(src).toContain("tryReplayPendingMutations")
-    expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
+    expect(src).toMatch(
+      /if\s*\(resolved\.name\s*!==\s*["']dispatch["']\)\s*await\s+tryReplayPendingMutations\(/
+    )
   })
 
   it("dispatch execute.ts imports and calls tryReplayPendingMutations", async () => {
     const src = await Bun.file(join(SRC, "src", "dispatch", "execute.ts")).text()
     expect(src).toContain("tryReplayPendingMutations")
-    expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
+    expect(src).toMatch(/replay:.*=\s*tryReplayPendingMutations/s)
+    expect(src).toMatch(/await\s+replay\(ctx\.cwd,\s*capability\)/)
+  })
+
+  it("dispatch command defers repository probing to shared execution", async () => {
+    const src = await Bun.file(join(SRC, "src", "commands", "dispatch.ts")).text()
+    expect(src).not.toContain("tryNonGitFastPath")
+    expect(src).not.toMatch(/from\s+["']\.\.\/git-helpers\.ts["']/)
   })
 
   it("stop-personal-repo-issues issues module calls replayPendingMutations", async () => {

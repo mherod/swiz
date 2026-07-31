@@ -33,6 +33,7 @@ const DISPATCH_CONTEXT_KEYS = [
   "touchProject",
   "registerProjectWatchers",
   "manifestCache",
+  "repositoryCapabilityCache",
   "resolveSnapshot",
   "upstreamSyncRegistry",
   "transcriptIndex",
@@ -81,6 +82,14 @@ function createDispatchContext(manifest: HookGroup[] = []): DispatchRoutesContex
     manifestCache: {
       get: async () => manifest,
     } as unknown as DispatchRoutesContext["manifestCache"],
+    repositoryCapabilityCache: {
+      get: async (cwd: string) => ({
+        canonicalRoot: cwd,
+        repoKey: "dispatch-route-test",
+        isGitRepo: true,
+        repoSlug: "owner/repo",
+      }),
+    } as DispatchRoutesContext["repositoryCapabilityCache"],
     resolveSnapshot: async () => {
       throw new Error("snapshot resolution is not expected in dispatch route tests")
     },
@@ -158,6 +167,36 @@ describe("handleDispatchActive", () => {
 })
 
 describe("handleDispatchRoute", () => {
+  test("resolves repository capability through the daemon cache", async () => {
+    const ctx = createDispatchContext()
+    let cacheCalls = 0
+    ctx.repositoryCapabilityCache = {
+      get: async (cwd: string) => {
+        cacheCalls++
+        return {
+          canonicalRoot: cwd,
+          repoKey: "daemon-cache-test",
+          isGitRepo: true,
+          repoSlug: "owner/repo",
+        }
+      },
+    } as DispatchRoutesContext["repositoryCapabilityCache"]
+    const url = new URL(
+      "http://daemon/dispatch?event=nonexistentEvent&hookEventName=NonexistentEvent"
+    )
+    const response = await handleDispatchRoute(
+      new Request(url, {
+        method: "POST",
+        body: JSON.stringify({ cwd: process.cwd(), session_id: "capability-cache-test" }),
+      }),
+      url,
+      ctx
+    )
+
+    expect(response.status).toBe(200)
+    expect(cacheCalls).toBe(1)
+  })
+
   test("maps invalid dispatch payloads to a structured 400 response", async () => {
     const url = new URL("http://daemon/dispatch?event=preToolUse&hookEventName=PreToolUse")
     const response = await handleDispatchRoute(

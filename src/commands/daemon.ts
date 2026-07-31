@@ -32,6 +32,7 @@ import {
   LastUserMessageCache,
   ManifestCache,
   ProjectSettingsCache,
+  RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
 import { sessionDataCache } from "./daemon/session-data.ts"
@@ -170,6 +171,7 @@ function createDaemonCaches() {
   const gitStateCache = new GitStateCache()
   const lastUserMessageCache = new LastUserMessageCache()
   const projectSettingsCache = new ProjectSettingsCache()
+  const repositoryCapabilityCache = new RepositoryCapabilityCache()
   const manifestCache = new ManifestCache(projectSettingsCache)
   const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
   const taskStateCache = new TaskStateCache()
@@ -187,6 +189,7 @@ function createDaemonCaches() {
     gitStateCache,
     lastUserMessageCache,
     projectSettingsCache,
+    repositoryCapabilityCache,
     manifestCache,
     snapshots,
     taskStateCache,
@@ -237,6 +240,7 @@ function setupWatchers(
     ghCache,
     eligibilityCache,
     gitStateCache,
+    repositoryCapabilityCache,
     projectSettingsCache,
     manifestCache,
     transcriptIndex,
@@ -249,6 +253,7 @@ function setupWatchers(
     ghCache.invalidateAll()
     eligibilityCache.invalidateAll()
     gitStateCache.invalidateAll()
+    repositoryCapabilityCache.invalidateAll()
     projectSettingsCache.invalidateAll()
     manifestCache.invalidateAll()
     // Also invalidate the in-process settings TTL cache so changes take
@@ -272,6 +277,7 @@ function setupWatchers(
     ghCache.invalidateProject(cwd)
     eligibilityCache.invalidateProject(cwd)
     gitStateCache.invalidateProject(cwd)
+    repositoryCapabilityCache.invalidateProject(cwd)
     projectSettingsCache.invalidateProject(cwd)
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
@@ -289,6 +295,7 @@ function setupWatchers(
     ghCache.invalidateProject(cwd)
     eligibilityCache.invalidateProject(cwd)
     gitStateCache.invalidateProject(cwd)
+    repositoryCapabilityCache.invalidateProject(cwd)
     projectSettingsCache.invalidateProject(cwd)
     manifestCache.invalidateProject(cwd)
     transcriptIndex.invalidateProject(cwd)
@@ -593,6 +600,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     eligibilityCache: caches.eligibilityCache,
     cooldownRegistry: caches.cooldownRegistry,
     gitStateCache: caches.gitStateCache,
+    repositoryCapabilityCache: caches.repositoryCapabilityCache,
     lastUserMessageCache: caches.lastUserMessageCache,
     ciWatchRegistry: caches.ciWatchRegistry,
     upstreamSyncRegistry: caches.upstreamSyncRegistry,

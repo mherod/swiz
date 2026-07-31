@@ -7,6 +7,7 @@ import {
   canonicalizePath,
   isPathWithinRoot,
   resolveProjectIdentity,
+  resolveProjectIdentityResolution,
   resolveProjectRoot,
 } from "./project-identity.ts"
 
@@ -105,6 +106,27 @@ describe("resolveProjectIdentity", () => {
       expect(fromRoot.canonicalRoot).toBe(canonicalizePath(root))
       expect(fromRoot.repoKey).toBe(getCanonicalPathHash(fromRoot.canonicalRoot))
       expect(fromSubdir).toEqual(fromRoot)
+    } finally {
+      await tree.cleanup()
+    }
+  })
+
+  test("reports repository membership from the same filesystem walk", async () => {
+    const tree = await createTempTree()
+    try {
+      const root = join(tree.base, "repo")
+      const plain = join(tree.base, "plain")
+      await mkdir(join(root, ".git"), { recursive: true })
+      await mkdir(join(root, "src"), { recursive: true })
+      await mkdir(plain, { recursive: true })
+
+      const fromRepo = await resolveProjectIdentityResolution(join(root, "src"))
+      const fromPlain = await resolveProjectIdentityResolution(plain)
+
+      expect(fromRepo.isGitRepo).toBe(true)
+      expect(fromRepo.canonicalRoot).toBe(canonicalizePath(root))
+      expect(fromPlain.isGitRepo).toBe(false)
+      expect(fromPlain.canonicalRoot).toBe(canonicalizePath(plain))
     } finally {
       await tree.cleanup()
     }

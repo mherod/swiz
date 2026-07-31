@@ -2,6 +2,7 @@ import { resolveSpawnCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import type { IssueStore, MutationPayload, PendingMutation } from "./issue-store.ts"
 import { isGraphQLRateLimited, tryMutationRestFallback } from "./issue-store-rest-fallback.ts"
+import type { RepositoryCapability } from "./repository-capability.ts"
 import { messageFromUnknownError } from "./utils/hook-json-helpers.ts"
 
 // ─── Replay ─────────────────────────────────────────────────────────────────
@@ -270,13 +271,22 @@ function logReplayExecFailed(
  * Catches all errors — never throws. Safe to call from any entry point.
  * Logs outcomes to stderr so failures are visible without blocking execution.
  */
-export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
+export async function tryReplayPendingMutations(
+  cwd?: string,
+  capability?: RepositoryCapability
+): Promise<void> {
   try {
-    const dir = resolveSpawnCwd(cwd)
+    const dir = capability?.canonicalRoot ?? resolveSpawnCwd(cwd)
     const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
     if (!hasGhCli()) return
-    if (!(await isGitRepo(dir))) return
-    const slug = await getRepoSlug(dir)
+    let slug: string | null
+    if (capability) {
+      if (!capability.isGitRepo) return
+      slug = capability.repoSlug
+    } else {
+      if (!(await isGitRepo(dir))) return
+      slug = await getRepoSlug(dir)
+    }
     if (!slug) return
 
     const { getIssueStore } = await import("./issue-store.ts")

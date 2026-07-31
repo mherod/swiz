@@ -9,12 +9,12 @@
 import { randomUUID } from "node:crypto"
 import { merge, orderBy, unset } from "lodash-es"
 import { detectCurrentAgentFromHookPayload } from "../agent-paths.ts"
-import { isGitRepo } from "../git-helpers.ts"
 import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
-import { tryReplayPendingMutations } from "../issue-store.ts"
+import { tryReplayPendingMutations } from "../issue-store-replay.ts"
 import { DISPATCH_TIMEOUTS, type HookGroup, hookIdentifier, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
+import { type RepositoryCapability, resolveRepositoryCapability } from "../repository-capability.ts"
 import {
   type EffectiveSwizSettings,
   getEffectiveSwizSettings,
@@ -75,6 +75,8 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _transcriptSummary?: TranscriptSummary
   /** Epoch ms of the last user message for this session (daemon hot-cache fast path). */
   _lastUserMessageAt?: number
+  /** Swiz-verified canonical repository identity and origin capability. */
+  _repositoryCapability?: RepositoryCapability
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -307,6 +309,10 @@ export interface DispatchRequest {
   disableTranscriptSummaryFallback?: boolean
   /** Optional cached manifest provider (injected by daemon to skip cold manifest rebuild). */
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>
+  /** Optional daemon-backed repository capability provider. */
+  repositoryCapabilityProvider?: (cwd: string) => Promise<RepositoryCapability>
+  /** Optional replay seam for tests; production uses the canonical replay entrypoint. */
+  replayPendingMutations?: (cwd: string, capability: RepositoryCapability) => Promise<void>
   /** Optional lifecycle callback for in-flight dispatch tracking. */
   onDispatchLifecycle?: (update: DispatchLifecycleUpdate) => void
   /** Optional abort signal from the caller (e.g. daemon request timeout).
@@ -605,10 +611,12 @@ function shouldAllowExplicitStop(ctx: DispatchContext): boolean {
 
 async function prepareDispatchGroups(
   ctx: DispatchContext,
-  manifestProvider?: (cwd: string) => Promise<HookGroup[]>
+  capability: RepositoryCapability,
+  manifestProvider?: (cwd: string) => Promise<HookGroup[]>,
+  replay: NonNullable<DispatchRequest["replayPendingMutations"]> = tryReplayPendingMutations
 ) {
   const tReplay = performance.now()
-  await tryReplayPendingMutations(ctx.cwd)
+  await replay(ctx.cwd, capability)
   log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
 
   const tManifest = performance.now()
@@ -685,9 +693,17 @@ function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Recor
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = await buildDispatchContext(req)
+  const repositoryCapability = req.repositoryCapabilityProvider
+    ? await req.repositoryCapabilityProvider(ctx.cwd)
+    : await resolveRepositoryCapability(ctx.cwd)
+
+  // Never trust agent-provided capability fields. This assignment overwrites
+  // inbound data with a value resolved inside Swiz before any hook can read it.
+  const enrichedPayload = ctx.payload as EnrichedDispatchPayload
+  enrichedPayload._repositoryCapability = repositoryCapability
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
-  if (!(await isGitRepo(ctx.cwd))) {
+  if (!repositoryCapability.isGitRepo) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
@@ -717,7 +733,12 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return { response }
   }
 
-  const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
+  const { filteredGroups, projectSettings } = await prepareDispatchGroups(
+    ctx,
+    repositoryCapability,
+    req.manifestProvider,
+    req.replayPendingMutations
+  )
   if (filteredGroups.length === 0) {
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)

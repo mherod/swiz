@@ -95,7 +95,10 @@ async function run(): Promise<void> {
     return
   }
 
-  await tryReplayPendingMutations()
+  // Dispatch resolves repository capability and replay once inside the shared
+  // local/daemon execution path. Replaying here would duplicate those probes
+  // before every daemon-backed hook request.
+  if (resolved.name !== "dispatch") await tryReplayPendingMutations()
 
   try {
     await resolved.command.run(resolved.rest)

@@ -28,6 +28,7 @@ import type {
   LastUserMessageCache,
   ManifestCache,
   ProjectSettingsCache,
+  RepositoryCapabilityCache,
   TranscriptIndexCache,
 } from "./runtime-cache.ts"
 import { getProjectTasks, getSessionData, listProjectSessions } from "./session-data.ts"
@@ -70,6 +71,7 @@ export interface DaemonWebServerContext {
   ciWatchRegistry: CiWatchRegistry
   upstreamSyncRegistry: UpstreamSyncRegistry
   projectSettingsCache: ProjectSettingsCache
+  repositoryCapabilityCache: RepositoryCapabilityCache
   registeredProjects: Set<string>
   projectLastSeen: Map<string, number>
   resolveSnapshot: (

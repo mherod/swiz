@@ -19,6 +19,12 @@ export interface ProjectIdentity {
   repoKey: string
 }
 
+/** Canonical project identity plus filesystem-verified repository membership. */
+export interface ProjectIdentityResolution extends ProjectIdentity {
+  /** True when the canonical root was resolved from a `.git` directory or worktree file. */
+  isGitRepo: boolean
+}
+
 function stripTrailingSlashes(path: string): string {
   if (path.length <= 1) return path
   const trimmed = path.replace(/\/+$/, "")
@@ -63,13 +69,31 @@ export function isPathWithinRoot(path: string, root: string): boolean {
  * route entry. Returns the canonicalised cwd when it is not inside a repo.
  */
 export async function resolveProjectRoot(cwd: string): Promise<string> {
+  return (await resolveProjectIdentityResolution(cwd)).canonicalRoot
+}
+
+/**
+ * Resolve canonical identity and repository membership with one filesystem walk.
+ *
+ * This deliberately uses `resolveGitPaths()` instead of spawning
+ * `git rev-parse`; callers that only need repository capability should not pay
+ * for a second Git subprocess after identity resolution.
+ */
+export async function resolveProjectIdentityResolution(
+  cwd: string
+): Promise<ProjectIdentityResolution> {
   const canonical = canonicalizePath(cwd)
   const gitPaths = await resolveGitPaths(canonical)
-  return gitPaths ? canonicalizePath(gitPaths.workTree) : canonical
+  const canonicalRoot = gitPaths ? canonicalizePath(gitPaths.workTree) : canonical
+  return {
+    canonicalRoot,
+    repoKey: getCanonicalPathHash(canonicalRoot),
+    isGitRepo: gitPaths !== null,
+  }
 }
 
 /** Resolve `cwd` to its canonical root and stable repo key in one pass. */
 export async function resolveProjectIdentity(cwd: string): Promise<ProjectIdentity> {
-  const canonicalRoot = await resolveProjectRoot(cwd)
-  return { canonicalRoot, repoKey: getCanonicalPathHash(canonicalRoot) }
+  const { canonicalRoot, repoKey } = await resolveProjectIdentityResolution(cwd)
+  return { canonicalRoot, repoKey }
 }
