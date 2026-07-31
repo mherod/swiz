@@ -477,7 +477,7 @@ describe("evaluateNativeTaskUpdatePath", () => {
 })
 
 describe("Codex task-store integration", () => {
-  test("allows Bash after update_plan tasks are persisted to the Codex task store", async () => {
+  test("emits no task-governance output for Codex Bash after update_plan", async () => {
     const sessionId = uniqueSessionId("codex-plan-bash")
     try {
       await cleanupSession(sessionId)
@@ -506,7 +506,7 @@ describe("Codex task-store integration", () => {
         }),
       })
 
-      expect(permissionDecision(result)).toBe("allow")
+      expect(result).toEqual({})
     } finally {
       await cleanupSession(sessionId)
     }

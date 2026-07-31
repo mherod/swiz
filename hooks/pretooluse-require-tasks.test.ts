@@ -741,7 +741,7 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBeUndefined()
     })
 
-    test("denies Codex functions.exec_command when task buffer is missing", async () => {
+    test("allows Codex functions.exec_command when task buffer is missing", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({
         homeDir,
@@ -749,8 +749,20 @@ describe("pretooluse-require-tasks", () => {
         command: "bun test --concurrent",
         payloadEnv: { CODEX_THREAD_ID: "thread-123" },
       })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("needs tasks in place first")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Codex tools through merged governance without task state", async () => {
+      const result = await runMergedTaskGovernance({
+        tool_name: "functions.exec_command",
+        session_id: "session-codex-no-tasks",
+        transcript_path: "",
+        cwd: PROJECT_ROOT,
+        tool_input: { command: "bun test --concurrent" },
+        _env: { CODEX_THREAD_ID: "thread-merged-no-tasks" },
+      })
+
+      expect(result.decision).toBeUndefined()
     })
   })
 
@@ -805,7 +817,7 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBe("deny")
     })
 
-    test("enforces task checks for Codex when memory markdown exemption applies", async () => {
+    test("allows Codex code edits with no tasks", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({
         homeDir,
@@ -813,8 +825,7 @@ describe("pretooluse-require-tasks", () => {
         filePath: "/Users/test/project/src/index.ts",
         payloadEnv: { CODEX_THREAD_ID: "thread-123" },
       })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("needs tasks in place first")
+      expect(result.decision).toBeUndefined()
     })
   })
 

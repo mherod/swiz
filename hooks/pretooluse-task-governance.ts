@@ -179,6 +179,10 @@ function taskGovernanceMessage(
   })
 }
 
+function isCodexTaskGovernanceExempt(input: Record<string, any>): boolean {
+  return detectCurrentAgentFromHookPayload(input)?.id === "codex"
+}
+
 function denyTaskGovernance(
   request: TaskGovernanceMessageRequest,
   input?: Record<string, any>
@@ -649,6 +653,7 @@ function validateGuardConditions(
   input: Record<string, any>
 ): boolean {
   if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
+  if (isCodexTaskGovernanceExempt(input)) return false
   if (!agentHasTaskToolsForHookPayload(input)) return false
   return !isExemptToolCall(input, toolName)
 }
@@ -1921,6 +1926,10 @@ async function evaluatePretooluseTaskGovernance(rawInput: unknown): Promise<Swiz
   const blockedTaskFiles = evaluateBlockedTaskFilesPrecheck(input, toolName, toolInput)
   if (blockedTaskFiles) return blockedTaskFiles
 
+  // Codex can use update_plan, but its tools do not depend on task state.
+  // Keep the task-file integrity precheck above while bypassing workflow gates.
+  if (isCodexTaskGovernanceExempt(input)) return {}
+
   if (!hasTaskGovernanceSurface(input, toolName)) return {}
 
   // Fully relax workflow-governance blocks for a short window after a user message.
@@ -2080,6 +2089,7 @@ const pretooluseTaskGovernance: SwizToolHook = {
     try {
       const result = await evaluatePretooluseTaskGovernance(input)
       if (isDenyOutput(result)) return result
+      if (isCodexTaskGovernanceExempt(input as Record<string, any>)) return {}
       if (await shouldSuppressGovernanceTrace(input as Record<string, any>)) return {}
       const trace = await buildTraceContext(input)
       return {
