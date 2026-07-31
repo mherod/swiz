@@ -4,7 +4,8 @@
  * bytes before JSON parsing, normalization, sanitization, or enrichment.
  *
  * **Disable** with **`SWIZ_CAPTURE_INCOMING=0`** or **`SWIZ_CAPTURE_INCOMING_PAYLOADS=0`** (also
- * `false`, `no`, `off`). Files older than **10 minutes** are removed on each write.
+ * `false`, `no`, `off`). Files older than **10 minutes** are removed by throttled
+ * background maintenance scheduled by the long-lived daemon.
  *
  * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
  * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`; raw companion:
@@ -30,6 +31,16 @@ import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 /** Age threshold for deleting prior capture files (10 minutes). */
 export const SWIZ_INCOMING_RETENTION_MS = 10 * 60 * 1000
+
+/** Minimum interval between incoming-capture directory scans. */
+export const SWIZ_INCOMING_PRUNE_INTERVAL_MS = 60 * 1000
+
+interface IncomingCapturePruneState {
+  inFlight: boolean
+  lastStartedAt: number
+}
+
+const incomingCapturePruneStateByDir = new Map<string, IncomingCapturePruneState>()
 
 function isExplicitlyDisabled(v: string | undefined): boolean {
   if (v === undefined) return false
@@ -139,6 +150,34 @@ export async function pruneStaleIncomingCaptures(
   }
 }
 
+/**
+ * Schedule stale-capture maintenance without putting the directory scan on the dispatch path.
+ * Concurrent requests share the in-flight scan and subsequent requests are throttled per directory.
+ */
+export function scheduleStaleIncomingCapturePrune(
+  dir: string = SWIZ_INCOMING_ROOT,
+  maxAgeMs: number = SWIZ_INCOMING_RETENTION_MS,
+  now: number = Date.now()
+): boolean {
+  const current = incomingCapturePruneStateByDir.get(dir)
+  const elapsedMs = current ? now - current.lastStartedAt : Number.POSITIVE_INFINITY
+  if (current?.inFlight || (elapsedMs >= 0 && elapsedMs < SWIZ_INCOMING_PRUNE_INTERVAL_MS)) {
+    return false
+  }
+
+  const state: IncomingCapturePruneState = { inFlight: true, lastStartedAt: now }
+  incomingCapturePruneStateByDir.set(dir, state)
+  void Promise.resolve()
+    .then(() => pruneStaleIncomingCaptures(dir, maxAgeMs))
+    .catch((err) => {
+      debugLog("[incoming-capture] scheduled prune failed:", messageFromUnknownError(err))
+    })
+    .finally(() => {
+      if (incomingCapturePruneStateByDir.get(dir) === state) state.inFlight = false
+    })
+  return true
+}
+
 interface IncomingDispatchCaptureArgs {
   canonicalEvent: string
   hookEventName: string
@@ -215,7 +254,6 @@ export async function writeIncomingDispatchCapture(
   dir: string = SWIZ_INCOMING_ROOT
 ): Promise<void> {
   await mkdir(dir, { recursive: true })
-  await pruneStaleIncomingCaptures(dir)
   const filename = buildIncomingCaptureFilename(args.hookEventName)
   const rawFilename = buildRawIncomingCaptureFilename(filename)
   const path = join(dir, filename)

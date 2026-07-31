@@ -13,6 +13,7 @@ import { isBlock } from "../../dispatch/engine.ts"
 import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
 import {
   schedulePayloadJsonlAppend,
+  scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
 import {
@@ -614,6 +615,7 @@ export async function handleDispatchRoute(
     )
     mergeLifecycleStopAdvisory(response, lifecyclePreparation.advisory)
     maybeSuppressDuplicateAllowMessage(ctx, parsedPayload, canonicalEvent, hookEventName, response)
+    if (shouldCaptureIncomingPayloads()) scheduleStaleIncomingCapturePrune()
     return Response.json(response)
   } catch (e) {
     const schemaResp = daemonDispatchSchemaFailureResponse(e)

@@ -9,9 +9,11 @@ import {
   buildRawIncomingCaptureFilename,
   normalizeEventNameToCanonical,
   pruneStaleIncomingCaptures,
+  SWIZ_INCOMING_PRUNE_INTERVAL_MS,
   SWIZ_INCOMING_RETENTION_MS,
   sanitizeDispatchPayloadForCapture,
   sanitizeHookFilenameSegment,
+  scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
   writeIncomingDispatchCapture,
 } from "./incoming-capture.ts"
@@ -204,5 +206,65 @@ describe("incoming-capture", () => {
 
     expect(await Bun.file(oldPath).exists()).toBe(false)
     expect(await Bun.file(freshPath).exists()).toBe(true)
+  })
+
+  it("writeIncomingDispatchCapture leaves pruning to daemon maintenance", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-write-no-prune-"))
+    const oldPath = join(dir, "old.json")
+    await writeFile(oldPath, "{}")
+    const oldTime = new Date(Date.now() - SWIZ_INCOMING_RETENTION_MS - 60_000)
+    await utimes(oldPath, oldTime, oldTime)
+
+    await writeIncomingDispatchCapture(
+      {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        parseError: false,
+        payloadStr: '{"tool_name":"Read"}',
+        incomingBeforeNormalize: { tool_name: "Read" },
+        normalizedPayload: { tool_name: "Read", cwd: "/proj" },
+      },
+      dir
+    )
+    await Bun.sleep(10)
+
+    expect(await Bun.file(oldPath).exists()).toBe(true)
+  })
+
+  it("scheduleStaleIncomingCapturePrune coalesces and throttles background pruning", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-scheduled-prune-"))
+    const oldPath = join(dir, "old.json")
+    await writeFile(oldPath, "{}")
+    const oldTime = new Date(Date.now() - SWIZ_INCOMING_RETENTION_MS - 60_000)
+    await utimes(oldPath, oldTime, oldTime)
+
+    const scheduledAt = Date.now()
+    expect(scheduleStaleIncomingCapturePrune(dir, SWIZ_INCOMING_RETENTION_MS, scheduledAt)).toBe(
+      true
+    )
+    expect(scheduleStaleIncomingCapturePrune(dir, SWIZ_INCOMING_RETENTION_MS, scheduledAt)).toBe(
+      false
+    )
+
+    for (let attempt = 0; attempt < 50 && (await Bun.file(oldPath).exists()); attempt += 1) {
+      await Bun.sleep(1)
+    }
+    expect(await Bun.file(oldPath).exists()).toBe(false)
+    await Bun.sleep(0)
+
+    expect(
+      scheduleStaleIncomingCapturePrune(
+        dir,
+        SWIZ_INCOMING_RETENTION_MS,
+        scheduledAt + SWIZ_INCOMING_PRUNE_INTERVAL_MS - 1
+      )
+    ).toBe(false)
+    expect(
+      scheduleStaleIncomingCapturePrune(
+        dir,
+        SWIZ_INCOMING_RETENTION_MS,
+        scheduledAt + SWIZ_INCOMING_PRUNE_INTERVAL_MS
+      )
+    ).toBe(true)
   })
 })
