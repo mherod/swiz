@@ -1,40 +1,36 @@
 import { type GitBranchStatus, getGitBranchStatus } from "../../../git-helpers.ts"
-import { CappedMap } from "./capped-map.ts"
+import { KeyedAsyncCache } from "../../../utils/keyed-async-cache.ts"
 
 export interface CachedGitState {
   status: GitBranchStatus
   cachedAt: number
 }
 
+/**
+ * Per-project git branch status, cached until explicitly invalidated.
+ *
+ * Entries never expire on their own — the daemon invalidates on the events that
+ * can change branch state — so no TTL is configured here.
+ */
 export class GitStateCache {
-  private entries = new CappedMap<string, CachedGitState>(200)
-  private inFlight = new Map<string, Promise<CachedGitState | null>>()
+  private readonly cache = new KeyedAsyncCache<CachedGitState | null>()
 
-  async get(cwd: string): Promise<CachedGitState | null> {
-    const cached = this.entries.get(cwd)
-    if (cached) return cached
-    const inflight = this.inFlight.get(cwd)
-    if (inflight) return inflight
-    const computation = getGitBranchStatus(cwd).then((status) => {
-      this.inFlight.delete(cwd)
-      if (!status) return null
-      const entry: CachedGitState = { status, cachedAt: Date.now() }
-      this.entries.set(cwd, entry)
-      return entry
+  get(cwd: string): Promise<CachedGitState | null> {
+    return this.cache.get(cwd, async (dir) => {
+      const status = await getGitBranchStatus(dir)
+      return status ? { status, cachedAt: Date.now() } : null
     })
-    this.inFlight.set(cwd, computation)
-    return computation
   }
 
   invalidateProject(cwd: string): void {
-    this.entries.delete(cwd)
+    this.cache.invalidate(cwd)
   }
 
   invalidateAll(): void {
-    this.entries.clear()
+    this.cache.invalidateAll()
   }
 
   get size(): number {
-    return this.entries.size
+    return this.cache.size
   }
 }

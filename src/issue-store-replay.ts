@@ -266,36 +266,64 @@ function logReplayExecFailed(
 
 // ─── Replay entrypoint used by CLI / dispatch ──────────────────────────────
 
+export interface ReplayTarget {
+  dir: string
+  slug: string
+}
+
+/**
+ * Decide whether this cwd can replay, reusing already-verified repository facts
+ * when the caller has them.
+ *
+ * Dispatch resolves the repository capability once per event, so passing it here
+ * skips the `gh` lookup, the `rev-parse`, and the remote lookup that this path
+ * would otherwise repeat — the probes that ran even when the pending count was
+ * about to come back zero (#752).
+ */
+export async function resolveReplayTarget(
+  dir: string,
+  capability: RepositoryCapability | undefined
+): Promise<ReplayTarget | null> {
+  if (capability) {
+    if (!capability.hasGhCli || !capability.isRepo || !capability.repoSlug) return null
+    return { dir: capability.canonicalRoot, slug: capability.repoSlug }
+  }
+
+  // Standalone path: no caller-verified capability, so probe directly. Kept so
+  // hooks and CLI entry points that have no dispatch context still work.
+  const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
+  if (!hasGhCli()) return null
+  if (!(await isGitRepo(dir))) return null
+  const slug = await getRepoSlug(dir)
+  return slug ? { dir, slug } : null
+}
+
 /**
  * Best-effort replay: resolve repo slug from cwd and drain pending mutations.
  * Catches all errors — never throws. Safe to call from any entry point.
  * Logs outcomes to stderr so failures are visible without blocking execution.
+ *
+ * Pass `capability` when the caller has already verified the repository this
+ * dispatch is running against; omit it to probe standalone.
  */
 export async function tryReplayPendingMutations(
   cwd?: string,
   capability?: RepositoryCapability
 ): Promise<void> {
   try {
-    const dir = capability?.canonicalRoot ?? resolveSpawnCwd(cwd)
-    const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
-    if (!hasGhCli()) return
-    let slug: string | null
-    if (capability) {
-      if (!capability.isGitRepo) return
-      slug = capability.repoSlug
-    } else {
-      if (!(await isGitRepo(dir))) return
-      slug = await getRepoSlug(dir)
-    }
-    if (!slug) return
+    const dir = resolveSpawnCwd(cwd)
+    const target = await resolveReplayTarget(dir, capability)
+    if (!target) return
 
     const { getIssueStore } = await import("./issue-store.ts")
     const store = getIssueStore()
-    const pending = store.pendingCount(slug)
+    // Read live rather than from the capability: a mutation queued moments ago
+    // must not be stranded behind a cached count.
+    const pending = store.pendingCount(target.slug)
     if (pending === 0) return
 
-    const result = await replayPendingMutations(slug, dir, store)
-    logReplayResult(result, pending, slug)
+    const result = await replayPendingMutations(target.slug, target.dir, store)
+    logReplayResult(result, pending, target.slug)
   } catch (err) {
     debugLog(`[swiz] REPLAY_INFRA_ERROR ${messageFromUnknownError(err)}`)
   }

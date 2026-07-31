@@ -1,125 +1,149 @@
-import { describe, expect, test } from "bun:test"
-import { mkdir } from "node:fs/promises"
-import { join } from "node:path"
-import { canonicalizePath } from "./project-identity.ts"
+import { beforeEach, describe, expect, it } from "bun:test"
 import {
-  isGitRepoForHookPayload,
-  type RepositoryCapability,
+  REPOSITORY_CAPABILITY_TTL_MS,
+  type RepositoryCapabilityProbes,
+  resetRepositoryCapabilityCacheForTests,
   resolveRepositoryCapability,
 } from "./repository-capability.ts"
-import { useTempDir } from "./utils/test-utils.ts"
 
-const tempDirs = useTempDir("swiz-repository-capability-")
+interface CountingProbes {
+  probes: RepositoryCapabilityProbes
+  counts: { isGitRepo: number; getRepoSlug: number; hasGhCli: number }
+}
+
+function countingProbes(
+  overrides: Partial<RepositoryCapabilityProbes> = {},
+  delayMs = 0
+): CountingProbes {
+  const counts = { isGitRepo: 0, getRepoSlug: 0, hasGhCli: 0 }
+  const probes: RepositoryCapabilityProbes = {
+    isGitRepo: async (dir) => {
+      counts.isGitRepo++
+      if (delayMs > 0) await Bun.sleep(delayMs)
+      return overrides.isGitRepo ? overrides.isGitRepo(dir) : true
+    },
+    getRepoSlug: async (dir) => {
+      counts.getRepoSlug++
+      return overrides.getRepoSlug ? overrides.getRepoSlug(dir) : "mherod/swiz"
+    },
+    hasGhCli: () => {
+      counts.hasGhCli++
+      return overrides.hasGhCli ? overrides.hasGhCli() : true
+    },
+  }
+  return { probes, counts }
+}
 
 describe("resolveRepositoryCapability", () => {
-  test("uses filesystem membership and performs one slug lookup for a repository", async () => {
-    const root = await tempDirs.create()
-    await mkdir(join(root, ".git"), { recursive: true })
-    await mkdir(join(root, "src"), { recursive: true })
-    let slugLookups = 0
-
-    const capability = await resolveRepositoryCapability(join(root, "src"), async (cwd) => {
-      slugLookups++
-      expect(cwd).toBe(canonicalizePath(root))
-      return "owner/repo"
-    })
-
-    expect(capability).toEqual({
-      canonicalRoot: canonicalizePath(root),
-      repoKey: expect.any(String),
-      isGitRepo: true,
-      repoSlug: "owner/repo",
-    })
-    expect(slugLookups).toBe(1)
+  beforeEach(() => {
+    resetRepositoryCapabilityCacheForTests()
   })
 
-  test("does not query a slug for a non-repository directory", async () => {
-    const root = await tempDirs.create()
-    let slugLookups = 0
+  it("performs one repository subprocess per uncached project request", async () => {
+    const { probes, counts } = countingProbes()
 
-    const capability = await resolveRepositoryCapability(root, async () => {
-      slugLookups++
-      return "owner/repo"
+    const first = await resolveRepositoryCapability("/repo", { probes })
+    const second = await resolveRepositoryCapability("/repo", { probes })
+    const third = await resolveRepositoryCapability("/repo", { probes })
+
+    expect(counts.isGitRepo).toBe(1)
+    expect(first.isRepo).toBe(true)
+    expect(first.repoSlug).toBe("mherod/swiz")
+    expect(second).toBe(first)
+    expect(third).toBe(first)
+  })
+
+  it("deduplicates concurrent resolves for the same project", async () => {
+    const { probes, counts } = countingProbes({}, 5)
+
+    const results = await Promise.all([
+      resolveRepositoryCapability("/repo", { probes }),
+      resolveRepositoryCapability("/repo", { probes }),
+      resolveRepositoryCapability("/repo", { probes }),
+      resolveRepositoryCapability("/repo", { probes }),
+    ])
+
+    expect(counts.isGitRepo).toBe(1)
+    expect(new Set(results).size).toBe(1)
+  })
+
+  it("keys separate projects independently", async () => {
+    const { probes, counts } = countingProbes({
+      isGitRepo: async (dir) => dir !== "/not-a-repo",
     })
 
-    expect(capability.isGitRepo).toBe(false)
+    const repo = await resolveRepositoryCapability("/repo", { probes })
+    const plain = await resolveRepositoryCapability("/not-a-repo", { probes })
+
+    expect(counts.isGitRepo).toBe(2)
+    expect(repo.isRepo).toBe(true)
+    expect(plain.isRepo).toBe(false)
+  })
+
+  it("skips the remote lookup entirely outside a repository", async () => {
+    const { probes, counts } = countingProbes({ isGitRepo: async () => false })
+
+    const capability = await resolveRepositoryCapability("/plain-dir", { probes })
+
+    expect(capability.isRepo).toBe(false)
     expect(capability.repoSlug).toBeNull()
-    expect(slugLookups).toBe(0)
+    expect(counts.getRepoSlug).toBe(0)
   })
 
-  test("retains verified membership when origin resolution fails", async () => {
-    const root = await tempDirs.create()
-    await mkdir(join(root, ".git"), { recursive: true })
+  it("reports a missing gh CLI without failing resolution", async () => {
+    const { probes } = countingProbes({ hasGhCli: () => false })
 
-    const capability = await resolveRepositoryCapability(root, async () => {
-      throw new Error("origin unavailable")
-    })
+    const capability = await resolveRepositoryCapability("/repo", { probes })
 
-    expect(capability.isGitRepo).toBe(true)
-    expect(capability.repoSlug).toBeNull()
-  })
-})
-
-const repositoryCapability = (isGitRepo: boolean): RepositoryCapability => ({
-  canonicalRoot: "/repo",
-  repoKey: "repo-key",
-  isGitRepo,
-  repoSlug: isGitRepo ? "owner/repo" : null,
-})
-
-describe("isGitRepoForHookPayload", () => {
-  test.each([
-    true,
-    false,
-  ])("reuses dispatcher-verified membership when isGitRepo=%s", async (expected) => {
-    let fallbackCalls = 0
-    const result = await isGitRepoForHookPayload(
-      { _repositoryCapability: repositoryCapability(expected) },
-      "/repo",
-      async () => {
-        fallbackCalls++
-        return !expected
-      }
-    )
-
-    expect(result).toBe(expected)
-    expect(fallbackCalls).toBe(0)
+    expect(capability.hasGhCli).toBe(false)
+    expect(capability.isRepo).toBe(true)
   })
 
-  test.each([
-    ["absent", {}],
-    ["malformed", { _repositoryCapability: { isGitRepo: true } }],
-  ])("uses the injected canonical fallback when capability is %s", async (_name, input) => {
-    const seenCwds: string[] = []
-    const result = await isGitRepoForHookPayload(input, "malformed-cwd", async (cwd) => {
-      seenCwds.push(cwd)
-      return true
-    })
+  it("re-probes after the TTL elapses", async () => {
+    let clock = 0
+    resetRepositoryCapabilityCacheForTests({ ttlMs: 50, now: () => clock })
+    const { probes, counts } = countingProbes()
 
-    expect(result).toBe(true)
-    expect(seenCwds).toEqual(["malformed-cwd"])
+    await resolveRepositoryCapability("/repo", { probes })
+    clock += 49
+    await resolveRepositoryCapability("/repo", { probes })
+    expect(counts.isGitRepo).toBe(1)
+
+    clock += 1
+    await resolveRepositoryCapability("/repo", { probes })
+    expect(counts.isGitRepo).toBe(2)
   })
 
-  test("is the repository-membership boundary for every issue #753 gate", async () => {
-    const hookFiles = [
-      "pretooluse-pr-changes-branch-guard.ts",
-      "pretooluse-task-governance.ts",
-      "pretooluse-sandboxed-edits.ts",
-      "pretooluse-repeated-lint-test.ts",
-      "pretooluse-pr-comment-read-gate.ts",
-      "pretooluse-no-phantom-task-completion.ts",
-      "pretooluse-branch-intent-gate.ts",
-      "pretooluse-pr-head-checkout-gate.ts",
-      "pretooluse-update-memory-enforcement.ts",
-      "pretooluse-issue-workflow-gate.ts",
-      "pretooluse-block-preexisting-dismissals.ts",
-      "pretooluse-dirty-worktree-gate.ts",
-      "pretooluse-trunk-mode-branch-gate.ts",
-    ]
+  it("forces a fresh probe when asked", async () => {
+    const { probes, counts } = countingProbes()
 
-    for (const hookFile of hookFiles) {
-      const source = await Bun.file(join(process.cwd(), "hooks", hookFile)).text()
-      expect(source, hookFile).toContain("isGitRepoForHookPayload(")
+    await resolveRepositoryCapability("/repo", { probes })
+    await resolveRepositoryCapability("/repo", { probes, forceRefresh: true })
+
+    expect(counts.isGitRepo).toBe(2)
+  })
+
+  it("fails open to a non-repo capability when a probe throws", async () => {
+    const probes: RepositoryCapabilityProbes = {
+      isGitRepo: async () => {
+        throw new Error("git unavailable")
+      },
+      getRepoSlug: async () => null,
+      hasGhCli: () => true,
     }
+
+    const capability = await resolveRepositoryCapability("/repo", { probes })
+
+    expect(capability.isRepo).toBe(false)
+    expect(capability.repoSlug).toBeNull()
+    expect(capability.canonicalRoot).toBe("/repo")
+  })
+
+  it("uses a short bounded default TTL", () => {
+    expect(REPOSITORY_CAPABILITY_TTL_MS).toBeGreaterThan(0)
+    expect(REPOSITORY_CAPABILITY_TTL_MS).toBeLessThanOrEqual(60_000)
+  })
+})
+
   })
 })

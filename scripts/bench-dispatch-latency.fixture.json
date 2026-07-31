@@ -1,0 +1,10 @@
+{
+  "session_id": "bench-dispatch-latency",
+  "transcript_path": "",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status --short",
+    "description": "Benchmark fixture — controlled Bash pre-hook payload"
+  }
+}

@@ -25,6 +25,7 @@ import {
   type RestFallbackStats,
   tryRestFallback as tryRestFallbackImpl,
 } from "./issue-store-rest-fallback.ts"
+import type { RepositoryCapability } from "./repository-capability.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -1314,11 +1315,17 @@ export async function replayPendingMutations(
  * Best-effort replay: resolve repo slug from cwd and drain pending mutations.
  * Catches all errors — never throws. Safe to call from any entry point.
  * Logs outcomes to stderr so failures are visible without blocking execution.
+ *
+ * Pass `capability` when the caller has already verified the repository, so the
+ * replay path skips its own `gh`/`rev-parse`/remote probes.
  */
-export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
+export async function tryReplayPendingMutations(
+  cwd?: string,
+  capability?: RepositoryCapability
+): Promise<void> {
   // Implementation delegated to the dedicated replay module.
   const mod = await import("./issue-store-replay.ts")
-  await mod.tryReplayPendingMutations(cwd)
+  await mod.tryReplayPendingMutations(cwd, capability)
 }
 
 // ─── Upstream sync ──────────────────────────────────────────────────────────

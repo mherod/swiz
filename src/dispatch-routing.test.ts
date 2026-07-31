@@ -143,6 +143,20 @@ describe("mutation replay wiring", () => {
     expect(src).not.toMatch(/from\s+["']\.\.\/git-helpers\.ts["']/)
   })
 
+  it("dispatch execute.ts hands replay the already-verified repository capability", async () => {
+    const src = await Bun.file(join(SRC, "src", "dispatch", "execute.ts")).text()
+    // Without the second argument the replay path re-probes gh/rev-parse/remote
+    // that core dispatch already resolved (#752).
+    expect(src).toMatch(/tryReplayPendingMutations\(\s*ctx\.cwd,\s*ctx\.repositoryCapability\s*\)/)
+  })
+
+  it("cli.ts skips the process-wide replay for dispatch invocations", async () => {
+    const src = await Bun.file(join(SRC, "src", "cli.ts")).text()
+    // Core dispatch owns replay for this command; draining here too would probe
+    // the repository a second time on the pre-hook path (#752).
+    expect(src).toMatch(/resolved\.name\s*!==\s*"dispatch"/)
+  })
+
   it("stop-personal-repo-issues issues module calls replayPendingMutations", async () => {
     const src = await Bun.file(join(SRC, "hooks", "stop-personal-repo-issues", "issues.ts")).text()
     expect(src).toContain("replayPendingMutations")

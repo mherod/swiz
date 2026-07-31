@@ -75,7 +75,13 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _transcriptSummary?: TranscriptSummary
   /** Epoch ms of the last user message for this session (daemon hot-cache fast path). */
   _lastUserMessageAt?: number
-  /** Swiz-verified canonical repository identity and origin capability. */
+  /**
+   * Repository facts verified by dispatch for this event.
+   *
+   * Swiz-authored only — any inbound value is stripped before enrichment, so a
+   * hook can trust this where it cannot trust agent-supplied fields. Exposed for
+   * the sibling hook migrations under #747; no hook consumes it yet.
+   */
   _repositoryCapability?: RepositoryCapability
 }
 
@@ -384,6 +390,8 @@ interface DispatchContext {
   trigger: string | undefined
   agentId: string | null
   settingsHomeOverride: string | undefined
+  /** Verified once per dispatch, then reused by the non-git check and replay. */
+  repositoryCapability: RepositoryCapability
 }
 
 async function buildDispatchContext(req: DispatchRequest): Promise<DispatchContext> {
@@ -411,6 +419,14 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
 
   const cwd = (payload.cwd as string) ?? process.cwd()
 
+  // Resolve the repository once here so every downstream consumer — the non-git
+  // short-circuit, pending-mutation replay, and the enriched payload handed to
+  // hooks — reads the same verified answer instead of re-probing git.
+  const repositoryCapability = await resolveRepositoryCapability(cwd)
+  // Assign unconditionally, overwriting anything the agent sent under this key.
+  // A payload claiming `isRepo: false` would otherwise skip every hook.
+  ;(payload as EnrichedDispatchPayload)._repositoryCapability = repositoryCapability
+
   return {
     canonicalEvent,
     hookEventName,
@@ -421,6 +437,7 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
     trigger,
     agentId,
     settingsHomeOverride: req.settingsHomeOverride,
+    repositoryCapability,
   }
 }
 
@@ -616,7 +633,7 @@ async function prepareDispatchGroups(
   replay: NonNullable<DispatchRequest["replayPendingMutations"]> = tryReplayPendingMutations
 ) {
   const tReplay = performance.now()
-  await replay(ctx.cwd, capability)
+  await tryReplayPendingMutations(ctx.cwd, ctx.repositoryCapability)
   log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
 
   const tManifest = performance.now()
@@ -703,7 +720,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   enrichedPayload._repositoryCapability = repositoryCapability
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
-  if (!repositoryCapability.isGitRepo) {
+  if (!ctx.repositoryCapability.isRepo) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
