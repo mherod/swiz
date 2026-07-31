@@ -45,6 +45,8 @@ describe("Codex eventMap contract (hooks.json)", () => {
       "notification",
       "subagentStart",
       "subagentStop",
+      "taskCreated",
+      "taskCompleted",
     ])
   })
 
