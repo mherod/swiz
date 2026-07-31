@@ -9,6 +9,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
@@ -130,6 +131,7 @@ interface TrunkShellRequest {
   command: string
   cwd: string
   toolName: string
+  input: Record<string, unknown>
 }
 
 function resolveTrunkShellRequest(input: unknown): TrunkShellRequest {
@@ -138,6 +140,7 @@ function resolveTrunkShellRequest(input: unknown): TrunkShellRequest {
     command: String(hookInput.tool_input?.command ?? "").normalize("NFKC"),
     cwd: hookInput.cwd ?? process.cwd(),
     toolName: hookInput.tool_name ?? "",
+    input: hookInput as Record<string, unknown>,
   }
 }
 
@@ -148,7 +151,7 @@ async function shouldEnforceTrunkMode(
 ): Promise<boolean> {
   if (!isShellTool(request.toolName)) return false
   if (!isTrunkModeRelevantShellCommand(request.command, branchChanges)) return false
-  if (!(await runtime.isGitRepo(request.cwd))) return false
+  if (!(await isGitRepoForHookPayload(request.input, request.cwd, runtime.isGitRepo))) return false
   return (await runtime.readProjectSettings(request.cwd))?.trunkMode === true
 }
 

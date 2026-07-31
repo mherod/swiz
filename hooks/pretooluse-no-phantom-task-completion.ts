@@ -19,6 +19,7 @@ import {
   agentHasTaskToolsForHookPayload,
   detectCurrentAgentFromHookPayload,
 } from "../src/agent-paths.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -29,7 +30,6 @@ import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-message
 import { readTasks } from "../src/tasks/task-repository.ts"
 import {
   extractToolBlocksFromEntry,
-  isGitRepo,
   isTaskTool,
   preToolUseAllow,
   preToolUseDeny,
@@ -190,7 +190,7 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     }
   }
 
-  if (!(await isGitRepo(cwd))) {
+  if (!(await isGitRepoForHookPayload(raw as Record<string, unknown>, cwd))) {
     return preToolUseAllow(
       "Continue in non-git task mode: phantom completion checks are skipped outside repositories."
     )

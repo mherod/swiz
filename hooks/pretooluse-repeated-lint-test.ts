@@ -19,6 +19,7 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { orderBy } from "lodash-es"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
@@ -27,7 +28,6 @@ import {
   collectBlockedToolUseIds,
   formatActionPlan,
   isCodeChangeTool,
-  isGitRepo,
   isShellTool,
   preToolUseDeny,
   readSessionLines,
@@ -764,7 +764,7 @@ export async function evaluatePretooluseRepeatedLintTest(input: unknown): Promis
   const overfilterIssue = detectOverfiltering(command, currentKind)
   if (overfilterIssue) return preToolUseDeny(overfilterIssue)
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
 
   const cachedSessionLines = getTranscriptSummary(

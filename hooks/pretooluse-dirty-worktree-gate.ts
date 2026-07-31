@@ -4,6 +4,7 @@
 // Forces a commit boundary before the task plan can be reshaped further.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
@@ -19,7 +20,6 @@ import {
   getGitStatusV2,
   getTaskToolName,
   git,
-  isGitRepo,
   mergeActionPlanIntoTasks,
   preToolUseAllow,
   preToolUseDeny,
@@ -70,7 +70,7 @@ export async function evaluatePretooluseDirtyWorktreeGate(
   }
   const cwd = input.cwd
   if (!cwd) return {}
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(raw, cwd))) return {}
 
   const [gitStatus, threshold] = await Promise.all([
     getGitStatusV2(cwd),

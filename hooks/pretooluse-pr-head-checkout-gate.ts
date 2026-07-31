@@ -8,6 +8,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
@@ -17,7 +18,7 @@ import {
   branchReferencesAlign,
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
-import { git, isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
+import { git, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-prs"
@@ -163,7 +164,7 @@ export async function evaluatePretoolusePrHeadCheckoutGate(
   const isShell = isShellTool(toolName)
 
   if (!isCodeChange && !isShell) return {}
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
 
   // For shell tools, quick-exit if the command is not in the blocked set

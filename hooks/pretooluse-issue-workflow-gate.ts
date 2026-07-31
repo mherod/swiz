@@ -10,6 +10,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { hasSkillInSessionLines, hasSkillUsedInProjectRecently } from "../src/skill-utils.ts"
@@ -21,7 +22,7 @@ import {
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
 import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
-import { git, isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
+import { git, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-issue"
@@ -298,7 +299,7 @@ export async function evaluateIssueWorkflowGate(
   const isShell = isShellTool(toolName)
 
   if (!isCodeChange && !isShell) return {}
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
 
   const command = String((hookInput.tool_input as Record<string, any>)?.command ?? "").normalize(

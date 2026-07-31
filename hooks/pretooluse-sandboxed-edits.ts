@@ -9,8 +9,9 @@
 import { tmpdir } from "node:os"
 import { dirname } from "node:path"
 import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
-import { git, isGitHubHost, isGitRepo, parseRemoteUrl } from "../src/git-helpers.ts"
+import { git, isGitHubHost, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { fileEditHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
@@ -46,8 +47,11 @@ function isWithin(parent: string, child: string): boolean {
 /**
  * Validates whether file edits are allowed on the current branch when trunk mode is enabled.
  */
-async function checkTrunkMode(cwd: string): Promise<SwizHookOutput | null> {
-  if (!(await isGitRepo(cwd))) return null
+async function checkTrunkMode(
+  input: Record<string, unknown>,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   const project = await readProjectSettings(cwd)
   if (!project?.trunkMode) return null
@@ -234,7 +238,7 @@ const pretooluseSandboxedEdits: SwizFileEditHook = {
     const hookCwd = parsed.cwd ?? process.cwd()
 
     // 1. Check trunk mode
-    const trunkResult = await checkTrunkMode(hookCwd)
+    const trunkResult = await checkTrunkMode(parsed as Record<string, unknown>, hookCwd)
     if (trunkResult) return trunkResult
 
     // 2. Block direct edits to swiz config files

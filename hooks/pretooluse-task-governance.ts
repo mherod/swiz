@@ -19,6 +19,7 @@ import {
 } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
   hookSpecificOutputSchema,
@@ -96,7 +97,6 @@ import {
   isCodeChangeTool,
   isEditTool,
   isFileEditTool,
-  isGitRepo,
   isShellTool,
   isTaskCreateTool,
   isTaskListTool,
@@ -335,8 +335,8 @@ export function isLargeContentPayload(input: Record<string, any>): boolean {
   return content.split("\n").length >= LARGE_CONTENT_LINE_THRESHOLD
 }
 
-async function isTaskEnforcementProject(cwd: string): Promise<boolean> {
-  if (!(await isGitRepo(cwd))) return false
+async function isTaskEnforcementProject(input: Record<string, any>, cwd: string): Promise<boolean> {
+  if (!(await isGitRepoForHookPayload(input, cwd))) return false
   return await hasFileInTree(cwd, "CLAUDE.md")
 }
 
@@ -672,7 +672,7 @@ function applySyncGuards(input: Record<string, any>): ParsedInput | null {
 async function tryParseAndGuard(input: Record<string, any>): Promise<ParsedInput | null> {
   const parsed = applySyncGuards(input)
   if (!parsed) return null
-  if (!(await isTaskEnforcementProject(parsed.cwd))) return null
+  if (!(await isTaskEnforcementProject(input, parsed.cwd))) return null
   return parsed
 }
 
@@ -1769,7 +1769,7 @@ export async function evaluatePendingOverflowGuard(
   const sessionId = resolveSafeSessionId(input.session_id as string | undefined)
   const cwd: string = (input.cwd as string) ?? process.cwd()
   if (!sessionId) return null
-  if (!(await isTaskEnforcementProject(cwd))) return null
+  if (!(await isTaskEnforcementProject(input, cwd))) return null
 
   const allTasks = overlayEventState(await readTasksForInput(input, sessionId), sessionId)
   return checkPendingOverflow(toolName, allTasks) ?? null
@@ -1870,7 +1870,7 @@ export async function evaluateBlockedToolPath(
   const cwd: string = (input.cwd as string) ?? process.cwd()
 
   if (!validateGuardConditions(sessionId, toolName, input)) return {}
-  if (!(await isTaskEnforcementProject(cwd))) return {}
+  if (!(await isTaskEnforcementProject(input, cwd))) return {}
 
   const transcriptPath: string = (input.transcript_path as string) ?? ""
 

@@ -167,6 +167,10 @@ export async function runSwizHookAsMain(
   const raw = await readSwizHookStdinRaw()
   const input = await parseSwizHookStdin(raw, options)
   const incomingBeforeNormalize = structuredClone(input)
+  // `_repositoryCapability` is trusted only after core dispatch enrichment.
+  // Standalone stdin is agent-controlled, so force hooks through the canonical
+  // repository fallback instead of accepting a forged capability.
+  delete input._repositoryCapability
   await injectEffectiveSettingsIfMissing(input)
   if (shouldCaptureIncomingPayloads()) {
     await writeIncomingDispatchCapture({

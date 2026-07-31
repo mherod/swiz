@@ -10,6 +10,7 @@ import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
@@ -24,7 +25,6 @@ import {
   formatActionPlan,
   hasFileInTree,
   isEditTool,
-  isGitRepo,
   isNotebookTool,
   isWriteTool,
   preToolUseDeny,
@@ -235,12 +235,13 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
 }
 
 async function shouldSkipEnforcement(
+  input: Record<string, unknown>,
   cwd: string,
   transcriptPath: string,
   toolName: string
 ): Promise<boolean> {
   if (!transcriptPath || !toolName) return true
-  if (!(await isGitRepo(cwd))) return true
+  if (!(await isGitRepoForHookPayload(input, cwd))) return true
   return !(await hasFileInTree(cwd, "CLAUDE.md"))
 }
 
@@ -274,11 +275,12 @@ function parseToolHookInput(raw: Record<string, any>): ToolHookInput | null {
 }
 
 async function getPendingReminderLines(
+  input: Record<string, unknown>,
   transcriptPath: string,
   cwd: string,
   toolName: string
 ): Promise<{ lines: string[]; lastTriggerIndex: number } | null> {
-  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return null
+  if (await shouldSkipEnforcement(input, cwd, transcriptPath, toolName)) return null
 
   const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
   if (lines.length === 0) return null
@@ -312,7 +314,12 @@ export async function evaluatePretooluseUpdateMemoryEnforcement(
     return {}
   }
 
-  const pendingReminder = await getPendingReminderLines(transcriptPath, cwd, toolName)
+  const pendingReminder = await getPendingReminderLines(
+    input as Record<string, unknown>,
+    transcriptPath,
+    cwd,
+    toolName
+  )
   if (!pendingReminder) return {}
   const { lines, lastTriggerIndex } = pendingReminder
   if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return {}

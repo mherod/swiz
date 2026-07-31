@@ -10,6 +10,7 @@
  * before the agent acts on the review.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import {
@@ -25,7 +26,6 @@ import {
   git,
   hasGhCli,
   isGitHubRemote,
-  isGitRepo,
   preToolUseAllow,
   preToolUseDeny,
 } from "../src/utils/hook-utils.ts"
@@ -50,7 +50,12 @@ const pretoolusePrCommentReadGate: SwizToolHook = {
     if (!skillExistsForHookPayload("pr-comments-address", hookInput as Record<string, unknown>)) {
       return {}
     }
-    if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd)) || !hasGhCli()) return {}
+    if (
+      !(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd)) ||
+      !(await isGitHubRemote(cwd)) ||
+      !hasGhCli()
+    )
+      return {}
 
     const branch = (await git(["branch", "--show-current"], cwd)).trim()
     if (!branch) return {}

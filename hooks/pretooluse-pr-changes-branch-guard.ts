@@ -7,6 +7,7 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
@@ -23,7 +24,6 @@ import {
   git,
   hasGhCli,
   isGitHubRemote,
-  isGitRepo,
   isShellTool,
   preToolUseAllow,
   preToolUseDeny,
@@ -44,13 +44,13 @@ function isValidShellCommand(input: Record<string, any>): boolean {
   )
 }
 
-async function isValidEnvironment(cwd: string): Promise<boolean> {
-  return (await isGitRepo(cwd)) && (await isGitHubRemote(cwd)) && hasGhCli()
+async function isValidEnvironment(input: Record<string, any>, cwd: string): Promise<boolean> {
+  return (await isGitRepoForHookPayload(input, cwd)) && (await isGitHubRemote(cwd)) && hasGhCli()
 }
 
 async function validateInputs(input: Record<string, any>, cwd: string): Promise<boolean> {
   if (!isValidShellCommand(input)) return false
-  return await isValidEnvironment(cwd)
+  return await isValidEnvironment(input, cwd)
 }
 
 async function getBranchAndPr(

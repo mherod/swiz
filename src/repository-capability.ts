@@ -1,4 +1,4 @@
-import { getRepoSlug } from "./git-helpers.ts"
+import { getRepoSlug, isGitRepo } from "./git-helpers.ts"
 import {
   type ProjectIdentityResolution,
   resolveProjectIdentityResolution,
@@ -16,6 +16,37 @@ export interface RepositoryCapability extends ProjectIdentityResolution {
 }
 
 export type RepoSlugResolver = (cwd: string) => Promise<string | null>
+export type GitRepoResolver = (cwd: string) => Promise<boolean>
+
+function isRepositoryCapability(
+  value: Partial<RepositoryCapability> | null | undefined
+): value is RepositoryCapability {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const capability = value as Partial<RepositoryCapability>
+  return (
+    typeof capability.canonicalRoot === "string" &&
+    typeof capability.repoKey === "string" &&
+    typeof capability.isGitRepo === "boolean" &&
+    (typeof capability.repoSlug === "string" || capability.repoSlug === null)
+  )
+}
+
+/**
+ * Reuse dispatcher-verified repository membership when present, otherwise
+ * resolve it through the canonical Git boundary used by standalone hooks.
+ */
+export async function isGitRepoForHookPayload(
+  input: object,
+  cwd: string,
+  resolveFallback: GitRepoResolver = isGitRepo
+): Promise<boolean> {
+  const capability = Reflect.get(input, "_repositoryCapability") as
+    | Partial<RepositoryCapability>
+    | null
+    | undefined
+  if (isRepositoryCapability(capability)) return capability.isGitRepo
+  return await resolveFallback(cwd)
+}
 
 /** Build a capability from an already-resolved project identity. */
 export async function resolveRepositoryCapabilityFromIdentity(

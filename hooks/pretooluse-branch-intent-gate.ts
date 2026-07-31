@@ -10,11 +10,12 @@
  * Only code-change tools and branch-creating commands are blocked.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
-import { isGitRepo, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
+import { preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { readSessionLines } from "../src/utils/transcript.ts"
 
 // Skill names that activate this gate
@@ -159,7 +160,7 @@ export async function evaluatePretoolusBranchIntentGate(input: unknown): Promise
 
   if (!isCodeChange && !isShell) return {}
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
 
   // For shell tools, classify the command before doing expensive transcript I/O
