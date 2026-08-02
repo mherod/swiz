@@ -454,6 +454,45 @@ const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
   "walkthrough.md.resolved.0",
 ])
 
+const PATH_REFERENCE_BOUNDARIES = new Set([
+  '"',
+  "'",
+  "`",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+  "<",
+  ">",
+  ",",
+  ";",
+  ":",
+  "=",
+  "?",
+  "#",
+  "\\",
+  "/",
+])
+
+function isPathReferenceBoundary(char: string | undefined): boolean {
+  return char === undefined || /\s/.test(char) || PATH_REFERENCE_BOUNDARIES.has(char)
+}
+
+function sampleReferencesPath(sample: string, targetPath: string): boolean {
+  let start = 0
+  while (start < sample.length) {
+    const index = sample.indexOf(targetPath, start)
+    if (index < 0) return false
+    const before = index > 0 ? sample[index - 1] : undefined
+    const after = sample[index + targetPath.length]
+    if (isPathReferenceBoundary(before) && isPathReferenceBoundary(after)) return true
+    start = index + targetPath.length
+  }
+  return false
+}
+
 async function antigravitySessionMatchesTarget(
   brainSessionDir: string,
   targetDir: string
@@ -478,13 +517,11 @@ async function antigravitySessionMatchesTarget(
   if (candidates.length === 0) return true
 
   const targetPath = resolve(targetDir)
-  const fileUrlNeedle = `file://${targetPath}`
-
   for (const name of candidates) {
     try {
       const content = await getCachedFileText(join(brainSessionDir, name))
       const sample = content.slice(0, 200_000)
-      if (sample.includes(fileUrlNeedle) || sample.includes(targetPath)) {
+      if (sampleReferencesPath(sample, targetPath)) {
         return true
       }
     } catch {}

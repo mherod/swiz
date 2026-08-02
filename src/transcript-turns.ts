@@ -135,6 +135,10 @@ function collectTurnsFromJsonlText(
   return collectTurns(parseTranscriptEntries(text, formatHint), userOnly)
 }
 
+function requiresWholeFileParsing(formatHint: JsonlTranscriptFormat): boolean {
+  return formatHint === "antigravity-jsonl"
+}
+
 function turnMatchesTimeRange(turn: Turn, timeRange: TimeRange | undefined): boolean {
   if (!timeRange) return true
   const ts = turn.entry.timestamp
@@ -238,7 +242,9 @@ async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
   _turnsCacheMisses++
   const jsonlFormatHint = getJsonlFormatHint(session)
   if (jsonlFormatHint) {
-    const turns = await loadJsonlTurnsForward(file, jsonlFormatHint, userOnly)
+    const turns = requiresWholeFileParsing(jsonlFormatHint)
+      ? collectTurnsFromJsonlText(await file.text(), jsonlFormatHint, userOnly)
+      : await loadJsonlTurnsForward(file, jsonlFormatHint, userOnly)
     turnsCache.set(cacheKey, { turns, mtimeMs })
     return turns
   }
@@ -256,6 +262,7 @@ async function loadWindowedJsonlTurns(
 ): Promise<Turn[] | null> {
   const formatHint = getJsonlFormatHint(session)
   if (!formatHint) return null
+  if (requiresWholeFileParsing(formatHint)) return null
   if (isUnsupportedTranscriptFormat(session.format)) {
     throw new Error(getUnsupportedTranscriptFormatMessage(session))
   }

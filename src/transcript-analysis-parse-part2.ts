@@ -301,7 +301,7 @@ export function parseAntigravityJsonlEntries(text: string): TranscriptEntry[] {
         },
       })
     } else if (source === "MODEL" && type === "PLANNER_RESPONSE") {
-      const blocks: unknown[] = []
+      const blocks: ContentBlock[] = []
       if (typeof rec.content === "string" && rec.content.trim().length > 0) {
         blocks.push({ type: "text", text: rec.content })
       }
@@ -322,11 +322,15 @@ export function parseAntigravityJsonlEntries(text: string): TranscriptEntry[] {
                 parsedArgs = JSON.parse(parsedArgs)
               } catch {}
             }
+            const input =
+              parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
+                ? (parsedArgs as Record<string, unknown>)
+                : {}
             blocks.push({
               type: "tool_use",
               id: callId,
               name: String(callRec.name),
-              input: (parsedArgs as Record<string, unknown>) ?? {},
+              input,
             })
           }
         }
@@ -337,7 +341,7 @@ export function parseAntigravityJsonlEntries(text: string): TranscriptEntry[] {
           timestamp: createdAt,
           message: {
             role: "assistant",
-            content: blocks as any,
+            content: blocks,
           },
         })
       }
@@ -384,6 +388,10 @@ function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
   if (geminiEntries.length > 0) return geminiEntries
   const codexEntries = parseCodexJsonlEntries(text)
   if (codexEntries.length > 0) return codexEntries
+  if (text.includes('"step_index"') && text.includes('"source"')) {
+    const antigravityEntries = parseAntigravityJsonlEntries(text)
+    if (antigravityEntries.length > 0) return antigravityEntries
+  }
   if (text.includes('"type":"event"') && text.includes('"payload":')) {
     const junieEntries = parseJunieEvents(text)
     if (junieEntries.length > 0) return junieEntries

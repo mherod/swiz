@@ -39,7 +39,7 @@ export async function createAntigravityCliSession(
   const brainDir = join(home, ".gemini", "antigravity-cli", "brain", sessionId)
   const logsDir = join(brainDir, ".system_generated", "logs")
   await mkdir(logsDir, { recursive: true })
-  await writeFile(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
+  await Bun.write(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
 
   const lines = [
     JSON.stringify({
@@ -65,7 +65,7 @@ export async function createAntigravityCliSession(
     )
   }
 
-  await writeFile(join(logsDir, "transcript.jsonl"), `${lines.join("\n")}\n`)
+  await Bun.write(join(logsDir, "transcript.jsonl"), `${lines.join("\n")}\n`)
 }
 
 interface CodexSessionOptions {
