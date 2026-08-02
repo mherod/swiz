@@ -30,7 +30,6 @@ import {
   extractSwitchBranch,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
-  GH_PR_MERGE_RE,
   GH_PR_REVIEW_DISMISS_RE,
   GIT_CHECKOUT_NEW_BRANCH_RE,
   GIT_CHECKOUT_RE,
@@ -39,12 +38,13 @@ import {
   getDefaultBranch,
   getGitStatusV2,
   isDefaultBranch,
+  isPullRequestMergeCommand,
 } from "../src/utils/git-utils.ts"
 
 type ProjectState = "developing" | "reviewing" | "addressing-feedback" | "planning"
 
 type SyncTransitionRule = {
-  when: RegExp
+  when: RegExp | ((command: string) => boolean)
   from: ProjectState | ProjectState[]
   to: ProjectState
 }
@@ -53,13 +53,18 @@ type UpstreamTransitionStatus = "transitioned" | "no-transition" | "abort"
 
 const SYNC_RULES: readonly SyncTransitionRule[] = [
   { when: GH_PR_CREATE_RE, from: "developing", to: "reviewing" },
-  { when: GH_PR_MERGE_RE, from: ["reviewing", "addressing-feedback"], to: "developing" },
+  {
+    when: isPullRequestMergeCommand,
+    from: ["reviewing", "addressing-feedback"],
+    to: "developing",
+  },
   { when: GH_PR_REVIEW_DISMISS_RE, from: "reviewing", to: "addressing-feedback" },
 ]
 
 function matchesSyncRule(command: string, state: ProjectState): SyncTransitionRule | null {
   for (const rule of SYNC_RULES) {
-    if (!rule.when.test(command)) continue
+    const matches = rule.when instanceof RegExp ? rule.when.test(command) : rule.when(command)
+    if (!matches) continue
     const fromStates = Array.isArray(rule.from) ? rule.from : [rule.from]
     if (fromStates.includes(state)) return rule
   }

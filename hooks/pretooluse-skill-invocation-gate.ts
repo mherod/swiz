@@ -54,11 +54,11 @@ import {
   GH_ISSUE_SELF_ASSIGN_RE,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
-  GH_PR_MERGE_RE,
   GH_PR_REVIEW_DISMISS_RE,
   GIT_COMMIT_RE,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
+  isPullRequestMergeCommand,
 } from "../src/utils/git-utils.ts"
 
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
@@ -146,7 +146,7 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
       primary: "pr-checkout",
       anyOf: ["pr-qa-and-merge", "pr-comments-address", "work-on-issue"],
     }
-  if (GH_PR_MERGE_RE.test(cleanedCommand))
+  if (isPullRequestMergeCommand(command))
     return { primary: "pr-qa-and-merge", anyOf: ["pr-qa-and-merge"] }
   if (GH_PR_CREATE_RE.test(cleanedCommand)) return { primary: "pr-open", anyOf: ["pr-open"] }
   if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand))

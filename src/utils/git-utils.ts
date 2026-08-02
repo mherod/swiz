@@ -421,8 +421,66 @@ export const GIT_SYNC_RE = gitSubcommandRe("(push|pull|fetch)\\b")
 /** Matches `git [opts] merge` anywhere in a shell command string. */
 export const GIT_MERGE_RE = gitSubcommandRe("merge\\b")
 
-/** Matches `gh pr merge` anywhere in a shell command string. */
+/** Matches the native `gh pr merge` command at a shell statement boundary. */
 export const GH_PR_MERGE_RE = shellStatementCommandRe("gh\\s+pr\\s+merge\\b")
+
+const PR_MERGE_REST_PATH_RE =
+  /(?:^|\/)(?:api\/v3\/)?repos\/[^/\s]+\/[^/\s]+\/pulls\/[^/?#\s]+\/merge(?:[?#].*)?$/i
+const PR_MERGE_GRAPHQL_MUTATION_RE =
+  /\b(?:mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest)\s*\(/
+const GRAPHQL_ENDPOINT_RE = /(?:^|\/)graphql(?:[?#].*)?$/i
+
+function commandTokens(segment: string): string[] {
+  const tokens = tokenizeShellSegment(segment)
+  return tokens[0] === "command" ? tokens.slice(1) : tokens
+}
+
+function hasExplicitGetMethod(args: string[], shortFlag: string, longFlag: string): boolean {
+  return flagTarget(args, shortFlag, longFlag)?.toUpperCase() === "GET"
+}
+
+function hasRestPullRequestMerge(args: string[], shortFlag: string, longFlag: string): boolean {
+  const method = flagTarget(args, shortFlag, longFlag)?.toUpperCase()
+  return method === "PUT" && args.some((arg) => PR_MERGE_REST_PATH_RE.test(arg))
+}
+
+function hasGraphqlPullRequestMerge(args: string[]): boolean {
+  return args.some((arg) => PR_MERGE_GRAPHQL_MUTATION_RE.test(arg))
+}
+
+function isGhPullRequestMerge(tokens: string[]): boolean {
+  if (tokens[0] !== "gh") return false
+  if (tokens[1] === "pr" && tokens[2] === "merge") return true
+  if (tokens[1] !== "api") return false
+
+  const args = tokens.slice(2)
+  if (hasRestPullRequestMerge(args, "-X", "--method")) return true
+  if (!args.some((arg) => arg === "graphql")) return false
+  if (hasExplicitGetMethod(args, "-X", "--method")) return false
+  return hasGraphqlPullRequestMerge(args)
+}
+
+function isCurlPullRequestMerge(tokens: string[]): boolean {
+  if (tokens[0] !== "curl") return false
+  const args = tokens.slice(1)
+  if (hasRestPullRequestMerge(args, "-X", "--request")) return true
+  if (!args.some((arg) => GRAPHQL_ENDPOINT_RE.test(arg))) return false
+  if (hasExplicitGetMethod(args, "-X", "--request") || args.includes("--get")) return false
+  return hasGraphqlPullRequestMerge(args)
+}
+
+/**
+ * Detect shell commands that can merge a pull request now or enqueue an
+ * eventual merge. Covers native GitHub CLI merges, the REST merge endpoint,
+ * and GraphQL merge/auto-merge/merge-queue mutations via `gh api` or `curl`.
+ */
+export function isPullRequestMergeCommand(command: string): boolean {
+  const normalized = command.replace(/\\\r?\n/g, " ")
+  return splitShellSegments(normalized).some((segment) => {
+    const tokens = commandTokens(segment)
+    return isGhPullRequestMerge(tokens) || isCurlPullRequestMerge(tokens)
+  })
+}
 
 /** Matches `gh pr create` anywhere in a shell command string. */
 export const GH_PR_CREATE_RE = shellStatementCommandRe("gh\\s+pr\\s+create\\b")
@@ -449,10 +507,14 @@ export const GIT_CHECKOUT_NEW_BRANCH_RE = gitSubcommandRe(
 /** Matches any `git` invocation in a shell command string. */
 export const GIT_ANY_CMD_RE = shellTokenCommandRe("git\\s")
 
-/** Extract the PR number from a `gh pr merge <number>` command. */
+/** Extract the PR number from a native or REST API pull-request merge command. */
 export function extractPrNumber(command: string): string | null {
-  const match = command.match(/gh\s+pr\s+merge\s+(\d+)/)
-  return match?.[1] ?? null
+  const nativeMatch = command.match(/gh\s+pr\s+merge\s+(\d+)/)
+  if (nativeMatch?.[1]) return nativeMatch[1]
+  const restMatch = command.match(
+    /(?:^|[\s/])(?:api\/v3\/)?repos\/[^/\s]+\/[^/\s]+\/pulls\/(\d+)\/merge(?:[?#\s]|$)/i
+  )
+  return restMatch?.[1] ?? null
 }
 
 /** Extract the branch name from a `git [opts] merge <branch>` command. */

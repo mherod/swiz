@@ -297,10 +297,13 @@ describe("pretooluse-skill-invocation-gate", () => {
     ).toBe("deny")
   })
 
-  async function runPrMergeGateSubprocess(sessionLines: string[]): Promise<Record<string, any>> {
+  async function runPrMergeGateSubprocess(
+    sessionLines: string[],
+    command = "gh pr merge 42 --squash"
+  ): Promise<Record<string, any>> {
     return await runGateSubprocess("pr-qa-and-merge", {
       tool_name: "Bash",
-      tool_input: { command: "gh pr merge 42 --squash" },
+      tool_input: { command },
       transcript_path: "fake-transcript.json",
       _transcriptSummary: summaryFromLines(sessionLines),
     })
@@ -320,6 +323,45 @@ describe("pretooluse-skill-invocation-gate", () => {
     const result = await runPrMergeGateSubprocess([
       assistantLine([{ type: "tool_use", name: "Skill", input: { skill: "pr-qa-and-merge" } }]),
     ])
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+  })
+
+  const alternatePrMergeCommands = [
+    "gh api --method PUT repos/octocat/Hello-World/pulls/42/merge",
+    "curl -X PUT https://api.github.com/repos/octocat/Hello-World/pulls/42/merge",
+    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"PR_1\"}) { pullRequest { merged } } }'",
+    "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_1\"}) { pullRequest { id } } }'",
+    "gh api graphql -f query='mutation { enqueuePullRequest(input: {pullRequestId: \"PR_1\"}) { mergeQueueEntry { id } } }'",
+  ]
+
+  for (const command of alternatePrMergeCommands) {
+    it(`blocks ${command} when pr-merge skill was not used recently`, async () => {
+      const result = await runPrMergeGateSubprocess([], command)
+
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+          ?.permissionDecision
+      ).toBe("deny")
+    })
+  }
+
+  it("allows a REST PR merge after Codex directly reads pr-qa-and-merge", async () => {
+    const result = await runPrMergeGateSubprocess(
+      [
+        assistantLine([
+          {
+            type: "tool_use",
+            name: "functions.exec_command",
+            input: { cmd: "cat ~/.codex/skills/pr-qa-and-merge/SKILL.md" },
+          },
+        ]),
+      ],
+      "gh api --method PUT repos/octocat/Hello-World/pulls/42/merge"
+    )
 
     expect(
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput

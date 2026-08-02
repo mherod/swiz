@@ -24,11 +24,11 @@ import {
   extractPrNumber,
   forkPrCreateCmd,
   forkPushCmd,
-  GH_PR_MERGE_RE,
   getDefaultBranch,
   getRepoSlug,
   git,
   isDefaultBranch,
+  isPullRequestMergeCommand,
   isShellTool,
   parseGitStatSummary,
   preToolUseAllow,
@@ -509,7 +509,7 @@ export async function evaluatePretooluseMainBranchScopeGate(
     if (result) return result
   }
 
-  const prMergeMatch = GH_PR_MERGE_RE.test(command)
+  const prMergeMatch = isPullRequestMergeCommand(command)
   if (prMergeMatch) {
     const result = await handlePrMerge(command, cwd, defaultBranch, deps)
     if (result) return result

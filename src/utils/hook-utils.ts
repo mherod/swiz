@@ -387,6 +387,7 @@ export {
   hasGitPushForceFlag,
   isDefaultBranch,
   isGitHubHost,
+  isPullRequestMergeCommand,
   PR_CHECK_RE,
   parseGitStatSummary,
   parseGitStatus,

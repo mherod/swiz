@@ -23,13 +23,13 @@ import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from 
 import {
   extractMergeBranch,
   extractPrNumber,
-  GH_PR_MERGE_RE,
   GIT_MERGE_RE,
   getDefaultBranch,
   getOpenPrForBranch,
   getRepoSlug,
   ghJson,
   git,
+  isPullRequestMergeCommand,
   isShellTool,
   preToolUseAllow,
   preToolUseDeny,
@@ -185,7 +185,7 @@ export async function evaluatePretoolusePrAgeGate(input: unknown): Promise<SwizH
   if (!parsed) return {}
   const { command, cwd } = parsed
 
-  const isGhPrMerge = GH_PR_MERGE_RE.test(command)
+  const isGhPrMerge = isPullRequestMergeCommand(command)
   const isGitMerge = GIT_MERGE_RE.test(command)
 
   if (!isGhPrMerge && !isGitMerge) return {}
