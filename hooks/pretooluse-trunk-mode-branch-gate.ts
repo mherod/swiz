@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
 /**
- * PreToolUse hook: When project trunk mode is enabled, allow switching to existing
- * branches as a recovery/maintenance escape hatch, while blocking operations that
- * create or reshape branches/worktrees. Also blocks `gh pr checkout` outside its
- * active-review exception and blocks `gh pr create`.
+ * PreToolUse hook: When project trunk mode is enabled, keep the checkout on the
+ * configured default branch. Blocks branch/worktree creation and reshaping,
+ * switching to non-default branches, `gh pr checkout` outside its active-review
+ * exception, and `gh pr create`.
  *
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
@@ -15,6 +15,9 @@ import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
 import {
   collectGitBranchChanges,
+  collectPlainCheckoutSwitchTargets,
+  GIT_CHECKOUT_RE,
+  GIT_SWITCH_RE,
   type GitBranchChange,
   getDefaultBranch,
   isDefaultBranch,
@@ -33,7 +36,11 @@ function isTrunkModeRelevantShellCommand(
   branchChanges: GitBranchChange[]
 ): boolean {
   return (
-    branchChanges.length > 0 || GH_PR_CHECKOUT_RE.test(command) || GH_PR_CREATE_RE.test(command)
+    branchChanges.length > 0 ||
+    GIT_CHECKOUT_RE.test(command) ||
+    GIT_SWITCH_RE.test(command) ||
+    GH_PR_CHECKOUT_RE.test(command) ||
+    GH_PR_CREATE_RE.test(command)
   )
 }
 
@@ -102,18 +109,10 @@ function denyBranchChangesWhenTrunk(
   defaultBranch: string
 ): SwizHookOutput | null {
   for (const change of changes) {
-    if (
-      change.kind === "create" &&
-      change.target &&
-      isDefaultBranch(change.target, defaultBranch)
-    ) {
-      continue
-    }
-
     if (change.kind === "worktree-add") {
       return preToolUseDeny(
         `Trunk mode is enabled — creating a new git worktree is not allowed.\n\n` +
-          `Use the main working directory and an existing branch instead.`
+          `Use the main working directory on the default branch '${defaultBranch}'.`
       )
     }
 
@@ -121,9 +120,41 @@ function denyBranchChangesWhenTrunk(
     return preToolUseDeny(
       `Trunk mode is enabled — branch ${change.kind} operations are not allowed.` +
         target +
-        `\n\nSwitching to an existing branch is allowed, but creating or reshaping branch state is not.`
+        `\n\nStay on the default branch '${defaultBranch}'.`
     )
   }
+  return null
+}
+
+function countBranchSwitchCommands(command: string): number {
+  const countMatches = (pattern: RegExp): number =>
+    Array.from(command.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))).length
+  return countMatches(GIT_CHECKOUT_RE) + countMatches(GIT_SWITCH_RE)
+}
+
+function denyBranchSwitchesWhenTrunk(
+  command: string,
+  defaultBranch: string
+): SwizHookOutput | null {
+  const commandCount = countBranchSwitchCommands(command)
+  if (commandCount === 0) return null
+
+  const targets = collectPlainCheckoutSwitchTargets(command)
+  const nonDefaultTarget = targets.find((target) => !isDefaultBranch(target, defaultBranch))
+  if (nonDefaultTarget) {
+    return preToolUseDeny(
+      `Trunk mode is enabled — checking out a non-default branch is not allowed.\n\n` +
+        `Attempted branch: '${nonDefaultTarget}'\n\n` +
+        `Stay on the default branch '${defaultBranch}'.`
+    )
+  }
+
+  if (targets.length < commandCount) {
+    return preToolUseDeny(
+      `Trunk mode is enabled — checkout and switch operations are only allowed when explicitly returning to the default branch '${defaultBranch}'.`
+    )
+  }
+
   return null
 }
 
@@ -172,7 +203,11 @@ async function selectTrunkModeDenial(
     projectState,
     runtime
   )
-  return prCheckout ?? denyBranchChangesWhenTrunk(branchChanges, defaultBranch)
+  return (
+    prCheckout ??
+    denyBranchChangesWhenTrunk(branchChanges, defaultBranch) ??
+    denyBranchSwitchesWhenTrunk(request.command, defaultBranch)
+  )
 }
 
 export async function evaluatePretooluseTrunkModeBranchGate(

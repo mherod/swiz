@@ -107,28 +107,10 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     }
   })
 
-  test("allows git checkout main when trunk mode is on", async () => {
-    const repo = await createTestRepo("https://github.com/mherod/repo.git", {
-      featureBranch: "feat/side",
-    })
-    await enableTrunkMode(repo)
-    try {
-      const result = await runHook(repo, "git checkout main")
-      expect(result.parsed).toBeNull()
-    } finally {
-      await cleanupRepo(repo)
-    }
-  })
-
-  for (const command of [
-    "git checkout feat/existing",
-    "git switch feat/existing",
-    "git checkout origin/feat/existing",
-    "git switch --detach origin/feat/existing",
-  ]) {
-    test(`allows switching to an existing branch with ${command}`, async () => {
+  for (const command of ["git checkout main", "git switch main"]) {
+    test(`allows returning to the default branch with ${command}`, async () => {
       const repo = await createTestRepo("https://github.com/mherod/repo.git", {
-        featureBranch: "feat/existing",
+        featureBranch: "feat/side",
       })
       await enableTrunkMode(repo)
       try {
@@ -140,14 +122,36 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     })
   }
 
-  test("allows git checkout -b main when trunk mode is on", async () => {
+  for (const command of [
+    "git checkout feat/existing",
+    "git switch feat/existing",
+    "git checkout origin/feat/existing",
+    "git switch --detach origin/feat/existing",
+  ]) {
+    test(`blocks switching away from trunk with ${command}`, async () => {
+      const repo = await createTestRepo("https://github.com/mherod/repo.git", {
+        featureBranch: "feat/existing",
+      })
+      await enableTrunkMode(repo)
+      try {
+        const result = await runHook(repo, command)
+        expect(result.decision).toBe("deny")
+        const hso = result.parsed?.hookSpecificOutput as Record<string, any>
+        expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
+      } finally {
+        await cleanupRepo(repo)
+      }
+    })
+  }
+
+  test("blocks git checkout -b main when trunk mode is on", async () => {
     const repo = await createTestRepo("https://github.com/mherod/repo.git", {
       featureBranch: "feat/side",
     })
     await enableTrunkMode(repo)
     try {
       const result = await runHook(repo, "git checkout -b main")
-      expect(result.parsed).toBeNull()
+      expect(result.decision).toBe("deny")
     } finally {
       await cleanupRepo(repo)
     }
