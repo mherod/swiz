@@ -3,7 +3,7 @@ import { mkdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { createCodexSession } from "./test-fixtures.ts"
+import { createAntigravityCliSession, createCodexSession } from "./test-fixtures.ts"
 
 /** Create a unique temp directory (concurrent-safe). */
 async function makeTmpDir(prefix: string): Promise<string> {
@@ -414,6 +414,39 @@ describe("transcript-utils integration", () => {
       expect(match).toBeDefined()
       expect(match?.provider).toBe("antigravity")
       expect(match?.format).toBe("antigravity-pb")
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it("discovers Antigravity CLI JSONL sessions mapped to the target project", async () => {
+      const home = await makeTmpDir("transcript-antigravity-cli")
+      const projectDir = join(home, "workspace", "antigravity-cli-project")
+      await mkdir(projectDir, { recursive: true })
+
+      const id = "710012fb-8a00-41f6-b80c-e9c748a14c0c"
+      await createAntigravityCliSession(home, projectDir, id)
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir, home)
+      const match = sessions.find((s) => s.id === id)
+      expect(match).toBeDefined()
+      expect(match?.provider).toBe("antigravity")
+      expect(match?.format).toBe("antigravity-jsonl")
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it("does not match Antigravity CLI sessions from a sibling project prefix", async () => {
+      const home = await makeTmpDir("transcript-antigravity-cli-boundary")
+      const projectDir = join(home, "workspace", "app")
+      const siblingProjectDir = join(home, "workspace", "app-old")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(siblingProjectDir, { recursive: true })
+
+      const id = "810012fb-8a00-41f6-b80c-e9c748a14c0c"
+      await createAntigravityCliSession(home, siblingProjectDir, id)
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir, home)
+      expect(sessions.some((session) => session.id === id)).toBe(false)
       await rm(home, { recursive: true, force: true }).catch(() => {})
     })
 

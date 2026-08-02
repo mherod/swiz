@@ -56,14 +56,15 @@ export interface Turn {
 
 type JsonlTranscriptFormat = Extract<
   Session["format"],
-  "jsonl" | "cursor-agent-jsonl" | "codex-jsonl"
+  "jsonl" | "cursor-agent-jsonl" | "codex-jsonl" | "antigravity-jsonl"
 >
 
 function getJsonlFormatHint(session: Session): JsonlTranscriptFormat | null {
   if (
     session.format === "jsonl" ||
     session.format === "cursor-agent-jsonl" ||
-    session.format === "codex-jsonl"
+    session.format === "codex-jsonl" ||
+    session.format === "antigravity-jsonl"
   ) {
     return session.format
   }
@@ -132,6 +133,10 @@ function collectTurnsFromJsonlText(
   userOnly: boolean
 ): Turn[] {
   return collectTurns(parseTranscriptEntries(text, formatHint), userOnly)
+}
+
+function requiresWholeFileParsing(formatHint: JsonlTranscriptFormat): boolean {
+  return formatHint === "antigravity-jsonl"
 }
 
 function turnMatchesTimeRange(turn: Turn, timeRange: TimeRange | undefined): boolean {
@@ -237,7 +242,9 @@ async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
   _turnsCacheMisses++
   const jsonlFormatHint = getJsonlFormatHint(session)
   if (jsonlFormatHint) {
-    const turns = await loadJsonlTurnsForward(file, jsonlFormatHint, userOnly)
+    const turns = requiresWholeFileParsing(jsonlFormatHint)
+      ? collectTurnsFromJsonlText(await file.text(), jsonlFormatHint, userOnly)
+      : await loadJsonlTurnsForward(file, jsonlFormatHint, userOnly)
     turnsCache.set(cacheKey, { turns, mtimeMs })
     return turns
   }
@@ -255,6 +262,7 @@ async function loadWindowedJsonlTurns(
 ): Promise<Turn[] | null> {
   const formatHint = getJsonlFormatHint(session)
   if (!formatHint) return null
+  if (requiresWholeFileParsing(formatHint)) return null
   if (isUnsupportedTranscriptFormat(session.format)) {
     throw new Error(getUnsupportedTranscriptFormatMessage(session))
   }

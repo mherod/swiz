@@ -26,6 +26,48 @@ export async function createAntigravitySession(
   await writeFile(join(brainDir, "task.md"), `# Task\n${taskText}\n`)
 }
 
+/**
+ * Create a mock Antigravity CLI JSONL session on disk.
+ */
+export async function createAntigravityCliSession(
+  home: string,
+  targetDir: string,
+  sessionId: string,
+  options: { userMessage?: string; assistantMessage?: string } = {}
+): Promise<void> {
+  const { userMessage = "Hello from Antigravity CLI session", assistantMessage } = options
+  const brainDir = join(home, ".gemini", "antigravity-cli", "brain", sessionId)
+  const logsDir = join(brainDir, ".system_generated", "logs")
+  await mkdir(logsDir, { recursive: true })
+  await Bun.write(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
+
+  const lines = [
+    JSON.stringify({
+      step_index: 0,
+      source: "USER_EXPLICIT",
+      type: "USER_INPUT",
+      status: "DONE",
+      created_at: "2026-08-01T21:00:00Z",
+      content: `<USER_REQUEST>\n${userMessage}\n</USER_REQUEST>`,
+    }),
+  ]
+
+  if (assistantMessage) {
+    lines.push(
+      JSON.stringify({
+        step_index: 1,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-08-01T21:00:01Z",
+        content: assistantMessage,
+      })
+    )
+  }
+
+  await Bun.write(join(logsDir, "transcript.jsonl"), `${lines.join("\n")}\n`)
+}
+
 interface CodexSessionOptions {
   userMessage?: string
   assistantMessage?: string

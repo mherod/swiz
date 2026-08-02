@@ -454,6 +454,45 @@ const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
   "walkthrough.md.resolved.0",
 ])
 
+const PATH_REFERENCE_BOUNDARIES = new Set([
+  '"',
+  "'",
+  "`",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+  "<",
+  ">",
+  ",",
+  ";",
+  ":",
+  "=",
+  "?",
+  "#",
+  "\\",
+  "/",
+])
+
+function isPathReferenceBoundary(char: string | undefined): boolean {
+  return char === undefined || /\s/.test(char) || PATH_REFERENCE_BOUNDARIES.has(char)
+}
+
+function sampleReferencesPath(sample: string, targetPath: string): boolean {
+  let start = 0
+  while (start < sample.length) {
+    const index = sample.indexOf(targetPath, start)
+    if (index < 0) return false
+    const before = index > 0 ? sample[index - 1] : undefined
+    const after = sample[index + targetPath.length]
+    if (isPathReferenceBoundary(before) && isPathReferenceBoundary(after)) return true
+    start = index + targetPath.length
+  }
+  return false
+}
+
 async function antigravitySessionMatchesTarget(
   brainSessionDir: string,
   targetDir: string
@@ -478,13 +517,11 @@ async function antigravitySessionMatchesTarget(
   if (candidates.length === 0) return true
 
   const targetPath = resolve(targetDir)
-  const fileUrlNeedle = `file://${targetPath}`
-
   for (const name of candidates) {
     try {
       const content = await getCachedFileText(join(brainSessionDir, name))
       const sample = content.slice(0, 200_000)
-      if (sample.includes(fileUrlNeedle) || sample.includes(targetPath)) {
+      if (sampleReferencesPath(sample, targetPath)) {
         return true
       }
     } catch {}
@@ -499,43 +536,71 @@ export async function findAntigravitySessions(
   limit?: number
 ): Promise<Session[]> {
   home = home ?? getHomeDir()
+  const sessions: Session[] = []
+
+  // 1. Check Antigravity CLI sessions (~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl)
+  const cliBrainDir = join(home, ".gemini", "antigravity-cli", "brain")
+  try {
+    const cliEntries = await readdir(cliBrainDir, { withFileTypes: true })
+    for (const entry of cliEntries) {
+      if (!entry.isDirectory()) continue
+      const id = entry.name
+      const brainSessionDir = join(cliBrainDir, id)
+      const transcriptPath = join(brainSessionDir, ".system_generated", "logs", "transcript.jsonl")
+
+      try {
+        const s = await stat(transcriptPath)
+        const matchesTarget = await antigravitySessionMatchesTarget(brainSessionDir, targetDir)
+        if (!matchesTarget) continue
+
+        pushLimitedSession(
+          sessions,
+          {
+            id,
+            path: transcriptPath,
+            mtime: s.mtimeMs,
+            provider: "antigravity",
+            format: "antigravity-jsonl",
+          },
+          limit
+        )
+      } catch {}
+    }
+  } catch {}
+
+  // 2. Check legacy Antigravity protobuf sessions (~/.gemini/antigravity/conversations/*.pb)
   const antigravityRoot = join(home, ".gemini", "antigravity")
   const conversationsDir = join(antigravityRoot, "conversations")
   const brainDir = join(antigravityRoot, "brain")
-  const sessions: Session[] = []
 
-  let entries: import("node:fs").Dirent[]
   try {
-    entries = await readdir(conversationsDir, { withFileTypes: true })
-  } catch {
-    return []
-  }
+    const pbEntries = await readdir(conversationsDir, { withFileTypes: true })
+    for (const entry of pbEntries) {
+      if (!entry.isFile()) continue
+      if (!entry.name.endsWith(".pb")) continue
 
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    if (!entry.name.endsWith(".pb")) continue
+      const id = entry.name.replace(/\.pb$/, "")
+      const sessionPath = join(conversationsDir, entry.name)
+      const brainSessionDir = join(brainDir, id)
+      const matchesTarget = await antigravitySessionMatchesTarget(brainSessionDir, targetDir)
+      if (!matchesTarget) continue
 
-    const id = entry.name.replace(/\.pb$/, "")
-    const sessionPath = join(conversationsDir, entry.name)
-    const brainSessionDir = join(brainDir, id)
-    const matchesTarget = await antigravitySessionMatchesTarget(brainSessionDir, targetDir)
-    if (!matchesTarget) continue
-
-    try {
-      const s = await stat(sessionPath)
-      pushLimitedSession(
-        sessions,
-        {
-          id,
-          path: sessionPath,
-          mtime: s.mtimeMs,
-          provider: "antigravity",
-          format: "antigravity-pb",
-        },
-        limit
-      )
-    } catch {}
-  }
+      try {
+        const s = await stat(sessionPath)
+        pushLimitedSession(
+          sessions,
+          {
+            id,
+            path: sessionPath,
+            mtime: s.mtimeMs,
+            provider: "antigravity",
+            format: "antigravity-pb",
+          },
+          limit
+        )
+      } catch {}
+    }
+  } catch {}
 
   return limitSessionList(sessions, limit)
 }

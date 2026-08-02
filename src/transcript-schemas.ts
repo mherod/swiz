@@ -104,6 +104,7 @@ export interface Session {
     | "gemini-json"
     | "cursor-sqlite"
     | "antigravity-pb"
+    | "antigravity-jsonl"
     | "codex-jsonl"
     | "cursor-agent-jsonl"
 }
