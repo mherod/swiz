@@ -19,9 +19,9 @@ alwaysApply: false
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
 ## Hook System
-- Hooks live in `hooks/`; canonical manifest is `manifest` in `src/manifest.ts`.
-- Canonical events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
-- Translation: `EVENT_MAP` (canonical→agent events), `TOOL_ALIASES` (per-agent tool names). Claude uses nested matchers in `settings.json`; Cursor uses flat list in `hooks.json`.
+- Hooks live in `hooks/`; `manifest` lives in `src/manifest.ts`.
+- CamelCase events: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
+- Translation: `EVENT_MAP` maps events; `TOOL_ALIASES` maps per-agent tools. Claude uses nested `settings.json` matchers; Cursor uses flat `hooks.json` lists.
 - Add hook flow (agent events):
   1. Add `hooks/<name>.ts`.
   2. Add entry to `manifest` in `src/manifest.ts`.
@@ -35,13 +35,13 @@ alwaysApply: false
   4. Add event to `TOOL_NAME_OPTIONAL_EVENTS` in `src/dispatch/execute.ts`.
   5. Add `DISPATCH_TIMEOUTS` entry in `src/manifest.ts`.
   6. Wire into `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
-- Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` synchronized.
+- Synchronize `DISPATCH_ROUTES`, `manifest`, and agent `eventMap`.
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
 - DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
-- DO NOT hard-code agent-specific event names or tool names in hook scripts.
-- `classifyHookOutput` (in `src/dispatch/worker-types.ts`) validates hook subprocess stdout against `hookOutputSchema`, returning `"invalid-schema"` on failure. Silent allows rejected; require `systemMessage`, `reason`, `stopReason`, or `additionalContext`. Empty `{}` valid. **Stop/SubagentStop** responses normalized with `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` module doc for stdout fields by event.
+- DON'T hard-code agent event or tool names in hook scripts.
+- `classifyHookOutput` (`src/dispatch/worker-types.ts`) validates subprocess stdout with `hookOutputSchema`; failures return `"invalid-schema"`. Rejected silent output requires `systemMessage`, `reason`, `stopReason`, or `additionalContext`; `{}` is valid. **Stop/SubagentStop** responses use `stopHookOutputSchema` (`src/dispatch/stop-response.ts`); see `hooks/schemas.ts` for event stdout fields.
 - In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`; omitting triggers the global-link check.
 - Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 - **Inline SwizHook imports**: Hooks imported by `manifest.ts` must NOT import from `hook-utils.ts` (circular dep via `skill-utils.ts` → `agents.ts`) or `git-utils.ts` (circular dep via `settings.ts` → `settings/persistence.ts` → `manifest.ts`). Safe: `tool-matchers.ts`, `git-helpers.ts`, `shell-patterns.ts`, `skill-utils.ts`, `node-modules-path.ts`, `command-utils.ts`, `utils/edit-projection.ts`, `utils/inline-hook-helpers.ts`, `utils/package-detection.ts`, `hooks/schemas.ts`.
@@ -68,16 +68,15 @@ alwaysApply: false
 - **Dispatch payload enrichment**: `performDispatch` injects `_effectiveSettings` and `_terminal` into payload. Read from payload; don't call `detectTerminal()` in daemon code.
 - **Cursor cwd + captures**: `normalizeAgentHookPayload` uses `workspace_roots` if cwd empty/outside; strips `…/.cursor` (not `…/projects/`). `swiz dispatch` injects `process.cwd()` if missing. Captured in `/tmp/swiz-incoming/` via `incoming-capture.ts`, `src/commands/dispatch.ts` for CLI dispatch and `src/SwizHook.ts` `runSwizHookAsMain` for standalone hook subprocesses. Each dispatch also appends a sanitized raw payload line to `/tmp/swiz-incoming/{canonicalEventName}.jsonl` (via `schedulePayloadJsonlAppend`; wired in CLI dispatch and daemon). See `_envKeys`, `SWIZ_CAPTURE_INCOMING=0` (~10m retention).
 - **File-path guard**: `filePathGuardHook(predicate, denyReason, allowMsg?)` for file-path PreToolUse hooks.
-- **Git Utilities Policy** — canonical locations:
-  - `src/utils/hook-utils.ts` — regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`), extractors, runtime helpers (`git`, `gh`, `ghJson`).
-  - `src/git-helpers.ts` — classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars.
-  - DO NOT define Git utilities locally — import from canonical source.
-- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr limit. Exempt: `gh auth status`, `gh run watch`.
+- **Git utilities**: Import canonical helpers; never define local copies. `src/utils/hook-utils.ts`: regexes, extractors, runtime helpers (`git`, `gh`, `ghJson`). `src/git-helpers.ts`: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries; its `git()` strips `GIT_*` env vars.
+- **PR merge detection**: Use `isPullRequestMergeCommand()` from `src/utils/git-utils.ts` in behavioral gates; `GH_PR_MERGE_RE` matches only native `gh pr merge`. It detects REST `PUT .../pulls/{number}/merge` and GraphQL `mergePullRequest`, `enablePullRequestAutoMerge`, and `enqueuePullRequest`.
+- **DON'T** run `stripQuotedShellStrings()` before detection; GraphQL bodies are quoted CLI arguments. Hooks using `extractPrNumber()` must handle `null` for GraphQL node-ID mutations.
+- **GitHub API throttle** (`src/gh-rate-limit.ts`): call `await acquireGhSlot()` before each `gh` request; `gh()` does so. Direct `Bun.spawn(["gh"...` must too. Limit: 4500/hour. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, recovery (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DON'T** add broad patterns to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
-- Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
+- Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — parse with `stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, or `sessionHookInputSchema`, or annotate directly; **DO NOT** cast stdin with `as { ... }`.
 - Hook schemas (`hooks/schemas.ts`, `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema` — module doc = stdout fields by event. Settings (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
 - **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` (`hook-utils.ts`); pass `cwd`, branch on return (allow vs deny PreToolUse), `store.consumeOne()`. `requiredSettings: ["autoSteer"]`. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
@@ -133,7 +132,7 @@ alwaysApply: false
 - **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
 - Before stop, audit open issue labels; if stop hook lists actionable issues, pick one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
 ## Standard Work Sequence
-- Required order for each unit of work:
+- Per work unit:
   1. `TaskCreate`/`TaskUpdate` -> `in_progress`.
   2. Edit/Bash implementation.
   3. `git add` + `git commit`.
@@ -160,7 +159,7 @@ alwaysApply: false
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - CI `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip; markdown triggers CI.
 - Pre-push checklist:
-  0. **Run Step 0 collaboration guard** (`/push`) before every push; read output, never assume repo type.
+  0. Run `/push` before every push and follow its collaboration decision.
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
@@ -239,6 +238,6 @@ alwaysApply: false
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` — prevents real backend calls. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
-- **DON'T**: Declare commit or push success before reading tool output confirming it.
+- Declare commit or push success only after confirming tool output.
 - **DO**: Create workflow tasks for multi-commit sessions: "Task Preflight", "Check Current Branch", "Determine Repository Type", "Branch Decision Rules". Mark complete as steps finish.
 - **DO**: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks that build action plans — auto-creates tasks before blocking. Call before `blockStop`/`denyPreToolUse` since those call `process.exit(0)`.
