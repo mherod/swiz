@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
+import { detectCurrentAgentFromEnv } from "../detect.ts"
+import {
+  createAntigravityCliSession,
+  createAntigravitySession,
+  createCodexSession,
+} from "../test-fixtures.ts"
 import { turnsToDisplayTurns } from "../transcript-turns.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
@@ -12,6 +17,7 @@ import { type TranscriptCommandOptions, transcriptCommand } from "./transcript.t
 const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
 
 const transcriptOptions: TranscriptCommandOptions = {
+  detectAgent: () => detectCurrentAgentFromEnv(),
   async runListMode(sessions) {
     for (const session of sessions) console.log(session.id)
   },
@@ -728,6 +734,28 @@ describe("Provider transcript/session command support", () => {
     )
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("Antigravity protobuf format (.pb)")
+  })
+
+  test("swiz transcript --session renders Antigravity CLI JSONL turns", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-antigravity-cli")
+    const sessionId = "30668ced-3f3f-4640-9ab3-fc5c72938894"
+    await mkdir(projectDir, { recursive: true })
+    await createAntigravityCliSession(home, projectDir, sessionId, {
+      userMessage: "How do minecarts work?",
+      assistantMessage: "Minecarts operate along tracks.",
+    })
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("USER")
+    expect(out).toContain("ASSISTANT")
+    expect(out).toContain("How do minecarts work?")
+    expect(out).toContain("Minecarts operate along tracks.")
   })
 
   test("swiz continue --session resolves Antigravity IDs and reports unsupported format", async () => {

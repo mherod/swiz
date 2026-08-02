@@ -56,14 +56,15 @@ export interface Turn {
 
 type JsonlTranscriptFormat = Extract<
   Session["format"],
-  "jsonl" | "cursor-agent-jsonl" | "codex-jsonl"
+  "jsonl" | "cursor-agent-jsonl" | "codex-jsonl" | "antigravity-jsonl"
 >
 
 function getJsonlFormatHint(session: Session): JsonlTranscriptFormat | null {
   if (
     session.format === "jsonl" ||
     session.format === "cursor-agent-jsonl" ||
-    session.format === "codex-jsonl"
+    session.format === "codex-jsonl" ||
+    session.format === "antigravity-jsonl"
   ) {
     return session.format
   }

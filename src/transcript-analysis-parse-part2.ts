@@ -6,6 +6,7 @@ import {
 } from "./transcript-analysis-parse-part1.ts"
 import { extractTextFromUnknownContent } from "./transcript-extract.ts"
 import type { ContentBlock, Session, TranscriptEntry } from "./transcript-schemas.ts"
+import { splitJsonlLines, tryParseJsonLine } from "./utils/jsonl.ts"
 
 // ─── Gemini content schemas ───────────────────────────────────────────────────
 
@@ -273,8 +274,99 @@ function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
+export function parseAntigravityJsonlEntries(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = []
+  let callIdSeq = 0
+  let lastToolUseId = ""
+
+  for (const line of splitJsonlLines(text)) {
+    const obj = tryParseJsonLine(line)
+    if (!obj || typeof obj !== "object") continue
+
+    const rec = obj as Record<string, unknown>
+    const stepIndex = rec.step_index
+    const source = rec.source
+    const type = rec.type
+    const createdAt = typeof rec.created_at === "string" ? rec.created_at : undefined
+
+    if (type === "USER_INPUT" || source === "USER_EXPLICIT") {
+      let content = typeof rec.content === "string" ? rec.content : ""
+      content = content.replace(/^<USER_REQUEST>\n?/, "").replace(/\n?<\/USER_REQUEST>[\s\S]*$/, "")
+      entries.push({
+        type: "user",
+        timestamp: createdAt,
+        message: {
+          role: "user",
+          content,
+        },
+      })
+    } else if (source === "MODEL" && type === "PLANNER_RESPONSE") {
+      const blocks: unknown[] = []
+      if (typeof rec.content === "string" && rec.content.trim().length > 0) {
+        blocks.push({ type: "text", text: rec.content })
+      }
+      if (Array.isArray(rec.tool_calls)) {
+        for (const call of rec.tool_calls) {
+          if (
+            call &&
+            typeof call === "object" &&
+            typeof (call as Record<string, unknown>).name === "string"
+          ) {
+            const callRec = call as Record<string, unknown>
+            callIdSeq++
+            const callId = `call_${stepIndex}_${callIdSeq}`
+            lastToolUseId = callId
+            let parsedArgs = callRec.args
+            if (typeof parsedArgs === "string") {
+              try {
+                parsedArgs = JSON.parse(parsedArgs)
+              } catch {}
+            }
+            blocks.push({
+              type: "tool_use",
+              id: callId,
+              name: String(callRec.name),
+              input: (parsedArgs as Record<string, unknown>) ?? {},
+            })
+          }
+        }
+      }
+      if (blocks.length > 0) {
+        entries.push({
+          type: "assistant",
+          timestamp: createdAt,
+          message: {
+            role: "assistant",
+            content: blocks as any,
+          },
+        })
+      }
+    } else if (source === "MODEL" && type !== "PLANNER_RESPONSE") {
+      if (lastToolUseId && typeof rec.content === "string") {
+        entries.push({
+          type: "user",
+          timestamp: createdAt,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: lastToolUseId,
+                content: rec.content,
+              },
+            ],
+          },
+        })
+      }
+    }
+  }
+
+  return entries
+}
+
 const FORMAT_PARSERS: Record<string, (text: string) => TranscriptEntry[]> = {
   "antigravity-pb": () => [],
+  "antigravity-jsonl": parseAntigravityJsonlEntries,
   "cursor-sqlite": parseCursorSqliteEntries,
   "cursor-agent-jsonl": parseJsonlEntries,
   "gemini-json": parseGeminiEntries,

@@ -417,6 +417,41 @@ describe("transcript-utils integration", () => {
       await rm(home, { recursive: true, force: true }).catch(() => {})
     })
 
+    it("discovers Antigravity CLI JSONL sessions mapped to the target project", async () => {
+      const home = await makeTmpDir("transcript-antigravity-cli")
+      const projectDir = join(home, "workspace", "antigravity-cli-project")
+      await mkdir(projectDir, { recursive: true })
+
+      const id = "710012fb-8a00-41f6-b80c-e9c748a14c0c"
+      const brainDir = join(home, ".gemini", "antigravity-cli", "brain", id)
+      const logsDir = join(brainDir, ".system_generated", "logs")
+      await mkdir(logsDir, { recursive: true })
+
+      await writeFile(
+        join(brainDir, "task.md"),
+        `# Task\nWork in file://${projectDir}\nand continue integration.\n`
+      )
+      await writeFile(
+        join(logsDir, "transcript.jsonl"),
+        JSON.stringify({
+          step_index: 0,
+          source: "USER_EXPLICIT",
+          type: "USER_INPUT",
+          status: "DONE",
+          created_at: "2026-08-01T21:00:00Z",
+          content: "<USER_REQUEST>Test prompt</USER_REQUEST>",
+        }) + "\n"
+      )
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir, home)
+      const match = sessions.find((s) => s.id === id)
+      expect(match).toBeDefined()
+      expect(match?.provider).toBe("antigravity")
+      expect(match?.format).toBe("antigravity-jsonl")
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
     it("filters out Antigravity sessions whose brain metadata points to another project", async () => {
       const home = await makeTmpDir("transcript-antigravity")
       const projectDir = join(home, "workspace", "primary-project")
