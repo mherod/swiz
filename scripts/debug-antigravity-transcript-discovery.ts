@@ -8,8 +8,14 @@ import { getHomeDir } from "../src/home.ts"
  */
 async function main() {
   const home = getHomeDir()
-  const currentSessionId = "63062b62-5dec-4166-a9d9-14d192672570"
-  const sessionDir = join(home, ".gemini", "antigravity-cli", "brain", currentSessionId)
+  const sessionId = process.argv[2]
+  if (!sessionId) {
+    console.error("Usage: bun scripts/debug-antigravity-transcript-discovery.ts <session-id>")
+    process.exitCode = 1
+    return
+  }
+
+  const sessionDir = join(home, ".gemini", "antigravity-cli", "brain", sessionId)
 
   console.log("Inspecting session dir:", sessionDir)
 
@@ -33,8 +39,9 @@ async function main() {
           .replace(/\n/g, " ")
       )
     }
-  } catch (err: any) {
-    console.error("Failed to read transcript.jsonl:", err.message)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error("Failed to read transcript.jsonl:", message)
   }
 }
 
