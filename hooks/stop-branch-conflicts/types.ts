@@ -11,7 +11,7 @@ export interface BranchCheckContext {
   branch: string
   defaultBranch: string
   defaultRemoteRef: string
-  forkTopology: ForkTopology
+  forkTopology: ForkTopology | null
 }
 
 export interface GitMergeState {

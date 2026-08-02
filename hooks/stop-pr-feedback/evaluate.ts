@@ -3,7 +3,12 @@ import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../../src/schemas.ts"
 import { blockStopObj, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import { buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
-import { buildStopContext, gatherPRFeedback, resolveRepoContext } from "./context.ts"
+import {
+  buildStopContext,
+  gatherPRFeedback,
+  getPreservedConflictPrNumbers,
+  resolveRepoContext,
+} from "./context.ts"
 import type { StopContext } from "./types.ts"
 
 /** Payload for composing stop-pr-feedback context. */
@@ -23,7 +28,8 @@ export async function collectPrFeedbackStopParsed(
     if (!ctx) return null
 
     const prs = await gatherPRFeedback(ctx.cwd, ctx.currentUser)
-    const stopCtx = buildStopContext(ctx, prs)
+    const preservedConflictPrNumbers = await getPreservedConflictPrNumbers(ctx.cwd, prs)
+    const stopCtx = buildStopContext(ctx, prs, preservedConflictPrNumbers)
     if (!stopCtx) return null
 
     const planSteps = buildStopPlanSteps(stopCtx, parsed as Record<string, unknown>)

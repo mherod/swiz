@@ -84,6 +84,25 @@ describe("stop-pr-feedback hook", () => {
       expect(result.changesRequestedPRs).toHaveLength(1)
       expect(result.conflictingPRs).toHaveLength(1)
     })
+
+    test("preserves the worktree conflict without suppressing review feedback", () => {
+      const prs: PR[] = [
+        {
+          number: 1,
+          title: "Preserved but needs changes",
+          url: "https://github.com/user/repo/pull/1",
+          reviewDecision: "CHANGES_REQUESTED",
+          mergeable: "CONFLICTING",
+          headRefName: "feature/preserve",
+          baseRefName: "main",
+        },
+      ]
+
+      const result = partitionPRsForStop(prs, new Set([1]))
+
+      expect(result.changesRequestedPRs).toHaveLength(1)
+      expect(result.conflictingPRs).toHaveLength(0)
+    })
   })
 
   describe("evaluateStopPrFeedback", () => {

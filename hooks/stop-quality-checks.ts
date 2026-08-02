@@ -17,6 +17,7 @@ import {
   git,
 } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
+import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const
 export const TYPECHECK_SCRIPTS = ["typecheck", "type-check", "tsc", "check:types"] as const
@@ -95,19 +96,28 @@ export function isQualityChecksEnabled(raw: Record<string, any>): boolean {
   return !!settings?.qualityChecksGate
 }
 
-async function buildFeatureBranchSteps(
-  branch: string,
+interface QualityCheckPr {
+  mergeable: string
+  number: number
+  url: string
+}
+
+export function buildFeatureBranchActionSteps(
   defaultBranch: string,
   isSolo: boolean,
-  cwd: string
-): Promise<string[]> {
-  const pr = await getOpenPrForBranch<{ number: number; url: string }>(
-    branch,
-    cwd,
-    "number,url"
-  ).catch(() => null)
-
+  pr: QualityCheckPr | null,
+  preserveViaPr: boolean
+): string[] {
   const steps: string[] = ["Fix all errors on this branch", "Commit and push the fixes"]
+  if (preserveViaPr) {
+    steps.push(
+      pr
+        ? `Keep PR #${pr.number} open as the recovery path (${pr.url})`
+        : "Open a PR to preserve this conflicting worktree branch"
+    )
+    return steps
+  }
+
   if (pr) {
     steps.push(
       isSolo
@@ -123,6 +133,26 @@ async function buildFeatureBranchSteps(
   }
   steps.push(`Switch back: \`git checkout ${defaultBranch} && git pull\``)
   return steps
+}
+
+async function buildFeatureBranchSteps(
+  branch: string,
+  defaultBranch: string,
+  isSolo: boolean,
+  cwd: string
+): Promise<string[]> {
+  const pr = await getOpenPrForBranch<QualityCheckPr>(branch, cwd, "mergeable,number,url").catch(
+    () => null
+  )
+  const preservation = await evaluateWorktreePreservation({
+    cwd,
+    branch,
+    defaultBranch,
+    trunkMode: false,
+    ...(pr?.mergeable === "CONFLICTING" ? { conflictsWithDefault: true as const } : {}),
+  })
+
+  return buildFeatureBranchActionSteps(defaultBranch, isSolo, pr, preservation.preserveViaPr)
 }
 
 interface QualityBlockContext {

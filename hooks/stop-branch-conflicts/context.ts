@@ -30,9 +30,10 @@ export async function resolveBranchCheckContext(
   if (isDefaultBranch(branch, defaultBranch)) return null
 
   const fork = await detectForkTopology(cwd)
-  if (!fork) return null
-
-  const defaultRemoteRef = forkRemoteRef(defaultBranch, fork)
+  const preferredRemoteRef = forkRemoteRef(defaultBranch, fork)
+  const defaultRemoteRef = (await git(["rev-parse", "--verify", preferredRemoteRef], cwd))
+    ? preferredRemoteRef
+    : defaultBranch
 
   return {
     cwd,

@@ -24,6 +24,30 @@ async function createGitRepo(branchName = "main"): Promise<string> {
   return dir
 }
 
+async function createConflictingLinkedWorktree(): Promise<string> {
+  const parent = await tmp.create()
+  const primary = join(parent, "primary")
+  const linked = join(parent, "linked")
+  await mkdir(primary)
+
+  Bun.spawnSync(["git", "init", "-b", "main"], { cwd: primary })
+  Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: primary })
+  Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: primary })
+  await writeFile(join(primary, "shared.txt"), "base\n")
+  Bun.spawnSync(["git", "add", "shared.txt"], { cwd: primary })
+  Bun.spawnSync(["git", "commit", "-m", "base"], { cwd: primary })
+  Bun.spawnSync(["git", "worktree", "add", "-b", "feature/preserve", linked], { cwd: primary })
+
+  await writeFile(join(primary, "shared.txt"), "main\n")
+  Bun.spawnSync(["git", "add", "shared.txt"], { cwd: primary })
+  Bun.spawnSync(["git", "commit", "-m", "main change"], { cwd: primary })
+
+  await writeFile(join(linked, "shared.txt"), "feature\n")
+  Bun.spawnSync(["git", "add", "shared.txt"], { cwd: linked })
+  Bun.spawnSync(["git", "commit", "-m", "feature change"], { cwd: linked })
+  return linked
+}
+
 async function runHook(cwd: string): Promise<HookResult> {
   return await runHookInProcess(HOOK, {
     session_id: "test-session",
@@ -101,6 +125,17 @@ describe("stop-non-default-branch", () => {
     expect(reason).toContain("git checkout")
     expect(reason).not.toContain("gh pr create")
     expect(reason).not.toContain("PR #")
+  })
+
+  test("requires PR preservation for a conflicting linked worktree", async () => {
+    const dir = await createConflictingLinkedWorktree()
+    const result = await runHook(dir)
+    const reason = result.json?.reason as string
+
+    expect(result.json?.decision).toBe("block")
+    expect(reason).toContain("Preserve linked worktree branch 'feature/preserve'")
+    expect(reason).toContain("Open a PR")
+    expect(reason).not.toContain("git checkout main")
   })
 
   test("allows stop when not in a git repo", async () => {

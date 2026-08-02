@@ -6,6 +6,8 @@
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
+import { readProjectSettings } from "../../src/settings.ts"
+import { evaluateWorktreePreservation } from "../../src/worktree-preservation.ts"
 import {
   buildPRConflictOutput,
   buildStaleBranchOutput,
@@ -19,6 +21,19 @@ import {
   isStaleBranch,
   STALE_BRANCH_THRESHOLD,
 } from "./local-merge-validator.ts"
+import type { BranchCheckContext } from "./types.ts"
+
+async function preservesConflictViaPr(ctx: BranchCheckContext): Promise<boolean> {
+  const trunkMode = (await readProjectSettings(ctx.cwd))?.trunkMode === true
+  const decision = await evaluateWorktreePreservation({
+    cwd: ctx.cwd,
+    branch: ctx.branch,
+    defaultBranch: ctx.defaultBranch,
+    trunkMode,
+    conflictsWithDefault: true,
+  })
+  return decision.preserveViaPr
+}
 
 /**
  * Evaluate branch conflicts and return blocking output or empty object.
@@ -30,6 +45,7 @@ export async function evaluateStopBranchConflicts(input: StopHookInput): Promise
   // Check GitHub PR state first (authoritative)
   const pr = await getGitHubPRState(ctx)
   if (isPRConflicting(pr)) {
+    if (await preservesConflictViaPr(ctx)) return {}
     return buildPRConflictOutput(ctx, pr!)
   }
   if (isPRMergeable(pr)) return {}
@@ -39,6 +55,7 @@ export async function evaluateStopBranchConflicts(input: StopHookInput): Promise
   if (!merge) return {}
 
   if (hasTextualConflicts(merge)) {
+    if (await preservesConflictViaPr(ctx)) return {}
     return buildTextualConflictOutput(ctx, merge)
   }
 

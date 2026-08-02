@@ -1,10 +1,15 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
+import { readProjectSettings } from "../../src/settings.ts"
 import {
+  getDefaultBranch,
+  git,
   hasGhCli,
+  isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
   sanitizeSessionId,
 } from "../../src/utils/hook-utils.ts"
+import { evaluateWorktreePreservation } from "../../src/worktree-preservation.ts"
 import { getOpenPRsWithFeedback, partitionPRsForStop } from "./pull-requests.ts"
 import type { PR, RepoContext, StopContext } from "./types.ts"
 
@@ -34,8 +39,15 @@ export async function resolveRepoContext(input: {
   }
 }
 
-export function buildStopContext(ctx: RepoContext, prs: PR[]): StopContext | null {
-  const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(prs)
+export function buildStopContext(
+  ctx: RepoContext,
+  prs: PR[],
+  preservedConflictPrNumbers: ReadonlySet<number> = new Set()
+): StopContext | null {
+  const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(
+    prs,
+    preservedConflictPrNumbers
+  )
 
   const total = changesRequestedPRs.length + reviewRequiredPRs.length + conflictingPRs.length
   if (total === 0) return null
@@ -52,4 +64,33 @@ export function buildStopContext(ctx: RepoContext, prs: PR[]): StopContext | nul
 
 export async function gatherPRFeedback(cwd: string, currentUser: string): Promise<PR[]> {
   return await getOpenPRsWithFeedback(cwd, currentUser)
+}
+
+export async function getPreservedConflictPrNumbers(
+  cwd: string,
+  prs: PR[]
+): Promise<ReadonlySet<number>> {
+  const branch = await git(["branch", "--show-current"], cwd)
+  if (!branch) return new Set()
+
+  const candidates = prs.filter((pr) => pr.mergeable === "CONFLICTING" && pr.headRefName === branch)
+  if (candidates.length === 0) return new Set()
+
+  const defaultBranch = await getDefaultBranch(cwd)
+  const targetsDefault = candidates.filter(
+    (pr) => !pr.baseRefName || isDefaultBranch(pr.baseRefName, defaultBranch)
+  )
+  if (targetsDefault.length === 0) return new Set()
+
+  const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
+  const decision = await evaluateWorktreePreservation({
+    cwd,
+    branch,
+    defaultBranch,
+    trunkMode,
+    conflictsWithDefault: true,
+  })
+  if (!decision.preserveViaPr) return new Set()
+
+  return new Set(targetsDefault.map((pr) => pr.number))
 }

@@ -4,6 +4,8 @@ export interface PR {
   url: string
   reviewDecision: string
   mergeable: string
+  headRefName?: string
+  baseRefName?: string
   createdAt?: string
   closingIssuesReferences?: Array<{ number: number }>
   author?: { login: string }

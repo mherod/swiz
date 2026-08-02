@@ -79,7 +79,7 @@ export async function getOpenPRsWithFeedback(cwd: string, currentUser: string): 
 
   // Fallback: direct gh CLI calls (include author so cached entries support store-first filtering)
   const jsonFields =
-    "number,title,url,reviewDecision,mergeable,createdAt,author,closingIssuesReferences"
+    "number,title,url,reviewDecision,mergeable,headRefName,baseRefName,createdAt,author,closingIssuesReferences"
   const [authoredPrs, reviewerPrs] = await Promise.all([
     ghJson<PR[]>(
       ["pr", "list", "--state", "open", "--author", currentUser, "--json", jsonFields],
@@ -109,7 +109,8 @@ export async function getOpenPRsWithFeedback(cwd: string, currentUser: string): 
 }
 
 export function partitionPRsForStop(
-  allPrs: PR[]
+  allPrs: PR[],
+  preservedConflictPrNumbers: ReadonlySet<number> = new Set()
 ): Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs" | "conflictingPRs"> {
   const changesRequestedPRs: PR[] = []
   const reviewRequiredPRs: PR[] = []
@@ -117,7 +118,9 @@ export function partitionPRsForStop(
   for (const p of allPrs.filter(openPrNeedsStopAttention)) {
     if (p.reviewDecision === "CHANGES_REQUESTED") changesRequestedPRs.push(p)
     if (p.reviewDecision === "REVIEW_REQUIRED") reviewRequiredPRs.push(p)
-    if (p.mergeable === "CONFLICTING") conflictingPRs.push(p)
+    if (p.mergeable === "CONFLICTING" && !preservedConflictPrNumbers.has(p.number)) {
+      conflictingPRs.push(p)
+    }
   }
   return { changesRequestedPRs, reviewRequiredPRs, conflictingPRs }
 }

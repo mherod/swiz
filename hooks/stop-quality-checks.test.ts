@@ -1,11 +1,31 @@
 import { describe, expect, test } from "bun:test"
 import {
+  buildFeatureBranchActionSteps,
   findScript,
   isQualityChecksEnabled,
   LINT_SCRIPTS,
   summarizeCheckOutput,
   TYPECHECK_SCRIPTS,
 } from "./stop-quality-checks.ts"
+
+describe("stop-quality-checks: feature branch guidance", () => {
+  test("keeps a preserved worktree on its open PR", () => {
+    const steps = buildFeatureBranchActionSteps(
+      "main",
+      true,
+      {
+        number: 42,
+        url: "https://github.com/user/repo/pull/42",
+        mergeable: "CONFLICTING",
+      },
+      true
+    )
+
+    expect(steps.join("\n")).toContain("Keep PR #42 open")
+    expect(steps.join("\n")).not.toContain("Merge PR")
+    expect(steps.join("\n")).not.toContain("git checkout main")
+  })
+})
 
 describe("stop-quality-checks: findScript", () => {
   describe("lint script discovery", () => {

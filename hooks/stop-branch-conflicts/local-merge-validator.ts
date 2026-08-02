@@ -6,6 +6,7 @@
  */
 
 import { git } from "../../src/utils/hook-utils.ts"
+import { countMergeTreeConflicts } from "../../src/worktree-preservation.ts"
 import type { BranchCheckContext, GitMergeState } from "./types.ts"
 
 export async function getGitMergeState(ctx: BranchCheckContext): Promise<GitMergeState | null> {
@@ -20,7 +21,7 @@ export async function getGitMergeState(ctx: BranchCheckContext): Promise<GitMerg
   if (!mergeBase) return null
 
   const mergeTree = await git(["merge-tree", mergeBase, "HEAD", ctx.defaultRemoteRef], ctx.cwd)
-  const conflictCount = (mergeTree.match(/^<<<<<</gm) ?? []).length
+  const conflictCount = countMergeTreeConflicts(mergeTree)
 
   return {
     conflictCount,
