@@ -39,8 +39,13 @@ function isTrunkModeRelevantShellCommand(
 function denyPrCreateWhenTrunk(command: string, defaultBranch: string): SwizHookOutput | null {
   if (!GH_PR_CREATE_RE.test(command)) return null
   return preToolUseDeny(
-    `Trunk mode is enabled — opening a new pull request is not allowed.\n\n` +
-      `Push directly to the default branch (\`${defaultBranch}\`).`
+    `Trunk mode kept the repository on its direct-delivery path; no pull request was created.\n\n` +
+      `New work lands directly on \`${defaultBranch}\` in this project. Continue with:\n` +
+      `  1. Return to trunk: git switch ${defaultBranch}\n` +
+      `  2. Commit the completed change on \`${defaultBranch}\`\n` +
+      `  3. Push it: git push origin ${defaultBranch}\n\n` +
+      `If you meant to finish a pull request that already exists, merge it instead:\n` +
+      `  gh pr merge <number>`
   )
 }
 
@@ -81,35 +86,68 @@ async function denyPrCheckoutWhenTrunk(
   runtime: TrunkModeBranchGateRuntime
 ): Promise<SwizHookOutput | null> {
   if (!GH_PR_CHECKOUT_RE.test(command)) return null
-  if (projectState === "reviewing" && (await runtime.hasOpenPullRequests(cwd))) return null
+  if (projectState === "reviewing") {
+    if (await runtime.hasOpenPullRequests(cwd)) return null
+    return preToolUseDeny(
+      `Trunk mode left the working tree unchanged because there is no open pull request to review.\n\n` +
+        `Check what is available:\n` +
+        `  gh pr list --state open\n\n` +
+        `If review work is finished, return to development on trunk:\n` +
+        `  swiz state set developing\n` +
+        `  git switch ${defaultBranch}`
+    )
+  }
 
   if (projectState === "developing") {
     return preToolUseDeny(
-      `Trunk mode is enabled and project state is \`developing\` — checking out a pull request branch is not allowed.\n\n` +
-        `Stay on the default branch (\`${defaultBranch}\`) while developing.`
+      `Trunk mode kept the working tree on \`${defaultBranch}\` because project state is \`developing\`; no pull request branch was checked out.\n\n` +
+        `You can continue without switching branches:\n` +
+        `  - Inspect the PR: gh pr view <number>\n` +
+        `  - Review its patch: gh pr diff <number>\n` +
+        `  - Finish a ready PR: gh pr merge <number>\n\n` +
+        `If the task is to work directly on an open PR, enter the review workflow first:\n` +
+        `  swiz state set reviewing\n` +
+        `Then retry \`gh pr checkout <number>\`.`
     )
   }
 
   return preToolUseDeny(
-    `Trunk mode is enabled for this project — checking out a pull request branch is not allowed.\n\n` +
-      `Work on the default branch (\`${defaultBranch}\`) only.`
+    `Trunk mode left the working tree on \`${defaultBranch}\`; no pull request branch was checked out.\n\n` +
+      `Available paths:\n` +
+      `  - Inspect the PR: gh pr view <number>\n` +
+      `  - Review its patch: gh pr diff <number>\n` +
+      `  - Finish a ready PR: gh pr merge <number>\n` +
+      `  - Continue trunk work: git switch ${defaultBranch}\n\n` +
+      `For direct work on an open PR, enter the review workflow first:\n` +
+      `  swiz state set reviewing\n` +
+      `Then retry \`gh pr checkout <number>\`.`
   )
 }
 
-function denyBranchChangesWhenTrunk(changes: GitBranchChange[]): SwizHookOutput | null {
+function denyBranchChangesWhenTrunk(
+  changes: GitBranchChange[],
+  defaultBranch: string
+): SwizHookOutput | null {
   for (const change of changes) {
     if (change.kind === "worktree-add") {
       return preToolUseDeny(
-        `Trunk mode is enabled — creating a new git worktree is not allowed.\n\n` +
-          `Use the main working directory and an existing branch instead.`
+        `Trunk mode kept work in the main working directory; no git worktree was created.\n\n` +
+          `Continue on trunk:\n` +
+          `  git switch ${defaultBranch}\n\n` +
+          `If another system moved the repository, use the recovery escape hatch instead:\n` +
+          `  git switch <existing-branch>`
       )
     }
 
     const target = change.target ? `\n\nAttempted branch: \`${change.target}\`` : ""
     return preToolUseDeny(
-      `Trunk mode is enabled — branch ${change.kind} operations are not allowed.` +
+      `Trunk mode left branch state unchanged. No branch was created, copied, renamed, or reset.` +
         target +
-        `\n\nSwitching to an existing branch is allowed as a recovery escape hatch, but creating or reshaping branch state is not.`
+        `\n\nContinue on trunk:\n` +
+        `  git switch ${defaultBranch}\n\n` +
+        `If another system moved the repository, switching to a branch that already exists is the recovery escape hatch:\n` +
+        `  git switch <existing-branch>\n\n` +
+        `The attempted branch ${change.kind} operation was not applied.`
     )
   }
   return null
@@ -160,7 +198,7 @@ async function selectTrunkModeDenial(
     projectState,
     runtime
   )
-  return prCheckout ?? denyBranchChangesWhenTrunk(branchChanges)
+  return prCheckout ?? denyBranchChangesWhenTrunk(branchChanges, defaultBranch)
 }
 
 export async function evaluatePretooluseTrunkModeBranchGate(

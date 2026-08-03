@@ -100,8 +100,12 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "git checkout -b feat/trunk-block")
       expect(result.decision).toBe("deny")
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-      expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
-      expect(String(hso?.permissionDecisionReason ?? "")).toContain("feat/trunk-block")
+      const reason = String(hso?.permissionDecisionReason ?? "")
+      expect(reason).toContain("Trunk mode")
+      expect(reason).toContain("feat/trunk-block")
+      expect(reason).toContain("No branch was created")
+      expect(reason).toContain("git switch main")
+      expect(reason).toContain("git switch <existing-branch>")
     } finally {
       await cleanupRepo(repo)
     }
@@ -179,7 +183,10 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         const result = await runHook(repo, command)
         expect(result.decision).toBe("deny")
         const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-        expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
+        const reason = String(hso?.permissionDecisionReason ?? "")
+        expect(reason).toContain("Trunk mode")
+        expect(reason).toContain("git switch main")
+        expect(reason).toContain("git switch <existing-branch>")
       } finally {
         await cleanupRepo(repo)
       }
@@ -221,7 +228,11 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "gh pr checkout 42")
       expect(result.decision).toBe("deny")
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-      expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
+      const reason = String(hso?.permissionDecisionReason ?? "")
+      expect(reason).toMatch(/pull request|PR/i)
+      expect(reason).toContain("gh pr view <number>")
+      expect(reason).toContain("gh pr diff <number>")
+      expect(reason).toContain("swiz state set reviewing")
     } finally {
       await cleanupRepo(repo)
     }
@@ -254,6 +265,11 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
         SWIZ_DAEMON_ORIGIN: "http://127.0.0.1:1",
       })
       expect(result.decision).toBe("deny")
+      const hso = result.parsed?.hookSpecificOutput as Record<string, any>
+      const reason = String(hso?.permissionDecisionReason ?? "")
+      expect(reason).toContain("gh pr list --state open")
+      expect(reason).toContain("swiz state set developing")
+      expect(reason).toContain("git switch main")
     } finally {
       await cleanupRepoAndMock(repo, mockGhBin)
     }
@@ -271,7 +287,11 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       })
       expect(result.decision).toBe("deny")
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-      expect(String(hso?.permissionDecisionReason ?? "")).toContain("developing")
+      const reason = String(hso?.permissionDecisionReason ?? "")
+      expect(reason).toContain("developing")
+      expect(reason).toContain("gh pr view <number>")
+      expect(reason).toContain("gh pr merge <number>")
+      expect(reason).toContain("swiz state set reviewing")
     } finally {
       await cleanupRepoAndMock(repo, mockGhBin)
     }
@@ -284,8 +304,12 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
       const result = await runHook(repo, "gh pr create --fill")
       expect(result.decision).toBe("deny")
       const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-      expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/pull request|PR/i)
-      expect(String(hso?.permissionDecisionReason ?? "")).toMatch(/trunk mode/i)
+      const reason = String(hso?.permissionDecisionReason ?? "")
+      expect(reason).toMatch(/pull request|PR/i)
+      expect(reason).toMatch(/trunk mode/i)
+      expect(reason).toContain("git switch main")
+      expect(reason).toContain("git push origin main")
+      expect(reason).toContain("gh pr merge <number>")
     } finally {
       await cleanupRepo(repo)
     }

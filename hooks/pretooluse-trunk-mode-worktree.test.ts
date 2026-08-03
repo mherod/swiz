@@ -29,9 +29,15 @@ describe("evaluatePretooluseTrunkModeWorktree", () => {
           permissionDecision: "deny",
         },
       })
+      const hookSpecificOutput = (
+        result as { hookSpecificOutput?: { permissionDecisionReason?: string } }
+      ).hookSpecificOutput
+      const reason = hookSpecificOutput?.permissionDecisionReason ?? ""
+      expect(reason).toContain("git worktree")
+      expect(reason).toContain("git switch main")
+      expect(reason).toContain("git switch <existing-branch>")
       if ("systemMessage" in result) {
-        expect(result.systemMessage).toContain("Trunk mode is enabled")
-        expect(result.systemMessage).toContain("git worktree")
+        expect(result.systemMessage).toContain("Trunk mode")
       }
     } finally {
       await destroyTempDir(tempDir)

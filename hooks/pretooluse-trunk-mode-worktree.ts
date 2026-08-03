@@ -22,11 +22,15 @@ export async function evaluatePretooluseTrunkModeWorktree(input: unknown): Promi
   const cwd: string = hookInput.cwd ?? process.cwd()
   const project = await readProjectSettings(cwd)
   if (!project?.trunkMode) return {}
+  const defaultBranch = project.defaultBranch ?? "main"
 
   return preToolUseDeny(
-    `Trunk mode is enabled — entering a git worktree is not allowed.\n\n` +
-      `Worktrees are designed for isolated feature branch work, which conflicts with trunk-based development.\n` +
-      `In trunk mode, all work stays on the default branch in your main working directory.`
+    `Trunk mode kept work in the current working directory; no git worktree was entered.\n\n` +
+      `Continue on trunk:\n` +
+      `  git switch ${defaultBranch}\n\n` +
+      `If another system moved the repository, use the existing-branch recovery escape hatch:\n` +
+      `  git switch <existing-branch>\n\n` +
+      `Worktrees remain disabled because this project delivers directly from \`${defaultBranch}\`.`
   )
 }
 
