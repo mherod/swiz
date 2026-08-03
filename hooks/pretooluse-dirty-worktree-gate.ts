@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Block task updates when the worktree has more than N dirty files.
-// Forces a commit boundary before the task plan can be reshaped further.
+// PreToolUse hook: Report dirty-worktree context during task updates.
+// Task planning remains available even when the worktree exceeds the configured threshold.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
@@ -13,16 +13,12 @@ import {
   readProjectSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import { skillAdvice } from "../src/skill-utils.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  expandSkillReferences,
   getGitStatusV2,
-  getTaskToolName,
   git,
-  mergeActionPlanIntoTasks,
   preToolUseAllow,
-  preToolUseDeny,
+  preToolUseAllowWithContext,
 } from "../src/utils/hook-utils.ts"
 
 /**
@@ -88,24 +84,11 @@ export async function evaluatePretooluseDirtyWorktreeGate(
     return preToolUseAllow(branchHint ? `${msg}\n\n${branchHint}` : msg)
   }
 
-  const commitSteps = await expandSkillReferences([
-    skillAdvice(
-      "commit",
-      "Use /commit skill to commit current changes",
-      'Run: git add . && git commit -m "wip: checkpoint"'
-    ),
-    `Retry this ${getTaskToolName("TaskUpdate")} after commit`,
-  ])
-
-  if (input.session_id) {
-    await mergeActionPlanIntoTasks(commitSteps, input.session_id, cwd)
-  }
-
-  return preToolUseDeny(
+  const context =
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +
-      `Commit your current changes before updating the task plan.\n\n` +
-      `To adjust: swiz settings set dirty-worktree-threshold <N>`
-  )
+    `Task planning remains available; consider creating a commit boundary after updating the plan.\n\n` +
+    `To adjust: swiz settings set dirty-worktree-threshold <N>`
+  return preToolUseAllowWithContext(context, context)
 }
 
 const pretooluseDirtyWorktreeGate: SwizToolHook = {

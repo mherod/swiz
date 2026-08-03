@@ -12,7 +12,7 @@ async function createDirtyFiles(dir: string, count: number): Promise<void> {
   }
 }
 
-async function runHook(cwd: string): Promise<{ decision?: string; reason?: string }> {
+async function runHook(cwd: string) {
   // Use a separate temp dir for HOME to avoid bun/node cache files
   // polluting the git worktree (causes +1 untracked file on CI)
   const fakeHome = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-home-"))
@@ -55,24 +55,25 @@ describe("pretooluse-dirty-worktree-gate", () => {
     expect(result.decision).toBe("allow")
   })
 
-  test("blocks task update above threshold (16 dirty files)", async () => {
+  test("allows task update above threshold and emits dirty-worktree context", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-over-"))
     await initGitRepo(dir)
     await createDirtyFiles(dir, 16)
     const result = await runHook(dir)
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
     expect(result.reason).toContain("16 dirty files")
     expect(result.reason).toContain("threshold: 15")
-    expect(result.reason).toContain("Commit")
+    expect(result.json?.hookSpecificOutput?.additionalContext).toContain("16 dirty files")
   })
 
-  test("blocks with clear commit instruction at 30 dirty files", async () => {
+  test("does not require a commit before task planning at 30 dirty files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-many-"))
     await initGitRepo(dir)
     await createDirtyFiles(dir, 30)
     const result = await runHook(dir)
-    expect(result.decision).toBe("deny")
+    expect(result.decision).toBe("allow")
     expect(result.reason).toContain("30 dirty files")
-    expect(result.reason).toContain("Commit your current changes")
+    expect(result.reason).not.toContain("Commit your current changes")
+    expect(result.json?.hookSpecificOutput?.additionalContext).toBe(result.reason)
   })
 })
