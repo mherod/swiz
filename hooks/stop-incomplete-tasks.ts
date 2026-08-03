@@ -13,6 +13,7 @@ import {
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
   detectCurrentAgentFromHookPayload,
+  shouldEnforceIncompleteTasksForHookPayload,
 } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -30,6 +31,7 @@ export async function evaluateStopIncompleteTasksHook(
   input: StopHookInput,
   dependencies: StopIncompleteTasksDependencies = {}
 ): Promise<SwizHookOutput> {
+  if (!shouldEnforceIncompleteTasksForHookPayload(input as Record<string, any>)) return {}
   if (!agentHasTaskToolsForHookPayload(input as Record<string, any>)) return {}
   try {
     const { getEffectiveSwizSettings, readSwizSettings, readProjectSettings } = await import(

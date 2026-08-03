@@ -3,6 +3,7 @@ import {
   detectCurrentAgentFromHookPayload,
   getAgentSettingsPath,
   getAgentSettingsSearchPaths,
+  shouldEnforceIncompleteTasksForHookPayload,
 } from "./agent-paths.ts"
 
 describe("getAgentSettingsSearchPaths", () => {
@@ -84,5 +85,21 @@ describe("detectCurrentAgentFromHookPayload _agent fast path", () => {
       _env: { CLAUDECODE: "1" },
     })
     expect(agent?.id).toBe("cursor")
+  })
+})
+
+describe("shouldEnforceIncompleteTasksForHookPayload", () => {
+  it("does not enforce persisted incomplete tasks for Codex", () => {
+    expect(shouldEnforceIncompleteTasksForHookPayload({ _agent: "codex" })).toBe(false)
+    expect(
+      shouldEnforceIncompleteTasksForHookPayload({
+        transcript_path: "/test/home/.codex/sessions/session.jsonl",
+      })
+    ).toBe(false)
+  })
+
+  it("retains incomplete-task enforcement for Claude and unknown callers", () => {
+    expect(shouldEnforceIncompleteTasksForHookPayload({ _agent: "claude" })).toBe(true)
+    expect(shouldEnforceIncompleteTasksForHookPayload(undefined)).toBe(true)
   })
 })

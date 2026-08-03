@@ -7,7 +7,11 @@
  */
 
 import { appendFile } from "node:fs/promises"
-import { agentHasTaskListToolForHookPayload, taskToolNameForHookPayload } from "../agent-paths.ts"
+import {
+  agentHasTaskListToolForHookPayload,
+  shouldEnforceIncompleteTasksForHookPayload,
+  taskToolNameForHookPayload,
+} from "../agent-paths.ts"
 import { debugLog, stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
@@ -404,6 +408,7 @@ async function tryStopFastPath(
 ): Promise<boolean> {
   const { canonicalEvent, sessionId } = timing
   if (!isStopLikeEvent(canonicalEvent) || !sessionId) return false
+  if (!shouldEnforceIncompleteTasksForHookPayload(payload)) return false
 
   const home = getHomeDirOrNull()
   if (!home) return false

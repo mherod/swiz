@@ -175,6 +175,17 @@ export function agentHasTaskToolsForHookPayload(input: HookPayload | undefined):
 }
 
 /**
+ * Codex task state is advisory at stop time because its planning surface cannot
+ * reliably reconcile every persisted task record. Other agents retain the
+ * incomplete-task stop gate, including unknown callers which default to Claude.
+ */
+export function shouldEnforceIncompleteTasksForHookPayload(
+  input: HookPayload | undefined
+): boolean {
+  return detectCurrentAgentFromHookPayload(input)?.id !== "codex"
+}
+
+/**
  * True only when the agent is definitely Claude with a TaskList-capable surface.
  * Unknown callers return false — TaskList must not appear in action-plan steps.
  */

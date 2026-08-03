@@ -246,7 +246,7 @@ describe("stop-incomplete-tasks", () => {
     expect(result.reason).not.toContain("Consider extracting helper")
   })
 
-  test("blocks Codex stop on incomplete tasks without requiring TaskList", async () => {
+  test("allows Codex to stop when incomplete tasks remain", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-codex-transcript"
     await writeRepositoryTask(
@@ -269,11 +269,8 @@ describe("stop-incomplete-tasks", () => {
       envOverrides: { CODEX_MANAGED_BY_NPM: "1" },
       transcriptPath: `${homeDir}/.codex/sessions/abc123.jsonl`,
     })
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Codex work")
-    expect(result.reason).toContain("Use update_plan to update task statuses")
-    expect(result.reason).not.toContain("TaskList")
-    expect(result.reason).not.toContain("TaskUpdate")
+    expect(result.decision).toBeUndefined()
+    expect(result.reason).toBeUndefined()
   })
 
   test("gate behavior: multiple incomplete tasks ordered in-progress first", async () => {
