@@ -7,7 +7,14 @@
  *      including edge cases the regex cannot handle correctly
  */
 import { describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { resolveProjectIdentity } from "../src/project-identity.ts"
+import type { ShellHookInput } from "../src/schemas.ts"
+import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import { FORCE_PUSH_RE, hasGitPushForceFlag } from "../src/utils/hook-utils.ts"
+import { evaluatePretoolusePushCooldown } from "./pretooluse-push-cooldown.ts"
 
 // ── FORCE_PUSH_RE regression tests ───────────────────────────────────────────
 
@@ -159,5 +166,33 @@ describe("hasGitPushForceFlag — token-based parser", () => {
     it("no force in quoted refspec containing the word force", () => {
       expect(hasGitPushForceFlag('git push origin "refs/heads/--force"')).toBe(false)
     })
+  })
+})
+
+describe("project identity", () => {
+  it("uses the canonical cwd fallback outside a Git repository", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-prepush-identity-"))
+    const cwd = join(base, "plain")
+    await mkdir(cwd, { recursive: true })
+    const { repoKey } = await resolveProjectIdentity(cwd)
+    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
+    await rm(sentinelPath, { force: true })
+
+    try {
+      const result = await evaluatePretoolusePushCooldown({
+        cwd,
+        tool_name: "Bash",
+        tool_input: { command: "git push origin main", cwd },
+      } as ShellHookInput)
+
+      expect(
+        "hookSpecificOutput" in result ? result.hookSpecificOutput?.permissionDecision : undefined
+      ).toBe("allow")
+    } finally {
+      await Promise.all([
+        rm(sentinelPath, { force: true }),
+        rm(base, { recursive: true, force: true }),
+      ])
+    }
   })
 })

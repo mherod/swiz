@@ -1,6 +1,6 @@
 import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getGitClient } from "../git/client.ts"
-import { getCanonicalPathHash } from "../git-helpers.ts"
+import { resolveProjectIdentity } from "../project-identity.ts"
 import {
   type EffectiveSwizSettings,
   getEffectiveSwizSettings,
@@ -126,23 +126,6 @@ async function pollUntilAllJobsSuccess(
 }
 
 // ─── Cooldown utilities ──────────────────────────────────────────────────
-
-export function getSentinelPath(cwd: string): string {
-  const proc = getGitClient().runSync(["rev-parse", "--show-toplevel"], {
-    cwd,
-  })
-  const repoRoot = proc.stdout.trim() || cwd
-  const repoKey = getCanonicalPathHash(repoRoot)
-  return swizPushCooldownSentinelPath(repoKey)
-}
-
-function getRepoKey(cwd: string): string {
-  const proc = getGitClient().runSync(["rev-parse", "--show-toplevel"], {
-    cwd,
-  })
-  const repoRoot = proc.stdout.trim() || cwd
-  return getCanonicalPathHash(repoRoot)
-}
 
 export async function getRemainingCooldownMs(sentinelPath: string): Promise<number> {
   try {
@@ -390,8 +373,8 @@ export const pushWaitCommand: Command = {
       throw new Error("Could not determine HEAD SHA")
     }
 
-    const repoKey = getRepoKey(cwd)
-    const sentinelPath = getSentinelPath(cwd)
+    const { repoKey } = await resolveProjectIdentity(cwd)
+    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
     // Wait for cooldown to clear
     await waitForCooldown({ sentinelPath, timeoutSeconds: timeout })

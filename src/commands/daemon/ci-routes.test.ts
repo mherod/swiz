@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { canonicalizePath } from "../../project-identity.ts"
 import type { CiRoutesContext } from "./ci-routes.ts"
 import { CiWatchRegistry } from "./ci-watch-registry.ts"
 
@@ -81,6 +85,46 @@ describe("CI routes", () => {
     const body = await response.json()
 
     expect(body.active).toEqual([expect.objectContaining({ cwd: "/two", sha: "sha-two" })])
+  })
+
+  test("matches canonical cwd aliases without matching sibling prefixes", async () => {
+    const base = await mkdtemp(join(tmpdir(), "swiz-ci-watch-identity-"))
+    const root = join(base, "repo")
+    const nested = join(root, "src", "nested")
+    const alias = join(base, "alias")
+    const sibling = join(base, "repo-copy")
+    await mkdir(join(root, ".git"), { recursive: true })
+    await mkdir(nested, { recursive: true })
+    await mkdir(sibling, { recursive: true })
+    await symlink(root, alias)
+
+    try {
+      const ctx = createContext()
+      const canonicalRoot = canonicalizePath(root)
+      const canonicalSibling = canonicalizePath(sibling)
+      ctx.ciWatchRegistry.start(canonicalRoot, "sha-root")
+      ctx.ciWatchRegistry.start(canonicalSibling, "sha-sibling")
+
+      for (const cwd of [`${root}/`, nested, alias]) {
+        const req = new Request(`http://daemon/ci-watches?cwd=${encodeURIComponent(cwd)}`)
+        const response = await routes.handleCiRoutes(req, new URL(req.url), ctx)
+        if (!response) throw new Error("Expected GET /ci-watches response")
+        const body = await response.json()
+        expect(body.active).toEqual([
+          expect.objectContaining({ cwd: canonicalRoot, sha: "sha-root" }),
+        ])
+      }
+
+      const siblingReq = new Request(`http://daemon/ci-watches?cwd=${encodeURIComponent(sibling)}`)
+      const siblingResponse = await routes.handleCiRoutes(siblingReq, new URL(siblingReq.url), ctx)
+      if (!siblingResponse) throw new Error("Expected GET /ci-watches response")
+      const siblingBody = await siblingResponse.json()
+      expect(siblingBody.active).toEqual([
+        expect.objectContaining({ cwd: canonicalSibling, sha: "sha-sibling" }),
+      ])
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
   })
 
   test("ignores non-workflow webhook events", async () => {

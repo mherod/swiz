@@ -17,8 +17,8 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { getCanonicalPathHash, git } from "../src/git-helpers.ts"
-import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
+import { resolveProjectIdentity } from "../src/project-identity.ts"
+import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
@@ -58,7 +58,9 @@ async function checkCooldown(
   }
 }
 
-async function evaluate(input: ShellHookInput) {
+export async function evaluatePretoolusePushCooldown(
+  input: ShellHookInput
+): Promise<SwizHookOutput> {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
   const command: string = (input.tool_input?.command as string) ?? ""
@@ -66,8 +68,7 @@ async function evaluate(input: ShellHookInput) {
   if (hasGitPushForceFlag(command)) return {}
 
   const cwd: string = (input.tool_input?.cwd as string) ?? process.cwd()
-  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-  const repoKey = getCanonicalPathHash(repoRoot || cwd)
+  const { repoKey } = await resolveProjectIdentity(cwd)
   const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
   const cooldownMs = await resolveCooldownMs()
@@ -86,7 +87,7 @@ const pretoolusePushCooldown: SwizShellHook = {
   timeout: 5,
 
   run(input) {
-    return evaluate(input as ShellHookInput)
+    return evaluatePretoolusePushCooldown(input as ShellHookInput)
   },
 }
 

@@ -2,6 +2,7 @@
  * CI watching route handlers for the daemon web server.
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
+import { resolveProjectRoot } from "../../project-identity.ts"
 import { readSwizSettings } from "../../settings.ts"
 import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import { verifyWebhookSignature } from "./ci-watch-registry.ts"
@@ -111,9 +112,10 @@ export async function handleCiRoutes(
   }
   if (url.pathname === "/ci-watches" && req.method === "GET") {
     const cwd = url.searchParams.get("cwd")
+    const projectCwd = cwd ? await resolveProjectRoot(cwd) : null
     const active = ctx.ciWatchRegistry
       .listActive()
-      .filter((entry) => (cwd ? entry.cwd === cwd : true))
+      .filter((entry) => (projectCwd ? entry.cwd === projectCwd : true))
     return Response.json({ active })
   }
   return null

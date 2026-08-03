@@ -320,3 +320,23 @@ describe("waitForCooldown", () => {
     expect(result.waitedMs).toBeLessThan(3000)
   })
 })
+
+describe("project identity", () => {
+  it("resolves one canonical repo key for cooldown and result storage", async () => {
+    const source = await Bun.file(join(import.meta.dir, "push-wait.ts")).text()
+
+    expect(source.match(/resolveProjectIdentity\(cwd\)/g)).toHaveLength(1)
+    expect(source).not.toContain("getCanonicalPathHash")
+    expect(source).not.toContain('["rev-parse", "--show-toplevel"]')
+    expect(source).toContain("swizPushCooldownSentinelPath(repoKey)")
+    expect(source).toContain("writePushResult(repoKey")
+  })
+
+  it("keeps push-ci on the same canonical sentinel contract", async () => {
+    const source = await Bun.file(join(import.meta.dir, "push-ci.ts")).text()
+
+    expect(source.match(/resolveProjectIdentity\(cwd\)/g)).toHaveLength(1)
+    expect(source).not.toContain("getSentinelPath")
+    expect(source).toContain("swizPushCooldownSentinelPath(repoKey)")
+  })
+})

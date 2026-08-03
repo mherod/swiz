@@ -9,16 +9,18 @@ import { requiresPeerReview } from "../collaboration-policy.ts"
 import { stderrLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getGitClient } from "../git/client.ts"
+import { resolveProjectIdentity } from "../project-identity.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
 } from "../settings.ts"
+import { swizPushCooldownSentinelPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { getDefaultBranch, isDefaultBranch } from "../utils/git-utils.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
-import { getSentinelPath, parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
+import { parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
 
 export interface PushCiArgs {
   remote: string
@@ -113,7 +115,8 @@ export const pushCiCommand: Command = {
     await assertPeerReviewAllowsDefaultPush(cwd, targetBranch, effective.collaborationMode)
 
     // 1. Wait for push cooldown
-    const sentinelPath = getSentinelPath(cwd)
+    const { repoKey } = await resolveProjectIdentity(cwd)
+    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
     await waitForCooldown({ sentinelPath, timeoutSeconds: cooldownTimeout })
 
     // 2. Push

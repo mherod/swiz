@@ -14,17 +14,12 @@
 // until the background task completes; the cooldown is handled by the
 // pretooluse hook reading the stale sentinel.
 
+import { resolveProjectIdentity } from "../src/project-identity.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
-import {
-  GIT_PUSH_RE,
-  getCanonicalPathHash,
-  git,
-  hasGitPushForceFlag,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+import { GIT_PUSH_RE, hasGitPushForceFlag, isShellTool } from "../src/utils/hook-utils.ts"
 
 function getEligibleCommand(hookInput: PostToolHookInput): string | null {
   if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return null
@@ -53,8 +48,7 @@ export async function evaluatePosttoolusePushCooldown(input: unknown): Promise<S
   if (isBackgroundPush(hookInput, command)) return {}
 
   const cwd = hookInput.cwd ?? process.cwd()
-  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-  const repoKey = getCanonicalPathHash(repoRoot || cwd)
+  const { repoKey } = await resolveProjectIdentity(cwd)
   const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
   try {

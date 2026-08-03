@@ -24,18 +24,13 @@
 // Dual-mode: exports a SwizShellHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { resolveProjectIdentity } from "../src/project-identity.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { swizUpstreamSyncDriftCooldownPath } from "../src/temp-paths.ts"
 import { fetchGitStatusFromDaemon } from "../src/utils/daemon-git-state.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
-import {
-  GIT_PUSH_RE,
-  GIT_SYNC_RE,
-  getCanonicalPathHash,
-  git,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+import { GIT_PUSH_RE, GIT_SYNC_RE, isShellTool } from "../src/utils/hook-utils.ts"
 
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen|review)|issue\s+(create|close|comment|edit|reopen))\b/i
@@ -111,8 +106,7 @@ async function maybeTriggerDriftSync(cwd: string): Promise<void> {
   const defaultBranch = await getDefaultBranch(cwd)
   if (!isDefaultBranchDrifted(status, defaultBranch)) return
 
-  const repoRoot = (await git(["rev-parse", "--show-toplevel"], cwd)) || cwd
-  const repoKey = getCanonicalPathHash(repoRoot)
+  const { repoKey } = await resolveProjectIdentity(cwd)
   if (await isDriftCooldownActive(repoKey)) return
 
   await markDriftCooldown(repoKey)
