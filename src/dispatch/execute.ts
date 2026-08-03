@@ -456,8 +456,12 @@ async function resolveFilteredGroups(
   let preloadedProjectSettings: ProjectSwizSettings | null | undefined
 
   if (manifestProvider) {
-    combinedManifest = await manifestProvider(ctx.cwd)
-    preloadedProjectSettings = undefined // daemon provides manifest but not settings snapshot
+    const [manifestSnapshot, projectSettingsSnapshot] = await Promise.all([
+      manifestProvider(ctx.cwd),
+      readProjectSettings(ctx.cwd),
+    ])
+    combinedManifest = manifestSnapshot
+    preloadedProjectSettings = projectSettingsSnapshot
   } else {
     const result = await loadCombinedManifest(ctx.cwd)
     combinedManifest = result.manifest

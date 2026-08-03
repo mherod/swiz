@@ -299,13 +299,15 @@ describe("pretooluse-skill-invocation-gate", () => {
 
   async function runPrMergeGateSubprocess(
     sessionLines: string[],
-    command = "gh pr merge 42 --squash"
+    command = "gh pr merge 42 --squash",
+    inputOverrides: Record<string, unknown> = {}
   ): Promise<Record<string, any>> {
     return await runGateSubprocess("pr-qa-and-merge", {
       tool_name: "Bash",
       tool_input: { command },
       transcript_path: "fake-transcript.json",
       _transcriptSummary: summaryFromLines(sessionLines),
+      ...inputOverrides,
     })
   }
 
@@ -317,6 +319,21 @@ describe("pretooluse-skill-invocation-gate", () => {
         ?.permissionDecision
     ).toBe("deny")
     expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+  })
+
+  it("allows gh pr merge without the merge skill in trunk mode", async () => {
+    const result = await runPrMergeGateSubprocess([], "gh pr merge 42 --squash", {
+      _effectiveSettings: { trunkMode: true },
+    })
+
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+        ?.permissionDecision
+    ).toBe("allow")
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecisionReason?: string } }).hookSpecificOutput
+        ?.permissionDecisionReason
+    ).toContain("reviewer approval is not required")
   })
 
   it("allows gh pr merge when pr-merge skill was used recently", async () => {

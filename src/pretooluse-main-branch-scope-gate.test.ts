@@ -106,13 +106,10 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       getIssueStoreReader: () => testStore.asReader(),
       getRepoSlug: async () => TEST_REPO,
       ghJsonViaDaemon: async <T>(args: string[]): Promise<T | null> => {
-        if (!args.join(" ").includes("pulls/101")) return null
+        if (!args.join(" ").includes("pr view 101")) return null
         return {
-          base: {
-            ref: "main",
-          },
-          mergeStateStatus: "MERGEABLE",
-          mergeable: true,
+          mergeStateStatus: "CLEAN",
+          mergeable: "MERGEABLE",
           reviewDecision: "APPROVED",
         } as T
       },
@@ -146,6 +143,36 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
     } catch {
       // ignore
     }
+  })
+
+  test("allows PR merge without reviewer approval in trunk mode", async () => {
+    const deps = testDeps()
+    deps.readProjectSettings = async () => ({ trunkMode: true })
+    deps.detectProjectCollaborationPolicy = async () => {
+      throw new Error("trunk-mode merges must not query collaboration policy")
+    }
+    deps.ghJsonViaDaemon = async () => {
+      throw new Error("trunk-mode merges must not query reviewer state")
+    }
+
+    const result = await evaluatePretooluseMainBranchScopeGate(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "gh pr merge 43 --squash",
+          cwd: process.cwd(),
+        },
+        cwd: process.cwd(),
+        transcript_path: "mock-transcript.jsonl",
+      },
+      deps
+    )
+    const parsed = hookOutputSchema.parse(result)
+
+    expect(parsed.hookSpecificOutput?.permissionDecision).toBe("allow")
+    expect(parsed.hookSpecificOutput?.permissionDecisionReason).toContain(
+      "reviewer approval is not required"
+    )
   })
 
   test("denies PR merge if PR has CONFLICTING mergeable status in database (Cache Fast-Path)", async () => {

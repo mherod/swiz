@@ -274,21 +274,33 @@ async function getPrMergeability(
     // fall through to live API
   }
 
-  // Live REST API for accurate mergeStateStatus (required CI, branch protection)
+  // `gh pr view` exposes the GraphQL merge-state fields used below. The REST
+  // pull response uses different names and does not include reviewDecision.
   try {
     const result = await deps.ghJsonViaDaemon<{
       mergeStateStatus?: string
-      mergeable?: boolean | null
+      mergeable?: string
       reviewDecision?: string
-    }>(["api", `repos/${repoSlug}/pulls/${prNumber}`], cwd)
+    }>(
+      [
+        "pr",
+        "view",
+        prNumber,
+        "--repo",
+        repoSlug,
+        "--json",
+        "mergeStateStatus,mergeable,reviewDecision",
+      ],
+      cwd
+    )
 
     const mergeStateStatus = result?.mergeStateStatus ?? "UNKNOWN"
-    const isMergeable = result?.mergeable !== false
+    const isMergeable = result?.mergeable === "MERGEABLE"
     const reviewDecision = result?.reviewDecision ?? "PENDING"
 
     const canMerge =
       isMergeable &&
-      mergeStateStatus === "MERGEABLE" &&
+      mergeStateStatus === "CLEAN" &&
       (reviewDecision === "APPROVED" || reviewDecision === "REVIEW_REQUIRED")
 
     const statusContext = [mergeStateStatus, `review: ${reviewDecision}`].filter(Boolean).join(", ")
@@ -489,9 +501,15 @@ export async function evaluatePretooluseMainBranchScopeGate(
   if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return {}
 
   const { command, cwd } = getCommandAndCwd(hookInput)
+  const prMergeMatch = isPullRequestMergeCommand(command)
 
   const trunkModeSettings = await deps.readProjectSettings(cwd)
   if (trunkModeSettings?.trunkMode) {
+    if (prMergeMatch) {
+      return preToolUseAllow(
+        "Continue in trunk-mode merge policy: reviewer approval is not required; GitHub remains authoritative for mergeability, checks, and branch protection."
+      )
+    }
     return preToolUseAllow(
       "Continue in trunk-mode push policy: direct pushes to the default branch are allowed."
     )
@@ -509,7 +527,6 @@ export async function evaluatePretooluseMainBranchScopeGate(
     if (result) return result
   }
 
-  const prMergeMatch = isPullRequestMergeCommand(command)
   if (prMergeMatch) {
     const result = await handlePrMerge(command, cwd, defaultBranch, deps)
     if (result) return result

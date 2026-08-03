@@ -16,6 +16,7 @@
 //     not --add-label; creation is not a label change on an existing issue)
 //   gh pr create                              →  requires /pr-open skill
 //   gh pr merge                               →  requires /pr-qa-and-merge skill
+//                                                 except in trunk mode
 //   gh pr checkout                            →  requires any of /pr-qa-and-merge,
 //     /pr-comments-address, or /work-on-issue
 //   gh pr review … --dismiss                  →  requires /pr-comments-address skill
@@ -343,6 +344,13 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const ctx = resolveGatedCommand(rawInput)
     if (!ctx) return {}
     const { primary, anyOfSkills } = ctx
+
+    const effectiveSettings = rawInput._effectiveSettings as { trunkMode?: boolean } | undefined
+    if (primary === "pr-qa-and-merge" && effectiveSettings?.trunkMode === true) {
+      return preToolUseAllow(
+        "Continue in trunk-mode merge policy: the merge skill is not required and reviewer approval is not required; GitHub remains authoritative for mergeability, checks, and branch protection."
+      )
+    }
 
     const cwd: string = (rawInput.cwd as string) ?? process.cwd()
     const preflightBlock = await checkSkillSpecificPreflight(primary, rawInput, cwd)
