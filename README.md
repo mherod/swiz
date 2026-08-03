@@ -63,12 +63,12 @@ The canonical manifest uses neutral names. At install time, `agents.ts` translat
 | Concept  | Claude Code    | Cursor         | Gemini CLI          | Codex CLI                        |
 |----------|----------------|----------------|---------------------|----------------------------------|
 | Shell    | `Bash`         | `Shell`        | `run_shell_command` | `shell_command` / `exec_command` |
-| Edit     | `Edit`         | `StrReplace`   | `replace`           | `apply_patch`                    |
-| Write    | `Write`        | `Write`        | `write_file`        | `apply_patch`                    |
+| Edit     | `Edit`         | `StrReplace`   | `replace`           | `apply_patch` / `functions.apply_patch` |
+| Write    | `Write`        | `Write`        | `write_file`        | `apply_patch` / `functions.apply_patch` |
 | Read     | `Read`         | `Read`         | `read_file`         | `read_file`                      |
 | Grep     | `Grep`         | `Grep`         | `grep_search`       | `grep_files`                     |
 | Glob     | `Glob`         | `Glob`         | `glob`              | `list_dir`                       |
-| Notebook | `NotebookEdit` | `EditNotebook` | —                   | `apply_patch`                    |
+| Notebook | `NotebookEdit` | `EditNotebook` | —                   | `apply_patch` / `functions.apply_patch` |
 | Tasks    | `TaskCreate`   | `TodoWrite`    | `write_todos`       | `spawn_agent`                    |
 
 **Event Names**
