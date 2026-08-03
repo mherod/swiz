@@ -11,7 +11,7 @@ import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../s
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
-import { detectPackageManager, type PackageManager } from "../src/utils/package-detection.ts"
+import { detectPackageManagerDetails, type PackageManager } from "../src/utils/package-detection.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
 
 // Equivalent subcommands across package managers
@@ -119,8 +119,12 @@ function classifySubcmd(subcmd: string, args: string): keyof CmdMap | null {
   return SUBCMD_MAP[subcmd] ?? null
 }
 
-function isImplausibleInvocation(invoked: string, pm: PackageManager): boolean {
-  if (invoked === "npm" || invoked === "npx") return pm !== "npm"
+function isImplausibleInvocation(
+  invoked: string,
+  pm: PackageManager,
+  signals: ReadonlySet<PackageManager>
+): boolean {
+  if (invoked === "npm" || invoked === "npx") return pm !== "npm" && !signals.has("npm")
   if (invoked === "yarn") return pm === "bun" || pm === "pnpm"
   return false
 }
@@ -164,21 +168,35 @@ function buildImplausibleDeny(parsed: ParsedInvocation, pm: PackageManager): Swi
   return buildDeny(`${invoked} ${subcmd}`, `${pm} ${subcmd}`, pm)
 }
 
+function resolveCwd(input: ShellHookInput): string | undefined {
+  if (input.cwd) return input.cwd
+  return typeof input.tool_input?.cwd === "string" ? input.tool_input.cwd : undefined
+}
+
+function buildAcceptedInvocation(
+  parsed: ParsedInvocation,
+  pm: PackageManager,
+  signals: ReadonlySet<PackageManager>
+): SwizHookOutput {
+  const npmSignalReason =
+    pm !== "npm" && signals.has("npm") ? " because npm project signals are also present" : ""
+  return preToolUseAllow(
+    `Continue in ${pm}-preferred package-command mode: '${parsed.invoked}' is accepted here${npmSignalReason}.`
+  )
+}
+
 async function evaluate(input: ShellHookInput) {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
-  const cwd =
-    input.cwd ?? (typeof input.tool_input?.cwd === "string" ? input.tool_input.cwd : undefined)
-  const pm = await detectPackageManager(cwd)
-  if (!pm) return {}
+  const detection = await detectPackageManagerDetails(resolveCwd(input))
+  if (!detection) return {}
+  const { packageManager: pm, signals } = detection
 
   const command: string = input.tool_input?.command ?? ""
   const parsed = parseInvocation(command)
   if (!parsed) return {}
-  if (!isImplausibleInvocation(parsed.invoked, pm)) {
-    return preToolUseAllow(
-      `Continue in ${pm}-preferred package-command mode: '${parsed.invoked}' is accepted here.`
-    )
+  if (!isImplausibleInvocation(parsed.invoked, pm, signals)) {
+    return buildAcceptedInvocation(parsed, pm, signals)
   }
 
   return buildImplausibleDeny(parsed, pm)

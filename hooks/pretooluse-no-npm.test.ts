@@ -123,4 +123,23 @@ describe("pretooluse-no-npm (pnpm project)", () => {
       expect(result.stdout).toBe("")
     })
   })
+
+  describe("strong npm signals", () => {
+    test("package-lock alongside pnpm lock allows npm", async () => {
+      const dir = await makeTempDir()
+      await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+      await writeFile(join(dir, "package-lock.json"), "{}")
+      const result = await runHook("npm install", { cwd: dir })
+      expect(result.decision).toBe("allow")
+      expect(result.reason).toContain("npm project signals are also present")
+    })
+
+    test("npm shrinkwrap alongside pnpm lock allows npx", async () => {
+      const dir = await makeTempDir()
+      await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+      await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
+      const result = await runHook("npx tsc --noEmit", { cwd: dir })
+      expect(result.decision).toBe("allow")
+    })
+  })
 })

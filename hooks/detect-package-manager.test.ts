@@ -159,7 +159,7 @@ describe("detectPackageManager — detection priority", () => {
     expect(result.decision).toBe("allow")
   })
 
-  test("packageManager field overrides all lock files", async () => {
+  test("packageManager field remains preferred when all lock files exist", async () => {
     const dir = await makeTempDir("-priority-pkg-locks")
     // package.json says yarn, all lock files present
     await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "yarn@3.6.0" }))
@@ -169,8 +169,8 @@ describe("detectPackageManager — detection priority", () => {
     await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
     await writeFile(join(dir, ".pnp.cjs"), "")
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("yarn") // packageManager field is used
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("npm project signals are also present")
   })
 })
 
@@ -347,6 +347,17 @@ describe("detectPackageManager — lockfile in parent directory", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("bun") // bun wins, not pnpm
   })
+
+  test("parent npm lock does not count beyond a nearer pnpm project boundary", async () => {
+    const parent = await makeTempDir("-parent-npm")
+    const child = join(parent, "child")
+    await mkdir(child)
+    await writeFile(join(parent, "package-lock.json"), "{}")
+    await writeFile(join(child, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+    const result = await npmDecisionInDir(child)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
 })
 
 // ─── Conflicting lockfiles (priority order) ───────────────────────────────────
@@ -382,22 +393,22 @@ describe("detectPackageManager — conflicting lockfiles in same directory", () 
     expect(result.reason).toContain("pnpm")
   })
 
-  test("yarn.lock + package-lock.json → yarn wins", async () => {
+  test("yarn.lock + package-lock.json → npm is allowed despite yarn preference", async () => {
     const dir = await makeTempDir("-conflict-yarn-npm")
     await writeFile(join(dir, "yarn.lock"), "")
     await writeFile(join(dir, "package-lock.json"), "{}")
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("yarn")
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("npm project signals are also present")
   })
 
-  test("shrinkwrap.yaml + npm-shrinkwrap.json → pnpm wins", async () => {
+  test("shrinkwrap.yaml + npm-shrinkwrap.json → npm is allowed despite pnpm preference", async () => {
     const dir = await makeTempDir("-conflict-pnpm-npm")
     await writeFile(join(dir, "shrinkwrap.yaml"), "lockfileVersion: 6.0\n")
     await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("pnpm")
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("npm project signals are also present")
   })
 
   test("bun.lockb + bun.lock → both detect bun (either file is sufficient)", async () => {
