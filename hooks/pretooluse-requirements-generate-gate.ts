@@ -19,6 +19,7 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains executable as a
 // standalone script for backwards compatibility and testing.
 
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import {
   formatSkillReferenceForAgent,
@@ -30,7 +31,7 @@ import { isFileEditForPath } from "../src/utils/edit-projection.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
-const GENERATE_REQUIREMENTS_SKILL = "generate-requirements"
+const GENERATE_REQUIREMENTS_SKILL = GATE_REQUIRED_SKILLS.generateRequirements.name
 
 /** Basename treated as the requirements spec file. */
 const REQUIREMENTS_FILE_PATTERN = "REQUIREMENTS.md"

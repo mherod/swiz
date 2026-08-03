@@ -65,7 +65,7 @@ export function clearSkillCache(): void {
   _skillCache.clear()
 }
 
-function skillFileExists(name: string, cwd?: string): boolean {
+export function skillFileExists(name: string, cwd?: string): boolean {
   if (!name.trim()) return false
   return getSkillDirs(cwd).some((dir) => existsSync(join(dir, name, "SKILL.md")))
 }

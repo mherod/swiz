@@ -7,6 +7,7 @@
 // that has not been invoked blocks stop. Add new skills to the ordered list
 // below instead of creating more one-off stop hooks.
 
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { git } from "../src/git-helpers.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
@@ -165,7 +166,7 @@ async function hasPreCompactionSkill(
 // Add future stop-gated skills here in the exact order they should block.
 const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   {
-    skill: "end-of-day",
+    skill: GATE_REQUIRED_SKILLS.endOfDay.name,
     applies: async (ctx) => {
       const { cwd, input } = ctx
       const es = (input as any)._effectiveSettings
@@ -222,7 +223,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
       `${skillReference} ensures commits reach the remote (so Closes #N auto-closes issues on GitHub), evidence is posted, and follow-up work is captured — preventing work from being lost when the session ends.`,
   },
   {
-    skill: "farm-out-issues",
+    skill: GATE_REQUIRED_SKILLS.farmOutIssues.name,
     applies: ({ cwd }) => isGitRepo(cwd),
     blockedLine: (skillReference) =>
       `BLOCKED: The ${skillReference} skill has not been invoked recently.`,
@@ -235,7 +236,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
     bypassIfNoNewCommits: true,
   },
   {
-    skill: "continue-with-tasks",
+    skill: GATE_REQUIRED_SKILLS.continueWithTasks.name,
     blockedLine: (skillReference) =>
       `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
     actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,
@@ -246,7 +247,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
       `the ${skillReference} skill makes the next task-carrying continuation explicit before the session ends, so work is handed off cleanly instead of being abandoned between stops.`,
   },
   {
-    skill: "reflect-on-session-mistakes",
+    skill: GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name,
     blockedLine: (skillReference) =>
       `BLOCKED: stop requires the ${skillReference} skill to be used first.`,
     actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,

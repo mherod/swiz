@@ -8,6 +8,7 @@
 
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
@@ -34,7 +35,8 @@ import {
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
-const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = "update-memory/SKILL.md"
+const UPDATE_MEMORY_SKILL = GATE_REQUIRED_SKILLS.updateMemory.name
+const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = `${UPDATE_MEMORY_SKILL}/SKILL.md`
 const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
 const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
 const COOLDOWN_MS = 30 * 60 * 1000 // 30 minutes
@@ -214,7 +216,7 @@ function buildDenialReason(toolName: string, missingSkill: boolean): string {
       `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
       formatActionPlan(
         [
-          "Read the /update-memory skill by opening its SKILL.md.",
+          `Read the /${UPDATE_MEMORY_SKILL} skill by opening its SKILL.md.`,
           "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
         ],
         { header: "To resolve:" }

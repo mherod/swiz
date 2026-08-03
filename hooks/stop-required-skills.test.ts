@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS } from "../src/agents.ts"
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { runHookInProcess, useTempDir } from "../src/utils/test-utils.ts"
 
 const HOOK = "hooks/stop-required-skills.ts"
@@ -122,10 +123,10 @@ async function createOldTranscript(dir: string, skills: string[]): Promise<strin
 }
 
 const ALL_REQUIRED_SKILLS = [
-  "end-of-day",
-  "farm-out-issues",
-  "continue-with-tasks",
-  "reflect-on-session-mistakes",
+  GATE_REQUIRED_SKILLS.endOfDay.name,
+  GATE_REQUIRED_SKILLS.farmOutIssues.name,
+  GATE_REQUIRED_SKILLS.continueWithTasks.name,
+  GATE_REQUIRED_SKILLS.reflectOnSessionMistakes.name,
 ]
 
 describe("stop-required-skills", () => {

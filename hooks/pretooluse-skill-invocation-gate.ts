@@ -34,6 +34,7 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { agentHasTaskListToolForHookPayload } from "../src/agent-paths.ts"
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { checkGitIdentity } from "../src/git-identity.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
@@ -131,27 +132,48 @@ interface SkillRequirement {
  * Returns null when no skill gate applies (command is not gated or is exempt).
  */
 function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRequirement | null {
-  if (GIT_COMMIT_RE.test(cleanedCommand)) return { primary: "commit", anyOf: ["commit"] }
+  if (GIT_COMMIT_RE.test(cleanedCommand)) {
+    const skill = GATE_REQUIRED_SKILLS.commit.name
+    return { primary: skill, anyOf: [skill] }
+  }
   if (GIT_PUSH_RE.test(cleanedCommand)) {
     if (GIT_PUSH_DELETE_RE.test(cleanedCommand)) return null // branch deletion is not a code push
-    return { primary: "push", anyOf: ["push"] }
+    const skill = GATE_REQUIRED_SKILLS.push.name
+    return { primary: skill, anyOf: [skill] }
   }
-  if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command))
-    return { primary: "triage-issues", anyOf: ["triage-issues"] }
-  if (GH_ISSUE_LABEL_CHANGE_RE.test(command))
-    return { primary: "refine-issue", anyOf: ["refine-issue"] }
-  if (GH_ISSUE_SELF_ASSIGN_RE.test(command))
-    return { primary: "work-on-issue", anyOf: ["work-on-issue"] }
+  if (GH_ISSUE_ADD_TRIAGED_LABEL_RE.test(command)) {
+    const skill = GATE_REQUIRED_SKILLS.triageIssues.name
+    return { primary: skill, anyOf: [skill] }
+  }
+  if (GH_ISSUE_LABEL_CHANGE_RE.test(command)) {
+    const skill = GATE_REQUIRED_SKILLS.refineIssue.name
+    return { primary: skill, anyOf: [skill] }
+  }
+  if (GH_ISSUE_SELF_ASSIGN_RE.test(command)) {
+    const skill = GATE_REQUIRED_SKILLS.workOnIssue.name
+    return { primary: skill, anyOf: [skill] }
+  }
   if (GH_PR_CHECKOUT_RE.test(cleanedCommand))
     return {
       primary: "pr-checkout",
-      anyOf: ["pr-qa-and-merge", "pr-comments-address", "work-on-issue"],
+      anyOf: [
+        GATE_REQUIRED_SKILLS.prQaAndMerge.name,
+        GATE_REQUIRED_SKILLS.prCommentsAddress.name,
+        GATE_REQUIRED_SKILLS.workOnIssue.name,
+      ],
     }
-  if (isPullRequestMergeCommand(command))
-    return { primary: "pr-qa-and-merge", anyOf: ["pr-qa-and-merge"] }
-  if (GH_PR_CREATE_RE.test(cleanedCommand)) return { primary: "pr-open", anyOf: ["pr-open"] }
-  if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand))
-    return { primary: "pr-comments-address", anyOf: ["pr-comments-address"] }
+  if (isPullRequestMergeCommand(command)) {
+    const skill = GATE_REQUIRED_SKILLS.prQaAndMerge.name
+    return { primary: skill, anyOf: [skill] }
+  }
+  if (GH_PR_CREATE_RE.test(cleanedCommand)) {
+    const skill = GATE_REQUIRED_SKILLS.prOpen.name
+    return { primary: skill, anyOf: [skill] }
+  }
+  if (GH_PR_REVIEW_DISMISS_RE.test(cleanedCommand)) {
+    const skill = GATE_REQUIRED_SKILLS.prCommentsAddress.name
+    return { primary: skill, anyOf: [skill] }
+  }
   return null
 }
 
@@ -168,21 +190,21 @@ const SKILL_DENY_CONFIGS: Record<
   string,
   (ref: string) => { action: string; planStep: string; whyMatters: string }
 > = {
-  "triage-issues": (ref) => ({
+  [GATE_REQUIRED_SKILLS.triageIssues.name]: (ref) => ({
     action: 'adding the "triaged" label',
     planStep: `Invoke the ${ref} skill before adding the triaged label.`,
     whyMatters:
       `the ${ref} skill runs the full triage workflow (repro, severity, owner assignment). ` +
       `Adding the label directly skips these safeguards.`,
   }),
-  "refine-issue": (ref) => ({
+  [GATE_REQUIRED_SKILLS.refineIssue.name]: (ref) => ({
     action: "changing issue labels",
     planStep: `Invoke the ${ref} skill before modifying issue labels.`,
     whyMatters:
       `the ${ref} skill validates label changes against issue state. ` +
       `Modifying labels directly skips these safeguards.`,
   }),
-  "work-on-issue": (ref) => ({
+  [GATE_REQUIRED_SKILLS.workOnIssue.name]: (ref) => ({
     action: "assigning yourself to an issue",
     planStep: `Invoke the ${ref} skill before claiming issue ownership.`,
     whyMatters:
@@ -196,28 +218,28 @@ const SKILL_DENY_CONFIGS: Record<
       `checking out a PR branch without a workflow skill skips PR context loading, ` +
       `review state awareness, and task setup. Use ${ref} to enter the correct workflow.`,
   }),
-  "pr-qa-and-merge": (ref) => ({
+  [GATE_REQUIRED_SKILLS.prQaAndMerge.name]: (ref) => ({
     action: "merging a pull request",
     planStep: `Invoke the ${ref} skill before running \`gh pr merge\`.`,
     whyMatters:
       `the ${ref} skill enforces the complete merge workflow (CI status, review sign-off, linked issue closure). ` +
       `Running \`gh pr merge\` directly skips these safeguards.`,
   }),
-  "pr-open": (ref) => ({
+  [GATE_REQUIRED_SKILLS.prOpen.name]: (ref) => ({
     action: "opening a new pull request",
     planStep: `Invoke the ${ref} skill before running \`gh pr create\`.`,
     whyMatters:
       `the ${ref} skill enforces the complete PR workflow (branch checks, AC verification, linked issues). ` +
       `Running \`gh pr create\` directly skips these safeguards.`,
   }),
-  "pr-comments-address": (ref) => ({
+  [GATE_REQUIRED_SKILLS.prCommentsAddress.name]: (ref) => ({
     action: "dismissing a pull request review",
     planStep: `Invoke the ${ref} skill before dismissing a PR review.`,
     whyMatters:
       `the ${ref} skill requires addressing every reviewer comment before dismissal. ` +
       `Dismissing a review directly skips this accountability.`,
   }),
-  commit: (ref) => ({
+  [GATE_REQUIRED_SKILLS.commit.name]: (ref) => ({
     action: "running git commit",
     planStep: `Invoke the ${ref} skill before running git commit.`,
     whyMatters:
@@ -225,7 +247,7 @@ const SKILL_DENY_CONFIGS: Record<
       `(task preflight, conventional message format, pre-commit hooks). ` +
       `Running git commit directly skips these safeguards.`,
   }),
-  push: (ref) => ({
+  [GATE_REQUIRED_SKILLS.push.name]: (ref) => ({
     action: "running git push",
     planStep: `Invoke the ${ref} skill before running git push.`,
     whyMatters:
@@ -277,7 +299,7 @@ function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | n
 }
 
 function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
-  return skill === "commit" && agentHasTaskListToolForHookPayload(input)
+  return skill === GATE_REQUIRED_SKILLS.commit.name && agentHasTaskListToolForHookPayload(input)
 }
 
 function getShellCommand(rawInput: Record<string, any>): string {
@@ -316,7 +338,7 @@ async function checkSkillSpecificPreflight(
   input: Record<string, any>,
   cwd: string
 ): Promise<SwizHookOutput | null> {
-  if (skill !== "commit") return null
+  if (skill !== GATE_REQUIRED_SKILLS.commit.name) return null
   return await checkCommitIdentityPreflight(input, cwd)
 }
 
@@ -346,7 +368,10 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const { primary, anyOfSkills } = ctx
 
     const effectiveSettings = rawInput._effectiveSettings as { trunkMode?: boolean } | undefined
-    if (primary === "pr-qa-and-merge" && effectiveSettings?.trunkMode === true) {
+    if (
+      primary === GATE_REQUIRED_SKILLS.prQaAndMerge.name &&
+      effectiveSettings?.trunkMode === true
+    ) {
       return preToolUseAllow(
         "Continue in trunk-mode merge policy: the merge skill is not required and reviewer approval is not required; GitHub remains authoritative for mergeability, checks, and branch protection."
       )

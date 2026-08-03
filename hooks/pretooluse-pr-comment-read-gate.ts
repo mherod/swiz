@@ -10,6 +10,7 @@
  * before the agent acts on the review.
  */
 
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
@@ -33,6 +34,7 @@ import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 /** Matches `gh api` reads of PR inline comments or PR reviews. */
 const GH_API_PR_COMMENTS_READ_RE = /\bgh\s+api\b[^\n]*\/pulls\/\d+\/(?:comments|reviews)\b/
+const SKILL_NAME = GATE_REQUIRED_SKILLS.prCommentsAddress.name
 
 const pretoolusePrCommentReadGate: SwizToolHook = {
   name: "pretooluse-pr-comment-read-gate",
@@ -47,7 +49,7 @@ const pretoolusePrCommentReadGate: SwizToolHook = {
     const command = (hookInput.tool_input as Record<string, string>)?.command ?? ""
     if (!GH_API_PR_COMMENTS_READ_RE.test(command)) return {}
 
-    if (!skillExistsForHookPayload("pr-comments-address", hookInput as Record<string, unknown>)) {
+    if (!skillExistsForHookPayload(SKILL_NAME, hookInput as Record<string, unknown>)) {
       return {}
     }
     if (
@@ -68,13 +70,13 @@ const pretoolusePrCommentReadGate: SwizToolHook = {
 
     const recencyOptions = {}
     const recentSkills = await getRecentlyInvokedSkillsForCurrentSession(hookInput, recencyOptions)
-    if (recentSkills.includes("pr-comments-address")) {
+    if (recentSkills.includes(SKILL_NAME)) {
       return preToolUseAllow(
         `/pr-comments-address was recently invoked — reading PR #${pr.number} comments is permitted.`
       )
     }
 
-    const skillRef = formatSkillReferenceForAgent("pr-comments-address")
+    const skillRef = formatSkillReferenceForAgent(SKILL_NAME)
     const windowDescription = `Skills used recently (${formatCurrentSessionUsageWindow(recencyOptions)}): ${recentSkills.length === 0 ? "(none)" : recentSkills.map((s) => `/${s}`).join(", ")}`
 
     return preToolUseDeny(

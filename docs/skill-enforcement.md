@@ -47,6 +47,19 @@ These four rules intentionally fail open for agents without a native `Skill` too
 Codex (`agentHasSkillToolForHookPayload`). They are therefore present in the hook policy but
 are not currently enforced in Codex sessions.
 
+## Gate-skill drift detection
+
+`src/gate-required-skills.ts` is the canonical registry for all 16 skill names whose absence
+can make an enforcement decision fail open. The central command gate, specialized file and
+PR-comment gates, memory follow-through gate, and ordered Stop rules consume those entries
+instead of owning duplicate skill-name strings.
+
+`swiz doctor` runs the `Gate-required skills` check against the same filesystem-backed
+`skillFileExists()` lookup used by runtime gates. A missing entry is reported with its owning
+hook so maintainers can install the skill or remove the stale gate rule before fail-open turns
+into fail-always. Advisory-only skill references are intentionally outside this registry because
+their underlying policy still runs when the suggested skill is unavailable.
+
 ## Enforcement strength and fail-open behaviour
 
 ### Central shell-command gate is prompt-once
@@ -101,6 +114,8 @@ auto-continue suggestions are prompts only and are not skill-invocation enforcem
 
 ## Authoritative sources
 
+- Fail-open gate skill names and owning hooks: `GATE_REQUIRED_SKILLS` in
+  [`gate-required-skills.ts`](../src/gate-required-skills.ts).
 - Central command-to-skill mapping: `classifyRequiredSkill()` in
   [`pretooluse-skill-invocation-gate.ts`](../hooks/pretooluse-skill-invocation-gate.ts).
 - PR merge command recognition: `isPullRequestMergeCommand()` in
@@ -121,11 +136,14 @@ auto-continue suggestions are prompts only and are not skill-invocation enforcem
 
 When adding or changing enforcement:
 
-1. Update the canonical classifier or the relevant specialized hook; do not duplicate command
+1. Register every new fail-open skill requirement in `GATE_REQUIRED_SKILLS`, including its owning
+   hook, and consume that entry from the gate implementation.
+2. Update the canonical classifier or the relevant specialized hook; do not duplicate command
    patterns in another gate.
-2. Keep `SKILL_DENY_CONFIGS` synchronized with new central command mappings.
-3. Add positive, negative, quoted-string, and agent-specific tests.
-4. Verify Codex direct `SKILL.md` reads and native `Skill` invocations both satisfy the intended
+3. Keep `SKILL_DENY_CONFIGS` synchronized with new central command mappings.
+4. Add positive, negative, quoted-string, and agent-specific tests.
+5. Verify Codex direct `SKILL.md` reads and native `Skill` invocations both satisfy the intended
    gate when supported.
-5. Update this document whenever a skill, trigger, cooldown, recency rule, or fail-open condition
+6. Run `swiz doctor` and confirm `Gate-required skills` passes for the installed environment.
+7. Update this document whenever a skill, trigger, cooldown, recency rule, or fail-open condition
    changes.

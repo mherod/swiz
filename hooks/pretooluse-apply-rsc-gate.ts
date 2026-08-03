@@ -16,6 +16,7 @@
 // Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
 import {
@@ -26,7 +27,7 @@ import {
 } from "../src/skill-utils.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
-const SKILL_NAME = "apply-rsc"
+const SKILL_NAME = GATE_REQUIRED_SKILLS.applyRsc.name
 
 // Matches **/app/**/page.tsx (Next.js App Router pages), **/layout.tsx (any
 // layout file), **/app/**/error.tsx and **/app/**/loading.tsx (App Router error
