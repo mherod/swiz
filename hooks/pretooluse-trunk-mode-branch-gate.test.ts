@@ -128,16 +128,14 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     "git checkout origin/feat/existing",
     "git switch --detach origin/feat/existing",
   ]) {
-    test(`blocks switching away from trunk with ${command}`, async () => {
+    test(`allows the existing-branch escape hatch with ${command}`, async () => {
       const repo = await createTestRepo("https://github.com/mherod/repo.git", {
         featureBranch: "feat/existing",
       })
       await enableTrunkMode(repo)
       try {
         const result = await runHook(repo, command)
-        expect(result.decision).toBe("deny")
-        const hso = result.parsed?.hookSpecificOutput as Record<string, any>
-        expect(String(hso?.permissionDecisionReason ?? "")).toContain("Trunk mode")
+        expect(result.parsed).toBeNull()
       } finally {
         await cleanupRepo(repo)
       }
