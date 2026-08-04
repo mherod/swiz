@@ -436,6 +436,10 @@ swiz skill              # list all available skills
 swiz skill commit       # print skill with inline commands expanded
 swiz skill --raw commit # raw SKILL.md without expansion
 
+# Copy cross-agent skills in either direction (copy-only)
+swiz skill --sync --from claude --to agents  # ~/.claude/skills -> ~/.agents
+swiz skill --sync --from agents --to claude  # ~/.agents -> ~/.claude/skills
+
 # Copy Gemini skills to Claude (copy-only — no tool name remapping)
 swiz skill --sync-gemini                     # sync ~/.gemini/skills -> ~/.claude/skills
 swiz skill --sync-gemini --dry-run           # preview sync actions only
@@ -448,9 +452,11 @@ swiz skill --convert --from codex  --to claude --overwrite
 swiz skill --convert --from claude --to gemini commit      # convert a single named skill
 ```
 
-Skills are discovered from `.skills/` (project-local) plus provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that exact order (project-local first).
+Skills are discovered from `.skills/` (project-local), the cross-agent global `~/.agents/`, and provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that exact order.
 
 `--sync-gemini` copies Gemini skill directories into `~/.claude/skills/` without transforming content — direct tool references in SKILL.md body or frontmatter are preserved as-is. Use `--convert` for automatic tool name remapping.
+
+The `agents` pseudo-provider maps to `~/.agents/<skill>/SKILL.md`. It is fully supported for discovery, reading, and copy-only `--sync` operations in either direction. Content conversion and command export require provider-specific tool aliases, so `agents` is intentionally unsupported for `--convert` and `--to-command`.
 
 `--convert` performs a content-aware conversion: it builds a reverse alias map for the source agent, composes it with the target agent's alias table, and rewrites both the frontmatter `allowed-tools` list and whole-word tool references in the body. Permission-specifier tokens like `Bash(git add:*)` remap the base tool name and keep the specifier. Tool names with no target-side equivalent are preserved as-is and reported as warnings — no silent data loss. Pass a skill name to convert just that skill. Supported agent IDs: `claude`, `cursor`, `gemini`, `codex`.
 

@@ -9,6 +9,7 @@ import {
 import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
+import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import {
@@ -25,6 +26,11 @@ import {
 } from "./transcript-summary.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
+/** Resolve the cross-agent global skill directory. */
+export function getAgentsSkillDir(): string {
+  return join(getHomeDir(), ".agents")
+}
+
 /** Resolve the current list of skill directories. */
 export function getSkillDirs(cwd?: string): string[] {
   // `cwd` overrides both the spawn cwd and the local cwd — tests pass an explicit
@@ -32,13 +38,14 @@ export function getSkillDirs(cwd?: string): string[] {
   // which bleeds across concurrently-running test files (#680).
   const spawnCwd = cwd ?? resolveSpawnCwd()
   const localCwd = cwd ?? process.cwd()
-  const dirs = [join(spawnCwd, ".skills"), ...getAllProviderSkillDirs()]
+  const dirs = [join(spawnCwd, ".skills"), getAgentsSkillDir(), ...getAllProviderSkillDirs()]
   const local = join(localCwd, ".skills")
   if (!dirs.includes(local)) dirs.unshift(local)
   return uniq(dirs)
 }
 
-// Skills live in .skills/ (project-local) and provider-specific global directories.
+// Skills live in .skills/ (project-local), ~/.agents/ (cross-agent), and
+// provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
 export const SKILL_DIRS = getSkillDirs()
 // Deterministic precedence for duplicate names: first directory wins.
@@ -47,12 +54,16 @@ export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 // Directory names that should never be treated as skill candidates even when
 // they appear directly under a skill root (e.g. stray bun install artefacts).
 const NON_SKILL_DIR_NAMES = new Set(["node_modules"])
+const AGENTS_ROOT_NON_SKILL_DIR_NAMES = new Set(["skills"])
 
 /** Return true when a directory entry should be scanned as a skill candidate. */
-export function isSkillCandidateDir(entry: import("node:fs").Dirent): boolean {
+export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?: string): boolean {
   if (!entry.isDirectory()) return false
   if (entry.name.startsWith(".")) return false
   if (NON_SKILL_DIR_NAMES.has(entry.name)) return false
+  if (skillRoot === getAgentsSkillDir() && AGENTS_ROOT_NON_SKILL_DIR_NAMES.has(entry.name)) {
+    return false
+  }
   return true
 }
 
@@ -706,7 +717,9 @@ export async function findSkills(): Promise<SkillInfo[]> {
       continue
     }
 
-    const directoryNames = entries.filter(isSkillCandidateDir).map((entry) => entry.name)
+    const directoryNames = entries
+      .filter((entry) => isSkillCandidateDir(entry, dir))
+      .map((entry) => entry.name)
     const orderedDirectoryNames = orderBy(directoryNames, [(name) => name], ["asc"])
 
     for (const name of orderedDirectoryNames) {
@@ -739,7 +752,9 @@ async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[
   } catch {
     return
   }
-  const directoryNames = entries.filter(isSkillCandidateDir).map((entry) => entry.name)
+  const directoryNames = entries
+    .filter((entry) => isSkillCandidateDir(entry, dir))
+    .map((entry) => entry.name)
   for (const name of orderBy(directoryNames, [(n) => n], ["asc"])) {
     const skillPath = join(dir, name, "SKILL.md")
     if (!(await Bun.file(skillPath).exists())) continue

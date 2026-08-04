@@ -131,7 +131,7 @@ async function validateSkillEntry(
   entry: import("node:fs").Dirent,
   skillDir: string
 ): Promise<InvalidSkillEntry[]> {
-  if (!isSkillCandidateDir(entry)) return []
+  if (!isSkillCandidateDir(entry, skillDir)) return []
   const entryDir = join(skillDir, entry.name)
   const skillPath = join(entryDir, "SKILL.md")
   const base = { name: entry.name, skillDir, entryDir }
@@ -443,7 +443,7 @@ export async function removeInvalidCategoryFields(): Promise<{
     }
 
     for (const entry of entries) {
-      if (!isSkillCandidateDir(entry)) continue
+      if (!isSkillCandidateDir(entry, skillDir)) continue
       const skillPath = join(skillDir, entry.name, "SKILL.md")
       try {
         const file = Bun.file(skillPath)

@@ -305,6 +305,23 @@ describe("swiz skill Gemini discovery", () => {
   })
 })
 
+describe("swiz skill Agents discovery", () => {
+  test("reads a skill that exists only in ~/.agents", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "agents-only-read-xyz"
+    const skillDir = join(fakeHome, ".agents", skillName)
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\ndescription: Agents only\n---\n# Agents Body\n"
+    )
+
+    const { stdout, exitCode } = await runSkillCli(["--raw", skillName], fakeHome)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("# Agents Body")
+  })
+})
+
 describe("swiz skill --sync-gemini", () => {
   test("supports dry-run without writing files", async () => {
     const fakeHome = await createTempDir()
@@ -423,6 +440,34 @@ describe("swiz skill --sync --to agents", () => {
     )
     expect(exitCode).not.toBe(0)
     expect(stderr).toContain('do not support the "agents" target')
+    expect(stderr).toContain("Use --sync")
+  })
+
+  test("syncs skills from ~/.agents to a provider directory", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "agents-sync-source-xyz"
+    const sourceDir = join(fakeHome, ".agents", skillName)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Agents source\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync", "--from", "agents", "--to", "claude"],
+      fakeHome
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`copied ${skillName}`)
+    expect(await Bun.file(targetPath).text()).toContain("Agents source")
+  })
+
+  test("--convert --from agents emits a helpful error pointing to --sync", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr, exitCode } = await runSkillCli(
+      ["--convert", "--from", "agents", "--to", "claude"],
+      fakeHome
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain('do not support the "agents" source')
     expect(stderr).toContain("Use --sync")
   })
 })

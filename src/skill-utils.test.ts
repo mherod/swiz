@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getAgent } from "./agents.ts"
 import { skillCommand } from "./commands/skill.ts"
@@ -16,7 +16,9 @@ import {
   filterQualitySteps,
   formatCurrentSessionUsageWindow,
   formatSkillReferenceForAgent,
+  getAgentsSkillDir,
   getSkillToolAvailabilityWarning,
+  isSkillCandidateDir,
   parseFrontmatterField,
   resolveSkillRecencyOptions,
   SKILL_DIRS,
@@ -105,10 +107,35 @@ describe("SKILL_DIRS", () => {
     expect(skillDirStr).toContain(".gemini/antigravity/global_skills")
   })
 
+  test("includes the cross-agent ~/.agents skill directory", () => {
+    expect(SKILL_DIRS).toContain(getAgentsSkillDir())
+  })
+
   test("all entries are non-empty strings", () => {
     for (const dir of SKILL_DIRS) {
       expect(typeof dir).toBe("string")
       expect(dir.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe("isSkillCandidateDir", () => {
+  test("ignores the legacy skills container only at the ~/.agents root", async () => {
+    const fakeHome = await createTempDir()
+    const agentsRoot = join(fakeHome, ".agents")
+    await mkdir(join(agentsRoot, "skills"), { recursive: true })
+    const entry = (await readdir(agentsRoot, { withFileTypes: true }))[0]!
+
+    const originalHome = process.env.HOME
+    await acquireEnvLock()
+    try {
+      process.env.HOME = fakeHome
+      expect(isSkillCandidateDir(entry, agentsRoot)).toBe(false)
+      expect(isSkillCandidateDir(entry, join(fakeHome, ".claude", "skills"))).toBe(true)
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+      releaseEnvLockFn()
     }
   })
 })
@@ -535,6 +562,17 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(out).toContain("Codex only")
   })
 
+  test("discovers skills that exist only in ~/.agents", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".agents", "agents-only-skill-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Agents only\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("agents-only-skill-xyz")
+    expect(out).toContain("Agents only")
+  })
+
   test("discovers skills that exist only in ~/.gemini/antigravity/skills", async () => {
     const fakeHome = await createTempDir()
     const skillDir = join(
@@ -586,6 +624,25 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(occurrences).toBe(1)
     expect(out).toContain("Claude wins")
     expect(out).not.toContain("Gemini loses")
+  })
+
+  test("uses ~/.agents before provider-specific globals for duplicate names", async () => {
+    const fakeHome = await createTempDir()
+    const duplicate = "agents-precedence-skill-xyz"
+
+    const agentsDir = join(fakeHome, ".agents", duplicate)
+    await mkdir(agentsDir, { recursive: true })
+    await writeFile(join(agentsDir, "SKILL.md"), "---\ndescription: Agents wins\n---\n")
+
+    const claudeDir = join(fakeHome, ".claude", "skills", duplicate)
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(join(claudeDir, "SKILL.md"), "---\ndescription: Claude loses\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    const occurrences = (out.match(new RegExp(duplicate, "g")) ?? []).length
+    expect(occurrences).toBe(1)
+    expect(out).toContain("Agents wins")
+    expect(out).not.toContain("Claude loses")
   })
 
   test("uses deterministic precedence for duplicate names (Antigravity skills before global_skills)", async () => {

@@ -11,6 +11,7 @@ import {
   extractMandatedSkillTools,
   extractReferencedToolsFromSkillText,
   findSkills,
+  getAgentsSkillDir,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   stripFrontmatter,
@@ -29,8 +30,8 @@ import { convertSkillContent } from "../utils/skill-conversion.ts"
 export { parseFrontmatterField, stripFrontmatter }
 
 function primarySkillDir(agentId: string): string {
+  if (agentId === "agents") return getAgentsSkillDir()
   const home = getHomeDir()
-  if (agentId === "agents") return join(home, ".agents")
   const adapter = getProviderAdapter(agentId)
   const primary = adapter?.getSkillDirs()[0]
   if (primary) return primary
@@ -248,13 +249,20 @@ function resolveAgentPair(
 ): { fromAgent: AgentEntry; toAgent: AgentEntry } {
   // --convert and --to-command apply tool-name remapping using the agent's
   // toolAliases, so pseudo-agents (e.g. "agents") aren't valid here. For
-  // copy-only sync to the HOME/.agents directory use --sync, which routes
+  // copy-only sync to the ~/.agents directory use --sync, which routes
   // through resolveForSync() and accepts the agents pseudo-target.
   // (Resolution for #662 and the migrated duplicate #663.)
   const fromAgent = getAgent(from)
   const toAgent = getAgent(to)
   const ids = AGENTS.map((a) => a.id).join(", ")
-  if (!fromAgent) throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
+  if (!fromAgent) {
+    if (PSEUDO_AGENTS[from]) {
+      throw new Error(
+        `--convert and --to-command do not support the "${from}" source (no tool aliases). Use --sync to copy skills from that location.`
+      )
+    }
+    throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
+  }
   if (!toAgent) {
     if (PSEUDO_AGENTS[to]) {
       throw new Error(
@@ -665,12 +673,12 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--from <agent>",
       description:
-        "Source agent ID for --sync, --convert, or --to-command (claude|cursor|gemini|codex)",
+        "Source agent ID (claude|cursor|gemini|codex|agents). The `agents` source is supported by --sync only and maps to ~/.agents/.",
     },
     {
       flags: "--to <agent>",
       description:
-        "Target agent ID for --sync or --convert (claude|cursor|gemini|codex|agents). Use `agents` to sync to ~/.agents/ for OpenCode and similar tools.",
+        "Target agent ID (claude|cursor|gemini|codex|agents). The `agents` target is supported by --sync only and maps to ~/.agents/.",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
