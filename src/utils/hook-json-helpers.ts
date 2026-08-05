@@ -34,7 +34,11 @@ export function extractHookSystemMessagePreview(
   text: string,
   maxLen = DEFAULT_HOOK_PREVIEW_LEN
 ): string {
-  const line = text.split("\n").shift()?.trim() || ""
+  const line =
+    text
+      .split("\n")
+      .find((candidate) => candidate.trim().length > 0)
+      ?.trim() ?? ""
   if (maxLen <= 0) return line
   return line.length > maxLen ? `${line.slice(0, maxLen - 3).trimEnd()}...` : line
 }

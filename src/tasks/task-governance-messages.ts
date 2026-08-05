@@ -810,10 +810,9 @@ export function formatIncompleteReason(
   const sourceNote = sourceCtx
     ? `\n\nTask files: ${sourceCtx.tasksDir ?? `~/.claude/tasks/${sourceCtx.sessionId}`}`
     : ""
-  const footer =
-    sourceCtx?.taskListAvailable === false
-      ? `\n\nComplete these tasks before stopping. ${buildTaskReviewInstruction(sourceCtx)} Only mark tasks completed when the work is done and the completion has evidence.`
-      : `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
+  const footer = sourceCtx
+    ? `\n\nComplete these tasks before stopping. ${buildTaskReviewInstruction(sourceCtx)} Only mark tasks completed when the work is done and the completion has evidence.`
+    : `\n\nComplete these tasks before stopping. ${TASKLIST_STABILITY_STEP} Then update each task only when the work is done and the completion has evidence.`
 
   return header + taskList + sourceNote + footer
 }

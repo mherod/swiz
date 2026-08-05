@@ -31,6 +31,7 @@ import {
   type NormalizedTask,
   parseToolResponse,
   reconcileTasks,
+  type TaskListParseResult,
 } from "../src/tasks/task-list-reconciliation.ts"
 import {
   applyCacheAuditWriteThrough,
@@ -216,28 +217,36 @@ export const taskAuditSyncHook: SwizHook<Record<string, any>> = {
 // ─── List sync orchestration ────────────────────────────────────────────────
 
 interface ResolvedListSyncInput {
+  kind: "resolved"
   sessionId: string
   tasks: NormalizedTask[]
-  tasksDir: string
-  cwd: string
 }
 
-async function resolveListSyncInput(
-  input: PostToolHookInput
-): Promise<ResolvedListSyncInput | null> {
-  if (input.tool_name !== "TaskList") return null
+type ListSyncResolution =
+  | ResolvedListSyncInput
+  | Extract<TaskListParseResult, { kind: "unrecognized" }>
+  | { kind: "skip" }
+
+const UNRECOGNIZED_TASKLIST_CONTEXT =
+  "TaskList response format was not recognized. Existing task state was kept unchanged. " +
+  "Run TaskList again before changing task statuses."
+
+async function resolveListSyncInput(input: PostToolHookInput): Promise<ListSyncResolution> {
+  if (input.tool_name !== "TaskList") return { kind: "skip" }
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return null
-  const tasks = parseToolResponse(input.tool_response)
-  if (tasks.length === 0) return null
+  if (!sessionId) return { kind: "skip" }
+  const parsed = parseToolResponse(input.tool_response)
+  if (parsed.kind === "unrecognized") return parsed
+  const { tasks } = parsed
+  if (tasks.length === 0) return { kind: "resolved", sessionId, tasks }
   const tasksDir = getSessionTasksDir(sessionId, homedir())
-  if (!tasksDir) return null
+  if (!tasksDir) return { kind: "skip" }
   try {
     await mkdir(tasksDir, { recursive: true })
   } catch {
-    return null
+    return { kind: "skip" }
   }
-  return { sessionId, tasks, tasksDir, cwd: input.cwd ?? process.cwd() }
+  return { kind: "resolved", sessionId, tasks }
 }
 
 function formatSyncSummary(
@@ -269,18 +278,13 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   const hookInput = input as PostToolHookInput
   if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
 
-  // Always write the sentinel when we see a TaskList response, even if zero
-  // tasks were returned. This resets the 5-minute freshness mandate so the
-  // PreToolUse staleness gate doesn't block after an empty TaskList.
-  if (hookInput.tool_name === "TaskList") {
-    const sessionId = resolveSafeSessionId(hookInput.session_id)
-    if (sessionId) {
-      await writeCanonicalTaskListSyncSentinel(sessionId)
-    }
-  }
-
   const resolved = await resolveListSyncInput(hookInput)
-  if (!resolved) return {}
+  if (resolved.kind === "unrecognized") {
+    return resolved.hasContent
+      ? buildContextHookOutput("PostToolUse", UNRECOGNIZED_TASKLIST_CONTEXT)
+      : {}
+  }
+  if (resolved.kind === "skip") return {}
 
   // Update in-memory event state with the full task list from the response.
   // Downstream hooks in the same dispatch see this immediately without disk reads.
@@ -288,6 +292,12 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
     resolved.sessionId,
     resolved.tasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject }))
   )
+
+  if (resolved.tasks.length === 0) {
+    const canonicalTaskListSyncedAtMs = await writeCanonicalTaskListSyncSentinel(resolved.sessionId)
+    applyCacheTaskListSnapshot(resolved.sessionId, [], canonicalTaskListSyncedAtMs)
+    return {}
+  }
 
   const syncResult = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
   const canonicalTaskListSyncedAtMs = await writeCanonicalTaskListSyncSentinel(resolved.sessionId)

@@ -130,4 +130,20 @@ describe("formatIncompleteReason — source context (#613)", () => {
     expect(reason).not.toContain("TaskList")
     expect(reason).not.toContain("TaskUpdate")
   })
+
+  it("uses TaskList only for review and names TaskUpdate as the status action", () => {
+    const details = ["Finish hook repair (task #12)"]
+    const reason = formatIncompleteReason(details, {
+      tasksDir: "/home/.claude/tasks/sess",
+      sessionId: "sess",
+      taskListAvailable: true,
+      taskListToolName: "TaskList",
+      taskUpdateToolName: "TaskUpdate",
+    })
+
+    expect(reason).toContain(
+      "Use TaskList to review tasks, then TaskUpdate to update their status."
+    )
+    expect(reason).not.toContain("Run TaskList now")
+  })
 })

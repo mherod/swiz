@@ -2,9 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  applyTaskCreateEvent,
+  applyTaskUpdateEvent,
+  clearAllEventState,
+  needsReconciliation,
+} from "../src/tasks/task-event-state.ts"
 import { getSessionTaskPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { runHook } from "../src/utils/test-utils.ts"
+import { evaluatePosttooluseTaskListSync } from "./posttooluse-task-sync.ts"
 
 const HOOK = join(import.meta.dir, "posttooluse-task-list-sync.ts")
 
@@ -104,6 +111,54 @@ describe("posttooluse-task-list-sync", () => {
     )
     expect(exitCode).toBe(0)
     expect(stdout).toBe("")
+  })
+
+  test("authoritative empty TaskList clears reconciliation state", async () => {
+    const sessionId = `${SESSION_ID}-empty-reconciliation`
+    applyTaskCreateEvent(sessionId, "1", "Task")
+    applyTaskUpdateEvent(sessionId, "1", { status: "completed" })
+    expect(needsReconciliation(sessionId)).toBe(true)
+
+    try {
+      const output = await evaluatePosttooluseTaskListSync({
+        _agent: "claude",
+        cwd: "/tmp",
+        session_id: sessionId,
+        tool_name: "TaskList",
+        tool_response: makeTaskListResponse([]),
+      })
+
+      expect(output).toEqual({})
+      expect(needsReconciliation(sessionId)).toBe(false)
+    } finally {
+      clearAllEventState()
+    }
+  })
+
+  test("unrecognized non-empty TaskList preserves reconciliation with sanitized guidance", async () => {
+    const sessionId = `${SESSION_ID}-unrecognized-reconciliation`
+    const privateTaskContent = "private task content must stay hidden"
+    applyTaskCreateEvent(sessionId, "1", "Task")
+    applyTaskUpdateEvent(sessionId, "1", { status: "completed" })
+    expect(needsReconciliation(sessionId)).toBe(true)
+
+    try {
+      const output = (await evaluatePosttooluseTaskListSync({
+        _agent: "claude",
+        cwd: "/tmp",
+        session_id: sessionId,
+        tool_name: "TaskList",
+        tool_response: { results: [{ subject: privateTaskContent }] },
+      })) as { hookSpecificOutput?: { additionalContext?: string } }
+      const context = output.hookSpecificOutput?.additionalContext ?? ""
+
+      expect(needsReconciliation(sessionId)).toBe(true)
+      expect(context).toContain("TaskList response format was not recognized")
+      expect(context).toContain("Run TaskList again")
+      expect(context).not.toContain(privateTaskContent)
+    } finally {
+      clearAllEventState()
+    }
   })
 
   test("creates new task file when it does not exist", async () => {
@@ -331,7 +386,7 @@ describe("posttooluse-task-list-sync", () => {
     expect(ctx).toContain('"Resolve task state" is on #60 (pending), #61 (in_progress)')
   })
 
-  test("skips tasks with missing id or subject", async () => {
+  test("reports malformed tasks without exposing their content", async () => {
     const { exitCode, stdout } = await runHook(
       HOOK,
       {
@@ -348,7 +403,10 @@ describe("posttooluse-task-list-sync", () => {
       { HOME: TMP_HOME }
     )
     expect(exitCode).toBe(0)
-    // Nothing valid to create → no output
-    expect(stdout).toBe("")
+    const parsed = JSON.parse(stdout)
+    const context: string = parsed.hookSpecificOutput.additionalContext
+    expect(context).toContain("TaskList response format was not recognized")
+    expect(context).toContain("Run TaskList again")
+    expect(context).not.toContain("No id task")
   })
 })

@@ -19,6 +19,17 @@ export interface NormalizedTask {
   status: string
 }
 
+export type TaskListParseResult =
+  | { kind: "recognized"; tasks: NormalizedTask[] }
+  | {
+      kind: "unrecognized"
+      hasContent: boolean
+      reason: "missing-response" | "invalid-json" | "unsupported-shape" | "malformed-task"
+    }
+
+type UnrecognizedTaskListResult = Extract<TaskListParseResult, { kind: "unrecognized" }>
+type DecodedToolResponse = { kind: "decoded"; value: unknown } | UnrecognizedTaskListResult
+
 interface SyncResult {
   created: number
   updated: number
@@ -41,39 +52,51 @@ function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null 
   return { id, subject, status }
 }
 
-/**
- * Extract tasks array from raw tool response (string JSON or object).
- * Returns null if response is not a valid object with a `tasks` array.
- */
-function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[] | null {
-  if (!raw) return null
-  let parsed: unknown = raw
-  if (typeof raw === "string") {
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return null
-    }
+function decodeToolResponse(raw: PostToolHookInput["tool_response"]): DecodedToolResponse {
+  if (raw === null || raw === undefined || (typeof raw === "string" && raw.trim().length === 0)) {
+    return { kind: "unrecognized", hasContent: false, reason: "missing-response" }
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
-  const items = (parsed as Record<string, unknown>).tasks
-  return Array.isArray(items) ? items : null
+  if (typeof raw !== "string") return { kind: "decoded", value: raw }
+
+  try {
+    return { kind: "decoded", value: JSON.parse(raw) }
+  } catch {
+    return { kind: "unrecognized", hasContent: true, reason: "invalid-json" }
+  }
+}
+
+function parseTaskItems(items: unknown[]): TaskListParseResult {
+  const tasks: NormalizedTask[] = []
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) {
+      return { kind: "unrecognized", hasContent: true, reason: "malformed-task" }
+    }
+    const normalized = parseNormalizedTask(item as Record<string, unknown>)
+    if (!normalized) {
+      return { kind: "unrecognized", hasContent: true, reason: "malformed-task" }
+    }
+    tasks.push(normalized)
+  }
+  return { kind: "recognized", tasks }
 }
 
 /**
  * Parse complete tool response into normalized tasks.
- * Filters out malformed items and returns array of valid NormalizedTask objects.
+ * Distinguishes authoritative task arrays, including an empty array, from
+ * missing, malformed, or unsupported response shapes.
  */
-export function parseToolResponse(raw: PostToolHookInput["tool_response"]): NormalizedTask[] {
-  const items = parseRawTasks(raw)
-  if (!items) return []
-  const result: NormalizedTask[] = []
-  for (const item of items) {
-    if (typeof item !== "object" || item === null) continue
-    const normalized = parseNormalizedTask(item as Record<string, unknown>)
-    if (normalized) result.push(normalized)
+export function parseToolResponse(raw: PostToolHookInput["tool_response"]): TaskListParseResult {
+  const decoded = decodeToolResponse(raw)
+  if (decoded.kind === "unrecognized") return decoded
+  if (typeof decoded.value !== "object" || decoded.value === null || Array.isArray(decoded.value)) {
+    return { kind: "unrecognized", hasContent: true, reason: "unsupported-shape" }
   }
-  return result
+
+  const items = (decoded.value as Record<string, unknown>).tasks
+  if (!Array.isArray(items)) {
+    return { kind: "unrecognized", hasContent: true, reason: "unsupported-shape" }
+  }
+  return parseTaskItems(items)
 }
 
 // ─── Task record building ────────────────────────────────────────────────────
