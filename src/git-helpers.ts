@@ -6,7 +6,7 @@
 
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { currentEnv } from "./gh-rate-limit"
 import { acquireGhSlot, observeGhApiIncludeOutput } from "./gh-rate-limit.ts"
@@ -423,6 +423,17 @@ export function getCanonicalPathHash(cwd: string): string {
 }
 
 // ─── Git worktree / path resolution ─────────────────────────────────────────
+
+/** Walk up synchronously and return the nearest Git worktree root. */
+export function findGitWorkTree(cwd: string): string | null {
+  let dir = resolve(cwd)
+  while (true) {
+    if (existsSync(joinGitPath(dir))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
 
 /**
  * Walk up from `cwd` to find the `.git` directory (or file for worktrees).

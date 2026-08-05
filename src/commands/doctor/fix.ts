@@ -602,16 +602,28 @@ export async function fixSkillConflicts(
     return messages
   }
 
+  let removedCount = 0
   for (const conflict of conflicts) {
+    const sharedEntries = [conflict.active, ...conflict.overridden].filter((entry) => entry.shared)
+    if (sharedEntries.length > 0) {
+      messages.push(
+        `${conflict.name}: shared-root conflict involving ${sharedEntries
+          .map((entry) => displayPath(dirname(entry.path)))
+          .join(", ")} — resolve manually; no files removed`
+      )
+      continue
+    }
+
     for (const overridden of conflict.overridden) {
       const skillDir = dirname(overridden.path)
       messages.push(
         `Removed ${displayPath(skillDir)} (shadowed by ${displayPath(dirname(conflict.active.path))})`
       )
       await defaultTrashPath(skillDir)
+      removedCount++
     }
   }
-  messages.push("Skill conflicts resolved")
+  if (removedCount > 0) messages.push("Skill conflicts resolved")
   return messages
 }
 

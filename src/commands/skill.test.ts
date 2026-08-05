@@ -376,11 +376,11 @@ describe("swiz skill --sync-gemini", () => {
 // ─── swiz skill --sync --to agents ───────────────────────────────────────────
 
 describe("swiz skill --sync --to agents", () => {
-  test("dry-run syncs to ~/.agents/ without writing files", async () => {
+  test("dry-run syncs to ~/.agents/skills without writing files", async () => {
     const fakeHome = await createTempDir()
     const skillName = "agents-sync-dry-run-xyz"
     const sourceDir = join(fakeHome, ".claude", "skills", skillName)
-    const targetPath = join(fakeHome, ".agents", skillName, "SKILL.md")
+    const targetPath = join(fakeHome, ".agents", "skills", skillName, "SKILL.md")
     await mkdir(sourceDir, { recursive: true })
     await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Dry run source\n---\n")
 
@@ -394,11 +394,11 @@ describe("swiz skill --sync --to agents", () => {
     expect(await Bun.file(targetPath).exists()).toBe(false)
   })
 
-  test("syncs skills from claude to ~/.agents/ directory", async () => {
+  test("syncs skills from claude to ~/.agents/skills directory", async () => {
     const fakeHome = await createTempDir()
     const skillName = "agents-sync-xyz"
     const sourceDir = join(fakeHome, ".claude", "skills", skillName)
-    const targetPath = join(fakeHome, ".agents", skillName, "SKILL.md")
+    const targetPath = join(fakeHome, ".agents", "skills", skillName, "SKILL.md")
     await mkdir(sourceDir, { recursive: true })
     await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Agents target\n---\n")
 
@@ -416,7 +416,7 @@ describe("swiz skill --sync --to agents", () => {
     const fakeHome = await createTempDir()
     const skillName = "agents-sync-skip-xyz"
     const sourceDir = join(fakeHome, ".claude", "skills", skillName)
-    const targetDir = join(fakeHome, ".agents", skillName)
+    const targetDir = join(fakeHome, ".agents", "skills", skillName)
     const targetPath = join(targetDir, "SKILL.md")
     await mkdir(sourceDir, { recursive: true })
     await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")

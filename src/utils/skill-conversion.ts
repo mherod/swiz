@@ -1,3 +1,7 @@
+import {
+  type AgentToolCapabilityInventory,
+  readAgentToolCapabilityInventoryFromEnv,
+} from "../agents.ts"
 import { parseQuotedString, transformQuotedString } from "./quoted-string.ts"
 
 // ─── Conversion result type ──────────────────────────────────────────────────
@@ -244,7 +248,8 @@ export function convertSkillContent(
   allAgents: {
     toolAliases: Record<string, string>
     taskToolAliases?: Record<string, string | null>
-  }[]
+  }[],
+  capabilityInventory: AgentToolCapabilityInventory | null = readAgentToolCapabilityInventoryFromEnv()
 ): ConversionResult {
   if (fromAgent.id === toAgent.id) return { content, unmapped: [] }
 
@@ -299,6 +304,9 @@ export function convertSkillContent(
         tools.add(taskCreateTarget)
       }
       addAvailableToolNames(tools, toAgent.additionalToolNames ?? [])
+      if (capabilityInventory?.agentId === toAgent.id) {
+        addAvailableToolNames(tools, capabilityInventory.toolNames)
+      }
       if ((toAgent as any).tasksEnabled) {
         tools.add("TaskList")
         tools.add("TaskGet")

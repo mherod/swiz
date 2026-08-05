@@ -1,14 +1,21 @@
 import { existsSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { orderBy, uniq } from "lodash-es"
 import {
   agentHasTaskToolsForHookPayload,
   detectCurrentAgentFromHookPayload,
 } from "./agent-paths.ts"
-import { AGENTS, type AgentDef, agentSupportsTool } from "./agents.ts"
+import {
+  AGENTS,
+  type AgentDef,
+  type AgentToolCapabilityInventory,
+  agentSupportsTool,
+  readAgentToolCapabilityInventoryFromEnv,
+} from "./agents.ts"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
+import { findGitWorkTree } from "./git-helpers.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
@@ -26,9 +33,52 @@ import {
 } from "./transcript-summary.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
-/** Resolve the cross-agent global skill directory. */
-export function getAgentsSkillDir(): string {
-  return join(getHomeDir(), ".agents")
+/** Resolve the standard cross-agent user skill directory. */
+export function getAgentsSkillDir(homeDir: string = getHomeDir()): string {
+  return join(homeDir, ".agents", "skills")
+}
+
+/** Resolve the legacy direct-root shared skill directory. */
+export function getLegacyAgentsSkillDir(homeDir: string = getHomeDir()): string {
+  return join(homeDir, ".agents")
+}
+
+/** Resolve repository-scoped `.agents/skills` roots from nearest to furthest. */
+export function getProjectAgentsSkillDirs(cwd: string = process.cwd()): string[] {
+  const start = resolve(cwd)
+  const repositoryRoot = findGitWorkTree(start)
+  if (!repositoryRoot) return [join(start, ".agents", "skills")]
+
+  const dirs: string[] = []
+  let current = start
+  while (true) {
+    dirs.push(join(current, ".agents", "skills"))
+    if (current === repositoryRoot) break
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return dirs
+}
+
+/** Resolve shared roots in discovery order: project ancestors, user standard, legacy. */
+export function getAgentsSkillDirs(
+  cwd: string = process.cwd(),
+  homeDir: string = getHomeDir()
+): string[] {
+  return uniq([
+    ...getProjectAgentsSkillDirs(cwd),
+    getAgentsSkillDir(homeDir),
+    getLegacyAgentsSkillDir(homeDir),
+  ])
+}
+
+/** Whether a directory is a standard or legacy shared Agents skill root. */
+export function isAgentsSkillDir(dir: string): boolean {
+  const normalized = resolve(dir)
+  const isStandardRoot =
+    basename(normalized) === "skills" && basename(dirname(normalized)) === ".agents"
+  return isStandardRoot || basename(normalized) === ".agents"
 }
 
 /** Resolve the current list of skill directories. */
@@ -38,14 +88,21 @@ export function getSkillDirs(cwd?: string): string[] {
   // which bleeds across concurrently-running test files (#680).
   const spawnCwd = cwd ?? resolveSpawnCwd()
   const localCwd = cwd ?? process.cwd()
-  const dirs = [join(spawnCwd, ".skills"), getAgentsSkillDir(), ...getAllProviderSkillDirs()]
+  const dirs = [
+    join(spawnCwd, ".skills"),
+    ...getProjectAgentsSkillDirs(localCwd),
+    ...getProjectAgentsSkillDirs(spawnCwd),
+    getAgentsSkillDir(),
+    getLegacyAgentsSkillDir(),
+    ...getAllProviderSkillDirs(),
+  ]
   const local = join(localCwd, ".skills")
   if (!dirs.includes(local)) dirs.unshift(local)
   return uniq(dirs)
 }
 
-// Skills live in .skills/ (project-local), ~/.agents/ (cross-agent), and
-// provider-specific global directories.
+// Skills live in .skills/ (legacy project-local), repository and user
+// .agents/skills/ roots, the legacy ~/.agents/ fallback, and provider globals.
 // Each skill is a directory containing SKILL.md.
 export const SKILL_DIRS = getSkillDirs()
 // Deterministic precedence for duplicate names: first directory wins.
@@ -58,10 +115,14 @@ const AGENTS_ROOT_NON_SKILL_DIR_NAMES = new Set(["skills"])
 
 /** Return true when a directory entry should be scanned as a skill candidate. */
 export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?: string): boolean {
-  if (!entry.isDirectory()) return false
+  if (!entry.isDirectory() && !entry.isSymbolicLink()) return false
   if (entry.name.startsWith(".")) return false
   if (NON_SKILL_DIR_NAMES.has(entry.name)) return false
-  if (skillRoot === getAgentsSkillDir() && AGENTS_ROOT_NON_SKILL_DIR_NAMES.has(entry.name)) {
+  if (
+    skillRoot !== undefined &&
+    basename(resolve(skillRoot)) === ".agents" &&
+    AGENTS_ROOT_NON_SKILL_DIR_NAMES.has(entry.name)
+  ) {
     return false
   }
   return true
@@ -259,6 +320,7 @@ function buildCanonicalToolScanSet(): Set<string> {
       if (SKILL_TOOL_NAME_RE.test(v)) s.add(v)
     }
     for (const toolName of a.additionalToolNames ?? []) s.add(toolName)
+    for (const toolName of a.knownToolNames ?? []) s.add(toolName)
   }
   s.add("Skill")
   for (const t of EXTRA_SKILL_TOOL_SCAN_TOKENS) s.add(t)
@@ -301,12 +363,13 @@ export function extractReferencedToolsFromSkillText(body: string): string[] {
  */
 export function buildSkillAgentToolEnvironmentFooter(
   agent: AgentDef,
-  referencedTools: string[]
+  referencedTools: string[],
+  capabilityInventory: AgentToolCapabilityInventory | null = readAgentToolCapabilityInventoryFromEnv()
 ): string | null {
   if (agent.id === "claude") return null
 
   const unsupported = orderBy(
-    uniq(referencedTools.filter((t) => !agentSupportsTool(agent, t))),
+    uniq(referencedTools.filter((t) => !agentSupportsTool(agent, t, capabilityInventory))),
     [(t) => t],
     ["asc"]
   )
@@ -334,30 +397,43 @@ export function buildSkillAgentToolEnvironmentFooter(
   )
 }
 
-function detectActiveSkillTools(): string[] {
-  const active = detectCurrentAgent()
-  if (!active) return []
-
-  const tools = new Set<string>()
-
+function addActiveAgentTools(
+  tools: Set<string>,
+  active: AgentDef,
+  capabilityInventory: AgentToolCapabilityInventory | null
+): void {
   // Agent-specific aliases are the primary invocation names.
   const toolAliases = active.toolAliases
   for (const alias of Object.values(toolAliases)) tools.add(alias)
   for (const toolName of active.additionalToolNames ?? []) tools.add(toolName)
+  if (capabilityInventory?.agentId === active.id) {
+    for (const toolName of capabilityInventory.toolNames) tools.add(toolName)
+  }
 
   // Include canonical names that map for this agent.
   for (const canonical of Object.keys(toolAliases)) {
-    if (agentSupportsTool(active, canonical)) {
+    if (agentSupportsTool(active, canonical, capabilityInventory)) {
       tools.add(canonical)
     }
   }
+}
 
+function addClaudeCanonicalTools(tools: Set<string>, active: AgentDef): void {
   // Claude uses canonical names directly and supports all tools by default.
-  if (active.id === "claude") {
-    for (const agent of AGENTS) {
-      for (const canonical of Object.keys(agent.toolAliases)) tools.add(canonical)
-    }
+  if (active.id !== "claude") return
+  for (const agent of AGENTS) {
+    for (const canonical of Object.keys(agent.toolAliases)) tools.add(canonical)
   }
+}
+
+function detectActiveSkillTools(): string[] {
+  const active = detectCurrentAgent()
+  if (!active) return []
+  const capabilityInventory = readAgentToolCapabilityInventoryFromEnv()
+  const tools = new Set<string>()
+
+  addActiveAgentTools(tools, active, capabilityInventory)
+  addClaudeCanonicalTools(tools, active)
 
   return orderBy([...tools], [(tool) => tool], ["asc"])
 }
@@ -699,6 +775,7 @@ interface SkillInfo {
 export interface SkillConflictEntry {
   dir: string
   path: string
+  shared: boolean
 }
 
 export interface SkillConflict {
@@ -762,7 +839,7 @@ async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[
     const skillPath = join(dir, name, "SKILL.md")
     if (!(await Bun.file(skillPath).exists())) continue
     const existing = byName.get(name) ?? []
-    existing.push({ dir, path: skillPath })
+    existing.push({ dir, path: skillPath, shared: isAgentsSkillDir(dir) })
     byName.set(name, existing)
   }
 }
@@ -773,30 +850,13 @@ export async function findSkillConflicts(
   const byName = new Map<string, SkillConflictEntry[]>()
   for (const dir of skillDirs) await scanSkillDir(dir, byName)
 
-  const { listProviderAdapters } = await import("./provider-adapters.ts")
-  const adapters = listProviderAdapters()
-
   const conflicts: SkillConflict[] = []
-  const seenConflictPairs = new Set<string>()
 
   for (const name of orderBy([...byName.keys()], [(n) => n], ["asc"])) {
     const entries = byName.get(name) ?? []
     if (entries.length <= 1) continue
-
-    for (const adapter of adapters) {
-      const agentDirs = adapter.getSkillDirs()
-      const agentEntries = entries.filter((e) => agentDirs.includes(e.dir))
-      if (agentEntries.length > 1) {
-        const [active, ...overridden] = agentEntries
-        if (active) {
-          const key = `${name}:${active.path} -> ${overridden.map((o) => o.path).join(",")}`
-          if (!seenConflictPairs.has(key)) {
-            seenConflictPairs.add(key)
-            conflicts.push({ name, active, overridden })
-          }
-        }
-      }
-    }
+    const [active, ...overridden] = entries
+    if (active) conflicts.push({ name, active, overridden })
   }
   return conflicts
 }

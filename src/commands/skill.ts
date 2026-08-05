@@ -12,6 +12,7 @@ import {
   extractReferencedToolsFromSkillText,
   findSkills,
   getAgentsSkillDir,
+  getAgentsSkillDirs,
   getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   stripFrontmatter,
@@ -37,6 +38,11 @@ function primarySkillDir(agentId: string): string {
   if (primary) return primary
 
   return join(home, `.${agentId}`, "skills")
+}
+
+function sourceSkillDirs(agentId: string): string[] {
+  if (agentId === "agents") return getAgentsSkillDirs()
+  return [primarySkillDir(agentId)]
 }
 
 type AgentLike = { id: string; name: string }
@@ -235,10 +241,26 @@ async function discoverSkillNames(skillsDir: string): Promise<string[]> {
   }
   const names: string[] = []
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
     if (await Bun.file(join(skillsDir, entry.name, "SKILL.md")).exists()) names.push(entry.name)
   }
   return orderBy(names, [(n) => n], ["asc"])
+}
+
+async function discoverSkillSources(
+  skillsDirs: string[]
+): Promise<{ name: string; sourceDir: string }[]> {
+  const byName = new Map<string, string>()
+  for (const sourceDir of skillsDirs) {
+    for (const name of await discoverSkillNames(sourceDir)) {
+      if (!byName.has(name)) byName.set(name, sourceDir)
+    }
+  }
+  return orderBy(
+    [...byName].map(([name, sourceDir]) => ({ name, sourceDir })),
+    [(entry) => entry.name],
+    ["asc"]
+  )
 }
 
 type AgentEntry = (typeof AGENTS)[number]
@@ -249,7 +271,7 @@ function resolveAgentPair(
 ): { fromAgent: AgentEntry; toAgent: AgentEntry } {
   // --convert and --to-command apply tool-name remapping using the agent's
   // toolAliases, so pseudo-agents (e.g. "agents") aren't valid here. For
-  // copy-only sync to the ~/.agents directory use --sync, which routes
+  // copy-only sync to the shared .agents/skills roots use --sync, which routes
   // through resolveForSync() and accepts the agents pseudo-target.
   // (Resolution for #662 and the migrated duplicate #663.)
   const fromAgent = getAgent(from)
@@ -406,12 +428,14 @@ async function syncSkills(options: {
   const { from, to, dryRun, overwrite } = options
   const fromAgent = resolveForSync(from)
   const toAgent = resolveForSync(to)
-  const fromSkillsDir = primarySkillDir(from)
+  const fromSkillsDirs = sourceSkillDirs(from)
   const toSkillsDir = primarySkillDir(to)
-  const orderedSkillNames = await discoverSkillNames(fromSkillsDir)
+  const orderedSkills = await discoverSkillSources(fromSkillsDirs)
 
-  if (orderedSkillNames.length === 0) {
-    console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
+  if (orderedSkills.length === 0) {
+    console.log(
+      `No ${fromAgent.name} skills with SKILL.md found at ${fromSkillsDirs.map(displayPath).join(", ")}.`
+    )
     return
   }
 
@@ -421,14 +445,14 @@ async function syncSkills(options: {
       : `Syncing ${fromAgent.name} → ${toAgent.name} skills.`
   )
   if (!dryRun) await mkdir(toSkillsDir, { recursive: true })
-  console.log(`Source: ${displayPath(fromSkillsDir)}`)
+  console.log(`Sources: ${fromSkillsDirs.map(displayPath).join(" > ")}`)
   console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
   let copied = 0,
     overwritten = 0,
     skipped = 0
 
-  for (const name of orderedSkillNames) {
+  for (const { name, sourceDir } of orderedSkills) {
     const targetDir = join(toSkillsDir, name)
     const targetExists = existsSync(targetDir)
     if (targetExists && !overwrite) {
@@ -436,8 +460,7 @@ async function syncSkills(options: {
       console.log(`  - skipped ${name} (already exists)`)
       continue
     }
-    if (!dryRun)
-      await cp(join(fromSkillsDir, name), targetDir, { recursive: true, force: overwrite })
+    if (!dryRun) await cp(join(sourceDir, name), targetDir, { recursive: true, force: overwrite })
     if (logSkillAction(name, targetExists, dryRun, "copied", "copy") === "overwrite") overwritten++
     else copied++
   }
@@ -673,12 +696,12 @@ export const skillCommand: Command<SkillCommandOptions> = {
     {
       flags: "--from <agent>",
       description:
-        "Source agent ID (claude|cursor|gemini|codex|agents). The `agents` source is supported by --sync only and maps to ~/.agents/.",
+        "Source agent ID (claude|cursor|gemini|codex|agents). The `agents` source is supported by --sync only and reads repository/user .agents/skills roots plus the legacy ~/.agents fallback.",
     },
     {
       flags: "--to <agent>",
       description:
-        "Target agent ID (claude|cursor|gemini|codex|agents). The `agents` target is supported by --sync only and maps to ~/.agents/.",
+        "Target agent ID (claude|cursor|gemini|codex|agents). The `agents` target is supported by --sync only and writes to ~/.agents/skills/.",
     },
     { flags: "--dry-run", description: "Preview actions without writing files" },
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },

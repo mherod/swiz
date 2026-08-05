@@ -1,3 +1,4 @@
+import { z } from "zod"
 import { getAgentSettingsPath } from "./agent-paths.ts"
 import { getHomeDir } from "./home.ts"
 
@@ -27,9 +28,15 @@ export interface AgentDef {
   toolAliases: Record<string, string>
   /**
    * Callable tool names supported by this agent beyond the canonical alias
-   * table. These are additive capabilities, not matcher translations.
+   * table in every environment. These are additive capabilities, not matcher
+   * translations.
    */
   additionalToolNames?: readonly string[]
+  /**
+   * Valid tool names that may be supplied by an active environment capability
+   * inventory. Known names are discoverable but are not assumed available.
+   */
+  knownToolNames?: readonly string[]
   /**
    * Human-facing task/planning aliases for governance messages. These do not
    * imply emitted-tool support; use toolAliases for actual hook matcher names.
@@ -150,9 +157,9 @@ function registerAgents(agents: AgentDef[]): AgentDef[] {
   return agents
 }
 
-export const CODEX_ADDITIONAL_TOOL_NAMES = [
-  "write_stdin",
-  "view_image",
+export const CODEX_BUILT_IN_TOOL_NAMES = ["write_stdin", "view_image"] as const
+
+export const CODEX_OPTIONAL_TOOL_NAMES = [
   "web.run",
   "web__run",
   "imagegen",
@@ -174,6 +181,16 @@ export const CODEX_ADDITIONAL_TOOL_NAMES = [
   "interrupt_agent",
   "list_agents",
   "wait_agent",
+] as const
+
+/**
+ * All recognized Codex tool names beyond the stable alias table. This export
+ * remains the complete name inventory for compatibility; only
+ * {@link CODEX_BUILT_IN_TOOL_NAMES} are assumed available everywhere.
+ */
+export const CODEX_ADDITIONAL_TOOL_NAMES = [
+  ...CODEX_BUILT_IN_TOOL_NAMES,
+  ...CODEX_OPTIONAL_TOOL_NAMES,
 ] as const
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
@@ -323,7 +340,8 @@ export const AGENTS: AgentDef[] = registerAgents([
     tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
-    additionalToolNames: CODEX_ADDITIONAL_TOOL_NAMES,
+    additionalToolNames: CODEX_BUILT_IN_TOOL_NAMES,
+    knownToolNames: CODEX_ADDITIONAL_TOOL_NAMES,
     // Codex emits update_plan for planning. Task* canonical names intentionally
     // remain out of toolAliases because there is no exact emitted-tool equivalent.
     taskToolAliases: {
@@ -424,6 +442,42 @@ export function getAgent(id: string): AgentDef | undefined {
   return AGENTS.find((a) => a.id === id)
 }
 
+export const AGENT_TOOL_CAPABILITIES_ENV = "SWIZ_AGENT_TOOL_CAPABILITIES"
+
+const TOOL_CAPABILITY_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/
+const agentToolCapabilityInventorySchema = z.object({
+  agentId: z.enum(["claude", "cursor", "gemini", "codex", "antigravity"]),
+  toolNames: z.array(z.string().regex(TOOL_CAPABILITY_NAME_RE)),
+})
+
+export type AgentToolCapabilityInventory = z.infer<typeof agentToolCapabilityInventorySchema>
+
+/** Parse and validate an invocation-scoped tool capability inventory. */
+export function parseAgentToolCapabilityInventory(
+  value: z.input<typeof agentToolCapabilityInventorySchema>
+): AgentToolCapabilityInventory | null {
+  const parsed = agentToolCapabilityInventorySchema.safeParse(value)
+  if (!parsed.success) return null
+
+  return {
+    agentId: parsed.data.agentId,
+    toolNames: [...new Set(parsed.data.toolNames)],
+  }
+}
+
+/** Read active tool capabilities from ephemeral invocation/session metadata. */
+export function readAgentToolCapabilityInventoryFromEnv(
+  env: { [key: string]: string | undefined } = process.env
+): AgentToolCapabilityInventory | null {
+  const raw = env[AGENT_TOOL_CAPABILITIES_ENV]
+  if (!raw) return null
+  try {
+    return parseAgentToolCapabilityInventory(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
 export function getAgentByFlag(args: string[]): AgentDef[] {
   const explicit = AGENTS.filter((a) => args.includes(`--${a.id}`))
   return explicit.length > 0 ? explicit : AGENTS
@@ -433,9 +487,19 @@ export function hasAnyAgentFlag(args: string[]): boolean {
   return args.some((arg) => AGENTS.some((agent) => `--${agent.id}` === arg))
 }
 
-/** Check if an agent supports a specific tool by name. */
-export function agentSupportsTool(agent: AgentDef, toolName: string): boolean {
+/** Check if an agent supports a specific tool by name in the active environment. */
+export function agentSupportsTool(
+  agent: AgentDef,
+  toolName: string,
+  capabilityInventory?: AgentToolCapabilityInventory | null
+): boolean {
   if (agent.additionalToolNames?.includes(toolName)) return true
+  if (
+    capabilityInventory?.agentId === agent.id &&
+    capabilityInventory.toolNames.includes(toolName)
+  ) {
+    return true
+  }
 
   // Only Claude has the TaskList tool
   if (toolName === "TaskList") {

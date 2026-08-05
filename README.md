@@ -83,6 +83,18 @@ The canonical manifest uses neutral names. At install time, `agents.ts` translat
 
 Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's name lands in the payload.
 
+#### Stable aliases and active capabilities
+
+Tool aliases are stable agent-wide translations such as `Bash` → `shell_command` for Codex, alongside retained emitted names such as `exec_command`. Optional tools supplied by a desktop host, plugin, MCP server, app connector, collaboration mode, or workspace are environment-scoped capabilities instead. Swiz assumes only the conservative built-in set and uses an invocation inventory before suppressing unavailable-tool warnings or retaining optional `allowed-tools` entries.
+
+Programmatic callers pass an `AgentToolCapabilityInventory`. CLI invocations can provide the same ephemeral metadata through `SWIZ_AGENT_TOOL_CAPABILITIES`; it is not persisted as project policy:
+
+```bash
+SWIZ_AGENT_TOOL_CAPABILITIES='{"agentId":"codex","toolNames":["web.run","image_gen__imagegen","list_mcp_resources"]}' swiz skill --convert --from claude --to codex
+```
+
+The JSON must name a supported agent and contain only valid tool-name strings. Missing or invalid metadata fails closed: optional tools are reported unavailable while the stable alias table remains unchanged.
+
 ## Bundled Hooks
 
 123 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
@@ -437,8 +449,8 @@ swiz skill commit       # print skill with inline commands expanded
 swiz skill --raw commit # raw SKILL.md without expansion
 
 # Copy cross-agent skills in either direction (copy-only)
-swiz skill --sync --from claude --to agents  # ~/.claude/skills -> ~/.agents
-swiz skill --sync --from agents --to claude  # ~/.agents -> ~/.claude/skills
+swiz skill --sync --from claude --to agents  # ~/.claude/skills -> ~/.agents/skills
+swiz skill --sync --from agents --to claude  # shared roots -> ~/.claude/skills
 
 # Copy Gemini skills to Claude (copy-only — no tool name remapping)
 swiz skill --sync-gemini                     # sync ~/.gemini/skills -> ~/.claude/skills
@@ -452,11 +464,11 @@ swiz skill --convert --from codex  --to claude --overwrite
 swiz skill --convert --from claude --to gemini commit      # convert a single named skill
 ```
 
-Skills are discovered from `.skills/` (project-local), the cross-agent global `~/.agents/`, and provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that exact order.
+Skills use deterministic first-found precedence: project `.skills/`; `.agents/skills/` from the current directory through the repository root (nearest first); user `~/.agents/skills/`; legacy direct `~/.agents/<skill>/`; then provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Symlinked skill directories are supported.
 
 `--sync-gemini` copies Gemini skill directories into `~/.claude/skills/` without transforming content — direct tool references in SKILL.md body or frontmatter are preserved as-is. Use `--convert` for automatic tool name remapping.
 
-The `agents` pseudo-provider maps to `~/.agents/<skill>/SKILL.md`. It is fully supported for discovery, reading, and copy-only `--sync` operations in either direction. Content conversion and command export require provider-specific tool aliases, so `agents` is intentionally unsupported for `--convert` and `--to-command`.
+The `agents` pseudo-provider writes to the standard user root `~/.agents/skills/<skill>/SKILL.md`. As a sync source it reads repository `.agents/skills` roots, that user root, and the legacy direct `~/.agents/<skill>/SKILL.md` fallback in precedence order. Content conversion and command export require provider-specific tool aliases, so `agents` is intentionally unsupported for `--convert` and `--to-command`.
 
 `--convert` performs a content-aware conversion: it builds a reverse alias map for the source agent, composes it with the target agent's alias table, and rewrites both the frontmatter `allowed-tools` list and whole-word tool references in the body. Permission-specifier tokens like `Bash(git add:*)` remap the base tool name and keep the specifier. Tool names with no target-side equivalent are preserved as-is and reported as warnings — no silent data loss. Pass a skill name to convert just that skill. Supported agent IDs: `claude`, `cursor`, `gemini`, `codex`.
 
@@ -855,7 +867,7 @@ swiz doctor --aggressive                   # replace every existing agent hook e
 | `--fix` | Auto-fix stale agent configs by running `swiz install`, fix invalid skill entries, and report skill conflicts |
 | `--aggressive` | Back up agent config files, remove all existing hook entries, and install only swiz hooks |
 
-Skill conflict warnings include both skill file paths, the currently active (winning) path, and the deterministic precedence order used to choose it.
+Skill conflict warnings include every skill file path, the currently active (winning) path, and the deterministic precedence order used to choose it. `swiz doctor --fix` never removes a shared `.agents` copy automatically; conflicts involving shared roots are routed to manual resolution so user and repository data cannot be discarded ambiguously.
 
 ### `swiz help`
 
