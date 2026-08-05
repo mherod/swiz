@@ -77,8 +77,9 @@ function remapToolList(
   for (const raw of list.split(",")) {
     if (!raw.trim()) continue
     const { token, unmapped: u } = remapToken(raw, remap)
-    if (u) unmapped.push(u)
-    if (!isAvailable || isAvailable(token)) {
+    const available = !isAvailable || isAvailable(token)
+    if (u && !available) unmapped.push(u)
+    if (available) {
       filtered.push(token)
     }
   }
@@ -101,8 +102,9 @@ function remapAllowedToolsBlock(
     if (!itemMatch) break
 
     const { mappedRaw, unmapped: unmatchedTool } = remapPossiblyQuotedTool(itemMatch[2]!, remap)
-    if (unmatchedTool) unmapped.push(unmatchedTool)
-    if (!isAvailable || isAvailable(mappedRaw)) {
+    const available = !isAvailable || isAvailable(mappedRaw)
+    if (unmatchedTool && !available) unmapped.push(unmatchedTool)
+    if (available) {
       lines.push(`${itemMatch[1]}${mappedRaw}`)
     }
     index++
@@ -215,6 +217,15 @@ function rewriteBodyToolNames(
   return result
 }
 
+function addAvailableToolNames(
+  tools: Set<string>,
+  names: Iterable<string | null | undefined>
+): void {
+  for (const name of names) {
+    if (name) tools.add(name)
+  }
+}
+
 // ─── Public: convert skill content between agents ────────────────────────────
 
 export function convertSkillContent(
@@ -228,6 +239,7 @@ export function convertSkillContent(
     id: string
     toolAliases: Record<string, string>
     taskToolAliases?: Record<string, string | null>
+    additionalToolNames?: readonly string[]
   },
   allAgents: {
     toolAliases: Record<string, string>
@@ -256,6 +268,7 @@ export function convertSkillContent(
       id: string
       toolAliases: Record<string, string>
       taskToolAliases?: Record<string, string | null>
+      additionalToolNames?: readonly string[]
     },
     taskCreateTarget?: string
   ): Set<string> {
@@ -280,17 +293,12 @@ export function convertSkillContent(
         tools.add(t)
       }
     } else {
-      for (const t of Object.values(toAgent.toolAliases)) {
-        tools.add(t)
-      }
-      if (toAgent.taskToolAliases) {
-        for (const t of Object.values(toAgent.taskToolAliases)) {
-          if (t) tools.add(t)
-        }
-      }
+      addAvailableToolNames(tools, Object.values(toAgent.toolAliases))
+      addAvailableToolNames(tools, Object.values(toAgent.taskToolAliases ?? {}))
       if (taskCreateTarget) {
         tools.add(taskCreateTarget)
       }
+      addAvailableToolNames(tools, toAgent.additionalToolNames ?? [])
       if ((toAgent as any).tasksEnabled) {
         tools.add("TaskList")
         tools.add("TaskGet")

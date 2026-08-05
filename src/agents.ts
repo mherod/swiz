@@ -26,6 +26,11 @@ export interface AgentDef {
   /** Tool name aliases: canonical (Claude-style) → agent-specific */
   toolAliases: Record<string, string>
   /**
+   * Callable tool names supported by this agent beyond the canonical alias
+   * table. These are additive capabilities, not matcher translations.
+   */
+  additionalToolNames?: readonly string[]
+  /**
    * Human-facing task/planning aliases for governance messages. These do not
    * imply emitted-tool support; use toolAliases for actual hook matcher names.
    */
@@ -144,6 +149,32 @@ function registerAgents(agents: AgentDef[]): AgentDef[] {
   validatePublicAgentHookMappings(agents)
   return agents
 }
+
+export const CODEX_ADDITIONAL_TOOL_NAMES = [
+  "write_stdin",
+  "view_image",
+  "web.run",
+  "web__run",
+  "imagegen",
+  "image_gen__imagegen",
+  "request_user_input",
+  "load_workspace_dependencies",
+  "codex_app__load_workspace_dependencies",
+  "list_mcp_resource_templates",
+  "list_mcp_resources",
+  "read_mcp_resource",
+  "codex_app__navigate_to_codex_page",
+  "codex_app__read_thread_terminal",
+  "create_goal",
+  "get_goal",
+  "update_goal",
+  "spawn_agent",
+  "followup_task",
+  "send_message",
+  "interrupt_agent",
+  "list_agents",
+  "wait_agent",
+] as const
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
 // Codex's public hooks.json schema currently exposes exactly:
@@ -292,6 +323,7 @@ export const AGENTS: AgentDef[] = registerAgents([
     tasksEnabled: true,
     hooksConfigurable: true,
     envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
+    additionalToolNames: CODEX_ADDITIONAL_TOOL_NAMES,
     // Codex emits update_plan for planning. Task* canonical names intentionally
     // remain out of toolAliases because there is no exact emitted-tool equivalent.
     taskToolAliases: {
@@ -403,6 +435,8 @@ export function hasAnyAgentFlag(args: string[]): boolean {
 
 /** Check if an agent supports a specific tool by name. */
 export function agentSupportsTool(agent: AgentDef, toolName: string): boolean {
+  if (agent.additionalToolNames?.includes(toolName)) return true
+
   // Only Claude has the TaskList tool
   if (toolName === "TaskList") {
     return agent.id === "claude"

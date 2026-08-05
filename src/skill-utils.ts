@@ -249,14 +249,16 @@ const EXTRA_SKILL_TOOL_SCAN_TOKENS: readonly string[] = [
 ]
 
 let _canonicalToolScanSet: Set<string> | null = null
+const SKILL_TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]*$/
 
 function buildCanonicalToolScanSet(): Set<string> {
   const s = new Set<string>()
   for (const a of AGENTS) {
     for (const k of Object.keys(a.toolAliases)) s.add(k)
     for (const v of Object.values(a.toolAliases)) {
-      if (/^[A-Za-z][A-Za-z0-9_]*$/.test(v)) s.add(v)
+      if (SKILL_TOOL_NAME_RE.test(v)) s.add(v)
     }
+    for (const toolName of a.additionalToolNames ?? []) s.add(toolName)
   }
   s.add("Skill")
   for (const t of EXTRA_SKILL_TOOL_SCAN_TOKENS) s.add(t)
@@ -276,12 +278,12 @@ export function extractReferencedToolsFromSkillText(body: string): string[] {
   const scan = getCanonicalToolScanSet()
   const found = new Set<string>()
 
-  for (const m of body.matchAll(/`([A-Za-z][A-Za-z0-9_]*)`/g)) {
+  for (const m of body.matchAll(/`([A-Za-z][A-Za-z0-9_.-]*)`/g)) {
     const name = m[1]
     if (name && scan.has(name)) found.add(name)
   }
 
-  for (const m of body.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*\(/g)) {
+  for (const m of body.matchAll(/\b([A-Za-z][A-Za-z0-9_.-]*)\s*\(/g)) {
     const name = m[1]
     if (name && scan.has(name)) found.add(name)
   }
@@ -341,6 +343,7 @@ function detectActiveSkillTools(): string[] {
   // Agent-specific aliases are the primary invocation names.
   const toolAliases = active.toolAliases
   for (const alias of Object.values(toolAliases)) tools.add(alias)
+  for (const toolName of active.additionalToolNames ?? []) tools.add(toolName)
 
   // Include canonical names that map for this agent.
   for (const canonical of Object.keys(toolAliases)) {
