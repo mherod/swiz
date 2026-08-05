@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -8,7 +8,15 @@ import {
   clearAllEventState,
   needsReconciliation,
 } from "../src/tasks/task-event-state.ts"
-import { getSessionTaskPath, getSessionTasksDir } from "../src/tasks/task-recovery.ts"
+import { TASKLIST_ARCHIVE_DIRNAME } from "../src/tasks/task-list-reconciliation.ts"
+import {
+  getSessionTaskPath,
+  getSessionTasksDir,
+  readSessionTasks,
+  readSessionTasksFresh,
+  setGlobalTaskStateCache,
+} from "../src/tasks/task-recovery.ts"
+import { TaskStateCache } from "../src/tasks/task-state-cache.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import { runHook } from "../src/utils/test-utils.ts"
 import { evaluatePosttooluseTaskListSync } from "./posttooluse-task-sync.ts"
@@ -26,6 +34,15 @@ const TASKS_DIR =
 function taskPath(id: string): string {
   return (
     getSessionTaskPath(SESSION_ID, id, TMP_HOME) ??
+    (() => {
+      throw new Error(`Failed to resolve task path for ${id}`)
+    })()
+  )
+}
+
+function taskPathForSession(sessionId: string, id: string): string {
+  return (
+    getSessionTaskPath(sessionId, id, TMP_HOME) ??
     (() => {
       throw new Error(`Failed to resolve task path for ${id}`)
     })()
@@ -99,11 +116,12 @@ describe("posttooluse-task-list-sync", () => {
   })
 
   test("no output when tasks array is empty", async () => {
+    const sessionId = `${SESSION_ID}-empty-output`
     const { stdout, exitCode } = await runHook(
       HOOK,
       {
         cwd: "/tmp",
-        session_id: SESSION_ID,
+        session_id: sessionId,
         tool_name: "TaskList",
         tool_response: makeTaskListResponse([]),
       },
@@ -115,21 +133,131 @@ describe("posttooluse-task-list-sync", () => {
 
   test("authoritative empty TaskList clears reconciliation state", async () => {
     const sessionId = `${SESSION_ID}-empty-reconciliation`
+    const tasksDir = getSessionTasksDir(sessionId, TMP_HOME)!
+    const staleTask = { id: "1", subject: "Task", status: "completed" }
+    await mkdir(tasksDir, { recursive: true })
+    await Bun.write(taskPathForSession(sessionId, "1"), JSON.stringify(staleTask))
+
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    cache.applyTaskListSnapshot(sessionId, [staleTask], Date.now() - 1_000)
+    setGlobalTaskStateCache(cache)
     applyTaskCreateEvent(sessionId, "1", "Task")
     applyTaskUpdateEvent(sessionId, "1", { status: "completed" })
     expect(needsReconciliation(sessionId)).toBe(true)
 
     try {
-      const output = await evaluatePosttooluseTaskListSync({
+      const output = await evaluatePosttooluseTaskListSync(
+        {
+          _agent: "claude",
+          cwd: "/tmp",
+          session_id: sessionId,
+          tool_name: "TaskList",
+          tool_response: makeTaskListResponse([]),
+        },
+        { home: TMP_HOME }
+      )
+
+      expect(output).toEqual({})
+      expect(needsReconciliation(sessionId)).toBe(false)
+      expect(await readSessionTasks(sessionId, TMP_HOME)).toEqual([])
+      expect(await readSessionTasksFresh(sessionId, TMP_HOME)).toEqual([])
+      expect(await Bun.file(taskPathForSession(sessionId, "1")).exists()).toBe(false)
+
+      const archiveBatches = await readdir(join(tasksDir, TASKLIST_ARCHIVE_DIRNAME))
+      expect(archiveBatches).toHaveLength(1)
+      expect(
+        await Bun.file(
+          join(tasksDir, TASKLIST_ARCHIVE_DIRNAME, archiveBatches[0]!, "1.json")
+        ).exists()
+      ).toBe(true)
+    } finally {
+      setGlobalTaskStateCache(null)
+      cache.close()
+      clearAllEventState()
+    }
+  })
+
+  test("persistence failures do not advance sentinel, cache, or event state", async () => {
+    const cache = new TaskStateCache({ maxEntries: 10 })
+    setGlobalTaskStateCache(cache)
+
+    try {
+      for (const operation of ["create", "update", "parse"] as const) {
+        const sessionId = `${SESSION_ID}-${operation}-failure`
+        const tasksDir = getSessionTasksDir(sessionId, TMP_HOME)!
+        const staleTask = { id: "old", subject: "Prior task", status: "pending" }
+        await mkdir(tasksDir, { recursive: true })
+        cache.applyTaskListSnapshot(sessionId, [staleTask], Date.now() - 1_000)
+        applyTaskCreateEvent(sessionId, "old", "Prior task")
+        applyTaskUpdateEvent(sessionId, "old", { status: "completed" })
+
+        let sentinelWrites = 0
+        const output = (await evaluatePosttooluseTaskListSync(
+          {
+            _agent: "claude",
+            cwd: "/tmp",
+            session_id: sessionId,
+            tool_name: "TaskList",
+            tool_response: makeTaskListResponse([
+              { id: "new", subject: "Sensitive task content", status: "pending" },
+            ]),
+          },
+          {
+            home: TMP_HOME,
+            reconcile() {
+              return Promise.resolve({
+                created: 0,
+                updated: 0,
+                skipped: 0,
+                archived: 0,
+                failures: [{ operation, taskId: "new" }],
+                resolvedTasks: [],
+              })
+            },
+            writeSentinel() {
+              sentinelWrites++
+              return Promise.resolve(Date.now())
+            },
+          }
+        )) as { hookSpecificOutput?: { additionalContext?: string } }
+
+        const context = output.hookSpecificOutput?.additionalContext ?? ""
+        expect(context).toContain("TaskList persistence was incomplete")
+        expect(context).toContain("run TaskList again")
+        expect(context).not.toContain("Sensitive task content")
+        expect(sentinelWrites).toBe(0)
+        expect(await Bun.file(taskListSyncSentinelPath(sessionId)).exists()).toBe(false)
+        expect(needsReconciliation(sessionId)).toBe(true)
+        expect((await cache.getState(sessionId, tasksDir)).tasks).toMatchObject([{ id: "old" }])
+      }
+    } finally {
+      setGlobalTaskStateCache(null)
+      cache.close()
+      clearAllEventState()
+    }
+  })
+
+  test("unknown status preserves reconciliation and freshness state", async () => {
+    const sessionId = `${SESSION_ID}-unknown-status`
+    applyTaskCreateEvent(sessionId, "1", "Task")
+    applyTaskUpdateEvent(sessionId, "1", { status: "completed" })
+
+    try {
+      const output = (await evaluatePosttooluseTaskListSync({
         _agent: "claude",
         cwd: "/tmp",
         session_id: sessionId,
         tool_name: "TaskList",
-        tool_response: makeTaskListResponse([]),
-      })
+        tool_response: makeTaskListResponse([
+          { id: "1", subject: "Sensitive task content", status: "mystery" },
+        ]),
+      })) as { hookSpecificOutput?: { additionalContext?: string } }
 
-      expect(output).toEqual({})
-      expect(needsReconciliation(sessionId)).toBe(false)
+      const context = output.hookSpecificOutput?.additionalContext ?? ""
+      expect(context).toContain("TaskList response format was not recognized")
+      expect(context).not.toContain("Sensitive task content")
+      expect(needsReconciliation(sessionId)).toBe(true)
+      expect(await Bun.file(taskListSyncSentinelPath(sessionId)).exists()).toBe(false)
     } finally {
       clearAllEventState()
     }

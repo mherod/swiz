@@ -31,6 +31,7 @@ import {
   type NormalizedTask,
   parseToolResponse,
   reconcileTasks,
+  type SyncResult,
   type TaskListParseResult,
 } from "../src/tasks/task-list-reconciliation.ts"
 import {
@@ -231,7 +232,30 @@ const UNRECOGNIZED_TASKLIST_CONTEXT =
   "TaskList response format was not recognized. Existing task state was kept unchanged. " +
   "Run TaskList again before changing task statuses."
 
-async function resolveListSyncInput(input: PostToolHookInput): Promise<ListSyncResolution> {
+const INCOMPLETE_TASKLIST_SYNC_CONTEXT =
+  "TaskList persistence was incomplete. Existing task freshness, cache, and event state were " +
+  "kept unchanged. Repair unreadable task files or run TaskList again before changing task statuses."
+
+export interface TaskListSyncDependencies {
+  home: string
+  reconcile: typeof reconcileTasks
+  writeSentinel: typeof writeCanonicalTaskListSyncSentinel
+}
+
+function resolveTaskListSyncDependencies(
+  dependencies: Partial<TaskListSyncDependencies>
+): TaskListSyncDependencies {
+  return {
+    home: dependencies.home ?? homedir(),
+    reconcile: dependencies.reconcile ?? reconcileTasks,
+    writeSentinel: dependencies.writeSentinel ?? writeCanonicalTaskListSyncSentinel,
+  }
+}
+
+async function resolveListSyncInput(
+  input: PostToolHookInput,
+  home: string
+): Promise<ListSyncResolution> {
   if (input.tool_name !== "TaskList") return { kind: "skip" }
   const sessionId = resolveSafeSessionId(input.session_id)
   if (!sessionId) return { kind: "skip" }
@@ -239,7 +263,7 @@ async function resolveListSyncInput(input: PostToolHookInput): Promise<ListSyncR
   if (parsed.kind === "unrecognized") return parsed
   const { tasks } = parsed
   if (tasks.length === 0) return { kind: "resolved", sessionId, tasks }
-  const tasksDir = getSessionTasksDir(sessionId, homedir())
+  const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return { kind: "skip" }
   try {
     await mkdir(tasksDir, { recursive: true })
@@ -250,13 +274,14 @@ async function resolveListSyncInput(input: PostToolHookInput): Promise<ListSyncR
 }
 
 function formatSyncSummary(
-  counts: { created: number; updated: number; skipped: number },
+  counts: Pick<SyncResult, "created" | "updated" | "skipped" | "archived">,
   total: number
 ): string | null {
-  if (counts.created === 0 && counts.updated === 0) return null
+  if (counts.created === 0 && counts.updated === 0 && counts.archived === 0) return null
   const parts: string[] = []
   if (counts.created > 0) parts.push(`${counts.created} created`)
   if (counts.updated > 0) parts.push(`${counts.updated} updated`)
+  if (counts.archived > 0) parts.push(`${counts.archived} archived`)
   if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
   return `TaskList sync: ${parts.join(", ")} (${total} task(s) in response).`
 }
@@ -274,11 +299,15 @@ function formatDuplicateSubjectNotice(
   )
 }
 
-export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<SwizHookOutput> {
+export async function evaluatePosttooluseTaskListSync(
+  input: unknown,
+  dependencies: Partial<TaskListSyncDependencies> = {}
+): Promise<SwizHookOutput> {
   const hookInput = input as PostToolHookInput
   if (!agentHasTaskToolsForHookPayload(hookInput as Record<string, any>)) return {}
 
-  const resolved = await resolveListSyncInput(hookInput)
+  const effectiveDependencies = resolveTaskListSyncDependencies(dependencies)
+  const resolved = await resolveListSyncInput(hookInput, effectiveDependencies.home)
   if (resolved.kind === "unrecognized") {
     return resolved.hasContent
       ? buildContextHookOutput("PostToolUse", UNRECOGNIZED_TASKLIST_CONTEXT)
@@ -286,31 +315,32 @@ export async function evaluatePosttooluseTaskListSync(input: unknown): Promise<S
   }
   if (resolved.kind === "skip") return {}
 
-  // Update in-memory event state with the full task list from the response.
-  // Downstream hooks in the same dispatch see this immediately without disk reads.
+  const syncResult = await effectiveDependencies.reconcile(
+    resolved.tasks,
+    effectiveDependencies.home,
+    resolved.sessionId
+  )
+  if (syncResult.failures.length > 0) {
+    return buildContextHookOutput("PostToolUse", INCOMPLETE_TASKLIST_SYNC_CONTEXT)
+  }
+
+  const canonicalTaskListSyncedAtMs = await effectiveDependencies.writeSentinel(resolved.sessionId)
+
+  // Publish the authoritative list only after every disk mutation succeeds.
   applyTaskListEvent(
     resolved.sessionId,
     resolved.tasks.map((t) => ({ id: t.id, status: t.status, subject: t.subject }))
   )
 
-  if (resolved.tasks.length === 0) {
-    const canonicalTaskListSyncedAtMs = await writeCanonicalTaskListSyncSentinel(resolved.sessionId)
-    applyCacheTaskListSnapshot(resolved.sessionId, [], canonicalTaskListSyncedAtMs)
-    return {}
-  }
-
-  const syncResult = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
-  const canonicalTaskListSyncedAtMs = await writeCanonicalTaskListSyncSentinel(resolved.sessionId)
-
   // Write-through to the daemon's TaskStateCache so web UI and stop hooks
   // see the reconciled state immediately without waiting for fs.watch.
-  if (syncResult.resolvedTasks.length > 0) {
-    applyCacheTaskListSnapshot(
-      resolved.sessionId,
-      syncResult.resolvedTasks,
-      canonicalTaskListSyncedAtMs
-    )
-  }
+  applyCacheTaskListSnapshot(
+    resolved.sessionId,
+    syncResult.resolvedTasks,
+    canonicalTaskListSyncedAtMs
+  )
+
+  if (resolved.tasks.length === 0) return {}
 
   // Build count context from the reconciled task state so the model sees
   // task hygiene feedback (pending/in_progress warnings) after every TaskList.

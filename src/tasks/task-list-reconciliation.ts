@@ -6,9 +6,13 @@
  * and reconciling against the filesystem.
  */
 
+import { mkdir, readdir, rename } from "node:fs/promises"
+import { join } from "node:path"
 import type { PostToolHookInput } from "../schemas.ts"
+import { isSessionTaskJsonFile } from "./task-file-utils.ts"
 import type { SessionTask } from "./task-recovery.ts"
-import { getSessionTaskPath } from "./task-recovery.ts"
+import { getSessionTaskPath, getSessionTasksDir } from "./task-recovery.ts"
+import { atomicWriteJson, type TaskStatus, taskStatusSchema } from "./task-repository.ts"
 import { getTaskCurrentDurationMs } from "./task-timing.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -16,7 +20,7 @@ import { getTaskCurrentDurationMs } from "./task-timing.ts"
 export interface NormalizedTask {
   id: string
   subject: string
-  status: string
+  status: TaskStatus
 }
 
 export type TaskListParseResult =
@@ -30,13 +34,41 @@ export type TaskListParseResult =
 type UnrecognizedTaskListResult = Extract<TaskListParseResult, { kind: "unrecognized" }>
 type DecodedToolResponse = { kind: "decoded"; value: unknown } | UnrecognizedTaskListResult
 
-interface SyncResult {
+export type TaskSyncFailureOperation = "create" | "parse" | "update" | "list" | "archive"
+
+export interface TaskSyncFailure {
+  operation: TaskSyncFailureOperation
+  taskId?: string
+}
+
+export interface SyncResult {
   created: number
   updated: number
   skipped: number
+  archived: number
+  failures: TaskSyncFailure[]
   /** All resolved SessionTask objects (written + unchanged) for cache write-through. */
   resolvedTasks: SessionTask[]
 }
+
+export interface TaskReconciliationIo {
+  writeJson(filePath: string, data: unknown): Promise<void>
+  listDirectory(dirPath: string): Promise<string[]>
+  makeDirectory(dirPath: string): Promise<void>
+  moveFile(sourcePath: string, destinationPath: string): Promise<void>
+}
+
+const defaultReconciliationIo: TaskReconciliationIo = {
+  writeJson: atomicWriteJson,
+  listDirectory: readdir,
+  async makeDirectory(dirPath) {
+    await mkdir(dirPath, { recursive: true })
+  },
+  moveFile: rename,
+}
+
+/** Hidden recoverable storage that preserves omitted task files under per-sync batches. */
+export const TASKLIST_ARCHIVE_DIRNAME = ".tasklist-archive"
 
 // ─── Parsing ────────────────────────────────────────────────────────────────
 
@@ -47,9 +79,9 @@ interface SyncResult {
 function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
   const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
   const subject = typeof t.subject === "string" ? t.subject : ""
-  const status = typeof t.status === "string" ? t.status : "pending"
-  if (!id || !subject) return null
-  return { id, subject, status }
+  const status = taskStatusSchema.safeParse(t.status)
+  if (!id || !subject || !status.success) return null
+  return { id, subject, status: status.data }
 }
 
 function decodeToolResponse(raw: PostToolHookInput["tool_response"]): DecodedToolResponse {
@@ -142,59 +174,171 @@ function updateExistingTask(existing: SessionTask, task: NormalizedTask): Sessio
 
 // ─── Reconciliation ─────────────────────────────────────────────────────────
 
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  )
+}
+
+function taskIdFromFileName(fileName: string): string {
+  return fileName.slice(0, -".json".length)
+}
+
+async function archiveOmittedTaskFiles(
+  tasksDir: string,
+  authoritativeTaskIds: Set<string>,
+  io: TaskReconciliationIo,
+  result: SyncResult
+): Promise<void> {
+  let fileNames: string[]
+  try {
+    fileNames = await io.listDirectory(tasksDir)
+  } catch (error) {
+    if (isNotFoundError(error)) return
+    result.failures.push({ operation: "list" })
+    return
+  }
+
+  const omittedFiles = fileNames.filter(
+    (fileName) =>
+      isSessionTaskJsonFile(fileName) && !authoritativeTaskIds.has(taskIdFromFileName(fileName))
+  )
+  if (omittedFiles.length === 0) return
+
+  const archiveDir = join(
+    tasksDir,
+    TASKLIST_ARCHIVE_DIRNAME,
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  )
+  try {
+    await io.makeDirectory(archiveDir)
+  } catch {
+    for (const fileName of omittedFiles) {
+      result.failures.push({ operation: "archive", taskId: taskIdFromFileName(fileName) })
+    }
+    return
+  }
+
+  for (const fileName of omittedFiles) {
+    const taskId = taskIdFromFileName(fileName)
+    try {
+      await io.moveFile(join(tasksDir, fileName), join(archiveDir, fileName))
+      result.archived++
+    } catch {
+      result.failures.push({ operation: "archive", taskId })
+    }
+  }
+}
+
+async function createTaskFile(
+  taskPath: string,
+  task: NormalizedTask,
+  io: TaskReconciliationIo,
+  result: SyncResult
+): Promise<void> {
+  const taskRecord = buildNewTaskRecord(task, new Date().toISOString(), Date.now())
+  try {
+    await io.writeJson(taskPath, taskRecord)
+    result.created++
+    result.resolvedTasks.push(taskRecord)
+  } catch {
+    result.failures.push({ operation: "create", taskId: task.id })
+  }
+}
+
+async function updateTaskFile(
+  taskPath: string,
+  existing: SessionTask,
+  task: NormalizedTask,
+  io: TaskReconciliationIo,
+  result: SyncResult
+): Promise<void> {
+  const merged = updateExistingTask(existing, task)
+  try {
+    await io.writeJson(taskPath, merged)
+    result.updated++
+    result.resolvedTasks.push(merged)
+  } catch {
+    result.failures.push({ operation: "update", taskId: task.id })
+  }
+}
+
+interface IncomingTaskContext {
+  home: string
+  sessionId: string
+  io: TaskReconciliationIo
+  result: SyncResult
+}
+
+async function reconcileIncomingTask(
+  task: NormalizedTask,
+  context: IncomingTaskContext
+): Promise<void> {
+  const taskPath = getSessionTaskPath(context.sessionId, task.id, context.home)
+  if (!taskPath) return
+
+  const file = Bun.file(taskPath)
+  if (!(await file.exists())) {
+    await createTaskFile(taskPath, task, context.io, context.result)
+    return
+  }
+
+  let existing: SessionTask
+  try {
+    existing = (await file.json()) as SessionTask
+  } catch {
+    context.result.failures.push({ operation: "parse", taskId: task.id })
+    return
+  }
+
+  if (existing.subject === task.subject && existing.status === task.status) {
+    context.result.skipped++
+    context.result.resolvedTasks.push(existing)
+    return
+  }
+
+  await updateTaskFile(taskPath, existing, task, context.io, context.result)
+}
+
 /**
  * Reconcile a normalized task list against the filesystem.
  * For each task: creates new files, updates existing files when state changes,
- * or skips when subject and status match. Returns sync counts and all resolved tasks.
+ * or skips when subject and status match. Files omitted from the authoritative
+ * list are moved into a hidden per-sync archive so direct disk reads cannot
+ * resurrect them and operators can restore them if needed.
  */
 export async function reconcileTasks(
   tasks: NormalizedTask[],
   home: string,
-  sessionId: string
+  sessionId: string,
+  ioOverrides: Partial<TaskReconciliationIo> = {}
 ): Promise<SyncResult> {
-  const result: SyncResult = { created: 0, updated: 0, skipped: 0, resolvedTasks: [] }
-
-  for (const task of tasks) {
-    const taskPath = getSessionTaskPath(sessionId, task.id, home)
-    if (!taskPath) continue
-
-    const file = Bun.file(taskPath)
-    const exists = await file.exists()
-
-    if (!exists) {
-      const taskRecord = buildNewTaskRecord(task, new Date().toISOString(), Date.now())
-      try {
-        await Bun.write(taskPath, JSON.stringify(taskRecord, null, 2))
-        result.created++
-        result.resolvedTasks.push(taskRecord)
-      } catch {}
-      continue
-    }
-
-    let existing: SessionTask
-    try {
-      existing = (await file.json()) as SessionTask
-    } catch {
-      result.skipped++
-      continue
-    }
-
-    if (existing.subject === task.subject && existing.status === task.status) {
-      result.skipped++
-      result.resolvedTasks.push(existing)
-      continue
-    }
-
-    const merged = updateExistingTask(existing, task)
-    try {
-      await Bun.write(taskPath, JSON.stringify(merged, null, 2))
-      result.updated++
-      result.resolvedTasks.push(merged)
-    } catch {
-      result.skipped++
-      result.resolvedTasks.push(existing)
-    }
+  const io: TaskReconciliationIo = { ...defaultReconciliationIo, ...ioOverrides }
+  const result: SyncResult = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    archived: 0,
+    failures: [],
+    resolvedTasks: [],
   }
+
+  const context: IncomingTaskContext = { home, sessionId, io, result }
+  for (const task of tasks) {
+    await reconcileIncomingTask(task, context)
+  }
+
+  if (result.failures.length > 0) return result
+
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) {
+    result.failures.push({ operation: "list" })
+    return result
+  }
+  await archiveOmittedTaskFiles(tasksDir, new Set(tasks.map((task) => task.id)), io, result)
 
   return result
 }

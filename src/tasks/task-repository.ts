@@ -21,12 +21,16 @@ export { sessionPrefix }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+export const TASK_STATUSES = ["pending", "in_progress", "completed", "cancelled"] as const
+export const taskStatusSchema = z.enum(TASK_STATUSES)
+export type TaskStatus = z.infer<typeof taskStatusSchema>
+
 export interface Task {
   id: string
   subject: string
   description: string
   activeForm?: string
-  status: "pending" | "in_progress" | "completed" | "cancelled"
+  status: TaskStatus
   blocks: string[]
   blockedBy: string[]
   completionEvidence?: string
@@ -45,10 +49,9 @@ export interface Task {
 
 /** Whether a task status represents an incomplete (actionable) task. */
 export function isIncompleteTaskStatus(status: string): boolean {
-  return status === "pending" || status === "in_progress"
+  const parsed = taskStatusSchema.safeParse(status)
+  return parsed.success && (parsed.data === "pending" || parsed.data === "in_progress")
 }
-
-export type TaskStatus = Task["status"]
 
 export type TaskMutationAction = "create" | "status_change" | "delete" | "field_update"
 

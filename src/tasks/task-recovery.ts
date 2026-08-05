@@ -6,6 +6,8 @@ import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import type { TaskStateCache } from "./task-state-cache.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
+export { isIncompleteTaskStatus } from "./task-repository.ts"
+
 /**
  * Canonical shape for a task file stored in ~/.claude/tasks/<session-id>/<id>.json.
  * All fields except id/subject/status are optional so callers that only need
@@ -177,11 +179,6 @@ export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
     visible,
     remaining: Math.max(items.length - visible.length, 0),
   }
-}
-
-/** True when a task status counts as incomplete work. */
-export function isIncompleteTaskStatus(status: string): boolean {
-  return status === "pending" || status === "in_progress"
 }
 
 /**
