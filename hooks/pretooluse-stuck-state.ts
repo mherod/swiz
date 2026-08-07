@@ -12,7 +12,7 @@ import {
   isSkillTool,
   isTaskUpdateTool,
 } from "../src/tool-matchers.ts"
-import { readSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const WINDOW_MS = 20 * 60 * 1000
 const EDIT_LIMIT = 8
@@ -378,7 +378,7 @@ export async function evaluatePretooluseStuckState(input: object): Promise<SwizH
   const transcriptPath = hookInput.transcript_path ?? ""
   if (!transcriptPath) return {}
 
-  const lines = await readSessionLines(transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   if (lines.length === 0) return {}
 
   const events = parseStuckStateEvents(lines)

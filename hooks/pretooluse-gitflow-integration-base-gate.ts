@@ -106,7 +106,8 @@ export async function evaluateGitFlowGate(input: unknown): Promise<SwizHookOutpu
     )
   }
 
-  // Get transcript to check for hotfix/release intent
+  // Full-history read is intentional: release/hotfix authorization may have
+  // been declared before compaction and must remain valid for the workflow.
   const transcript = hookInput.transcript_path
     ? await Bun.file(hookInput.transcript_path)
         .text()

@@ -30,6 +30,8 @@ import { isSkillMdOnlyFileEditPayload } from "../tool-matchers.ts"
 import {
   type CurrentSessionToolUsage,
   computeTranscriptSummary,
+  registerDispatchSessionLines,
+  releaseDispatchSessionLines,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
 import {
@@ -73,6 +75,8 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _currentSessionToolUsage?: CurrentSessionToolUsage
   /** Pre-parsed transcript metadata (tool calls, commands, skills, elapsed time). */
   _transcriptSummary?: TranscriptSummary
+  /** Daemon-local lookup key for raw session lines omitted from the serialized payload. */
+  _transcriptSessionLinesKey?: string
   /** Epoch ms of the last user message for this session (daemon hot-cache fast path). */
   _lastUserMessageAt?: number
   /**
@@ -217,7 +221,12 @@ interface EnrichPayloadOptions {
   disableTranscriptSummaryFallback?: boolean
 }
 
-async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string> {
+interface EnrichedPayloadResult {
+  payloadStr: string
+  transcriptSessionLinesKey?: string
+}
+
+async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<EnrichedPayloadResult> {
   const {
     payload,
     summaryProvider,
@@ -232,14 +241,22 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
   const transcriptPath = payload.transcript_path as string | undefined
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
 
-  if (currentSessionToolUsageProvider && sessionId) {
-    const usage = await currentSessionToolUsageProvider(sessionId, transcriptPath)
-    if (usage) {
-      payload._currentSessionToolUsage = usage
-      log(
-        `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
-      )
-    }
+  const usagePromise =
+    currentSessionToolUsageProvider && sessionId
+      ? currentSessionToolUsageProvider(sessionId, transcriptPath)
+      : Promise.resolve(null)
+  const summaryPromise = resolveTranscriptSummary(
+    transcriptPath,
+    summaryProvider,
+    disableTranscriptSummaryFallback
+  )
+
+  const [usage, summary] = await Promise.all([usagePromise, summaryPromise])
+  if (usage) {
+    payload._currentSessionToolUsage = usage
+    log(
+      `   current-session usage: ${usage.toolNames.length} tools, ${usage.skillInvocations.length} skills`
+    )
   }
 
   if (lastUserMessageAtProvider && sessionId) {
@@ -247,21 +264,31 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<string
     if (typeof at === "number" && Number.isFinite(at)) payload._lastUserMessageAt = at
   }
 
-  const summary = await resolveTranscriptSummary(
-    transcriptPath,
-    summaryProvider,
-    disableTranscriptSummaryFallback
-  )
+  let transcriptSessionLinesKey: string | undefined
   if (summary) {
-    payload._transcriptSummary = summary
+    if (disableTranscriptSummaryFallback) {
+      transcriptSessionLinesKey = randomUUID()
+      registerDispatchSessionLines(transcriptSessionLinesKey, summary.sessionLines)
+      payload._transcriptSessionLinesKey = transcriptSessionLinesKey
+      payload._transcriptSummary = { ...summary, sessionLines: [] }
+    } else {
+      payload._transcriptSummary = summary
+    }
     log(`   transcript: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   } else if (disableTranscriptSummaryFallback) {
     log(`   [warn] transcript summary unavailable (fallback disabled, no provider)`)
   }
 
-  await syncCodexUpdatePlanForHooks(payload, summary)
-
-  return JSON.stringify(assertEnrichedDispatchPayloadRecord(payload))
+  try {
+    await syncCodexUpdatePlanForHooks(payload, summary)
+    return {
+      payloadStr: JSON.stringify(assertEnrichedDispatchPayloadRecord(payload)),
+      transcriptSessionLinesKey,
+    }
+  } catch (error) {
+    if (transcriptSessionLinesKey) releaseDispatchSessionLines(transcriptSessionLinesKey)
+    throw error
+  }
 }
 
 async function syncCodexUpdatePlanForHooks(
@@ -783,13 +810,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   )
 
   const tEnrich = performance.now()
-  const enrichedPayloadStr = await enrichPayloadForHooks({
+  const enrichment = await enrichPayloadForHooks({
     payload: ctx.payload,
     summaryProvider: req.transcriptSummaryProvider,
     currentSessionToolUsageProvider: req.currentSessionToolUsageProvider,
     lastUserMessageAtProvider: req.lastUserMessageAtProvider,
     disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
   })
+  const enrichedPayloadStr = enrichment.payloadStr
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
 
   // Apply the caller's environment to process.env for in-process hooks.
@@ -862,6 +890,9 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return { response }
   } finally {
     restoreEnv()
+    if (enrichment.transcriptSessionLinesKey) {
+      releaseDispatchSessionLines(enrichment.transcriptSessionLinesKey)
+    }
     req.onDispatchLifecycle?.(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )

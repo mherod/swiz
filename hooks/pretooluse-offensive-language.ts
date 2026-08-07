@@ -22,8 +22,8 @@ import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { extractSessionLines } from "../src/transcript-summary.ts"
 import { messageFromUnknownError, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 import {
   CATEGORY_LABELS,
   extractLastAssistantText,
@@ -104,16 +104,7 @@ export async function evaluatePretooluseOffensiveLanguage(
 
   if (!transcriptPath) return {}
 
-  // Use session-scoped lines from dispatch payload if available, else extract from file
-  let lines: string[] = []
-  const transcriptSummary = input._transcriptSummary as Record<string, any> | undefined
-  if (transcriptSummary?.sessionLines && Array.isArray(transcriptSummary.sessionLines)) {
-    lines = transcriptSummary.sessionLines
-  } else {
-    // Fallback: read full transcript and extract session-scoped lines
-    const fullText = await Bun.file(transcriptPath).text()
-    lines = extractSessionLines(fullText)
-  }
+  const lines = await resolveSessionLines(raw, transcriptPath)
 
   if (lines.length === 0) return {}
 

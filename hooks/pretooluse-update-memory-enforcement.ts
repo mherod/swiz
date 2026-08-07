@@ -29,8 +29,8 @@ import {
   isNotebookTool,
   isWriteTool,
   preToolUseDeny,
-  readSessionLines,
 } from "../src/utils/hook-utils.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
@@ -284,7 +284,7 @@ async function getPendingReminderLines(
 ): Promise<{ lines: string[]; lastTriggerIndex: number } | null> {
   if (await shouldSkipEnforcement(input, cwd, transcriptPath, toolName)) return null
 
-  const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
+  const lines = (await resolveSessionLines(input, transcriptPath)).filter((line) => line.trim())
   if (lines.length === 0) return null
 
   const lastTriggerIndex = findLastTriggerIndex(lines)

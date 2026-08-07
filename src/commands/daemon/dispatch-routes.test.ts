@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 import stopLifecycleTasks from "../../../hooks/stop-lifecycle-tasks.ts"
 import type { HookGroup } from "../../manifest.ts"
 import type { SwizHook } from "../../SwizHook.ts"
+import { resolveSessionLines } from "../../utils/transcript.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import { LastUserMessageCache } from "./cache/last-user-message-cache.ts"
 import { createMetrics } from "./cache/metrics.ts"
+import { TranscriptIndexCache } from "./cache/transcript-index-cache.ts"
 import {
   buildDispatchRoutesContext,
   type DispatchRoutesContext,
@@ -169,6 +171,85 @@ describe("handleDispatchActive", () => {
 })
 
 describe("handleDispatchRoute", () => {
+  test("injects one shared transcript summary across concurrent requests", async () => {
+    let releaseBuild!: () => void
+    const buildGate = new Promise<void>((resolve) => {
+      releaseBuild = resolve
+    })
+    let buildCalls = 0
+    const sessionLine = JSON.stringify({ type: "user", message: { content: "current" } })
+    const transcriptIndex = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ mtimeMs: 123, size: sessionLine.length }),
+      async buildIndex(_path, _size, mtimeMs) {
+        buildCalls++
+        await buildGate
+        return {
+          summary: {
+            toolNames: [],
+            toolCallCount: 0,
+            bashCommands: [],
+            skillInvocations: [],
+            hasGitPush: false,
+            sessionLines: [sessionLine],
+            sessionDurationMs: 0,
+            successfulTestRuns: 0,
+            lastVerificationTime: null,
+            sessionScope: "trivial",
+          },
+          blockedToolUseIds: [],
+          mtimeMs,
+          computedAt: Date.now(),
+        }
+      },
+    })
+    const observedSummaries: Array<Record<string, any> | undefined> = []
+    const observedSessionLines: string[][] = []
+    const observer: SwizHook = {
+      name: "test-transcript-summary-observer",
+      event: "preToolUse",
+      matcher: "Bash",
+      async run(input) {
+        observedSummaries.push(
+          (input as Record<string, any>)._transcriptSummary as Record<string, any> | undefined
+        )
+        observedSessionLines.push(
+          await resolveSessionLines(input as Record<string, any>, "/mock/summary.jsonl")
+        )
+        return {}
+      },
+    }
+    const ctx = createDispatchContext([
+      { event: "preToolUse", matcher: "Bash", hooks: [{ hook: observer }] },
+    ])
+    ctx.transcriptIndex = transcriptIndex
+    const url = new URL("http://daemon/dispatch?event=preToolUse&hookEventName=PreToolUse")
+    const request = () =>
+      new Request(url, {
+        method: "POST",
+        body: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "summary-concurrency",
+          transcript_path: "/mock/summary.jsonl",
+          tool_name: "Bash",
+          tool_input: { command: "true" },
+        }),
+      })
+
+    const pending = [
+      handleDispatchRoute(request(), url, ctx),
+      handleDispatchRoute(request(), url, ctx),
+    ]
+    await Promise.resolve()
+    releaseBuild()
+    const responses = await Promise.all(pending)
+
+    expect(responses.every((response) => response.status === 200)).toBe(true)
+    expect(buildCalls).toBe(1)
+    expect(observedSummaries).toHaveLength(2)
+    expect(observedSummaries.every((summary) => summary?.sessionLines.length === 0)).toBe(true)
+    expect(observedSessionLines.every((lines) => lines[0] === sessionLine)).toBe(true)
+  })
+
   test("resolves repository capability through the daemon cache", async () => {
     const ctx = createDispatchContext()
     let cacheCalls = 0

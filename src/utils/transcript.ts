@@ -3,8 +3,10 @@
 
 import {
   getBashCommandsUsedForCurrentSession,
+  getRegisteredDispatchSessionLines,
   getSkillsUsedForCurrentSession,
   getToolsUsedForCurrentSession,
+  getTranscriptSummary,
   readCurrentSessionLines,
 } from "../transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../transcript-utils.ts"
@@ -147,6 +149,21 @@ export async function readSessionLines(transcriptPath: string): Promise<string[]
   } catch {
     return []
   }
+}
+
+/**
+ * Resolve current-session transcript lines from dispatch enrichment first,
+ * falling back to the canonical file reader for standalone hook execution.
+ */
+export async function resolveSessionLines(
+  input: Record<string, any>,
+  transcriptPath: string = typeof input.transcript_path === "string" ? input.transcript_path : ""
+): Promise<string[]> {
+  const registered = getRegisteredDispatchSessionLines(input)
+  if (registered) return registered
+  const summary = getTranscriptSummary(input)
+  if (summary && Array.isArray(summary.sessionLines)) return summary.sessionLines
+  return transcriptPath ? readSessionLines(transcriptPath) : []
 }
 
 /**

@@ -25,6 +25,7 @@ import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/Sw
 import type { ToolHookInput } from "../src/schemas.ts"
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
 import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
   const injected = (input as Record<string, any>)._effectiveSettings as
@@ -68,8 +69,9 @@ const pretoolusNoPushWhenInstructed: SwizHook = {
     const transcriptPath: string = input?.transcript_path ?? ""
     if (!transcriptPath) return preToolUseAllow("")
 
-    const { readSessionLines } = await import("../src/utils/hook-utils.ts")
-    const state = scanPushGateFromJsonlLines(await readSessionLines(transcriptPath))
+    const state = scanPushGateFromJsonlLines(
+      await resolveSessionLines(input as Record<string, any>, transcriptPath)
+    )
 
     if (!state.blockingLine) {
       return preToolUseAllow(

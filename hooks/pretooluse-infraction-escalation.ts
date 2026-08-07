@@ -35,7 +35,7 @@ import {
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSkillRecencyOptions, wasEditUnblockSkillRecentlyUsed } from "../src/skill-utils.ts"
-import { readSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 function describeAction(toolName: string, key: string): string {
   if (toolName === "Bash") return `the command \`${key}\``
@@ -81,7 +81,7 @@ export async function evaluatePretooluseInfractionEscalation(
   const transcriptPath = hookInput.transcript_path ?? ""
   if (!transcriptPath) return {}
 
-  const lines = await readSessionLines(transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   if (lines.length === 0) return {}
 
   const nowMs =

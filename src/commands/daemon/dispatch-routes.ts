@@ -569,6 +569,8 @@ export async function handleDispatchRoute(
         payloadStr: dispatchPayloadStr,
         daemonContext: true,
         signal: requestAbort.signal,
+        transcriptSummaryProvider: (transcriptPath) =>
+          ctx.transcriptIndex.getSummary(transcriptPath),
         currentSessionToolUsageProvider: async (sessionId, transcriptPath) =>
           getCurrentSessionToolUsageFromDaemon(ctx, sessionId, transcriptPath),
         lastUserMessageAtProvider: (sessionId) =>

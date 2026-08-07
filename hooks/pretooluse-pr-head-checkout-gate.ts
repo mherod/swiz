@@ -19,7 +19,7 @@ import {
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
 import { git, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
-import { readSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-prs"
 
@@ -173,7 +173,7 @@ export async function evaluatePretoolusePrHeadCheckoutGate(
   )
   if (isShell && !isBlockedBashCommand(command)) return {}
 
-  const lines = await readSessionLines(transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   const { inWorkflow, prHeadBranch } = scanLines(lines)
 
   if (!inWorkflow) return {}

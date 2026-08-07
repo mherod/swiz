@@ -111,6 +111,30 @@ describe("pretooluse-gitflow-integration-base-gate", () => {
     expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
   })
 
+  it("preserves hotfix intent declared before a compaction boundary", async () => {
+    const tempDir = await makeGitRepo(true)
+    const transcriptPath = path.join(tempDir, "compacted-transcript.jsonl")
+    await fs.writeFile(
+      transcriptPath,
+      [
+        "This is a critical hotfix for production",
+        JSON.stringify({ type: "system", content: "Compacted" }),
+        JSON.stringify({ type: "user", message: { content: "continue" } }),
+      ].join("\n")
+    )
+
+    const result = await evaluateGitFlowGate({
+      tool_name: "Bash",
+      cwd: tempDir,
+      tool_input: { command: "git checkout -b hotfix/critical-bug origin/main" },
+      transcript_path: transcriptPath,
+    })
+
+    expect("hookSpecificOutput" in result).toBe(true)
+    if (!("hookSpecificOutput" in result)) return
+    expect(result.hookSpecificOutput?.permissionDecision).toBe("allow")
+  })
+
   it("should ignore non-shell tools", async () => {
     const tempDir = await makeGitRepo(true)
 

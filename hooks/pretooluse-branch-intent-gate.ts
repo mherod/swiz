@@ -16,7 +16,7 @@ import { toolHookInputSchema } from "../src/schemas.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import { preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
-import { readSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 // Skill names that activate this gate
 const WORKFLOW_SKILLS = new Set(["work-on-issue", "work-on-prs"])
@@ -173,7 +173,7 @@ export async function evaluatePretoolusBranchIntentGate(input: unknown): Promise
     if (!branchCreate) return {}
   }
 
-  const lines = await readSessionLines(transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   const { inWorkflow, targetDeclared, baseDeclared } = scanLines(lines)
 
   if (!inWorkflow) return {}

@@ -23,7 +23,7 @@ import {
 } from "../src/utils/branch-reference.ts"
 import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
 import { git, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
-import { readSessionLines } from "../src/utils/transcript.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-issue"
 const PR_WORKFLOW_SKILL = "work-on-prs"
@@ -306,7 +306,7 @@ export async function evaluateIssueWorkflowGate(
     "NFKC"
   )
 
-  const lines = await readSessionLines(transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   const { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch } =
     scanLines(lines)
 

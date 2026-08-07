@@ -33,9 +33,9 @@ import {
   isTaskTool,
   preToolUseAllow,
   preToolUseDeny,
-  readSessionLines,
   resolveSafeSessionId,
 } from "../src/utils/hook-utils.ts"
+import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 function hasTrackedEvidence(text: string): boolean {
   return hasStructuredEvidence(text)
@@ -208,7 +208,9 @@ export async function evaluatePretooluseNoPhantomTaskCompletion(
     )
   }
 
-  const lines = (await readSessionLines(transcriptPath)).filter((l) => l.trim())
+  const lines = (await resolveSessionLines(raw as Record<string, any>, transcriptPath)).filter(
+    (l) => l.trim()
+  )
   if (lines.length === 0) {
     return preToolUseAllow(
       "Continue in empty-transcript task mode: completion cannot be mechanically audited."

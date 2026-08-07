@@ -51,6 +51,22 @@ describe("TranscriptIndexCache", () => {
     }
   })
 
+  test("provides full session lines through the bounded dispatch summary view", async () => {
+    const lines = [
+      JSON.stringify({ type: "system", content: "Compacted" }),
+      JSON.stringify({ type: "user", message: { content: "Current session" } }),
+    ]
+    await Bun.write(TEST_TRANSCRIPT, lines.join("\n"))
+
+    const cache = new TranscriptIndexCache()
+    const summary = await cache.getSummary(TEST_TRANSCRIPT)
+    const compactIndex = await cache.get(TEST_TRANSCRIPT)
+
+    expect(summary?.sessionLines).toEqual([lines[1]!])
+    expect(compactIndex?.summary.sessionLines).toEqual([])
+    expect(cache.summarySize).toBe(1)
+  })
+
   test("correctly identifies blocked tool use IDs", async () => {
     const lines = [
       JSON.stringify({ type: "system", content: "Compacted" }),
@@ -134,6 +150,118 @@ describe("TranscriptIndexCache", () => {
     const cached = await cache.get(testPath)
     expect(cached).toBe(first)
     expect(cache.hits).toBe(1)
+  })
+
+  test("deduplicates concurrent full-summary builds", async () => {
+    let releaseBuild!: () => void
+    const buildGate = new Promise<void>((resolve) => {
+      releaseBuild = resolve
+    })
+    let buildCalls = 0
+    const sessionLine = JSON.stringify({ type: "user", message: { content: "hello" } })
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ mtimeMs: 123, size: sessionLine.length }),
+      async buildIndex(_path, _size, mtimeMs) {
+        buildCalls++
+        await buildGate
+        return {
+          summary: {
+            toolNames: [],
+            toolCallCount: 0,
+            bashCommands: [],
+            skillInvocations: [],
+            hasGitPush: false,
+            sessionLines: [sessionLine],
+            sessionDurationMs: 0,
+            successfulTestRuns: 0,
+            lastVerificationTime: null,
+            sessionScope: "trivial",
+          },
+          blockedToolUseIds: [],
+          mtimeMs,
+          computedAt: Date.now(),
+        }
+      },
+    })
+
+    const pending = [
+      cache.getSummary("/mock/summary.jsonl"),
+      cache.getSummary("/mock/summary.jsonl"),
+      cache.getSummary("/mock/summary.jsonl"),
+    ]
+    await Promise.resolve()
+    releaseBuild()
+    const summaries = await Promise.all(pending)
+
+    expect(buildCalls).toBe(1)
+    expect(summaries.every((summary) => summary?.sessionLines[0] === sessionLine)).toBe(true)
+  })
+
+  test("rebuilds the dispatch summary when transcript mtime changes", async () => {
+    let mtimeMs = 1
+    let buildCalls = 0
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ mtimeMs, size: 100 }),
+      async buildIndex(_path, _size, observedMtimeMs) {
+        buildCalls++
+        return {
+          summary: {
+            toolNames: [],
+            toolCallCount: 0,
+            bashCommands: [],
+            skillInvocations: [],
+            hasGitPush: false,
+            sessionLines: [String(observedMtimeMs)],
+            sessionDurationMs: 0,
+            successfulTestRuns: 0,
+            lastVerificationTime: null,
+            sessionScope: "trivial",
+          },
+          blockedToolUseIds: [],
+          mtimeMs: observedMtimeMs,
+          computedAt: Date.now(),
+        }
+      },
+    })
+
+    expect((await cache.getSummary("/mock/mtime.jsonl"))?.sessionLines).toEqual(["1"])
+    expect((await cache.getSummary("/mock/mtime.jsonl"))?.sessionLines).toEqual(["1"])
+    mtimeMs = 2
+    expect((await cache.getSummary("/mock/mtime.jsonl"))?.sessionLines).toEqual(["2"])
+    expect(buildCalls).toBe(2)
+  })
+
+  test("does not retain a full summary larger than the character budget", async () => {
+    const oversizedLine = "x".repeat(17 * 1024 * 1024)
+    let buildCalls = 0
+    const cache = new TranscriptIndexCache({
+      readMetadata: () => Promise.resolve({ mtimeMs: 123, size: oversizedLine.length }),
+      async buildIndex(_path, _size, mtimeMs) {
+        buildCalls++
+        return {
+          summary: {
+            toolNames: [],
+            toolCallCount: 0,
+            bashCommands: [],
+            skillInvocations: [],
+            hasGitPush: false,
+            sessionLines: [oversizedLine],
+            sessionDurationMs: 0,
+            successfulTestRuns: 0,
+            lastVerificationTime: null,
+            sessionScope: "trivial",
+          },
+          blockedToolUseIds: [],
+          mtimeMs,
+          computedAt: Date.now(),
+        }
+      },
+    })
+
+    expect(await cache.getSummary("/mock/oversized.jsonl")).not.toBeNull()
+    expect(cache.summarySize).toBe(0)
+    expect(await cache.getSummary("/mock/oversized.jsonl")).not.toBeNull()
+    expect(buildCalls).toBe(2)
   })
 
   test("does not store pre-boundary lines in memory", async () => {

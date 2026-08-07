@@ -26,6 +26,23 @@ export interface TranscriptIndexCacheDependencies {
   ) => Promise<TranscriptIndex | null>
 }
 
+const MAX_TRANSCRIPT_INDEX_ENTRIES = 50
+const MAX_CACHED_SESSION_LINE_CHARS = 16 * 1024 * 1024
+
+function sessionLineCharCount(index: TranscriptIndex): number {
+  return Math.max(
+    1,
+    index.summary.sessionLines.reduce((total, line) => total + line.length, 0)
+  )
+}
+
+function compactTranscriptIndex(index: TranscriptIndex): TranscriptIndex {
+  return {
+    ...index,
+    summary: { ...index.summary, sessionLines: [] },
+  }
+}
+
 function extractToolResultText(block: { content?: string | unknown[] }): string {
   const blockContent = block.content
   if (typeof blockContent === "string") return blockContent
@@ -90,7 +107,12 @@ function splitSessionLinesAfterLatestSystem(text: string): {
 }
 
 export class TranscriptIndexCache {
-  private entries = new LRUCache<string, TranscriptIndex>({ max: 50 })
+  private entries = new LRUCache<string, TranscriptIndex>({ max: MAX_TRANSCRIPT_INDEX_ENTRIES })
+  private summaryEntries = new LRUCache<string, TranscriptIndex>({
+    max: MAX_TRANSCRIPT_INDEX_ENTRIES,
+    maxSize: MAX_CACHED_SESSION_LINE_CHARS,
+    sizeCalculation: sessionLineCharCount,
+  })
   private inFlight = new Map<string, Promise<TranscriptIndex | null>>()
   private _hits = 0
   private _misses = 0
@@ -99,10 +121,7 @@ export class TranscriptIndexCache {
 
   async get(transcriptPath: string): Promise<TranscriptIndex | null> {
     try {
-      const transcriptFile = Bun.file(transcriptPath)
-      const metadata = this.dependencies.readMetadata
-        ? await this.dependencies.readMetadata(transcriptPath)
-        : await transcriptFile.stat()
+      const metadata = await this.readMetadata(transcriptPath)
       if (!metadata) return null
 
       const mtimeMs = metadata.mtimeMs ?? 0
@@ -113,32 +132,70 @@ export class TranscriptIndexCache {
         return cached
       }
 
-      const inFlightKey = `${transcriptPath}\0${mtimeMs}`
-      const existing = this.inFlight.get(inFlightKey)
-      if (existing) return await existing
-
-      this._misses++
-      let computation: Promise<TranscriptIndex | null>
-      const build = this.dependencies.buildIndex
-        ? this.dependencies.buildIndex(transcriptPath, metadata.size, mtimeMs)
-        : this.buildIndex(transcriptFile, metadata.size, mtimeMs)
-      computation = build
-        .then((index) => {
-          if (index && this.inFlight.get(inFlightKey) === computation) {
-            this.entries.set(transcriptPath, index)
-          }
-          return index
-        })
-        .finally(() => {
-          if (this.inFlight.get(inFlightKey) === computation) {
-            this.inFlight.delete(inFlightKey)
-          }
-        })
-      this.inFlight.set(inFlightKey, computation)
-      return await computation
+      const built = await this.getOrBuild(transcriptPath, metadata.size, mtimeMs)
+      return built ? (this.entries.get(transcriptPath) ?? compactTranscriptIndex(built)) : null
     } catch {
       return null
     }
+  }
+
+  async getSummary(transcriptPath: string): Promise<TranscriptSummary | null> {
+    try {
+      const metadata = await this.readMetadata(transcriptPath)
+      if (!metadata) return null
+
+      const mtimeMs = metadata.mtimeMs ?? 0
+      const cached = this.summaryEntries.get(transcriptPath)
+      if (cached && cached.mtimeMs === mtimeMs) {
+        cached.computedAt = Date.now()
+        this._hits++
+        return cached.summary
+      }
+
+      const built = await this.getOrBuild(transcriptPath, metadata.size, mtimeMs)
+      return built?.summary ?? null
+    } catch {
+      return null
+    }
+  }
+
+  private async readMetadata(
+    transcriptPath: string
+  ): Promise<{ mtimeMs: number; size: number } | null> {
+    return this.dependencies.readMetadata
+      ? await this.dependencies.readMetadata(transcriptPath)
+      : await Bun.file(transcriptPath).stat()
+  }
+
+  private async getOrBuild(
+    transcriptPath: string,
+    fileSize: number,
+    mtimeMs: number
+  ): Promise<TranscriptIndex | null> {
+    const inFlightKey = `${transcriptPath}\0${mtimeMs}`
+    const existing = this.inFlight.get(inFlightKey)
+    if (existing) return await existing
+
+    this._misses++
+    let computation: Promise<TranscriptIndex | null>
+    const build = this.dependencies.buildIndex
+      ? this.dependencies.buildIndex(transcriptPath, fileSize, mtimeMs)
+      : this.buildIndex(Bun.file(transcriptPath), fileSize, mtimeMs)
+    computation = build
+      .then((index) => {
+        if (index && this.inFlight.get(inFlightKey) === computation) {
+          this.entries.set(transcriptPath, compactTranscriptIndex(index))
+          this.summaryEntries.set(transcriptPath, index)
+        }
+        return index
+      })
+      .finally(() => {
+        if (this.inFlight.get(inFlightKey) === computation) {
+          this.inFlight.delete(inFlightKey)
+        }
+      })
+    this.inFlight.set(inFlightKey, computation)
+    return await computation
   }
 
   private async buildIndex(
@@ -158,12 +215,8 @@ export class TranscriptIndexCache {
       const summary = computeSummaryFromSessionLines(sessionLines)
       const blockedIds = extractBlockedToolUseIds(sessionLines)
 
-      // Strip sessionLines before caching — raw JSONL lines can be GB-scale for large sessions
-      // (tool_result blocks embed full file content). All derived data (toolNames, bashCommands, etc.)
-      // is already extracted. The daemon dispatch path sets disableTranscriptSummaryFallback=true
-      // so sessionLines is never consumed from the cached index.
       const index: TranscriptIndex = {
-        summary: { ...summary, sessionLines: [] },
+        summary,
         blockedToolUseIds: blockedIds,
         mtimeMs,
         computedAt: Date.now(),
@@ -180,6 +233,9 @@ export class TranscriptIndexCache {
     for (const key of this.entries.keys()) {
       if (key.includes(projectKey)) this.entries.delete(key)
     }
+    for (const key of this.summaryEntries.keys()) {
+      if (key.includes(projectKey)) this.summaryEntries.delete(key)
+    }
     for (const key of this.inFlight.keys()) {
       if (key.includes(projectKey)) this.inFlight.delete(key)
     }
@@ -187,11 +243,16 @@ export class TranscriptIndexCache {
 
   invalidateAll(): void {
     this.entries.clear()
+    this.summaryEntries.clear()
     this.inFlight.clear()
   }
 
   get size(): number {
     return this.entries.size
+  }
+
+  get summarySize(): number {
+    return this.summaryEntries.size
   }
 
   get hits(): number {
@@ -205,6 +266,9 @@ export class TranscriptIndexCache {
   pruneOlderThan(cutoffMs: number): void {
     for (const [path, entry] of this.entries) {
       if (entry.computedAt < cutoffMs) this.entries.delete(path)
+    }
+    for (const [path, entry] of this.summaryEntries) {
+      if (entry.computedAt < cutoffMs) this.summaryEntries.delete(path)
     }
   }
 }

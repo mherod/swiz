@@ -57,6 +57,21 @@ export interface TranscriptSummary {
   sessionScope: SessionScope
 }
 
+const dispatchSessionLines = new Map<string, string[]>()
+
+export function registerDispatchSessionLines(key: string, sessionLines: string[]): void {
+  dispatchSessionLines.set(key, sessionLines)
+}
+
+export function releaseDispatchSessionLines(key: string): void {
+  dispatchSessionLines.delete(key)
+}
+
+export function getRegisteredDispatchSessionLines(input: Record<string, any>): string[] | null {
+  const key = input?._transcriptSessionLinesKey
+  return typeof key === "string" ? (dispatchSessionLines.get(key) ?? null) : null
+}
+
 export const CURRENT_SESSION_USAGE_MAX_TURNS = 30
 export const CURRENT_SESSION_USAGE_MAX_AGE_MS = 20 * 60 * 1000
 
