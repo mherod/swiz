@@ -4,7 +4,7 @@
  */
 import { getWorkerPoolMetrics } from "../../dispatch/worker-pool.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
-import { readHookLogs } from "../../hook-log.ts"
+import { getHookLogMetrics, readHookLogs } from "../../hook-log.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
 import type {
   CooldownRegistry,
@@ -55,6 +55,7 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
       ...(pm ? serializeMetrics(pm) : serializeMetrics(createMetrics())),
       project: projectParam,
       caches: cacheMetrics,
+      hookLogs: getHookLogMetrics(),
       workerPool: getWorkerPoolMetrics(),
     })
   }
@@ -66,6 +67,7 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
     ...serializeMetrics(ctx.globalMetrics),
     projects,
     caches: cacheMetrics,
+    hookLogs: getHookLogMetrics(),
     workerPool: getWorkerPoolMetrics(),
   })
 }

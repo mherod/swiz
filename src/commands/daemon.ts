@@ -3,6 +3,7 @@ import { LRUCache } from "lru-cache"
 import { CONFIGURABLE_AGENTS } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
 import { DISPATCH_ROUTES } from "../dispatch/index.ts"
+import { startHookLogMaintenance } from "../hook-log.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
 import { validateDispatchRoutes } from "../manifest.ts"
 import { resolveProjectRoot } from "../project-identity.ts"
@@ -527,6 +528,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   )
 
   startMemoryMonitoring(state.globalMetrics)
+  const stopHookLogMaintenance = startHookLogMaintenance()
 
   let isClosing = false
   const cleanup = (reason: string) => {
@@ -543,6 +545,8 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     process.stderr.write("Upstream sync... ")
     caches.workerRuntime.close()
     process.stderr.write("Worker runtime... ")
+    stopHookLogMaintenance()
+    process.stderr.write("Hook logs... ")
     caches.taskStateCache.close()
     caches.lifecycleTaskRegistry.clear()
     setGlobalTaskStateCache(null)

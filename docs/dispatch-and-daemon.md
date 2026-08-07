@@ -137,6 +137,10 @@ A long-lived `Bun.serve` process on port 7943. Its job is to make dispatch fast:
 
 Hooks should consume these via the helpers in `src/utils/daemon-git-state.ts` (`fetchGitStatusFromDaemon`, `fetchLastUserMessageFromDaemon`, `fetchSessionTasksFromDaemon`) rather than raw fetches; all return `null` quickly when the daemon is down so callers fall back to direct computation.
 
+### Hook-log retention
+
+The daemon owns a maintenance tick for `~/.swiz/hook-logs.jsonl`. Appenders and compaction share a cross-process lock, and compaction atomically preserves the newest valid records without adding work to the dispatch response path. Defaults are 32MB, 30 days, at least 10,000 records, and a five-minute maintenance interval. Override them with `SWIZ_HOOK_LOG_MAX_BYTES`, `SWIZ_HOOK_LOG_MAX_AGE_DAYS`, and `SWIZ_HOOK_LOG_MAINTENANCE_INTERVAL_MS`. `/metrics` exposes current bytes, retained records, append errors, and the latest maintenance result and duration.
+
 ### Daemon-resident state and caches
 
 Created once at startup (`createDaemonState` / `createDaemonCaches` in `daemon.ts`); all bounded (`CappedMap`/LRU) and pruned on timers:

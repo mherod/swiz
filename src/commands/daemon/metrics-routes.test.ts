@@ -40,6 +40,11 @@ const hookLogEntries: HookLogEntry[] = [
 ]
 
 void mock.module("../../hook-log.ts", () => ({
+  getHookLogMetrics: () => ({
+    currentBytes: 1024,
+    retainedRecords: 12,
+    lastMaintenanceResult: "compacted",
+  }),
   readHookLogs: async (limit: number) => {
     requestedLogLimits.push(limit)
     return hookLogEntries.map((entry) => ({ ...entry }))
@@ -91,6 +96,11 @@ describe("metrics routes", () => {
     expect(body.totalDispatches).toBe(1)
     expect(body.projects["/repo"].totalDispatches).toBe(1)
     expect(body.caches.snapshots.size).toBe(3)
+    expect(body.hookLogs).toMatchObject({
+      currentBytes: 1024,
+      retainedRecords: 12,
+      lastMaintenanceResult: "compacted",
+    })
     expect(body.workerPool).toMatchObject({
       activeWorkers: 0,
       initialized: false,

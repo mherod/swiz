@@ -450,7 +450,7 @@ function buildJsonlTempPath(path: string): string {
   return `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}${JSONL_TMP_SUFFIX}`
 }
 
-async function writeJsonlTextAtomically(path: string, text: string): Promise<void> {
+export async function writeJsonlTextAtomically(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const tempPath = buildJsonlTempPath(path)
   await Bun.write(tempPath, text)
