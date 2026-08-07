@@ -28,7 +28,7 @@ import {
   extractSessionLines,
   getCurrentSessionToolUsage,
 } from "../src/transcript-summary.ts"
-import { blockStopObj } from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 interface RequiredStopSkillContext {

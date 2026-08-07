@@ -5,8 +5,7 @@
  * numbered checklist. Order is always: git → CI → issues (workflow sequence).
  */
 
-import type { ActionPlanItem } from "../../src/utils/hook-utils.ts"
-import { formatActionPlan } from "../../src/utils/hook-utils.ts"
+import { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
 import type { WorkflowStep } from "./types.ts"
 
 /**

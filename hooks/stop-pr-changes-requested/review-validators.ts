@@ -4,7 +4,7 @@
  * Checks for CHANGES_REQUESTED reviews, no reviews, and self-authored edge cases.
  */
 
-import { ghJson } from "../../src/utils/hook-utils.ts"
+import { ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import type { PullDetails, Review } from "./types.ts"
 
 export function isSelfAuthored(

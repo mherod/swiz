@@ -5,9 +5,11 @@
  * Exported for composition with stop-ship-checklist.
  */
 
+import { formatActionPlan } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import { blockStopObj, createSessionTask, formatActionPlan } from "../../src/utils/hook-utils.ts"
+import { blockStopObj } from "../../src/utils/hook-response.ts"
+import { createSessionTask } from "../../src/utils/session-task-io.ts"
 import { buildGitWorkflowSections } from "./action-plan.ts"
 import { detectBackgroundPush } from "./background-push-detector.ts"
 import { resolveGitContext } from "./context.ts"

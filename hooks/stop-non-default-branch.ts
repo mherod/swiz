@@ -9,23 +9,22 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import {
+  detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
+  getOpenPrForBranch,
+  git,
+  hasGhCli,
+} from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
-import {
-  blockStopObj,
-  detectForkTopology,
-  forkPrCreateCmd,
-  forkPushCmd,
-  getDefaultBranch,
-  getOpenPrForBranch,
-  git,
-  hasGhCli,
-  isDefaultBranch,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import type { WorktreePreservationDecision } from "../src/worktree-preservation.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 

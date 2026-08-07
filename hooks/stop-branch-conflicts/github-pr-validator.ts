@@ -4,7 +4,7 @@
  * Checks if current branch has an open PR with merge conflicts (GitHub mergeable=CONFLICTING).
  */
 
-import { ghJson, hasGhCli } from "../../src/utils/hook-utils.ts"
+import { ghJsonViaDaemon as ghJson, hasGhCli } from "../../src/git-helpers.ts"
 import type { BranchCheckContext, GitHubPRState } from "./types.ts"
 
 export async function getGitHubPRState(ctx: BranchCheckContext): Promise<GitHubPRState | null> {

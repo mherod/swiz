@@ -21,7 +21,8 @@ import type { StopHookInput } from "../src/schemas.ts"
 import { stopHookInputSchema } from "../src/schemas.ts"
 import { getRecentlyUsedToolsForCurrentSession } from "../src/skill-utils.ts"
 import { buildTaskListBeforeStopMessage } from "../src/tasks/task-governance-messages.ts"
-import { blockStopObj, isTaskListTool, isTaskTool } from "../src/utils/hook-utils.ts"
+import { isTaskListTool, isTaskTool } from "../src/tool-matchers.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import {
   evaluateStopIncompleteTasks,
   type StopIncompleteTasksDependencies,

@@ -5,6 +5,7 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import { git } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
@@ -17,8 +18,11 @@ import {
   buildConstructiveGitSummary,
   buildGitContextLine,
 } from "../../src/utils/git-context-messages.ts"
-import { getUnpushedCommitSummaries } from "../../src/utils/git-utils.ts"
-import { getDefaultBranch, getGitStatusV2, git } from "../../src/utils/hook-utils.ts"
+import {
+  getDefaultBranch,
+  getGitStatusV2,
+  getUnpushedCommitSummaries,
+} from "../../src/utils/git-utils.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
 /**

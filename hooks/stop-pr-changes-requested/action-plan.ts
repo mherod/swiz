@@ -4,14 +4,10 @@
  * Builds contextual blocking messages for changes-requested, no-reviews, and self-authored edge cases.
  */
 
+import { detectForkTopology, forkPushCmd } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
-import {
-  blockStopHumanRequiredObj,
-  blockStopObj,
-  detectForkTopology,
-  forkPushCmd,
-  skillAdvice,
-} from "../../src/utils/hook-utils.ts"
+import { skillAdvice } from "../../src/skill-utils.ts"
+import { blockStopHumanRequiredObj, blockStopObj } from "../../src/utils/hook-response.ts"
 import type { IssueComment, Review, ReviewComment } from "./types.ts"
 
 export async function buildSelfAuthoredNoReviewerOutput(
@@ -23,8 +19,8 @@ export async function buildSelfAuthoredNoReviewerOutput(
     requested_reviewers?: Array<{ login: string }>
     requested_teams?: Array<{ slug: string }>
   }
-  const pullDetails = await import("../../src/utils/hook-utils.ts").then((m) =>
-    m.ghJson<PullDetails>(["api", `repos/${repo}/pulls/${pr.number}`], cwd)
+  const pullDetails = await import("../../src/git-helpers.ts").then((m) =>
+    m.ghJsonViaDaemon<PullDetails>(["api", `repos/${repo}/pulls/${pr.number}`], cwd)
   )
   const reviewerCount =
     (pullDetails?.requested_reviewers?.length ?? 0) + (pullDetails?.requested_teams?.length ?? 0)

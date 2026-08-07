@@ -5,6 +5,7 @@
  */
 
 import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
@@ -15,13 +16,9 @@ import {
 import {
   getCurrentGitHubUser,
   getDefaultBranch,
-  getOpenPrForBranch,
   getRepoNameWithOwner,
-  git,
-  hasGhCli,
   isDefaultBranch,
-  isGitHubRemote,
-} from "../../src/utils/hook-utils.ts"
+} from "../../src/utils/git-utils.ts"
 import type { PRCheckContext } from "./types.ts"
 
 export async function resolvePRCheckContext(input: StopHookInput): Promise<PRCheckContext | null> {

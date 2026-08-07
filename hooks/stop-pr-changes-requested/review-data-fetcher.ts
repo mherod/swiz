@@ -5,7 +5,7 @@
  */
 
 import { min } from "lodash-es"
-import { ghJson } from "../../src/utils/hook-utils.ts"
+import { ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import type { IssueComment, Review, ReviewComment } from "./types.ts"
 
 export async function fetchReviewData(

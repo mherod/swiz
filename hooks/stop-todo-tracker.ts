@@ -5,11 +5,14 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { git } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, git, SOURCE_EXT_RE, sanitizeSessionId } from "../src/utils/hook-utils.ts"
+import { sanitizeSessionId } from "../src/session-id.ts"
+import { SOURCE_EXT_RE } from "../src/utils/git-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import { tryFileFollowUpIssue } from "../src/utils/issue-guidance.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./

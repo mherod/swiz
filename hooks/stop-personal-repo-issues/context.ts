@@ -1,8 +1,9 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
+import { hasGhCli, isGitHubRemote } from "../../src/git-helpers.ts"
 import { needsRefinement } from "../../src/issue-refinement.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
+import { sanitizeSessionId } from "../../src/session-id.ts"
 import type { ProjectState } from "../../src/settings.ts"
-import { hasGhCli, isGitHubRemote, sanitizeSessionId } from "../../src/utils/hook-utils.ts"
 import { isInCooldown } from "./cooldown.ts"
 import {
   filterBlockedIssues,

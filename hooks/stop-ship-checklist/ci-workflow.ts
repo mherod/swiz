@@ -5,15 +5,12 @@
  * generation. Uses store-first caching to minimize API calls.
  */
 
+import type { ActionPlanItem } from "../../src/action-plan.ts"
+import { getRepoSlug, ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import { getIssueStore, getIssueStoreReader } from "../../src/issue-store.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import type { ActionPlanItem } from "../../src/utils/hook-utils.ts"
-import {
-  getRepoSlug,
-  ghJson,
-  resolveCurrentFeatureBranch,
-  skillExistsForHookPayload,
-} from "../../src/utils/hook-utils.ts"
+import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
+import { resolveCurrentFeatureBranch } from "../../src/utils/git-utils.ts"
 
 import type { WorkflowStep } from "./types.ts"
 

@@ -1,14 +1,9 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
+import { git, hasGhCli, isGitHubRemote } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
+import { sanitizeSessionId } from "../../src/session-id.ts"
 import { readProjectSettings } from "../../src/settings.ts"
-import {
-  getDefaultBranch,
-  git,
-  hasGhCli,
-  isDefaultBranch,
-  isGitHubRemote,
-  sanitizeSessionId,
-} from "../../src/utils/hook-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../../src/utils/git-utils.ts"
 import { evaluateWorktreePreservation } from "../../src/worktree-preservation.ts"
 import { getOpenPRsWithFeedback, partitionPRsForStop } from "./pull-requests.ts"
 import type { PR, RepoContext, StopContext } from "./types.ts"

@@ -7,7 +7,7 @@
  * into a single numbered action plan.
  */
 
-import type { ActionPlanItem } from "../../src/utils/hook-utils.ts"
+import type { ActionPlanItem } from "../../src/action-plan.ts"
 
 /**
  * Workflow gates that can be independently enabled/disabled.

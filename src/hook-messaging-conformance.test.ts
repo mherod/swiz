@@ -100,7 +100,7 @@ describe("hook messaging conformance", () => {
       expect(violations).toEqual([])
     })
 
-    it("every stop hook with a block imports from hook-utils", () => {
+    it("every stop hook with a block imports from hook-response", () => {
       const violations: string[] = []
 
       for (const { name, content } of hooks) {
@@ -114,10 +114,10 @@ describe("hook messaging conformance", () => {
 
         if (!hasBlock) continue
 
-        const importsFromHookUtils = content.includes('from "../src/utils/hook-utils.ts"')
+        const importsFromHookResponse = content.includes('from "../src/utils/hook-response.ts"')
 
-        if (!importsFromHookUtils) {
-          violations.push(`${name}: has block calls but does not import from hook-utils.ts`)
+        if (!importsFromHookResponse) {
+          violations.push(`${name}: has block calls but does not import from hook-response.ts`)
         }
       }
 

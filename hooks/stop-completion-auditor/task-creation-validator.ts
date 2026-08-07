@@ -5,9 +5,9 @@
  * Returns blocking result if threshold not met and agent has task tools.
  */
 
+import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import { agentHasTaskTools } from "../../src/agent-paths.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
-import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
 const TOOL_CALL_THRESHOLD = 10

@@ -9,7 +9,7 @@
  */
 
 import type { SessionTask } from "../../src/tasks/task-recovery.ts"
-import type { TranscriptSummary } from "../../src/utils/hook-utils.ts"
+import type { TranscriptSummary } from "../../src/transcript-summary.ts"
 
 /** Control which validation gates are active. */
 export interface CompletionValidationGate {

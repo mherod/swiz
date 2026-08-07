@@ -5,17 +5,14 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { join } from "node:path"
-import { getOpenPrForBranch } from "../src/git-helpers.ts"
+import { formatActionPlan } from "../src/action-plan.ts"
+import { getOpenPrForBranch, git } from "../src/git-helpers.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
-import {
-  blockStopObj,
-  detectPackageManager,
-  formatActionPlan,
-  git,
-} from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
+import { detectPackageManager } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 import { evaluateWorktreePreservation } from "../src/worktree-preservation.ts"
 

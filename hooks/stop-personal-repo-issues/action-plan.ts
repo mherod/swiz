@@ -1,14 +1,11 @@
+import { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
 import {
   missingRefinementCategories,
   NEEDS_REFINEMENT_NORM,
   normaliseLabel,
 } from "../../src/issue-refinement.ts"
+import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
-import {
-  type ActionPlanItem,
-  formatActionPlan,
-  skillExistsForHookPayload,
-} from "../../src/utils/hook-utils.ts"
 import { MAX_SHOWN_ISSUES, REVIEWABLE_BLOCK_NORM } from "./constants.ts"
 import { planSectionOrderForProjectState, statePriorityHint } from "./project-state.ts"
 import type { StopContext, StopSection } from "./types.ts"

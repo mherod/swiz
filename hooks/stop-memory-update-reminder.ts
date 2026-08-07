@@ -11,7 +11,8 @@ import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, skillAdvice } from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 
 const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 

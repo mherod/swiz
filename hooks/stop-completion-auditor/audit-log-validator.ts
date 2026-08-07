@@ -7,10 +7,10 @@
  */
 
 import { join } from "node:path"
+import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import { agentHasTaskTools } from "../../src/agent-paths.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import { isIncompleteTaskStatus } from "../../src/tasks/task-recovery.ts"
-import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
 interface AuditEntry {

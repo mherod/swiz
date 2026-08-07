@@ -5,8 +5,9 @@
  * when a push is already in flight.
  */
 
+import { git } from "../../src/git-helpers.ts"
+import { sanitizeSessionId } from "../../src/session-id.ts"
 import { stopGitPushPromptedFlagPath } from "../../src/temp-paths.ts"
-import { git, sanitizeSessionId } from "../../src/utils/hook-utils.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 

@@ -1,9 +1,5 @@
-import {
-  type ActionPlanItem,
-  formatActionPlan,
-  skillAdvice,
-  skillExistsForHookPayload,
-} from "../../src/utils/hook-utils.ts"
+import { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
+import { skillAdvice, skillExistsForHookPayload } from "../../src/skill-utils.ts"
 import { selectRebaseSuggestionPRs } from "./pull-requests.ts"
 import type { StopContext } from "./types.ts"
 

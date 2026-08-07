@@ -13,7 +13,7 @@ import {
   readSwizSettings,
 } from "../../src/settings.ts"
 import { getSessionTasksDir, readSessionTasksFresh } from "../../src/tasks/task-recovery.ts"
-import { getTranscriptSummary } from "../../src/utils/hook-utils.ts"
+import { getTranscriptSummary } from "../../src/transcript-summary.ts"
 import type { CompletionAuditContext, CompletionValidationGate } from "./types.ts"
 
 /**

@@ -7,7 +7,7 @@ import {
   formatIncompleteReason,
   type TaskReviewInstructionContext,
 } from "../../src/tasks/task-governance-messages.ts"
-import { blockStopObj } from "../../src/utils/hook-utils.ts"
+import { blockStopObj } from "../../src/utils/hook-response.ts"
 
 export { formatIncompleteReason } from "../../src/tasks/task-governance-messages.ts"
 

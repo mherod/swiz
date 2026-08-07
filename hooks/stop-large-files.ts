@@ -5,6 +5,7 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { git as defaultGit, isGitRepo as defaultIsGitRepo } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
@@ -16,12 +17,8 @@ import {
   readSwizSettings as defaultReadSwizSettings,
   resolveNumericSetting as defaultResolveNumericSetting,
 } from "../src/settings.ts"
-import {
-  blockStopObj as defaultBlockStopObj,
-  git as defaultGit,
-  isGitRepo as defaultIsGitRepo,
-  recentHeadRange as defaultRecentHeadRange,
-} from "../src/utils/hook-utils.ts"
+import { recentHeadRange as defaultRecentHeadRange } from "../src/utils/git-utils.ts"
+import { blockStopObj as defaultBlockStopObj } from "../src/utils/hook-response.ts"
 
 interface StopLargeFilesDeps {
   blockStopObj: typeof defaultBlockStopObj

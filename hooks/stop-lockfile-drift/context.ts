@@ -5,9 +5,10 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import { git } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import { git, recentHeadRange } from "../../src/utils/hook-utils.ts"
+import { recentHeadRange } from "../../src/utils/git-utils.ts"
 import type { LockfileDriftContext } from "./types.ts"
 
 /**

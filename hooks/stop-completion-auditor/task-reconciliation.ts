@@ -15,7 +15,7 @@ import {
   formatCurrentSessionUsageWindow,
   getCurrentSessionTaskToolStats,
   getRecentToolsUsedForCurrentSession,
-} from "../../src/utils/hook-utils.ts"
+} from "../../src/transcript-summary.ts"
 import type { CompletionAuditContext, ValidationResult } from "./types.ts"
 
 /**

@@ -5,7 +5,7 @@
  * Returns conflict count and behind count.
  */
 
-import { git } from "../../src/utils/hook-utils.ts"
+import { git } from "../../src/git-helpers.ts"
 import { countMergeTreeConflicts } from "../../src/worktree-preservation.ts"
 import type { BranchCheckContext, GitMergeState } from "./types.ts"
 

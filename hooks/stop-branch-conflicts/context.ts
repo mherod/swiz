@@ -5,15 +5,10 @@
  * Returns null if any prerequisite is missing (fail-open).
  */
 
+import { detectForkTopology, forkRemoteRef, git } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import {
-  detectForkTopology,
-  forkRemoteRef,
-  getDefaultBranch,
-  git,
-  isDefaultBranch,
-} from "../../src/utils/hook-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "../../src/utils/git-utils.ts"
 import type { BranchCheckContext } from "./types.ts"
 
 export async function resolveBranchCheckContext(

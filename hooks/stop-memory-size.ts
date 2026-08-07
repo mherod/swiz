@@ -11,6 +11,7 @@
 
 import { mkdir, readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { formatActionPlan } from "../src/action-plan.ts"
 import { GIT_DIR_NAME } from "../src/git-helpers.ts"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import {
@@ -25,7 +26,8 @@ import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, formatActionPlan, skillAdvice } from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
 
 interface MemoryViolation {

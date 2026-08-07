@@ -6,7 +6,7 @@
  * Creates task suggestions for agents.
  */
 
-import { formatActionPlan } from "../../src/utils/hook-utils.ts"
+import { formatActionPlan } from "../../src/action-plan.ts"
 import type { ActionPlanItem, ValidationResult } from "./types.ts"
 
 /**

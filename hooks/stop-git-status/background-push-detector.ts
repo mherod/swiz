@@ -5,7 +5,7 @@
  * is currently running in the background for this repository.
  */
 
-import { git } from "../../src/utils/hook-utils.ts"
+import { git } from "../../src/git-helpers.ts"
 import { spawnWithTimeout } from "../../src/utils/process-utils.ts"
 
 const PROC_INSPECT_TIMEOUT_MS = 2_500

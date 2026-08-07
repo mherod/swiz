@@ -5,7 +5,8 @@
  */
 
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
-import { blockStopObj, skillAdvice } from "../../src/utils/hook-utils.ts"
+import { skillAdvice } from "../../src/skill-utils.ts"
+import { blockStopObj } from "../../src/utils/hook-response.ts"
 import type { PRCheckContext, PRValidationState } from "./types.ts"
 
 export function buildPRAdvice(prNumber: number): string {

@@ -5,11 +5,12 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
+import { ghJsonViaDaemon as ghJson, hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
 import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, ghJson, hasGhCli, isGitHubRemote } from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 
 const STALE_DAYS = 7
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000

@@ -3,14 +3,9 @@
 // Validates PR state (reviews, CI status, merge conflicts) before allowing session stop
 
 import { uniq } from "lodash-es"
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
-import {
-  getOpenPrForBranch,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  skillAdvice,
-} from "../../src/utils/hook-utils.ts"
+import { skillAdvice } from "../../src/skill-utils.ts"
 
 export interface ReviewingPr {
   number: number

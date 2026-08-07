@@ -7,10 +7,12 @@
 // Dual-mode: exports a SwizStopHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
+import { git } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, git, skillAdvice } from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 
 const BRANCH_LIMIT = 40
 

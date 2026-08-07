@@ -6,6 +6,7 @@
 import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { resolveSpawnCwd } from "../src/cwd.ts"
+import { hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
@@ -19,7 +20,8 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import { blockStopObj, hasGhCli, isGitHubRemote, skillAdvice } from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import { checkChangelogStaleness } from "./stop-auto-continue/changelog-staleness.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
 import {

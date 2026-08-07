@@ -1,6 +1,6 @@
 import { orderBy, uniqBy } from "lodash-es"
+import { getRepoSlug, ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import { getIssueStore } from "../../src/issue-store.ts"
-import { getRepoSlug, ghJson } from "../../src/utils/hook-utils.ts"
 import type { PR, StopContext } from "./types.ts"
 
 const REBASE_SUGGESTIONS_PER_SIDE = 2

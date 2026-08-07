@@ -7,7 +7,7 @@ import { join } from "node:path"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj } from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import type { PackageManager } from "../src/utils/package-detection.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 

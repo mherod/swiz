@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractOwnerFromUrl } from "../src/utils/hook-utils.ts"
+import { extractOwnerFromUrl } from "../src/utils/git-utils.ts"
 import { buildStopPlanSteps } from "./stop-personal-repo-issues/action-plan.ts"
 import { filterVisibleIssues } from "./stop-personal-repo-issues/issues.ts"
 import type { StopContext } from "./stop-personal-repo-issues/types.ts"

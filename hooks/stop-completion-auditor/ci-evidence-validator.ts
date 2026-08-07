@@ -8,14 +8,11 @@
 
 import { readdir } from "node:fs/promises"
 import { dirname } from "node:path"
+import { formatActionPlan, mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import { hasCiEvidence } from "../../src/tasks/task-evidence.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import type { SessionTask } from "../../src/tasks/task-recovery.ts"
-import {
-  computeTranscriptSummary,
-  formatActionPlan,
-  mergeActionPlanIntoTasks,
-} from "../../src/utils/hook-utils.ts"
+import { computeTranscriptSummary } from "../../src/transcript-summary.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
 /** Matches bash commands that perform explicit CI verification. */

@@ -6,8 +6,8 @@
  */
 
 import { dirname } from "node:path"
+import { git } from "../../src/git-helpers.ts"
 import { isNodeModulesPath } from "../../src/node-modules-path.ts"
-import { git } from "../../src/utils/hook-utils.ts"
 import type { DriftedPackage, LockfileDriftContext, LockfileInfo } from "./types.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {

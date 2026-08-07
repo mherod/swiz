@@ -1,4 +1,5 @@
 import { orderBy } from "lodash-es"
+import { getRepoSlug, ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import { normaliseLabel } from "../../src/issue-refinement.ts"
 import {
   getDaemonBackedStore,
@@ -6,7 +7,7 @@ import {
   getIssueStoreReader,
   replayPendingMutations,
 } from "../../src/issue-store.ts"
-import { getRepoSlug, ghJson, messageFromUnknownError } from "../../src/utils/hook-utils.ts"
+import { messageFromUnknownError } from "../../src/utils/hook-json-helpers.ts"
 import { REVIEWABLE_BLOCK_NORM, SCORE_NORM, SKIP_NORM, TWENTY_FOUR_HOURS_MS } from "./constants.ts"
 import type { Issue } from "./types.ts"
 

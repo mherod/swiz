@@ -4,9 +4,9 @@
  * Resolves context, fetches reviews, and returns blocking output or empty object.
  */
 
+import { ghJsonViaDaemon as ghJson } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import { ghJson } from "../../src/utils/hook-utils.ts"
 import { buildChangesRequestedOutput, buildNoReviewsOutput } from "./action-plan.ts"
 import { resolvePRCheckContext } from "./context.ts"
 import { fetchReviewData } from "./review-data-fetcher.ts"

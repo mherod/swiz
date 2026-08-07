@@ -7,7 +7,8 @@
 
 import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
 import type { CollaborationMode } from "../../src/settings.ts"
-import { isDefaultBranch, skillExistsForHookPayload } from "../../src/utils/hook-utils.ts"
+import { skillExistsForHookPayload } from "../../src/skill-utils.ts"
+import { isDefaultBranch } from "../../src/utils/git-utils.ts"
 import type { ActionPlanItem } from "./types.ts"
 
 /**

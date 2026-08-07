@@ -11,7 +11,7 @@ import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import { extractSessionLines } from "../src/transcript-summary.ts"
-import { blockStopObj } from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-response.ts"
 import {
   extractLastAssistantText,
   findAllLazyPatterns,

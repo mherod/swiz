@@ -20,10 +20,10 @@
  */
 
 import { join } from "node:path"
+import { mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import { agentHasTaskTools } from "../../src/agent-paths.ts"
 import { getTaskToolName } from "../../src/tasks/task-governance-messages.ts"
 import type { SessionTask } from "../../src/tasks/task-recovery.ts"
-import { mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
 import type { ActionPlanItem, CompletionAuditContext, ValidationResult } from "./types.ts"
 
 /** Collect the set of task IDs that appear anywhere in the session trail. */

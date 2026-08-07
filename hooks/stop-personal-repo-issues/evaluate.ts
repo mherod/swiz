@@ -1,9 +1,10 @@
 import type { ActionPlanItem } from "../../src/action-plan.ts"
+import { mergeActionPlanIntoTasks } from "../../src/action-plan.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../../src/schemas.ts"
 import { readProjectState } from "../../src/settings.ts"
 import { getDefaultBranch } from "../../src/utils/git-utils.ts"
-import { blockStopObj, mergeActionPlanIntoTasks } from "../../src/utils/hook-utils.ts"
+import { blockStopObj } from "../../src/utils/hook-response.ts"
 import { buildStopPlanSteps, formatStopReason } from "./action-plan.ts"
 import {
   buildStopContext,
