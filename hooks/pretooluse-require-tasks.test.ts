@@ -7,7 +7,7 @@ import { getSessionTasksDir } from "../src/tasks/task-recovery.ts"
 import { taskListSyncSentinelPath } from "../src/temp-paths.ts"
 import {
   buildEffectiveTestSettings,
-  runHookInProcess,
+  runHook as runHookSubprocess,
   useTempDir,
 } from "../src/utils/test-utils.ts"
 import {
@@ -79,6 +79,9 @@ async function runHook({
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
     tool_input: toolInput,
+    // Keep the task-store fixture explicit so each subprocess reads the
+    // intended temporary home regardless of its ambient environment.
+    _taskHome: homeDir,
     ...(payloadEnv !== undefined ? { _env: payloadEnv } : {}),
     ...(effectiveSettings !== undefined ? { _effectiveSettings: effectiveSettings } : {}),
     // cwd defaults to the swiz project root (a git repo with CLAUDE.md) when omitted
@@ -91,9 +94,7 @@ async function runHook({
   if (seedFreshTaskListSync && sessionId) {
     await writeTaskListSyncSentinel(sessionId)
   }
-  const result = await runHookInProcess(HOOK, payload, {
-    env: { ...env, ...envOverrides },
-  })
+  const result = await runHookSubprocess(HOOK, payload, { ...env, ...envOverrides })
   return result.json ? hookResultFromOutput(result.json) : {}
 }
 
