@@ -3,12 +3,12 @@
 // Validates PR state (reviews, CI status, merge conflicts) before allowing session stop
 
 import { uniq } from "lodash-es"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import {
   getOpenPrForBranch,
   git,
   hasGhCli,
   isGitHubRemote,
-  isGitRepo,
   skillAdvice,
 } from "../../src/utils/hook-utils.ts"
 
@@ -93,12 +93,13 @@ async function checkMergeConflicts(cwd: string): Promise<string | null> {
 
 async function validateReviewingStateInputs(
   state: string | null,
-  cwd: string
+  cwd: string,
+  input: object
 ): Promise<{ valid: boolean; directive?: string }> {
   if (state !== "reviewing" && state !== "addressing-feedback") {
     return { valid: false }
   }
-  if (!(await isGitRepo(cwd))) {
+  if (!(await isGitRepoForHookPayload(input, cwd))) {
     return { valid: false }
   }
 
@@ -130,9 +131,10 @@ async function resolvePrForBranch(cwd: string): Promise<ReviewingPr | null> {
 
 export async function checkReviewingState(
   cwd: string,
-  state: string | null
+  state: string | null,
+  input: object = {}
 ): Promise<string | null> {
-  const validation = await validateReviewingStateInputs(state, cwd)
+  const validation = await validateReviewingStateInputs(state, cwd, input)
   if (!validation.valid) return validation.directive ?? null
 
   const pr = await resolvePrForBranch(cwd)

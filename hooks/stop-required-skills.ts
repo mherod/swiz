@@ -9,6 +9,7 @@
 
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { git } from "../src/git-helpers.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
@@ -27,7 +28,7 @@ import {
   extractSessionLines,
   getCurrentSessionToolUsage,
 } from "../src/transcript-summary.ts"
-import { blockStopObj, isGitRepo } from "../src/utils/hook-utils.ts"
+import { blockStopObj } from "../src/utils/hook-utils.ts"
 import { type ActionPlanItem, formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 interface RequiredStopSkillContext {
@@ -174,7 +175,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
         if (process.env.DEBUG_REQUIRED_SKILLS) console.error("end-of-day: enforceEndOfDay is false")
         return false
       }
-      if (!(await isGitRepo(cwd))) {
+      if (!(await isGitRepoForHookPayload(input, cwd))) {
         if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${cwd} is not a git repo`)
         return false
       }
@@ -224,7 +225,7 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   },
   {
     skill: GATE_REQUIRED_SKILLS.farmOutIssues.name,
-    applies: ({ cwd }) => isGitRepo(cwd),
+    applies: ({ cwd, input }) => isGitRepoForHookPayload(input, cwd),
     blockedLine: (skillReference) =>
       `BLOCKED: The ${skillReference} skill has not been invoked recently.`,
     actionHeader: (skillReference) => `The ${skillReference} skill has not been invoked recently:`,

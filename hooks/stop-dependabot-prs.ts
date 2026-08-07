@@ -5,16 +5,11 @@
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import {
-  blockStopObj,
-  ghJson,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-} from "../src/utils/hook-utils.ts"
+import { blockStopObj, ghJson, hasGhCli, isGitHubRemote } from "../src/utils/hook-utils.ts"
 
 const STALE_DAYS = 7
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000
@@ -34,11 +29,14 @@ function ageDays(createdAt: string, now: number): number {
   return Math.floor((now - created) / (24 * 60 * 60 * 1000))
 }
 
-export async function evaluateStopDependabotPrs(input: StopHookInput): Promise<SwizHookOutput> {
+export async function evaluateStopDependabotPrs(
+  input: StopHookInput,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd, resolveGitRepo))) return {}
   if (!(await isGitHubRemote(cwd))) return {}
   if (!hasGhCli()) return {}
 

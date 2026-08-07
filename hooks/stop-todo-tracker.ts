@@ -5,16 +5,11 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import {
-  blockStopObj,
-  git,
-  isGitRepo,
-  SOURCE_EXT_RE,
-  sanitizeSessionId,
-} from "../src/utils/hook-utils.ts"
+import { blockStopObj, git, SOURCE_EXT_RE, sanitizeSessionId } from "../src/utils/hook-utils.ts"
 import { tryFileFollowUpIssue } from "../src/utils/issue-guidance.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
@@ -47,7 +42,7 @@ export async function evaluateStopTodoTracker(input: StopHookInput): Promise<Swi
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd))) return {}
 
   const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
   const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE

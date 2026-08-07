@@ -4,10 +4,11 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, git, isGitRepo, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
+import { blockStopObj, git, TEST_FILE_RE } from "../src/utils/hook-utils.ts"
 
 const PRIVATE_KEY_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY/i
 const TOKEN_RE =
@@ -64,7 +65,7 @@ export async function evaluateStopSecretScanner(input: StopHookInput): Promise<S
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd))) return {}
 
   const findings = await findSecretFindings(cwd)
   if (findings.length === 0) return {}

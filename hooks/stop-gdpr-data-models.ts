@@ -6,10 +6,11 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { buildContextHookOutput, git, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { buildContextHookOutput, git, skillAdvice } from "../src/utils/hook-utils.ts"
 
 const DATA_MODEL_PATTERNS = [
   /\b(?:models?|schemas?|entities|types)\/.*(?:user|account|profile|person|customer|member)\b/i,
@@ -28,7 +29,10 @@ function matchesDataModelPattern(filePath: string): boolean {
   return DATA_MODEL_PATTERNS.some((re) => re.test(filePath))
 }
 
-export async function evaluateStopGdprDataModels(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateStopGdprDataModels(
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   let data: StopHookInput
   try {
     data = stopHookInputSchema.parse(input)
@@ -38,7 +42,7 @@ export async function evaluateStopGdprDataModels(input: unknown): Promise<SwizHo
 
   const cwd = data.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(data, cwd, resolveGitRepo))) return {}
 
   const statusOutput = await git(["status", "--porcelain"], cwd)
   if (!statusOutput.trim()) return {}

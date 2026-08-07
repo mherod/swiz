@@ -9,13 +9,15 @@
  * Reusable by any hook that needs a fallback suggestion without AI.
  */
 
-import { git, isGitRepo } from "../../src/git-helpers.ts"
+import { git } from "../../src/git-helpers.ts"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import { readSessionTasks } from "../../src/tasks/task-recovery.ts"
 
 export interface FillerContext {
   cwd: string
   sessionId?: string
   editedFiles?: string[]
+  input?: object
 }
 
 interface GitState {
@@ -24,8 +26,8 @@ interface GitState {
   branch: string
 }
 
-async function getGitState(cwd: string): Promise<GitState | null> {
-  if (!(await isGitRepo(cwd))) return null
+async function getGitState(cwd: string, input: object): Promise<GitState | null> {
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   const [status, branch, unpushed] = await Promise.all([
     git(["status", "--porcelain"], cwd).catch(() => ""),
@@ -77,9 +79,9 @@ function suggestFromEditedFiles(editedFiles: string[] | undefined): string {
  * Returns "" if no useful suggestion can be derived.
  */
 export async function buildFillerSuggestion(ctx: FillerContext): Promise<string> {
-  const { cwd, sessionId, editedFiles } = ctx
+  const { cwd, sessionId, editedFiles, input = {} } = ctx
 
-  const gitSuggestion = suggestFromGitState(await getGitState(cwd))
+  const gitSuggestion = suggestFromGitState(await getGitState(cwd, input))
   if (gitSuggestion) return gitSuggestion
 
   if (sessionId) {

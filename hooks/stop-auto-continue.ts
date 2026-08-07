@@ -8,6 +8,7 @@ import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { resolveSpawnCwd } from "../src/cwd.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
@@ -18,13 +19,7 @@ import {
   readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
-import {
-  blockStopObj,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+import { blockStopObj, hasGhCli, isGitHubRemote, skillAdvice } from "../src/utils/hook-utils.ts"
 import { checkChangelogStaleness } from "./stop-auto-continue/changelog-staleness.ts"
 import { checkReviewingState } from "./stop-auto-continue/reviewing-state.ts"
 import {
@@ -139,8 +134,8 @@ function normalizeReflectiveNextStep(reflections: string[]): string {
  * explicitly labelled needs-refinement). Returns a formatted status string
  * for injection into the auto-continue prompt, or "" if none found.
  */
-async function checkRefinementNeeds(cwd: string): Promise<string> {
-  if (!(await isGitRepo(cwd))) return ""
+async function checkRefinementNeeds(cwd: string, input: StopHookInput): Promise<string> {
+  if (!(await isGitRepoForHookPayload(input, cwd))) return ""
   if (!hasGhCli()) return ""
   if (!(await isGitHubRemote(cwd))) return ""
 
@@ -396,15 +391,15 @@ async function generateDeterministicResponse(
   response: AgentResponse
   refinementStatus: string | null
 }> {
-  const reviewingDirective = await checkReviewingState(cwd, projectState)
+  const reviewingDirective = await checkReviewingState(cwd, projectState, input)
   if (reviewingDirective) terminate("block", reviewingDirective)
 
   // Parallel: deterministic filler suggestion + refinement/changelog checks
   const { buildFillerSuggestion } = await import("./stop-auto-continue/filler-suggestions.ts")
   const [filler, refinementStatus, changelogStatus] = await Promise.all([
-    buildFillerSuggestion({ cwd, sessionId: input.session_id ?? undefined }).catch(() => ""),
-    checkRefinementNeeds(cwd),
-    checkChangelogStaleness(cwd),
+    buildFillerSuggestion({ cwd, sessionId: input.session_id ?? undefined, input }).catch(() => ""),
+    checkRefinementNeeds(cwd, input),
+    checkChangelogStaleness(cwd, input),
   ])
 
   const next = filler || changelogStatus || refinementStatus || ""

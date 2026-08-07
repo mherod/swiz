@@ -21,10 +21,11 @@ import {
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, formatActionPlan, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { blockStopObj, formatActionPlan, skillAdvice } from "../src/utils/hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
 
 interface MemoryViolation {
@@ -208,7 +209,7 @@ export async function evaluateStopMemorySize(input: StopHookInput): Promise<Swiz
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd))) return {}
 
   const thresholds = await resolveThresholds(cwd)
   const home = getHomeDirWithFallback("")

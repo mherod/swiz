@@ -2,7 +2,8 @@
 // Changelog staleness detection module for stop-auto-continue hook
 // Checks if CHANGELOG.md is stale relative to the latest commit
 
-import { git, isGitRepo } from "../../src/git-helpers.ts"
+import { git } from "../../src/git-helpers.ts"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 
 const ONE_DAY = 86400
 
@@ -10,8 +11,8 @@ const ONE_DAY = 86400
  * Check if CHANGELOG.md is stale (last updated > 1 day before the latest commit).
  * Returns a human-readable status string, or "" if not stale or not applicable.
  */
-export async function checkChangelogStaleness(cwd: string): Promise<string> {
-  if (!(await isGitRepo(cwd))) return ""
+export async function checkChangelogStaleness(cwd: string, input: object = {}): Promise<string> {
+  if (!(await isGitRepoForHookPayload(input, cwd))) return ""
 
   const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
   if (!repoRoot) return ""

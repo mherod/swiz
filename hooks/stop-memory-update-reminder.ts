@@ -7,10 +7,11 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, isGitRepo, skillAdvice } from "../src/utils/hook-utils.ts"
+import { blockStopObj, skillAdvice } from "../src/utils/hook-utils.ts"
 
 const MEMORY_RECENCY_WINDOW_MS = 30 * 60 * 1000
 
@@ -36,11 +37,12 @@ async function memoryRecentlyUpdated(cwd: string): Promise<boolean> {
 }
 
 export async function evaluateStopMemoryUpdateReminder(
-  input: StopHookInput
+  input: StopHookInput,
+  resolveGitRepo?: GitRepoResolver
 ): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd, resolveGitRepo))) return {}
 
   if (await memoryRecentlyUpdated(cwd)) return {}
 

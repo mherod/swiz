@@ -257,4 +257,50 @@ describe("isGitRepoForHookPayload", () => {
       expect(fallbackCwds, `${hookFile}: standalone fallback cwd`).toEqual([hookFile])
     }
   })
+
+  it("is the repository-membership boundary for every issue #755 governance stop hook", async () => {
+    const hookFiles = [
+      "stop-auto-continue.ts",
+      "stop-auto-continue/changelog-staleness.ts",
+      "stop-auto-continue/reviewing-state.ts",
+      "stop-auto-continue/filler-suggestions.ts",
+      "stop-memory-update-reminder.ts",
+      "stop-memory-size.ts",
+      "stop-secret-scanner.ts",
+      "stop-gdpr-data-models.ts",
+      "stop-todo-tracker.ts",
+      "stop-dependabot-prs.ts",
+      "stop-required-skills.ts",
+      "stop-large-files.ts",
+    ]
+
+    for (const hookFile of hookFiles) {
+      const source = await Bun.file(join(process.cwd(), "hooks", hookFile)).text()
+      expect(source, hookFile).toContain("isGitRepoForHookPayload(")
+      expect(source, hookFile).not.toMatch(/await\s+(?:deps\.)?isGitRepo\(/)
+
+      for (const isRepo of [true, false]) {
+        let fallbackCalls = 0
+        const result = await isGitRepoForHookPayload(
+          { _repositoryCapability: repositoryCapability(isRepo) },
+          hookFile,
+          async () => {
+            fallbackCalls++
+            return !isRepo
+          }
+        )
+
+        expect(result, `${hookFile}: enriched isRepo=${isRepo}`).toBe(isRepo)
+        expect(fallbackCalls, `${hookFile}: enriched fallback calls`).toBe(0)
+      }
+
+      const fallbackCwds: string[] = []
+      const fallbackResult = await isGitRepoForHookPayload({}, hookFile, async (cwd) => {
+        fallbackCwds.push(cwd)
+        return true
+      })
+      expect(fallbackResult, `${hookFile}: standalone fallback result`).toBe(true)
+      expect(fallbackCwds, `${hookFile}: standalone fallback cwd`).toEqual([hookFile])
+    }
+  })
 })
