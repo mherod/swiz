@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
-import { cp, mkdir, readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { cp, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgent } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -418,14 +418,193 @@ function printSyncSummary(
   )
 }
 
+export interface SkillSyncFileSystem {
+  copyDirectory(sourceDir: string, targetDir: string): Promise<void>
+  createTemporaryDirectory(prefix: string): Promise<string>
+  isFile(path: string): Promise<boolean>
+  moveDirectory(sourceDir: string, targetDir: string): Promise<void>
+  removeDirectory(path: string): Promise<void>
+}
+
+const DEFAULT_SKILL_SYNC_FILE_SYSTEM: SkillSyncFileSystem = {
+  async copyDirectory(sourceDir, targetDir) {
+    // Copy links as links and retain source timestamps/modes in the staged tree.
+    await cp(sourceDir, targetDir, {
+      recursive: true,
+      force: true,
+      dereference: false,
+      preserveTimestamps: true,
+      verbatimSymlinks: true,
+    })
+  },
+  createTemporaryDirectory(prefix) {
+    return mkdtemp(prefix)
+  },
+  async isFile(path) {
+    return (await stat(path)).isFile()
+  },
+  moveDirectory(sourceDir, targetDir) {
+    return rename(sourceDir, targetDir)
+  },
+  async removeDirectory(path) {
+    await rm(path, { recursive: true, force: true })
+  },
+}
+
+function resolveSkillSyncFileSystem(
+  overrides: Partial<SkillSyncFileSystem> = {}
+): SkillSyncFileSystem {
+  return { ...DEFAULT_SKILL_SYNC_FILE_SYSTEM, ...overrides }
+}
+
+async function safelyRemoveDirectory(path: string, fileSystem: SkillSyncFileSystem): Promise<void> {
+  try {
+    await fileSystem.removeDirectory(path)
+  } catch {
+    // Cleanup must not mask the copy/swap error that left the old target recoverable.
+  }
+}
+
+async function replaceSkillDirectory(
+  sourceDir: string,
+  targetDir: string,
+  fileSystemOverrides: Partial<SkillSyncFileSystem> = {}
+): Promise<void> {
+  const fileSystem = resolveSkillSyncFileSystem(fileSystemOverrides)
+  const targetParent = dirname(targetDir)
+  const targetName = basename(targetDir)
+  const stagingRoot = await fileSystem.createTemporaryDirectory(
+    join(targetParent, `.${targetName}.sync-`)
+  )
+  const replacementDir = join(stagingRoot, "replacement")
+  let backupRoot: string | null = null
+  let preserveBackup = false
+
+  try {
+    await fileSystem.copyDirectory(sourceDir, replacementDir)
+    if (!(await fileSystem.isFile(join(replacementDir, "SKILL.md")))) {
+      throw new Error(`Copied skill ${targetName} is missing a valid SKILL.md.`)
+    }
+
+    if (!existsSync(targetDir)) {
+      await fileSystem.moveDirectory(replacementDir, targetDir)
+      return
+    }
+
+    backupRoot = await fileSystem.createTemporaryDirectory(
+      join(targetParent, `.${targetName}.backup-`)
+    )
+    const backupDir = join(backupRoot, "previous")
+    await fileSystem.moveDirectory(targetDir, backupDir)
+
+    try {
+      await fileSystem.moveDirectory(replacementDir, targetDir)
+    } catch (installError) {
+      try {
+        await fileSystem.moveDirectory(backupDir, targetDir)
+      } catch (restoreError) {
+        preserveBackup = true
+        throw new Error(
+          `Failed to install replacement for ${targetName} and restore the previous target. ` +
+            `The previous target remains recoverable at ${backupDir}. ` +
+            `Install error: ${messageFromUnknownError(installError)}. ` +
+            `Restore error: ${messageFromUnknownError(restoreError)}.`
+        )
+      }
+      throw installError
+    }
+
+    await fileSystem.removeDirectory(backupRoot)
+    backupRoot = null
+  } finally {
+    await safelyRemoveDirectory(stagingRoot, fileSystem)
+    if (backupRoot && !preserveBackup) {
+      await safelyRemoveDirectory(backupRoot, fileSystem)
+    }
+  }
+}
+
+type SkillTreeEntryKind = "directory" | "file" | "symlink"
+
+async function collectSkillTreeEntries(
+  rootDir: string,
+  relativeDir = "",
+  entries = new Map<string, SkillTreeEntryKind>()
+): Promise<Map<string, SkillTreeEntryKind>> {
+  const children = await readdir(join(rootDir, relativeDir), { withFileTypes: true })
+  for (const child of children) {
+    const relativePath = relativeDir ? join(relativeDir, child.name) : child.name
+    const kind: SkillTreeEntryKind = child.isDirectory()
+      ? "directory"
+      : child.isSymbolicLink()
+        ? "symlink"
+        : "file"
+    entries.set(relativePath, kind)
+    if (kind === "directory") {
+      await collectSkillTreeEntries(rootDir, relativePath, entries)
+    }
+  }
+  return entries
+}
+
+async function findTargetOnlySkillPaths(sourceDir: string, targetDir: string): Promise<string[]> {
+  const [sourceEntries, targetEntries] = await Promise.all([
+    collectSkillTreeEntries(sourceDir),
+    collectSkillTreeEntries(targetDir),
+  ])
+  const stalePaths: string[] = []
+  for (const [path, kind] of targetEntries) {
+    if (sourceEntries.get(path) === kind) continue
+    stalePaths.push(kind === "directory" ? `${path}/` : path)
+  }
+  return stalePaths.sort()
+}
+
+type SkillSyncAction = "copied" | "overwritten" | "skipped"
+
+async function syncSingleSkill(options: {
+  name: string
+  sourceDir: string
+  targetRoot: string
+  dryRun: boolean
+  overwrite: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
+}): Promise<SkillSyncAction> {
+  const { name, sourceDir, targetRoot, dryRun, overwrite, fileSystem } = options
+  const sourceSkillDir = join(sourceDir, name)
+  const targetDir = join(targetRoot, name)
+  const targetExists = existsSync(targetDir)
+
+  if (targetExists && !overwrite) {
+    console.log(`  - skipped ${name} (already exists)`)
+    return "skipped"
+  }
+
+  if (dryRun) {
+    const action = logSkillAction(name, targetExists, true, "copied", "copy")
+    if (targetExists) {
+      for (const stalePath of await findTargetOnlySkillPaths(sourceSkillDir, targetDir)) {
+        console.log(`    - would remove ${name}/${stalePath}`)
+      }
+    }
+    return action === "overwrite" ? "overwritten" : "copied"
+  }
+
+  await replaceSkillDirectory(sourceSkillDir, targetDir, fileSystem)
+  return logSkillAction(name, targetExists, false, "copied", "copy") === "overwrite"
+    ? "overwritten"
+    : "copied"
+}
+
 // Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
 async function syncSkills(options: {
   from: string
   to: string
   dryRun: boolean
   overwrite: boolean
+  fileSystem?: Partial<SkillSyncFileSystem>
 }): Promise<void> {
-  const { from, to, dryRun, overwrite } = options
+  const { from, to, dryRun, overwrite, fileSystem } = options
   const fromAgent = resolveForSync(from)
   const toAgent = resolveForSync(to)
   const fromSkillsDirs = sourceSkillDirs(from)
@@ -453,15 +632,16 @@ async function syncSkills(options: {
     skipped = 0
 
   for (const { name, sourceDir } of orderedSkills) {
-    const targetDir = join(toSkillsDir, name)
-    const targetExists = existsSync(targetDir)
-    if (targetExists && !overwrite) {
-      skipped++
-      console.log(`  - skipped ${name} (already exists)`)
-      continue
-    }
-    if (!dryRun) await cp(join(sourceDir, name), targetDir, { recursive: true, force: overwrite })
-    if (logSkillAction(name, targetExists, dryRun, "copied", "copy") === "overwrite") overwritten++
+    const action = await syncSingleSkill({
+      name,
+      sourceDir,
+      targetRoot: toSkillsDir,
+      dryRun,
+      overwrite,
+      fileSystem,
+    })
+    if (action === "skipped") skipped++
+    else if (action === "overwritten") overwritten++
     else copied++
   }
 
@@ -634,17 +814,21 @@ async function handleSync(
   args: string[],
   syncGemini: boolean,
   dryRun: boolean,
-  overwrite: boolean
+  overwrite: boolean,
+  fileSystem?: Partial<SkillSyncFileSystem>
 ): Promise<void> {
   if (extractPositionals(args).length > 0)
     throw new Error("--sync/--sync-gemini does not accept a skill name.")
   const from = syncGemini ? "gemini" : extractFlagValue(args, "--from")
   if (!from) throw new Error("--sync requires --from <agent>.")
   const to = extractFlagValue(args, "--to") ?? "claude"
-  await syncSkills({ from, to, dryRun, overwrite })
+  await syncSkills({ from, to, dryRun, overwrite, fileSystem })
 }
 
-async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
+async function handleSkillTransferArgs(
+  args: string[],
+  fileSystem?: Partial<SkillSyncFileSystem>
+): Promise<boolean> {
   const sync = args.includes("--sync")
   const syncGemini = args.includes("--sync-gemini")
   const convert = args.includes("--convert")
@@ -655,7 +839,7 @@ async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
   const overwrite = args.includes("--overwrite")
   if (convert) await handleConvert(args, dryRun, overwrite)
   else if (toCommand) await handleToCommand(args, dryRun, overwrite)
-  else await handleSync(args, syncGemini, dryRun, overwrite)
+  else await handleSync(args, syncGemini, dryRun, overwrite, fileSystem)
   return true
 }
 
@@ -663,6 +847,7 @@ async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
 
 export interface SkillCommandOptions {
   expandInlineCommands?: typeof expandInlineCommands
+  syncFileSystem?: Partial<SkillSyncFileSystem>
 }
 
 export const skillCommand: Command<SkillCommandOptions> = {
@@ -707,7 +892,7 @@ export const skillCommand: Command<SkillCommandOptions> = {
     { flags: "--overwrite", description: "Allow overwriting existing target skills or commands" },
   ],
   async run(args, options) {
-    const handled = await handleSkillTransferArgs(args)
+    const handled = await handleSkillTransferArgs(args, options?.syncFileSystem)
     if (handled) return
 
     if (args.includes("--dry-run") || args.includes("--overwrite")) {

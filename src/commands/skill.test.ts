@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { mkdir, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
 import { convertSkillContent } from "../utils/skill-conversion.ts"
 import { runCommandInProcess, useTempDir } from "../utils/test-utils.ts"
-import { parseFrontmatterField, skillCommand, stripFrontmatter } from "./skill.ts"
+import {
+  parseFrontmatterField,
+  type SkillCommandOptions,
+  skillCommand,
+  stripFrontmatter,
+} from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────
 
@@ -206,11 +211,12 @@ describe("swiz skill --no-front-matter", () => {
 /** Run `swiz skill [args...]` with full control over HOME and args. No skill name appended. */
 async function runListCmd(
   args: string[],
-  fakeHome: string
+  fakeHome: string,
+  commandOptions: SkillCommandOptions = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   const tempCwd = await createTempDir()
   return runCommandInProcess(skillCommand, args, {
-    commandOptions: { expandInlineCommands: expandInlineCommandsForTest },
+    commandOptions: { expandInlineCommands: expandInlineCommandsForTest, ...commandOptions },
     cwd: tempCwd,
     env: { HOME: fakeHome },
   })
@@ -218,9 +224,10 @@ async function runListCmd(
 
 async function runSkillCli(
   args: string[],
-  fakeHome: string
+  fakeHome: string,
+  commandOptions: SkillCommandOptions = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return runListCmd(args, fakeHome)
+  return runListCmd(args, fakeHome, commandOptions)
 }
 
 describe("swiz skill (list mode)", () => {
@@ -365,11 +372,94 @@ describe("swiz skill --sync-gemini", () => {
     await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
     await mkdir(targetDir, { recursive: true })
     await writeFile(targetPath, "---\ndescription: Existing target\n---\n")
+    const stalePath = join(targetDir, "scripts", "removed.sh")
+    await mkdir(join(targetDir, "scripts"), { recursive: true })
+    await writeFile(stalePath, "#!/bin/sh\n")
 
     const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`overwritten ${skillName}`)
     expect(await Bun.file(targetPath).text()).toContain("Source version")
+    expect(await Bun.file(stalePath).exists()).toBe(false)
+  })
+
+  test("dry-run lists nested stale removals without writing", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-dry-overwrite-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(targetDir, "SKILL.md")
+    const stalePath = join(targetDir, "references", "stale.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
+    await mkdir(join(targetDir, "references"), { recursive: true })
+    await writeFile(targetPath, "---\ndescription: Existing target\n---\n")
+    await writeFile(stalePath, "stale\n")
+
+    const { stdout, exitCode } = await runSkillCli(
+      ["--sync-gemini", "--overwrite", "--dry-run"],
+      fakeHome
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`would overwrite ${skillName}`)
+    expect(stdout).toContain(`would remove ${skillName}/references/stale.md`)
+    expect(await Bun.file(targetPath).text()).toContain("Existing target")
+    expect(await Bun.file(stalePath).exists()).toBe(true)
+  })
+
+  test("copy failure preserves the previous target and does not report success", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-copy-failure-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(targetDir, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
+    await mkdir(targetDir, { recursive: true })
+    await writeFile(targetPath, "---\ndescription: Recoverable target\n---\n")
+
+    const { stdout, stderr, exitCode } = await runSkillCli(
+      ["--sync-gemini", "--overwrite"],
+      fakeHome,
+      {
+        syncFileSystem: {
+          async copyDirectory() {
+            throw new Error("simulated copy failure")
+          },
+        },
+      }
+    )
+
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("simulated copy failure")
+    expect(stdout).not.toContain(`overwritten ${skillName}`)
+    expect(await Bun.file(targetPath).text()).toContain("Recoverable target")
+  })
+
+  test("replacement preserves executable modes and symbolic links", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-metadata-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const sourceScript = join(sourceDir, "scripts", "run.sh")
+    const sourceLink = join(sourceDir, "run-link")
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    await mkdir(join(sourceDir, "scripts"), { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Metadata\n---\n")
+    await writeFile(sourceScript, "#!/bin/sh\n")
+    await chmod(sourceScript, 0o751)
+    await symlink("scripts/run.sh", sourceLink)
+    await mkdir(targetDir, { recursive: true })
+    await writeFile(join(targetDir, "SKILL.md"), "---\ndescription: Old\n---\n")
+
+    const { exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+    const targetScript = join(targetDir, "scripts", "run.sh")
+    const targetLink = join(targetDir, "run-link")
+
+    expect(exitCode).toBe(0)
+    expect((await lstat(targetScript)).mode & 0o777).toBe(0o751)
+    expect((await lstat(targetLink)).isSymbolicLink()).toBe(true)
+    expect(await readlink(targetLink)).toBe("scripts/run.sh")
   })
 })
 
