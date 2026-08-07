@@ -5,6 +5,7 @@
  * Returns null if any prerequisite is missing (fail-open).
  */
 
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   detectForkTopology,
@@ -12,7 +13,6 @@ import {
   getDefaultBranch,
   git,
   isDefaultBranch,
-  isGitRepo,
 } from "../../src/utils/hook-utils.ts"
 import type { BranchCheckContext } from "./types.ts"
 
@@ -21,7 +21,7 @@ export async function resolveBranchCheckContext(
 ): Promise<BranchCheckContext | null> {
   const cwd = input.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return null

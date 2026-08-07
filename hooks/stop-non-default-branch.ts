@@ -9,6 +9,7 @@
 //
 // Dual-mode: SwizStopHook for inline dispatch + subprocess via runSwizHookAsMain.
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizStopHook } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
@@ -23,7 +24,6 @@ import {
   git,
   hasGhCli,
   isDefaultBranch,
-  isGitRepo,
   skillAdvice,
 } from "../src/utils/hook-utils.ts"
 import type { WorktreePreservationDecision } from "../src/worktree-preservation.ts"
@@ -141,7 +141,7 @@ export async function evaluateStopNonDefaultBranch(input: StopHookInput): Promis
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd))) return {}
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return {}

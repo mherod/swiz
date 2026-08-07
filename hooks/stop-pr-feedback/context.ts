@@ -1,4 +1,5 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import { readProjectSettings } from "../../src/settings.ts"
 import {
   getDefaultBranch,
@@ -6,7 +7,6 @@ import {
   hasGhCli,
   isDefaultBranch,
   isGitHubRemote,
-  isGitRepo,
   sanitizeSessionId,
 } from "../../src/utils/hook-utils.ts"
 import { evaluateWorktreePreservation } from "../../src/worktree-preservation.ts"
@@ -21,7 +21,7 @@ export async function resolveRepoContext(input: {
   if (!cwd) return null // fail open: cwd is required for repo detection
   const sessionId = sanitizeSessionId(input.session_id)
 
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
   if (!hasGhCli()) return null
 
   const hasRemote = await isGitHubRemote(cwd)

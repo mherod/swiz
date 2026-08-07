@@ -5,6 +5,7 @@
  */
 
 import { getCollaborationModePolicy } from "../../src/collaboration-policy.ts"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
@@ -20,7 +21,6 @@ import {
   hasGhCli,
   isDefaultBranch,
   isGitHubRemote,
-  isGitRepo,
 } from "../../src/utils/hook-utils.ts"
 import type { PRCheckContext } from "./types.ts"
 
@@ -39,7 +39,7 @@ export async function resolvePRCheckContext(input: StopHookInput): Promise<PRChe
   if (!modePolicy.requirePeerReview) return null
 
   // Fail open: prerequisites
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
   if (!hasGhCli()) return null
   if (!(await isGitHubRemote(cwd))) return null
 

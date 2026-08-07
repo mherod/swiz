@@ -6,13 +6,13 @@
  * shared across the three workflow concerns.
  */
 
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
-import { isGitRepo } from "../../src/utils/hook-utils.ts"
 import type { ShipChecklistContext, WorkflowGates } from "./types.ts"
 
 /**
@@ -25,7 +25,7 @@ export async function resolveShipChecklistContext(
   const cwd = input.cwd ?? process.cwd()
 
   // Prerequisite: must be in a git repository
-  if (!(await isGitRepo(cwd))) {
+  if (!(await isGitRepoForHookPayload(input, cwd))) {
     return null
   }
 

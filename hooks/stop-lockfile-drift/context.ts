@@ -5,8 +5,9 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
-import { git, isGitRepo, recentHeadRange } from "../../src/utils/hook-utils.ts"
+import { git, recentHeadRange } from "../../src/utils/hook-utils.ts"
 import type { LockfileDriftContext } from "./types.ts"
 
 /**
@@ -20,7 +21,7 @@ export async function resolveLockfileDriftContext(
   const sessionId = input.session_id ?? null
 
   // Fail-open: not a git repo
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   // Resolve recent commit range
   const range = await recentHeadRange(cwd, 10)

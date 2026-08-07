@@ -4,6 +4,7 @@
  * Fetches PR data from GitHub. Returns null if prerequisite (open PR on feature branch) is missing.
  */
 
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   getDefaultBranch,
@@ -12,14 +13,13 @@ import {
   hasGhCli,
   isDefaultBranch,
   isGitHubRemote,
-  isGitRepo,
 } from "../../src/utils/hook-utils.ts"
 import type { PRCheckContext } from "./types.ts"
 
 export async function resolvePRCheckContext(input: StopHookInput): Promise<PRCheckContext | null> {
   const cwd = input.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
   if (!hasGhCli()) return null
   if (!(await isGitHubRemote(cwd))) return null
 

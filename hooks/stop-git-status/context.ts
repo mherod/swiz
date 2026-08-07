@@ -5,6 +5,7 @@
  * Returns null (fail-open) if prerequisites not met.
  */
 
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import {
   type CollaborationMode,
@@ -17,7 +18,7 @@ import {
   buildGitContextLine,
 } from "../../src/utils/git-context-messages.ts"
 import { getUnpushedCommitSummaries } from "../../src/utils/git-utils.ts"
-import { getDefaultBranch, getGitStatusV2, git, isGitRepo } from "../../src/utils/hook-utils.ts"
+import { getDefaultBranch, getGitStatusV2, git } from "../../src/utils/hook-utils.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
 /**
@@ -205,7 +206,7 @@ function gitStatusWarrantsStopHook(gitStatus: GitStatus): boolean {
  */
 export async function resolveGitContext(input: StopHookInput): Promise<GitContext | null> {
   const cwd = input.cwd ?? process.cwd()
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
   const effective = await resolveEffectiveSettings(input, cwd)
 

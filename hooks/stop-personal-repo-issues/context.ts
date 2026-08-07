@@ -1,12 +1,8 @@
 import { detectRepoOwnership } from "../../src/collaboration-policy.ts"
 import { needsRefinement } from "../../src/issue-refinement.ts"
+import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import type { ProjectState } from "../../src/settings.ts"
-import {
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-  sanitizeSessionId,
-} from "../../src/utils/hook-utils.ts"
+import { hasGhCli, isGitHubRemote, sanitizeSessionId } from "../../src/utils/hook-utils.ts"
 import { isInCooldown } from "./cooldown.ts"
 import {
   filterBlockedIssues,
@@ -74,7 +70,7 @@ export async function resolveRepoContext(input: {
   if (!cwd) return null // fail open: cwd is required for repo detection
   const sessionId = sanitizeSessionId(input.session_id)
 
-  if (!(await isGitRepo(cwd))) return null
+  if (!(await isGitRepoForHookPayload(input, cwd))) return null
   if (!hasGhCli()) return null
 
   const [hasRemote, inCooldown] = await Promise.all([
