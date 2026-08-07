@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { withGitClient } from "../src/git/client.ts"
 import { MockGitClient } from "../src/git/mock-client.ts"
+import type { RepositoryCapability } from "../src/repository-capability.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import { evaluatePosttooluseStateTransition } from "./posttooluse-state-transition.ts"
 
@@ -17,6 +18,17 @@ interface GitState {
   upstreamUrl?: string | null
   headEmail?: string
   userEmail?: string
+}
+
+function repositoryCapability(isRepo: boolean): RepositoryCapability {
+  return {
+    canonicalRoot: "/repo",
+    repoKey: "state-transition-test",
+    isRepo,
+    repoSlug: isRepo ? "mherod/swiz" : null,
+    hasGhCli: true,
+    resolvedAt: Date.now(),
+  }
 }
 
 function statusV2(state: GitState): string {
@@ -106,6 +118,25 @@ async function withRepo<T>(fn: (repo: string) => Promise<T>): Promise<T> {
 }
 
 describe("posttooluse-state-transition commit behavior", () => {
+  test("trusted non-repository enrichment skips the fallback probe", async () => {
+    await withRepo(async (repo) => {
+      const git = new MockGitClient()
+      await writeProjectState(repo, "developing")
+
+      await withGitClient(git, () =>
+        evaluatePosttooluseStateTransition({
+          tool_name: "Bash",
+          tool_input: { command: "git status" },
+          cwd: repo,
+          _repositoryCapability: repositoryCapability(false),
+        })
+      )
+
+      expect(git.calls).toHaveLength(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    })
+  })
+
   for (const state of ["planning", "reviewing", "addressing-feedback"] as const) {
     test(`git commit on no-upstream branch transitions ${state} -> developing`, async () => {
       await withRepo(async (repo) => {

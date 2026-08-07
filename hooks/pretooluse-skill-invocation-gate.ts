@@ -323,7 +323,7 @@ async function checkCommitIdentityPreflight(
     )
   }
 
-  const result = await checkGitIdentity(cwd)
+  const result = await checkGitIdentity(cwd, input)
   if (!result.isGitRepo || result.ok) return null
 
   return preToolUseDeny(

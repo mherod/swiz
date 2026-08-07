@@ -9,6 +9,10 @@ import {
   type UpstreamSyncResult,
 } from "../../issue-store.ts"
 import { canonicalizePath, isPathWithinRoot, resolveProjectRoot } from "../../project-identity.ts"
+import {
+  type RepositoryCapability,
+  resolveRepositoryCapability,
+} from "../../repository-capability.ts"
 import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import { isRegisterableProjectCwd } from "./route-helpers.ts"
 
@@ -34,6 +38,7 @@ interface SyncEntry {
 }
 
 type RepoSlugResolver = (cwd: string) => Promise<string | null>
+type RepositoryCapabilityResolver = (cwd: string) => Promise<RepositoryCapability>
 type ForkTopologyResolver = (cwd: string) => Promise<{ upstreamSlug: string } | null>
 type SyncRunner = typeof syncUpstreamState
 type RegistrationResult = { deduped: boolean; registered: boolean }
@@ -330,12 +335,16 @@ function createEmptySyncResult(): UpstreamSyncResult {
   }
 }
 
-async function defaultResolveSlug(cwd: string): Promise<string | null> {
-  const { getRepoSlug, isGitRepo, hasGhCli } = await import("../../git-helpers.ts")
-  if (!hasGhCli()) return null
-  if (!(await isGitRepo(cwd))) return null
-  return getRepoSlug(cwd)
+export async function resolveUpstreamRepoSlug(
+  cwd: string,
+  resolveCapability: RepositoryCapabilityResolver = resolveRepositoryCapability
+): Promise<string | null> {
+  const capability = await resolveCapability(cwd)
+  if (!capability.hasGhCli || !capability.isRepo) return null
+  return capability.repoSlug
 }
+
+const defaultResolveSlug = resolveUpstreamRepoSlug
 
 async function defaultResolveFork(cwd: string): Promise<{ upstreamSlug: string } | null> {
   const { detectForkTopology } = await import("../../git-helpers.ts")

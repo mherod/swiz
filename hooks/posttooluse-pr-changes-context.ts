@@ -9,6 +9,7 @@
  * /pr-comments-address before committing or pushing.
  */
 
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { formatSkillReferenceForAgent, skillExistsForHookPayload } from "../src/skill-utils.ts"
@@ -24,7 +25,6 @@ import {
   git,
   hasGhCli,
   isGitHubRemote,
-  isGitRepo,
   postToolUseAdditionalContext,
 } from "../src/utils/hook-utils.ts"
 
@@ -50,7 +50,12 @@ const posttoolusPrChangesContext: SwizShellHook = {
     if (!isCheckoutCommand(parsed.data)) return {}
 
     const cwd = parsed.data.cwd ?? process.cwd()
-    if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd)) || !hasGhCli()) return {}
+    if (
+      !(await isGitRepoForHookPayload(parsed.data, cwd)) ||
+      !(await isGitHubRemote(cwd)) ||
+      !hasGhCli()
+    )
+      return {}
 
     const branch = (await git(["branch", "--show-current"], cwd)).trim()
     if (!branch) return {}

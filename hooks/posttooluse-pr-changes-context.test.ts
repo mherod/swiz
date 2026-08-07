@@ -1,5 +1,20 @@
 import { describe, expect, test } from "bun:test"
+import { withGitClient } from "../src/git/client.ts"
+import { MockGitClient } from "../src/git/mock-client.ts"
+import type { RepositoryCapability } from "../src/repository-capability.ts"
 import { runHook as runHookScript } from "../src/utils/test-utils.ts"
+import posttoolusePrChangesContext from "./posttooluse-pr-changes-context.ts"
+
+function repositoryCapability(isRepo: boolean): RepositoryCapability {
+  return {
+    canonicalRoot: "/repo",
+    repoKey: "pr-changes-test",
+    isRepo,
+    repoSlug: isRepo ? "mherod/swiz" : null,
+    hasGhCli: true,
+    resolvedAt: Date.now(),
+  }
+}
 
 async function runChangesContextHook(command: string, cwd = "/tmp") {
   const result = await runHookScript("hooks/posttooluse-pr-changes-context.ts", {
@@ -44,6 +59,21 @@ describe("posttooluse-pr-changes-context: non-checkout commands", () => {
 })
 
 describe("posttooluse-pr-changes-context: checkout commands (no PR environment)", () => {
+  test("trusted non-repository enrichment avoids the fallback probe", async () => {
+    const git = new MockGitClient()
+    const result = await withGitClient(git, () =>
+      posttoolusePrChangesContext.run({
+        tool_name: "Bash",
+        tool_input: { command: "git checkout feature-branch" },
+        cwd: "/repo",
+        _repositoryCapability: repositoryCapability(false),
+      })
+    )
+
+    expect(result).toEqual({})
+    expect(git.calls).toHaveLength(0)
+  })
+
   test("git checkout exits cleanly with no output when not in git repo", async () => {
     const result = await runChangesContextHook("git checkout feature-branch")
     expect(result.exitedCleanly).toBe(true)

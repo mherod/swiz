@@ -12,11 +12,11 @@
 
 import { stat, writeFile } from "node:fs/promises"
 import { acquireGhSlot } from "../src/gh-rate-limit.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { swizCeremonyDayFlagPath } from "../src/temp-paths.ts"
-import { isGitRepo } from "../src/utils/hook-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 const PR_THRESHOLD = 3
@@ -47,12 +47,13 @@ async function countMergedPrsInLast7Days(cwd: string): Promise<number> {
 }
 
 export async function evaluateSessionstartWeeklyRetroPrompt(
-  input: unknown
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
 ): Promise<SwizHookOutput> {
   const hookInput = sessionStartHookInputSchema.parse(input)
   const cwd = hookInput.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput, cwd, resolveGitRepo))) return {}
 
   const sentinel = swizCeremonyDayFlagPath("weekly-retro", isoWeekKey())
   try {

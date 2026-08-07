@@ -1,9 +1,10 @@
 // Shared types and utilities for stop hooks that scan git diffs for violations.
 
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../repository-capability.ts"
 import type { HookOutput } from "../schemas.ts"
 import { stopHookInputSchema } from "../schemas.ts"
 import { hasNonEmptyHookOutput } from "./hook-json-helpers.ts"
-import { blockStopObj, exitWithHookObject, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
+import { blockStopObj, exitWithHookObject, getDefaultBranch, git } from "./hook-utils.ts"
 
 /** Violation result shared by all diff-scanning stop hooks. */
 export interface DiffViolation {
@@ -30,12 +31,13 @@ interface DiffScanStopHookOptions {
  */
 export async function evaluateDiffScanStopHook(
   opts: DiffScanStopHookOptions,
-  input: unknown
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
 ): Promise<HookOutput | Record<string, never>> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(parsed, cwd, resolveGitRepo))) return {}
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return {}

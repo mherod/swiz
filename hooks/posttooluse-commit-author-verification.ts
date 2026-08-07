@@ -72,7 +72,7 @@ export async function evaluatePosttooluseCommitAuthorVerification(
   if (commandFailed(parsed.data as PostToolHookInput)) return {}
 
   const cwd = parsed.data.cwd ?? process.cwd()
-  const result = await checkHeadCommitIdentity(cwd)
+  const result = await checkHeadCommitIdentity(cwd, parsed.data)
   if (!result.isGitRepo || result.ok) return {}
   return buildBlock(result.problems)
 }

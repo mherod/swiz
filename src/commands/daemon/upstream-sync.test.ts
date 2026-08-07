@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { IssueStore, type UpstreamSyncResult } from "../../issue-store.ts"
-import { UpstreamSyncRegistry } from "./upstream-sync.ts"
+import { resolveUpstreamRepoSlug, UpstreamSyncRegistry } from "./upstream-sync.ts"
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = (): void => {}
@@ -31,6 +31,32 @@ function createSyncResult(): UpstreamSyncResult {
     fetchOk: true,
   }
 }
+
+describe("resolveUpstreamRepoSlug", () => {
+  test("reuses repository capability decisions", async () => {
+    const base = {
+      canonicalRoot: "/repo",
+      repoKey: "upstream-sync-test",
+      resolvedAt: Date.now(),
+    }
+
+    expect(
+      await resolveUpstreamRepoSlug("/repo", () =>
+        Promise.resolve({ ...base, isRepo: false, repoSlug: null, hasGhCli: true })
+      )
+    ).toBeNull()
+    expect(
+      await resolveUpstreamRepoSlug("/repo", () =>
+        Promise.resolve({ ...base, isRepo: true, repoSlug: "mherod/swiz", hasGhCli: false })
+      )
+    ).toBeNull()
+    expect(
+      await resolveUpstreamRepoSlug("/repo", () =>
+        Promise.resolve({ ...base, isRepo: true, repoSlug: "mherod/swiz", hasGhCli: true })
+      )
+    ).toBe("mherod/swiz")
+  })
+})
 
 describe("UpstreamSyncRegistry fork entries", () => {
   test("runs fork and upstream syncs independently while both are in flight", async () => {

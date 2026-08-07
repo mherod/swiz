@@ -4,7 +4,7 @@
 // Dispatched by lefthook commit-msg via `swiz dispatch commitMsg`.
 
 import { z } from "zod"
-import { isGitRepo } from "../src/git-helpers.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 
@@ -20,13 +20,16 @@ function isProhibitedAttributionLine(line: string): boolean {
   )
 }
 
-export async function evaluateCommitMsgScrubCoauthors(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateCommitMsgScrubCoauthors(
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   try {
     const parsed = commitMsgHookInputSchema.parse(input)
     const cwd = parsed.cwd ?? process.cwd()
     const msgFile = parsed.commit_msg_file
 
-    if (!(await isGitRepo(cwd)) || !msgFile) return {}
+    if (!(await isGitRepoForHookPayload(parsed, cwd, resolveGitRepo)) || !msgFile) return {}
 
     const messageFile = Bun.file(msgFile)
     if (!(await messageFile.exists())) return {}

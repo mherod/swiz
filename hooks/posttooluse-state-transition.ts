@@ -19,7 +19,8 @@
 // Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
 
-import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "../src/git-helpers.ts"
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
@@ -270,7 +271,7 @@ export async function evaluatePosttooluseStateTransition(input: unknown): Promis
   if (!cwd) return {}
 
   if (hookInput.tool_name !== "Bash" && hookInput.tool_name !== "mcp__ide__runCommand") return {}
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput, cwd))) return {}
 
   const command = String(hookInput.tool_input?.command ?? "")
   const state = (await readProjectState(cwd)) as ProjectState | null

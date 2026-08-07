@@ -4,10 +4,11 @@
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
 // Uses the blocking strategy — returns blockStopObj to fail the commit.
 
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { preCommitHookInputSchema } from "../src/schemas.ts"
-import { blockStopObj, git, isGitRepo } from "../src/utils/hook-utils.ts"
+import { blockStopObj, git } from "../src/utils/hook-utils.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
 const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/
@@ -86,12 +87,15 @@ function formatReason(findings: Finding[]): string {
   return parts.join("\n")
 }
 
-export async function evaluatePrecommitStagedValidation(input: unknown): Promise<SwizHookOutput> {
+export async function evaluatePrecommitStagedValidation(
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   try {
     const parsed = preCommitHookInputSchema.parse(input)
     const cwd = parsed.cwd ?? process.cwd()
 
-    if (!(await isGitRepo(cwd))) return {}
+    if (!(await isGitRepoForHookPayload(parsed, cwd, resolveGitRepo))) return {}
 
     const stagedFiles = await getStagedFiles(cwd)
     if (stagedFiles.length === 0) return {}

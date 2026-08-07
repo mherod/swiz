@@ -4,6 +4,7 @@
 
 import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
@@ -13,7 +14,6 @@ import {
   git,
   hasGhCli,
   isGitHubRemote,
-  isGitRepo,
 } from "../src/utils/hook-utils.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
@@ -99,7 +99,10 @@ async function collectGitHubParts(cwd: string, branch: string): Promise<string[]
   return parts
 }
 
-export async function evaluateSessionstartHealthSnapshot(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateSessionstartHealthSnapshot(
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   const hookInput = sessionStartHookInputSchema.parse(input)
   const cwd = hookInput.cwd
   if (!cwd) return {}
@@ -116,7 +119,10 @@ export async function evaluateSessionstartHealthSnapshot(input: unknown): Promis
     parts.push(`State: ${stateInfo.state} → [${stateInfo.transitions.join(", ")}]`)
   }
 
-  if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
+  if (
+    !(await isGitRepoForHookPayload(hookInput, cwd, resolveGitRepo)) ||
+    !(await isGitHubRemote(cwd))
+  ) {
     if (parts.length > 0) return buildContextHookOutput("SessionStart", parts.join(" "))
     return {}
   }

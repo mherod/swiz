@@ -1,4 +1,5 @@
-import { git, isGitRepo } from "./git-helpers.ts"
+import { git } from "./git-helpers.ts"
+import { type GitRepoResolver, isGitRepoForHookPayload } from "./repository-capability.ts"
 
 interface GitIdentity {
   name: string
@@ -83,8 +84,12 @@ async function readGitIdentity(cwd: string): Promise<GitIdentity> {
   return { name: normalize(name), email: normalize(email) }
 }
 
-export async function checkGitIdentity(cwd: string): Promise<GitIdentityCheck> {
-  const repo = await isGitRepo(cwd)
+export async function checkGitIdentity(
+  cwd: string,
+  input: object = {},
+  resolveGitRepo?: GitRepoResolver
+): Promise<GitIdentityCheck> {
+  const repo = await isGitRepoForHookPayload(input, cwd, resolveGitRepo)
   const identity = repo ? await readGitIdentity(cwd) : { name: "", email: "" }
   const problems = repo ? validateGitIdentity(identity) : []
   return { ok: problems.length === 0, isGitRepo: repo, identity, problems }
@@ -106,8 +111,12 @@ function parseHeadIdentity(raw: string): HeadCommitIdentityCheck["head"] | null 
   }
 }
 
-export async function checkHeadCommitIdentity(cwd: string): Promise<HeadCommitIdentityCheck> {
-  const config = await checkGitIdentity(cwd)
+export async function checkHeadCommitIdentity(
+  cwd: string,
+  input: object = {},
+  resolveGitRepo?: GitRepoResolver
+): Promise<HeadCommitIdentityCheck> {
+  const config = await checkGitIdentity(cwd, input, resolveGitRepo)
   if (!config.isGitRepo) return { ...config, ok: true }
 
   const raw = await git(["log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", "HEAD"], cwd)

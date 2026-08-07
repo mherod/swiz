@@ -2,18 +2,22 @@
 
 // SessionStart hook: inject current project state into session context
 
+import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
-import { buildContextHookOutput, isGitRepo } from "../src/utils/hook-utils.ts"
+import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
-export async function evaluateSessionstartStateContext(input: unknown): Promise<SwizHookOutput> {
+export async function evaluateSessionstartStateContext(
+  input: unknown,
+  resolveGitRepo?: GitRepoResolver
+): Promise<SwizHookOutput> {
   const hookInput = sessionStartHookInputSchema.parse(input)
   const cwd = hookInput.cwd
   if (!cwd) return {}
 
-  if (!(await isGitRepo(cwd))) return {}
+  if (!(await isGitRepoForHookPayload(hookInput, cwd, resolveGitRepo))) return {}
 
   const stateInfo = await readSessionStartStateInfo(cwd)
   if (!stateInfo) return {}

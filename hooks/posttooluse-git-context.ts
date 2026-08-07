@@ -10,6 +10,7 @@
 
 import { z } from "zod"
 import { promptObject } from "../src/ai-providers.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import {
   buildSplitContextHookOutput,
   runSwizHookAsMain,
@@ -192,14 +193,13 @@ const posttoolusGitContext: SwizHook = {
     const {
       isShellTool,
       getRepoSlug,
-      isGitRepo,
       getGitStatusV2,
       GIT_ANY_CMD_RE,
       getEffectiveSwizSettingsForToolHook,
       fetchGitStatusFromDaemon,
     } = await import("../src/utils/hook-utils.ts")
 
-    if (!(await isGitRepo(cwd))) {
+    if (!(await isGitRepoForHookPayload(input, cwd))) {
       return {}
     }
 

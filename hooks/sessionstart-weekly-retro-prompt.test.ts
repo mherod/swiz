@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { rm, writeFile } from "node:fs/promises"
+import type { RepositoryCapability } from "../src/repository-capability.ts"
 import { swizCeremonyDayFlagPath } from "../src/temp-paths.ts"
 import { useTempDir } from "../src/utils/test-utils.ts"
 import { evaluateSessionstartWeeklyRetroPrompt } from "./sessionstart-weekly-retro-prompt.ts"
@@ -25,7 +26,36 @@ async function initGitRepo(dir: string): Promise<void> {
 
 const BASE_INPUT = { session_id: "test-sess" }
 
+function repositoryCapability(isRepo: boolean): RepositoryCapability {
+  return {
+    canonicalRoot: "/repo",
+    repoKey: "weekly-retro-test",
+    isRepo,
+    repoSlug: isRepo ? "mherod/swiz" : null,
+    hasGhCli: true,
+    resolvedAt: Date.now(),
+  }
+}
+
 describe("sessionstart-weekly-retro-prompt", () => {
+  test("trusted non-repository enrichment avoids the fallback probe", async () => {
+    let fallbackCalls = 0
+    const result = await evaluateSessionstartWeeklyRetroPrompt(
+      {
+        ...BASE_INPUT,
+        cwd: "/repo",
+        _repositoryCapability: repositoryCapability(false),
+      },
+      () => {
+        fallbackCalls++
+        return Promise.resolve(true)
+      }
+    )
+
+    expect(result).toEqual({})
+    expect(fallbackCalls).toBe(0)
+  })
+
   test("non-git dir → no output", async () => {
     const dir = await tmp.create()
     const result = await evaluateSessionstartWeeklyRetroPrompt({ ...BASE_INPUT, cwd: dir })
