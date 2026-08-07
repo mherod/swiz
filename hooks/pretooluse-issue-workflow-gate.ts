@@ -10,10 +10,20 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { git } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { hasSkillInSessionLines, hasSkillUsedInProjectRecently } from "../src/skill-utils.ts"
+import {
+  hasSkillInSessionLines,
+  hasSkillUsedInProjectRecently,
+  skillAdvice,
+} from "../src/skill-utils.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import {
@@ -22,7 +32,6 @@ import {
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
 import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
-import { git, preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 const WORKFLOW_SKILL = "work-on-issue"

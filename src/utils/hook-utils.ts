@@ -2,7 +2,6 @@
 // Import with: import { denyPreToolUse, allowPreToolUseWithUpdatedInput, isShellTool, isEditTool, ... } from "./hook-utils.ts";
 // noinspection JSUnusedGlobalSymbols
 
-import { dirname, join } from "node:path"
 import {
   type ActionPlanItem,
   expandSkillReferences,
@@ -12,6 +11,10 @@ import {
 import { stderrLog } from "../debug.ts"
 import {
   detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
+  forkRemoteRef,
+  forkSyncGuidance,
   getOpenPrForBranch,
   getRepoSlug,
   getUpstreamSlug,
@@ -35,17 +38,15 @@ import {
   RECOVERY_CMD_RE,
   SETUP_CMD_RE,
 } from "./git-utils.ts"
-import { extractHookSystemMessagePreview } from "./hook-json-helpers.ts"
-import {
-  hsoPreToolUseAllow,
-  hsoPreToolUseAllowContextual,
-  hsoPreToolUseDeny,
-  hsoPreToolUseDenyTaskFile,
-  type TaskFileDenyMeta,
-} from "./hook-specific-output.ts"
 import { SWIZ_CMD_RE } from "./inline-hook-helpers.ts"
 
-export { preToolUseDeny } from "../SwizHook"
+export {
+  preToolUseAllow,
+  preToolUseAllowWithContext,
+  preToolUseDeny,
+  preToolUseDenyTaskFileAccess,
+  preToolUseDenyWithSystemMessage,
+} from "../SwizHook"
 export { getTaskToolName }
 
 // Re-export skillAdvice for backward compatibility with existing hooks.
@@ -218,6 +219,10 @@ async function ghJson<T>(args: string[], cwd: string): Promise<T | null> {
 
 export {
   detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
+  forkRemoteRef,
+  forkSyncGuidance,
   getOpenPrForBranch,
   getRepoSlug,
   getUpstreamSlug,
@@ -240,20 +245,7 @@ export {
   subjectsOverlap,
 } from "../subject-fingerprint.ts"
 
-/**
- * Walk upward from `startDir` to the filesystem root looking for `fileName`.
- * Returns true on first match, false when no match exists.
- */
-export async function hasFileInTree(startDir: string, fileName: string): Promise<boolean> {
-  if (!startDir || !fileName) return false
-  let dir = startDir
-  while (true) {
-    if (await Bun.file(join(dir, fileName)).exists()) return true
-    const parent = dirname(dir)
-    if (parent === dir) return false
-    dir = parent
-  }
-}
+export { hasFileInTree } from "./file-utils.ts"
 
 /**
  * Build the standard denial message for the last-task-standing guard.
@@ -304,13 +296,9 @@ export async function buildLastTaskStandingDenial(taskId: string, cwd?: string):
   )
 }
 
-/** True when a task status counts as terminal work. */
-export function isTerminalTaskStatus(status: string): boolean {
-  return status === "completed" || status === "cancelled" || status === "deleted"
-}
-
 // ─── Command normalisation (re-exported from src/) ──────────────────────
 export { normalizeCommand, stripHeredocs } from "../command-utils.ts"
+export { isTerminalTaskStatus } from "../tasks/task-recovery.ts"
 // ─── Task creation (re-exported from src/) ───────────────────────────────
 export { type CreateTaskOptions, createTaskInProcess } from "../tasks/task-service.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
@@ -442,67 +430,6 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
 export { type ForkTopology, issueState } from "../git-helpers.ts"
 export { isSettingDisableCommand } from "./inline-hook-helpers.ts"
 
-// ─── Fork-aware guidance helpers ───────────────────────────────────────────
-
-/**
- * Build fork-aware git push command guidance.
- * In fork workflows, you push to origin (your fork). The command is the same,
- * but the context message differs.
- */
-export function forkPushCmd(
-  branch: string,
-  fork: import("../git-helpers.ts").ForkTopology | null
-): string {
-  if (fork) return `git push origin ${branch}  # pushes to your fork (${fork.originSlug})`
-  return `git push origin ${branch}`
-}
-
-/**
- * Build fork-aware PR creation command.
- * In fork workflows, PRs target the upstream repo.
- */
-export function forkPrCreateCmd(
-  defaultBranch: string,
-  fork: import("../git-helpers.ts").ForkTopology | null
-): string {
-  if (fork) return `gh pr create --repo ${fork.upstreamSlug} --base ${defaultBranch}`
-  return `gh pr create --base ${defaultBranch}`
-}
-
-/**
- * Build fork-aware sync guidance (fetch + rebase from upstream).
- * Returns null when not in a fork workflow.
- */
-export function forkSyncGuidance(
-  defaultBranch: string,
-  fork: import("../git-helpers.ts").ForkTopology | null
-): string | null {
-  if (!fork) return null
-  const lines = [
-    `Sync your fork with upstream:`,
-    `  git fetch upstream`,
-    `  git rebase upstream/${defaultBranch}`,
-  ]
-  if (!fork.hasUpstreamRemote) {
-    lines.unshift(`Set up the upstream remote first:`)
-    lines.splice(1, 0, `  git remote add upstream https://github.com/${fork.upstreamSlug}.git`)
-  }
-  return lines.join("\n")
-}
-
-/**
- * Build the remote ref prefix for diff ranges.
- * In fork workflows where upstream is configured, use upstream/<branch>
- * for comparing against the canonical repo's default branch.
- */
-export function forkRemoteRef(
-  branch: string,
-  fork: import("../git-helpers.ts").ForkTopology | null
-): string {
-  if (fork?.hasUpstreamRemote) return `upstream/${branch}`
-  return `origin/${branch}`
-}
-
 // ─── Common input types ─────────────────────────────────────────────────
 
 // export interface ToolHookInput {
@@ -559,66 +486,6 @@ export type TaskToolInput = ToolHookInput & {
     activeForm?: string
     metadata?: Record<string, any>
     [key: string]: unknown
-  }
-}
-
-/** Build a PreToolUse allow response (mirrors `allowPreToolUse`). */
-export function preToolUseAllow(reason = ""): SwizHookOutput {
-  const rephrasedReason = reason ? rephraseHookMessage(reason) : reason
-  const preview = extractHookSystemMessagePreview(rephrasedReason)
-  return {
-    suppressOutput: true,
-    systemMessage: preview,
-    hookSpecificOutput: hsoPreToolUseAllow(rephrasedReason),
-  }
-}
-
-/** Build a task-file-access denial with structured telemetry metadata. */
-export function preToolUseDenyTaskFileAccess(
-  reason: string,
-  meta: TaskFileDenyMeta = {}
-): SwizHookOutput {
-  const fullReason = `${reason}
-
-You must act on this now. Do not try to stop again without completing the required action.`
-  return {
-    suppressOutput: true,
-    systemMessage: (extractHookSystemMessagePreview(reason) || "Denied without reason").trim(),
-    hookSpecificOutput: hsoPreToolUseDenyTaskFile(fullReason, meta),
-  }
-}
-
-/** Build a PreToolUse deny response with a distinct visible UI preview. */
-export function preToolUseDenyWithSystemMessage(
-  reason: string,
-  systemMessage: string
-): SwizHookOutput {
-  const fullReason = `${reason}
-
-You must act on this now. Do not try to stop again without completing the required action.`
-
-  return {
-    suppressOutput: true,
-    systemMessage: systemMessage.trim() || "Denied without reason",
-    hookSpecificOutput: hsoPreToolUseDeny(fullReason),
-  }
-}
-
-/** Build a PreToolUse allow with advisory `additionalContext` (mirrors `allowPreToolUseWithContext`). */
-export function preToolUseAllowWithContext(
-  reason: string,
-  additionalContext: string
-): SwizHookOutput {
-  const rephrasedReason = reason ? rephraseHookMessage(reason) : ""
-  const rephrasedContext = additionalContext ? rephraseHookMessage(additionalContext) : ""
-  const effectiveReason = rephrasedReason || rephrasedContext
-  return {
-    suppressOutput: true,
-    ...(rephrasedContext && { systemMessage: rephrasedContext }),
-    hookSpecificOutput: hsoPreToolUseAllowContextual(
-      effectiveReason || undefined,
-      rephrasedContext || undefined
-    ),
   }
 }
 

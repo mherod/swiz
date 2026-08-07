@@ -5,10 +5,14 @@
  * safeguards around `publish`; checks should be fixed, not skipped.
  */
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { SHELL_SEGMENT_BOUNDARY, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 
 const PNPM_INVOKE_RE = new RegExp(`${SHELL_SEGMENT_BOUNDARY}\\s*(npm|pnpm)\\b`)

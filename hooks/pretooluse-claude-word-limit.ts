@@ -3,19 +3,21 @@
 // Threshold is configurable via `swiz settings set memory-word-threshold <N>` (default: 5000).
 
 import { join } from "node:path"
+import { formatActionPlan } from "../src/action-plan.ts"
+import { countFileWords } from "../src/file-metrics.ts"
 import {
   compactionChecklistSteps,
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import {
-  countFileWords,
-  formatActionPlan,
-  isShellTool,
-  preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 
 export async function evaluatePretooluseClaudeWordLimit(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

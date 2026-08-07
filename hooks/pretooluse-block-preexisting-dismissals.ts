@@ -23,21 +23,16 @@
 //   - A scoped verification run (e.g. lint on specific files)
 //   - Transcript-visible baseline evidence for the exact diagnostic
 
+import { isGitRepo } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseAllow, preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
-import {
-  isCodeChangeTool,
-  isGitRepo,
-  isShellTool,
-  preToolUseAllow,
-  preToolUseDeny,
-  readAllTranscriptLines,
-} from "../src/utils/hook-utils.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+import { readAllTranscriptLines } from "../src/utils/transcript.ts"
 
 // ── Dismissal patterns ──────────────────────────────────────────────────────
 

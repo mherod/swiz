@@ -7,9 +7,13 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 async function evaluate(input: FileEditHookInput) {
   const filePath: string = input.tool_input?.file_path ?? ""

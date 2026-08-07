@@ -9,15 +9,16 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
-import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import {
-  isShellTool,
   preToolUseAllow,
   preToolUseDeny,
-  type ToolHookInput,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
 
 // Detect commands that create or fetch from main/default branch
 const GIT_FETCH_FROM_MAIN_RE = /\bgit\s+(?:pull|fetch)\s+(?:origin\s+)?main\b/

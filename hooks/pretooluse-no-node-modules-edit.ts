@@ -8,9 +8,13 @@
  */
 
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",

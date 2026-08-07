@@ -8,29 +8,23 @@
 
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { formatActionPlan } from "../src/action-plan.ts"
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/project-key.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
+import { isEditTool, isNotebookTool, isWriteTool } from "../src/tool-matchers.ts"
 import {
   extractTextFromUnknownContent,
   isHookFeedback,
   stripQuotedText,
 } from "../src/transcript-utils.ts"
-import {
-  extractToolBlocksFromEntry,
-  formatActionPlan,
-  hasFileInTree,
-  isEditTool,
-  isNotebookTool,
-  isWriteTool,
-  preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
-import { resolveSessionLines } from "../src/utils/transcript.ts"
+import { hasFileInTree } from "../src/utils/file-utils.ts"
+import { extractToolBlocksFromEntry, resolveSessionLines } from "../src/utils/transcript.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."

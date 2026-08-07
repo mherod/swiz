@@ -18,13 +18,18 @@
  */
 
 import { resolveProjectIdentity } from "../src/project-identity.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GIT_PUSH_RE, hasGitPushForceFlag } from "../src/utils/git-utils.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const DEFAULT_COOLDOWN_MS = 60_000
 

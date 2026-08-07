@@ -7,10 +7,14 @@
 // Dual-mode: exports a SwizFileEditHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import { runSwizHookAsMain, type SwizFileEditHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+} from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
 import { computeProjectedContent, isFileEditForPath } from "../src/utils/edit-projection.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 /** Extract stop hook filenames from manifest source in order. */
 function extractStopHookOrder(source: string): string[] {

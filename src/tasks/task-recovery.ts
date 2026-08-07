@@ -31,6 +31,11 @@ export interface SessionTask {
   subjectFingerprint?: string
 }
 
+/** True when a task status represents terminal work. */
+export function isTerminalTaskStatus(status: string): boolean {
+  return status === "completed" || status === "cancelled" || status === "deleted"
+}
+
 /** Resolve ~/.claude/tasks for the active home directory. */
 export function getTasksRoot(home: string = getHomeDirWithFallback("")): string | null {
   if (!home) return null

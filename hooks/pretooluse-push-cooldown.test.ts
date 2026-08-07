@@ -13,7 +13,7 @@ import { join } from "node:path"
 import { resolveProjectIdentity } from "../src/project-identity.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
-import { FORCE_PUSH_RE, hasGitPushForceFlag } from "../src/utils/hook-utils.ts"
+import { FORCE_PUSH_RE, hasGitPushForceFlag } from "../src/utils/git-utils.ts"
 import { evaluatePretoolusePushCooldown } from "./pretooluse-push-cooldown.ts"
 
 // ── FORCE_PUSH_RE regression tests ───────────────────────────────────────────

@@ -36,7 +36,13 @@
 import { agentHasTaskListToolForHookPayload } from "../src/agent-paths.ts"
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
 import { checkGitIdentity } from "../src/git-identity.ts"
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
 import {
   type CurrentSessionUsageRecencyOptions,
@@ -62,8 +68,6 @@ import {
   GIT_PUSH_RE,
   isPullRequestMergeCommand,
 } from "../src/utils/git-utils.ts"
-
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
 

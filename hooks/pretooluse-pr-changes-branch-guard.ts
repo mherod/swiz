@@ -7,28 +7,35 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
-import { shellHookInputSchema } from "../src/schemas.ts"
-import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   detectForkTopology,
   type ForkTopology,
   forkPushCmd,
-  GH_PR_CHECKOUT_RE,
-  GIT_CHECKOUT_RE,
-  GIT_SWITCH_RE,
   getOpenPrForBranch,
-  getRepoNameWithOwner,
-  ghJson,
+  ghJsonViaDaemon as ghJson,
   git,
   hasGhCli,
   isGitHubRemote,
-  isShellTool,
+} from "../src/git-helpers.ts"
+import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
+import {
   preToolUseAllow,
   preToolUseDeny,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { shellHookInputSchema } from "../src/schemas.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import {
+  GH_PR_CHECKOUT_RE,
+  GIT_CHECKOUT_RE,
+  GIT_SWITCH_RE,
+  getDefaultBranch,
+  getRepoNameWithOwner,
+  isDefaultBranch,
+} from "../src/utils/git-utils.ts"
 
 type Review = {
   state: string

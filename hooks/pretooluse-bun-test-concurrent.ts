@@ -11,10 +11,14 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 import { bunTestArgSegments, isSingleFileBunTestArgs } from "../src/command-utils.ts"
-import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 function removeFlag(invocation: string, flag: "concurrent" | "parallel"): string {
   return invocation

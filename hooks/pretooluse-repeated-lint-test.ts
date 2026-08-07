@@ -19,21 +19,20 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { orderBy } from "lodash-es"
+import { formatActionPlan } from "../src/action-plan.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
-import {
-  collectBlockedToolUseIds,
-  formatActionPlan,
-  isCodeChangeTool,
-  isShellTool,
-  preToolUseDeny,
-  readSessionLines,
-  stripAnsi,
-} from "../src/utils/hook-utils.ts"
 import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
+import { collectBlockedToolUseIds, readSessionLines, stripAnsi } from "../src/utils/transcript.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 

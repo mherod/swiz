@@ -1,3 +1,17 @@
+import { dirname, join } from "node:path"
+
+/** Walk upward from `startDir` to the filesystem root looking for `fileName`. */
+export async function hasFileInTree(startDir: string, fileName: string): Promise<boolean> {
+  if (!startDir || !fileName) return false
+  let dir = startDir
+  while (true) {
+    if (await Bun.file(join(dir, fileName)).exists()) return true
+    const parent = dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
+
 export async function readLines(path: string, count: number): Promise<string[]> {
   try {
     const file = Bun.file(path)

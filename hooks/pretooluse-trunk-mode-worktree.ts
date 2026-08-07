@@ -8,10 +8,14 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings } from "../src/settings.ts"
-import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 export async function evaluatePretooluseTrunkModeWorktree(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)

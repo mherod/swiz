@@ -8,33 +8,38 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import { ghJsonViaDaemon } from "../src/git-helpers.ts"
+import {
+  detectForkTopology,
+  forkPrCreateCmd,
+  forkPushCmd,
+  getRepoSlug,
+  ghJsonViaDaemon,
+  git,
+} from "../src/git-helpers.ts"
 import { getIssueStoreReader } from "../src/issue-store.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
   resolvePolicy,
 } from "../src/settings.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import {
   classifyChangeScope,
-  detectForkTopology,
   extractPrNumber,
-  forkPrCreateCmd,
-  forkPushCmd,
   getDefaultBranch,
-  getRepoSlug,
-  git,
   isDefaultBranch,
   isPullRequestMergeCommand,
-  isShellTool,
   parseGitStatSummary,
-  preToolUseAllow,
-  preToolUseDeny,
-  type ToolHookInput,
-} from "../src/utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
 import { escapeRegex, GIT_GLOBAL_OPTS } from "../src/utils/shell-patterns.ts"
 
 export interface MainBranchScopeGateDeps {

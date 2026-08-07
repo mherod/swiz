@@ -21,10 +21,15 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
 import { scanPushGateFromJsonlLines } from "../src/transcript-push-gate.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
@@ -50,7 +55,10 @@ async function isPushGateActive(input: ToolHookInput): Promise<boolean> {
 }
 
 async function isPushCommand(input: ToolHookInput): Promise<boolean> {
-  const { isShellTool, GIT_PUSH_RE } = await import("../src/utils/hook-utils.ts")
+  const [{ isShellTool }, { GIT_PUSH_RE }] = await Promise.all([
+    import("../src/tool-matchers.ts"),
+    import("../src/utils/git-utils.ts"),
+  ])
   if (!isShellTool(input?.tool_name ?? "")) return false
   const command: string = (input?.tool_input?.command as string) ?? ""
   return GIT_PUSH_RE.test(command)

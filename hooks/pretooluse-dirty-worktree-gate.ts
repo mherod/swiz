@@ -4,22 +4,17 @@
 // Task planning remains available even when the worktree exceeds the configured threshold.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
+import { git } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseAllow, preToolUseAllowWithContext, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_DIRTY_WORKTREE_THRESHOLD,
   readProjectSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
-import {
-  getGitStatusV2,
-  git,
-  preToolUseAllow,
-  preToolUseAllowWithContext,
-} from "../src/utils/hook-utils.ts"
+import { getDefaultBranch, getGitStatusV2, isDefaultBranch } from "../src/utils/git-utils.ts"
 
 /**
  * When on the default branch in a non-trunk-mode project, return advice

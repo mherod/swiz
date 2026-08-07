@@ -4,9 +4,14 @@
 // Catches: node/bun -e, python -c (more runtimes added via RUNTIME_DEFS).
 // Inline eval scripts bypass file-change review the same way Write/Edit tool calls do.
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
 // ── Shared body parser ─────────────────────────────────────────────────────────

@@ -15,28 +15,33 @@
 //
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
+import { formatActionPlan } from "../src/action-plan.ts"
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import { detectForkTopology, git } from "../src/git-helpers.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import type { EffectiveSwizSettings } from "../src/settings/types.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import {
+  formatCurrentSessionUsageWindow,
+  getRecentBashCommandsUsedForCurrentSession,
+} from "../src/transcript-summary.ts"
 import {
   BRANCH_CHECK_RE,
   CI_WAIT_RE,
-  detectForkTopology,
-  formatActionPlan,
-  formatCurrentSessionUsageWindow,
   GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
-  getRecentBashCommandsUsedForCurrentSession,
-  git,
   hasGitPushForceFlag,
-  isShellTool,
   PR_CHECK_RE,
-  preToolUseAllow,
-  preToolUseDeny,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 export interface PushChecksGateDependencies {

@@ -2,9 +2,14 @@
 
 // PreToolUse hook: Redirect task queries to TaskList/TaskGet tool calls.
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import {
   isProtectedTaskStoragePath,
   isProtectedTaskStoragePathResolved,

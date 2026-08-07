@@ -1,24 +1,23 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Warn before `git commit` would invalidate an existing
 // PR approval when branch protection dismisses stale reviews on new commits.
 //
 // Fires once per 5 minutes (cooldownSeconds: 300 in manifest).
 // Fails open on all error paths — missing gh, no PR, no protection, API 404.
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
+import { formatActionPlan } from "../src/action-plan.ts"
+import { getOpenPrForBranch, getRepoSlug, ghJsonViaDaemon as ghJson } from "../src/git-helpers.ts"
 import {
-  formatActionPlan,
-  GIT_COMMIT_RE,
-  getOpenPrForBranch,
-  getRepoSlug,
-  ghJson,
-  isShellTool,
   preToolUseAllow,
   preToolUseDeny,
-  resolveCurrentFeatureBranch,
-  type ToolHookInput,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { GIT_COMMIT_RE, resolveCurrentFeatureBranch } from "../src/utils/git-utils.ts"
 
 interface PrWithReviews {
   number: number

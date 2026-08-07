@@ -12,16 +12,18 @@ import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
 import { git, isGitHubHost, parseRemoteUrl } from "../src/git-helpers.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizFileEditHook, type SwizHookOutput } from "../src/SwizHook.ts"
-import { fileEditHookInputSchema } from "../src/schemas.ts"
-import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { isFileEditTool } from "../src/tool-matchers.ts"
-import { getDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   preToolUseAllow,
   preToolUseAllowWithContext,
   preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizFileEditHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import { fileEditHookInputSchema } from "../src/schemas.ts"
+import { readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
+import { getDefaultBranch } from "../src/utils/git-utils.ts"
 
 // Matches individual auto-memory entries under ~/.claude/projects/<key>/memory/<slug>.md.
 // These are written by the built-in auto-memory system, exempt from sandboxed-edits restrictions.

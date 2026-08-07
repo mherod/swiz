@@ -45,6 +45,8 @@ import {
   messageFromUnknownError,
 } from "./utils/hook-json-helpers.ts"
 import {
+  hsoPreToolUseAllow,
+  hsoPreToolUseAllowContextual,
   hsoPreToolUseDeny,
   hsoPreToolUseDenyTaskFile,
   type TaskFileDenyMeta,
@@ -249,6 +251,35 @@ export function buildSplitContextHookOutput(
 // Inline equivalents of the process.exit-based helpers in hook-utils.ts.
 // These return output objects instead of terminating the process, making them
 // safe for use in SwizHook.run() implementations.
+
+/** Build a PreToolUse allow response for inline hooks. */
+export function preToolUseAllow(reason = ""): SwizHookOutput {
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : reason
+  const preview = extractHookSystemMessagePreview(rephrasedReason)
+  return {
+    suppressOutput: true,
+    systemMessage: preview,
+    hookSpecificOutput: hsoPreToolUseAllow(rephrasedReason),
+  }
+}
+
+/** Build a PreToolUse allow response with advisory additional context. */
+export function preToolUseAllowWithContext(
+  reason: string,
+  additionalContext: string
+): SwizHookOutput {
+  const rephrasedReason = reason ? rephraseHookMessage(reason) : ""
+  const rephrasedContext = additionalContext ? rephraseHookMessage(additionalContext) : ""
+  const effectiveReason = rephrasedReason || rephrasedContext
+  return {
+    suppressOutput: true,
+    ...(rephrasedContext && { systemMessage: rephrasedContext }),
+    hookSpecificOutput: hsoPreToolUseAllowContextual(
+      effectiveReason || undefined,
+      rephrasedContext || undefined
+    ),
+  }
+}
 
 /** Build a PreToolUse deny response for inline hooks. */
 export function preToolUseDeny(reason: string): SwizHookOutput {

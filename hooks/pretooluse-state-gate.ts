@@ -5,11 +5,12 @@
 // Dual-mode: SwizToolHook for inline dispatch + subprocess via runSwizHookAsMain.
 
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type ToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { readProjectState } from "../src/settings.ts"
 import { STATE_METADATA } from "../src/state-machine.ts"
-import { isShellTool, isSwizCommand, preToolUseDeny } from "../src/utils/hook-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { isSwizCommand } from "../src/utils/inline-hook-helpers.ts"
 
 /** Tool categories blocked in each state — extended as new blocking states are added */
 const STATE_BLOCKED_CATEGORIES: Partial<Record<string, ((name: string) => boolean)[]>> = {}

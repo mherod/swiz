@@ -22,7 +22,8 @@ import { z } from "zod"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import { type RunSwizHookAsMainOptions, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { messageFromUnknownError, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
+import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 import {
   CATEGORY_LABELS,

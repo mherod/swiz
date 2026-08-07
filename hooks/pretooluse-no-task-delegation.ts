@@ -9,10 +9,9 @@
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
-import { preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const delegationPatterns = [
   /\bTaskCreate\b/,

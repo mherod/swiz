@@ -6,9 +6,14 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 function evaluate(input: ShellHookInput): SwizHookOutput {
   const command = input.tool_input?.command || ""

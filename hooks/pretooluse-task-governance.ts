@@ -11,10 +11,12 @@
 // Each hook is exported as a named export for manifest registration.
 // Original files are thin wrappers for standalone subprocess execution.
 
+import { formatActionPlan, mergeActionPlanIntoTasks } from "../src/action-plan.ts"
 import {
   agentDefinitelySupportsTaskList,
   agentHasTaskListToolForHookPayload,
   agentHasTaskToolsForHookPayload,
+  detectCurrentAgentFromEnv,
   detectCurrentAgentFromHookPayload,
 } from "../src/agent-paths.ts"
 import { formatDuration } from "../src/format-duration.ts"
@@ -22,10 +24,18 @@ import { getHomeDirOrNull } from "../src/home.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { RunSwizHookAsMainOptions, SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
 import {
+  preToolUseAllow,
+  preToolUseAllowWithContext,
+  preToolUseDeny,
+  preToolUseDenyTaskFileAccess,
+  preToolUseDenyWithSystemMessage,
+} from "../src/SwizHook.ts"
+import {
   hookSpecificOutputSchema,
   TASK_UPDATE_ALLOWED_FIELDS,
   toolHookInputSchema,
 } from "../src/schemas.ts"
+import { resolveSafeSessionId } from "../src/session-id.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
@@ -68,6 +78,7 @@ import {
   applyCacheTaskUpdate,
   formatTaskSubjectsForDisplay,
   isIncompleteTaskStatus,
+  isTerminalTaskStatus,
 } from "../src/tasks/task-recovery.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
 // validateLastTaskStanding removed — handleTaskCompletion now checks full governance thresholds
@@ -90,10 +101,6 @@ import {
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
-  detectCurrentAgentFromEnv,
-  formatActionPlan,
-  getCurrentSessionTaskToolStats,
-  hasFileInTree,
   isCodeChangeTool,
   isEditTool,
   isFileEditTool,
@@ -101,18 +108,12 @@ import {
   isTaskCreateTool,
   isTaskListTool,
   isTaskUpdateTool,
-  isTerminalTaskStatus,
   isWriteTool,
-  mergeActionPlanIntoTasks,
-  messageFromUnknownError,
-  preToolUseAllow,
-  preToolUseAllowWithContext,
-  preToolUseDeny,
-  preToolUseDenyTaskFileAccess,
-  preToolUseDenyWithSystemMessage,
-  resolveSafeSessionId,
-  scheduleAutoSteer,
-} from "../src/utils/hook-utils.ts"
+} from "../src/tool-matchers.ts"
+import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
+import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
+import { hasFileInTree } from "../src/utils/file-utils.ts"
+import { messageFromUnknownError } from "../src/utils/hook-json-helpers.ts"
 
 // ─── Shared governance infrastructure ──────────────────────────────────────
 

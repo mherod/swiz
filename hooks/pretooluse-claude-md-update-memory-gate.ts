@@ -22,7 +22,13 @@
 // standalone script for backwards compatibility and testing.
 
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import {
   formatSkillReferenceForAgent,
   getRecentlyInvokedSkillsForCurrentSession,
@@ -30,7 +36,6 @@ import {
   skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isFileEditForPath } from "../src/utils/edit-projection.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 const UPDATE_MEMORY_SKILL = GATE_REQUIRED_SKILLS.updateMemory.name

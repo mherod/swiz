@@ -8,9 +8,13 @@
  */
 
 import { formatDurationPrecise } from "../src/format-duration.ts"
-import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import type { ToolHookInput } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 
 const MAX_TIMEOUT_MS = 120_000
 const MAX_TIMEOUT_LABEL = formatDurationPrecise(MAX_TIMEOUT_MS)

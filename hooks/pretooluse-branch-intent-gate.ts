@@ -11,11 +11,16 @@
  */
 
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
-import { preToolUseDeny, skillAdvice } from "../src/utils/hook-utils.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
 
 // Skill names that activate this gate

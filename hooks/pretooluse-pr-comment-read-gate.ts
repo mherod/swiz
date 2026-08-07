@@ -11,8 +11,15 @@
  */
 
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import {
   formatCurrentSessionUsageWindow,
@@ -22,14 +29,6 @@ import {
 } from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
-import {
-  getOpenPrForBranch,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  preToolUseAllow,
-  preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 /** Matches `gh api` reads of PR inline comments or PR reviews. */

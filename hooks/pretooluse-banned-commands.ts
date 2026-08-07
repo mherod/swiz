@@ -3,15 +3,17 @@
 // Rules with severity "warn" allow the command through with a gentle nudge.
 // Rules with severity "deny" (default) block the command entirely.
 
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
 import {
-  detectPackageManager,
-  isShellTool,
   preToolUseAllow,
   preToolUseDeny,
-  skillExistsForHookPayload,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
+import { skillExistsForHookPayload } from "../src/skill-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { detectPackageManager } from "../src/utils/package-detection.ts"
 import {
   findGitCommitAttribution,
   hasGhFlag,

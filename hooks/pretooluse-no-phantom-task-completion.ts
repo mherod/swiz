@@ -21,21 +21,16 @@ import {
 } from "../src/agent-paths.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHookOutput, SwizToolHook } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { preToolUseAllow, preToolUseDeny, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
+import { resolveSafeSessionId } from "../src/session-id.ts"
 import { createDefaultTaskStore } from "../src/task-roots.ts"
 import { hasStructuredEvidence } from "../src/tasks/task-evidence.ts"
 import { isWithinUserMessageGrace } from "../src/tasks/task-governance-grace.ts"
 import { buildTaskGovernanceMessage } from "../src/tasks/task-governance-messages.ts"
 import { readTasks } from "../src/tasks/task-repository.ts"
-import {
-  extractToolBlocksFromEntry,
-  isTaskTool,
-  preToolUseAllow,
-  preToolUseDeny,
-  resolveSafeSessionId,
-} from "../src/utils/hook-utils.ts"
-import { resolveSessionLines } from "../src/utils/transcript.ts"
+import { isTaskTool } from "../src/tool-matchers.ts"
+import { extractToolBlocksFromEntry, resolveSessionLines } from "../src/utils/transcript.ts"
 
 function hasTrackedEvidence(text: string): boolean {
   return hasStructuredEvidence(text)

@@ -16,24 +16,30 @@
 // Dual-mode: SwizToolHook + runSwizHookAsMain.
 
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import {
+  getOpenPrForBranch,
+  getRepoSlug,
+  ghJsonViaDaemon as ghJson,
+  git,
+} from "../src/git-helpers.ts"
 import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import {
   extractMergeBranch,
   extractPrNumber,
   GIT_MERGE_RE,
   getDefaultBranch,
-  getOpenPrForBranch,
-  getRepoSlug,
-  ghJson,
-  git,
   isPullRequestMergeCommand,
-  isShellTool,
-  preToolUseAllow,
-  preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
 
 /** Format milliseconds as "Xm Ys". */
 export function formatRemaining(ms: number): string {

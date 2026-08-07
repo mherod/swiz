@@ -13,9 +13,13 @@
 import { homedir } from "node:os"
 import { isAbsolute, join, resolve } from "node:path"
 import { detectCurrentAgentFromHookPayload } from "../src/agent-paths.ts"
-import { runSwizHookAsMain, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllowWithContext,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
-import { preToolUseAllowWithContext, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 import {
   buildProtectedTaskStorageDenyReason,

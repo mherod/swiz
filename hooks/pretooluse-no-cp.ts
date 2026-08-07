@@ -6,10 +6,14 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
-import { runSwizHookAsMain, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { shellSegmentCommandRe } from "../src/utils/shell-patterns.ts"
 
 const DENY_REASON = [

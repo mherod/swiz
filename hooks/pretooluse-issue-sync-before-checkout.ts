@@ -10,18 +10,20 @@
 
 import { getRepoSlug } from "../src/git-helpers.ts"
 import { syncUpstreamState } from "../src/issue-store-sync.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseAllowWithContext,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import {
   collectCheckoutNewBranchNames,
   collectPlainCheckoutSwitchTargets,
-} from "../src/utils/git-utils.ts"
-import {
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
-  isShellTool,
-  preToolUseAllowWithContext,
-} from "../src/utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
 
 function isBranchSwitchCommand(command: string): boolean {
   if (!GIT_CHECKOUT_RE.test(command) && !GIT_SWITCH_RE.test(command)) return false

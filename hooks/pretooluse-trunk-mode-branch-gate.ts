@@ -9,23 +9,24 @@
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
 
+import { ghJsonViaDaemon as ghJson, isGitRepo } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizToolHook } from "../src/SwizHook.ts"
+import {
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizToolHook,
+} from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { readProjectSettings, readProjectState } from "../src/settings.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import {
   collectGitBranchChanges,
+  GH_PR_CHECKOUT_RE,
+  GH_PR_CREATE_RE,
   type GitBranchChange,
   getDefaultBranch,
 } from "../src/utils/git-utils.ts"
-import {
-  GH_PR_CHECKOUT_RE,
-  GH_PR_CREATE_RE,
-  ghJson,
-  isGitRepo,
-  isShellTool,
-  preToolUseDeny,
-} from "../src/utils/hook-utils.ts"
 
 function isTrunkModeRelevantShellCommand(
   command: string,

@@ -7,9 +7,14 @@
 // Dual-mode: exports a SwizHook for inline dispatch and remains
 // executable as a standalone script for backwards compatibility and testing.
 
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
+import {
+  preToolUseAllow,
+  preToolUseDeny,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import type { FileEditHookInput } from "../src/schemas.ts"
-import { preToolUseAllow, preToolUseDeny } from "../src/utils/hook-utils.ts"
 import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 
 // ─── stripNonCode ────────────────────────────────────────────────────────────
