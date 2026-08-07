@@ -17,6 +17,7 @@ import {
   writeResponse,
 } from "./engine.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
+import type { DispatchStage } from "./timing.ts"
 
 /** Context passed to each hook execution strategy. */
 export interface HookStrategyContext {
@@ -31,6 +32,8 @@ export interface HookStrategyContext {
   agentId?: string | null
   /** Dispatch-level abort signal — when fired, all running hook processes should be killed. */
   signal?: AbortSignal
+  /** Records bounded stage timing without exposing it on the agent response wire. */
+  recordStageDuration?: (stage: DispatchStage, durationMs: number) => void
 }
 
 /** Interface for hook execution strategies. */
@@ -88,16 +91,27 @@ export async function runStrategyPipeline(
     collectionTimer = setTimeout(() => controller.abort(), opts.collectionTimeoutMs)
   }
 
-  const [results] = await Promise.all([
-    Promise.all(
-      entries.map(async (e) => {
-        const result = await runEntry(e, enrichedPayloadStr, cwd, signal, spawnCtx)
-        opts.onResult?.(result, () => controller.abort())
-        return result
-      })
-    ),
-    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal, { spawnCtx }),
-  ])
+  const syncStartedAt = performance.now()
+  const syncHooks = Promise.all(
+    entries.map(async (e) => {
+      const result = await runEntry(e, enrichedPayloadStr, cwd, signal, spawnCtx)
+      opts.onResult?.(result, () => controller.abort())
+      return result
+    })
+  ).finally(() => {
+    ctx.recordStageDuration?.("syncHooks", performance.now() - syncStartedAt)
+  })
+  const asyncStartedAt = performance.now()
+  const asyncHooks = launchAsyncHooks(
+    filteredGroups,
+    enrichedPayloadStr,
+    daemonContext,
+    ctx.signal,
+    { spawnCtx }
+  ).finally(() => {
+    ctx.recordStageDuration?.("asyncHooks", performance.now() - asyncStartedAt)
+  })
+  const [results] = await Promise.all([syncHooks, asyncHooks])
 
   if (collectionTimer) clearTimeout(collectionTimer)
 

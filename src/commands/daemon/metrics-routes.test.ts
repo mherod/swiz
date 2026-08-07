@@ -106,6 +106,16 @@ describe("metrics routes", () => {
       initialized: false,
       queueDepth: 0,
     })
+    expect(body.byEvent.stop).toMatchObject({
+      count: 1,
+      p50Ms: 22.63,
+      p95Ms: 22.63,
+      p99Ms: 22.63,
+      maxMs: 20,
+      errorCount: 0,
+      timeoutCount: 0,
+    })
+    expect(body.byEvent.stop.routes.unknown.count).toBe(1)
   })
 
   test("returns an isolated project view and an empty fallback for unknown projects", async () => {

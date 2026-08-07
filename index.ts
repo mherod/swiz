@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+const CLI_PROCESS_STARTED_AT = performance.now()
+
 // Guard: require invocation via the globally linked `swiz` command.
 // The shell sets process.env._ to the command that was actually executed.
 // When run via `swiz`, it ends with "/swiz"; when run via `bun index.ts`, it points to bun.
@@ -184,7 +186,7 @@ async function runGeneralCli(): Promise<void> {
 const cliArgs = process.argv.slice(2)
 if (shouldUseThinDispatch(cliArgs)) {
   const { runThinDispatch } = await import("./src/commands/dispatch-bootstrap.ts")
-  await runThinDispatch(process.argv.slice(3))
+  await runThinDispatch(process.argv.slice(3), CLI_PROCESS_STARTED_AT)
 } else {
   await runGeneralCli()
 }

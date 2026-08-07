@@ -1,5 +1,6 @@
 import { stderrLog } from "../../debug.ts"
 import { isLaunchAgentLoaded, launchAgentExists, SWIZ_DAEMON_LABEL } from "../../launch-agents.ts"
+import type { SerializedEventMetrics } from "./runtime-cache.ts"
 
 export const DAEMON_PORT = 7_943
 
@@ -24,13 +25,13 @@ export async function fetchDaemonStatus(port: number): Promise<void> {
     const data = (await resp.json()) as {
       uptimeHuman: string
       totalDispatches: number
-      byEvent: Record<string, { count: number; avgMs: number }>
+      byEvent: Record<string, SerializedEventMetrics>
       projects?: Record<
         string,
         {
           uptimeHuman: string
           totalDispatches: number
-          byEvent: Record<string, { count: number; avgMs: number }>
+          byEvent: Record<string, SerializedEventMetrics>
         }
       >
     }
@@ -40,7 +41,19 @@ export async function fetchDaemonStatus(port: number): Promise<void> {
     if (events.length > 0) {
       console.log("\nDispatches by event:")
       for (const [event, m] of events.sort((a, b) => b[1].count - a[1].count)) {
-        console.log(`  ${event}: ${m.count} (avg ${m.avgMs}ms)`)
+        console.log(
+          `  ${event}: ${m.count} ` +
+            `(avg ${m.avgMs}ms, p50 ${m.p50Ms}ms, p95 ${m.p95Ms}ms, ` +
+            `p99 ${m.p99Ms}ms, max ${m.maxMs}ms, errors ${m.errorCount}, ` +
+            `timeouts ${m.timeoutCount})`
+        )
+        for (const [route, routeMetrics] of Object.entries(m.routes)) {
+          console.log(
+            `    ${route}: ${routeMetrics.count} ` +
+              `(p50 ${routeMetrics.p50Ms}ms, p95 ${routeMetrics.p95Ms}ms, ` +
+              `p99 ${routeMetrics.p99Ms}ms, max ${routeMetrics.maxMs}ms)`
+          )
+        }
       }
     }
     if (data.projects) {

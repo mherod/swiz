@@ -5,7 +5,7 @@ import type { SwizHook } from "../../SwizHook.ts"
 import { resolveSessionLines } from "../../utils/transcript.ts"
 import { CappedMap } from "./cache/capped-map.ts"
 import { LastUserMessageCache } from "./cache/last-user-message-cache.ts"
-import { createMetrics } from "./cache/metrics.ts"
+import { createMetrics, serializeMetrics } from "./cache/metrics.ts"
 import { TranscriptIndexCache } from "./cache/transcript-index-cache.ts"
 import {
   buildDispatchRoutesContext,
@@ -280,6 +280,65 @@ describe("handleDispatchRoute", () => {
 
     expect(response.status).toBe(200)
     expect(cacheCalls).toBe(1)
+  })
+
+  test("records full-path route and stage distributions", async () => {
+    const syncHook: SwizHook = {
+      name: "test-metrics-sync",
+      event: "preToolUse",
+      matcher: "Bash",
+      run: () => ({}),
+    }
+    const asyncHook: SwizHook = {
+      name: "test-metrics-async",
+      event: "preToolUse",
+      matcher: "Bash",
+      async: true,
+      async run() {
+        return {}
+      },
+    }
+    const ctx = createDispatchContext([
+      {
+        event: "preToolUse",
+        matcher: "Bash",
+        hooks: [{ hook: syncHook }, { hook: asyncHook }],
+      },
+    ])
+    const url = new URL("http://daemon/dispatch?event=preToolUse&hookEventName=PreToolUse")
+    const response = await handleDispatchRoute(
+      new Request(url, {
+        method: "POST",
+        body: JSON.stringify({
+          cwd: process.cwd(),
+          session_id: "metrics-stage-test",
+          tool_name: "Bash",
+          tool_input: { command: "true" },
+          _swizTiming: { cliBootstrapMs: 12 },
+        }),
+      }),
+      url,
+      ctx
+    )
+
+    expect(response.status).toBe(200)
+    const event = serializeMetrics(ctx.globalMetrics).byEvent.preToolUse
+    expect(event).toMatchObject({ count: 1, errorCount: 0, timeoutCount: 0, maxHookCount: 2 })
+    const route = event?.routes.preToolUse
+    expect(route?.stages).toEqual(
+      expect.objectContaining({
+        cliBootstrap: expect.objectContaining({ count: 1, minMs: 12 }),
+        capture: expect.objectContaining({ count: 1 }),
+        repository: expect.objectContaining({ count: 1 }),
+        replay: expect.objectContaining({ count: 1 }),
+        manifest: expect.objectContaining({ count: 1 }),
+        enrichment: expect.objectContaining({ count: 1 }),
+        syncHooks: expect.objectContaining({ count: 1 }),
+        asyncHooks: expect.objectContaining({ count: 1 }),
+        persistence: expect.objectContaining({ count: 1 }),
+      })
+    )
+    expect(ctx.projectMetrics.get(process.cwd())?.dispatches.get("preToolUse")?.count).toBe(1)
   })
 
   test("maps invalid dispatch payloads to a structured 400 response", async () => {

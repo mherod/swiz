@@ -10,16 +10,22 @@ import {
   parseValidatedAgentDispatchWireJson,
 } from "../../dispatch/dispatch-zod-surfaces.ts"
 import { isBlock } from "../../dispatch/engine.ts"
-import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
+import {
+  type DispatchLifecycleUpdate,
+  type DispatchResult,
+  executeDispatch,
+} from "../../dispatch/execute.ts"
 import {
   schedulePayloadJsonlAppend,
   scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
 } from "../../dispatch/incoming-capture.ts"
+import { DISPATCH_ROUTES } from "../../dispatch/index.ts"
 import {
   DEFAULT_STOP_DISPATCH_ALLOW_CONTEXT,
   isStopLikeDispatchEvent,
 } from "../../dispatch/stop-response.ts"
+import type { DispatchStageDurations } from "../../dispatch/timing.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
@@ -36,6 +42,7 @@ import {
 import { registerProjectAndTouch } from "./route-helpers.ts"
 import {
   type DaemonMetrics,
+  type DispatchOutcome,
   type LastUserMessageCache,
   type ManifestCache,
   type RepositoryCapabilityCache,
@@ -259,17 +266,17 @@ function createDispatchLifecycleHandler(
 async function updateParsedPayloadMetrics(
   ctx: DispatchRoutesContext,
   payloadStr: string,
-  canonicalEvent: string,
-  durationMs: number
-): Promise<void> {
+  canonicalEvent: string
+): Promise<DaemonMetrics | null> {
   const parsed = await ctx.workerRuntime.parseDispatchPayload(payloadStr)
-  if (!parsed) return
+  if (!parsed) return null
 
   const nowMs = Date.now()
+  let projectMetrics: DaemonMetrics | null = null
   if (parsed.cwd) {
     const projectCwd = await registerProjectAndTouch(ctx, parsed.cwd)
     if (projectCwd) {
-      recordDispatch(ctx.getProjectMetrics(projectCwd), canonicalEvent, durationMs)
+      projectMetrics = ctx.getProjectMetrics(projectCwd)
     }
   }
   if (parsed.sessionId) {
@@ -315,6 +322,7 @@ async function updateParsedPayloadMetrics(
       )
     }
   }
+  return projectMetrics
 }
 
 async function getCurrentSessionToolUsageFromDaemon(
@@ -505,24 +513,72 @@ function mergeLifecycleStopAdvisory(
   }
 }
 
-export async function handleDispatchRoute(
-  req: Request,
-  url: URL,
-  ctx: DispatchRoutesContext
-): Promise<Response> {
-  const canonicalEvent = url.searchParams.get("event")
-  const hookEventName = url.searchParams.get("hookEventName") ?? canonicalEvent
-  if (!canonicalEvent || !hookEventName) {
-    return Response.json({ error: "Missing required query param: event" }, { status: 400 })
-  }
-  const payloadStr = await req.text()
-  let dispatchPayloadStr = payloadStr
-  const start = performance.now()
-  let parsedPayload: Record<string, unknown> | null = null
+function clientBootstrapDurationMs(payload: Record<string, unknown> | null): number | undefined {
+  const timing = payload?._swizTiming
+  if (!timing || typeof timing !== "object" || Array.isArray(timing)) return undefined
+  const duration = (timing as Record<string, unknown>).cliBootstrapMs
+  return typeof duration === "number" && Number.isFinite(duration) && duration >= 0
+    ? duration
+    : undefined
+}
 
-  // Register fs.watch and seed in-memory event state for this session's task
-  // directory so both TaskStateCache and task-count-context have accurate data
-  // from the very first tool call in the session.
+function createDispatchMetricRecorder(options: {
+  ctx: DispatchRoutesContext
+  canonicalEvent: string
+  fallbackRoute: string
+  requestStartedAt: number
+  captureMs: number
+  cliBootstrapMs: number | undefined
+}): (
+  result: DispatchResult | null,
+  projectMetrics: DaemonMetrics | null,
+  outcome: DispatchOutcome,
+  persistenceMs?: number
+) => void {
+  const { ctx, canonicalEvent, fallbackRoute, requestStartedAt, captureMs, cliBootstrapMs } =
+    options
+  const baseStages: DispatchStageDurations = {
+    capture: captureMs,
+    ...(cliBootstrapMs === undefined ? {} : { cliBootstrap: cliBootstrapMs }),
+  }
+  return (result, projectMetrics, outcome, persistenceMs) => {
+    const stages: DispatchStageDurations = {
+      ...baseStages,
+      ...(result?.timing.stages ?? {}),
+      ...(persistenceMs === undefined ? {} : { persistence: persistenceMs }),
+    }
+    const options = {
+      route: result?.timing.route ?? fallbackRoute,
+      outcome,
+      stages,
+      hookCount: result?.timing.hookCount ?? 0,
+    } as const
+    const durationMs = performance.now() - requestStartedAt
+    recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs, options)
+    if (projectMetrics) recordDispatch(projectMetrics, canonicalEvent, durationMs, options)
+  }
+}
+
+function dispatchOutcome(response: Record<string, any>): DispatchOutcome {
+  const error = typeof response.error === "string" ? response.error : ""
+  if (error.toLowerCase().includes("timeout")) return "timeout"
+  return error ? "error" : "success"
+}
+
+interface PreparedDaemonDispatchPayload {
+  dispatchPayloadStr: string
+  parsedPayload: Record<string, unknown> | null
+  lifecyclePreparation: LifecycleTaskDispatchPreparation
+}
+
+async function prepareDaemonDispatchPayload(
+  req: Request,
+  hookEventName: string,
+  canonicalEvent: string,
+  ctx: DispatchRoutesContext
+): Promise<PreparedDaemonDispatchPayload> {
+  const payloadStr = await req.text()
+  let parsedPayload: Record<string, unknown> | null = null
   try {
     parsedPayload = JSON.parse(payloadStr) as Record<string, unknown>
     const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
@@ -533,7 +589,7 @@ export async function handleDispatchRoute(
       const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
       await seedSessionFromDisk(sessionId, sessionTasksDir)
     }
-    if (parsedPayload && hookEventName && shouldCaptureIncomingPayloads()) {
+    if (shouldCaptureIncomingPayloads()) {
       schedulePayloadJsonlAppend(hookEventName, parsedPayload as Record<string, any>)
     }
   } catch {
@@ -545,11 +601,44 @@ export async function handleDispatchRoute(
     canonicalEvent,
     parsedPayload
   )
-  if (lifecyclePreparation.failOpen) return Response.json({})
-  if (lifecyclePreparation.payloadChanged && parsedPayload) {
-    dispatchPayloadStr = JSON.stringify(parsedPayload)
+  return {
+    dispatchPayloadStr:
+      lifecyclePreparation.payloadChanged && parsedPayload
+        ? JSON.stringify(parsedPayload)
+        : payloadStr,
+    parsedPayload,
+    lifecyclePreparation,
   }
+}
 
+export async function handleDispatchRoute(
+  req: Request,
+  url: URL,
+  ctx: DispatchRoutesContext
+): Promise<Response> {
+  const requestStartedAt = performance.now()
+  const canonicalEvent = url.searchParams.get("event")
+  const hookEventName = url.searchParams.get("hookEventName") ?? canonicalEvent
+  if (!canonicalEvent || !hookEventName) {
+    return Response.json({ error: "Missing required query param: event" }, { status: 400 })
+  }
+  const fallbackRoute = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+  const { dispatchPayloadStr, parsedPayload, lifecyclePreparation } =
+    await prepareDaemonDispatchPayload(req, hookEventName, canonicalEvent, ctx)
+  const recordCompletedDispatch = createDispatchMetricRecorder({
+    ctx,
+    canonicalEvent,
+    fallbackRoute,
+    requestStartedAt,
+    captureMs: performance.now() - requestStartedAt,
+    cliBootstrapMs: clientBootstrapDurationMs(parsedPayload),
+  })
+
+  if (lifecyclePreparation.failOpen) {
+    const response = Response.json({})
+    recordCompletedDispatch(null, null, "success")
+    return response
+  }
   const requestTimeoutMs = daemonDispatchRequestTimeoutMs(canonicalEvent)
 
   // Daemon-level AbortController — when the request timeout fires, this
@@ -586,9 +675,8 @@ export async function handleDispatchRoute(
     ])
   } catch (e) {
     clearTimeout(requestTimer)
-    const durationMs = performance.now() - start
-    recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
     const schemaResp = daemonDispatchSchemaFailureResponse(e)
+    recordCompletedDispatch(null, null, "error")
     if (schemaResp) return schemaResp
     throw e
   }
@@ -598,20 +686,19 @@ export async function handleDispatchRoute(
   if (raceResult === TIMEOUT_SENTINEL) {
     // Ensure abort fires even if timer callback hasn't executed yet.
     if (!requestAbort.signal.aborted) requestAbort.abort()
-    const durationMs = performance.now() - start
-    recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
-    return Response.json(
+    const response = Response.json(
       {
         error: `Dispatch timeout: ${canonicalEvent} exceeded ${requestTimeoutMs}ms`,
         timedOut: true,
       },
       { status: 504 }
     )
+    recordCompletedDispatch(null, null, "timeout")
+    return response
   }
 
-  const durationMs = performance.now() - start
-  recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
-  await updateParsedPayloadMetrics(ctx, dispatchPayloadStr, canonicalEvent, durationMs)
+  const persistenceStartedAt = performance.now()
+  const projectMetrics = await updateParsedPayloadMetrics(ctx, dispatchPayloadStr, canonicalEvent)
 
   try {
     const response = parseValidatedAgentDispatchWireJson(
@@ -622,9 +709,19 @@ export async function handleDispatchRoute(
     mergeLifecycleStopAdvisory(response, lifecyclePreparation.advisory)
     maybeSuppressDuplicateAllowMessage(ctx, parsedPayload, canonicalEvent, hookEventName, response)
     if (shouldCaptureIncomingPayloads()) scheduleStaleIncomingCapturePrune()
-    return Response.json(response)
+    const httpResponse = Response.json(response)
+    const persistenceMs = performance.now() - persistenceStartedAt
+    recordCompletedDispatch(
+      raceResult,
+      projectMetrics,
+      dispatchOutcome(raceResult.response),
+      persistenceMs
+    )
+    return httpResponse
   } catch (e) {
     const schemaResp = daemonDispatchSchemaFailureResponse(e)
+    const persistenceMs = performance.now() - persistenceStartedAt
+    recordCompletedDispatch(raceResult, projectMetrics, "error", persistenceMs)
     if (schemaResp) return schemaResp
     throw e
   }

@@ -1,0 +1,11 @@
+{
+  "session_id": "bench-dispatch-bootstrap-edit",
+  "transcript_path": "",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "scripts/bench-dispatch-target.txt",
+    "old_string": "before",
+    "new_string": "after"
+  }
+}

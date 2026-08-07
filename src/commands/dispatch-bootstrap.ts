@@ -240,7 +240,10 @@ async function failOpen(
   process.exitCode = 0
 }
 
-export async function runThinDispatch(args: string[]): Promise<void> {
+export async function runThinDispatch(
+  args: string[],
+  processStartedAt: number = performance.now()
+): Promise<void> {
   let canonicalEvent = args[0] ?? "(missing-event)"
   let hookEventName = canonicalEvent
   try {
@@ -271,6 +274,9 @@ export async function runThinDispatch(args: string[]): Promise<void> {
     }
     if (!payload._env) payload._env = buildAllowlistedEnv()
     if (parsedArgs.agentId && !payload._agent) payload._agent = parsedArgs.agentId
+    payload._swizTiming = {
+      cliBootstrapMs: Math.max(0, performance.now() - processStartedAt),
+    }
 
     const response = await tryDaemonDispatch(canonicalEvent, hookEventName, JSON.stringify(payload))
     if (response !== null) {

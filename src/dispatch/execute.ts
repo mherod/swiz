@@ -57,6 +57,11 @@ import { normalizeAgentHookPayload } from "./payload-normalize.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 import { isSubagentSession } from "./subagent-detect.ts"
+import {
+  addDispatchStageDuration,
+  type DispatchStageDurations,
+  type DispatchTimingSnapshot,
+} from "./timing.ts"
 
 // ─── Enriched dispatch payload type ───────────────────────────────────────────
 
@@ -360,6 +365,7 @@ export interface DispatchRequest {
 
 export interface DispatchResult {
   response: Record<string, any>
+  timing: DispatchTimingSnapshot
 }
 
 export interface DispatchLifecycleUpdate {
@@ -421,7 +427,10 @@ interface DispatchContext {
   repositoryCapability: RepositoryCapability
 }
 
-async function buildDispatchContext(req: DispatchRequest): Promise<DispatchContext> {
+async function buildDispatchContext(
+  req: DispatchRequest,
+  stageDurations: DispatchStageDurations
+): Promise<DispatchContext> {
   const { canonicalEvent, hookEventName, payloadStr, preParsedPayload } = req
 
   let payload: Record<string, any>
@@ -449,9 +458,11 @@ async function buildDispatchContext(req: DispatchRequest): Promise<DispatchConte
   // Resolve the repository once here so every downstream consumer — the non-git
   // short-circuit, pending-mutation replay, and the enriched payload handed to
   // hooks — reads the same verified answer instead of re-probing git.
+  const repositoryStartedAt = performance.now()
   const repositoryCapability = req.repositoryCapabilityProvider
     ? await req.repositoryCapabilityProvider(cwd)
     : await resolveRepositoryCapability(cwd)
+  addDispatchStageDuration(stageDurations, "repository", performance.now() - repositoryStartedAt)
   // Assign unconditionally, overwriting anything the agent sent under this key.
   // A payload claiming `isRepo: false` would otherwise skip every hook.
   ;(payload as EnrichedDispatchPayload)._repositoryCapability = repositoryCapability
@@ -662,16 +673,21 @@ function shouldAllowExplicitStop(ctx: DispatchContext): boolean {
 async function prepareDispatchGroups(
   ctx: DispatchContext,
   capability: RepositoryCapability,
+  stageDurations: DispatchStageDurations,
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>,
   replay: NonNullable<DispatchRequest["replayPendingMutations"]> = tryReplayPendingMutations
 ) {
   const tReplay = performance.now()
   await replay(ctx.cwd, capability)
-  log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
+  const replayMs = performance.now() - tReplay
+  addDispatchStageDuration(stageDurations, "replay", replayMs)
+  log(`   ⏱ replay: ${Math.round(replayMs)}ms`)
 
   const tManifest = performance.now()
   const result = await resolveFilteredGroups(ctx, manifestProvider)
-  log(`   ⏱ manifest+filter: ${Math.round(performance.now() - tManifest)}ms`)
+  const manifestMs = performance.now() - tManifest
+  addDispatchStageDuration(stageDurations, "manifest", manifestMs)
+  log(`   ⏱ manifest+filter: ${Math.round(manifestMs)}ms`)
   return result
 }
 
@@ -742,8 +758,14 @@ function buildSkipResponse(ctx: DispatchContext, daemonContext?: boolean): Recor
 
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
-  const ctx = await buildDispatchContext(req)
+  const stageDurations: DispatchStageDurations = {}
+  const ctx = await buildDispatchContext(req, stageDurations)
   const repositoryCapability = ctx.repositoryCapability
+  const route = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
+  const result = (response: Record<string, any>, hookCount = 0): DispatchResult => ({
+    response,
+    timing: { route, stages: stageDurations, hookCount },
+  })
 
   // Never trust agent-provided capability fields. This assignment overwrites
   // inbound data with a value resolved inside Swiz before any hook can read it.
@@ -755,14 +777,14 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   if (await shouldSkipMcpToolDispatch(ctx)) {
     log(`   ⏭ ignoreMcpTools enabled, skipping dispatch for ${ctx.toolName}`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   if (await shouldSkipSubagentDispatch(ctx)) {
@@ -771,26 +793,27 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     )
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   if (shouldSkipSkillMdPreToolUse(ctx)) {
     log(`   ⏭ SKILL.md file edit, skipping preToolUse blockers`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   const { filteredGroups, projectSettings } = await prepareDispatchGroups(
     ctx,
     repositoryCapability,
+    stageDurations,
     req.manifestProvider,
     req.replayPendingMutations
   )
   if (filteredGroups.length === 0) {
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   await injectEffectiveSettings(ctx, projectSettings ?? null)
@@ -799,7 +822,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     log(`   ⏭ autoContinue disabled, allowing explicit stop`)
     const response = buildSkipResponse(ctx, req.daemonContext)
     assertDispatchResponseMatchesWire(response, ctx.canonicalEvent, ctx.hookEventName, ctx.agentId)
-    return { response }
+    return result(response)
   }
 
   const lifecycleRequestId = resolveLifecycleRequestId(ctx.payload)
@@ -818,7 +841,9 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     disableTranscriptSummaryFallback: req.disableTranscriptSummaryFallback,
   })
   const enrichedPayloadStr = enrichment.payloadStr
-  log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
+  const enrichmentMs = performance.now() - tEnrich
+  addDispatchStageDuration(stageDurations, "enrichment", enrichmentMs)
+  log(`   ⏱ enrich: ${Math.round(enrichmentMs)}ms`)
 
   // Apply the caller's environment to process.env for in-process hooks.
   // The daemon's own launchd environment lacks agent-identifying vars
@@ -856,6 +881,8 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
         cwd: ctx.cwd,
         agentId: ctx.agentId,
         signal: dispatchAbort.signal,
+        recordStageDuration: (stage, durationMs) =>
+          addDispatchStageDuration(stageDurations, stage, durationMs),
       },
       { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: ctx.canonicalEvent }
     )
@@ -887,7 +914,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     log(
       `   ⏱ total: ${Math.round(performance.now() - t0)}ms (hooks: ${Math.round(performance.now() - dispatchStart)}ms)`
     )
-    return { response }
+    return result(response, countHooks(filteredGroups))
   } finally {
     restoreEnv()
     if (enrichment.transcriptSessionLinesKey) {

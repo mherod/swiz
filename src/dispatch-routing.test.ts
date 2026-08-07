@@ -148,7 +148,7 @@ describe("mutation replay wiring", () => {
     // Without the second argument the replay path re-probes gh/rev-parse/remote
     // that core dispatch already resolved (#752).
     expect(src).toMatch(
-      /prepareDispatchGroups\(\s*ctx,\s*repositoryCapability,\s*req\.manifestProvider,/
+      /prepareDispatchGroups\(\s*ctx,\s*repositoryCapability,\s*stageDurations,\s*req\.manifestProvider,/
     )
   })
 
