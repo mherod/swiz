@@ -2,6 +2,7 @@
  * Metrics and observability route handlers for the daemon web server.
  * Extracted from web-server.ts (issue #685) to keep routing code focused.
  */
+import { getWorkerPoolMetrics } from "../../dispatch/worker-pool.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { readHookLogs } from "../../hook-log.ts"
 import { getTurnsCacheStats } from "../../transcript-turns.ts"
@@ -54,13 +55,19 @@ export function handleMetricsRoute(url: URL, ctx: MetricsRoutesContext): Respons
       ...(pm ? serializeMetrics(pm) : serializeMetrics(createMetrics())),
       project: projectParam,
       caches: cacheMetrics,
+      workerPool: getWorkerPoolMetrics(),
     })
   }
   const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
   for (const [cwd, m] of ctx.projectMetrics) {
     projects[cwd] = serializeMetrics(m)
   }
-  return Response.json({ ...serializeMetrics(ctx.globalMetrics), projects, caches: cacheMetrics })
+  return Response.json({
+    ...serializeMetrics(ctx.globalMetrics),
+    projects,
+    caches: cacheMetrics,
+    workerPool: getWorkerPoolMetrics(),
+  })
 }
 
 export function handleCacheStatus(ctx: MetricsRoutesContext): Response {

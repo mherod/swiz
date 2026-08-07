@@ -909,8 +909,12 @@ export async function launchAsyncHooks(
   payloadStr: string,
   daemonContext?: boolean,
   signal?: AbortSignal,
-  spawnCtx?: PreParsedSpawnContext
+  options: {
+    spawnCtx?: PreParsedSpawnContext
+    workerPoolProvider?: () => ReturnType<typeof getWorkerPool>
+  } = {}
 ): Promise<void> {
+  const { spawnCtx, workerPoolProvider = getWorkerPool } = options
   // Flatten all async hooks across groups for concurrent condition evaluation.
   type AsyncEntry = { hook: HookDef; id: string }
   const asyncEntries: AsyncEntry[] = groups.flatMap((group) =>
@@ -925,24 +929,32 @@ export async function launchAsyncHooks(
     )
   )
 
+  const eligibleEntries: AsyncEntry[] = []
+  for (let i = 0; i < asyncEntries.length; i++) {
+    const entry = asyncEntries[i]!
+    if (!conditionResults[i]) {
+      log(`   ⏭ ${entry.id} [condition false, skipping]`)
+      continue
+    }
+    if (signal?.aborted) {
+      log(`   ⏭ ${entry.id} [async, dispatch aborted]`)
+      continue
+    }
+    eligibleEntries.push(entry)
+  }
+  if (eligibleEntries.length === 0) return
+
   const promises: Promise<void>[] = []
 
   // In daemon context, use the worker pool for parallel execution — workers
   // stay alive across requests. In CLI context, use runHook directly —
   // Worker threads would keep the short-lived CLI process alive, causing hangs.
-  const pool = daemonContext ? getWorkerPool() : null
-  if (pool) await pool.initialize()
+  const needsWorkerPool =
+    daemonContext && eligibleEntries.some(({ hook }) => !isInlineHookDef(hook))
+  const pool = needsWorkerPool ? workerPoolProvider() : null
+  if (pool) pool.initialize()
 
-  for (let i = 0; i < asyncEntries.length; i++) {
-    const { hook, id } = asyncEntries[i]!
-    if (!conditionResults[i]) {
-      log(`   ⏭ ${id} [condition false, skipping]`)
-      continue
-    }
-    if (signal?.aborted) {
-      log(`   ⏭ ${id} [async, dispatch aborted]`)
-      continue
-    }
+  for (const { hook } of eligibleEntries) {
     scheduleAsyncHookEntry(hook, payloadStr, {
       pool,
       daemonContext,

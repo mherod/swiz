@@ -4,7 +4,6 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { cpus } from "node:os"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import type { HookExecution } from "./engine.ts"
@@ -14,8 +13,30 @@ import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
  *  Accounts for worker startup, message passing, and SIGKILL escalation time. */
 const SUPERVISOR_GRACE_SEC = 10
 
-function getWorkerCount(): number {
-  return Math.max(1, cpus().length - 1)
+/** Two workers balance file-hook throughput against Bun Worker RSS on typical hosts. */
+export const DEFAULT_WORKER_POOL_SIZE = 2
+
+/** Host overrides remain bounded so a high-core machine cannot exhaust daemon memory. */
+export const MAX_WORKER_POOL_SIZE = 8
+
+export function resolveWorkerPoolSize(
+  env: Record<string, string | undefined> = process.env
+): number {
+  const parsed = Number.parseInt(env.SWIZ_WORKER_POOL_SIZE ?? "", 10)
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_WORKER_POOL_SIZE
+  return Math.min(parsed, MAX_WORKER_POOL_SIZE)
+}
+
+export interface WorkerPoolMetrics {
+  activeWorkers: number
+  averageQueueDelayMs: number
+  dispatchedJobs: number
+  initialized: boolean
+  initializationRssBytes: number
+  maxQueueDelayMs: number
+  queueDepth: number
+  replacements: number
+  size: number
 }
 
 // Bun exposes Worker as a global - add types for TypeScript
@@ -35,12 +56,20 @@ interface QueuedHook {
   file: string
   payloadStr: string
   timeoutSec?: number
+  queuedAt: number
   /** Filled when the job is assigned to a worker (for error recovery). */
   workerIndex?: number
   /** Supervisor-level timeout timer — fires if worker doesn't respond in time. */
   supervisorTimer?: ReturnType<typeof setTimeout>
   resolve: (result: { parsed: Record<string, unknown> | null; execution: HookExecution }) => void
   reject: (error: Error) => void
+}
+
+export interface WorkerPoolOptions {
+  size?: number
+  smol?: boolean
+  /** Test-only override for exercising supervisor replacement without a 10s wait. */
+  supervisorGraceSec?: number
 }
 
 /**
@@ -59,36 +88,67 @@ export class WorkerPool {
   private deferredProcess = false
   /** Set during `terminate()` so a tail `queueMicrotask` does not touch torn-down state. */
   private shutdown = false
+  private readonly workerCount: number
+  private readonly smol: boolean
+  private readonly supervisorGraceSec: number
+  private dispatchedJobs = 0
+  private totalQueueDelayMs = 0
+  private maxQueueDelayMs = 0
+  private initializationRssBytes = 0
+  private replacements = 0
 
-  async initialize(): Promise<void> {
+  constructor(options: WorkerPoolOptions = {}) {
+    this.workerCount = Math.min(
+      Math.max(1, Math.trunc(options.size ?? resolveWorkerPoolSize())),
+      MAX_WORKER_POOL_SIZE
+    )
+    this.smol = options.smol ?? false
+    this.supervisorGraceSec = options.supervisorGraceSec ?? SUPERVISOR_GRACE_SEC
+  }
+
+  private createWorker(workerIndex: number): BunWorker {
+    const workerPath = join(import.meta.dir, "hook-worker.ts")
+    const worker = new Worker(workerPath, { smol: this.smol })
+    worker.onmessage = (event: MessageEvent) => {
+      this.handleWorkerMessage(event.data as WorkerMessage, workerIndex)
+    }
+    worker.onerror = (error) => {
+      debugLog(`Worker ${workerIndex} error: ${error}`)
+      const err =
+        error instanceof ErrorEvent && error.error instanceof Error
+          ? error.error
+          : new Error(String(error))
+      this.handleWorkerFailure(workerIndex, err)
+    }
+    return worker
+  }
+
+  initialize(): void {
     if (this.initialized) return
     this.shutdown = false
 
-    const workerPath = join(import.meta.dir, "hook-worker.ts")
-
-    const workerCount = getWorkerCount()
-    for (let i = 0; i < workerCount; i++) {
-      const workerIndex = i
-      const worker = new Worker(workerPath)
-
-      worker.onmessage = (event: MessageEvent) => {
-        this.handleWorkerMessage(event.data as WorkerMessage, workerIndex)
-      }
-
-      worker.onerror = (error) => {
-        debugLog(`Worker ${workerIndex} error: ${error}`)
-        const err =
-          error instanceof ErrorEvent && error.error instanceof Error
-            ? error.error
-            : new Error(String(error))
-        this.handleWorkerFailure(workerIndex, err)
-      }
-
-      this.workers.push(worker)
+    const rssBefore = process.memoryUsage().rss
+    for (let workerIndex = 0; workerIndex < this.workerCount; workerIndex++) {
+      this.workers.push(this.createWorker(workerIndex))
       this.workerBusy.push(false)
     }
-
+    this.initializationRssBytes = Math.max(0, process.memoryUsage().rss - rssBefore)
     this.initialized = true
+  }
+
+  getMetrics(): WorkerPoolMetrics {
+    return {
+      activeWorkers: this.workerBusy.filter(Boolean).length,
+      averageQueueDelayMs:
+        this.dispatchedJobs === 0 ? 0 : Math.round(this.totalQueueDelayMs / this.dispatchedJobs),
+      dispatchedJobs: this.dispatchedJobs,
+      initialized: this.initialized,
+      initializationRssBytes: this.initializationRssBytes,
+      maxQueueDelayMs: Math.round(this.maxQueueDelayMs),
+      queueDepth: this.queue.length,
+      replacements: this.replacements,
+      size: this.workerCount,
+    }
   }
 
   private handleWorkerMessage(msg: WorkerMessage, workerIndex: number): void {
@@ -154,13 +214,17 @@ export class WorkerPool {
         if (!hook) break
 
         this.workerBusy[idleIndex] = true
+        const queueDelayMs = Math.max(0, performance.now() - hook.queuedAt)
+        this.dispatchedJobs += 1
+        this.totalQueueDelayMs += queueDelayMs
+        this.maxQueueDelayMs = Math.max(this.maxQueueDelayMs, queueDelayMs)
         hook.workerIndex = idleIndex
         this.pendingMessages.set(hook.id, hook)
         const worker = this.workers[idleIndex]!
 
         // Start supervisor timeout — if the worker doesn't respond within
         // hookTimeout + grace, reject the promise and free the worker slot.
-        const supervisorMs = ((hook.timeoutSec ?? 10) + SUPERVISOR_GRACE_SEC) * 1000
+        const supervisorMs = Math.max(1, ((hook.timeoutSec ?? 10) + this.supervisorGraceSec) * 1000)
         hook.supervisorTimer = setTimeout(() => {
           if (!this.pendingMessages.has(hook.id)) return // already resolved
           this.pendingMessages.delete(hook.id)
@@ -211,7 +275,7 @@ export class WorkerPool {
     signal?: AbortSignal
   ): Promise<{ parsed: Record<string, any> | null; execution: HookExecution }> {
     if (!this.initialized) {
-      await this.initialize()
+      this.initialize()
     }
 
     // If already aborted, reject immediately without queuing.
@@ -239,6 +303,7 @@ export class WorkerPool {
         id,
         file,
         payloadStr,
+        queuedAt: performance.now(),
         timeoutSec,
         resolve,
         reject,
@@ -312,20 +377,8 @@ export class WorkerPool {
         // Worker may already be dead
       }
     }
-    const workerPath = join(import.meta.dir, "hook-worker.ts")
-    const replacement = new Worker(workerPath)
-    replacement.onmessage = (event: MessageEvent) => {
-      this.handleWorkerMessage(event.data as WorkerMessage, workerIndex)
-    }
-    replacement.onerror = (error) => {
-      debugLog(`Worker ${workerIndex} (replaced) error: ${error}`)
-      const err =
-        error instanceof ErrorEvent && error.error instanceof Error
-          ? error.error
-          : new Error(String(error))
-      this.handleWorkerFailure(workerIndex, err)
-    }
-    this.workers[workerIndex] = replacement
+    this.workers[workerIndex] = this.createWorker(workerIndex)
+    this.replacements += 1
     debugLog(`Worker pool: replaced stuck worker at index ${workerIndex}`)
   }
 
@@ -355,6 +408,7 @@ export class WorkerPool {
     this.initialized = false
     this.processing = false
     this.deferredProcess = false
+    this.initializationRssBytes = 0
   }
 }
 
@@ -376,6 +430,23 @@ export function getWorkerPool(): WorkerPool {
     process.on("SIGINT", signalHandler)
   }
   return pool
+}
+
+/** Snapshot daemon worker capacity without causing lazy pool initialization. */
+export function getWorkerPoolMetrics(): WorkerPoolMetrics {
+  return (
+    pool?.getMetrics() ?? {
+      activeWorkers: 0,
+      averageQueueDelayMs: 0,
+      dispatchedJobs: 0,
+      initialized: false,
+      initializationRssBytes: 0,
+      maxQueueDelayMs: 0,
+      queueDepth: 0,
+      replacements: 0,
+      size: resolveWorkerPoolSize(),
+    }
+  )
 }
 
 /**

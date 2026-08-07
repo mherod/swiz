@@ -96,7 +96,7 @@ export async function runStrategyPipeline(
         return result
       })
     ),
-    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal, spawnCtx),
+    launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal, { spawnCtx }),
   ])
 
   if (collectionTimer) clearTimeout(collectionTimer)

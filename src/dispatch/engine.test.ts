@@ -9,6 +9,7 @@ import {
   type HookEntry,
   type HookStatus,
   isAsyncFireAndForgetHook,
+  launchAsyncHooks,
   logSlowHook,
   runEntry,
   runsInSyncPipeline,
@@ -429,6 +430,41 @@ describe("runsInSyncPipeline / isAsyncFireAndForgetHook", () => {
     const h = { file: "x.ts", async: true, asyncMode: "block-until-complete" as const }
     expect(runsInSyncPipeline(h)).toBe(true)
     expect(isAsyncFireAndForgetHook(h)).toBe(false)
+  })
+})
+
+describe("launchAsyncHooks worker pool gating", () => {
+  it("does not initialize the worker pool for inline-only daemon dispatches", async () => {
+    let runs = 0
+    let workerPoolRequests = 0
+    const groups = [
+      {
+        event: "stop" as const,
+        hooks: [
+          {
+            hook: {
+              name: "inline-async.ts",
+              event: "stop" as const,
+              async: true,
+              async run() {
+                runs += 1
+                return {}
+              },
+            },
+          },
+        ],
+      },
+    ]
+
+    await launchAsyncHooks(groups, "{}", true, undefined, {
+      workerPoolProvider: () => {
+        workerPoolRequests += 1
+        throw new Error("inline hooks must not request the worker pool")
+      },
+    })
+
+    expect(runs).toBe(1)
+    expect(workerPoolRequests).toBe(0)
   })
 })
 

@@ -91,6 +91,11 @@ describe("metrics routes", () => {
     expect(body.totalDispatches).toBe(1)
     expect(body.projects["/repo"].totalDispatches).toBe(1)
     expect(body.caches.snapshots.size).toBe(3)
+    expect(body.workerPool).toMatchObject({
+      activeWorkers: 0,
+      initialized: false,
+      queueDepth: 0,
+    })
   })
 
   test("returns an isolated project view and an empty fallback for unknown projects", async () => {
@@ -107,6 +112,7 @@ describe("metrics routes", () => {
       .json()
 
     expect(known).toMatchObject({ project: "/repo", totalDispatches: 1 })
+    expect(known.workerPool).toMatchObject({ initialized: false })
     expect(unknown).toMatchObject({ project: "/missing", totalDispatches: 0 })
   })
 

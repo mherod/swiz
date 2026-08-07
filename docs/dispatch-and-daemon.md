@@ -89,6 +89,10 @@ Sequence:
 
 All strategies share `runStrategyPipeline()` (`src/dispatch/strategy-base.ts`): async (`fire-and-forget`) hooks launch unawaited, sync hooks fan out concurrently, abort signals propagate, and a per-strategy `processResults()` merges output. Stop and context output may be humanised via LLM, skipped within `USER_MESSAGE_GRACE_MS` of the last user message. On session stop, queued auto-steer messages are delivered instead of normal hook output.
 
+Inline async hooks stay in-process and do not initialize the worker pool. Eligible file hooks lazily initialize a fixed two-worker pool; `SWIZ_WORKER_POOL_SIZE` can override it from 1 to 8. `/metrics` reports pool size, initialization state and RSS cost, active workers, queue depth/delay, dispatched jobs, and worker replacements. `scripts/benchmark-worker-pool.ts` compares isolated file-hook throughput and p95 latency across the supported pool sizes.
+
+The reference 24-job benchmark selected two workers as the default: it delivered 45.46 hooks/s at 521.36ms p95 with a 113.1MB RSS increase, versus 21.97 hooks/s at 1044.22ms and 68.5MB for one worker. Four and eight workers improved throughput but raised RSS to 195.2MB and 349.6MB. An inline-only dispatch requested no pool and added 128KB RSS, keeping the common path well below the 100MB budget.
+
 Per-hook execution (subprocess spawn, inline `SwizHook`s, worker pool, timeouts, cooldowns, output classification via `hookOutputSchema`) is covered in [`dispatch-engine.md`](./dispatch-engine.md).
 
 ### Dispatch timeouts (`DISPATCH_TIMEOUTS`, `src/manifest.ts`)
