@@ -1,5 +1,5 @@
 /**
- * Reproducible latency benchmark for the controlled Bash pre-hook path (#752).
+ * Reproducible latency benchmark for controlled pre-hook paths (#746, #752).
  *
  * Two measurements, both driven from one committed fixture so runs are
  * comparable across machines and commits:
@@ -18,6 +18,7 @@
  * Usage:
  *   bun run scripts/bench-dispatch-latency.ts
  *   bun run scripts/bench-dispatch-latency.ts --iterations 40 --only probe
+ *   bun run scripts/bench-dispatch-latency.ts --only dispatch --fixture read
  */
 
 import { join } from "node:path"
@@ -32,6 +33,19 @@ interface Stats {
   p95Ms: number
   minMs: number
   maxMs: number
+}
+
+function parseFixture(value: string): "bash" | "read" {
+  if (value === "bash" || value === "read") return value
+  throw new Error(`Unknown benchmark fixture: ${value}`)
+}
+
+function assertMinimumIterations(iterations: number): void {
+  if (iterations >= DEFAULT_MEASURED_ITERATIONS) return
+  console.error(
+    `[bench] refusing ${iterations} iterations — the acceptance criteria require at least ${DEFAULT_MEASURED_ITERATIONS}`
+  )
+  process.exit(1)
 }
 
 function percentile(sortedMs: number[], fraction: number): number {
@@ -82,9 +96,14 @@ async function runDispatchOnce(indexPath: string, payload: string, cwd: string):
   await proc.exited
 }
 
-function parseArgs(argv: string[]): { iterations: number; only: string | null } {
+function parseArgs(argv: string[]): {
+  fixture: "bash" | "read"
+  iterations: number
+  only: string | null
+} {
   let iterations = DEFAULT_MEASURED_ITERATIONS
   let only: string | null = null
+  let fixture: "bash" | "read" = "bash"
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--iterations" && argv[i + 1]) {
       const parsed = Number.parseInt(argv[i + 1]!, 10)
@@ -93,15 +112,13 @@ function parseArgs(argv: string[]): { iterations: number; only: string | null } 
     } else if (argv[i] === "--only" && argv[i + 1]) {
       only = argv[i + 1]!
       i++
+    } else if (argv[i] === "--fixture" && argv[i + 1]) {
+      fixture = parseFixture(argv[i + 1]!)
+      i++
     }
   }
-  if (iterations < DEFAULT_MEASURED_ITERATIONS) {
-    console.error(
-      `[bench] refusing ${iterations} iterations — the acceptance criteria require at least ${DEFAULT_MEASURED_ITERATIONS}`
-    )
-    process.exit(1)
-  }
-  return { iterations, only }
+  assertMinimumIterations(iterations)
+  return { fixture, iterations, only }
 }
 
 function report(stats: Stats[]): void {
@@ -119,10 +136,14 @@ function report(stats: Stats[]): void {
 }
 
 async function main(): Promise<void> {
-  const { iterations, only } = parseArgs(process.argv.slice(2))
+  const { fixture, iterations, only } = parseArgs(process.argv.slice(2))
   const projectRoot = join(import.meta.dirname, "..")
   const indexPath = join(projectRoot, "index.ts")
-  const fixturePath = join(projectRoot, "scripts", "bench-dispatch-latency.fixture.json")
+  const fixtureFilename =
+    fixture === "read"
+      ? "bench-dispatch-latency.read.fixture.json"
+      : "bench-dispatch-latency.fixture.json"
+  const fixturePath = join(projectRoot, "scripts", fixtureFilename)
   const payload = await Bun.file(fixturePath).text()
 
   console.error(`[bench] fixture: ${fixturePath}`)

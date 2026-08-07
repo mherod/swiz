@@ -20,75 +20,6 @@ if (isInteractive && !invokedAs.endsWith("/swiz") && !process.env.SWIZ_DIRECT) {
   process.exit(1)
 }
 
-import { registerCommand, run } from "./src/cli.ts"
-import { ciWaitCommand } from "./src/commands/ci-wait.ts"
-import { compactCommand } from "./src/commands/compact.ts"
-import { continueCommand } from "./src/commands/continue.ts"
-import { crossRepoIssueCommand } from "./src/commands/cross-repo-issue.ts"
-import { daemonCommand } from "./src/commands/daemon.ts"
-import { dispatchCommand } from "./src/commands/dispatch.ts"
-import { doctorCommand } from "./src/commands/doctor.ts"
-import { emergencyBypassCommand } from "./src/commands/emergency-bypass.ts"
-import { hooksCommand } from "./src/commands/hooks.ts"
-import { ideaCommand } from "./src/commands/idea.ts"
-import { installCommand } from "./src/commands/install.ts"
-import { issueCommand } from "./src/commands/issue.ts"
-import { manageCommand } from "./src/commands/manage.ts"
-import { mcpCommand } from "./src/commands/mcp.ts"
-import { memoryCommand } from "./src/commands/memory.ts"
-import { mergetoolCommand } from "./src/commands/mergetool.ts"
-import { modelCommand } from "./src/commands/model.ts"
-import { pluginsCommand } from "./src/commands/plugins.ts"
-import { pushCiCommand } from "./src/commands/push-ci.ts"
-import { pushWaitCommand } from "./src/commands/push-wait.ts"
-import { reflectCommand } from "./src/commands/reflect.ts"
-import { sentimentCommand } from "./src/commands/sentiment.ts"
-import { sessionCommand } from "./src/commands/session.ts"
-import { settingsCommand } from "./src/commands/settings.ts"
-import { shimCommand } from "./src/commands/shim.ts"
-import { skillCommand } from "./src/commands/skill.ts"
-import { stateCommand } from "./src/commands/state.ts"
-import { statusCommand } from "./src/commands/status.ts"
-import { statusLineCommand } from "./src/commands/status-line.ts"
-import { tasksCommand } from "./src/commands/tasks.ts"
-import { transcriptCommand } from "./src/commands/transcript.ts"
-import { uninstallCommand } from "./src/commands/uninstall.ts"
-import { usageCommand } from "./src/commands/usage.ts"
-
-registerCommand(skillCommand)
-registerCommand(hooksCommand)
-registerCommand(installCommand)
-registerCommand(uninstallCommand)
-registerCommand(statusCommand)
-registerCommand(statusLineCommand)
-registerCommand(settingsCommand)
-registerCommand(stateCommand)
-registerCommand(tasksCommand)
-registerCommand(shimCommand)
-registerCommand(dispatchCommand)
-registerCommand(transcriptCommand)
-registerCommand(continueCommand)
-registerCommand(issueCommand)
-registerCommand(crossRepoIssueCommand)
-registerCommand(ideaCommand)
-registerCommand(reflectCommand)
-registerCommand(sentimentCommand)
-registerCommand(sessionCommand)
-registerCommand(ciWaitCommand)
-registerCommand(memoryCommand)
-registerCommand(modelCommand)
-registerCommand(pluginsCommand)
-registerCommand(manageCommand)
-registerCommand(mcpCommand)
-registerCommand(compactCommand)
-registerCommand(mergetoolCommand)
-registerCommand(pushWaitCommand)
-registerCommand(pushCiCommand)
-registerCommand(doctorCommand)
-registerCommand(emergencyBypassCommand)
-registerCommand(usageCommand)
-registerCommand(daemonCommand)
-
 // Signal listeners for tidy exit and cleanup.
 const handleSignal = async (signal: string) => {
   // Use stderr to avoid polluting stdout if the output is being piped.
@@ -126,4 +57,134 @@ if (timeoutSeconds > 0) {
   }, timeoutSeconds * 1000).unref()
 }
 
-await run()
+function shouldUseThinDispatch(argv: string[]): boolean {
+  if (argv[0] !== "dispatch" || process.env.SWIZ_TEST_FORCE_DISPATCH_FAILURE === "1") return false
+  const args = argv.slice(1)
+  const positional: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--agent" && index + 1 < args.length) index++
+    else positional.push(args[index]!)
+  }
+  const event = positional[0]
+  return !!event && event !== "replay" && event !== "stop" && event !== "subagentStop"
+}
+
+async function runGeneralCli(): Promise<void> {
+  const [
+    cli,
+    skill,
+    hooks,
+    install,
+    uninstall,
+    status,
+    statusLine,
+    settings,
+    state,
+    tasks,
+    shim,
+    dispatch,
+    transcript,
+    continueModule,
+    issue,
+    crossRepoIssue,
+    idea,
+    reflect,
+    sentiment,
+    session,
+    ciWait,
+    memory,
+    model,
+    plugins,
+    manage,
+    mcp,
+    compact,
+    mergetool,
+    pushWait,
+    pushCi,
+    doctor,
+    emergencyBypass,
+    usage,
+    daemon,
+  ] = await Promise.all([
+    import("./src/cli.ts"),
+    import("./src/commands/skill.ts"),
+    import("./src/commands/hooks.ts"),
+    import("./src/commands/install.ts"),
+    import("./src/commands/uninstall.ts"),
+    import("./src/commands/status.ts"),
+    import("./src/commands/status-line.ts"),
+    import("./src/commands/settings.ts"),
+    import("./src/commands/state.ts"),
+    import("./src/commands/tasks.ts"),
+    import("./src/commands/shim.ts"),
+    import("./src/commands/dispatch.ts"),
+    import("./src/commands/transcript.ts"),
+    import("./src/commands/continue.ts"),
+    import("./src/commands/issue.ts"),
+    import("./src/commands/cross-repo-issue.ts"),
+    import("./src/commands/idea.ts"),
+    import("./src/commands/reflect.ts"),
+    import("./src/commands/sentiment.ts"),
+    import("./src/commands/session.ts"),
+    import("./src/commands/ci-wait.ts"),
+    import("./src/commands/memory.ts"),
+    import("./src/commands/model.ts"),
+    import("./src/commands/plugins.ts"),
+    import("./src/commands/manage.ts"),
+    import("./src/commands/mcp.ts"),
+    import("./src/commands/compact.ts"),
+    import("./src/commands/mergetool.ts"),
+    import("./src/commands/push-wait.ts"),
+    import("./src/commands/push-ci.ts"),
+    import("./src/commands/doctor.ts"),
+    import("./src/commands/emergency-bypass.ts"),
+    import("./src/commands/usage.ts"),
+    import("./src/commands/daemon.ts"),
+  ])
+
+  const commands = [
+    skill.skillCommand,
+    hooks.hooksCommand,
+    install.installCommand,
+    uninstall.uninstallCommand,
+    status.statusCommand,
+    statusLine.statusLineCommand,
+    settings.settingsCommand,
+    state.stateCommand,
+    tasks.tasksCommand,
+    shim.shimCommand,
+    dispatch.dispatchCommand,
+    transcript.transcriptCommand,
+    continueModule.continueCommand,
+    issue.issueCommand,
+    crossRepoIssue.crossRepoIssueCommand,
+    idea.ideaCommand,
+    reflect.reflectCommand,
+    sentiment.sentimentCommand,
+    session.sessionCommand,
+    ciWait.ciWaitCommand,
+    memory.memoryCommand,
+    model.modelCommand,
+    plugins.pluginsCommand,
+    manage.manageCommand,
+    mcp.mcpCommand,
+    compact.compactCommand,
+    mergetool.mergetoolCommand,
+    pushWait.pushWaitCommand,
+    pushCi.pushCiCommand,
+    doctor.doctorCommand,
+    emergencyBypass.emergencyBypassCommand,
+    usage.usageCommand,
+    daemon.daemonCommand,
+  ]
+  for (const command of commands) cli.registerCommand(command)
+  await cli.run()
+}
+
+const cliArgs = process.argv.slice(2)
+if (shouldUseThinDispatch(cliArgs)) {
+  const { runThinDispatch } = await import("./src/commands/dispatch-bootstrap.ts")
+  await runThinDispatch(process.argv.slice(3))
+} else {
+  await runGeneralCli()
+}

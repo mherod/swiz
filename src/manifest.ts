@@ -161,6 +161,8 @@ import userpromptsubmitTaskAdvisor from "../hooks/userpromptsubmit-task-advisor.
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
+export { DISPATCH_TIMEOUTS } from "./dispatch/timeouts.ts"
+
 // Hook type definitions live in hook-types.ts to break the circular dependency:
 // manifest.ts → hook files → git-utils.ts → settings.ts → persistence.ts → manifest.ts
 // Re-exported here for backward-compatible access.
@@ -689,23 +691,4 @@ export function validateDispatchRoutes(
         errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")
     )
   }
-}
-
-// Per-event timeout budget for the dispatcher (seconds).
-// Sync hooks run concurrently (Promise.all); budget equals the slowest single hook, not the sum.
-export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 180, // dominated by stop-auto-continue AI call (~120s) + stop-ship-checklist CI polling (~30s)
-  preToolUse: 15, // concurrent: budget = slowest hook (~5s) + overhead
-  postToolUse: 15, // concurrent: budget = slowest hook (~10s) + overhead
-  postToolUseFailure: 10,
-  sessionStart: 20,
-  preCompact: 15,
-  postCompact: 10,
-  permissionRequest: 10,
-  taskCreated: 10,
-  taskCompleted: 10,
-  userPromptSubmit: 15,
-  preCommit: 30,
-  commitMsg: 10,
-  prePush: 30,
 }

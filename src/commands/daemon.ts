@@ -1,7 +1,10 @@
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
+import { CONFIGURABLE_AGENTS } from "../agents.ts"
 import { stderrLog } from "../debug.ts"
+import { DISPATCH_ROUTES } from "../dispatch/index.ts"
 import { pruneTempLogs } from "../log-rotation.ts"
+import { validateDispatchRoutes } from "../manifest.ts"
 import { resolveProjectRoot } from "../project-identity.ts"
 import {
   getProjectSettingsPath,
@@ -508,6 +511,11 @@ export async function hydratePersistedSessionToolState(
 }
 
 async function startDaemonProcess(_args: string[], port: number): Promise<void> {
+  // The thin CLI bootstrap deliberately skips loading the manifest on daemon
+  // success. Validate the same routing contract once when the long-lived
+  // daemon starts, while local fallback and general CLI startup retain their
+  // own validation.
+  validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
   const state = createDaemonState()
   const caches = createDaemonCaches()
   setGlobalTaskStateCache(caches.taskStateCache)
