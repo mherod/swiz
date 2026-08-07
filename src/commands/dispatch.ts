@@ -35,10 +35,7 @@ import {
   shouldCaptureIncomingPayloads,
   withLogBuffer,
 } from "../dispatch"
-import {
-  schedulePayloadJsonlAppend,
-  writeIncomingDispatchCapture,
-} from "../dispatch/incoming-capture.ts"
+import { scheduleIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
 import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
@@ -504,7 +501,7 @@ async function runDispatch(
   const normalizedPayloadForCapture = structuredClone(payload)
 
   if (shouldCaptureIncomingPayloads()) {
-    await writeIncomingDispatchCapture({
+    scheduleIncomingDispatchCapture({
       canonicalEvent,
       hookEventName,
       parseError: false,
@@ -512,7 +509,6 @@ async function runDispatch(
       incomingBeforeNormalize,
       normalizedPayload: normalizedPayloadForCapture,
     })
-    schedulePayloadJsonlAppend(hookEventName, incomingBeforeNormalize ?? payload)
   }
 
   // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)

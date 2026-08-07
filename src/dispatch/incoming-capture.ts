@@ -4,8 +4,8 @@
  * bytes before JSON parsing, normalization, sanitization, or enrichment.
  *
  * **Disable** with **`SWIZ_CAPTURE_INCOMING=0`** or **`SWIZ_CAPTURE_INCOMING_PAYLOADS=0`** (also
- * `false`, `no`, `off`). Files older than **10 minutes** are removed by throttled
- * background maintenance scheduled by the long-lived daemon.
+ * `false`, `no`, `off`). Throttled daemon maintenance enforces configurable age
+ * and byte limits across capture pairs and event JSONL files.
  *
  * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
  * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`; raw companion:
@@ -23,7 +23,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
+import { appendFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
@@ -31,6 +31,12 @@ import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 /** Age threshold for deleting prior capture files (10 minutes). */
 export const SWIZ_INCOMING_RETENTION_MS = 10 * 60 * 1000
+
+/** Total capture-directory budget (64 MiB). */
+export const SWIZ_INCOMING_MAX_BYTES = 64 * 1024 * 1024
+
+/** Per-event JSONL segment budget (4 MiB). */
+export const SWIZ_INCOMING_JSONL_MAX_BYTES = 4 * 1024 * 1024
 
 /** Minimum interval between incoming-capture directory scans. */
 export const SWIZ_INCOMING_PRUNE_INTERVAL_MS = 60 * 1000
@@ -41,6 +47,34 @@ interface IncomingCapturePruneState {
 }
 
 const incomingCapturePruneStateByDir = new Map<string, IncomingCapturePruneState>()
+const jsonlAppendQueueByPath = new Map<string, Promise<void>>()
+const activeCapturePaths = new Set<string>()
+
+export interface IncomingCaptureLimits {
+  maxAgeMs: number
+  maxBytes: number
+  jsonlMaxBytes: number
+}
+
+function positiveEnvNumber(value: string | undefined, fallback: number): number {
+  if (!value) return fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+/** Resolve capture limits at operation time so daemon env changes apply after restart. */
+export function resolveIncomingCaptureLimits(
+  env: Record<string, string | undefined> = process.env
+): IncomingCaptureLimits {
+  return {
+    maxAgeMs: positiveEnvNumber(env.SWIZ_INCOMING_RETENTION_MS, SWIZ_INCOMING_RETENTION_MS),
+    maxBytes: positiveEnvNumber(env.SWIZ_INCOMING_MAX_BYTES, SWIZ_INCOMING_MAX_BYTES),
+    jsonlMaxBytes: positiveEnvNumber(
+      env.SWIZ_INCOMING_JSONL_MAX_BYTES,
+      SWIZ_INCOMING_JSONL_MAX_BYTES
+    ),
+  }
+}
 
 function isExplicitlyDisabled(v: string | undefined): boolean {
   if (v === undefined) return false
@@ -122,27 +156,118 @@ export function buildRawIncomingCaptureFilename(captureFilename: string): string
   return captureFilename.replace(/\.json$/, ".raw.json")
 }
 
-/** Remove `*.json` under `dir` whose mtime is older than `maxAgeMs`. */
+interface CaptureFileInfo {
+  name: string
+  path: string
+  size: number
+  mtimeMs: number
+}
+
+interface CaptureFileGroup {
+  files: CaptureFileInfo[]
+  inFlight: boolean
+  mtimeMs: number
+  size: number
+}
+
+function isCaptureFilename(name: string): boolean {
+  return name.endsWith(".json") || name.endsWith(".jsonl")
+}
+
+function captureGroupKey(name: string): string {
+  if (name.endsWith(".raw.json")) return name.slice(0, -".raw.json".length)
+  if (name.endsWith(".json")) return name.slice(0, -".json".length)
+  return name
+}
+
+function groupCaptureFiles(files: CaptureFileInfo[]): CaptureFileGroup[] {
+  const groups = new Map<string, CaptureFileInfo[]>()
+  for (const file of files) {
+    const key = captureGroupKey(file.name)
+    const group = groups.get(key) ?? []
+    group.push(file)
+    groups.set(key, group)
+  }
+  return [...groups.values()].map((groupFiles) => ({
+    files: groupFiles,
+    inFlight: groupFiles.some(
+      (file) => activeCapturePaths.has(file.path) || jsonlAppendQueueByPath.has(file.path)
+    ),
+    mtimeMs: Math.max(...groupFiles.map((file) => file.mtimeMs)),
+    size: groupFiles.reduce((total, file) => total + file.size, 0),
+  }))
+}
+
+async function removeCaptureGroup(group: CaptureFileGroup): Promise<void> {
+  await Promise.all(
+    group.files.map(async (file) => {
+      try {
+        await unlink(file.path)
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e
+      }
+    })
+  )
+}
+
+async function readCaptureFileInfo(
+  dir: string,
+  entry: { isFile(): boolean; name: string }
+): Promise<CaptureFileInfo | null> {
+  if (!entry.isFile() || !isCaptureFilename(entry.name)) return null
+  const path = join(dir, entry.name)
+  try {
+    const metadata = await stat(path)
+    return { name: entry.name, path, size: metadata.size, mtimeMs: metadata.mtimeMs }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
+    debugLog("[incoming-capture] prune stat failed:", path, messageFromUnknownError(e))
+    return null
+  }
+}
+
+async function enforceCaptureLimits(
+  groups: CaptureFileGroup[],
+  now: number,
+  maxAgeMs: number,
+  maxBytes: number
+): Promise<void> {
+  const retained: CaptureFileGroup[] = []
+  let retainedBytes = 0
+  for (const group of groups) {
+    if (!group.inFlight && now - group.mtimeMs > maxAgeMs) {
+      await removeCaptureGroup(group)
+      continue
+    }
+    retained.push(group)
+    retainedBytes += group.size
+  }
+
+  retained.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  for (const group of retained) {
+    if (retainedBytes <= maxBytes) break
+    if (group.inFlight) continue
+    try {
+      await removeCaptureGroup(group)
+      retainedBytes -= group.size
+    } catch (e) {
+      debugLog("[incoming-capture] prune group failed:", messageFromUnknownError(e))
+    }
+  }
+}
+
+/** Enforce age and total-byte budgets for capture pairs and JSONL segments. */
 export async function pruneStaleIncomingCaptures(
   dir: string = SWIZ_INCOMING_ROOT,
-  maxAgeMs: number = SWIZ_INCOMING_RETENTION_MS
+  maxAgeMs: number = resolveIncomingCaptureLimits().maxAgeMs,
+  maxBytes: number = resolveIncomingCaptureLimits().maxBytes
 ): Promise<void> {
   const now = Date.now()
   try {
     const entries = await readdir(dir, { withFileTypes: true })
-    for (const ent of entries) {
-      if (!ent.isFile()) continue
-      if (!ent.name.endsWith(".json")) continue
-      const full = join(dir, ent.name)
-      try {
-        const s = await stat(full)
-        if (now - s.mtimeMs > maxAgeMs) await unlink(full)
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code
-        if (code === "ENOENT") continue
-        debugLog("[incoming-capture] prune entry failed:", full, messageFromUnknownError(e))
-      }
-    }
+    const files = await Promise.all(entries.map((entry) => readCaptureFileInfo(dir, entry)))
+    const groups = groupCaptureFiles(files.filter((file): file is CaptureFileInfo => file !== null))
+    await enforceCaptureLimits(groups, now, maxAgeMs, maxBytes)
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code
     if (code === "ENOENT") return
@@ -156,8 +281,9 @@ export async function pruneStaleIncomingCaptures(
  */
 export function scheduleStaleIncomingCapturePrune(
   dir: string = SWIZ_INCOMING_ROOT,
-  maxAgeMs: number = SWIZ_INCOMING_RETENTION_MS,
-  now: number = Date.now()
+  maxAgeMs: number = resolveIncomingCaptureLimits().maxAgeMs,
+  now: number = Date.now(),
+  maxBytes: number = resolveIncomingCaptureLimits().maxBytes
 ): boolean {
   const current = incomingCapturePruneStateByDir.get(dir)
   const elapsedMs = current ? now - current.lastStartedAt : Number.POSITIVE_INFINITY
@@ -168,7 +294,7 @@ export function scheduleStaleIncomingCapturePrune(
   const state: IncomingCapturePruneState = { inFlight: true, lastStartedAt: now }
   incomingCapturePruneStateByDir.set(dir, state)
   void Promise.resolve()
-    .then(() => pruneStaleIncomingCaptures(dir, maxAgeMs))
+    .then(() => pruneStaleIncomingCaptures(dir, maxAgeMs, maxBytes))
     .catch((err) => {
       debugLog("[incoming-capture] scheduled prune failed:", messageFromUnknownError(err))
     })
@@ -190,8 +316,11 @@ interface IncomingDispatchCaptureArgs {
 }
 
 /** Caller should invoke only when `shouldCaptureIncomingPayloads()` is true. */
-export function scheduleIncomingDispatchCapture(args: IncomingDispatchCaptureArgs): void {
-  void writeIncomingDispatchCapture(args).catch((err) => {
+export function scheduleIncomingDispatchCapture(
+  args: IncomingDispatchCaptureArgs,
+  dir: string = SWIZ_INCOMING_ROOT
+): void {
+  void writeIncomingDispatchCapture(args, dir).catch((err) => {
     debugLog("[incoming-capture] failed:", messageFromUnknownError(err))
   })
 }
@@ -228,15 +357,40 @@ export function buildIncomingDispatchCaptureEnvelope(
 export async function appendPayloadToJsonl(
   hookEventName: string,
   payload: Record<string, any>,
-  dir: string = SWIZ_INCOMING_ROOT
+  dir: string = SWIZ_INCOMING_ROOT,
+  maxBytes: number = resolveIncomingCaptureLimits().jsonlMaxBytes
 ): Promise<void> {
-  await mkdir(dir, { recursive: true })
   const canonical = normalizeEventNameToCanonical(hookEventName)
   const safe = sanitizeHookFilenameSegment(canonical)
   const path = join(dir, `${safe}.jsonl`)
   const sanitized = sanitizeDispatchPayloadForCapture(payload)
   const line = `${JSON.stringify({ ...sanitized, _capturedAt: new Date().toISOString() })}\n`
-  await appendFile(path, line)
+  const lineBytes = new TextEncoder().encode(line).byteLength
+  const previous = jsonlAppendQueueByPath.get(path) ?? Promise.resolve()
+  const operation = previous
+    .catch(() => {})
+    .then(async () => {
+      await mkdir(dir, { recursive: true })
+      try {
+        const metadata = await stat(path)
+        if (metadata.size > 0 && metadata.size + lineBytes > maxBytes) {
+          const rotatedPath = join(
+            dir,
+            `${safe}.${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}.jsonl`
+          )
+          await rename(path, rotatedPath)
+        }
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e
+      }
+      await appendFile(path, line)
+    })
+  jsonlAppendQueueByPath.set(path, operation)
+  try {
+    await operation
+  } finally {
+    if (jsonlAppendQueueByPath.get(path) === operation) jsonlAppendQueueByPath.delete(path)
+  }
 }
 
 /** Fire-and-forget wrapper for `appendPayloadToJsonl`. */
@@ -260,6 +414,15 @@ export async function writeIncomingDispatchCapture(
   const rawPath = join(dir, rawFilename)
   const envelope = buildIncomingDispatchCaptureEnvelope(args)
   envelope._swizIncomingCapture.rawPayloadFile = rawFilename
-  await Bun.write(rawPath, args.payloadStr)
-  await Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`)
+  activeCapturePaths.add(rawPath)
+  activeCapturePaths.add(path)
+  try {
+    await Promise.all([
+      Bun.write(rawPath, args.payloadStr),
+      Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`),
+    ])
+  } finally {
+    activeCapturePaths.delete(rawPath)
+    activeCapturePaths.delete(path)
+  }
 }

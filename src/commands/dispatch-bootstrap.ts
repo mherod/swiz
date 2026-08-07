@@ -10,9 +10,8 @@
 
 import { appendFile } from "node:fs/promises"
 import {
-  schedulePayloadJsonlAppend,
+  scheduleIncomingDispatchCapture,
   shouldCaptureIncomingPayloads,
-  writeIncomingDispatchCapture,
 } from "../dispatch/incoming-capture.ts"
 import { normalizeAgentHookPayload } from "../dispatch/payload-normalize.ts"
 import { DISPATCH_TIMEOUTS } from "../dispatch/timeouts.ts"
@@ -256,7 +255,7 @@ export async function runThinDispatch(args: string[]): Promise<void> {
     const normalizedPayload = structuredClone(payload)
 
     if (shouldCaptureIncomingPayloads()) {
-      await writeIncomingDispatchCapture({
+      scheduleIncomingDispatchCapture({
         canonicalEvent,
         hookEventName,
         parseError: false,
@@ -264,7 +263,6 @@ export async function runThinDispatch(args: string[]): Promise<void> {
         incomingBeforeNormalize,
         normalizedPayload,
       })
-      schedulePayloadJsonlAppend(hookEventName, incomingBeforeNormalize)
     }
 
     if (!payload._terminal) {

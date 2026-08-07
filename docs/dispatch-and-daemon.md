@@ -45,7 +45,7 @@ The CLI process is intentionally thin and short-lived:
    - `_terminal` — detected terminal app. The daemon must read this from the payload, never call `detectTerminal()` itself.
    - `_agent` — agent id baked in at install time via the `--agent` flag.
 5. **Fast paths** — before any network hop: stop/subagentStop events check the task list in-process (`tryStopFastPath`), and non-git directories skip hooks entirely (`tryNonGitFastPath`).
-6. **Capture** — payloads are written to `/tmp/swiz-incoming/` (raw + normalized + per-event `.jsonl`, ~10 min retention, `_env` stripped). Disable with `SWIZ_CAPTURE_INCOMING=0`.
+6. **Capture** — raw + normalized capture pairs are scheduled without blocking daemon forwarding; the daemon owns the single per-event `.jsonl` append. `_env` values are stripped. Disable with `SWIZ_CAPTURE_INCOMING=0`; tune age, total bytes, and JSONL segment bytes with `SWIZ_INCOMING_RETENTION_MS`, `SWIZ_INCOMING_MAX_BYTES`, and `SWIZ_INCOMING_JSONL_MAX_BYTES`.
 7. **Try daemon** — POST to `http://127.0.0.1:<port>/dispatch?event=…&hookEventName=…`. Port is `SWIZ_DAEMON_PORT` or `7943` (`src/commands/daemon/daemon-admin.ts`).
 8. **Fallback** — on daemon failure or timeout, run `executeDispatch()` in-process. A failure starts a 30s backoff (`BACKOFF_MS`) during which the daemon is not retried, avoiding burning the timeout budget on every event.
 9. **Respond** — write a single JSON object to stdout and `process.exit(0)`.
@@ -193,7 +193,7 @@ The `command -v` guard makes hooks no-ops if swiz is uninstalled. Writes are ver
 
 ## Debugging
 
-- **Captures**: `/tmp/swiz-incoming/` — recent raw + normalized payloads per event (10 min window). Inspect with `src/dispatch/incoming-inspect.ts` tooling.
+- **Captures**: `/tmp/swiz-incoming/` — recent raw + normalized payloads and rotated per-event JSONL segments. Throttled cleanup runs outside request handling; defaults are a 10-minute age window, 64 MiB total, and 4 MiB per JSONL segment. Inspect with `src/dispatch/incoming-inspect.ts` tooling.
 - **Dispatch log**: `/tmp/swiz-dispatch.log` — per-hook timing/status; slow hooks (>3s) flagged.
 - **Daemon log**: `/tmp/swiz-daemon.log`.
 - **Replay**: `swiz dispatch <event> --replay [--json]` runs the chain without emitting a live response ([details](./dispatch-engine.md#replay-mode--swiz-dispatch-event---replay)).

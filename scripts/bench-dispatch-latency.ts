@@ -19,6 +19,7 @@
  *   bun run scripts/bench-dispatch-latency.ts
  *   bun run scripts/bench-dispatch-latency.ts --iterations 40 --only probe
  *   bun run scripts/bench-dispatch-latency.ts --only dispatch --fixture read
+ *   bun run scripts/bench-dispatch-latency.ts --only dispatch --fixture read --compare-capture
  */
 
 import { join } from "node:path"
@@ -84,9 +85,22 @@ async function timeSeries(
   return summarize(label, durationsMs)
 }
 
-async function runDispatchOnce(indexPath: string, payload: string, cwd: string): Promise<void> {
+async function runDispatchOnce(
+  indexPath: string,
+  payload: string,
+  cwd: string,
+  capture: "default" | "enabled" | "disabled" = "default"
+): Promise<void> {
+  const env = { ...process.env }
+  if (capture === "enabled") {
+    delete env.SWIZ_CAPTURE_INCOMING
+    delete env.SWIZ_CAPTURE_INCOMING_PAYLOADS
+  } else if (capture === "disabled") {
+    env.SWIZ_CAPTURE_INCOMING = "0"
+  }
   const proc = Bun.spawn(["bun", "run", indexPath, "dispatch", "preToolUse"], {
     cwd,
+    env,
     stdin: new TextEncoder().encode(payload),
     stdout: "pipe",
     stderr: "pipe",
@@ -97,6 +111,7 @@ async function runDispatchOnce(indexPath: string, payload: string, cwd: string):
 }
 
 function parseArgs(argv: string[]): {
+  compareCapture: boolean
   fixture: "bash" | "read"
   iterations: number
   only: string | null
@@ -104,6 +119,7 @@ function parseArgs(argv: string[]): {
   let iterations = DEFAULT_MEASURED_ITERATIONS
   let only: string | null = null
   let fixture: "bash" | "read" = "bash"
+  const compareCapture = argv.includes("--compare-capture")
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--iterations" && argv[i + 1]) {
       const parsed = Number.parseInt(argv[i + 1]!, 10)
@@ -118,7 +134,7 @@ function parseArgs(argv: string[]): {
     }
   }
   assertMinimumIterations(iterations)
-  return { fixture, iterations, only }
+  return { compareCapture, fixture, iterations, only }
 }
 
 function report(stats: Stats[]): void {
@@ -135,8 +151,22 @@ function report(stats: Stats[]): void {
   console.error("")
 }
 
+async function appendDispatchBenchmarks(
+  stats: Stats[],
+  compareCapture: boolean,
+  iterations: number,
+  runOnce: (capture?: "default" | "enabled" | "disabled") => Promise<void>
+): Promise<void> {
+  if (!compareCapture) {
+    stats.push(await timeSeries("dispatch:end-to-end", iterations, () => runOnce()))
+    return
+  }
+  stats.push(await timeSeries("dispatch:capture-on", iterations, () => runOnce("enabled")))
+  stats.push(await timeSeries("dispatch:capture-off", iterations, () => runOnce("disabled")))
+}
+
 async function main(): Promise<void> {
-  const { fixture, iterations, only } = parseArgs(process.argv.slice(2))
+  const { compareCapture, fixture, iterations, only } = parseArgs(process.argv.slice(2))
   const projectRoot = join(import.meta.dirname, "..")
   const indexPath = join(projectRoot, "index.ts")
   const fixtureFilename =
@@ -171,10 +201,8 @@ async function main(): Promise<void> {
   }
 
   if (only === null || only === "dispatch") {
-    stats.push(
-      await timeSeries("dispatch:end-to-end", iterations, () =>
-        runDispatchOnce(indexPath, payload, projectRoot)
-      )
+    await appendDispatchBenchmarks(stats, compareCapture, iterations, (capture = "default") =>
+      runDispatchOnce(indexPath, payload, projectRoot, capture)
     )
   }
 
@@ -191,6 +219,14 @@ async function main(): Promise<void> {
     console.error(
       `[bench] per-reuse saving: ${savedPerReuse.toFixed(2)}ms median ` +
         `→ ${(savedPerReuse * 3).toFixed(2)}ms across the 3 eliminated probes`
+    )
+  }
+
+  const captureOn = stats.find((s) => s.label === "dispatch:capture-on")
+  const captureOff = stats.find((s) => s.label === "dispatch:capture-off")
+  if (captureOn && captureOff) {
+    console.error(
+      `[bench] capture overhead: ${(captureOn.medianMs - captureOff.medianMs).toFixed(2)}ms median`
     )
   }
 }

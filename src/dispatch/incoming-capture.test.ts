@@ -9,10 +9,14 @@ import {
   buildRawIncomingCaptureFilename,
   normalizeEventNameToCanonical,
   pruneStaleIncomingCaptures,
+  resolveIncomingCaptureLimits,
+  SWIZ_INCOMING_JSONL_MAX_BYTES,
+  SWIZ_INCOMING_MAX_BYTES,
   SWIZ_INCOMING_PRUNE_INTERVAL_MS,
   SWIZ_INCOMING_RETENTION_MS,
   sanitizeDispatchPayloadForCapture,
   sanitizeHookFilenameSegment,
+  scheduleIncomingDispatchCapture,
   scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
   writeIncomingDispatchCapture,
@@ -186,6 +190,36 @@ describe("incoming-capture", () => {
     expect(content.trim().split("\n")).toHaveLength(2)
   })
 
+  it("serializes concurrent JSONL appends without dropping records", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-jsonl-concurrent-"))
+    await Promise.all(
+      Array.from({ length: 25 }, (_, index) =>
+        appendPayloadToJsonl("preToolUse", { request_id: `request-${index}` }, dir)
+      )
+    )
+    const content = await readFile(join(dir, "preToolUse.jsonl"), "utf8")
+    const records = content
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, any>)
+    expect(records).toHaveLength(25)
+    expect(new Set(records.map((record) => record.request_id)).size).toBe(25)
+  })
+
+  it("rotates event JSONL before the configured segment budget is exceeded", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-jsonl-rotate-"))
+    const payload = { value: "x".repeat(80) }
+    await appendPayloadToJsonl("preToolUse", payload, dir, 180)
+    await appendPayloadToJsonl("preToolUse", payload, dir, 180)
+
+    const jsonlFiles = (await readdir(dir)).filter((file) => file.endsWith(".jsonl"))
+    expect(jsonlFiles).toHaveLength(2)
+    expect(jsonlFiles).toContain("preToolUse.jsonl")
+    for (const file of jsonlFiles) {
+      expect((await readFile(join(dir, file), "utf8")).trim().split("\n")).toHaveLength(1)
+    }
+  })
+
   it("appendPayloadToJsonl normalizes PascalCase event name in filename", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-inc-norm-"))
     await appendPayloadToJsonl("PostToolUse", { cwd: "/x" }, dir)
@@ -193,19 +227,57 @@ describe("incoming-capture", () => {
     expect(exists).toBe(true)
   })
 
-  it("pruneStaleIncomingCaptures removes stale .json only", async () => {
+  it("pruneStaleIncomingCaptures removes stale capture pairs and JSONL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-inc-prune-"))
     const oldPath = join(dir, "old.json")
+    const oldRawPath = join(dir, "old.raw.json")
+    const oldJsonlPath = join(dir, "old.jsonl")
     const freshPath = join(dir, "fresh.json")
     await writeFile(oldPath, "{}")
+    await writeFile(oldRawPath, "{}")
+    await writeFile(oldJsonlPath, "{}\n")
     await writeFile(freshPath, "{}")
     const oldTime = new Date(Date.now() - SWIZ_INCOMING_RETENTION_MS - 60_000)
     await utimes(oldPath, oldTime, oldTime)
+    await utimes(oldRawPath, oldTime, oldTime)
+    await utimes(oldJsonlPath, oldTime, oldTime)
 
     await pruneStaleIncomingCaptures(dir, SWIZ_INCOMING_RETENTION_MS)
 
     expect(await Bun.file(oldPath).exists()).toBe(false)
+    expect(await Bun.file(oldRawPath).exists()).toBe(false)
+    expect(await Bun.file(oldJsonlPath).exists()).toBe(false)
     expect(await Bun.file(freshPath).exists()).toBe(true)
+  })
+
+  it("pruneStaleIncomingCaptures evicts oldest pairs to enforce the byte budget", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-prune-bytes-"))
+    const oldEnvelope = join(dir, "old.json")
+    const oldRaw = join(dir, "old.raw.json")
+    const freshEnvelope = join(dir, "fresh.json")
+    const freshRaw = join(dir, "fresh.raw.json")
+    await Promise.all([
+      writeFile(oldEnvelope, "12345678"),
+      writeFile(oldRaw, "12345678"),
+      writeFile(freshEnvelope, "1"),
+      writeFile(freshRaw, "1"),
+    ])
+    const oldTime = new Date(Date.now() - 60_000)
+    await Promise.all([utimes(oldEnvelope, oldTime, oldTime), utimes(oldRaw, oldTime, oldTime)])
+
+    await pruneStaleIncomingCaptures(dir, SWIZ_INCOMING_RETENTION_MS, 4)
+
+    expect(await Bun.file(oldEnvelope).exists()).toBe(false)
+    expect(await Bun.file(oldRaw).exists()).toBe(false)
+    expect(await Bun.file(freshEnvelope).exists()).toBe(true)
+    expect(await Bun.file(freshRaw).exists()).toBe(true)
+  })
+
+  it("pruneStaleIncomingCaptures accepts a missing directory", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "swiz-inc-missing-parent-"))
+    await expect(
+      pruneStaleIncomingCaptures(join(parent, "missing"), SWIZ_INCOMING_RETENTION_MS)
+    ).resolves.toBeUndefined()
   })
 
   it("writeIncomingDispatchCapture leaves pruning to daemon maintenance", async () => {
@@ -266,5 +338,72 @@ describe("incoming-capture", () => {
         scheduledAt + SWIZ_INCOMING_PRUNE_INTERVAL_MS
       )
     ).toBe(true)
+  })
+
+  it("writes concurrent capture pairs with unique filenames", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-write-concurrent-"))
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        writeIncomingDispatchCapture(
+          {
+            canonicalEvent: "preToolUse",
+            hookEventName: "PreToolUse",
+            parseError: false,
+            payloadStr: JSON.stringify({ request_id: index }),
+            incomingBeforeNormalize: { request_id: index },
+            normalizedPayload: { request_id: index, cwd: "/project" },
+          },
+          dir
+        )
+      )
+    )
+    expect(await readdir(dir)).toHaveLength(24)
+  })
+
+  it("scheduled capture fails open when the destination is not a directory", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "swiz-inc-write-failure-"))
+    const notDirectory = join(parent, "file")
+    await writeFile(notDirectory, "occupied")
+    const args = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      parseError: false,
+      payloadStr: "{}",
+      incomingBeforeNormalize: {},
+      normalizedPayload: { cwd: "/project" },
+    }
+
+    await expect(writeIncomingDispatchCapture(args, notDirectory)).rejects.toBeDefined()
+    expect(() => scheduleIncomingDispatchCapture(args, notDirectory)).not.toThrow()
+    await Bun.sleep(5)
+  })
+
+  it("resolves configurable age and byte limits with safe defaults", () => {
+    expect(resolveIncomingCaptureLimits({})).toEqual({
+      maxAgeMs: SWIZ_INCOMING_RETENTION_MS,
+      maxBytes: SWIZ_INCOMING_MAX_BYTES,
+      jsonlMaxBytes: SWIZ_INCOMING_JSONL_MAX_BYTES,
+    })
+    expect(
+      resolveIncomingCaptureLimits({
+        SWIZ_INCOMING_RETENTION_MS: "1000",
+        SWIZ_INCOMING_MAX_BYTES: "2000",
+        SWIZ_INCOMING_JSONL_MAX_BYTES: "3000",
+      })
+    ).toEqual({ maxAgeMs: 1000, maxBytes: 2000, jsonlMaxBytes: 3000 })
+    expect(resolveIncomingCaptureLimits({ SWIZ_INCOMING_MAX_BYTES: "invalid" }).maxBytes).toBe(
+      SWIZ_INCOMING_MAX_BYTES
+    )
+  })
+
+  it("keeps the daemon as the only CLI dispatch JSONL owner", async () => {
+    const [legacyCli, thinCli, daemonRoute] = await Promise.all([
+      Bun.file(join(import.meta.dir, "..", "commands", "dispatch.ts")).text(),
+      Bun.file(join(import.meta.dir, "..", "commands", "dispatch-bootstrap.ts")).text(),
+      Bun.file(join(import.meta.dir, "..", "commands", "daemon", "dispatch-routes.ts")).text(),
+    ])
+    expect(legacyCli).not.toContain("schedulePayloadJsonlAppend")
+    expect(thinCli).not.toContain("schedulePayloadJsonlAppend")
+    expect(daemonRoute.match(/schedulePayloadJsonlAppend\(/g)).toHaveLength(1)
   })
 })
