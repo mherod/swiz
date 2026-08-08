@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**153 hooks. 17 event types. Every agent. Zero compromises.**
+**154 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -97,7 +97,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-125 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+126 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -136,7 +136,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (77)
+### PreToolUse (78)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -177,7 +177,8 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-pr-comment-read-gate.ts`           | Blocks `gh api .../pulls/N/comments` and `.../pulls/N/reviews` calls unless `/pr-comments-address` has been recently invoked — but only when on the PR's own branch (non-default branch with an open PR). Prevents fetching reviewer feedback and acting on it without running the full comment-address workflow first. |
 | `pretooluse-pr-head-checkout-gate.ts`          | In `work-on-prs` workflows, blocks PR feedback inspection (`gh pr view --comments`), file edits, commits, rebases, and merges when the current branch does not match the selected PR head branch declared in the transcript. Allows PR selection, branch discovery, remote-ref refresh, and checkout or switch to the PR head branch. Fail-open when no PR head branch has been declared yet.                                                                                                                                                                                                                      |
 | `pretooluse-issue-workflow-gate.ts`            | In `work-on-issue` workflows, enforces the implementation preflight sequence: blocks file edits and mutating git commands until GitHub connectivity or remote-ref sync evidence (`git fetch`) appears in the transcript. If a linked PR head branch is discovered, blocks edits and commits until the worktree is on that branch or the workflow routes to `work-on-prs`. If a target branch is declared, blocks edits and commits until the worktree matches it. Discovery commands, checkout/switch for alignment, and branch creation are always allowed. Also enforces a task-subject skill gate: if the active in-progress task matches a workflow pattern (e.g. "Work on issue #N" or "Push #N"), all file edits and shell commands are blocked until the corresponding skill (`/work-on-issue` or `/push`) has been invoked in the current or a recent project session. |
-| `pretooluse-trunk-mode-branch-gate.ts`         | When project trunk mode is enabled, allows checkout/switch to existing branches as a recovery or maintenance escape hatch, but blocks branch creation, force-create, orphan, copy, and rename operations plus `git worktree add`. Also blocks `gh pr create` and `gh pr checkout` outside the active-review exception.                                                                                                                                                                                                                                                                                             |
+| `pretooluse-trunk-mode-branch-gate.ts`         | When project trunk mode is enabled, allows checkout/switch to existing branches as a recovery or maintenance escape hatch, but blocks branch creation, force-create, orphan, copy, and rename operations. Also blocks `gh pr create` and `gh pr checkout` outside the active-review exception.                                                                                                                                                                                                                                                                                                                         |
+| `pretooluse-trunk-mode-worktree-creation.ts`   | When project trunk mode is enabled, blocks shell commands that create worktrees with `git worktree add`. Read-only and cleanup operations such as `git worktree list`, `remove`, and `prune` remain available.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `pretooluse-branch-intent-gate.ts`             | In work-on-issue and work-on-prs workflows, blocks code edits and branch-creating commands until the transcript explicitly declares both the target branch and integration base. Discovery commands (gh issue/pr lookups, read-only git, checkout/switch to align) are always allowed. Clears once the session names both branches, ensuring implementation begins on the correct branch from the correct base.                                                                                                                                                                                                       |
 | `pretooluse-gitflow-integration-base-gate.ts`  | In git-flow repositories (those with origin/dev or origin/develop branches), blocks creating feature branches from or syncing with main. Enforces git-flow discipline: ordinary feature work must use the integration base (dev/develop), not main. Allows explicit hotfix, release, production, backport, and emergency workflows when declared in the transcript.                                                                                                                                                                                                                       |
 | `pretooluse-trunk-mode-worktree.ts`            | When project trunk mode is enabled, blocks the `EnterWorktree` tool. Worktrees isolate feature branch work, which conflicts with trunk-based development where all work stays on the default branch.                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -344,7 +345,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 124 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 125 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

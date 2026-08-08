@@ -117,6 +117,7 @@ import pretooluseTaskoutputTimeout from "../hooks/pretooluse-taskoutput-timeout.
 import pretooluseTodoTracker from "../hooks/pretooluse-todo-tracker.ts"
 import pretooluseTrunkModeBranchGate from "../hooks/pretooluse-trunk-mode-branch-gate.ts"
 import pretooluseTrunkModeWorktree from "../hooks/pretooluse-trunk-mode-worktree.ts"
+import pretooluseTrunkModeWorktreeCreation from "../hooks/pretooluse-trunk-mode-worktree-creation.ts"
 import pretooluseTsEditStateGate from "../hooks/pretooluse-ts-edit-state-gate.ts"
 import pretooluseTsQuality from "../hooks/pretooluse-ts-quality.ts"
 import pretooluseUpdateMemoryEnforcement from "../hooks/pretooluse-update-memory-enforcement.ts"
@@ -388,6 +389,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretoolusePrCommentReadGate },
       { hook: pretoolusePrHeadCheckoutGate },
       { hook: pretooluseIssueWorkflowGate },
+      { hook: pretooluseTrunkModeWorktreeCreation },
       { hook: pretooluseTrunkModeBranchGate },
       { hook: pretooluseIssueSyncBeforeCheckout },
       { hook: pretooluseSkillInvocationGate },

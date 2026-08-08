@@ -2,9 +2,9 @@
 
 /**
  * PreToolUse hook: When project trunk mode is enabled, allow switching to existing
- * branches as a recovery escape hatch while blocking branch/worktree creation and
- * reshaping. Also blocks `gh pr checkout` outside its active-review exception and
- * blocks `gh pr create`.
+ * branches as a recovery escape hatch while blocking branch creation and reshaping.
+ * Also blocks `gh pr checkout` outside its active-review exception and blocks
+ * `gh pr create`.
  *
  * Dual-mode: SwizToolHook + runSwizHookAsMain.
  */
@@ -130,16 +130,6 @@ function denyBranchChangesWhenTrunk(
   defaultBranch: string
 ): SwizHookOutput | null {
   for (const change of changes) {
-    if (change.kind === "worktree-add") {
-      return preToolUseDeny(
-        `Trunk mode kept work in the main working directory; no git worktree was created.\n\n` +
-          `Continue on trunk:\n` +
-          `  git switch ${defaultBranch}\n\n` +
-          `If another system moved the repository, use the recovery escape hatch instead:\n` +
-          `  git switch <existing-branch>`
-      )
-    }
-
     const target = change.target ? `\n\nAttempted branch: \`${change.target}\`` : ""
     return preToolUseDeny(
       `Trunk mode left branch state unchanged. No branch was created, copied, renamed, or reset.` +
@@ -208,7 +198,9 @@ export async function evaluatePretooluseTrunkModeBranchGate(
 ): Promise<SwizHookOutput> {
   const runtime = { ...defaultRuntime, ...options.runtime }
   const request = resolveTrunkShellRequest(input)
-  const branchChanges = collectGitBranchChanges(request.command)
+  const branchChanges = collectGitBranchChanges(request.command).filter(
+    (change) => change.kind !== "worktree-add"
+  )
   if (!(await shouldEnforceTrunkMode(request, branchChanges, runtime))) return {}
 
   const projectState = await runtime.readProjectState(request.cwd)

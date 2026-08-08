@@ -173,10 +173,8 @@ describe("pretooluse-trunk-mode-branch-gate", () => {
     "git branch -m main feat/renamed",
     "git branch --move main feat/renamed-long",
     "git branch --force feat/force-updated main",
-    "git worktree add /tmp/swiz-feature-worktree",
-    "git worktree add -b feat/worktree /tmp/swiz-feature-worktree",
   ]) {
-    test(`blocks branch or worktree creation with ${command}`, async () => {
+    test(`blocks branch creation or reshaping with ${command}`, async () => {
       const repo = await createTestRepo("https://github.com/mherod/repo.git")
       await enableTrunkMode(repo)
       try {
