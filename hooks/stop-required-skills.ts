@@ -13,13 +13,14 @@ import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
 import {
-  agentHasSkillToolForHookPayload,
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
-  formatSkillReferenceForAgent,
+  formatSkillFileReadFallback,
+  formatSkillReferenceForHookPayload,
   getRecentlyInvokedSkillsForCurrentSession,
+  type ResolvedSkillFile,
+  resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
-  skillExistsForHookPayload,
 } from "../src/skill-utils.ts"
 import { isIncompleteTaskStatus, readTasks } from "../src/tasks/task-repository.ts"
 import {
@@ -85,12 +86,16 @@ function formatSessionSkillsForReason(
 
 function buildMissingSkillReason(
   rule: RequiredStopSkillRule,
-  skillReference: string,
-  invokedSkills: string[],
-  ctx: RequiredStopSkillContext,
-  options?: CurrentSessionUsageRecencyOptions,
-  compactionReset?: boolean
+  details: {
+    skillReference: string
+    invokedSkills: string[]
+    ctx: RequiredStopSkillContext
+    skillFile: ResolvedSkillFile
+    options?: CurrentSessionUsageRecencyOptions
+    compactionReset?: boolean
+  }
 ): string {
+  const { skillReference, invokedSkills, ctx, skillFile, options, compactionReset } = details
   const parts = [
     rule.blockedLine(skillReference),
     "",
@@ -99,6 +104,7 @@ function buildMissingSkillReason(
     formatActionPlan(rule.actionPlan(skillReference, ctx), {
       header: rule.actionHeader(skillReference),
     }).trimEnd(),
+    formatSkillFileReadFallback([skillFile]),
     `Why this matters: ${rule.why(skillReference)}`,
   ]
   if (compactionReset) {
@@ -265,9 +271,6 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
   const cwd = parsed.cwd ?? process.cwd()
   const ctx: RequiredStopSkillContext = { cwd, input: parsed }
 
-  // Fail-open: agents that cannot invoke the Skill tool cannot satisfy these requirements.
-  if (!agentHasSkillToolForHookPayload(parsed as Record<string, unknown>)) return {}
-
   const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
 
   let invokedSkills: string[] | null = null
@@ -277,7 +280,12 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Rule ${rule.skill} does not apply`)
       continue
     }
-    if (!skillExistsForHookPayload(rule.skill, parsed as Record<string, unknown>)) {
+    const skillPath = resolveSkillFilePathForHookPayload(
+      rule.skill,
+      parsed as Record<string, unknown>,
+      cwd
+    )
+    if (!skillPath) {
       if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} does not exist`)
       continue
     }
@@ -307,18 +315,21 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       }
     }
 
-    const skillReference = formatSkillReferenceForAgent(rule.skill)
+    const skillReference = formatSkillReferenceForHookPayload(
+      rule.skill,
+      parsed as Record<string, unknown>
+    )
     if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Blocking on missing skill: ${rule.skill}`)
     const compactionReset = await hasPreCompactionSkill(parsed.transcript_path, rule.skill)
     return blockStopObj(
-      buildMissingSkillReason(
-        rule,
+      buildMissingSkillReason(rule, {
         skillReference,
         invokedSkills,
         ctx,
-        recencyOptions,
-        compactionReset
-      )
+        skillFile: { name: rule.skill, path: skillPath },
+        options: recencyOptions,
+        compactionReset,
+      })
     )
   }
 

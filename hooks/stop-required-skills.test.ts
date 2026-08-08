@@ -140,6 +140,9 @@ describe("stop-required-skills", () => {
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("farm-out-issues")
+    expect(result.reason).toContain(
+      join(dir, ".skills", GATE_REQUIRED_SKILLS.farmOutIssues.name, "SKILL.md")
+    )
   })
 
   test("falls through to the next missing skill once higher-priority skills were used", async () => {
@@ -313,13 +316,17 @@ describe("stop-required-skills", () => {
     })
   })
 
-  test("skips all skill requirements when payload _env identifies a Codex session", async () => {
-    // Daemon process has CLAUDECODE (would normally trigger skill gates) but the
-    // dispatched payload carries _env from a Codex session.  Codex has no Skill
-    // tool so all skill requirements should be bypassed — the hook must allow.
+  test("blocks Codex with its preferred verified SKILL.md path", async () => {
     const dir = await tmp.create()
     await initGitRepo(dir)
     for (const s of ALL_REQUIRED_SKILLS) await createSkill(dir, s, s)
+    const skill = GATE_REQUIRED_SKILLS.farmOutIssues.name
+    const claudePath = join(dir, ".claude", "skills", skill, "SKILL.md")
+    const codexPath = join(dir, ".codex", "skills", skill, "SKILL.md")
+    await mkdir(join(dir, ".claude", "skills", skill), { recursive: true })
+    await mkdir(join(dir, ".codex", "skills", skill), { recursive: true })
+    await writeFile(claudePath, "# Claude farm out\n")
+    await writeFile(codexPath, "# Codex farm out\n")
     const transcriptPath = await createTranscript(dir) // no skills invoked
 
     const result = await runHookWithInput(dir, transcriptPath, {
@@ -327,7 +334,9 @@ describe("stop-required-skills", () => {
     })
 
     expect(result.exitCode).toBe(0)
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain(codexPath)
+    expect(result.reason).not.toContain(claudePath)
   })
 
   test("includes compaction note when required skill was used only before a compaction boundary", async () => {
@@ -433,7 +442,7 @@ describe("stop-required-skills", () => {
     })
   })
 
-  test("fails open when the active agent does not support the Skill tool", async () => {
+  test("fails open when no required SKILL.md file exists", async () => {
     const dir = await tmp.create()
     const transcriptPath = await createTranscript(dir)
 
@@ -447,6 +456,7 @@ describe("stop-required-skills", () => {
       {
         cwd: dir,
         env: {
+          HOME: dir,
           CLAUDECODE: undefined,
           ANTHROPIC_EXEC_VERSION: undefined,
         },
@@ -454,5 +464,6 @@ describe("stop-required-skills", () => {
     )
 
     expect(result.exitCode).toBe(0)
+    expect(result.decision).toBeUndefined()
   })
 })

@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { clearSkillCache } from "../src/skill-utils.ts"
 import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
 import { runHookInProcess } from "../src/utils/test-utils.ts"
-import pretooluseSkillInvocationGate from "./pretooluse-skill-invocation-gate.ts"
 
 const HOOK = "hooks/pretooluse-skill-invocation-gate.ts"
 
@@ -80,7 +79,7 @@ describe("pretooluse-skill-invocation-gate", () => {
   async function runGateSubprocess(
     skillName: string,
     payload: object,
-    setupProject?: (projectDir: string) => Promise<void>
+    setupProject?: (projectDir: string) => Promise<void> | void
   ): Promise<Record<string, any>> {
     const projectDir = await mkdtemp(join(tmpdir(), "gate-subprocess-"))
     try {
@@ -93,6 +92,7 @@ describe("pretooluse-skill-invocation-gate", () => {
       for (const key of agentEnvKeys) {
         if (key !== "CLAUDECODE") env[key] = undefined
       }
+      env.HOME = projectDir
       const result = await runHookInProcess(HOOK, payload as Record<string, any>, {
         cwd: projectDir,
         env,
@@ -113,18 +113,77 @@ describe("pretooluse-skill-invocation-gate", () => {
   }
 
   it("blocks git commit when commit skill is installed and no prior skill invocation", async () => {
-    const result = await runGateSubprocess("commit", {
-      tool_name: "Bash",
-      tool_input: { command: "git commit -m 'test'" },
-      transcript_path: "fake-transcript.json",
-      _transcriptSummary: summaryFromLines([]),
-    })
+    let expectedPath = ""
+    const result = await runGateSubprocess(
+      "commit",
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m 'test'" },
+        transcript_path: "fake-transcript.json",
+        _transcriptSummary: summaryFromLines([]),
+      },
+      (projectDir) => {
+        expectedPath = join(projectDir, ".skills", "commit", "SKILL.md")
+      }
+    )
 
     expect(
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
         ?.permissionDecision
     ).toBe("deny")
     expect((result as { systemMessage?: string }).systemMessage).toContain("BLOCKED")
+    expect(result.hookSpecificOutput?.permissionDecisionReason).toContain(expectedPath)
+  })
+
+  it("prefers the Claude SKILL.md path when duplicate skill files exist", async () => {
+    let claudePath = ""
+    let codexPath = ""
+    const result = await runGateSubprocess(
+      "commit",
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m 'test'" },
+        transcript_path: "fake-transcript.json",
+        _transcriptSummary: summaryFromLines([]),
+      },
+      async (projectDir) => {
+        claudePath = join(projectDir, ".claude", "skills", "commit", "SKILL.md")
+        codexPath = join(projectDir, ".codex", "skills", "commit", "SKILL.md")
+        await mkdir(join(projectDir, ".claude", "skills", "commit"), { recursive: true })
+        await mkdir(join(projectDir, ".codex", "skills", "commit"), { recursive: true })
+        await writeFile(claudePath, "# Claude commit\n")
+        await writeFile(codexPath, "# Codex commit\n")
+      }
+    )
+
+    expect(result.hookSpecificOutput?.permissionDecisionReason).toContain(claudePath)
+    expect(result.hookSpecificOutput?.permissionDecisionReason).not.toContain(codexPath)
+  })
+
+  it("prefers the Codex SKILL.md path when duplicate skill files exist", async () => {
+    let claudePath = ""
+    let codexPath = ""
+    const result = await runGateSubprocess(
+      "commit",
+      {
+        tool_name: "exec_command",
+        tool_input: { cmd: "git commit -m 'test'" },
+        transcript_path: "fake-transcript.json",
+        _env: { CODEX_MANAGED_BY_NPM: "1" },
+        _transcriptSummary: summaryFromLines([]),
+      },
+      async (projectDir) => {
+        claudePath = join(projectDir, ".claude", "skills", "commit", "SKILL.md")
+        codexPath = join(projectDir, ".codex", "skills", "commit", "SKILL.md")
+        await mkdir(join(projectDir, ".claude", "skills", "commit"), { recursive: true })
+        await mkdir(join(projectDir, ".codex", "skills", "commit"), { recursive: true })
+        await writeFile(claudePath, "# Claude commit\n")
+        await writeFile(codexPath, "# Codex commit\n")
+      }
+    )
+
+    expect(result.hookSpecificOutput?.permissionDecisionReason).toContain(codexPath)
+    expect(result.hookSpecificOutput?.permissionDecisionReason).not.toContain(claudePath)
   })
 
   it("does not gate a quoted 'git commit' substring inside an unrelated command", async () => {
@@ -590,43 +649,34 @@ describe("pretooluse-skill-invocation-gate", () => {
     })
   })
 
-  it("skips gate when running in Cursor (does NOT support Skill tool)", async () => {
-    // Simulate Cursor agent
-    process.env.CURSOR_TRACE_ID = "1"
-    process.env.CURSOR_SANDBOX_ENV_RESTORE = "1" // Use processPattern indicator too
-    delete process.env.CLAUDECODE
-
-    const input = {
+  it("blocks Cursor with a verified direct-read fallback when native Skill is unavailable", async () => {
+    const result = await runGateSubprocess("commit", {
       tool_name: "Bash",
-      tool_input: {
-        command: "git commit -m 'test'",
-      },
+      tool_input: { command: "git commit -m 'test'" },
       transcript_path: "fake-transcript.json",
-    }
+      _env: { CURSOR_TRACE_ID: "1" },
+      _transcriptSummary: summaryFromLines([]),
+    })
 
-    const result = await pretooluseSkillInvocationGate.run(input)
-
-    // Should return empty object (allow/skip) because skillExists returns false for Cursor
-    expect(result).toEqual({})
+    expect(result.hookSpecificOutput?.permissionDecision).toBe("deny")
+    expect(result.hookSpecificOutput?.permissionDecisionReason).toContain(
+      "Verified SKILL.md fallback"
+    )
   })
 
-  it("skips gate when running in Gemini (does NOT support Skill tool)", async () => {
-    // Simulate Gemini agent
-    process.env.GEMINI_CLI = "1"
-    delete process.env.CLAUDECODE
-
-    const input = {
+  it("blocks Gemini with a verified direct-read fallback when native Skill is unavailable", async () => {
+    const result = await runGateSubprocess("commit", {
       tool_name: "Bash",
-      tool_input: {
-        command: "git commit -m 'test'",
-      },
+      tool_input: { command: "git commit -m 'test'" },
       transcript_path: "fake-transcript.json",
-    }
+      _env: { GEMINI_CLI: "1" },
+      _transcriptSummary: summaryFromLines([]),
+    })
 
-    const result = await pretooluseSkillInvocationGate.run(input)
-
-    // Should return empty object (allow/skip) because skillExists returns false for Gemini
-    expect(result).toEqual({})
+    expect(result.hookSpecificOutput?.permissionDecision).toBe("deny")
+    expect(result.hookSpecificOutput?.permissionDecisionReason).toContain(
+      "Verified SKILL.md fallback"
+    )
   })
 
   it("allows Codex git commit after a direct SKILL.md read without requiring TaskList", async () => {
@@ -663,6 +713,31 @@ describe("pretooluse-skill-invocation-gate", () => {
     expect(
       (result as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
     ).toMatchObject({ permissionDecision: "deny" })
+  })
+
+  it("fails open when no verified SKILL.md path exists", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "gate-no-skill-"))
+    try {
+      const result = await runHookInProcess(
+        HOOK,
+        {
+          cwd: projectDir,
+          tool_name: "exec_command",
+          tool_input: { cmd: "git commit -m 'test'" },
+          transcript_path: "fake-transcript.json",
+          _agent: "codex",
+          _transcriptSummary: summaryFromLines([]),
+        },
+        {
+          cwd: projectDir,
+          env: { HOME: projectDir, CLAUDECODE: undefined, CODEX_MANAGED_BY_NPM: "1" },
+        }
+      )
+
+      expect(result.json ?? {}).toEqual({})
+    } finally {
+      await rm(projectDir, { recursive: true, force: true })
+    }
   })
 
   it("does not repeat the same missing-skill denial within two minutes", async () => {

@@ -47,11 +47,13 @@ import { sanitizeSessionId } from "../src/session-id.ts"
 import {
   type CurrentSessionUsageRecencyOptions,
   formatCurrentSessionUsageWindow,
-  formatSkillReferenceForAgent,
+  formatSkillFileReadFallback,
+  formatSkillReferenceForHookPayload,
   getRecentlyInvokedSkillsForCurrentSession,
   getRecentlyUsedToolsForCurrentSession,
+  type ResolvedSkillFile,
+  resolveSkillFilePathForHookPayload,
   resolveSkillRecencyOptions,
-  skillExistsForHookPayload,
   skillGateAgentIdForHookPayload,
 } from "../src/skill-utils.ts"
 import { skillRequirementCooldownPath } from "../src/temp-paths.ts"
@@ -182,9 +184,9 @@ function classifyRequiredSkill(command: string, cleanedCommand: string): SkillRe
 }
 
 /** Format a human-readable skill reference for one or more acceptable skills. */
-function formatAnyOfSkillRef(anyOfSkills: string[]): string {
-  if (anyOfSkills.length === 1) return formatSkillReferenceForAgent(anyOfSkills[0] ?? "")
-  const refs = anyOfSkills.map((s) => formatSkillReferenceForAgent(s))
+function formatAnyOfSkillRef(skills: readonly string[], input: Record<string, unknown>): string {
+  if (skills.length === 1) return formatSkillReferenceForHookPayload(skills[0] ?? "", input)
+  const refs = skills.map((skill) => formatSkillReferenceForHookPayload(skill, input))
   const last = refs.at(-1) ?? ""
   return `one of ${refs.slice(0, -1).join(", ")}, or ${last}`
 }
@@ -261,8 +263,14 @@ const SKILL_DENY_CONFIGS: Record<
   }),
 }
 
-function buildDenyMessage(primary: string, anyOfSkills: string[], reason: string): SwizHookOutput {
-  const ref = formatAnyOfSkillRef(anyOfSkills)
+function buildDenyMessage(
+  primary: string,
+  anyOfSkills: readonly string[],
+  skillFiles: readonly ResolvedSkillFile[],
+  reason: string,
+  input: Record<string, unknown>
+): SwizHookOutput {
+  const ref = formatAnyOfSkillRef(anyOfSkills, input)
   const isMulti = anyOfSkills.length > 1
   const configFactory = SKILL_DENY_CONFIGS[primary]
   const { action, planStep, whyMatters } = configFactory?.(ref) ?? {
@@ -280,6 +288,7 @@ function buildDenyMessage(primary: string, anyOfSkills: string[], reason: string
     `${blockedLine}\n\n` +
       `${reason}\n\n` +
       formatActionPlan([planStep], { header: planHeader }) +
+      `\n${formatSkillFileReadFallback(skillFiles)}\n` +
       `\nWhy this matters: ${whyMatters}\n\n` +
       `This block is advisory for the next ${Math.round(SKILL_REQUIREMENT_COOLDOWN_MS / 60_000)} minutes — ` +
       `invoke the skill before retrying, don't just retry the same command.`
@@ -289,6 +298,7 @@ function buildDenyMessage(primary: string, anyOfSkills: string[], reason: string
 interface GatedCommandCtx {
   primary: string
   anyOfSkills: string[]
+  skillFiles: ResolvedSkillFile[]
 }
 
 function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | null {
@@ -298,8 +308,13 @@ function resolveGatedCommand(rawInput: Record<string, any>): GatedCommandCtx | n
   const classified = classifyRequiredSkill(command, stripQuotedShellStrings(command))
   if (!classified) return null
   const { primary, anyOf } = classified
-  if (!anyOf.some((s) => skillExistsForHookPayload(s, rawInput))) return null
-  return { primary, anyOfSkills: anyOf }
+  const cwd = (rawInput.cwd as string | undefined) ?? process.cwd()
+  const skillFiles = anyOf.flatMap((name) => {
+    const path = resolveSkillFilePathForHookPayload(name, rawInput, cwd)
+    return path ? [{ name, path }] : []
+  })
+  if (skillFiles.length === 0) return null
+  return { primary, anyOfSkills: anyOf, skillFiles }
 }
 
 function requiresTaskListCheck(skill: string, input: Record<string, unknown>): boolean {
@@ -369,7 +384,7 @@ const pretoolusSkillInvocationGate: SwizHook = {
   run: async (rawInput: Record<string, any>): Promise<SwizHookOutput> => {
     const ctx = resolveGatedCommand(rawInput)
     if (!ctx) return {}
-    const { primary, anyOfSkills } = ctx
+    const { primary, anyOfSkills, skillFiles } = ctx
 
     const effectiveSettings = rawInput._effectiveSettings as { trunkMode?: boolean } | undefined
     if (
@@ -393,16 +408,16 @@ const pretoolusSkillInvocationGate: SwizHook = {
     const invokedSkills = await getRecentlyInvokedSkillsForCurrentSession(rawInput, recencyOptions)
     const reason = formatSessionSkillsForReason(invokedSkills, recencyOptions)
 
-    if (anyOfSkills.some((s) => invokedSkills.includes(s))) {
+    if (anyOfSkills.some((skill) => invokedSkills.includes(skill))) {
       const blocked = await checkTaskListRequirement(primary, rawInput, recencyOptions)
       if (blocked) return blocked
-      const ref = formatAnyOfSkillRef(anyOfSkills)
+      const ref = formatAnyOfSkillRef(anyOfSkills, rawInput)
       return preToolUseAllow(`${ref} skill was invoked recently.\n${reason}`)
     }
 
     if (await isSkillRequirementOnCooldown(rawInput, primary)) return {}
     await markSkillRequirementCooldown(rawInput, primary)
-    return buildDenyMessage(primary, anyOfSkills, reason)
+    return buildDenyMessage(primary, anyOfSkills, skillFiles, reason, rawInput)
   },
 }
 

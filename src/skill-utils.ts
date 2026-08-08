@@ -18,6 +18,7 @@ import { detectCurrentAgent } from "./detect.ts"
 import { findGitWorkTree } from "./git-helpers.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
+import { getProviderAdapter } from "./provider-adapters.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 import {
   DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES,
@@ -132,14 +133,48 @@ export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?:
 
 const _skillCache = new Map<string, boolean>()
 
+export interface ResolvedSkillFile {
+  name: string
+  path: string
+}
+
 /** Clear the internal skill existence cache. Primarily for testing. */
 export function clearSkillCache(): void {
   _skillCache.clear()
 }
 
+function resolveSkillFilePathFromDirs(name: string, dirs: string[]): string | null {
+  if (!name.trim()) return null
+  for (const dir of dirs) {
+    const skillPath = join(dir, name, "SKILL.md")
+    if (existsSync(skillPath)) return skillPath
+  }
+  return null
+}
+
+/** Resolve the first existing SKILL.md using the standard discovery order. */
+export function resolveSkillFilePath(name: string, cwd?: string): string | null {
+  return resolveSkillFilePathFromDirs(name, getSkillDirs(cwd))
+}
+
+/**
+ * Resolve an existing SKILL.md for a hook caller. The originating provider's
+ * global skill roots take precedence over shared/project roots, so duplicate
+ * Claude and Codex skills point at ~/.claude/skills and ~/.codex/skills
+ * respectively.
+ */
+export function resolveSkillFilePathForHookPayload(
+  name: string,
+  payload: Record<string, unknown>,
+  cwd?: string
+): string | null {
+  const agent = detectCurrentAgentFromHookPayload(payload) ?? detectCurrentAgent()
+  const providerDirs = agent ? (getProviderAdapter(agent)?.getSkillDirs() ?? []) : []
+  return resolveSkillFilePathFromDirs(name, uniq([...providerDirs, ...getSkillDirs(cwd)]))
+}
+
 export function skillFileExists(name: string, cwd?: string): boolean {
-  if (!name.trim()) return false
-  return getSkillDirs(cwd).some((dir) => existsSync(join(dir, name, "SKILL.md")))
+  return resolveSkillFilePath(name, cwd) !== null
 }
 
 /** Check if a skill exists in any of the skill directories. Cached per process. */
@@ -185,18 +220,6 @@ export function skillExistsForHookPayload(
 }
 
 export { agentHasTaskToolsForHookPayload }
-
-/**
- * Returns true when the agent identified by the hook payload supports the Skill tool.
- * Used by stop hooks to fail-open for agents (e.g. Codex) that cannot invoke /skills.
- */
-export function agentHasSkillToolForHookPayload(payload: Record<string, unknown>): boolean {
-  const agent = detectCurrentAgentFromHookPayload(payload)
-  if (agent !== null) return agentSupportsTool(agent, "Skill")
-  const current = detectCurrentAgent()
-  if (current !== null) return agentSupportsTool(current, "Skill")
-  return true
-}
 
 export function skillGateAgentIdForHookPayload(payload: Record<string, unknown>): string {
   return detectCurrentAgentFromHookPayload(payload)?.id ?? detectCurrentAgent()?.id ?? "unknown"
@@ -446,14 +469,40 @@ interface SkillToolAvailabilityWarning {
 }
 
 export function formatSkillReferenceForAgent(skillName: string): string {
-  const a = detectCurrentAgent()
-  switch (a?.id) {
+  return formatSkillReference(skillName, detectCurrentAgent()?.id)
+}
+
+function formatSkillReference(skillName: string, agentId: string | undefined): string {
+  switch (agentId) {
     case "claude":
       return `\`/${skillName}\``
     case "codex":
       return `\`$${skillName}\``
   }
   return `Skill(${skillName})`
+}
+
+/** Format a skill invocation reference using the hook caller rather than daemon process state. */
+export function formatSkillReferenceForHookPayload(
+  skillName: string,
+  payload: Record<string, unknown>
+): string {
+  const agent = detectCurrentAgentFromHookPayload(payload) ?? detectCurrentAgent()
+  return formatSkillReference(skillName, agent?.id)
+}
+
+/** Format verified direct-read fallbacks for one or more required skills. */
+export function formatSkillFileReadFallback(skillFiles: readonly ResolvedSkillFile[]): string {
+  if (skillFiles.length === 0) return ""
+  if (skillFiles.length === 1) {
+    const skill = skillFiles[0]
+    if (!skill) return ""
+    return `Verified SKILL.md fallback for /${skill.name} (read directly if native Skill is unavailable): \`${skill.path}\``
+  }
+  return [
+    "Verified SKILL.md fallbacks (read any one directly if native Skill is unavailable):",
+    ...skillFiles.map((skill) => `- /${skill.name}: \`${skill.path}\``),
+  ].join("\n")
 }
 
 export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions }

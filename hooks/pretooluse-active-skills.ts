@@ -14,7 +14,7 @@ import type { ToolHookInput } from "../src/schemas.ts"
 export async function evaluatePretooluseActiveSkills(
   input: ToolHookInput
 ): Promise<SwizHookOutput> {
-  const context = await resolveActiveSkillsContext(input)
+  const context = await resolveActiveSkillsContext(input, { includeVerifiedSkillPaths: true })
   return context ? preToolUseAllowWithContext("", context) : {}
 }
 
