@@ -6,6 +6,7 @@
  */
 
 import { formatActionPlan } from "../../src/action-plan.ts"
+import { git } from "../../src/git-helpers.ts"
 import type { SwizHookOutput } from "../../src/SwizHook.ts"
 import type { StopHookInput } from "../../src/schemas.ts"
 import { blockStopObj } from "../../src/utils/hook-response.ts"
@@ -17,6 +18,59 @@ import { isPushCooldownActive, markPushPrompted } from "./push-cooldown-validato
 import { buildTaskDesc, describeRemoteState, selectTaskSubject } from "./remote-state-validator.ts"
 import type { GitWorkflowCollectResult } from "./types.ts"
 import { buildUncommittedReason } from "./uncommitted-changes-validator.ts"
+
+interface DetachedMainWorktree {
+  path: string
+  commit: string
+}
+
+function parseDetachedMainWorktree(porcelain: string): DetachedMainWorktree | null {
+  const mainWorktree = porcelain.split("\0\0", 1)[0]
+  if (!mainWorktree) return null
+
+  const fields = mainWorktree.split("\0")
+  if (!fields.includes("detached")) return null
+
+  const path = fields.find((field) => field.startsWith("worktree "))?.slice("worktree ".length)
+  const commit = fields.find((field) => field.startsWith("HEAD "))?.slice("HEAD ".length)
+  if (!path || !commit) return null
+
+  return { path, commit }
+}
+
+async function collectDetachedMainWorktreeStop(
+  input: StopHookInput
+): Promise<GitWorkflowCollectResult | null> {
+  const cwd = input.cwd ?? process.cwd()
+  const state = parseDetachedMainWorktree(await git(["worktree", "list", "--porcelain", "-z"], cwd))
+  if (!state) return null
+
+  const shortCommit = state.commit.slice(0, 12)
+  const summary =
+    `The main Git worktree is on a detached HEAD at ${shortCommit}.\n\n` +
+    `Main worktree: ${state.path}\n\n` +
+    "Stop is blocked until the main worktree is attached to a branch."
+  const steps = [
+    "Reattach the main worktree HEAD:",
+    [
+      `Open the main worktree at ${state.path}`,
+      `If the detached commit must be preserved: git switch -c <branch> ${shortCommit}`,
+      "Otherwise switch to the intended existing branch: git switch <branch>",
+      "Verify the result: git status --short --branch",
+    ],
+  ]
+
+  return {
+    kind: "block",
+    summary,
+    steps,
+    willNeedPush: false,
+    sessionId: input.session_id,
+    cwd: state.path,
+    taskSubject: "Reattach main worktree HEAD",
+    taskDesc: `note: main worktree detached at ${state.commit}`,
+  }
+}
 
 /**
  * Check for push cooldown or in-flight push.
@@ -58,7 +112,7 @@ async function checkPushCooldownOrInFlight(input: StopHookInput): Promise<SwizHo
  * Evaluate git status without blocking.
  * Used by stop-ship-checklist to merge git, CI, and issues into one action plan.
  */
-export async function collectGitWorkflowStop(
+async function collectGitWorkflowStopAfterDetachedCheck(
   input: StopHookInput
 ): Promise<GitWorkflowCollectResult> {
   const ctx = await resolveGitContext(input)
@@ -113,14 +167,35 @@ export async function collectGitWorkflowStop(
   }
 }
 
+export async function collectGitWorkflowStop(
+  input: StopHookInput
+): Promise<GitWorkflowCollectResult> {
+  const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
+  if (detachedMainWorktree) return detachedMainWorktree
+  return await collectGitWorkflowStopAfterDetachedCheck(input)
+}
+
 /**
  * Main evaluation: check git status and return blocking output or empty object.
  */
 export async function evaluateStopGitStatus(input: StopHookInput): Promise<SwizHookOutput> {
+  const detachedMainWorktree = await collectDetachedMainWorktreeStop(input)
+  if (detachedMainWorktree?.kind === "block") {
+    await createSessionTask(
+      detachedMainWorktree.sessionId,
+      "stop-git-workflow-task-created",
+      detachedMainWorktree.taskSubject,
+      detachedMainWorktree.taskDesc
+    )
+    return blockStopObj(
+      `${detachedMainWorktree.summary}\n\n${formatActionPlan(detachedMainWorktree.steps)}`
+    )
+  }
+
   const pushShortCircuit = await checkPushCooldownOrInFlight(input)
   if (pushShortCircuit !== null) return pushShortCircuit
 
-  const r = await collectGitWorkflowStop(input)
+  const r = await collectGitWorkflowStopAfterDetachedCheck(input)
   if (r.kind === "ok") return {}
   if (r.kind === "hookOutput") return r.output
 
