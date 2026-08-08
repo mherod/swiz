@@ -8,6 +8,7 @@ import commitMsgScrubCoauthors from "../hooks/commitmsg-scrub-coauthors.ts"
 import notificationSpeak from "../hooks/notification-speak.ts"
 import permissionrequestInfractionRecord from "../hooks/permissionrequest-infraction-record.ts"
 import postcompactTaskRestore from "../hooks/postcompact-task-restore.ts"
+import posttooluseActiveSkills from "../hooks/posttooluse-active-skills.ts"
 import posttooluseAutoSteer from "../hooks/posttooluse-auto-steer.ts"
 import posttooluseCommitAuthorVerification from "../hooks/posttooluse-commit-author-verification.ts"
 import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation-guard.ts"
@@ -43,6 +44,7 @@ import posttoolusefailureRetryAdvisor from "../hooks/posttoolusefailure-retry-ad
 import precommitStagedValidation from "../hooks/precommit-staged-validation.ts"
 import precompactSpeak from "../hooks/precompact-speak.ts"
 import precompactTaskSnapshot from "../hooks/precompact-task-snapshot.ts"
+import pretooluseActiveSkills from "../hooks/pretooluse-active-skills.ts"
 import pretooluseApplyRscGate from "../hooks/pretooluse-apply-rsc-gate.ts"
 import pretooluseBannedCommands from "../hooks/pretooluse-banned-commands.ts"
 import pretooluseBlockCommitToMain from "../hooks/pretooluse-block-commit-to-main.ts"
@@ -284,7 +286,11 @@ export const bundledHookManifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    hooks: [{ hook: speakNarrator }, { hook: pretooluseTaskGovernance }],
+    hooks: [
+      { hook: pretooluseActiveSkills },
+      { hook: speakNarrator },
+      { hook: pretooluseTaskGovernance },
+    ],
   },
   {
     event: "preToolUse",
@@ -423,6 +429,7 @@ export const bundledHookManifest: HookGroup[] = [
   {
     event: "postToolUse",
     hooks: [
+      { hook: posttooluseActiveSkills },
       { hook: posttoolusGitContext },
       { hook: posttooluseMcpChannelTrace },
       { hook: speakNarrator },

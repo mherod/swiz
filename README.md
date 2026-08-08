@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**151 hooks. 17 event types. Every agent. Zero compromises.**
+**153 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -97,7 +97,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-123 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+125 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -136,12 +136,13 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (76)
+### PreToolUse (77)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
 | Hook                                           | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 |------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pretooluse-active-skills.ts`                  | Injects the skills invoked within the configured recency window before every tool call, keeping the active workflows present in tool context. |
 | `pretooluse-no-mixed-tool-calls.ts`            | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `pretooluse-banned-commands.ts`                | Blocks `grep` (use `rg`), file-writing `sed`/`awk` (use Edit; read-only usage is allowed), `rm` (use trash), `cd`, and raw `python`. Enforces Git/GitHub safety by blocking `--no-verify`, unsafe force pushes, commit attribution, `gh --admin`, and `gh --skip-status-check`; lease-based force pushes remain allowed. Also blocks shell redirects and heredocs that write files (use the Write/Edit tool instead), and blocks `gh issue create`/`gh issue edit --body` with shell-sensitive inline content (backticks, `$()`, `<...>`). For long or complex bodies, write to a temp file and pass `--body-file /tmp/issue-body.md`; delete the file after the `gh` call. |
 | `pretooluse-inline-script-write-gate.ts`       | Blocks inline eval scripts across multiple runtimes that contain file-write API calls. Covered runtimes: `node`/`bun -e`/`--eval` (`writeFile`, `appendFile`, `createWriteStream`, `Bun.write`, and sync variants); `python`/`python3 -c` (`open` write/append modes, `Path.write_text/write_bytes`); `perl -e` (`open >, >>`); `ruby -e` (`File.write`, `IO.write`, `File.open` write mode); `deno eval` (`Deno.writeTextFile/Sync`, `Deno.writeFile/Sync`). Inline eval scripts bypass the native Write/Edit tool review path — use the Write or Edit tools instead.                                             |
@@ -219,12 +220,13 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-measure-test-time.ts`              | Identifies full test suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory test runs to focus on complete suite evaluations. |
 | `pretooluse-measure-lint-time.ts`              | Identifies full lint suite runs and writes start times to temporary sentinel files. Excludes single file or limited directory lint runs to focus on complete suite evaluations. |
 
-### PostToolUse (30)
+### PostToolUse (31)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
 | Hook | What it does |
 |------|-------------|
+| `posttooluse-active-skills.ts` | Refreshes the configured recently active skill context after every tool call so it remains available for the next action. |
 | `posttooluse-git-context.ts` | Injects current git status context after every tool use (branch, upstream, uncommitted count, ahead/behind). After git Bash commands, also injects active swiz settings (trunk mode, push gate, collab mode) and synced branch protection rules. Keeps the agent informed of repo state and policy without repeated status/settings queries. |
 | `posttooluse-commit-author-verification.ts` | After `git commit`, verifies the landed HEAD author and committer match git config and are not placeholder identities. Blocks immediately so incorrect author metadata is amended before push. |
 | `posttooluse-mcp-channel-trace.ts` | Injects a compact auto-steer transport trace after every tool use: terminal transport, MCP channel availability, heartbeat/status age, watcher state, and delivery count. Debug context only; non-blocking. |
@@ -342,7 +344,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 122 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 124 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
