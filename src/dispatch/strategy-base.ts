@@ -16,6 +16,7 @@ import {
   runEntry,
   writeResponse,
 } from "./engine.ts"
+import { injectDispatchSessionAgeContext } from "./session-age-context.ts"
 import { isStopLikeDispatchEvent, normalizeStopDispatchResponseInPlace } from "./stop-response.ts"
 import type { DispatchStage } from "./timing.ts"
 
@@ -119,6 +120,7 @@ export async function runStrategyPipeline(
 
   const executions: HookExecution[] = []
   const finalResponse = await opts.processResults(results, executions)
+  await injectDispatchSessionAgeContext(finalResponse, ctx.canonicalEvent, ctx.enrichedPayloadStr)
 
   logSlowHookSummary(executions)
   if (executions.length > 0) merge(finalResponse, { hookExecutions: executions })
