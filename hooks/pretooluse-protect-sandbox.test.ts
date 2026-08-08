@@ -216,6 +216,21 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
 })
 
 describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
+  test("allows cat of a skill file under the shared ~/.agents/skills root", async () => {
+    const result = await runPinnedHomeBashHook(
+      `cat ${join(TEST_HOME, ".agents", "skills", "report-skill-issue", "SKILL.md")}`
+    )
+    expect(result.decision).toBe("allow")
+  })
+
+  test("allows compound read-only inspection under the shared ~/.agents root", async () => {
+    const agentsRoot = join(TEST_HOME, ".agents")
+    const result = await runPinnedHomeBashHook(
+      `ls -la ${agentsRoot} && rg --files ${agentsRoot} | head -n 40`
+    )
+    expect(result.decision).toBe("allow")
+  })
+
   test("allows cat of a skill file under ~/.claude/skills/ (current skill root)", async () => {
     const result = await runPinnedHomeBashHook(
       `cat ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
@@ -234,6 +249,12 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
     const result = await runPinnedHomeBashHook(
       `echo "# Modified" > ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
     )
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks writes appended to reads under the shared ~/.agents root", async () => {
+    const skillPath = join(TEST_HOME, ".agents", "skills", "report-skill-issue", "SKILL.md")
+    const result = await runPinnedHomeBashHook(`cat ${skillPath} && echo modified > ${skillPath}`)
     expect(result.decision).toBe("deny")
   })
 

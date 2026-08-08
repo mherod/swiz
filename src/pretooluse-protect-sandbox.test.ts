@@ -89,8 +89,23 @@ describe("isSafeReadOnlyShellCommand", () => {
     expect(isSafeReadOnlyShellCommand("rg foo ~/.swiz/settings.json")).toBe(true)
   })
 
-  it("rejects chaining, redirects, and command substitution", () => {
+  it("allows && chains when every command remains read-only", () => {
+    expect(
+      isSafeReadOnlyShellCommand("ls -la ~/.agents && rg --files ~/.agents | head -n 40")
+    ).toBe(true)
+    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md && head ~/.agents/README.md")).toBe(
+      true
+    )
+  })
+
+  it("rejects unsafe chaining, redirects, and command substitution", () => {
     expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json && echo done")).toBe(false)
+    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md; head ~/.agents/README.md")).toBe(
+      false
+    )
+    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md || head ~/.agents/README.md")).toBe(
+      false
+    )
     expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json > /tmp/out")).toBe(false)
     expect(isSafeReadOnlyShellCommand("sed -i 's/foo/bar/' ~/.swiz/settings.json")).toBe(false)
     expect(isSafeReadOnlyShellCommand('cat $(printf "%s" "$HOME")/.swiz/settings.json')).toBe(false)

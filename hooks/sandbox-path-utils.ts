@@ -22,9 +22,9 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
   "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n).",
-  "Skill files under configured skill roots (e.g., ~/.claude/skills/, ~/.cursor/skills/) are readable with those commands.",
+  "Skill files under configured skill roots (e.g., ~/.agents/skills/, ~/.claude/skills/, ~/.cursor/skills/) are readable with those commands.",
   "Use the local .skills/ copy when the global path is not accessible.",
-  "Do not chain writes, tees, redirects, or command substitution when you only need a read.",
+  "Read-only commands may be joined with &&; do not append writes, tees, redirects, or command substitution.",
 ].join(" ")
 
 export const PROTECTED_TASK_STORAGE_HINT = [
@@ -119,12 +119,28 @@ function isSafeSedCommand(stage: string): boolean {
   return true
 }
 
+function containsUnsafeReadOnlyShellSyntax(command: string): boolean {
+  return ["||", ";", ">", "<"].some((token) => command.includes(token))
+}
+
+function isSafeReadOnlyPipeline(command: string): boolean {
+  const stages = command.split("|").map((stage) => stage.trim())
+  if (stages.length === 0 || stages.some((stage) => !stage)) return false
+
+  return stages.every((stage) => {
+    const commandName = stage.match(/^[^\s]+/)?.[0] ?? ""
+    return (
+      SAFE_READ_ONLY_COMMANDS.has(commandName) && (commandName !== "sed" || isSafeSedCommand(stage))
+    )
+  })
+}
+
 /**
  * Returns true when a shell command is a simple read-only inspection command.
  *
- * The validator is intentionally strict: it only permits direct read commands
- * and pipelines of read commands, and it rejects shell chaining, redirects,
- * and command substitution.
+ * The validator is intentionally strict: it only permits direct read commands,
+ * pipelines, and `&&` chains whose every command is read-only. It rejects other
+ * shell chaining, redirects, and command substitution.
  */
 export function isSafeReadOnlyShellCommand(command: string): boolean {
   if (!command.trim()) return false
@@ -133,30 +149,14 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
 
   const sanitized = stripBenignRedirects(sanitizeShellCommand(normalized))
   if (!sanitized) return false
-  if (
-    sanitized.includes("&&") ||
-    sanitized.includes("||") ||
-    sanitized.includes(";") ||
-    sanitized.includes("&") ||
-    sanitized.includes(">") ||
-    sanitized.includes("<")
-  ) {
-    return false
-  }
+  if (containsUnsafeReadOnlyShellSyntax(sanitized)) return false
 
-  const stages = sanitized
-    .split("|")
-    .map((stage) => stage.trim())
-    .filter(Boolean)
-  if (stages.length === 0) return false
+  const commands = sanitized.split("&&").map((part) => part.trim())
+  if (commands.length === 0 || commands.some((part) => !part)) return false
 
-  for (const stage of stages) {
-    const commandName = stage.match(/^[^\s]+/)?.[0] ?? ""
-    if (!SAFE_READ_ONLY_COMMANDS.has(commandName)) return false
-    if (commandName === "sed" && !isSafeSedCommand(stage)) return false
-  }
-
-  return true
+  return commands.every(
+    (readCommand) => !readCommand.includes("&") && isSafeReadOnlyPipeline(readCommand)
+  )
 }
 
 export async function resolveCanonical(p: string): Promise<string> {
