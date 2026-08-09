@@ -6,7 +6,7 @@
 // Opt-in via enforceMidSessionCheckin setting (default: false).
 
 import { stat } from "node:fs/promises"
-import { ghJson, git } from "../src/git-helpers.ts"
+import { getHeadCommitAgeMs, ghJson, git } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sanitizeSessionId } from "../src/session-id.ts"
@@ -44,9 +44,7 @@ async function getLastCommitAgeMs(cwd: string, sessionId: string): Promise<numbe
   const recordedCommitAt = getIssueStore().getLastSessionCommitAt(projectKeyFromCwd(cwd), sessionId)
   if (recordedCommitAt !== null) return Date.now() - recordedCommitAt
 
-  const ts = parseInt(await git(["log", "-1", "--format=%ct"], cwd), 10)
-  if (Number.isNaN(ts)) return null
-  return Date.now() - ts * 1000
+  return await getHeadCommitAgeMs(cwd)
 }
 
 async function detectPrSignal(cwd: string, safeSession: string): Promise<string | null> {

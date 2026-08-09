@@ -15,6 +15,7 @@ import posttooluseFileTruncationGuard from "../hooks/posttooluse-file-truncation
 import posttoolusGitContext from "../hooks/posttooluse-git-context.ts"
 import posttooluseGitTaskAutocomplete from "../hooks/posttooluse-git-task-autocomplete.ts"
 import posttooluseJsonValidation from "../hooks/posttooluse-json-validation.ts"
+import posttooluseLastCommitAge from "../hooks/posttooluse-last-commit-age.ts"
 import posttooluseMcpChannelTrace from "../hooks/posttooluse-mcp-channel-trace.ts"
 import posttooluseMeasureLintTime from "../hooks/posttooluse-measure-lint-time.ts"
 import posttooluseMeasureTestTime from "../hooks/posttooluse-measure-test-time.ts"
@@ -433,6 +434,7 @@ export const bundledHookManifest: HookGroup[] = [
     hooks: [
       { hook: posttooluseActiveSkills },
       { hook: posttoolusGitContext },
+      { hook: posttooluseLastCommitAge },
       { hook: posttooluseMcpChannelTrace },
       { hook: speakNarrator },
       { hook: posttooluseAutoSteer },

@@ -257,6 +257,13 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   return (await git(["rev-parse", "--git-dir"], cwd)) !== ""
 }
 
+/** Return the age of the current HEAD commit, or null when HEAD is unavailable. */
+export async function getHeadCommitAgeMs(cwd: string, nowMs = Date.now()): Promise<number | null> {
+  const timestampSeconds = Number(await git(["log", "-1", "--format=%ct"], cwd))
+  if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return null
+  return Math.max(0, nowMs - timestampSeconds * 1000)
+}
+
 const _repoSlugCache = new Map<string, string>()
 
 /** Get the owner/repo slug from a git remote URL (e.g., "mherod/swiz"). */
