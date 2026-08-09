@@ -321,6 +321,12 @@ export class IssueStore {
   private _stmtListAllCommentIds!: Statement<{ comment_id: number; issue_number: number }>
   private _stmtRecordSessionEdit!: Statement
   private _stmtListSessionEdits!: Statement<{ file_path: string; updated_at: number }>
+  private _stmtListOtherSessionEditors!: Statement<{ session_id: string; updated_at: number }>
+  private _stmtListOtherSessionEdits!: Statement<{
+    session_id: string
+    file_path: string
+    updated_at: number
+  }>
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getDefaultDbPath()
@@ -353,6 +359,12 @@ export class IssueStore {
     )
     this._stmtListSessionEdits = this.db.prepare(
       "SELECT file_path, updated_at FROM session_edits WHERE project_key = ? AND session_id = ? ORDER BY updated_at ASC"
+    )
+    this._stmtListOtherSessionEditors = this.db.prepare(
+      "SELECT session_id, updated_at FROM session_edits WHERE project_key = ? AND file_path = ? AND session_id != ? AND updated_at >= ? ORDER BY updated_at DESC"
+    )
+    this._stmtListOtherSessionEdits = this.db.prepare(
+      "SELECT session_id, file_path, updated_at FROM session_edits WHERE project_key = ? AND session_id != ? AND updated_at >= ? ORDER BY updated_at DESC"
     )
   }
 
@@ -525,6 +537,10 @@ export class IssueStore {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_session_edits_project_session
       ON session_edits (project_key, session_id)
+    `)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_session_edits_project_file
+      ON session_edits (project_key, file_path, updated_at)
     `)
   }
 
@@ -1184,6 +1200,35 @@ export class IssueStore {
     sessionId: string
   ): { file_path: string; updated_at: number }[] {
     return this._stmtListSessionEdits.all(projectKey, sessionId)
+  }
+
+  /** Timestamp of this session's most recent recorded edit to `filePath`, or null. */
+  getSessionEditAt(projectKey: string, sessionId: string, filePath: string): number | null {
+    const row = this.db
+      .query(
+        "SELECT updated_at FROM session_edits WHERE project_key = ? AND session_id = ? AND file_path = ?"
+      )
+      .get(projectKey, sessionId, filePath) as { updated_at: number } | undefined
+    return row?.updated_at ?? null
+  }
+
+  /** Sessions other than `sessionId` that touched `filePath` at or after `since`, newest first. */
+  listOtherSessionEditors(
+    projectKey: string,
+    sessionId: string,
+    filePath: string,
+    since = 0
+  ): { session_id: string; updated_at: number }[] {
+    return this._stmtListOtherSessionEditors.all(projectKey, filePath, sessionId, since)
+  }
+
+  /** Files touched by sessions other than `sessionId` at or after `since`, newest first. */
+  listOtherSessionEdits(
+    projectKey: string,
+    sessionId: string,
+    since = 0
+  ): { session_id: string; file_path: string; updated_at: number }[] {
+    return this._stmtListOtherSessionEdits.all(projectKey, sessionId, since)
   }
 
   // ─── Session commit tracking ───────────────────────────────────────────

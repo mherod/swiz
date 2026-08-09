@@ -549,6 +549,55 @@ describe("Session edit tracking", () => {
       store.close()
     }
   })
+
+  test("lists other sessions that touched the same file, newest first", () => {
+    const store = createStore()
+    try {
+      store.recordSessionEdit("project-a", "session-a", "/shared.ts", 1000)
+      store.recordSessionEdit("project-a", "session-b", "/shared.ts", 3000)
+      store.recordSessionEdit("project-a", "session-c", "/shared.ts", 2000)
+      store.recordSessionEdit("project-b", "session-d", "/shared.ts", 4000)
+
+      const editors = store.listOtherSessionEditors("project-a", "session-a", "/shared.ts")
+      expect(editors).toEqual([
+        { session_id: "session-b", updated_at: 3000 },
+        { session_id: "session-c", updated_at: 2000 },
+      ])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("filters other-session editors by the since cutoff", () => {
+    const store = createStore()
+    try {
+      store.recordSessionEdit("project-a", "session-b", "/shared.ts", 1000)
+      store.recordSessionEdit("project-a", "session-c", "/shared.ts", 5000)
+
+      const editors = store.listOtherSessionEditors("project-a", "session-a", "/shared.ts", 2000)
+      expect(editors).toHaveLength(1)
+      expect(editors[0]!.session_id).toBe("session-c")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("lists project-wide edits from other sessions only", () => {
+    const store = createStore()
+    try {
+      store.recordSessionEdit("project-a", "session-a", "/mine.ts", 4000)
+      store.recordSessionEdit("project-a", "session-b", "/theirs.ts", 3000)
+      store.recordSessionEdit("project-a", "session-b", "/stale.ts", 500)
+      store.recordSessionEdit("project-b", "session-c", "/elsewhere.ts", 9000)
+
+      const edits = store.listOtherSessionEdits("project-a", "session-a", 1000)
+      expect(edits).toEqual([
+        { session_id: "session-b", file_path: "/theirs.ts", updated_at: 3000 },
+      ])
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe("replayPendingMutations", () => {

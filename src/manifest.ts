@@ -60,6 +60,7 @@ import pretooluseBunTestConcurrent from "../hooks/pretooluse-bun-test-concurrent
 import pretooluseClaudeMdUpdateMemoryGate from "../hooks/pretooluse-claude-md-update-memory-gate.ts"
 import pretooluseClaudeMdWordLimit from "../hooks/pretooluse-claude-md-word-limit.ts"
 import pretooluseClaudeWordLimit from "../hooks/pretooluse-claude-word-limit.ts"
+import pretooluseConcurrentSessionEdits from "../hooks/pretooluse-concurrent-session-edits.ts"
 import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate.ts"
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
@@ -340,6 +341,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
+      { hook: pretooluseConcurrentSessionEdits },
       { hook: pretooluseApplyRscGate },
       { hook: pretooluseRequireConvertToKotlin },
       { hook: pretooluseSandboxedEdits },
