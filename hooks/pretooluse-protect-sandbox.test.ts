@@ -231,6 +231,35 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
     expect(result.decision).toBe("allow")
   })
 
+  test("allows jq to load a program from the shared ~/.agents/skills root", async () => {
+    const result = await runPinnedHomeBashHook(
+      "gh issue list --json number,title | " +
+        "jq -r -f ~/.agents/skills/morning-standup/scripts/select-issues.jq"
+    )
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows Bun to execute a script from the shared ~/.agents/skills root", async () => {
+    const scriptPath = join(TEST_HOME, ".agents", "skills", "example", "scripts", "run.ts")
+    const result = await runPinnedHomeBashHook(`bun ${scriptPath} --dry-run`)
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("still blocks another hidden-home input alongside an executable skill asset", async () => {
+    const jqProgram = join(
+      TEST_HOME,
+      ".agents",
+      "skills",
+      "morning-standup",
+      "scripts",
+      "select-issues.jq"
+    )
+    const result = await runPinnedHomeBashHook(
+      `jq -f ${jqProgram} ${join(TEST_HOME, ".swiz", "settings.json")}`
+    )
+    expect(result.decision).toBe("deny")
+  })
+
   test("allows cat of a skill file under ~/.claude/skills/ (current skill root)", async () => {
     const result = await runPinnedHomeBashHook(
       `cat ${join(TEST_HOME, ".claude", "skills", "report-skill-issue", "SKILL.md")}`
@@ -255,6 +284,12 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
   test("blocks writes appended to reads under the shared ~/.agents root", async () => {
     const skillPath = join(TEST_HOME, ".agents", "skills", "report-skill-issue", "SKILL.md")
     const result = await runPinnedHomeBashHook(`cat ${skillPath} && echo modified > ${skillPath}`)
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks tee writes under the shared ~/.agents/skills root", async () => {
+    const skillPath = join(TEST_HOME, ".agents", "skills", "report-skill-issue", "SKILL.md")
+    const result = await runPinnedHomeBashHook(`printf modified | tee ${skillPath}`)
     expect(result.decision).toBe("deny")
   })
 

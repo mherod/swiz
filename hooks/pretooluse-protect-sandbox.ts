@@ -23,11 +23,13 @@ import { isFileEditTool, isShellTool } from "../src/tool-matchers.ts"
 import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline-hook-helpers.ts"
 import {
   buildProtectedTaskStorageDenyReason,
+  isAllowedSharedSkillShellCommand,
   isCodexHomePath,
   isHiddenTopLevelHomePath,
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
   isSessionToolResultsPath,
+  isSharedAgentsSkillPath,
   resolveCanonical,
   SAFE_READ_ONLY_INSPECTION_HINT,
 } from "./sandbox-path-utils.ts"
@@ -206,6 +208,14 @@ async function shouldBlockShellCommand(
       if (
         await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir, allowCodexHome)
       ) {
+        if (
+          resolvedCandidate &&
+          (isSharedAgentsSkillPath(candidate, canonicalHomeDir) ||
+            isSharedAgentsSkillPath(resolvedCandidate, canonicalHomeDir)) &&
+          isAllowedSharedSkillShellCommand(command, candidate)
+        ) {
+          continue
+        }
         return { kind: "hidden-home", path: candidate }
       }
       if (

@@ -2,7 +2,11 @@ import { realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
-import { stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+import {
+  splitShellSegments,
+  stripQuotedShellStrings,
+  tokenizeShellSegment,
+} from "../src/utils/shell-patterns.ts"
 
 const SAFE_READ_ONLY_COMMANDS = new Set([
   "cat",
@@ -19,6 +23,9 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
   "uniq",
   "tr",
 ])
+
+const SKILL_SCRIPT_RUNNERS = new Set(["bash", "bun", "sh", "zsh"])
+const SKILL_PROGRAM_FILE_FLAGS = new Set(["-f", "--from-file"])
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
   "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n).",
@@ -157,6 +164,79 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
   return commands.every(
     (readCommand) => !readCommand.includes("&") && isSafeReadOnlyPipeline(readCommand)
   )
+}
+
+function normalizeShellPathToken(token: string): string {
+  return token.replace(/^[`"']+|[`"']+$/g, "")
+}
+
+function tokenReferencesPath(token: string, path: string): boolean {
+  const normalizedToken = normalizeShellPathToken(token)
+  const normalizedPath = normalizeShellPathToken(path)
+  return normalizedToken === normalizedPath || normalizedToken.endsWith(`=${normalizedPath}`)
+}
+
+function commandTokenIndex(tokens: string[]): number {
+  let index = tokens[0] === "command" ? 1 : 0
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index] ?? "")) index++
+  return index
+}
+
+function isAllowedSkillPathStage(tokens: string[], pathIndexes: number[]): boolean {
+  const commandIndex = commandTokenIndex(tokens)
+  const commandName = tokens[commandIndex] ?? ""
+  if (!commandName || pathIndexes.length !== 1) return false
+
+  const pathIndex = pathIndexes[0]!
+  if (pathIndex === commandIndex) return true
+
+  if (SKILL_SCRIPT_RUNNERS.has(commandName)) {
+    return tokens.slice(commandIndex + 1, pathIndex).every((token) => {
+      return token === "run" || token.startsWith("-")
+    })
+  }
+
+  if (commandName !== "jq") return false
+  const pathToken = tokens[pathIndex]!
+  return (
+    SKILL_PROGRAM_FILE_FLAGS.has(tokens[pathIndex - 1] ?? "") ||
+    pathToken.startsWith("--from-file=")
+  )
+}
+
+/**
+ * Returns true when every use of a shared skill path executes that script or
+ * loads it as a jq program. Skill files are trusted user-installed code, but
+ * the path must not also appear as a redirect or another command's write target.
+ */
+export function isAllowedSharedSkillShellCommand(command: string, skillPath: string): boolean {
+  if (!command.trim() || !skillPath.trim()) return false
+  const normalized = command.normalize("NFKC")
+  if (normalized.includes("`") || normalized.includes("$(")) return false
+
+  let matched = false
+  for (const segment of splitShellSegments(normalized)) {
+    const tokens = tokenizeShellSegment(segment)
+    const pathIndexes = tokens.flatMap((token, index) =>
+      tokenReferencesPath(token, skillPath) ? [index] : []
+    )
+    if (pathIndexes.length === 0) continue
+    matched = true
+    if (!isAllowedSkillPathStage(tokens, pathIndexes)) return false
+  }
+  return matched
+}
+
+export function isSharedAgentsSkillPath(target: string, homeDir: string): boolean {
+  const normalizedHome = homeDir.replace(/\\/g, "/").replace(/\/$/, "")
+  const normalizedTarget = normalizeShellPathToken(target)
+    .replace(/^~(?=\/|$)/, normalizedHome)
+    .replace(/^\$HOME(?=\/|$)/, normalizedHome)
+    .replace(/^\$\{HOME\}(?=\/|$)/, normalizedHome)
+    .replace(/\\/g, "/")
+    .replace(/\/$/, "")
+  const sharedSkillRoot = `${normalizedHome}/.agents/skills`
+  return normalizedTarget === sharedSkillRoot || normalizedTarget.startsWith(`${sharedSkillRoot}/`)
 }
 
 export async function resolveCanonical(p: string): Promise<string> {
