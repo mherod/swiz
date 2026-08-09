@@ -231,6 +231,18 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
     expect(result.decision).toBe("allow")
   })
 
+  test("allows awk line-range inspection under the shared ~/.agents/skills root", async () => {
+    const skillPath = join(TEST_HOME, ".agents", "skills", "work-on-issue", "SKILL.md")
+    const result = await runPinnedHomeBashHook(`awk 'NR>=251 && NR<=450 {print}' ${skillPath}`)
+    expect(result.decision).toBe("allow")
+  })
+
+  test("blocks awk programs that write under the shared ~/.agents/skills root", async () => {
+    const skillPath = join(TEST_HOME, ".agents", "skills", "work-on-issue", "SKILL.md")
+    const result = await runPinnedHomeBashHook(`awk '{print > "${skillPath}"}' ${skillPath}`)
+    expect(result.decision).toBe("deny")
+  })
+
   test("allows jq to load a program from the shared ~/.agents/skills root", async () => {
     const result = await runPinnedHomeBashHook(
       "gh issue list --json number,title | " +

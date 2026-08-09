@@ -15,6 +15,7 @@ const SAFE_READ_ONLY_COMMANDS = new Set([
   "grep",
   "rg",
   "sed",
+  "awk",
   "ls",
   "stat",
   "wc",
@@ -28,7 +29,7 @@ const SKILL_SCRIPT_RUNNERS = new Set(["bash", "bun", "sh", "zsh"])
 const SKILL_PROGRAM_FILE_FLAGS = new Set(["-f", "--from-file"])
 
 export const SAFE_READ_ONLY_INSPECTION_HINT = [
-  "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n).",
+  "If you only need to inspect the file, use Read or a read-only shell command (cat, head, tail, grep, rg, sed -n, awk).",
   "Skill files under configured skill roots (e.g., ~/.agents/skills/, ~/.claude/skills/, ~/.cursor/skills/) are readable with those commands.",
   "Use the local .skills/ copy when the global path is not accessible.",
   "Read-only commands may be joined with &&; do not append writes, tees, redirects, or command substitution.",
@@ -126,6 +127,27 @@ function isSafeSedCommand(stage: string): boolean {
   return true
 }
 
+function isSafeAwkCommand(stage: string): boolean {
+  const tokens = tokenizeShellSegment(stage)
+  const commandIndex = commandTokenIndex(tokens)
+  if (tokens[commandIndex] !== "awk") return true
+
+  for (const token of tokens.slice(commandIndex + 1)) {
+    if (token === "-f" || token.startsWith("--file")) return false
+    if (token === "-i" || token.startsWith("-i") || token.startsWith("--in-place")) return false
+  }
+
+  const programAndArgs = tokens.slice(commandIndex + 1).join(" ")
+  if (/\bsystem\s*\(/i.test(programAndArgs) || /@load\b/i.test(programAndArgs)) return false
+  if (/\|\s*&?\s*getline\b/.test(programAndArgs)) return false
+  if (/\b(?:print|printf)\b[^;}]*?(?:>>?|\|)/.test(programAndArgs)) return false
+  return true
+}
+
+function areAwkCommandsSafe(command: string): boolean {
+  return splitShellSegments(command).every(isSafeAwkCommand)
+}
+
 function containsUnsafeReadOnlyShellSyntax(command: string): boolean {
   return ["||", ";", ">", "<"].some((token) => command.includes(token))
 }
@@ -153,6 +175,7 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
   if (!command.trim()) return false
   const normalized = command.normalize("NFKC")
   if (normalized.includes("`") || normalized.includes("$(")) return false
+  if (!areAwkCommandsSafe(normalized)) return false
 
   const sanitized = stripBenignRedirects(sanitizeShellCommand(normalized))
   if (!sanitized) return false

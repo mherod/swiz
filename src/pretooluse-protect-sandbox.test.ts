@@ -87,6 +87,32 @@ describe("isSafeReadOnlyShellCommand", () => {
     expect(isSafeReadOnlyShellCommand("grep foo ~/.swiz/settings.json | head -n 5")).toBe(true)
     expect(isSafeReadOnlyShellCommand("sed -n '1,10p' ~/.swiz/settings.json")).toBe(true)
     expect(isSafeReadOnlyShellCommand("rg foo ~/.swiz/settings.json")).toBe(true)
+    expect(
+      isSafeReadOnlyShellCommand(
+        "awk 'NR>=251 && NR<=450 {print}' ~/.agents/skills/work-on-issue/SKILL.md"
+      )
+    ).toBe(true)
+  })
+
+  it("rejects awk execution and write-capable programs", () => {
+    expect(
+      isSafeReadOnlyShellCommand(
+        "awk '{print > \"~/.agents/skills/work-on-issue/SKILL.md\"}' " +
+          "~/.agents/skills/work-on-issue/SKILL.md"
+      )
+    ).toBe(false)
+    expect(
+      isSafeReadOnlyShellCommand(
+        "awk 'BEGIN { system(\"touch /tmp/pwned\") } { print }' " +
+          "~/.agents/skills/work-on-issue/SKILL.md"
+      )
+    ).toBe(false)
+    expect(
+      isSafeReadOnlyShellCommand(
+        "awk -f ~/.agents/skills/work-on-issue/scripts/filter.awk " +
+          "~/.agents/skills/work-on-issue/SKILL.md"
+      )
+    ).toBe(false)
   })
 
   it("allows && chains when every command remains read-only", () => {
