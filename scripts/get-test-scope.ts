@@ -157,6 +157,7 @@ const SKIP_PATTERNS = [
   "commands/reflect.test",
   "commands/usage.test",
   "commands/idea.test",
+  "scripts/get-test-scope",
 ]
 
 const filteredTests = Array.from(testFiles).filter(
