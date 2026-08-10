@@ -1,4 +1,4 @@
-import { acquireGhSlot } from "../gh-rate-limit.ts"
+import { requiresPeerReview } from "../collaboration-policy.ts"
 import { getGitClient } from "../git/client.ts"
 import { resolveProjectIdentity } from "../project-identity.ts"
 import {
@@ -9,123 +9,12 @@ import {
 } from "../settings.ts"
 import { swizPushCooldownSentinelPath, swizPushResultPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
-import { expandSha, findRunId, startCiWatchViaDaemon } from "./ci-wait.ts"
+import { getDefaultBranch, isDefaultBranch } from "../utils/git-utils.ts"
+import { startCiWatchViaDaemon, summarizeCiJobs, waitForCiCompletion } from "./ci-wait.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
 export const COOLDOWN_MS = 60_000
 const POLL_INTERVAL_MS = 2_000
-const CI_POLL_INTERVAL_MS = 10_000
-
-// ─── CI polling ──────────────────────────────────────────────────────────
-
-interface GhRunJob {
-  name: string
-  conclusion: string | null
-  status: string
-}
-
-interface GhRunViewResult {
-  conclusion: string | null
-  status: string
-  jobs: GhRunJob[]
-}
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-function evaluateRunResult(data: GhRunViewResult, runId: number): "success" | "pending" | Error {
-  const { conclusion, status, jobs } = data
-  if (status !== "completed") return "pending"
-  if (conclusion !== "success") {
-    return new Error(`CI run ${runId} completed with conclusion: ${conclusion ?? "unknown"}`)
-  }
-  const failed = jobs.filter((j) => j.conclusion !== "success")
-  if (failed.length === 0) {
-    console.log(`✓ All ${jobs.length} CI job(s) reached conclusion=success`)
-    return "success"
-  }
-  const names = failed.map((j) => `${j.name} (${j.conclusion ?? "null"})`).join(", ")
-  return new Error(`CI completed but some jobs did not succeed: ${names}`)
-}
-
-async function discoverRunId(
-  fullSha: string,
-  commitSha: string,
-  startTime: number,
-  timeoutMs: number
-): Promise<number> {
-  let runId: number | null = null
-  while (runId === null) {
-    const elapsed = Date.now() - startTime
-    if (elapsed > timeoutMs) {
-      throw new Error(
-        `No CI run found for commit ${commitSha} within ${Math.round(timeoutMs / 1000)}s`
-      )
-    }
-    runId = await findRunId(fullSha)
-    if (runId === null) {
-      console.log(`⏳ Waiting for CI run... (${Math.round(elapsed / 1000)}s)`)
-      await sleep(CI_POLL_INTERVAL_MS)
-    }
-  }
-  return runId
-}
-
-async function pollUntilAllJobsSuccess(
-  commitSha: string,
-  timeoutSeconds: number,
-  cwd?: string
-): Promise<void> {
-  const startTime = Date.now()
-  const timeoutMs = timeoutSeconds * 1000
-
-  const fullSha = await expandSha(commitSha)
-  const runId = await discoverRunId(fullSha, commitSha, startTime, timeoutMs)
-  console.log(`✓ CI run ${runId} found — polling for job completion...`)
-
-  // Phase 2: poll gh run view until all jobs reach conclusion=success
-  while (true) {
-    const elapsed = Date.now() - startTime
-    if (elapsed > timeoutMs) {
-      throw new Error(`CI run ${runId} did not complete within ${timeoutSeconds}s timeout`)
-    }
-
-    await acquireGhSlot()
-    const proc = Bun.spawn(
-      ["gh", "run", "view", String(runId), "--json", "conclusion,status,jobs"],
-      { stdout: "pipe", stderr: "pipe", ...(cwd ? { cwd } : {}) }
-    )
-    const [output] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-
-    if (proc.exitCode !== 0) {
-      await sleep(CI_POLL_INTERVAL_MS)
-      continue
-    }
-
-    let data: GhRunViewResult
-    try {
-      data = JSON.parse(output) as GhRunViewResult
-    } catch {
-      await sleep(CI_POLL_INTERVAL_MS)
-      continue
-    }
-
-    const pollResult = evaluateRunResult(data, runId)
-    if (pollResult === "success") return
-    if (pollResult instanceof Error) throw pollResult
-
-    const done = data.jobs.filter((j) => j.conclusion !== null).length
-    console.log(
-      `⏳ CI: ${data.status} — ${done}/${data.jobs.length} job(s) done (${Math.round(elapsed / 1000)}s)`
-    )
-    await sleep(CI_POLL_INTERVAL_MS)
-  }
-}
-
-// ─── Cooldown utilities ──────────────────────────────────────────────────
 
 export async function getRemainingCooldownMs(sentinelPath: string): Promise<number> {
   try {
@@ -133,12 +22,11 @@ export async function getRemainingCooldownMs(sentinelPath: string): Promise<numb
     if (!(await file.exists())) return 0
     const raw = (await file.text()).trim()
     if (raw === "") return 0
-    const lastPush = parseInt(raw, 10)
-    if (Number.isNaN(lastPush)) return 0
+    const lastPush = Number(raw)
+    if (!Number.isFinite(lastPush)) return 0
     const remaining = COOLDOWN_MS - (Date.now() - lastPush)
     return remaining > 0 ? remaining : 0
   } catch {
-    // Permission error, file disappeared between exists/read — treat as no cooldown
     return 0
   }
 }
@@ -156,18 +44,14 @@ export async function waitForCooldown(opts: WaitForCooldownOptions): Promise<{ w
   const startTime = Date.now()
   const timeoutMs = timeoutSeconds * 1000
 
-  // Check immediately — cooldown may already be clear
   const initial = await getRemainingCooldownMs(sentinelPath)
-  if (initial === 0) {
-    return { waitedMs: 0 }
-  }
+  if (initial === 0) return { waitedMs: 0 }
 
   log(`⏳ Push cooldown active — ${Math.ceil(initial / 1000)}s remaining`)
 
   while (true) {
     await Bun.sleep(pollInterval)
     const elapsed = Date.now() - startTime
-
     if (elapsed > timeoutMs) {
       const remaining = await getRemainingCooldownMs(sentinelPath)
       throw new Error(
@@ -185,53 +69,69 @@ export async function waitForCooldown(opts: WaitForCooldownOptions): Promise<{ w
   }
 }
 
-// ─── Arg parsing ─────────────────────────────────────────────────────────
-
-interface PushWaitArgs {
+export interface PushWaitArgs {
   remote: string
   branch: string
   timeout: number
+  ciTimeout: number
   wait: boolean
   extraArgs: string[]
   cwd?: string
 }
 
-function parsePositiveTimeout(raw: string): number {
-  const timeout = parseInt(raw, 10)
-  if (Number.isNaN(timeout) || timeout <= 0) {
-    throw new Error("Timeout must be a positive number")
+interface PushWaitParseState {
+  timeout: number
+  ciTimeout: number
+  cwd?: string
+}
+
+function parsePositiveTimeout(raw: string, label: string): number {
+  const timeout = Number(raw)
+  if (!Number.isInteger(timeout) || timeout <= 0) {
+    throw new Error(`${label} must be a positive number`)
   }
   return timeout
+}
+
+function consumePushWaitValueOption(
+  args: string[],
+  index: number,
+  state: PushWaitParseState
+): number | null {
+  const arg = args[index]
+  if (!["--timeout", "-t", "--ci-timeout", "--ci-t", "--cwd"].includes(arg ?? "")) {
+    return null
+  }
+  const next = args[index + 1]
+  if (!next) throw new Error(`${arg} requires a value`)
+  if (arg === "--cwd") state.cwd = next
+  else if (arg === "--ci-timeout" || arg === "--ci-t") {
+    state.ciTimeout = parsePositiveTimeout(next, "CI timeout")
+  } else {
+    state.timeout = parsePositiveTimeout(next, "Timeout")
+  }
+  return index + 1
 }
 
 export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   let remote = "origin"
   let branch = ""
-  let timeout = 120
   let wait = false
-  let cwd: string | undefined
+  const state: PushWaitParseState = { timeout: 120, ciTimeout: 300 }
   const extraArgs: string[] = []
   const positional: string[] = []
-
-  const valueFlags: Record<string, (v: string) => void> = {
-    "--timeout": (v) => {
-      timeout = parsePositiveTimeout(v)
-    },
-    "-t": (v) => {
-      timeout = parsePositiveTimeout(v)
-    },
-    "--cwd": (v) => {
-      cwd = v
-    },
-  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
+    if (arg === "--") {
+      extraArgs.push(...args.slice(i + 1))
+      break
+    }
 
-    const valueSetter = valueFlags[arg]
-    if (valueSetter && args[i + 1]) {
-      valueSetter(args[++i]!)
+    const consumedThrough = consumePushWaitValueOption(args, i, state)
+    if (consumedThrough !== null) {
+      i = consumedThrough
       continue
     }
     if (arg === "--wait") {
@@ -245,13 +145,22 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
     positional.push(arg)
   }
 
+  if (positional.length > 2) {
+    throw new Error(`Unexpected argument: ${positional[2]}`)
+  }
   remote = positional[0] || remote
   branch = positional[1] || branch
 
-  return { remote, branch, timeout, wait, extraArgs, cwd }
+  return {
+    remote,
+    branch,
+    timeout: state.timeout,
+    ciTimeout: state.ciTimeout,
+    wait,
+    extraArgs,
+    cwd: state.cwd,
+  }
 }
-
-// ─── Push result file ───────────────────────────────────────────────────
 
 interface PushResult {
   success: boolean
@@ -261,156 +170,283 @@ interface PushResult {
   exitCode: number
   timestamp: number
   ciWatchStarted: boolean
+  ciRunId: number | null
+  ciConclusion: string | null
 }
 
 async function writePushResult(repoKey: string, result: PushResult): Promise<void> {
   try {
     await Bun.write(swizPushResultPath(repoKey), JSON.stringify(result, null, 2))
   } catch {
-    // Non-fatal — result file is a convenience, not critical path
+    // Non-fatal — the result file is a convenience, not the source of truth.
   }
 }
 
-async function finalizeSuccessfulPushWait(opts: {
+async function assertPeerReviewAllowsDefaultPush(
+  cwd: string,
+  targetBranch: string,
   effective: EffectiveSwizSettings
-  wait: boolean
-  timeout: number
-  commitSha: string
+): Promise<void> {
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (!isDefaultBranch(targetBranch, defaultBranch)) return
+  if (!requiresPeerReview(effective.collaborationMode)) return
+  throw new Error(
+    `Collaboration mode "${effective.collaborationMode}" requires peer review — ` +
+      `direct pushes to ${targetBranch} are not allowed.\n\n` +
+      `Push to a feature branch and open a PR instead:\n` +
+      `  git checkout -b feat/<description>\n` +
+      `  git push origin feat/<description>\n` +
+      `  gh pr create`
+  )
+}
+
+function remoteBranchName(refspec: string): string {
+  const destination = refspec.includes(":") ? refspec.slice(refspec.lastIndexOf(":") + 1) : refspec
+  return destination.replace(/^refs\/heads\//, "")
+}
+
+async function verifyRemoteHead(
+  cwd: string,
+  remote: string,
+  targetBranch: string,
+  expectedSha: string
+): Promise<void> {
+  const branch = remoteBranchName(targetBranch)
+  const result = await getGitClient().run(
+    ["ls-remote", "--heads", remote, `refs/heads/${branch}`],
+    {
+      cwd,
+    }
+  )
+  if (result.exitCode !== 0) {
+    throw new Error(`Push succeeded, but remote verification failed: ${result.stderr.trim()}`)
+  }
+  const remoteSha = result.stdout.trim().split(/\s+/)[0]
+  if (remoteSha !== expectedSha) {
+    throw new Error(
+      `Push returned success, but ${remote}/${branch} is ${remoteSha || "missing"}; ` +
+        `expected ${expectedSha}`
+    )
+  }
+  console.log(`✓ Remote ${remote}/${branch} verified at ${expectedSha.slice(0, 8)}`)
+}
+
+export interface ExecutePushFlowOptions {
+  remote: string
+  branch: string
+  cooldownTimeout: number
+  ciTimeout: number
+  waitForCi: boolean
+  extraArgs?: string[]
   cwd: string
-  repoKey: string
+}
+
+export interface ExecutePushFlowResult {
+  commitSha: string
   targetBranch: string
   remote: string
-}): Promise<void> {
-  const { effective, wait, timeout, commitSha, cwd, repoKey, targetBranch, remote } = opts
-  console.log("✓ Push succeeded")
+  ciRunId: number | null
+  ciConclusion: string | null
+}
 
-  if (wait) {
-    if (effective.ignoreCi) {
-      console.log(`ℹ ignore-ci enabled — skipping CI poll (--wait).`)
-    } else {
-      console.log(`⏳ --wait: polling CI until all jobs reach conclusion=success...`)
-      await pollUntilAllJobsSuccess(commitSha, timeout, cwd)
-    }
-    await writePushResult(repoKey, {
-      success: true,
-      commitSha,
-      branch: targetBranch,
-      remote,
-      exitCode: 0,
-      timestamp: Date.now(),
-      ciWatchStarted: false,
-    })
-    return
+interface PushExecutionContext {
+  commitSha: string
+  targetBranch: string
+  remote: string
+  cwd: string
+  repoKey: string
+  effective: EffectiveSwizSettings
+}
+
+interface PushResultOutcome {
+  success: boolean
+  exitCode: number
+  ciWatchStarted?: boolean
+  ciRunId?: number | null
+  ciConclusion?: string | null
+}
+
+function flowResult(
+  context: PushExecutionContext,
+  ciRunId: number | null = null,
+  ciConclusion: string | null = null
+): ExecutePushFlowResult {
+  return {
+    commitSha: context.commitSha,
+    targetBranch: context.targetBranch,
+    remote: context.remote,
+    ciRunId,
+    ciConclusion,
   }
+}
 
-  let ciWatchStarted = false
-  if (effective.ignoreCi) {
-    console.log(`ℹ ignore-ci enabled — skipping background CI watch.`)
-  } else {
-    const watchResult = await startCiWatchViaDaemon(commitSha, cwd)
-    if (watchResult?.ignored) {
-      console.log(`ℹ ignore-ci enabled — skipping background CI watch.`)
-    } else if (watchResult?.watch) {
-      ciWatchStarted = true
-      const mode = watchResult.deduped ? "already active" : "started"
-      console.log(`✓ CI background watch ${mode} for ${commitSha.slice(0, 8)}`)
-    } else {
-      console.log(
-        `⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications.`
-      )
-    }
-  }
-
-  await writePushResult(repoKey, {
-    success: true,
-    commitSha,
-    branch: targetBranch,
-    remote,
-    exitCode: 0,
+async function persistPushOutcome(
+  context: PushExecutionContext,
+  outcome: PushResultOutcome
+): Promise<void> {
+  await writePushResult(context.repoKey, {
+    success: outcome.success,
+    commitSha: context.commitSha,
+    branch: context.targetBranch,
+    remote: context.remote,
+    exitCode: outcome.exitCode,
     timestamp: Date.now(),
-    ciWatchStarted,
+    ciWatchStarted: outcome.ciWatchStarted ?? false,
+    ciRunId: outcome.ciRunId ?? null,
+    ciConclusion: outcome.ciConclusion ?? null,
   })
 }
 
-// ─── Command ─────────────────────────────────────────────────────────────
+async function preparePushFlow(options: ExecutePushFlowOptions): Promise<PushExecutionContext> {
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(options.cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
+  let targetBranch = options.branch
+  if (!targetBranch) {
+    const branchResult = getGitClient().runSync(["branch", "--show-current"], {
+      cwd: options.cwd,
+    })
+    targetBranch = branchResult.stdout.trim()
+    if (!targetBranch) throw new Error("Could not determine current branch (detached HEAD?)")
+  }
+
+  const headResult = getGitClient().runSync(["rev-parse", "HEAD"], { cwd: options.cwd })
+  const commitSha = headResult.stdout.trim()
+  if (!commitSha) throw new Error("Could not determine HEAD SHA")
+
+  await assertPeerReviewAllowsDefaultPush(options.cwd, targetBranch, effective)
+  const { repoKey } = await resolveProjectIdentity(options.cwd)
+  await waitForCooldown({
+    sentinelPath: swizPushCooldownSentinelPath(repoKey),
+    timeoutSeconds: options.cooldownTimeout,
+  })
+  return {
+    commitSha,
+    targetBranch,
+    remote: options.remote,
+    cwd: options.cwd,
+    repoKey,
+    effective,
+  }
+}
+
+async function pushAndVerifyRemote(
+  context: PushExecutionContext,
+  extraArgs: string[]
+): Promise<{ dryRun: boolean }> {
+  const pushArgs = ["push", ...extraArgs, context.remote, context.targetBranch]
+  console.log(`→ git ${pushArgs.join(" ")}`)
+  const pushResult = await getGitClient().run(pushArgs, {
+    cwd: context.cwd,
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  if (pushResult.exitCode !== 0) {
+    await persistPushOutcome(context, { success: false, exitCode: pushResult.exitCode })
+    throw new Error(`git push failed with exit code ${pushResult.exitCode}`)
+  }
+
+  console.log("✓ Push succeeded")
+  const dryRun = extraArgs.includes("--dry-run") || extraArgs.includes("-n")
+  if (dryRun) {
+    console.log("ℹ Dry-run push completed — skipping remote and CI verification.")
+    return { dryRun: true }
+  }
+
+  try {
+    await verifyRemoteHead(context.cwd, context.remote, context.targetBranch, context.commitSha)
+  } catch (error) {
+    await persistPushOutcome(context, { success: false, exitCode: 1 })
+    throw error
+  }
+  return { dryRun: false }
+}
+
+async function waitForCiAfterPush(
+  context: PushExecutionContext,
+  ciTimeout: number
+): Promise<ExecutePushFlowResult> {
+  if (context.effective.ignoreCi) {
+    console.log("ℹ ignore-ci enabled — skipping CI verification.")
+    await persistPushOutcome(context, { success: true, exitCode: 0 })
+    return flowResult(context)
+  }
+
+  console.log(`⏳ Waiting for CI run for commit ${context.commitSha.slice(0, 8)}...`)
+  const ci = await waitForCiCompletion(context.commitSha, ciTimeout, { cwd: context.cwd })
+  const success = ci.conclusion === "success"
+  await persistPushOutcome(context, {
+    success,
+    exitCode: success ? 0 : 1,
+    ciRunId: ci.runId,
+    ciConclusion: ci.conclusion,
+  })
+  console.log(`CI jobs: ${summarizeCiJobs(ci.jobs) || "none reported"}`)
+  console.log(`CI completed in ${Math.round(ci.elapsed / 1000)}s: ${ci.conclusion}`)
+  if (!success) throw new Error(`CI run ${ci.runId} completed with conclusion: ${ci.conclusion}`)
+  console.log(`evidence: ci_green:${ci.runId} -- commit:${context.commitSha}`)
+  return flowResult(context, ci.runId, ci.conclusion)
+}
+
+async function startBackgroundCiWatch(
+  context: PushExecutionContext
+): Promise<ExecutePushFlowResult> {
+  let ciWatchStarted = false
+  if (context.effective.ignoreCi) {
+    console.log("ℹ ignore-ci enabled — skipping background CI watch.")
+  } else {
+    const watchResult = await startCiWatchViaDaemon(context.commitSha, context.cwd)
+    if (watchResult?.ignored) {
+      console.log("ℹ ignore-ci enabled — skipping background CI watch.")
+    } else if (watchResult?.watch) {
+      ciWatchStarted = true
+      const mode = watchResult.deduped ? "already active" : "started"
+      console.log(`✓ CI background watch ${mode} for ${context.commitSha.slice(0, 8)}`)
+    } else {
+      console.log(
+        "⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications."
+      )
+    }
+  }
+  await persistPushOutcome(context, { success: true, exitCode: 0, ciWatchStarted })
+  return flowResult(context)
+}
+
+/** Canonical push path shared by `push-wait` and `push-ci`. */
+export async function executePushFlow(
+  options: ExecutePushFlowOptions
+): Promise<ExecutePushFlowResult> {
+  const context = await preparePushFlow(options)
+  const extraArgs = options.extraArgs ?? []
+  const { dryRun } = await pushAndVerifyRemote(context, extraArgs)
+  if (dryRun) return flowResult(context)
+  if (options.waitForCi) return await waitForCiAfterPush(context, options.ciTimeout)
+  return await startBackgroundCiWatch(context)
+}
 
 export const pushWaitCommand: Command = {
   name: "push-wait",
-  description: "Wait for push cooldown to expire, then push (optionally wait for CI)",
-  usage: "swiz push-wait [remote] [branch] [--wait] [--cwd <dir>] [--timeout <seconds>]",
+  description: "Wait for push cooldown, push, verify the remote, and optionally verify CI",
+  usage:
+    "swiz push-wait [remote] [branch] [--wait] [--cwd <dir>] [--timeout <s>] [--ci-timeout <s>]",
   options: [
-    { flags: "--wait", description: "Poll gh run view until all CI jobs reach conclusion=success" },
+    { flags: "--wait", description: "Wait for authoritative CI and job conclusions" },
     { flags: "--cwd <dir>", description: "Working directory for the git push (default: cwd)" },
-    { flags: "--timeout, -t <seconds>", description: "Max wait for cooldown (default: 120)" },
+    { flags: "--timeout, -t <seconds>", description: "Max cooldown wait (default: 120)" },
+    { flags: "--ci-timeout <seconds>", description: "Max CI wait (default: 300)" },
   ],
   async run(args) {
-    const { remote, branch, timeout, wait, extraArgs, cwd: cwdArg } = parsePushWaitArgs(args)
-    const cwd = cwdArg ?? process.cwd()
-
-    const [globalSettings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-    const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
-
-    // Resolve branch from git if not provided
-    let targetBranch = branch
-    if (!targetBranch) {
-      const proc = getGitClient().runSync(["branch", "--show-current"], {
-        cwd,
-      })
-      targetBranch = proc.stdout.trim()
-      if (!targetBranch) {
-        throw new Error("Could not determine current branch (detached HEAD?)")
-      }
-    }
-
-    const headProc = getGitClient().runSync(["rev-parse", "HEAD"], {
-      cwd,
-    })
-    const commitSha = headProc.stdout.trim()
-    if (!commitSha) {
-      throw new Error("Could not determine HEAD SHA")
-    }
-
-    const { repoKey } = await resolveProjectIdentity(cwd)
-    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
-
-    // Wait for cooldown to clear
-    await waitForCooldown({ sentinelPath, timeoutSeconds: timeout })
-
-    // Execute git push
-    const pushArgs = ["push", ...extraArgs, remote, targetBranch]
-    console.log(`→ git ${pushArgs.join(" ")}`)
-
-    const proc = await getGitClient().run(pushArgs, {
-      cwd,
-      stdout: "inherit",
-      stderr: "inherit",
-    })
-
-    if (proc.exitCode !== 0) {
-      await writePushResult(repoKey, {
-        success: false,
-        commitSha,
-        branch: targetBranch,
-        remote,
-        exitCode: proc.exitCode ?? 1,
-        timestamp: Date.now(),
-        ciWatchStarted: false,
-      })
-      throw new Error(`git push failed with exit code ${proc.exitCode}`)
-    }
-
-    await finalizeSuccessfulPushWait({
-      effective,
-      wait,
-      timeout,
-      commitSha,
-      cwd,
-      repoKey,
-      targetBranch,
-      remote,
+    const parsed = parsePushWaitArgs(args)
+    await executePushFlow({
+      remote: parsed.remote,
+      branch: parsed.branch,
+      cooldownTimeout: parsed.timeout,
+      ciTimeout: parsed.ciTimeout,
+      waitForCi: parsed.wait,
+      extraArgs: parsed.extraArgs,
+      cwd: parsed.cwd ?? process.cwd(),
     })
   },
 }

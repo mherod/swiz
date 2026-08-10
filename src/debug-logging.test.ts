@@ -35,7 +35,6 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "daemon admin — reports unreachable daemon or error HTTP responses",
   ],
   ["src/commands/continue.ts", "SDK agent message stream logging (tool use, results, errors)"],
-  ["src/commands/push-ci.ts", "push-ci failure reporting (CI conclusion !== 'success')"],
   [
     "src/commands/mergetool.ts",
     "Interactive merge progress indicators (→ Gathering..., ✓ Resolved)",
@@ -114,7 +113,6 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/plugins.ts",
   // manage command prints MCP list/show/add/remove output
   "src/commands/manage.ts",
-  "src/commands/push-ci.ts",
   "src/commands/push-wait.ts",
   // reflect — prints prompt (--print-prompt) and reflection output to user
   "src/commands/reflect.ts",

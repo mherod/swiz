@@ -1,178 +1,48 @@
-// push-ci: Wait for push cooldown, push to remote, then poll CI until conclusion.
-//
-// This combines push-wait + ci-wait into a single command so the agent never has to
-// manually sequence: push → capture SHA → gh run list → gh run watch → gh run view.
-// It emits the same CI verification evidence the manual sequence would produce,
-// so transcript-based workflow checks can treat the result as verified.
+// push-ci is the always-wait-for-CI facade over the canonical push-wait flow.
 
-import { requiresPeerReview } from "../collaboration-policy.ts"
-import { stderrLog } from "../debug.ts"
-import { acquireGhSlot } from "../gh-rate-limit.ts"
-import { getGitClient } from "../git/client.ts"
-import { resolveProjectIdentity } from "../project-identity.ts"
-import {
-  type CollaborationMode,
-  getEffectiveSwizSettings,
-  readProjectSettings,
-  readSwizSettings,
-} from "../settings.ts"
-import { swizPushCooldownSentinelPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
-import { getDefaultBranch, isDefaultBranch } from "../utils/git-utils.ts"
-import { waitForCiCompletion } from "./ci-wait.ts"
-import { parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
+import { executePushFlow, parsePushWaitArgs } from "./push-wait.ts"
 
 export interface PushCiArgs {
   remote: string
   branch: string
   cooldownTimeout: number
   ciTimeout: number
+  extraArgs: string[]
   cwd?: string
 }
 
-async function assertPeerReviewAllowsDefaultPush(
-  cwd: string,
-  targetBranch: string,
-  collaborationMode: CollaborationMode
-): Promise<void> {
-  const defaultBranch = await getDefaultBranch(cwd)
-  if (!isDefaultBranch(targetBranch, defaultBranch)) return
-  if (!requiresPeerReview(collaborationMode)) return
-  throw new Error(
-    `Collaboration mode "${collaborationMode}" requires peer review — ` +
-      `direct pushes to ${targetBranch} are not allowed.\n\n` +
-      `Push to a feature branch and open a PR instead:\n` +
-      `  git checkout -b feat/<description>\n` +
-      `  git push origin feat/<description>\n` +
-      `  gh pr create`
-  )
-}
-
 export function parsePushCiArgs(args: string[]): PushCiArgs {
-  let ciTimeout = 300
-  const remaining: string[] = []
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (!arg) continue
-    const next = args[i + 1]
-
-    if ((arg === "--ci-timeout" || arg === "--ci-t") && next) {
-      ciTimeout = parseInt(next, 10)
-      if (Number.isNaN(ciTimeout) || ciTimeout <= 0) {
-        throw new Error("CI timeout must be a positive number")
-      }
-      i++
-    } else {
-      remaining.push(arg)
-    }
+  const parsed = parsePushWaitArgs(args)
+  return {
+    remote: parsed.remote,
+    branch: parsed.branch,
+    cooldownTimeout: parsed.timeout,
+    ciTimeout: parsed.ciTimeout,
+    extraArgs: parsed.extraArgs,
+    cwd: parsed.cwd,
   }
-
-  const { remote, branch, timeout: cooldownTimeout, cwd } = parsePushWaitArgs(remaining)
-  return { remote, branch, cooldownTimeout, ciTimeout, cwd }
 }
 
 export const pushCiCommand: Command = {
   name: "push-ci",
-  description: "Push to remote and wait for CI to pass (combines push-wait + ci-wait)",
+  description: "Push, verify the remote branch, then wait for authoritative CI results",
   usage: "swiz push-ci [remote] [branch] [--cwd <dir>] [--timeout <s>] [--ci-timeout <s>]",
   options: [
     { flags: "--cwd <dir>", description: "Working directory for git push (default: cwd)" },
-    { flags: "--timeout, -t <seconds>", description: "Max wait for push cooldown (default: 120)" },
-    { flags: "--ci-timeout <seconds>", description: "Max wait for CI completion (default: 300)" },
+    { flags: "--timeout, -t <seconds>", description: "Max cooldown wait (default: 120)" },
+    { flags: "--ci-timeout <seconds>", description: "Max CI wait (default: 300)" },
   ],
   async run(args) {
-    const { remote, branch, cooldownTimeout, ciTimeout, cwd: cwdArg } = parsePushCiArgs(args)
-    const cwd = cwdArg ?? process.cwd()
-
-    const [globalSettings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-    const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
-
-    // Resolve branch if not provided
-    let targetBranch = branch
-    if (!targetBranch) {
-      const proc = getGitClient().runSync(["branch", "--show-current"], {
-        cwd,
-      })
-      targetBranch = proc.stdout.trim()
-      if (!targetBranch) {
-        throw new Error("Could not determine current branch (detached HEAD?)")
-      }
-    }
-
-    // Capture HEAD SHA before push — the commit is already local
-    const shaProc = getGitClient().runSync(["rev-parse", "HEAD"], {
-      cwd,
+    const parsed = parsePushCiArgs(args)
+    await executePushFlow({
+      remote: parsed.remote,
+      branch: parsed.branch,
+      cooldownTimeout: parsed.cooldownTimeout,
+      ciTimeout: parsed.ciTimeout,
+      waitForCi: true,
+      extraArgs: parsed.extraArgs,
+      cwd: parsed.cwd ?? process.cwd(),
     })
-    const commitSha = shaProc.stdout.trim()
-    if (!commitSha) {
-      throw new Error("Could not determine HEAD SHA")
-    }
-
-    await assertPeerReviewAllowsDefaultPush(cwd, targetBranch, effective.collaborationMode)
-
-    // 1. Wait for push cooldown
-    const { repoKey } = await resolveProjectIdentity(cwd)
-    const sentinelPath = swizPushCooldownSentinelPath(repoKey)
-    await waitForCooldown({ sentinelPath, timeoutSeconds: cooldownTimeout })
-
-    // 2. Push
-    const pushArgs = ["push", remote, targetBranch]
-    console.log(`→ git ${pushArgs.join(" ")}`)
-    const pushProc = await getGitClient().run(pushArgs, {
-      cwd,
-      stdout: "inherit",
-      stderr: "inherit",
-    })
-    if (pushProc.exitCode !== 0) {
-      throw new Error(`git push failed with exit code ${pushProc.exitCode}`)
-    }
-    console.log(`✓ Push succeeded — SHA ${commitSha.slice(0, 8)}`)
-
-    if (effective.ignoreCi) {
-      console.log(`ℹ ignore-ci enabled — skipping CI wait and GitHub Actions checks.`)
-      return
-    }
-
-    // 3. Poll CI for the pushed SHA
-    console.log(`⏳ Waiting for CI run for commit ${commitSha.slice(0, 8)}...`)
-    const { conclusion, elapsed } = await waitForCiCompletion(commitSha, ciTimeout)
-    const elapsedSeconds = Math.round(elapsed / 1000)
-
-    // 4. Emit a gh run view --json line so manual transcript scanners also see verification
-    const runListProc = Bun.spawnSync(
-      [
-        "gh",
-        "run",
-        "list",
-        "--commit",
-        commitSha,
-        "--json",
-        "databaseId",
-        "--jq",
-        ".[0].databaseId",
-      ],
-      { cwd, stdout: "pipe", stderr: "pipe" }
-    )
-    const runId = new TextDecoder().decode(runListProc.stdout).trim()
-    if (runId) {
-      await acquireGhSlot()
-      const viewProc = Bun.spawn(["gh", "run", "view", runId, "--json", "conclusion,status,jobs"], {
-        cwd,
-        stdout: "inherit",
-        stderr: "pipe",
-      })
-      await Promise.all([new Response(viewProc.stderr).text(), viewProc.exited])
-    }
-
-    console.log(`✓ CI completed in ${elapsedSeconds}s — conclusion: ${conclusion}`)
-
-    if (conclusion !== "success") {
-      stderrLog("push-ci failure reporting (CI conclusion !== 'success')", `✗ CI ${conclusion}`)
-      process.exitCode = 1
-    }
   },
 }

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { randomBytes } from "node:crypto"
-import { writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   COOLDOWN_MS,
+  executePushFlow,
   getRemainingCooldownMs,
   parsePushWaitArgs,
   waitForCooldown,
@@ -21,6 +22,14 @@ function writeSentinel(path: string, timestamp: number): void {
   writeFileSync(path, String(timestamp))
 }
 
+function runGit(cwd: string, args: string[]): string {
+  const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  if (result.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(result.stderr))
+  }
+  return new TextDecoder().decode(result.stdout).trim()
+}
+
 // ─── parsePushWaitArgs ───────────────────────────────────────────────────
 
 describe("parsePushWaitArgs", () => {
@@ -29,6 +38,7 @@ describe("parsePushWaitArgs", () => {
     expect(result.remote).toBe("origin")
     expect(result.branch).toBe("")
     expect(result.timeout).toBe(120)
+    expect(result.ciTimeout).toBe(300)
     expect(result.extraArgs).toEqual([])
   })
 
@@ -48,6 +58,12 @@ describe("parsePushWaitArgs", () => {
     expect(result.timeout).toBe(30)
   })
 
+  it("parses a separate CI timeout", () => {
+    const result = parsePushWaitArgs(["--timeout", "30", "--ci-timeout", "600"])
+    expect(result.timeout).toBe(30)
+    expect(result.ciTimeout).toBe(600)
+  })
+
   it("throws on non-positive timeout", () => {
     expect(() => parsePushWaitArgs(["--timeout", "0"])).toThrow("positive number")
     expect(() => parsePushWaitArgs(["--timeout", "-5"])).toThrow("positive number")
@@ -55,6 +71,15 @@ describe("parsePushWaitArgs", () => {
 
   it("throws on non-numeric timeout", () => {
     expect(() => parsePushWaitArgs(["--timeout", "abc"])).toThrow("positive number")
+  })
+
+  it("rejects malformed and missing timeout values", () => {
+    expect(() => parsePushWaitArgs(["--timeout", "10seconds"])).toThrow("positive number")
+    expect(() => parsePushWaitArgs(["--ci-timeout", "0"])).toThrow(
+      "CI timeout must be a positive number"
+    )
+    expect(() => parsePushWaitArgs(["--timeout"])).toThrow("requires a value")
+    expect(() => parsePushWaitArgs(["--cwd"])).toThrow("requires a value")
   })
 
   it("collects extra flags into extraArgs", () => {
@@ -112,6 +137,15 @@ describe("parsePushWaitArgs", () => {
     const result = parsePushWaitArgs(["--wait", "--dry-run"])
     expect(result.wait).toBe(true)
     expect(result.extraArgs).toEqual(["--dry-run"])
+  })
+
+  it("passes every argument after -- directly to git push", () => {
+    const result = parsePushWaitArgs(["origin", "main", "--", "--push-option", "release"])
+    expect(result.extraArgs).toEqual(["--push-option", "release"])
+  })
+
+  it("rejects extra positional arguments instead of silently discarding them", () => {
+    expect(() => parsePushWaitArgs(["origin", "main", "unexpected"])).toThrow("Unexpected argument")
   })
 })
 
@@ -325,18 +359,56 @@ describe("project identity", () => {
   it("resolves one canonical repo key for cooldown and result storage", async () => {
     const source = await Bun.file(join(import.meta.dir, "push-wait.ts")).text()
 
-    expect(source.match(/resolveProjectIdentity\(cwd\)/g)).toHaveLength(1)
+    expect(source.match(/resolveProjectIdentity\(options\.cwd\)/g)).toHaveLength(1)
     expect(source).not.toContain("getCanonicalPathHash")
     expect(source).not.toContain('["rev-parse", "--show-toplevel"]')
     expect(source).toContain("swizPushCooldownSentinelPath(repoKey)")
     expect(source).toContain("writePushResult(repoKey")
   })
 
-  it("keeps push-ci on the same canonical sentinel contract", async () => {
+  it("makes push-ci delegate to the canonical push flow", async () => {
     const source = await Bun.file(join(import.meta.dir, "push-ci.ts")).text()
 
-    expect(source.match(/resolveProjectIdentity\(cwd\)/g)).toHaveLength(1)
-    expect(source).not.toContain("getSentinelPath")
-    expect(source).toContain("swizPushCooldownSentinelPath(repoKey)")
+    expect(source).toContain("executePushFlow")
+    expect(source).not.toContain("resolveProjectIdentity")
+    expect(source).not.toContain("waitForCiCompletion")
+    expect(source).not.toContain("getGitClient")
+  })
+})
+
+describe("executePushFlow", () => {
+  it("pushes through the shared flow and verifies the remote SHA", async () => {
+    const root = mkdtempSync(join(tmpdir(), "swiz-push-flow-"))
+    const repo = join(root, "repo")
+    const remote = join(root, "remote.git")
+    mkdirSync(repo)
+    runGit(root, ["init", "--bare", remote])
+    runGit(repo, ["init", "-b", "main"])
+    runGit(repo, ["config", "user.name", "Swiz Test"])
+    runGit(repo, ["config", "user.email", "swiz-test@example.test"])
+    writeFileSync(join(repo, "tracked.txt"), "shared push flow\n")
+    runGit(repo, ["add", "tracked.txt"])
+    runGit(repo, ["commit", "-m", "test: seed push flow"])
+    runGit(repo, ["remote", "add", "origin", remote])
+    mkdirSync(join(repo, ".swiz"))
+    writeFileSync(
+      join(repo, ".swiz", "config.json"),
+      JSON.stringify({ ignoreCi: true, collaborationMode: "solo" })
+    )
+
+    const result = await executePushFlow({
+      remote: "origin",
+      branch: "main",
+      cooldownTimeout: 1,
+      ciTimeout: 1,
+      waitForCi: true,
+      cwd: repo,
+    })
+
+    expect(result.commitSha).toBe(runGit(repo, ["rev-parse", "HEAD"]))
+    expect(result.ciRunId).toBeNull()
+    expect(runGit(repo, ["ls-remote", "--heads", "origin", "refs/heads/main"])).toContain(
+      result.commitSha
+    )
   })
 })

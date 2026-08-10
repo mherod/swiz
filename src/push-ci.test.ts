@@ -8,6 +8,7 @@ describe("parsePushCiArgs", () => {
     expect(result.branch).toBe("")
     expect(result.cooldownTimeout).toBe(120)
     expect(result.ciTimeout).toBe(300)
+    expect(result.extraArgs).toEqual([])
     expect(result.cwd).toBeUndefined()
   })
 
@@ -22,6 +23,10 @@ describe("parsePushCiArgs", () => {
     expect(result.ciTimeout).toBe(600)
     expect(result.remote).toBe("origin")
     expect(result.branch).toBe("main")
+  })
+
+  it("parses --ci-t shorthand", () => {
+    expect(parsePushCiArgs(["--ci-t", "90"]).ciTimeout).toBe(90)
   })
 
   it("parses --timeout flag for cooldown", () => {
@@ -62,5 +67,16 @@ describe("parsePushCiArgs", () => {
     expect(() => parsePushCiArgs(["--ci-timeout", "-5"])).toThrow(
       "CI timeout must be a positive number"
     )
+  })
+
+  it("rejects malformed CI timeouts", () => {
+    expect(() => parsePushCiArgs(["--ci-timeout", "10seconds"])).toThrow(
+      "CI timeout must be a positive number"
+    )
+  })
+
+  it("preserves explicit git push arguments", () => {
+    const result = parsePushCiArgs(["origin", "main", "--", "--push-option", "release"])
+    expect(result.extraArgs).toEqual(["--push-option", "release"])
   })
 })
