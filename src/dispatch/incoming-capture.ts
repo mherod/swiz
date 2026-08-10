@@ -1,33 +1,35 @@
 /**
  * Dispatch stdin payloads are written to `/tmp/swiz-incoming/` **by default** for inspection.
- * Every dispatch writes a `*.raw.json` companion file containing the exact stdin
- * bytes before JSON parsing, normalization, sanitization, or enrichment.
+ * Sanitized captures are enabled by default. Exact stdin bytes are written only
+ * when `SWIZ_CAPTURE_INCOMING_RAW=1` is explicitly enabled.
  *
  * **Disable** with **`SWIZ_CAPTURE_INCOMING=0`** or **`SWIZ_CAPTURE_INCOMING_PAYLOADS=0`** (also
  * `false`, `no`, `off`). Throttled daemon maintenance enforces configurable age
  * and byte limits across capture pairs and event JSONL files.
  *
- * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with `incoming` (before
- * `normalizeAgentHookPayload`) and `afterNormalizeAndBackfill`; raw companion:
+ * Filename pattern: `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.json` with sanitized
+ * `incoming` and a `normalizationDelta`. Optional raw companion:
  * `{YYYY-MM-DD}T{HH-mm-ss-sss}-{canonicalEventName}-{id}.raw.json`.
  *
- * **JSONL files**: Each dispatch also appends a sanitized raw payload line to
- * `/tmp/swiz-incoming/{canonicalEventName}.jsonl` for easy streaming inspection.
+ * **JSONL files**: Each dispatch also appends a content-free shape/identity summary to
+ * `/tmp/swiz-incoming/{canonicalEventName}.jsonl` for streaming analysis.
  *
  * **Event name normalization:** Filenames use canonical camelCase event names for consistency across agents:
  * - Agent-specific names (PreToolUse, PostToolUse, beforeShellExecution, etc.) are normalized
  * - Maps to canonical names (preToolUse, postToolUse, sessionStart, etc.)
  *
- * **Secrets:** `_env` (injected by `swiz dispatch` for hook subprocesses) is **never** written —
- * it is replaced with `_envKeys` (sorted var names only). `user_email` is redacted.
+ * **Secrets:** sanitization is recursive. `_env` becomes `_envKeys`; credential-like keys,
+ * user email, and high-confidence token strings are redacted. Captures are stored with 0700/0600 modes.
  */
 
-import { randomUUID } from "node:crypto"
-import { appendFile, mkdir, readdir, rename, stat, unlink } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { appendFile, chmod, lstat, mkdir, readdir, rename, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { SWIZ_INCOMING_ROOT } from "../temp-paths.ts"
 import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
+import { writeJsonlTextAtomically } from "../utils/jsonl.ts"
+import { dispatchToolUseId } from "./dispatch-id.ts"
 
 /** Age threshold for deleting prior capture files (10 minutes). */
 export const SWIZ_INCOMING_RETENTION_MS = 10 * 60 * 1000
@@ -49,6 +51,14 @@ interface IncomingCapturePruneState {
 const incomingCapturePruneStateByDir = new Map<string, IncomingCapturePruneState>()
 const jsonlAppendQueueByPath = new Map<string, Promise<void>>()
 const activeCapturePaths = new Set<string>()
+const CAPTURE_DIRECTORY_MODE = 0o700
+const CAPTURE_FILE_MODE = 0o600
+const MAX_CAPTURE_STRING_LENGTH = 64 * 1024
+const SENSITIVE_KEY_RE =
+  /authorization|cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret/i
+const BEARER_SECRET_RE = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi
+const TOKEN_SECRET_RE = /\b(?:github_pat_|gh[pousr]_|sk-(?:proj-)?)[A-Za-z0-9_-]{12,}\b/g
+const AWS_ACCESS_KEY_RE = /\bAKIA[0-9A-Z]{16}\b/g
 
 export interface IncomingCaptureLimits {
   maxAgeMs: number
@@ -83,10 +93,19 @@ function isExplicitlyDisabled(v: string | undefined): boolean {
 }
 
 /** Capture is on unless either env var explicitly disables it. */
-export function shouldCaptureIncomingPayloads(): boolean {
-  if (isExplicitlyDisabled(process.env.SWIZ_CAPTURE_INCOMING)) return false
-  if (isExplicitlyDisabled(process.env.SWIZ_CAPTURE_INCOMING_PAYLOADS)) return false
+export function shouldCaptureIncomingPayloads(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (isExplicitlyDisabled(env.SWIZ_CAPTURE_INCOMING)) return false
+  if (isExplicitlyDisabled(env.SWIZ_CAPTURE_INCOMING_PAYLOADS)) return false
   return true
+}
+
+/** Exact wire payloads are disabled unless explicitly enabled. */
+export function shouldCaptureRawIncomingPayloads(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  return env.SWIZ_CAPTURE_INCOMING_RAW === "1"
 }
 
 /** Safe single path segment for filenames. */
@@ -128,18 +147,72 @@ export function normalizeEventNameToCanonical(eventName: string): string {
  * `process.env` as `_env` — that must not be persisted in `/tmp`.
  */
 export function sanitizeDispatchPayloadForCapture(o: Record<string, any>): Record<string, any> {
+  return sanitizeCaptureObject(o, new WeakSet<object>(), 0)
+}
+
+function sanitizeCaptureString(value: string): string {
+  const redacted = value
+    .replace(BEARER_SECRET_RE, "Bearer [redacted]")
+    .replace(TOKEN_SECRET_RE, "[redacted]")
+    .replace(AWS_ACCESS_KEY_RE, "[redacted]")
+  if (redacted.length <= MAX_CAPTURE_STRING_LENGTH) return redacted
+  return `${redacted.slice(0, MAX_CAPTURE_STRING_LENGTH)}…[truncated ${redacted.length - MAX_CAPTURE_STRING_LENGTH} chars]`
+}
+
+function sanitizeCaptureValue(value: unknown, seen: WeakSet<object>, depth: number): unknown {
+  if (typeof value === "string") return sanitizeCaptureString(value)
+  if (value === null || typeof value !== "object") return value
+  if (depth >= 12) return "[truncated: max depth]"
+  if (seen.has(value)) return "[redacted: circular]"
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const sanitized = value.map((item) => sanitizeCaptureValue(item, seen, depth + 1))
+    seen.delete(value)
+    return sanitized
+  }
+  const sanitized = sanitizeCaptureObject(value as Record<string, unknown>, seen, depth + 1)
+  seen.delete(value)
+  return sanitized
+}
+
+function sanitizeCaptureObject(
+  value: Record<string, unknown>,
+  seen: WeakSet<object>,
+  depth: number
+): Record<string, any> {
   const out: Record<string, any> = {}
-  for (const key of Object.keys(o)) {
+  const envValue = value._env
+  for (const [key, nestedValue] of Object.entries(value)) {
     if (key === "_env") continue
-    out[key] = o[key]
+    if (key === "user_email" || SENSITIVE_KEY_RE.test(key)) {
+      out[key] = "[redacted]"
+      continue
+    }
+    out[key] = sanitizeCaptureValue(nestedValue, seen, depth)
   }
-  if (o._env && typeof o._env === "object" && !Array.isArray(o._env)) {
-    out._envKeys = Object.keys(o._env as Record<string, any>).sort()
-  }
-  if (typeof out.user_email === "string" && out.user_email.includes("@")) {
-    out.user_email = "[redacted]"
+  if (envValue && typeof envValue === "object" && !Array.isArray(envValue)) {
+    out._envKeys = Object.keys(envValue).sort()
   }
   return out
+}
+
+async function ensureIncomingCaptureDirectory(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: CAPTURE_DIRECTORY_MODE })
+  const metadata = await lstat(dir)
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`Incoming capture path is not a secure directory: ${dir}`)
+  }
+  const currentUid = process.getuid?.()
+  if (currentUid !== undefined && metadata.uid !== currentUid) {
+    throw new Error(`Incoming capture directory is owned by another user: ${dir}`)
+  }
+  if ((metadata.mode & 0o777) !== CAPTURE_DIRECTORY_MODE) {
+    await chmod(dir, CAPTURE_DIRECTORY_MODE)
+  }
+}
+
+async function secureCaptureFile(path: string): Promise<void> {
+  await chmod(path, CAPTURE_FILE_MODE)
 }
 
 export function buildIncomingCaptureFilename(hookEventName: string): string {
@@ -256,6 +329,47 @@ async function enforceCaptureLimits(
   }
 }
 
+function enqueueJsonlOperation(path: string, run: () => Promise<void>): Promise<void> {
+  const previous = jsonlAppendQueueByPath.get(path) ?? Promise.resolve()
+  const operation = previous.catch(() => {}).then(run)
+  jsonlAppendQueueByPath.set(path, operation)
+  return operation.finally(() => {
+    if (jsonlAppendQueueByPath.get(path) === operation) jsonlAppendQueueByPath.delete(path)
+  })
+}
+
+async function compactIncomingJsonlByRecordAge(path: string, cutoffMs: number): Promise<void> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return
+  const original = await file.text()
+  let removed = false
+  const retained: string[] = []
+  for (const line of original.split("\n")) {
+    if (!line.trim()) continue
+    try {
+      const record = JSON.parse(line) as Record<string, unknown>
+      const capturedAt =
+        typeof record._capturedAt === "string" ? Date.parse(record._capturedAt) : NaN
+      if (Number.isFinite(capturedAt) && capturedAt < cutoffMs) {
+        removed = true
+        continue
+      }
+    } catch {
+      // Preserve malformed legacy lines; file-age pruning remains their fallback.
+    }
+    retained.push(line)
+  }
+  if (!removed) return
+  if (retained.length === 0) {
+    await unlink(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error
+    })
+    return
+  }
+  await writeJsonlTextAtomically(path, `${retained.join("\n")}\n`)
+  await secureCaptureFile(path)
+}
+
 /** Enforce age and total-byte budgets for capture pairs and JSONL segments. */
 export async function pruneStaleIncomingCaptures(
   dir: string = SWIZ_INCOMING_ROOT,
@@ -264,6 +378,17 @@ export async function pruneStaleIncomingCaptures(
 ): Promise<void> {
   const now = Date.now()
   try {
+    const initialEntries = await readdir(dir, { withFileTypes: true })
+    await Promise.all(
+      initialEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+        .map((entry) => {
+          const path = join(dir, entry.name)
+          return enqueueJsonlOperation(path, () =>
+            compactIncomingJsonlByRecordAge(path, now - maxAgeMs)
+          )
+        })
+    )
     const entries = await readdir(dir, { withFileTypes: true })
     const files = await Promise.all(entries.map((entry) => readCaptureFileInfo(dir, entry)))
     const groups = groupCaptureFiles(files.filter((file): file is CaptureFileInfo => file !== null))
@@ -328,30 +453,52 @@ export function scheduleIncomingDispatchCapture(
 export function buildIncomingDispatchCaptureEnvelope(
   args: IncomingDispatchCaptureArgs
 ): Record<string, any> {
+  const payloadBytes = new TextEncoder().encode(args.payloadStr).byteLength
+  const dispatchId =
+    args.normalizedPayload._swizDispatchId ?? args.incomingBeforeNormalize?._swizDispatchId
+  const toolUseId = dispatchToolUseId(args.normalizedPayload)
   const envelope: Record<string, any> = {
     _swizIncomingCapture: {
+      formatVersion: 2,
       canonicalEvent: args.canonicalEvent,
       hookEventName: args.hookEventName,
       capturedAt: new Date().toISOString(),
       parseError: args.parseError,
-      rawPayloadFile: "",
+      payloadBytes,
+      payloadSha256: createHash("sha256").update(args.payloadStr).digest("hex"),
+      ...(typeof dispatchId === "string" ? { dispatchId } : {}),
+      ...(toolUseId ? { toolUseId } : {}),
     },
   }
 
-  if (args.parseError) {
-    envelope.rawPayload = args.payloadStr
-  } else {
-    if (args.incomingBeforeNormalize) {
-      envelope.incoming = sanitizeDispatchPayloadForCapture(args.incomingBeforeNormalize)
-    }
-    envelope.afterNormalizeAndBackfill = sanitizeDispatchPayloadForCapture(args.normalizedPayload)
+  if (!args.parseError && args.incomingBeforeNormalize) {
+    const incoming = sanitizeDispatchPayloadForCapture(args.incomingBeforeNormalize)
+    const normalized = sanitizeDispatchPayloadForCapture(args.normalizedPayload)
+    envelope.incoming = incoming
+    envelope.normalizationDelta = buildNormalizationDelta(incoming, normalized)
   }
 
   return envelope
 }
 
+function buildNormalizationDelta(
+  incoming: Record<string, any>,
+  normalized: Record<string, any>
+): { set: Record<string, any>; removed: string[] } {
+  const set: Record<string, any> = {}
+  const removed: string[] = []
+  for (const [key, value] of Object.entries(normalized)) {
+    if (!(key in incoming) || JSON.stringify(incoming[key]) !== JSON.stringify(value))
+      set[key] = value
+  }
+  for (const key of Object.keys(incoming)) {
+    if (!(key in normalized)) removed.push(key)
+  }
+  return { set, removed }
+}
+
 /**
- * Append a sanitized raw payload as one JSON line to `/tmp/swiz-incoming/{canonicalEventName}.jsonl`.
+ * Append a content-free payload summary to `/tmp/swiz-incoming/{canonicalEventName}.jsonl`.
  * Caller should check `shouldCaptureIncomingPayloads()` before calling.
  */
 export async function appendPayloadToJsonl(
@@ -363,34 +510,57 @@ export async function appendPayloadToJsonl(
   const canonical = normalizeEventNameToCanonical(hookEventName)
   const safe = sanitizeHookFilenameSegment(canonical)
   const path = join(dir, `${safe}.jsonl`)
-  const sanitized = sanitizeDispatchPayloadForCapture(payload)
-  const line = `${JSON.stringify({ ...sanitized, _capturedAt: new Date().toISOString() })}\n`
+  const line = `${JSON.stringify(summarizeDispatchPayloadForJsonl(payload))}\n`
   const lineBytes = new TextEncoder().encode(line).byteLength
-  const previous = jsonlAppendQueueByPath.get(path) ?? Promise.resolve()
-  const operation = previous
-    .catch(() => {})
-    .then(async () => {
-      await mkdir(dir, { recursive: true })
-      try {
-        const metadata = await stat(path)
-        if (metadata.size > 0 && metadata.size + lineBytes > maxBytes) {
-          const rotatedPath = join(
-            dir,
-            `${safe}.${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}.jsonl`
-          )
-          await rename(path, rotatedPath)
-        }
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e
+  await enqueueJsonlOperation(path, async () => {
+    await ensureIncomingCaptureDirectory(dir)
+    try {
+      const metadata = await stat(path)
+      if (metadata.size > 0 && metadata.size + lineBytes > maxBytes) {
+        const rotatedPath = join(
+          dir,
+          `${safe}.${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}.jsonl`
+        )
+        await rename(path, rotatedPath)
+        await secureCaptureFile(rotatedPath)
       }
-      await appendFile(path, line)
-    })
-  jsonlAppendQueueByPath.set(path, operation)
-  try {
-    await operation
-  } finally {
-    if (jsonlAppendQueueByPath.get(path) === operation) jsonlAppendQueueByPath.delete(path)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e
+    }
+    await appendFile(path, line, { mode: CAPTURE_FILE_MODE })
+    await secureCaptureFile(path)
+  })
+}
+
+export function summarizeDispatchPayloadForJsonl(
+  payload: Record<string, any>
+): Record<string, any> {
+  const sanitized = sanitizeDispatchPayloadForCapture(payload)
+  const toolInput = sanitized.tool_input
+  const summaryKeys = [
+    "session_id",
+    "cwd",
+    "tool_name",
+    "tool_use_id",
+    "tool_call_id",
+    "request_id",
+    "_swizDispatchId",
+    "_agent",
+    "trigger",
+  ] as const
+  const summary: Record<string, any> = {
+    _capturedAt: new Date().toISOString(),
+    _topLevelKeys: Object.keys(sanitized).sort(),
   }
+  for (const key of summaryKeys) {
+    if (sanitized[key] !== undefined) summary[key] = sanitized[key]
+  }
+  if (Array.isArray(sanitized._envKeys)) summary._envKeys = sanitized._envKeys
+  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
+    summary._toolInputKeys = Object.keys(toolInput).sort()
+    summary._toolInputBytes = new TextEncoder().encode(JSON.stringify(toolInput)).byteLength
+  }
+  return summary
 }
 
 /** Fire-and-forget wrapper for `appendPayloadToJsonl`. */
@@ -405,24 +575,31 @@ export function schedulePayloadJsonlAppend(
 
 export async function writeIncomingDispatchCapture(
   args: IncomingDispatchCaptureArgs,
-  dir: string = SWIZ_INCOMING_ROOT
+  dir: string = SWIZ_INCOMING_ROOT,
+  captureRaw: boolean = shouldCaptureRawIncomingPayloads()
 ): Promise<void> {
-  await mkdir(dir, { recursive: true })
+  await ensureIncomingCaptureDirectory(dir)
   const filename = buildIncomingCaptureFilename(args.hookEventName)
-  const rawFilename = buildRawIncomingCaptureFilename(filename)
   const path = join(dir, filename)
-  const rawPath = join(dir, rawFilename)
   const envelope = buildIncomingDispatchCaptureEnvelope(args)
-  envelope._swizIncomingCapture.rawPayloadFile = rawFilename
-  activeCapturePaths.add(rawPath)
   activeCapturePaths.add(path)
+  let rawPath: string | null = null
+  if (captureRaw) {
+    const rawFilename = buildRawIncomingCaptureFilename(filename)
+    rawPath = join(dir, rawFilename)
+    envelope._swizIncomingCapture.rawPayloadFile = rawFilename
+    activeCapturePaths.add(rawPath)
+  }
   try {
-    await Promise.all([
-      Bun.write(rawPath, args.payloadStr),
-      Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`),
-    ])
+    const writes: Promise<unknown>[] = [
+      Bun.write(path, `${JSON.stringify(envelope, null, 2)}\n`).then(() => secureCaptureFile(path)),
+    ]
+    if (rawPath) {
+      writes.push(Bun.write(rawPath, args.payloadStr).then(() => secureCaptureFile(rawPath!)))
+    }
+    await Promise.all(writes)
   } finally {
-    activeCapturePaths.delete(rawPath)
+    if (rawPath) activeCapturePaths.delete(rawPath)
     activeCapturePaths.delete(path)
   }
 }

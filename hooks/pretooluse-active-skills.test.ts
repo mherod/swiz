@@ -16,8 +16,13 @@ function activeSkillInput(skills: string[]) {
   return {
     session_id: "active-skills-test",
     cwd: process.cwd(),
+    transcript_path: "/definitely/unavailable/transcript.jsonl",
     tool_name: "Read",
     tool_input: { file_path: "README.md" },
+    _effectiveSettings: {
+      skillRecencyMaxTurns: 30,
+      skillRecencyMaxAgeMinutes: 20,
+    },
     _currentSessionToolUsage: {
       toolNames: skills.map(() => "Skill"),
       skillInvocations: skills,

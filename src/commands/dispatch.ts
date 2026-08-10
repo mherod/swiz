@@ -35,6 +35,7 @@ import {
   shouldCaptureIncomingPayloads,
   withLogBuffer,
 } from "../dispatch"
+import { dispatchToolUseId, ensureDispatchId } from "../dispatch/dispatch-id.ts"
 import { scheduleIncomingDispatchCapture } from "../dispatch/incoming-capture.ts"
 import { normalizeStopDispatchResponseInPlace } from "../dispatch/stop-response.ts"
 import { getHomeDirOrNull } from "../home.ts"
@@ -256,6 +257,8 @@ interface CliTimingInfo {
   sessionId?: string
   cwd: string
   toolName?: string
+  dispatchId?: string
+  toolUseId?: string
   totalMs: number
   stdinMs: number
   daemonMs: number
@@ -276,6 +279,8 @@ function appendCliTimingLog(info: CliTimingInfo): Promise<void> {
     sessionId: info.sessionId,
     cwd: info.cwd,
     toolName: info.toolName,
+    dispatchId: info.dispatchId,
+    toolUseId: info.toolUseId,
     stdoutSnippet: [
       `stdin: ${info.stdinMs}ms`,
       `daemon: ${info.daemonMs}ms (${info.route === "daemon" ? "forwarded" : "fallback"})`,
@@ -296,6 +301,8 @@ interface DispatchTiming {
   sessionId?: string
   cwd: string
   toolName?: string
+  dispatchId?: string
+  toolUseId?: string
   t0: number
   stdinMs: number
 }
@@ -486,7 +493,18 @@ async function runDispatch(
   log(`   ⏱ cli:stdin: ${stdinMs}ms`)
 
   const { payload, parseError } = parsePayload(payloadStr)
+  if (parseError && shouldCaptureIncomingPayloads()) {
+    scheduleIncomingDispatchCapture({
+      canonicalEvent,
+      hookEventName,
+      parseError: true,
+      payloadStr,
+      incomingBeforeNormalize: null,
+      normalizedPayload: {},
+    })
+  }
   assertDispatchInboundNotParseError(canonicalEvent, parseError)
+  const dispatchId = ensureDispatchId(payload)
   const incomingBeforeNormalize = structuredClone(payload)
   normalizeAgentHookPayload(payload)
   // Recover/infer missing required fields from env vars, the dispatch route,
@@ -498,6 +516,7 @@ async function runDispatch(
   const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
   const cwd = payload.cwd as string
   const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
+  const toolUseId = dispatchToolUseId(payload)
   const normalizedPayloadForCapture = structuredClone(payload)
 
   if (shouldCaptureIncomingPayloads()) {
@@ -535,6 +554,8 @@ async function runDispatch(
     sessionId,
     cwd,
     toolName,
+    dispatchId,
+    toolUseId,
     t0,
     stdinMs,
   }

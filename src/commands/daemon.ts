@@ -40,6 +40,7 @@ import {
   TranscriptIndexCache,
 } from "./daemon/runtime-cache.ts"
 import { sessionDataCache } from "./daemon/session-data.ts"
+import { sessionToolCallPersistenceQueue } from "./daemon/session-tool-call-persistence.ts"
 import {
   buildSnapshotFingerprint,
   type CachedSnapshot,
@@ -531,10 +532,14 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const stopHookLogMaintenance = startHookLogMaintenance()
 
   let isClosing = false
-  const cleanup = (reason: string) => {
+  const cleanup = async (reason: string) => {
     if (isClosing) return
     isClosing = true
     process.stderr.write(`\nClosing daemon components (${reason})... `)
+    if (reason !== "exit") {
+      await Promise.race([sessionToolCallPersistenceQueue.flush(), Bun.sleep(2_000)])
+      process.stderr.write("Session telemetry... ")
+    }
     caches.watchers.close()
     process.stderr.write("Watchers... ")
     transcriptMonitor.terminate()
@@ -555,9 +560,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     if (reason !== "exit") process.exit(0)
   }
 
-  process.on("SIGINT", () => cleanup("SIGINT"))
-  process.on("SIGTERM", () => cleanup("SIGTERM"))
-  process.on("exit", () => cleanup("exit"))
+  process.on("SIGINT", () => void cleanup("SIGINT"))
+  process.on("SIGTERM", () => void cleanup("SIGTERM"))
+  process.on("exit", () => void cleanup("exit"))
 
   const cwd = process.cwd()
   const projectRoot = await resolveProjectRoot(cwd)

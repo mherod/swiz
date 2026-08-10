@@ -34,6 +34,7 @@ import {
   releaseDispatchSessionLines,
   type TranscriptSummary,
 } from "../transcript-summary.ts"
+import { dispatchToolUseId, ensureDispatchId } from "./dispatch-id.ts"
 import {
   assertDispatchInboundNotParseError,
   assertEnrichedDispatchPayloadRecord,
@@ -612,6 +613,9 @@ function buildDispatchLogEntries(
   dispatchDurationMs: number
 ): HookLogEntry[] {
   const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+  const dispatchId = ensureDispatchId(ctx.payload)
+  const toolUseId = dispatchToolUseId(ctx.payload)
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(ctx.payload)).byteLength
 
   const logEntries: HookLogEntry[] = executions.map((exec) => ({
     ts: new Date(exec.startTime).toISOString(),
@@ -626,6 +630,9 @@ function buildDispatchLogEntries(
     sessionId,
     cwd: ctx.cwd,
     toolName: ctx.toolName,
+    dispatchId,
+    toolUseId,
+    payloadBytes,
     stdoutSnippet: exec.stdoutSnippet || undefined,
     stderrSnippet: exec.stderrSnippet || undefined,
   }))
@@ -644,6 +651,9 @@ function buildDispatchLogEntries(
     sessionId,
     cwd: ctx.cwd,
     toolName: ctx.toolName,
+    dispatchId,
+    toolUseId,
+    payloadBytes,
   })
 
   return logEntries
@@ -693,11 +703,7 @@ async function prepareDispatchGroups(
 
 /** Fallback uses RFC 4122 UUID v4 when the agent omits `request_id`. */
 export function resolveLifecycleRequestId(payload: Record<string, any>): string {
-  const fromPayload = payload.request_id as string | undefined
-  if (typeof fromPayload === "string" && fromPayload.length > 0) {
-    return fromPayload
-  }
-  return randomUUID()
+  return ensureDispatchId(payload)
 }
 
 function assertDispatchResponseMatchesWire(

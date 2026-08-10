@@ -16,14 +16,17 @@ import { messageFromUnknownError } from "../utils/hook-json-helpers.ts"
 
 interface CaptureEnvelope {
   _swizIncomingCapture: {
+    formatVersion?: number
     canonicalEvent: string
     hookEventName: string
     capturedAt: string
     parseError: boolean
+    payloadBytes?: number
+    payloadSha256?: string
   }
   incoming?: Record<string, any>
   afterNormalizeAndBackfill?: Record<string, any>
-  rawPayload?: string
+  normalizationDelta?: { set: Record<string, any>; removed: string[] }
 }
 
 interface CaptureStats {
@@ -38,16 +41,18 @@ interface CaptureStats {
 }
 
 /** Get all capture files. */
-async function listCaptureFiles(): Promise<Array<{ name: string; mtimeMs: number }>> {
+async function listCaptureFiles(
+  dir: string = SWIZ_INCOMING_ROOT
+): Promise<Array<{ name: string; mtimeMs: number }>> {
   try {
-    const entries = await readdir(SWIZ_INCOMING_ROOT, { withFileTypes: true })
+    const entries = await readdir(dir, { withFileTypes: true })
     const files: Array<{ name: string; mtimeMs: number }> = []
 
     for (const ent of entries) {
-      if (!ent.isFile() || !ent.name.endsWith(".json")) continue
+      if (!ent.isFile() || !ent.name.endsWith(".json") || ent.name.endsWith(".raw.json")) continue
 
       try {
-        const fullPath = join(SWIZ_INCOMING_ROOT, ent.name)
+        const fullPath = join(dir, ent.name)
         const s = await stat(fullPath)
         files.push({ name: ent.name, mtimeMs: s.mtimeMs })
       } catch {
@@ -62,23 +67,45 @@ async function listCaptureFiles(): Promise<Array<{ name: string; mtimeMs: number
 }
 
 /** Load a capture envelope from disk. */
-async function loadCapture(filename: string): Promise<CaptureEnvelope | null> {
+function isCaptureEnvelope(value: unknown): value is CaptureEnvelope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const metadata = (value as Record<string, unknown>)._swizIncomingCapture
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false
+  const record = metadata as Record<string, unknown>
+  return (
+    typeof record.canonicalEvent === "string" &&
+    typeof record.hookEventName === "string" &&
+    typeof record.capturedAt === "string" &&
+    typeof record.parseError === "boolean"
+  )
+}
+
+async function loadCapture(
+  filename: string,
+  dir: string = SWIZ_INCOMING_ROOT
+): Promise<CaptureEnvelope | null> {
   try {
-    const path = join(SWIZ_INCOMING_ROOT, filename)
+    const path = join(dir, filename)
     const content = await Bun.file(path).text()
-    return JSON.parse(content) as CaptureEnvelope
+    const parsed: unknown = JSON.parse(content)
+    return isCaptureEnvelope(parsed) ? parsed : null
   } catch {
     return null
   }
 }
 
 /** Compute summary statistics about captures. */
-async function computeStats(): Promise<CaptureStats> {
-  const files = await listCaptureFiles()
-  const oldest = files[0]
-  const newest = files[files.length - 1]
+async function computeStats(dir: string = SWIZ_INCOMING_ROOT): Promise<CaptureStats> {
+  const files = await listCaptureFiles(dir)
+  const valid: Array<{ file: { name: string; mtimeMs: number }; capture: CaptureEnvelope }> = []
+  for (const file of files) {
+    const capture = await loadCapture(file.name, dir)
+    if (capture) valid.push({ file, capture })
+  }
+  const oldest = valid[0]?.file
+  const newest = valid.at(-1)?.file
   const stats: CaptureStats = {
-    total: files.length,
+    total: valid.length,
     byCanonicalEvent: {},
     byHookEventName: {},
     parseErrors: 0,
@@ -88,10 +115,7 @@ async function computeStats(): Promise<CaptureStats> {
     newestTime: newest?.mtimeMs ?? null,
   }
 
-  for (const file of files) {
-    const cap = await loadCapture(file.name)
-    if (!cap) continue
-
+  for (const { capture: cap } of valid) {
     const { canonicalEvent, hookEventName, parseError } = cap._swizIncomingCapture
     stats.byCanonicalEvent[canonicalEvent] = (stats.byCanonicalEvent[canonicalEvent] ?? 0) + 1
     stats.byHookEventName[hookEventName] = (stats.byHookEventName[hookEventName] ?? 0) + 1
@@ -103,13 +127,14 @@ async function computeStats(): Promise<CaptureStats> {
 
 /** Filter captures by canonical event. */
 async function filterByCanonicalEvent(
-  event: string
+  event: string,
+  dir: string = SWIZ_INCOMING_ROOT
 ): Promise<Array<{ file: string; capture: CaptureEnvelope }>> {
-  const files = await listCaptureFiles()
+  const files = await listCaptureFiles(dir)
   const results: Array<{ file: string; capture: CaptureEnvelope }> = []
 
   for (const file of files) {
-    const cap = await loadCapture(file.name)
+    const cap = await loadCapture(file.name, dir)
     if (cap && cap._swizIncomingCapture.canonicalEvent === event) {
       results.push({ file: file.name, capture: cap })
     }
@@ -121,13 +146,14 @@ async function filterByCanonicalEvent(
 /** Filter captures by hook event name (exact or substring). */
 async function filterByHookEventName(
   eventName: string,
-  substring = false
+  substring = false,
+  dir: string = SWIZ_INCOMING_ROOT
 ): Promise<Array<{ file: string; capture: CaptureEnvelope }>> {
-  const files = await listCaptureFiles()
+  const files = await listCaptureFiles(dir)
   const results: Array<{ file: string; capture: CaptureEnvelope }> = []
 
   for (const file of files) {
-    const cap = await loadCapture(file.name)
+    const cap = await loadCapture(file.name, dir)
     if (cap) {
       const hookEvent = cap._swizIncomingCapture.hookEventName
       const matches = substring ? hookEvent.includes(eventName) : hookEvent === eventName
@@ -141,12 +167,14 @@ async function filterByHookEventName(
 }
 
 /** Get captures with parse errors. */
-async function getParseErrors(): Promise<Array<{ file: string; capture: CaptureEnvelope }>> {
-  const files = await listCaptureFiles()
+async function getParseErrors(
+  dir: string = SWIZ_INCOMING_ROOT
+): Promise<Array<{ file: string; capture: CaptureEnvelope }>> {
+  const files = await listCaptureFiles(dir)
   const results: Array<{ file: string; capture: CaptureEnvelope }> = []
 
   for (const file of files) {
-    const cap = await loadCapture(file.name)
+    const cap = await loadCapture(file.name, dir)
     if (cap?._swizIncomingCapture.parseError) {
       results.push({ file: file.name, capture: cap })
     }
@@ -216,9 +244,8 @@ Options:
         console.log(`Found ${errors.length} parse error(s):`)
         for (const { file, capture } of errors.slice(0, limit)) {
           console.log(`\n${file}`)
-          console.log(
-            `  raw payload (first 200 chars): ${(capture.rawPayload ?? "").slice(0, 200)}`
-          )
+          console.log(`  payload bytes: ${capture._swizIncomingCapture.payloadBytes ?? "unknown"}`)
+          console.log(`  sha256: ${capture._swizIncomingCapture.payloadSha256 ?? "unknown"}`)
         }
       }
     } else if (command === "event" && args[1]) {

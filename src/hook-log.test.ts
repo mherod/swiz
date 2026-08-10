@@ -68,6 +68,43 @@ describe("hook-log configuration", () => {
 })
 
 describe("HookLogStore", () => {
+  it("aggregates hook outcomes, latency, payload size, and skip reasons", async () => {
+    const { store } = await createStore()
+    await store.append([
+      {
+        ts: new Date().toISOString(),
+        event: "preToolUse",
+        hookEventName: "PreToolUse",
+        hook: "pretooluse-fast.ts",
+        status: "ok",
+        durationMs: 12,
+        exitCode: 0,
+        payloadBytes: 100,
+      },
+      {
+        ts: new Date().toISOString(),
+        event: "preToolUse",
+        hookEventName: "PreToolUse",
+        hook: "pretooluse-fast.ts",
+        status: "skipped",
+        skipReason: "cooldown",
+        durationMs: 3,
+        exitCode: null,
+        payloadBytes: 60,
+      },
+    ])
+
+    expect(store.getMetrics().aggregates["preToolUse:pretooluse-fast.ts"]).toEqual({
+      count: 2,
+      totalDurationMs: 15,
+      maxDurationMs: 12,
+      payloadBytesTotal: 160,
+      payloadBytesMax: 100,
+      statuses: { ok: 1, skipped: 1 },
+      skipReasons: { cooldown: 1 },
+    })
+  })
+
   it("serializes 100,000 records, compacts by bytes, and preserves reader ordering", async () => {
     const maxBytes = 4 * 1024 * 1024
     const { logPath, store } = await createStore({ maxBytes })

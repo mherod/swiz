@@ -193,13 +193,14 @@ function buildAcceptedInvocation(
 async function evaluate(input: ShellHookInput) {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
+  const command: string = input.tool_input?.command ?? ""
+  const parsed = parseInvocation(command)
+  if (!parsed) return {}
+
   const detection = await detectPackageManagerDetails(resolveCwd(input))
   if (!detection) return {}
   const { packageManager: pm, signals } = detection
 
-  const command: string = input.tool_input?.command ?? ""
-  const parsed = parseInvocation(command)
-  if (!parsed) return {}
   if (!isImplausibleInvocation(parsed.invoked, pm, signals)) {
     return buildAcceptedInvocation(parsed, pm, signals)
   }

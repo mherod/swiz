@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, readdir, readFile, utimes, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -19,6 +19,8 @@ import {
   scheduleIncomingDispatchCapture,
   scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
+  shouldCaptureRawIncomingPayloads,
+  summarizeDispatchPayloadForJsonl,
   writeIncomingDispatchCapture,
 } from "./incoming-capture.ts"
 
@@ -55,6 +57,12 @@ describe("incoming-capture", () => {
     }
   })
 
+  it("requires an explicit opt-in for exact raw captures", () => {
+    expect(shouldCaptureRawIncomingPayloads({})).toBe(false)
+    expect(shouldCaptureRawIncomingPayloads({ SWIZ_CAPTURE_INCOMING_RAW: "true" })).toBe(false)
+    expect(shouldCaptureRawIncomingPayloads({ SWIZ_CAPTURE_INCOMING_RAW: "1" })).toBe(true)
+  })
+
   it("sanitizeDispatchPayloadForCapture drops _env values and redacts user_email", () => {
     const out = sanitizeDispatchPayloadForCapture({
       cwd: "/proj",
@@ -67,6 +75,21 @@ describe("incoming-capture", () => {
     expect(out.user_email).toBe("[redacted]")
     expect(out.cwd).toBe("/proj")
     expect(out.tool_name).toBe("Bash")
+  })
+
+  it("recursively redacts nested credentials and bounds large strings", () => {
+    const out = sanitizeDispatchPayloadForCapture({
+      nested: {
+        authorization: "Bearer abc.def.ghi",
+        message: `prefix ghp_${"a".repeat(20)} ${"x".repeat(70_000)}`,
+        _env: { API_KEY: "secret" },
+      },
+    })
+    expect(out.nested.authorization).toBe("[redacted]")
+    expect(out.nested._env).toBeUndefined()
+    expect(out.nested._envKeys).toEqual(["API_KEY"])
+    expect(out.nested.message).not.toContain("ghp_")
+    expect(out.nested.message).toContain("[truncated")
   })
 
   it("buildIncomingDispatchCaptureEnvelope keeps incoming raw before normalization", () => {
@@ -82,6 +105,7 @@ describe("incoming-capture", () => {
       },
       normalizedPayload: {
         tool_name: "normalized",
+        _swizDispatchId: "dispatch-1",
         user_email: "user@example.com",
         cwd: "/proj",
         _env: { SECRET: "x" },
@@ -91,11 +115,27 @@ describe("incoming-capture", () => {
     expect(envelope._swizIncomingCapture.canonicalEvent).toBe("preToolUse")
     expect(envelope._swizIncomingCapture.hookEventName).toBe("PreToolUse")
     expect(envelope._swizIncomingCapture.parseError).toBe(false)
+    expect(envelope._swizIncomingCapture.dispatchId).toBe("dispatch-1")
     expect(envelope.incoming.tool_name).toBe("raw")
     expect(envelope.incoming._env).toBeUndefined()
     expect(envelope.incoming.user_email).toBe("[redacted]")
-    expect(envelope.afterNormalizeAndBackfill.tool_name).toBe("normalized")
-    expect(envelope.afterNormalizeAndBackfill.cwd).toBe("/proj")
+    expect(envelope._swizIncomingCapture.formatVersion).toBe(2)
+    expect(envelope.normalizationDelta.set.tool_name).toBe("normalized")
+    expect(envelope.normalizationDelta.set.cwd).toBe("/proj")
+    expect(envelope.afterNormalizeAndBackfill).toBeUndefined()
+  })
+
+  it("records an empty normalization delta when normalization changes nothing", () => {
+    const envelope = buildIncomingDispatchCaptureEnvelope({
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      parseError: false,
+      payloadStr: '{"tool_name":"Read"}',
+      incomingBeforeNormalize: { tool_name: "Read" },
+      normalizedPayload: { tool_name: "Read" },
+    })
+
+    expect(envelope.normalizationDelta).toEqual({ set: {}, removed: [] })
   })
 
   it("sanitizeHookFilenameSegment strips unsafe characters", () => {
@@ -131,7 +171,7 @@ describe("incoming-capture", () => {
     ).toBe("2026-01-01T00-00-00.000-preToolUse-abc12345.raw.json")
   })
 
-  it("writeIncomingDispatchCapture writes exact raw wire payload bytes", async () => {
+  it("writeIncomingDispatchCapture omits exact raw wire payload bytes by default", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-inc-raw-"))
     const rawPayload = '{"tool_name":"Bash","user_email":"user@example.com"}'
     await writeIncomingDispatchCapture(
@@ -154,31 +194,89 @@ describe("incoming-capture", () => {
     )
 
     const files = await readdir(dir)
-    const rawFile = files.find((file) => file.endsWith(".raw.json"))
     const envelopeFile = files.find((file) => file.endsWith(".json") && !file.endsWith(".raw.json"))
-    expect(rawFile).toBeDefined()
+    expect(files.some((file) => file.endsWith(".raw.json"))).toBe(false)
     expect(envelopeFile).toBeDefined()
-    expect(await readFile(join(dir, rawFile ?? ""), "utf8")).toBe(rawPayload)
 
     const envelope = JSON.parse(await readFile(join(dir, envelopeFile ?? ""), "utf8")) as Record<
       string,
       any
     >
-    expect(envelope._swizIncomingCapture.rawPayloadFile).toBe(rawFile)
+    expect(envelope._swizIncomingCapture.rawPayloadFile).toBeUndefined()
     expect(envelope.incoming.user_email).toBe("[redacted]")
   })
 
-  it("appendPayloadToJsonl writes sanitized JSON line to {event}.jsonl", async () => {
+  it("writes exact raw wire payload bytes only when explicitly enabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-raw-opt-in-"))
+    const rawPayload = '{"token":"secret-value"}'
+    await writeIncomingDispatchCapture(
+      {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        parseError: false,
+        payloadStr: rawPayload,
+        incomingBeforeNormalize: { token: "secret-value" },
+        normalizedPayload: { token: "secret-value" },
+      },
+      dir,
+      true
+    )
+
+    const files = await readdir(dir)
+    const rawFile = files.find((file) => file.endsWith(".raw.json"))
+    expect(rawFile).toBeDefined()
+    expect(await readFile(join(dir, rawFile ?? ""), "utf8")).toBe(rawPayload)
+  })
+
+  it("records parse errors without embedding malformed payload bytes", () => {
+    const malformed = '{"token":"secret-value"'
+    const envelope = buildIncomingDispatchCaptureEnvelope({
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      parseError: true,
+      payloadStr: malformed,
+      incomingBeforeNormalize: null,
+      normalizedPayload: {},
+    })
+    expect(JSON.stringify(envelope)).not.toContain(malformed)
+    expect(envelope.rawPayload).toBeUndefined()
+    expect(envelope._swizIncomingCapture.payloadBytes).toBeGreaterThan(0)
+  })
+
+  it("appendPayloadToJsonl writes a content-free payload summary to {event}.jsonl", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-inc-jsonl-"))
-    const payload = { tool_name: "Bash", _env: { SECRET: "x" }, user_email: "u@e.com" }
+    const payload = {
+      tool_name: "Bash",
+      tool_input: { command: "sensitive command" },
+      _env: { SECRET: "x" },
+      user_email: "u@e.com",
+    }
     await appendPayloadToJsonl("PreToolUse", payload, dir)
     const content = await readFile(join(dir, "preToolUse.jsonl"), "utf8")
     const obj = JSON.parse(content.trim()) as Record<string, unknown>
     expect(obj._env).toBeUndefined()
     expect(obj._envKeys).toEqual(["SECRET"])
-    expect(obj.user_email).toBe("[redacted]")
+    expect(obj.user_email).toBeUndefined()
+    expect(obj.tool_input).toBeUndefined()
+    expect(obj._toolInputKeys).toEqual(["command"])
+    expect(content).not.toContain("sensitive command")
     expect(obj.tool_name).toBe("Bash")
     expect(typeof obj._capturedAt).toBe("string")
+  })
+
+  it("summarizes JSONL payload shape without content-bearing values", () => {
+    const summary = summarizeDispatchPayloadForJsonl({
+      session_id: "session-1",
+      tool_name: "Edit",
+      tool_input: { file_path: "/secret/path", new_string: "private contents" },
+    })
+    expect(summary).toMatchObject({
+      session_id: "session-1",
+      tool_name: "Edit",
+      _toolInputKeys: ["file_path", "new_string"],
+    })
+    expect(JSON.stringify(summary)).not.toContain("private contents")
+    expect(JSON.stringify(summary)).not.toContain("/secret/path")
   })
 
   it("appendPayloadToJsonl appends successive lines to the same file", async () => {
@@ -209,8 +307,8 @@ describe("incoming-capture", () => {
   it("rotates event JSONL before the configured segment budget is exceeded", async () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-inc-jsonl-rotate-"))
     const payload = { value: "x".repeat(80) }
-    await appendPayloadToJsonl("preToolUse", payload, dir, 180)
-    await appendPayloadToJsonl("preToolUse", payload, dir, 180)
+    await appendPayloadToJsonl("preToolUse", payload, dir, 100)
+    await appendPayloadToJsonl("preToolUse", payload, dir, 100)
 
     const jsonlFiles = (await readdir(dir)).filter((file) => file.endsWith(".jsonl"))
     expect(jsonlFiles).toHaveLength(2)
@@ -225,6 +323,27 @@ describe("incoming-capture", () => {
     await appendPayloadToJsonl("PostToolUse", { cwd: "/x" }, dir)
     const exists = await Bun.file(join(dir, "postToolUse.jsonl")).exists()
     expect(exists).toBe(true)
+  })
+
+  it("secures capture directories and files", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "swiz-inc-modes-"))
+    const dir = join(parent, "captures")
+    await appendPayloadToJsonl("preToolUse", { cwd: "/x" }, dir)
+    await writeIncomingDispatchCapture(
+      {
+        canonicalEvent: "preToolUse",
+        hookEventName: "PreToolUse",
+        parseError: false,
+        payloadStr: "{}",
+        incomingBeforeNormalize: {},
+        normalizedPayload: {},
+      },
+      dir
+    )
+    expect((await stat(dir)).mode & 0o777).toBe(0o700)
+    for (const file of await readdir(dir)) {
+      expect((await stat(join(dir, file))).mode & 0o777).toBe(0o600)
+    }
   })
 
   it("pruneStaleIncomingCaptures removes stale capture pairs and JSONL", async () => {
@@ -248,6 +367,25 @@ describe("incoming-capture", () => {
     expect(await Bun.file(oldRawPath).exists()).toBe(false)
     expect(await Bun.file(oldJsonlPath).exists()).toBe(false)
     expect(await Bun.file(freshPath).exists()).toBe(true)
+  })
+
+  it("prunes stale records from an actively appended JSONL segment", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-inc-prune-records-"))
+    const path = join(dir, "preToolUse.jsonl")
+    const stale = new Date(Date.now() - SWIZ_INCOMING_RETENTION_MS - 1_000).toISOString()
+    const fresh = new Date().toISOString()
+    await writeFile(
+      path,
+      `${JSON.stringify({ request_id: "stale", _capturedAt: stale })}\n${JSON.stringify({ request_id: "fresh", _capturedAt: fresh })}\n`
+    )
+
+    await pruneStaleIncomingCaptures(dir, SWIZ_INCOMING_RETENTION_MS)
+
+    const records = (await readFile(path, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(records.map((record) => record.request_id)).toEqual(["fresh"])
   })
 
   it("pruneStaleIncomingCaptures evicts oldest pairs to enforce the byte budget", async () => {
@@ -331,13 +469,16 @@ describe("incoming-capture", () => {
         scheduledAt + SWIZ_INCOMING_PRUNE_INTERVAL_MS - 1
       )
     ).toBe(false)
-    expect(
-      scheduleStaleIncomingCapturePrune(
+    let scheduledAfterInterval = false
+    for (let attempt = 0; attempt < 50 && !scheduledAfterInterval; attempt += 1) {
+      scheduledAfterInterval = scheduleStaleIncomingCapturePrune(
         dir,
         SWIZ_INCOMING_RETENTION_MS,
         scheduledAt + SWIZ_INCOMING_PRUNE_INTERVAL_MS
       )
-    ).toBe(true)
+      if (!scheduledAfterInterval) await Bun.sleep(1)
+    }
+    expect(scheduledAfterInterval).toBe(true)
   })
 
   it("writes concurrent capture pairs with unique filenames", async () => {
@@ -357,7 +498,7 @@ describe("incoming-capture", () => {
         )
       )
     )
-    expect(await readdir(dir)).toHaveLength(24)
+    expect(await readdir(dir)).toHaveLength(12)
   })
 
   it("scheduled capture fails open when the destination is not a directory", async () => {

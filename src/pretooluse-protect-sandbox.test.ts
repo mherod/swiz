@@ -124,11 +124,30 @@ describe("isSafeReadOnlyShellCommand", () => {
     )
   })
 
+  it("allows semicolon chains when every command remains read-only", () => {
+    expect(
+      isSafeReadOnlyShellCommand(
+        "wc -l ~/.agents/skills/example/one.md ~/.agents/skills/example/two.md; " +
+          "find ~/.agents/skills/example/presets -maxdepth 1 -type f -print; " +
+          "sed -n '1,320p' ~/.agents/skills/example/one.md"
+      )
+    ).toBe(true)
+    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md; head ~/.agents/README.md")).toBe(
+      true
+    )
+  })
+
+  it("rejects write-capable find actions", () => {
+    expect(isSafeReadOnlyShellCommand("find ~/.agents/skills -type f -delete")).toBe(false)
+    expect(isSafeReadOnlyShellCommand("find ~/.agents/skills -type f -exec echo {} +")).toBe(false)
+    expect(
+      isSafeReadOnlyShellCommand("find ~/.agents/skills -type f -fprint /tmp/skills.txt")
+    ).toBe(false)
+  })
+
   it("rejects unsafe chaining, redirects, and command substitution", () => {
     expect(isSafeReadOnlyShellCommand("cat ~/.swiz/settings.json && echo done")).toBe(false)
-    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md; head ~/.agents/README.md")).toBe(
-      false
-    )
+    expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md; echo done")).toBe(false)
     expect(isSafeReadOnlyShellCommand("cat ~/.agents/AGENTS.md || head ~/.agents/README.md")).toBe(
       false
     )

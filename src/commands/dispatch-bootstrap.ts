@@ -9,6 +9,7 @@
  */
 
 import { appendFile } from "node:fs/promises"
+import { ensureDispatchId } from "../dispatch/dispatch-id.ts"
 import {
   scheduleIncomingDispatchCapture,
   shouldCaptureIncomingPayloads,
@@ -251,7 +252,23 @@ export async function runThinDispatch(
     canonicalEvent = parsedArgs.canonicalEvent
     hookEventName = parsedArgs.hookEventName
     const rawPayloadStr = await readStdinPayload()
-    const payload = parsePayload(rawPayloadStr, canonicalEvent)
+    let payload: Record<string, any>
+    try {
+      payload = parsePayload(rawPayloadStr, canonicalEvent)
+    } catch (error) {
+      if (shouldCaptureIncomingPayloads()) {
+        scheduleIncomingDispatchCapture({
+          canonicalEvent,
+          hookEventName,
+          parseError: true,
+          payloadStr: rawPayloadStr,
+          incomingBeforeNormalize: null,
+          normalizedPayload: {},
+        })
+      }
+      throw error
+    }
+    ensureDispatchId(payload)
     const incomingBeforeNormalize = structuredClone(payload)
     normalizeAgentHookPayload(payload)
     await backfillPayload(payload)

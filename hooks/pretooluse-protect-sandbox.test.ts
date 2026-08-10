@@ -231,6 +231,21 @@ describe("pretooluse-protect-sandbox (skill file reads #607)", () => {
     expect(result.decision).toBe("allow")
   })
 
+  test("allows semicolon-delimited read-only inspection under the shared ~/.agents root", async () => {
+    const skillRoot = join(TEST_HOME, ".agents", "skills", "verify-requirements")
+    const reference = join(skillRoot, "references", "requirements-document-contract.md")
+    const result = await runPinnedHomeBashHook(
+      `wc -l ${reference}; find ${join(skillRoot, "presets")} -maxdepth 1 -type f -print; sed -n '1,320p' ${reference}`
+    )
+    expect(result.decision).toBe("allow")
+  })
+
+  test("blocks write-capable find actions under the shared ~/.agents root", async () => {
+    const skillRoot = join(TEST_HOME, ".agents", "skills", "verify-requirements")
+    const result = await runPinnedHomeBashHook(`find ${skillRoot} -type f -delete`)
+    expect(result.decision).toBe("deny")
+  })
+
   test("allows awk line-range inspection under the shared ~/.agents/skills root", async () => {
     const skillPath = join(TEST_HOME, ".agents", "skills", "work-on-issue", "SKILL.md")
     const result = await runPinnedHomeBashHook(`awk 'NR>=251 && NR<=450 {print}' ${skillPath}`)

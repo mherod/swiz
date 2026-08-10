@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 export const TMP_ROOT = tmpdir()
 export const PUBLIC_TMP_ROOT = "/tmp"
 
-/** Incoming dispatch payload dumps (on by default; disable with `SWIZ_CAPTURE_INCOMING=0`). See `incoming-capture.ts`. */
+/** Sanitized incoming dispatch captures (raw bytes require `SWIZ_CAPTURE_INCOMING_RAW=1`). */
 export const SWIZ_INCOMING_ROOT = `${PUBLIC_TMP_ROOT}/swiz-incoming`
 
 export function swizDispatchLogPath(): string {

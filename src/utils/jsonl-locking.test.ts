@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { TMP_ROOT } from "../temp-paths.ts"
 import { appendJsonlEntry, readJsonlFileUntyped, writeJsonlFile } from "./jsonl.ts"
@@ -81,6 +81,37 @@ describe("JSONL locking", () => {
 
       const entries = await readJsonlFileUntyped(filePath)
       expect(entries).toEqual([{ id: 1 }])
+    } finally {
+      await rm(testDir, { recursive: true, force: true })
+    }
+  })
+
+  it("appends without replacing the existing JSONL file", async () => {
+    const testDir = makeTestDir("preserve-inode")
+    try {
+      const filePath = join(testDir, "entries.jsonl")
+      await writeJsonlFile(filePath, [{ id: 1 }])
+      const inodeBefore = (await stat(filePath)).ino
+
+      await appendJsonlEntry(filePath, { id: 2 })
+
+      expect((await stat(filePath)).ino).toBe(inodeBefore)
+      expect(await readJsonlFileUntyped(filePath)).toEqual([{ id: 1 }, { id: 2 }])
+    } finally {
+      await rm(testDir, { recursive: true, force: true })
+    }
+  })
+
+  it("separates an existing unterminated line before appending", async () => {
+    const testDir = makeTestDir("unterminated")
+    try {
+      const filePath = join(testDir, "entries.jsonl")
+      await mkdir(testDir, { recursive: true })
+      await Bun.write(filePath, '{"id":1}')
+
+      await appendJsonlEntry(filePath, { id: 2 })
+
+      expect(await Bun.file(filePath).text()).toBe('{"id":1}\n{"id":2}\n')
     } finally {
       await rm(testDir, { recursive: true, force: true })
     }

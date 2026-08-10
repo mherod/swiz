@@ -22,6 +22,7 @@
  * run() inputs without manually specifying the generic parameter.
  */
 
+import { ensureDispatchId } from "./dispatch/dispatch-id.ts"
 import {
   shouldCaptureIncomingPayloads,
   writeIncomingDispatchCapture,
@@ -86,14 +87,38 @@ async function readSwizHookStdinRaw(): Promise<string> {
 
 async function parseSwizHookStdin(
   raw: string,
+  hook: Pick<SwizHook<Record<string, any>>, "event" | "name">,
   options?: RunSwizHookAsMainOptions
 ): Promise<Record<string, any>> {
   try {
     const parsed = JSON.parse(raw) as unknown
-    if (!isJsonLikeRecord(parsed)) process.exit(0)
+    if (!isJsonLikeRecord(parsed)) {
+      await captureStandaloneParseError(raw, hook)
+      process.exit(0)
+    }
     return parsed
   } catch (err) {
+    await captureStandaloneParseError(raw, hook)
     return handleSwizHookStdinParseError(err, options)
+  }
+}
+
+async function captureStandaloneParseError(
+  raw: string,
+  hook: Pick<SwizHook<Record<string, any>>, "event" | "name">
+): Promise<void> {
+  if (!shouldCaptureIncomingPayloads()) return
+  try {
+    await writeIncomingDispatchCapture({
+      canonicalEvent: hook.event,
+      hookEventName: hook.name,
+      parseError: true,
+      payloadStr: raw,
+      incomingBeforeNormalize: null,
+      normalizedPayload: {},
+    })
+  } catch {
+    // Capture is diagnostic and must not change the existing parse-error contract.
   }
 }
 
@@ -167,7 +192,8 @@ export async function runSwizHookAsMain(
   options?: RunSwizHookAsMainOptions
 ): Promise<void> {
   const raw = await readSwizHookStdinRaw()
-  const input = await parseSwizHookStdin(raw, options)
+  const input = await parseSwizHookStdin(raw, hook, options)
+  ensureDispatchId(input)
   const incomingBeforeNormalize = structuredClone(input)
   // `_repositoryCapability` is trusted only after core dispatch enrichment.
   // Standalone stdin is agent-controlled, so force hooks through the canonical

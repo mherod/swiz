@@ -5,7 +5,7 @@
  * transcript readers, hook-log readers, and task audit-log scanners.
  */
 
-import { mkdir, rename, rm } from "node:fs/promises"
+import { appendFile, mkdir, rename, rm } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { ZodType } from "zod"
 import { getLockPathForFile, withFileLock } from "./file-lock.ts"
@@ -402,11 +402,16 @@ export async function writeJsonlFile<T>(path: string, entries: T[]): Promise<voi
 export async function appendJsonlEntry<T>(path: string, entry: T): Promise<void> {
   const lockFile = getLockPathForFile(path)
   await withFileLock(lockFile, async () => {
+    await mkdir(dirname(path), { recursive: true })
     const file = Bun.file(path)
-    const existingText = (await file.exists()) ? await file.text() : ""
-    const prefix =
-      existingText.length > 0 && !existingText.endsWith("\n") ? `${existingText}\n` : existingText
-    await writeJsonlTextAtomically(path, `${prefix}${JSON.stringify(entry)}\n`)
+    let prefix = ""
+    if (await file.exists()) {
+      const { size } = await file.stat()
+      if (size > 0 && (await file.slice(size - 1).text()) !== "\n") prefix = "\n"
+    }
+    // Bun has no append-mode file primitive; appendFile preserves the inode and
+    // delegates O_APPEND semantics to the runtime while the cross-process lock is held.
+    await appendFile(path, `${prefix}${JSON.stringify(entry)}\n`)
   })
 }
 

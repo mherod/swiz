@@ -64,9 +64,9 @@ async function getActiveTasks(
   home?: string
 ): Promise<Array<{ subject: string; status: string }>> {
   const daemonTasks = await fetchSessionTasksFromDaemon(sessionId, cwd)
-  // Only trust daemon when it returned actual tasks; empty array means session is
-  // unknown to the daemon (not "session exists with no tasks"), so fall back to disk.
-  if (daemonTasks?.length) return daemonTasks
+  // `null` means the daemon does not know the session; an empty array is a
+  // valid authoritative result and must not trigger a disk fallback.
+  if (daemonTasks !== null) return daemonTasks
   const { readSessionTasks } = await import("../src/tasks/task-recovery.ts")
   return await readSessionTasks(sessionId, home)
 }
@@ -315,26 +315,35 @@ export async function evaluateIssueWorkflowGate(
     "NFKC"
   )
 
-  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
-  const { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch } =
-    scanLines(lines)
-
-  // Task-subject skill gate — blocks until the required skill is invoked
+  let activeTaskGate: (typeof TASK_SKILL_GATES)[number] | null = null
   if (sessionId) {
-    const gate = await findActiveTaskGate(sessionId, cwd, _home)
-    if (gate) {
-      const resolvedHome = _home ?? process.env.HOME ?? ""
-      const skillUsed =
-        hasSkillInSessionLines(lines, gate.skill) ||
-        (resolvedHome ? await hasSkillUsedInProjectRecently(gate.skill, cwd, resolvedHome) : false)
-      if (!skillUsed) {
-        return preToolUseDeny(buildMissingSkillMessage(gate))
-      }
+    activeTaskGate = await findActiveTaskGate(sessionId, cwd, _home)
+  }
+
+  // Ordinary shell commands only need transcript evidence when an active task
+  // subject requires a skill. This is the overwhelmingly common fast path.
+  if (isShell && !isBlockedBashCommand(command) && !activeTaskGate) return {}
+
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
+
+  // Task-subject skill gate — blocks until the required skill is invoked.
+  if (activeTaskGate) {
+    const resolvedHome = _home ?? process.env.HOME ?? ""
+    const skillUsed =
+      hasSkillInSessionLines(lines, activeTaskGate.skill) ||
+      (resolvedHome
+        ? await hasSkillUsedInProjectRecently(activeTaskGate.skill, cwd, resolvedHome)
+        : false)
+    if (!skillUsed) {
+      return preToolUseDeny(buildMissingSkillMessage(activeTaskGate))
     }
   }
 
   // Non-blocked shell commands are exempt from workflow/preflight checks
   if (isShell && !isBlockedBashCommand(command)) return {}
+
+  const { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch } =
+    scanLines(lines)
   if (!inWorkflow) return {}
 
   // AC #1-2: Block until preflight or remote-ref sync evidence exists

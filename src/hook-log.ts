@@ -29,6 +29,9 @@ export interface HookLogEntry {
   sessionId?: string
   cwd?: string
   toolName?: string
+  dispatchId?: string
+  toolUseId?: string
+  payloadBytes?: number
   skipReason?: string
   stdoutSnippet?: string
   stderrSnippet?: string
@@ -44,6 +47,7 @@ export const DEFAULT_HOOK_LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 export const DEFAULT_HOOK_LOG_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000
 const HOOK_LOG_COMPACTION_TARGET_RATIO = 0.75
 const HOOK_LOG_MAINTENANCE_TRIGGER_RATIO = 0.9
+const MAX_HOOK_LOG_AGGREGATES = 512
 
 export interface HookLogConfig {
   logPath: string
@@ -61,6 +65,17 @@ export interface HookLogMetrics {
   maxAgeMs: number
   maxBytes: number
   retainedRecords: number
+  aggregates: Record<string, HookExecutionAggregate>
+}
+
+export interface HookExecutionAggregate {
+  count: number
+  totalDurationMs: number
+  maxDurationMs: number
+  payloadBytesTotal: number
+  payloadBytesMax: number
+  statuses: Record<string, number>
+  skipReasons: Record<string, number>
 }
 
 interface RetainedLine {
@@ -170,6 +185,7 @@ export class HookLogStore {
       maxAgeMs: config.maxAgeMs,
       maxBytes: config.maxBytes,
       retainedRecords: 0,
+      aggregates: {},
     }
   }
 
@@ -198,6 +214,7 @@ export class HookLogStore {
           ) {
             this.metrics.retainedRecords += entries.length
           }
+          this.recordAggregates(entries)
         })
       } catch {
         this.metrics.appendErrors += 1
@@ -205,6 +222,39 @@ export class HookLogStore {
     })
     void write.then(() => this.scheduleMaintenanceIfNeeded())
     return write
+  }
+
+  private recordAggregates(entries: HookLogEntry[]): void {
+    for (const entry of entries) {
+      if (entry.kind === "dispatch" || entry.hook === "dispatch") continue
+      const key = `${entry.event}:${entry.hook}`
+      if (
+        !(key in this.metrics.aggregates) &&
+        Object.keys(this.metrics.aggregates).length >= MAX_HOOK_LOG_AGGREGATES
+      ) {
+        continue
+      }
+      const aggregate = this.metrics.aggregates[key] ?? {
+        count: 0,
+        totalDurationMs: 0,
+        maxDurationMs: 0,
+        payloadBytesTotal: 0,
+        payloadBytesMax: 0,
+        statuses: {},
+        skipReasons: {},
+      }
+      aggregate.count += 1
+      aggregate.totalDurationMs += entry.durationMs
+      aggregate.maxDurationMs = Math.max(aggregate.maxDurationMs, entry.durationMs)
+      const payloadBytes = entry.payloadBytes ?? 0
+      aggregate.payloadBytesTotal += payloadBytes
+      aggregate.payloadBytesMax = Math.max(aggregate.payloadBytesMax, payloadBytes)
+      aggregate.statuses[entry.status] = (aggregate.statuses[entry.status] ?? 0) + 1
+      if (entry.skipReason) {
+        aggregate.skipReasons[entry.skipReason] = (aggregate.skipReasons[entry.skipReason] ?? 0) + 1
+      }
+      this.metrics.aggregates[key] = aggregate
+    }
   }
 
   private scheduleMaintenanceIfNeeded(): void {
@@ -274,7 +324,19 @@ export class HookLogStore {
   }
 
   getMetrics(): HookLogMetrics {
-    return { ...this.metrics }
+    return {
+      ...this.metrics,
+      aggregates: Object.fromEntries(
+        Object.entries(this.metrics.aggregates).map(([key, aggregate]) => [
+          key,
+          {
+            ...aggregate,
+            statuses: { ...aggregate.statuses },
+            skipReasons: { ...aggregate.skipReasons },
+          },
+        ])
+      ),
+    }
   }
 }
 

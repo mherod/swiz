@@ -717,12 +717,15 @@ export async function getRecentCurrentSessionUsage(
 ): Promise<RecentCurrentSessionUsage> {
   if (typeof source !== "string") {
     const summary = getTranscriptSummary(source)
+    const registeredLines = getRegisteredDispatchSessionLines(source)
     const transcriptPath = transcriptPathFromUsageSource(source)
-    const transcriptUsage = transcriptPath
-      ? await tryReadRecentSessionUsage(transcriptPath, options)
-      : null
-    const summaryEvents = summary
-      ? filterRecentCurrentSessionUsageEvents(summary.sessionLines, options)
+    const enrichedLines = registeredLines ?? summary?.sessionLines ?? null
+    const transcriptUsage =
+      transcriptPath && !enrichedLines
+        ? await tryReadRecentSessionUsage(transcriptPath, options)
+        : null
+    const summaryEvents = enrichedLines
+      ? filterRecentCurrentSessionUsageEvents(enrichedLines, options)
       : []
     const cachedUsage = getCurrentSessionToolUsage(source)
     const cachedEvents = cachedUsage?.events

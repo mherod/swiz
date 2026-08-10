@@ -5,6 +5,7 @@
 import { join } from "node:path"
 import { ZodError } from "zod"
 import { debugLog } from "../../debug.ts"
+import { ensureDispatchId } from "../../dispatch/dispatch-id.ts"
 import {
   DispatchPayloadValidationError,
   parseValidatedAgentDispatchWireJson,
@@ -16,6 +17,7 @@ import {
   executeDispatch,
 } from "../../dispatch/execute.ts"
 import {
+  scheduleIncomingDispatchCapture,
   schedulePayloadJsonlAppend,
   scheduleStaleIncomingCapturePrune,
   shouldCaptureIncomingPayloads,
@@ -30,7 +32,6 @@ import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { taskCompletedHookInputSchema, taskCreatedHookInputSchema } from "../../schemas.ts"
 import { createTaskStoreForHookPayload } from "../../task-roots.ts"
 import type { CurrentSessionToolUsage } from "../../transcript-summary.ts"
-import { messageFromUnknownError } from "../../utils/hook-json-helpers.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import type { CappedMap } from "./cache/capped-map.ts"
 import {
@@ -49,15 +50,11 @@ import {
   recordDispatch,
   type TranscriptIndexCache,
 } from "./runtime-cache.ts"
+import { sessionToolCallPersistenceQueue } from "./session-tool-call-persistence.ts"
 import type { ActiveHookDispatch } from "./types.ts"
 import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import type { CapturedToolCall, SessionToolUsageState } from "./utils.ts"
-import {
-  captureSessionToolCall,
-  captureSessionToolUsage,
-  persistSessionToolCall,
-  seedSessionToolUsage,
-} from "./utils.ts"
+import { captureSessionToolCall, captureSessionToolUsage, seedSessionToolUsage } from "./utils.ts"
 import type { DaemonWebServerContext } from "./web-server-context.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
@@ -297,21 +294,13 @@ async function updateParsedPayloadMetrics(
         nowMs
       )
       if (parsed.cwd) {
-        try {
-          await persistSessionToolCall(
-            parsed.cwd,
-            parsed.sessionId,
-            parsed.toolName,
-            parsed.toolInput,
-            nowMs
-          )
-        } catch (error) {
-          debugLog(
-            `[daemon] failed to persist session tool call for ${parsed.sessionId}: ${messageFromUnknownError(
-              error
-            )}`
-          )
-        }
+        sessionToolCallPersistenceQueue.enqueue({
+          cwd: parsed.cwd,
+          sessionId: parsed.sessionId,
+          toolName: parsed.toolName,
+          toolInput: parsed.toolInput,
+          nowMs,
+        })
       }
       captureSessionToolUsage(
         ctx.sessionToolUsage,
@@ -579,21 +568,46 @@ async function prepareDaemonDispatchPayload(
 ): Promise<PreparedDaemonDispatchPayload> {
   const payloadStr = await req.text()
   let parsedPayload: Record<string, unknown> | null = null
+  let dispatchIdAdded = false
   try {
-    parsedPayload = JSON.parse(payloadStr) as Record<string, unknown>
-    const sessionId = typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
-    if (sessionId && ctx.taskStateCache) {
-      const { tasksDir } = createTaskStoreForHookPayload(parsedPayload)
-      const sessionTasksDir = join(tasksDir, sessionId)
-      ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
-      const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
-      await seedSessionFromDisk(sessionId, sessionTasksDir)
+    const parsed: unknown = JSON.parse(payloadStr)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Dispatch payload must be a JSON object")
     }
-    if (shouldCaptureIncomingPayloads()) {
-      schedulePayloadJsonlAppend(hookEventName, parsedPayload as Record<string, any>)
-    }
+    parsedPayload = parsed as Record<string, unknown>
+    const existingDispatchId = parsedPayload._swizDispatchId
+    ensureDispatchId(parsedPayload)
+    dispatchIdAdded = parsedPayload._swizDispatchId !== existingDispatchId
   } catch {
-    // Best-effort — don't block dispatch if payload parsing or seeding fails
+    if (shouldCaptureIncomingPayloads()) {
+      scheduleIncomingDispatchCapture({
+        canonicalEvent,
+        hookEventName,
+        parseError: true,
+        payloadStr,
+        incomingBeforeNormalize: null,
+        normalizedPayload: {},
+      })
+    }
+  }
+
+  if (parsedPayload) {
+    try {
+      const sessionId =
+        typeof parsedPayload.session_id === "string" ? parsedPayload.session_id : null
+      if (sessionId && ctx.taskStateCache) {
+        const { tasksDir } = createTaskStoreForHookPayload(parsedPayload)
+        const sessionTasksDir = join(tasksDir, sessionId)
+        ctx.taskStateCache.watchSession(sessionId, sessionTasksDir)
+        const { seedSessionFromDisk } = await import("../../tasks/task-event-state.ts")
+        await seedSessionFromDisk(sessionId, sessionTasksDir)
+      }
+      if (shouldCaptureIncomingPayloads()) {
+        schedulePayloadJsonlAppend(hookEventName, parsedPayload as Record<string, any>)
+      }
+    } catch {
+      // Best-effort — task-state seeding and diagnostic JSONL must not block dispatch.
+    }
   }
 
   const lifecyclePreparation = await prepareLifecycleTaskDispatch(
@@ -603,7 +617,7 @@ async function prepareDaemonDispatchPayload(
   )
   return {
     dispatchPayloadStr:
-      lifecyclePreparation.payloadChanged && parsedPayload
+      (lifecyclePreparation.payloadChanged || dispatchIdAdded) && parsedPayload
         ? JSON.stringify(parsedPayload)
         : payloadStr,
     parsedPayload,

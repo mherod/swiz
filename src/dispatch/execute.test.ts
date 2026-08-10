@@ -26,6 +26,12 @@ function repositoryCapability(overrides: Partial<RepositoryCapability> = {}): Re
 }
 
 describe("resolveLifecycleRequestId", () => {
+  it("prefers an existing Swiz dispatch id", () => {
+    expect(resolveLifecycleRequestId({ _swizDispatchId: "swiz-abc", request_id: "req-abc" })).toBe(
+      "swiz-abc"
+    )
+  })
+
   it("returns caller request_id when non-empty string", () => {
     expect(resolveLifecycleRequestId({ request_id: "req-abc" })).toBe("req-abc")
   })
