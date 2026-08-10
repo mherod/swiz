@@ -277,7 +277,7 @@ describe("createSessionTask input sanitization", () => {
       await createSessionTask("${id}", "key", "subj-${id}", "desc");
       console.log("OK");
     `
-    const proc = Bun.spawn(["bun", "-e", script], {
+    const proc = Bun.spawn([process.execPath, "-e", script], {
       stdout: "pipe",
       stderr: "pipe",
       env: neutralAgentEnv({ HOME: "" }),
