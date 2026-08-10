@@ -402,10 +402,13 @@ describe("lefthook.yml hook-order and invariant guards", () => {
     expect(glob).toContain("json")
   })
 
-  test("lint run command uses lint-staged", async () => {
+  test("lint-staged never stashes or hides shared-checkout changes", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands?.lint?.run).toContain("lint-staged")
+    const command = config["pre-commit"]?.commands?.lint?.run ?? ""
+    expect(command).toContain("lint-staged")
+    expect(command).toContain("--no-stash")
+    expect(command).toContain("--no-hide-partially-staged")
   })
 })
 
