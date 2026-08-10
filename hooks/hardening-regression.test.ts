@@ -283,9 +283,9 @@ describe("createSessionTask input sanitization", () => {
       env: neutralAgentEnv({ HOME: undefined }),
     })
     const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    // Should complete without crashing (early return due to empty HOME)
-    expect(proc.exitCode).toBe(0)
+    const stderr = await new Response(proc.stderr).text()
+    if (proc.exitCode !== 0) console.error("Empty HOME test failed stderr:", stderr)
+    expect(proc.exitCode, `empty HOME subshell failed: ${stderr}`).toBe(0)
     expect(stdout.trim()).toBe("OK")
   })
 })
