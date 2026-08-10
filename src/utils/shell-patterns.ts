@@ -357,6 +357,13 @@ export function hasUnsafeGitPushForceFlag(command: string): boolean {
   )
 }
 
+/** Detect any `git stash` invocation except the read-only `list` and `show` forms. */
+export function hasGitStashMutation(command: string): boolean {
+  return _gitInvocations(command).some(
+    ({ subcommand, args }) => subcommand === "stash" && args[0] !== "list" && args[0] !== "show"
+  )
+}
+
 /** Detect `--no-verify` on the commit and push subcommands where it bypasses hooks. */
 export function hasGitNoVerifyFlag(command: string): boolean {
   return _gitInvocations(command).some(

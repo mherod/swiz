@@ -151,6 +151,22 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).not.toBe("deny")
     })
 
+    test("git stash show does not exempt an earlier stash push in the same command", async () => {
+      const result = await runHook(
+        [
+          "set -e",
+          "STASH_MESSAGE='preserve concurrent work'",
+          'git stash push -u -m "$STASH_MESSAGE"',
+          "STASH_OID=$(git rev-parse --verify refs/stash)",
+          'git stash show -u --stat "$STASH_OID"',
+        ].join("\n")
+      )
+
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("shared checkout")
+      expect(result.reason).toContain("same checkout")
+    })
+
     test("git reset --hard is blocked", async () => {
       const result = await runHook("git reset --hard HEAD~1")
       expect(result.decision).toBe("deny")

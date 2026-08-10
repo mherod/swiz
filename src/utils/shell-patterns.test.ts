@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { splitShellSegments, stripQuotedShellStrings } from "./shell-patterns.ts"
+import {
+  hasGitStashMutation,
+  splitShellSegments,
+  stripQuotedShellStrings,
+} from "./shell-patterns.ts"
 
 describe("stripQuotedShellStrings", () => {
   test("preserves empty quote pairs when requested", () => {
@@ -41,5 +45,30 @@ describe("splitShellSegments", () => {
     expect(splitShellSegments("bun test src/foo.test.ts 2>&1 > out.log")).toEqual([
       "bun test src/foo.test.ts 2>&1 > out.log",
     ])
+  })
+})
+
+describe("hasGitStashMutation", () => {
+  test("detects a mutating stash before a read-only stash in a multiline command", () => {
+    const command = [
+      "git stash push -u -m 'preserve concurrent work'",
+      "STASH_OID=$(git rev-parse --verify refs/stash)",
+      'git stash show -u --stat "$STASH_OID"',
+    ].join("\n")
+
+    expect(hasGitStashMutation(command)).toBe(true)
+  })
+
+  test("allows commands containing only read-only stash invocations", () => {
+    expect(hasGitStashMutation("git stash list\ngit -C /repo stash show stash@{0}")).toBe(false)
+  })
+
+  test("detects bare and global-option stash mutations", () => {
+    expect(hasGitStashMutation("git stash")).toBe(true)
+    expect(hasGitStashMutation("command git -C /repo stash pop")).toBe(true)
+  })
+
+  test("ignores stash examples inside another command's quoted argument", () => {
+    expect(hasGitStashMutation('echo "do not run git stash push"')).toBe(false)
   })
 })
