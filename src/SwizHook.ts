@@ -232,12 +232,25 @@ export async function runSwizHookAsMain(
 // biome-ignore lint/complexity/noBannedTypes: Allow empty object
 export type SwizHookOutput = HookOutput | {}
 
+export interface HookMessageOptions {
+  /** Preserve safety-critical wording exactly instead of applying voice variation. */
+  rephrase?: boolean
+}
+
+function renderHookMessage(message: string, options?: HookMessageOptions): string {
+  return options?.rephrase === false ? message : rephraseHookMessage(message)
+}
+
 /**
  * Build additionalContext / systemMessage payload for SessionStart, UserPromptSubmit,
  * PostToolUse, etc. Safe for manifest-linked inline hooks (no hook-utils import).
  */
-export function buildContextHookOutput(eventName: string, context: string): SwizHookOutput {
-  const rephrasedContext = rephraseHookMessage(context)
+export function buildContextHookOutput(
+  eventName: string,
+  context: string,
+  options?: HookMessageOptions
+): SwizHookOutput {
+  const rephrasedContext = renderHookMessage(context, options)
   return hookOutputSchema.parse({
     systemMessage: rephrasedContext,
     suppressOutput: true,
@@ -257,11 +270,12 @@ export function buildContextHookOutput(eventName: string, context: string): Swiz
 export function buildSplitContextHookOutput(
   eventName: string,
   additionalContext: string,
-  systemMessage?: string
+  systemMessage?: string,
+  options?: HookMessageOptions
 ): SwizHookOutput {
-  const rephrasedAdditionalContext = rephraseHookMessage(additionalContext)
+  const rephrasedAdditionalContext = renderHookMessage(additionalContext, options)
   const rephrasedSystemMessage = systemMessage?.trim()
-    ? rephraseHookMessage(systemMessage)
+    ? renderHookMessage(systemMessage, options)
     : undefined
   return hookOutputSchema.parse({
     ...(rephrasedSystemMessage ? { systemMessage: rephrasedSystemMessage } : {}),
@@ -292,10 +306,11 @@ export function preToolUseAllow(reason = ""): SwizHookOutput {
 /** Build a PreToolUse allow response with advisory additional context. */
 export function preToolUseAllowWithContext(
   reason: string,
-  additionalContext: string
+  additionalContext: string,
+  options?: HookMessageOptions
 ): SwizHookOutput {
-  const rephrasedReason = reason ? rephraseHookMessage(reason) : ""
-  const rephrasedContext = additionalContext ? rephraseHookMessage(additionalContext) : ""
+  const rephrasedReason = reason ? renderHookMessage(reason, options) : ""
+  const rephrasedContext = additionalContext ? renderHookMessage(additionalContext, options) : ""
   const effectiveReason = rephrasedReason || rephrasedContext
   return {
     suppressOutput: true,

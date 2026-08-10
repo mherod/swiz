@@ -4,25 +4,25 @@
 //
 // Dual-mode: exports a SwizHook for inline dispatch and remains executable as a subprocess.
 
+import { resolve } from "node:path"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
-import { isFileEditTool } from "../src/utils/hook-utils.ts"
+import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
 
-function resolveEditTarget(input: ReturnType<typeof toolHookInputSchema.parse>): string | null {
+export function resolveEditTargets(input: ReturnType<typeof toolHookInputSchema.parse>): string[] {
   const tool = input.tool_name ?? ""
-  const file = (input.tool_input?.file_path as string) ?? ""
-  if (!isFileEditTool(tool)) return null
-  return file || null
+  if (!isFileEditTool(tool)) return []
+  return extractFileEditTargetPaths(input.tool_input ?? {})
 }
 
 export async function evaluatePosttooluseSessionEdits(
   input: PostToolHookInput
 ): Promise<SwizHookOutput> {
   const parsed = toolHookInputSchema.parse(input)
-  const file = resolveEditTarget(parsed)
+  const files = resolveEditTargets(parsed)
 
-  if (!file) return {}
+  if (files.length === 0) return {}
 
   const cwd = parsed.cwd ?? process.cwd()
   const sessionId = (parsed.session_id as string) ?? ""
@@ -34,8 +34,9 @@ export async function evaluatePosttooluseSessionEdits(
 
   const projectKey = projectKeyFromCwd(cwd)
 
-  if (sessionId && projectKey && file) {
-    getIssueStore().recordSessionEdit(projectKey, sessionId, file)
+  if (sessionId && projectKey) {
+    const store = getIssueStore()
+    for (const file of files) store.recordSessionEdit(projectKey, sessionId, resolve(cwd, file))
   }
 
   return {}

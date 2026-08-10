@@ -3,6 +3,7 @@ import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { git } from "../git-helpers.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
+import { buildConcurrentWaitGuidance } from "../utils/concurrent-work-guidance.ts"
 import { getDaemonPort } from "./daemon/daemon-admin.ts"
 
 const DAEMON_PORT = getDaemonPort()
@@ -470,7 +471,7 @@ export function summarizeCiJobs(jobs: GhRunJob[]): string {
 
 export const ciWaitCommand: Command = {
   name: "ci-wait",
-  description: "Wait for GitHub Actions CI and verify every job's final state",
+  description: "Wait for authoritative CI without treating shared-directory edits as failures",
   usage: "swiz ci-wait <commit-sha> [--cwd <dir>] [--timeout <seconds>]",
   options: [
     { flags: "--cwd <dir>", description: "Repository containing the commit (default: cwd)" },
@@ -489,6 +490,7 @@ export const ciWaitCommand: Command = {
       return
     }
 
+    console.log(buildConcurrentWaitGuidance("Waiting for authoritative CI on the target commit."))
     try {
       console.log(`⏳ Waiting for CI run for commit ${commitSha.slice(0, 8)}...`)
       const { conclusion, elapsed, runId, jobs } = await waitForCiCompletion(commitSha, timeout, {

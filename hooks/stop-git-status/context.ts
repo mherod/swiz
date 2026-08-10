@@ -23,6 +23,10 @@ import {
   getGitStatusV2,
   getUnpushedCommitSummaries,
 } from "../../src/utils/git-utils.ts"
+import {
+  appendSessionFileOwnershipContext,
+  resolveSessionFileOwnership,
+} from "../../src/utils/session-file-ownership.ts"
 import type { GitContext, GitStatus } from "./types.ts"
 
 /**
@@ -80,62 +84,6 @@ async function getVisibleUnpushedCommitSummaries(
   }
 }
 
-async function classifySessionFiles(
-  cwd: string,
-  sessionId: string | undefined,
-  files: string[]
-): Promise<{ editedByUs: string[]; editedByOthers: string[] }> {
-  const editedByUs: string[] = []
-  let editedByOthers: string[] = []
-
-  if (!sessionId) return { editedByUs, editedByOthers: files }
-
-  try {
-    const { getIssueStoreReader } = await import("../../src/issue-store.ts")
-    const { projectKeyFromCwd } = await import("../../src/transcript-utils.ts")
-    const { resolve, relative } = await import("node:path")
-
-    const projectKey = projectKeyFromCwd(cwd)
-    const store = getIssueStoreReader()
-    const rawEdits = await store.listSessionEdits(projectKey, sessionId)
-
-    let gitRoot = cwd
-    try {
-      gitRoot = (await git(["rev-parse", "--show-toplevel"], cwd)).trim()
-    } catch {
-      // fallback
-    }
-
-    const dbPaths = new Set(
-      rawEdits.flatMap((edit: unknown) => {
-        const filePath = getSessionEditFilePath(edit)
-        if (!filePath) return []
-        const abs = resolve(cwd, filePath)
-        return relative(gitRoot, abs)
-      })
-    )
-
-    for (const file of files) {
-      const normalizedFile = relative(gitRoot, resolve(gitRoot, file))
-      if (dbPaths.has(normalizedFile)) {
-        editedByUs.push(file)
-      } else {
-        editedByOthers.push(file)
-      }
-    }
-  } catch {
-    editedByOthers = files
-  }
-
-  return { editedByUs, editedByOthers }
-}
-
-function getSessionEditFilePath(edit: unknown): string | null {
-  if (!edit || typeof edit !== "object") return null
-  const filePath = Reflect.get(edit, "file_path")
-  return typeof filePath === "string" ? filePath : null
-}
-
 async function appendUncommittedFileContext(
   gitLine: string,
   cwd: string,
@@ -144,31 +92,8 @@ async function appendUncommittedFileContext(
 ): Promise<string> {
   if (gitStatus.total <= 0 || !gitStatus.lines || gitStatus.lines.length === 0) return gitLine
 
-  const maxFiles = 30
-  const { editedByUs, editedByOthers } = await classifySessionFiles(cwd, sessionId, gitStatus.lines)
-  const sections = ["Uncommitted files:"]
-
-  if (editedByUs.length > 0) {
-    const visibleUs = editedByUs.slice(0, maxFiles)
-    sections.push("  Edited in this session (by us):", ...visibleUs.map((file) => `    - ${file}`))
-    if (editedByUs.length > maxFiles) {
-      sections.push(`    ... and ${editedByUs.length - maxFiles} more file(s)`)
-    }
-  }
-
-  if (editedByOthers.length > 0) {
-    const remainingSlots = Math.max(5, maxFiles - editedByUs.length)
-    const visibleOthers = editedByOthers.slice(0, remainingSlots)
-    sections.push(
-      "  Edited externally (by tools or other parallel agents):",
-      ...visibleOthers.map((file) => `    - ${file}`)
-    )
-    if (editedByOthers.length > remainingSlots) {
-      sections.push(`    ... and ${editedByOthers.length - remainingSlots} more file(s)`)
-    }
-  }
-
-  return `${gitLine}\n${sections.join("\n")}`
+  const ownership = await resolveSessionFileOwnership(cwd, sessionId, gitStatus.lines)
+  return appendSessionFileOwnershipContext(gitLine, ownership)
 }
 
 async function buildStopGitSummary(

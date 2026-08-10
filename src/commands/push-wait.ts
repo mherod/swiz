@@ -9,6 +9,7 @@ import {
 } from "../settings.ts"
 import { swizPushCooldownSentinelPath, swizPushResultPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
+import { buildConcurrentWaitGuidance } from "../utils/concurrent-work-guidance.ts"
 import { getDefaultBranch, isDefaultBranch } from "../utils/git-utils.ts"
 import { startCiWatchViaDaemon, summarizeCiJobs, waitForCiCompletion } from "./ci-wait.ts"
 
@@ -418,6 +419,9 @@ async function startBackgroundCiWatch(
 export async function executePushFlow(
   options: ExecutePushFlowOptions
 ): Promise<ExecutePushFlowResult> {
+  console.log(
+    buildConcurrentWaitGuidance("Running the push, remote verification, and CI flow safely.")
+  )
   const context = await preparePushFlow(options)
   const extraArgs = options.extraArgs ?? []
   const { dryRun } = await pushAndVerifyRemote(context, extraArgs)
@@ -428,7 +432,7 @@ export async function executePushFlow(
 
 export const pushWaitCommand: Command = {
   name: "push-wait",
-  description: "Wait for push cooldown, push, verify the remote, and optionally verify CI",
+  description: "Push safely from a shared directory, verify the remote, and optionally verify CI",
   usage:
     "swiz push-wait [remote] [branch] [--wait] [--cwd <dir>] [--timeout <s>] [--ci-timeout <s>]",
   options: [

@@ -59,11 +59,16 @@ describe("displayPathFor", () => {
 })
 
 describe("formatConcurrentEditContext", () => {
-  test("leads with the re-read instruction and reassures", () => {
+  test("leads with reassurance and gives exact-file instructions", () => {
     const context = formatConcurrentEditContext("src/shared.ts", 6 * 60_000)
-    expect(context.startsWith("Re-read src/shared.ts before you change it")).toBe(true)
+    expect(context.startsWith("Concurrent changes in a shared directory are normal.")).toBe(true)
+    expect(context).toContain("Don't panic.")
+    expect(context).toContain("Continue as you were.")
+    expect(context).toContain("Stay focused on your own task.")
+    expect(context).toContain("It's going to be fine.")
     expect(context).toContain("6m ago")
-    expect(context).toContain("nothing has gone wrong")
+    expect(context).toContain("Re-read src/shared.ts immediately before editing")
+    expect(context).toContain("Do not stash")
   })
 })
 
@@ -89,7 +94,36 @@ describe("evaluatePretooluseConcurrentSessionEdits", () => {
     expect(decisionOf(output)).toBe("allow")
     expect(contextOf(output)).toContain("src/shared.ts")
     expect(contextOf(output)).toContain("6m ago")
-    expect(contextOf(output)).toContain("another agent")
+    expect(contextOf(output)).toContain("Don't panic")
+    expect(contextOf(output)).toContain("continue normally")
+  })
+
+  test("checks every file in a multi-file apply_patch", async () => {
+    const store = seedStore()
+    store.recordSessionEdit(
+      projectKeyFromCwd("/repo"),
+      "session-theirs",
+      "/repo/src/second.ts",
+      NOW - 60_000
+    )
+
+    const output = await evaluatePretooluseConcurrentSessionEdits(
+      editInput({
+        tool_name: "apply_patch",
+        tool_input: {
+          command: [
+            "*** Begin Patch",
+            "*** Update File: src/first.ts",
+            "*** Update File: src/second.ts",
+            "*** End Patch",
+          ].join("\n"),
+        },
+      }),
+      NOW
+    )
+
+    expect(decisionOf(output)).toBe("allow")
+    expect(contextOf(output)).toContain("src/second.ts")
   })
 
   test("stays quiet when the other session's edit predates the window", async () => {

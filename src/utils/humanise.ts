@@ -10,6 +10,7 @@ import { LRUCache } from "lru-cache"
 import { promptText } from "../ai-providers.ts"
 import { getHomeDirWithFallback } from "../home.ts"
 import { extractTextFromUnknownContent } from "../transcript-extract.ts"
+import { containsConcurrentWorkGuidance } from "./concurrent-work-guidance.ts"
 import { tryParseJsonLine } from "./jsonl.ts"
 import { readSessionLines } from "./transcript.ts"
 
@@ -362,6 +363,7 @@ export async function getInProgressTasksSnippet(
  * Rewrites a message into a humanised, single paragraph via the AI provider layer.
  */
 export async function humaniseText(message: string, options?: HumaniseOptions): Promise<string> {
+  if (containsConcurrentWorkGuidance(message)) return message
   const trimmed = message.trim()
   if (!trimmed) return message
 

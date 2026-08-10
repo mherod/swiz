@@ -5,7 +5,7 @@
 // Reassurance, not a block: another agent editing the same repo is expected.
 // The point is to re-read before writing and to stay inside your own change.
 
-import { relative } from "node:path"
+import { relative, resolve } from "node:path"
 import { formatDuration } from "../src/format-duration.ts"
 import {
   preToolUseAllowWithContext,
@@ -14,10 +14,11 @@ import {
   type SwizHookOutput,
 } from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
-import { isFileEditTool } from "../src/tool-matchers.ts"
+import { extractFileEditTargetPaths, isFileEditTool } from "../src/tool-matchers.ts"
+import { buildConcurrentFileEditGuidance } from "../src/utils/concurrent-work-guidance.ts"
+import { CONCURRENT_EDIT_WINDOW_MS } from "../src/utils/session-file-ownership.ts"
 
-/** How recently another session must have touched a file to count as concurrent work. */
-export const CONCURRENT_EDIT_WINDOW_MS = 2 * 60 * 60 * 1000
+export { CONCURRENT_EDIT_WINDOW_MS } from "../src/utils/session-file-ownership.ts"
 
 /** Render an absolute path relative to the project when it sits inside it. */
 export function displayPathFor(cwd: string, filePath: string): string {
@@ -27,11 +28,7 @@ export function displayPathFor(cwd: string, filePath: string): string {
 }
 
 export function formatConcurrentEditContext(displayPath: string, ageMs: number): string {
-  return [
-    `Re-read ${displayPath} before you change it — another agent working in this repo touched it ${formatDuration(ageMs)} ago.`,
-    "",
-    "That is expected and nothing has gone wrong. Stay inside your own change: leave their edits alone, do not refactor around them, and do not tidy files you did not come here for. They are getting the same note about your work.",
-  ].join("\n")
+  return buildConcurrentFileEditGuidance(displayPath, formatDuration(ageMs))
 }
 
 export async function evaluatePretooluseConcurrentSessionEdits(
@@ -41,10 +38,12 @@ export async function evaluatePretooluseConcurrentSessionEdits(
   const parsed = fileEditHookInputSchema.parse(input)
   if (!isFileEditTool(parsed.tool_name ?? "")) return {}
 
-  const filePath = parsed.tool_input?.file_path ?? ""
   const cwd = parsed.cwd ?? ""
   const sessionId = parsed.session_id ?? ""
-  if (!filePath || !cwd || !sessionId) return {}
+  const filePaths = extractFileEditTargetPaths(parsed.tool_input ?? {}).map((filePath) =>
+    resolve(cwd, filePath)
+  )
+  if (filePaths.length === 0 || !cwd || !sessionId) return {}
 
   const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
     import("../src/issue-store.ts"),
@@ -56,20 +55,24 @@ export async function evaluatePretooluseConcurrentSessionEdits(
 
   const store = getIssueStore()
   const since = nowMs - CONCURRENT_EDIT_WINDOW_MS
-  const editors = store.listOtherSessionEditors(projectKey, sessionId, filePath, since)
-  const latest = editors[0]
+  const pendingOverlaps = filePaths.flatMap((filePath) => {
+    const latest = store.listOtherSessionEditors(projectKey, sessionId, filePath, since)[0]
+    if (!latest) return []
+    const ownEditAt = store.getSessionEditAt(projectKey, sessionId, filePath)
+    if (ownEditAt !== null && ownEditAt >= latest.updated_at) return []
+    return [{ filePath, updatedAt: latest.updated_at }]
+  })
+  pendingOverlaps.sort((a, b) => b.updatedAt - a.updatedAt)
+  const latest = pendingOverlaps[0]
   if (!latest) return {}
 
-  // Already reconciled: this session wrote the file after they did, so the
-  // working copy in hand already carries their change.
-  const ownEditAt = store.getSessionEditAt(projectKey, sessionId, filePath)
-  if (ownEditAt !== null && ownEditAt >= latest.updated_at) return {}
-
   const context = formatConcurrentEditContext(
-    displayPathFor(cwd, filePath),
-    Math.max(0, nowMs - latest.updated_at)
+    displayPathFor(cwd, latest.filePath),
+    Math.max(0, nowMs - latest.updatedAt)
   )
-  return preToolUseAllowWithContext("Another agent session is working in this repo", context)
+  return preToolUseAllowWithContext("Concurrent work is normal — continue your task", context, {
+    rephrase: false,
+  })
 }
 
 const pretooluseConcurrentSessionEdits: SwizHook<FileEditHookInput> = {

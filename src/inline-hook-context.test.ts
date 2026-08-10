@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 import { SwizHookExit, withInlineSwizHookRun } from "./inline-hook-context.ts"
-import { buildContextHookOutput, exitWithHookObject } from "./utils/hook-utils.ts"
+import {
+  buildContextHookOutput,
+  buildSplitContextHookOutput,
+  preToolUseAllowWithContext,
+} from "./SwizHook.ts"
+import { exitWithHookObject } from "./utils/hook-utils.ts"
 
 describe("inline SwizHook context", () => {
   it("exitWithHookObject throws SwizHookExit carrying output when inline dispatch is active", async () => {
@@ -49,5 +54,22 @@ describe("inline SwizHook context", () => {
     } finally {
       nowSpy.mockRestore()
     }
+  })
+
+  it("preserves safety-critical wording when rephrasing is disabled", () => {
+    const exact = "Don't panic. Continue as you were. Stay focused on your own task."
+    const options = { rephrase: false }
+
+    const context = buildContextHookOutput("UserPromptSubmit", exact, options) as any
+    const split = buildSplitContextHookOutput("PostToolUse", exact, exact, options) as any
+    const preTool = preToolUseAllowWithContext(exact, exact, options) as any
+
+    expect(context.systemMessage).toBe(exact)
+    expect(context.hookSpecificOutput.additionalContext).toBe(exact)
+    expect(split.systemMessage).toBe(exact)
+    expect(split.hookSpecificOutput.additionalContext).toBe(exact)
+    expect(preTool.systemMessage).toBe(exact)
+    expect(preTool.hookSpecificOutput.permissionDecisionReason).toBe(exact)
+    expect(preTool.hookSpecificOutput.additionalContext).toBe(exact)
   })
 })

@@ -26,7 +26,7 @@ export function parsePushCiArgs(args: string[]): PushCiArgs {
 
 export const pushCiCommand: Command = {
   name: "push-ci",
-  description: "Push, verify the remote branch, then wait for authoritative CI results",
+  description: "Push safely from a shared directory, then wait for authoritative CI results",
   usage: "swiz push-ci [remote] [branch] [--cwd <dir>] [--timeout <s>] [--ci-timeout <s>]",
   options: [
     { flags: "--cwd <dir>", description: "Working directory for git push (default: cwd)" },

@@ -7,7 +7,11 @@ import type { GitStatusV2 } from "../src/utils/git-utils.ts"
 import { evaluateUserpromptsubmitGitContext } from "./userpromptsubmit-git-context.ts"
 
 const mockGitStatusByCwd = new Map<string, GitStatusV2 | null>()
-const mockSessionEdits = new Map<string, { file_path: string }[]>()
+const mockSessionEdits = new Map<string, { file_path: string; updated_at?: number }[]>()
+const mockOtherSessionEdits = new Map<
+  string,
+  { session_id: string; file_path: string; updated_at: number }[]
+>()
 
 await mock.module("../src/utils/git-utils.ts", () => {
   return {
@@ -21,6 +25,9 @@ await mock.module("../src/issue-store.ts", () => {
   const reader = {
     listSessionEdits: (projectKey: string, sessionId: string) => {
       return mockSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
+    },
+    listOtherSessionEdits: (projectKey: string, sessionId: string) => {
+      return mockOtherSessionEdits.get(`${projectKey}:${sessionId}`) ?? []
     },
   }
   return {
@@ -128,15 +135,18 @@ describe("userpromptsubmit-git-context", () => {
     expect(context).toContain("... and 15 more file(s)")
   })
 
-  test("partitions uncommitted files into session edits and external edits", async () => {
+  test("partitions uncommitted files using positive session ownership evidence", async () => {
     const cwd = testCwd("partitioned")
     const projKey = projectKeyFromCwd(cwd)
     const sessionId = "session-xyz"
 
     // Mock two files edited by us in this session
     mockSessionEdits.set(`${projKey}:${sessionId}`, [
-      { file_path: "src/file1.ts" },
-      { file_path: "src/file2.ts" },
+      { file_path: "src/file1.ts", updated_at: 20 },
+      { file_path: "src/file2.ts", updated_at: 20 },
+    ])
+    mockOtherSessionEdits.set(`${projKey}:${sessionId}`, [
+      { session_id: "other-session", file_path: "src/file3.ts", updated_at: 30 },
     ])
 
     mockGitStatusByCwd.set(
@@ -155,13 +165,60 @@ describe("userpromptsubmit-git-context", () => {
 
     const context = additionalContext(result)
     expect(context).toContain("Uncommitted files:")
-    expect(context).toContain("  Edited in this session (by us):")
+    expect(context).toContain("  Edited in this session (recorded):")
     expect(context).toContain("    - src/file1.ts")
     expect(context).toContain("    - src/file2.ts")
-    expect(context).toContain("  Edited externally (by tools or other parallel agents):")
+    expect(context).toContain("  Edited by another active session (confirmed):")
     expect(context).toContain("    - src/file3.ts")
+    expect(context).toContain("Don't panic.")
+    expect(context).toContain("Continue as you were.")
+    expect(context).toContain("Stay focused on your own task.")
+    expect(context).toContain("It's going to be fine.")
+    expect(context).toContain("Do not stash, revert, restore, reset, clean")
     expect(context).not.toContain(
       "    - src/file1.ts" + "\n" + "    - src/file2.ts" + "\n" + "    - src/file3.ts"
     ) // shouldn't be under one single list
+  })
+
+  test("does not add concurrent-work guidance when every dirty file belongs to this session", async () => {
+    const cwd = testCwd("session-only")
+    const projKey = projectKeyFromCwd(cwd)
+    const sessionId = "session-only"
+    mockSessionEdits.set(`${projKey}:${sessionId}`, [{ file_path: "src/mine.ts" }])
+    mockGitStatusByCwd.set(
+      cwd,
+      gitStatus({
+        modified: 1,
+        lines: ["src/mine.ts"],
+        total: 1,
+      })
+    )
+
+    const result = await evaluateUserpromptsubmitGitContext({ session_id: sessionId, cwd })
+    const context = additionalContext(result)
+
+    expect(context).toContain("Edited in this session (recorded):")
+    expect(context).not.toContain("Don't panic.")
+  })
+
+  test("does not mistake an unrecorded dirty file for another agent's work", async () => {
+    const cwd = testCwd("unattributed")
+    const sessionId = "session-unattributed"
+    mockGitStatusByCwd.set(
+      cwd,
+      gitStatus({
+        modified: 1,
+        lines: ["src/possibly-mine.ts"],
+        total: 1,
+      })
+    )
+
+    const result = await evaluateUserpromptsubmitGitContext({ session_id: sessionId, cwd })
+    const context = additionalContext(result)
+
+    expect(context).toContain("Ownership not recorded (not evidence of another agent):")
+    expect(context).toContain("    - src/possibly-mine.ts")
+    expect(context).not.toContain("Edited by another active session")
+    expect(context).not.toContain("Don't panic.")
   })
 })
