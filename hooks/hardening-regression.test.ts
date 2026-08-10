@@ -271,9 +271,10 @@ describe("createSessionTask input sanitization", () => {
 
   test("empty HOME causes early return", async () => {
     // Use subprocess to control HOME env
+    const id = `valid-id-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const script = `
       import { createSessionTask } from "./src/utils/session-task-io.ts";
-      await createSessionTask("valid-id", "key", "subj", "desc");
+      await createSessionTask("${id}", "key", "subj-${id}", "desc");
       console.log("OK");
     `
     const proc = Bun.spawn(["bun", "-e", script], {
