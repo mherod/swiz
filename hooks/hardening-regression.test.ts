@@ -280,12 +280,17 @@ describe("createSessionTask input sanitization", () => {
     const proc = Bun.spawn(["bun", "-e", script], {
       stdout: "pipe",
       stderr: "pipe",
-      env: neutralAgentEnv({ HOME: undefined }),
+      env: neutralAgentEnv({
+        HOME: undefined,
+        BUN_INSTALL: process.env.BUN_INSTALL || `${process.env.HOME}/.bun`,
+        PATH: process.env.PATH,
+      }),
     })
     const stdout = await new Response(proc.stdout).text()
     const stderr = await new Response(proc.stderr).text()
-    if (proc.exitCode !== 0) console.error("Empty HOME test failed stderr:", stderr)
-    expect(proc.exitCode, `empty HOME subshell failed: ${stderr}`).toBe(0)
+    const exitCode = await proc.exited
+    if (exitCode !== 0) console.error("Empty HOME test failed stderr:", stderr)
+    expect(exitCode, `empty HOME subshell failed: ${stderr}`).toBe(0)
     expect(stdout.trim()).toBe("OK")
   })
 })
