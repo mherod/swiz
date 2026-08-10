@@ -163,7 +163,7 @@ const filteredTests = Array.from(testFiles).filter(
   (f) => directlyChangedTests.has(f) || !SKIP_PATTERNS.some((p) => f.includes(p))
 )
 
-if (filteredTests.length > 0 && filteredTests.length <= 15) {
+if (filteredTests.length > 0 && filteredTests.length <= 30) {
   process.stdout.write(filteredTests.join(" "))
 } else if (changedFiles.length > 0 && filteredTests.length === 0) {
   // A changed-file list we actually computed — whether it arrived as args
