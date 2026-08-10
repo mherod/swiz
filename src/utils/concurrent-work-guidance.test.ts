@@ -14,6 +14,10 @@ describe("concurrent work guidance", () => {
     expect(guidance).toContain("Continue as you were.")
     expect(guidance).toContain("Stay focused on your own task.")
     expect(guidance).toContain("It's going to be fine.")
+    expect(guidance).toContain(
+      "Missing ownership evidence does not mean another session made a change; it may be yours."
+    )
+    expect(guidance).not.toContain("unrelated changes")
     expect(guidance).toContain("Do not stash, revert, restore, reset, clean")
   })
 

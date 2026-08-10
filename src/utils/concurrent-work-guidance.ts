@@ -8,7 +8,8 @@ export const CONCURRENT_WORK_REASSURANCE = [
 ].join(" ")
 
 export const CONCURRENT_WORK_BOUNDARY = [
-  "Leave unrelated changes exactly as you found them.",
+  "Leave changes outside your task scope exactly as you found them.",
+  "Missing ownership evidence does not mean another session made a change; it may be yours.",
   "Do not stash, revert, restore, reset, clean, delete, overwrite, stage, or commit another session's work.",
   "Only inspect or edit one of these files when your task genuinely needs that exact file.",
 ].join(" ")
