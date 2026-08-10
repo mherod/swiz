@@ -9,17 +9,18 @@
 //     without re-running the git log / gh run list dance.
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { ghJsonViaDaemon as ghJson } from "../src/git-helpers.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
-import {
-  buildContextHookOutput,
-  buildDenyPostToolUseOutput,
-  ghJson,
-  stripAnsi,
-} from "../src/utils/hook-utils.ts"
+import { buildDenyPostToolUseOutput } from "../src/utils/hook-response.ts"
+import { stripAnsi } from "../src/utils/transcript.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

@@ -10,9 +10,8 @@
 // emits a gentle advisory nudging a change of approach instead of a blind retry.
 
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { postToolUseFailureHookInputSchema } from "../src/schemas.ts"
-import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 
 /** Consecutive same-tool failures before the retry advisory fires. */
 export const RETRY_ADVISORY_THRESHOLD = 2

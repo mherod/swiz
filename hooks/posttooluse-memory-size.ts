@@ -5,6 +5,7 @@
 // Non-blocking — injects additionalContext with compaction instructions.
 // Thresholds are configurable via global (~/.swiz/settings.json) and project (.swiz/config.json).
 
+import { formatActionPlan } from "../src/action-plan.ts"
 import {
   COMPACT_MEMORY_SKILL_ID,
   compactionChecklistSteps,
@@ -12,8 +13,12 @@ import {
   USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -21,12 +26,8 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
-import {
-  buildContextHookOutput,
-  formatActionPlan,
-  isFileEditTool,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
 export function isMemoryFile(filePath: string): boolean {

@@ -9,14 +9,16 @@
  * Dual-mode: SwizHook + runSwizHookAsMain.
  */
 
-import { getRepoSlug } from "../src/git-helpers.ts"
+import { getRepoSlug, git } from "../src/git-helpers.ts"
 import { needsRefinement } from "../src/issue-refinement.ts"
 import { getIssueStore } from "../src/issue-store.ts"
 import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import type { PostToolHookInput } from "../src/schemas.ts"
 import { postToolUseHookInputSchema } from "../src/schemas.ts"
 import { readSessionTasks } from "../src/tasks/task-recovery.ts"
-import { GIT_PUSH_RE, git, isShellTool, scheduleAutoSteer } from "../src/utils/hook-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
+import { GIT_PUSH_RE } from "../src/utils/shell-patterns.ts"
 
 export function isPushCommand(toolName: string, command: string): boolean {
   return isShellTool(toolName) && GIT_PUSH_RE.test(command)

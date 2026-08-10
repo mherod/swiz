@@ -54,7 +54,7 @@ const posttoolusSkillSteps: SwizHook<SkillToolInput> = {
     })
 
     if (result) {
-      const { buildContextHookOutput } = await import("../src/utils/hook-utils.ts")
+      const { buildContextHookOutput } = await import("../src/SwizHook.ts")
       return buildContextHookOutput("PostToolUse", formatSkillStepsSummary(result))
     }
 

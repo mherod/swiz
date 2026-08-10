@@ -11,6 +11,7 @@
 
 import { orderBy } from "lodash-es"
 import { formatActionPlan } from "../action-plan.ts"
+import { isCurrentAgent } from "../agent-paths.ts"
 import type { HookOutput } from "../schemas.ts"
 import {
   buildTaskReviewInstruction,
@@ -26,7 +27,7 @@ import {
 } from "../tasks/task-recovery.ts"
 import { isTaskSubjectCarryoverDeferral } from "../tasks/task-subject-deferral.ts"
 import { stopIncompleteTasksLogPath } from "../temp-paths.ts"
-import { blockStopObj, isCurrentAgent } from "./hook-utils.ts"
+import { blockStopObj } from "./hook-response.ts"
 
 // ─── Incomplete detail formatting ───────────────────────────────────────────
 

@@ -35,8 +35,8 @@ import {
   consumeAutoSteerRequest,
   isAppleScriptTerminalApp,
   renderQueuedAutoSteerRequest,
+  sendAutoSteer,
 } from "../src/utils/auto-steer-helpers.ts"
-import { sendAutoSteer } from "../src/utils/hook-utils.ts"
 import { GIT_COMMIT_RE } from "../src/utils/shell-patterns.ts"
 import type { TerminalApp } from "../src/utils/terminal-detection.ts"
 import { detectTerminal } from "../src/utils/terminal-detection.ts"

@@ -3,18 +3,12 @@
 // SessionStart hook: Inject project health snapshot as additionalContext
 
 import { join } from "node:path"
+import { ghJsonViaDaemon as ghJson, git, hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
 import { getHomeDir } from "../src/home.ts"
 import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
-import {
-  buildContextHookOutput,
-  ghJson,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-} from "../src/utils/hook-utils.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 interface PluginEnvRequirement {

@@ -6,14 +6,15 @@
 
 import { stat } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import {
   buildContextHookOutput,
-  isFileEditTool,
-  scheduleAutoSteer,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
+import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/
 const TEST_FILE_RE =

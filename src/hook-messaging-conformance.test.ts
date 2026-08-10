@@ -53,7 +53,7 @@ describe("hook messaging conformance", () => {
       expect(violations).toEqual([])
     })
 
-    it("every pretooluse hook with a denial imports from SwizHook or hook-utils", () => {
+    it("every pretooluse hook with a denial imports from SwizHook", () => {
       const violations: string[] = []
 
       for (const { name, content } of hooks) {
@@ -66,12 +66,9 @@ describe("hook messaging conformance", () => {
 
         // Verify it imports from the canonical source
         const importsFromSwizHook = content.includes('from "../src/SwizHook.ts"')
-        const importsFromHookUtils = content.includes('from "../src/utils/hook-utils.ts"')
 
-        if (!importsFromSwizHook && !importsFromHookUtils) {
-          violations.push(
-            `${name}: has denial calls but does not import from SwizHook.ts or hook-utils.ts`
-          )
+        if (!importsFromSwizHook) {
+          violations.push(`${name}: has denial calls but does not import from SwizHook.ts`)
         }
       }
 

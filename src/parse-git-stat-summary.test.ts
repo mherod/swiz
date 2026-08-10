@@ -1,9 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import {
-  classifyChangeScope,
-  type GitStatSummary,
-  parseGitStatSummary,
-} from "./utils/hook-utils.ts"
+import { classifyChangeScope, type GitStatSummary, parseGitStatSummary } from "./utils/git-utils.ts"
 
 describe("parseGitStatSummary", () => {
   it("parses both insertions and deletions", () => {

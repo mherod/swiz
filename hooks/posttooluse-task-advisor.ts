@@ -4,8 +4,12 @@
 // Dual-mode: SwizHook + runSwizHookAsMain.
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
 import {
   TASK_CREATION_ADVISORY_THRESHOLD as CREATION_THRESHOLD,
@@ -16,13 +20,9 @@ import {
   buildTaskCreationCountdownMessage,
   getTaskToolName,
 } from "../src/tasks/task-governance-messages.ts"
-import {
-  buildContextHookOutput,
-  getCurrentSessionTaskToolStats,
-  isEditTool,
-  isWriteTool,
-  scheduleAutoSteer,
-} from "../src/utils/hook-utils.ts"
+import { isEditTool, isWriteTool } from "../src/tool-matchers.ts"
+import { getCurrentSessionTaskToolStats } from "../src/transcript-summary.ts"
+import { scheduleAutoSteer } from "../src/utils/auto-steer-helpers.ts"
 
 let advisorSessionId = ""
 let advisorCwd: string | undefined

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { blockStopObj } from "./hook-utils.ts"
+import { blockStopObj } from "./hook-response.ts"
 
 describe("blockStopObj", () => {
   it("keeps a long first line in systemMessage (not 70-char junk truncation)", () => {

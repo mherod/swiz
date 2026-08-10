@@ -133,14 +133,19 @@ const posttoolusGitContext: SwizHook = {
     const { tool_name, cwd } = input
     if (!cwd) return {}
 
-    const {
-      isShellTool,
-      getRepoSlug,
-      getGitStatusV2,
-      GIT_ANY_CMD_RE,
-      getEffectiveSwizSettingsForToolHook,
-      fetchGitStatusFromDaemon,
-    } = await import("../src/utils/hook-utils.ts")
+    const [
+      { isShellTool },
+      { getRepoSlug },
+      { getGitStatusV2, GIT_ANY_CMD_RE },
+      { getEffectiveSwizSettingsForToolHook },
+      { fetchGitStatusFromDaemon },
+    ] = await Promise.all([
+      import("../src/tool-matchers.ts"),
+      import("../src/git-helpers.ts"),
+      import("../src/utils/git-utils.ts"),
+      import("../src/utils/hook-effective-settings.ts"),
+      import("../src/utils/daemon-git-state.ts"),
+    ])
 
     if (!(await isGitRepoForHookPayload(input, cwd))) {
       return {}

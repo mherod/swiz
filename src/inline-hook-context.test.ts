@@ -5,7 +5,7 @@ import {
   buildSplitContextHookOutput,
   preToolUseAllowWithContext,
 } from "./SwizHook.ts"
-import { exitWithHookObject } from "./utils/hook-utils.ts"
+import { exitWithHookObject } from "./utils/hook-response.ts"
 
 describe("inline SwizHook context", () => {
   it("exitWithHookObject throws SwizHookExit carrying output when inline dispatch is active", async () => {

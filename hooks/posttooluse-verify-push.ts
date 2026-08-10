@@ -27,15 +27,17 @@
  */
 
 import { formatDurationPrecise } from "../src/format-duration.ts"
-import { runSwizHookAsMain, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
-import type { PostToolHookInput } from "../src/schemas.ts"
+import { git } from "../src/git-helpers.ts"
 import {
   buildContextHookOutput,
-  buildDenyPostToolUseOutput,
-  GIT_PUSH_RE,
-  git,
-  isShellTool,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import type { PostToolHookInput } from "../src/schemas.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { buildDenyPostToolUseOutput } from "../src/utils/hook-response.ts"
+import { GIT_PUSH_RE } from "../src/utils/shell-patterns.ts"
 
 const RETRY_DELAYS_MS = [1000, 2000, 4000] // 1s, 2s, 4s → 7s total
 

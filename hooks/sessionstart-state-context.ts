@@ -4,9 +4,8 @@
 
 import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
-import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 export async function evaluateSessionstartStateContext(

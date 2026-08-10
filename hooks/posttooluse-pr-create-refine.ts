@@ -3,17 +3,16 @@
 // PostToolUse hook: After `gh pr create`, checks whether the PR description is
 // thin and suggests the /refine-pr skill via additionalContext (non-blocking).
 
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import { ghJsonViaDaemon as ghJson, git, hasGhCli } from "../src/git-helpers.ts"
 import {
   buildContextHookOutput,
-  GH_PR_CREATE_RE,
-  ghJson,
-  git,
-  hasGhCli,
-  isShellTool,
-  skillAdvice,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import { skillAdvice } from "../src/skill-utils.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { GH_PR_CREATE_RE } from "../src/utils/git-utils.ts"
 
 function parseCommandInput(input: unknown): { cwd: string; valid: boolean } {
   if (!input || typeof input !== "object") return { cwd: "", valid: false }

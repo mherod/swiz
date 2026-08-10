@@ -98,7 +98,7 @@ async function resolveAutoSteerEnabled(
 ): Promise<boolean> {
   const injected = payload._effectiveSettings
   if (injected && typeof injected.autoSteer === "boolean") return injected.autoSteer
-  const { isAutoSteerAvailable } = await import("../utils/hook-utils.ts")
+  const { isAutoSteerAvailable } = await import("../utils/auto-steer-helpers.ts")
   return (await isAutoSteerAvailable(sessionId)) !== null
 }
 
@@ -130,7 +130,9 @@ async function tryOnSessionStopDelivery(enrichedPayloadStr: string): Promise<boo
   const store = getAutoSteerStore()
   if (!store.hasPending(ctx.safeSession, "on_session_stop")) return false
 
-  const { renderQueuedAutoSteerRequest, sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const { renderQueuedAutoSteerRequest, sendAutoSteer } = await import(
+    "../utils/auto-steer-helpers.ts"
+  )
   const sent = new Set<string>()
   let deliveredCount = 0
   let batch = store.consumeOne(ctx.safeSession, "on_session_stop")
@@ -164,7 +166,7 @@ async function tryAutoSteerStopBlock(
   const { getAutoSteerStore: getStore } = await import("../../src/auto-steer-store.ts")
   if (getStore().wasRecentlyDelivered(ctx.safeSession, blockReason, "on_session_stop")) return
 
-  const { renderAutoSteerMessage, sendAutoSteer } = await import("../utils/hook-utils.ts")
+  const { renderAutoSteerMessage, sendAutoSteer } = await import("../utils/auto-steer-helpers.ts")
   const message = await renderAutoSteerMessage(ctx.sessionId, blockReason, ctx.graceInput)
   const sent = await sendAutoSteer(message, ctx.terminalApp)
   if (!sent) return

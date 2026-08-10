@@ -28,9 +28,10 @@ import { resolveProjectIdentity } from "../src/project-identity.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
 import type { ShellHookInput } from "../src/schemas.ts"
 import { swizUpstreamSyncDriftCooldownPath } from "../src/temp-paths.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
 import { fetchGitStatusFromDaemon } from "../src/utils/daemon-git-state.ts"
-import { getDefaultBranch } from "../src/utils/git-utils.ts"
-import { GIT_PUSH_RE, GIT_SYNC_RE, isShellTool } from "../src/utils/hook-utils.ts"
+import { GIT_SYNC_RE, getDefaultBranch } from "../src/utils/git-utils.ts"
+import { GIT_PUSH_RE } from "../src/utils/shell-patterns.ts"
 
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen|review)|issue\s+(create|close|comment|edit|reopen))\b/i

@@ -25,9 +25,8 @@ import {
   isGitHubRemote,
   isGitRepo,
 } from "../git-helpers.ts"
-import { rephraseHookMessage } from "../hook-message-rephrasing.ts"
-import { buildContextHookOutput, type SwizHookOutput } from "../SwizHook.ts"
-import { hookSpecificOutputSchema, type SessionHookInput, type ToolHookInput } from "../schemas.ts"
+import { buildContextHookOutput, postToolUseAdditionalContext } from "../SwizHook.ts"
+import type { SessionHookInput, ToolHookInput } from "../schemas.ts"
 import { skillAdvice, skillExists, skillExistsForHookPayload } from "../skill-utils.ts"
 import { getTaskToolName } from "../tasks/task-governance-messages.ts"
 import {
@@ -196,7 +195,7 @@ export {
   PLACEHOLDER_SUBJECT_RE,
 } from "./inline-hook-helpers.ts"
 
-export { buildContextHookOutput }
+export { buildContextHookOutput, postToolUseAdditionalContext }
 
 export { SwizHookExit } from "../inline-hook-context.ts"
 
@@ -486,18 +485,5 @@ export type TaskToolInput = ToolHookInput & {
     activeForm?: string
     metadata?: Record<string, any>
     [key: string]: unknown
-  }
-}
-
-/** Same envelope as `emitContext` in hook-utils, without `process.exit` (safe for inline dispatch). */
-export function postToolUseAdditionalContext(context: string): SwizHookOutput {
-  const rephrasedContext = rephraseHookMessage(context)
-  return {
-    systemMessage: rephrasedContext,
-    suppressOutput: true,
-    hookSpecificOutput: hookSpecificOutputSchema.parse({
-      hookEventName: "PostToolUse",
-      additionalContext: rephrasedContext,
-    }),
   }
 }

@@ -13,7 +13,7 @@ import { resolveSafeSessionId } from "../src/session-id.ts"
 import { hadHealthyPendingTaskBufferBeforeTaskCreate } from "../src/tasks/task-buffer-health.ts"
 import { readSessionTasksFresh } from "../src/tasks/task-recovery.ts"
 import { detect, formatMessage } from "../src/tasks/task-subject-validation.ts"
-import { buildDenyPostToolUseOutput } from "../src/utils/hook-utils.ts"
+import { buildDenyPostToolUseOutput } from "../src/utils/hook-response.ts"
 
 async function sessionHadHealthyPendingBufferBeforeCreate(
   sessionId: string | undefined,

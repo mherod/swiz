@@ -183,11 +183,11 @@ describe("path-traversal sessionId payloads are neutralized", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("whitespace-only line filtering", () => {
-  // These test the hardened filter(l => l.trim()) pattern imported from hook-utils
+  // These test the hardened filter(l => l.trim()) pattern in the canonical utilities.
 
   test("parseGitStatus: whitespace-only lines are excluded from total count", async () => {
     // Import directly — this is a pure function
-    const { parseGitStatus } = await import("../src/utils/hook-utils.ts")
+    const { parseGitStatus } = await import("../src/utils/git-utils.ts")
 
     const input = " M file.ts\n   \n?? new.ts\n  \t  \n"
     const result = parseGitStatus(input)
@@ -200,7 +200,7 @@ describe("whitespace-only line filtering", () => {
   })
 
   test("parseGitStatus: tabs-only lines are excluded", async () => {
-    const { parseGitStatus } = await import("../src/utils/hook-utils.ts")
+    const { parseGitStatus } = await import("../src/utils/git-utils.ts")
 
     const input = "\t\t\t\n M real.ts\n\t\n"
     const result = parseGitStatus(input)
@@ -209,7 +209,7 @@ describe("whitespace-only line filtering", () => {
   })
 
   test("parseGitStatus: mixed whitespace between valid lines", async () => {
-    const { parseGitStatus } = await import("../src/utils/hook-utils.ts")
+    const { parseGitStatus } = await import("../src/utils/git-utils.ts")
 
     const input = "A  added.ts\n \n \n \nD  deleted.ts\n\n\n"
     const result = parseGitStatus(input)
@@ -219,7 +219,7 @@ describe("whitespace-only line filtering", () => {
   })
 
   test("extractToolNamesFromTranscript: whitespace-only JSONL lines don't cause parse errors", async () => {
-    const { extractToolNamesFromTranscript } = await import("../src/utils/hook-utils.ts")
+    const { extractToolNamesFromTranscript } = await import("../src/utils/transcript.ts")
 
     const tmpDir = await tmp.create("swiz-filter-")
 
@@ -236,7 +236,7 @@ describe("whitespace-only line filtering", () => {
   })
 
   test("extractToolNamesFromTranscript: only-whitespace file returns empty array", async () => {
-    const { extractToolNamesFromTranscript } = await import("../src/utils/hook-utils.ts")
+    const { extractToolNamesFromTranscript } = await import("../src/utils/transcript.ts")
 
     const tmpDir = await tmp.create("swiz-filter-")
 
@@ -253,18 +253,18 @@ describe("whitespace-only line filtering", () => {
 
 describe("createSessionTask input sanitization", () => {
   test("path-traversal in sentinelKey produces safe /tmp/ path", async () => {
-    const { createSessionTask } = await import("../src/utils/hook-utils.ts")
+    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
     // Should not throw — path separators are stripped from sentinel key
     await createSessionTask("valid-session-id", "../../etc/cron.d/evil", "subject", "desc")
   })
 
   test("path-traversal in sessionId produces safe /tmp/ path", async () => {
-    const { createSessionTask } = await import("../src/utils/hook-utils.ts")
+    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
     await createSessionTask("../../etc/passwd", "safe-key", "subject", "desc")
   })
 
   test("shell injection in sessionId is sanitized", async () => {
-    const { createSessionTask } = await import("../src/utils/hook-utils.ts")
+    const { createSessionTask } = await import("../src/utils/session-task-io.ts")
     await createSessionTask("$(whoami)", "safe-key", "subject", "desc")
     // If this returns without error, the injection was neutralized
   })
@@ -272,7 +272,7 @@ describe("createSessionTask input sanitization", () => {
   test("empty HOME causes early return", async () => {
     // Use subprocess to control HOME env
     const script = `
-      import { createSessionTask } from "./src/utils/hook-utils.ts";
+      import { createSessionTask } from "./src/utils/session-task-io.ts";
       await createSessionTask("valid-id", "key", "subj", "desc");
       console.log("OK");
     `

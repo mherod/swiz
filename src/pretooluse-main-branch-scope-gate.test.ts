@@ -9,7 +9,7 @@ import {
 import { getIssueStore, resetIssueStore } from "./issue-store.ts"
 import { hookOutputSchema } from "./schemas.ts"
 import { DEFAULT_SETTINGS, getEffectiveSwizSettings } from "./settings.ts"
-import { extractPrNumber, GH_PR_MERGE_RE } from "./utils/hook-utils.ts"
+import { extractPrNumber, GH_PR_MERGE_RE } from "./utils/git-utils.ts"
 
 // ── gh pr merge command detection ────────────────────────────────────────────
 // These tests verify the regex and helper used by the scope gate hook to

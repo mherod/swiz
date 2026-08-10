@@ -2,10 +2,14 @@
 
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
+import {
+  buildContextHookOutput,
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
 import { type FileEditHookInput, fileEditHookInputSchema } from "../src/schemas.ts"
-import { buildContextHookOutput, isFileEditTool } from "../src/utils/hook-utils.ts"
+import { isFileEditTool } from "../src/tool-matchers.ts"
 import { spawnWithTimeout } from "../src/utils/process-utils.ts"
 
 async function findPrettier(filePath: string, cwd: string): Promise<string | null> {

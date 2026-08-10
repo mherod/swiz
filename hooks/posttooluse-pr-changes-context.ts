@@ -9,24 +9,31 @@
  * /pr-comments-address before committing or pushing.
  */
 
+import {
+  getOpenPrForBranch,
+  ghJsonViaDaemon as ghJson,
+  git,
+  hasGhCli,
+  isDefaultBranch,
+  isGitHubRemote,
+} from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  postToolUseAdditionalContext,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { formatSkillReferenceForAgent, skillExistsForHookPayload } from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
-import { getDefaultBranch, isDefaultBranch } from "../src/utils/git-utils.ts"
 import {
   GH_PR_CHECKOUT_RE,
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
-  getOpenPrForBranch,
+  getDefaultBranch,
   getRepoNameWithOwner,
-  ghJson,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  postToolUseAdditionalContext,
-} from "../src/utils/hook-utils.ts"
+} from "../src/utils/git-utils.ts"
 
 type Review = { state: string; user: { login: string }; body?: string }
 

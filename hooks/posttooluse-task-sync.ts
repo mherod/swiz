@@ -17,7 +17,7 @@ import {
   agentHasTaskToolsForHookPayload,
   detectCurrentAgentFromHookPayload,
 } from "../src/agent-paths.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
+import { buildContextHookOutput, type SwizHook, type SwizHookOutput } from "../src/SwizHook.ts"
 import { type PostToolHookInput, toolHookInputSchema } from "../src/schemas.ts"
 import { resolveSafeSessionId } from "../src/session-id.ts"
 import { buildCountSummaryFromTasks } from "../src/tasks/task-count-summary.ts"
@@ -42,7 +42,6 @@ import {
 } from "../src/tasks/task-recovery.ts"
 import { writeCanonicalTaskListSyncSentinel } from "../src/tasks/task-state-cache.ts"
 import { findDuplicateSubjectGroups } from "../src/tasks/task-subject-duplicates.ts"
-import { buildContextHookOutput } from "../src/utils/hook-utils.ts"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // § 1. Task Audit Sync (TaskCreate / TaskUpdate / TodoWrite)

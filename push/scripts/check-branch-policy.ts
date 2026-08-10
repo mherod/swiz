@@ -16,19 +16,20 @@ import {
   detectProjectCollaborationPolicy,
   getCollaborationModePolicy,
 } from "../../src/collaboration-policy.ts"
-import { isDocsOrConfig, parseCommitType } from "../../src/git-helpers.ts"
+import {
+  gh,
+  git,
+  isDefaultBranch,
+  isDocsOrConfig,
+  isGitRepo,
+  parseCommitType,
+} from "../../src/git-helpers.ts"
 import {
   getEffectiveSwizSettings,
   readProjectSettings,
   readSwizSettings,
 } from "../../src/settings.ts"
-import {
-  getDefaultBranch,
-  gh,
-  git,
-  isDefaultBranch,
-  isGitRepo,
-} from "../../src/utils/hook-utils.ts"
+import { getDefaultBranch } from "../../src/utils/git-utils.ts"
 
 const MAX_FILES_HARD_BLOCK = 5
 const MAX_TRIVIAL_FILES = 3

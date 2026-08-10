@@ -1,10 +1,12 @@
 // Shared types and utilities for stop hooks that scan git diffs for violations.
 
+import { git } from "../git-helpers.ts"
 import { type GitRepoResolver, isGitRepoForHookPayload } from "../repository-capability.ts"
 import type { HookOutput } from "../schemas.ts"
 import { stopHookInputSchema } from "../schemas.ts"
+import { getDefaultBranch } from "./git-utils.ts"
 import { hasNonEmptyHookOutput } from "./hook-json-helpers.ts"
-import { blockStopObj, exitWithHookObject, getDefaultBranch, git } from "./hook-utils.ts"
+import { blockStopObj, exitWithHookObject } from "./hook-response.ts"
 
 /** Violation result shared by all diff-scanning stop hooks. */
 export interface DiffViolation {

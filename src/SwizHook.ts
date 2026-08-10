@@ -72,7 +72,7 @@ async function handleSwizHookStdinParseError(
   if (options?.onStdinJsonError) {
     const fallback = options.onStdinJsonError(err)
     if (hasNonEmptyHookOutput(fallback)) {
-      const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+      const { exitWithHookObject } = await import("./utils/hook-response.ts")
       exitWithHookObject(fallback)
     }
     process.exit(0)
@@ -150,7 +150,7 @@ async function injectEffectiveSettingsIfMissing(input: Record<string, any>): Pro
 
 async function emitHookOutputIfNonEmpty(output: SwizHookOutput): Promise<void> {
   if (!hasNonEmptyHookOutput(output)) return
-  const { exitWithHookObject } = await import("./utils/hook-utils.ts")
+  const { exitWithHookObject } = await import("./utils/hook-response.ts")
   exitWithHookObject(output)
 }
 
@@ -215,7 +215,7 @@ export async function runSwizHookAsMain(
   // The hook decision is already emitted above. Keep the old flush point for
   // compatibility with any external hook path that still tracks async rewrites.
   await flushPendingAutoSteerHumanisation()
-  // Always exit explicitly: dynamic imports (settings.ts, hook-utils.ts) may open
+  // Always exit explicitly: dynamic imports (settings.ts, hook-response.ts) may open
   // SQLite connections or file watchers that prevent natural process exit when
   // the hook returns {} (empty output, e.g. non-TS file passthrough).
   process.exit(0)
@@ -259,6 +259,19 @@ export function buildContextHookOutput(
       additionalContext: rephrasedContext,
     }),
   })
+}
+
+/** Build PostToolUse additional context without terminating an inline hook run. */
+export function postToolUseAdditionalContext(context: string): SwizHookOutput {
+  const rephrasedContext = rephraseHookMessage(context)
+  return {
+    systemMessage: rephrasedContext,
+    suppressOutput: true,
+    hookSpecificOutput: hookSpecificOutputSchema.parse({
+      hookEventName: "PostToolUse",
+      additionalContext: rephrasedContext,
+    }),
+  }
 }
 
 /**

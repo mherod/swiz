@@ -7,11 +7,15 @@
 // executable as a standalone script for backwards compatibility and testing.
 
 import { ghJson, git } from "../src/git-helpers.ts"
-import { runSwizHookAsMain, type SwizHookOutput, type SwizShellHook } from "../src/SwizHook.ts"
+import {
+  postToolUseAdditionalContext,
+  runSwizHookAsMain,
+  type SwizHookOutput,
+  type SwizShellHook,
+} from "../src/SwizHook.ts"
 import { type ShellHookInput, shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { GH_PR_CHECKOUT_RE, GIT_CHECKOUT_RE } from "../src/utils/git-utils.ts"
-import { postToolUseAdditionalContext } from "../src/utils/hook-utils.ts"
 
 interface GhReview {
   author?: { login?: string }

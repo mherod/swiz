@@ -16,7 +16,7 @@ import {
   parseTranscriptEvents,
 } from "../hooks/pretooluse-repeated-lint-test.ts"
 import { extractSessionLines, parseTranscriptSummary } from "../src/transcript-summary.ts"
-import { collectBlockedToolUseIds } from "./utils/hook-utils.ts"
+import { collectBlockedToolUseIds } from "./utils/transcript.ts"
 
 // ── isHelpQuery ───────────────────────────────────────────────────────────────
 

@@ -11,11 +11,11 @@
  */
 
 import { stat, writeFile } from "node:fs/promises"
+import { isGitRepo } from "../src/git-helpers.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { buildContextHookOutput, runSwizHookAsMain } from "../src/SwizHook.ts"
 import { sessionStartHookInputSchema } from "../src/schemas.ts"
 import { swizCeremonyDayFlagPath } from "../src/temp-paths.ts"
-import { isGitRepo } from "../src/utils/hook-utils.ts"
 
 function isoDate(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10)

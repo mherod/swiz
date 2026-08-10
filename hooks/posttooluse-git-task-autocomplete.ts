@@ -11,19 +11,19 @@
  */
 
 import { agentHasTaskToolsForHookPayload } from "../src/agent-paths.ts"
-import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
-import { runSwizHookAsMain } from "../src/SwizHook.ts"
-import { toolHookInputSchema } from "../src/schemas.ts"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
-import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
+import { stripHeredocs } from "../src/command-utils.ts"
 import {
   buildContextHookOutput,
-  GIT_COMMIT_RE,
-  GIT_PUSH_RE,
-  isShellTool,
-  resolveSafeSessionId,
-  stripHeredocs,
-} from "../src/utils/hook-utils.ts"
+  runSwizHookAsMain,
+  type SwizHook,
+  type SwizHookOutput,
+} from "../src/SwizHook.ts"
+import { toolHookInputSchema } from "../src/schemas.ts"
+import { resolveSafeSessionId } from "../src/session-id.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { getTaskToolName } from "../src/tasks/task-governance-messages.ts"
+import { isShellTool } from "../src/tool-matchers.ts"
+import { GIT_COMMIT_RE, GIT_PUSH_RE } from "../src/utils/shell-patterns.ts"
 
 async function buildPushContext(sessionId: string, cwd: string): Promise<string> {
   const taskCreateName = getTaskToolName("TaskCreate")
