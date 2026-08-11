@@ -158,16 +158,22 @@ function buildNewTaskRecord(task: NormalizedTask, nowIso: string, nowMs: number)
  */
 function updateExistingTask(existing: SessionTask, task: NormalizedTask): SessionTask {
   const merged: SessionTask = { ...existing, subject: task.subject, status: task.status }
-  const nowIso = new Date().toISOString()
+  if (existing.status === task.status) return merged
+
   const nowMs = Date.now()
+  const nowIso = new Date(nowMs).toISOString()
   if (existing.status === "in_progress") {
     merged.elapsedMs = getTaskCurrentDurationMs(existing, nowMs)
   }
   merged.statusChangedAt = nowIso
-  if (task.status === "in_progress") merged.startedAt = nowMs
+  merged.startedAt = task.status === "in_progress" ? nowMs : null
   if (task.status === "completed") {
     merged.completedAt = nowMs
-    if (!merged.completionTimestamp) merged.completionTimestamp = nowIso
+    merged.completionTimestamp = nowIso
+  } else {
+    merged.completedAt = null
+    merged.completionTimestamp = undefined
+    merged.completionEvidence = undefined
   }
   return merged
 }
