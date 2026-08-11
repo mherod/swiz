@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { makeTempGitRepo, useTempDir } from "../utils/test-utils.ts"
 import {
@@ -32,6 +33,39 @@ async function runShell(
 }
 
 describe("shell shim runtime", () => {
+  testWithZsh("finds Bun before login PATH setup runs", async () => {
+    const home = await tmp.create("swiz-shim-home-bun-path-")
+    const bunInstall = join(home, ".bun")
+    const bunBinDir = join(bunInstall, "bin")
+    const bunPath = join(bunBinDir, "bun")
+    await mkdir(bunBinDir, { recursive: true })
+    await Bun.write(bunPath, "#!/usr/bin/env sh\nprintf 'fake-bun\\n'\n")
+    const chmod = Bun.spawn(["chmod", "+x", bunPath], { stdout: "pipe", stderr: "pipe" })
+    const [, , chmodExitCode] = await Promise.all([
+      new Response(chmod.stdout).text(),
+      new Response(chmod.stderr).text(),
+      chmod.exited,
+    ])
+    expect(chmodExitCode).toBe(0)
+
+    const result = await runShell(
+      ZSH_PATH ?? "zsh",
+      ["-f", "-c", 'source "$1"; command bun', "swiz", SHIM_PATH],
+      {
+        cwd: home,
+        env: {
+          BUN_INSTALL: bunInstall,
+          HOME: home,
+          PATH: "/usr/bin:/bin",
+        },
+      }
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("fake-bun\n")
+    expect(result.stderr).not.toContain("bun is not installed or not on PATH")
+  })
+
   testWithZsh("git wrapper runs under zsh and still blocks an unsafe force push", async () => {
     const repo = await makeTempGitRepo(tmp, { suffix: "-zsh" })
     const status = await runShell(

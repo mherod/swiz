@@ -13,9 +13,29 @@
 # Uninstall: swiz shim uninstall
 
 # ── Dependency check ──────────────────────────────────────────────────────────
-# swiz hooks and the shim redirect commands to bun. Warn once if it's missing.
+# swiz hooks and the shim redirect commands to bun. The shim is sourced from
+# .zshenv before a login shell reaches .zprofile, so recover the standard Bun
+# install locations before deciding that Bun is unavailable.
 
-if ! command -v bun >/dev/null 2>&1; then
+_swiz_ensure_bun_path() {
+  command -v bun >/dev/null 2>&1 && return 0
+
+  local candidate
+  for candidate in \
+    "${BUN_INSTALL:-${HOME:-}/.bun}/bin/bun" \
+    "/opt/homebrew/bin/bun" \
+    "/usr/local/bin/bun"; do
+    if [[ -x "$candidate" ]]; then
+      PATH="${candidate%/bun}:$PATH"
+      export PATH
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! _swiz_ensure_bun_path; then
   printf '\033[31mswiz: bun is not installed or not on PATH.\033[0m\n' >&2
   printf 'swiz hooks require bun to run. Install it:\n' >&2
   printf '  curl -fsSL https://bun.sh/install | bash\n\n' >&2
