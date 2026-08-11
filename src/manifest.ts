@@ -65,6 +65,7 @@ import pretooluseDirtyWorktreeGate from "../hooks/pretooluse-dirty-worktree-gate
 import pretoolusEslintConfigStrength from "../hooks/pretooluse-eslint-config-strength.ts"
 import pretooluseGitIndexLock from "../hooks/pretooluse-git-index-lock.ts"
 import pretooluseGitFlowIntegrationBaseGate from "../hooks/pretooluse-gitflow-integration-base-gate.ts"
+import pretooluseGuardianAwareness from "../hooks/pretooluse-guardian-awareness.ts"
 import pretooluseInfractionEscalation from "../hooks/pretooluse-infraction-escalation.ts"
 import pretooluseInlineScriptWriteGate from "../hooks/pretooluse-inline-script-write-gate.ts"
 import pretooluseIssueSyncBeforeCheckout from "../hooks/pretooluse-issue-sync-before-checkout.ts"
@@ -368,6 +369,7 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
+      { hook: pretooluseGuardianAwareness },
       { hook: pretooluseNoMixedToolCalls },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseBannedCommands },

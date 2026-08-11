@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**156 hooks. 17 event types. Every agent. Zero compromises.**
+**157 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -51,7 +51,7 @@ swiz supports every agent that has a hook system, with automatic translation of 
 | Cursor IDE  | `~/.cursor/hooks.json`    | Full support — flat list (`version: 1`), all events                                                                                                                                                       |
 | Cursor CLI  | `~/.cursor/hooks.json`    | Limited — only `beforeShellExecution`/`afterShellExecution` fire. Cursor team confirmed full hook event parity is "in development, no ETA" ([forum thread](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)). The canonical swiz workaround is `swiz shim install`, which intercepts shell commands at the `~/.zshenv` layer regardless of which agent is running. Non-shell events (Edit/Write/Read PreToolUse, Stop, SessionStart, UserPromptSubmit) cannot be intercepted under Cursor CLI until upstream ships them — when that happens, update `EVENT_MAP` in `src/agents.ts` and rerun `swiz install`. |
 | Gemini CLI  | `~/.gemini/settings.json` | Full support — nested matcher groups, all 5 event types                                                                                                                                                   |
-| Codex CLI   | `~/.codex/hooks.json`     | Full support — nested matcher groups, shipped event types (`SessionStart`, `Stop`, `UserPromptSubmit`)                                                                                                    |
+| Codex CLI   | `~/.codex/hooks.json`     | Full support — nested matcher groups, shipped events, and transcript-derived awareness of guardian-bound shell escalation requests                                                                        |
 | Antigravity | `~/.gemini/antigravity-cli/hooks.json` | Supported — nested matcher groups under a named `swiz` group; `PreToolUse`/`PostToolUse`/`Stop`/`SessionStart` mapped. Agent detection uses the `--agent antigravity` dispatch flag (no env injection). Tasks use brain `task.md` checklists, so the Task\* governance hooks are skipped. `tool_name` matchers and the `PreInvocation`/`PostInvocation` mapping are pending live payload confirmation. |
 
 ### Cross-Agent Translation
@@ -97,7 +97,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-127 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+128 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -136,7 +136,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (79)
+### PreToolUse (80)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -144,6 +144,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 |------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `pretooluse-active-skills.ts`                  | Injects the skills invoked within the configured recency window before every tool call, keeping the active workflows present in tool context. |
 | `pretooluse-no-mixed-tool-calls.ts`            | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pretooluse-guardian-awareness.ts`             | Detects Codex shell calls that proactively request guardian review. Requires an ordinary sandboxed attempt first, keeps successful sandboxed operations non-escalated even when they emit incidental permission warnings, and permits a narrowly scoped escalation only after the transcript proves a concrete sandbox permission or network failure.                                                                                                                                                                                                                                                         |
 | `pretooluse-banned-commands.ts`                | Blocks `grep` (use `rg`), file-writing `sed`/`awk` (use Edit; read-only usage and stderr suppression are allowed), `rm` (use trash), `cd`, raw `python`, and raw mutating `git stash` commands. Enforces Git/GitHub safety by blocking `--no-verify`, unsafe force pushes, commit attribution, `gh --admin`, and `gh --skip-status-check`; lease-based force pushes remain allowed. A stash already proven disposable by `/prune-branches` can be removed through the OID-bound `swiz stash retire <full-oid>` workflow. The hook also blocks shell redirects and heredocs that write files (use the Write/Edit tool instead), and blocks `gh issue create`/`gh issue edit --body` with shell-sensitive inline content (backticks, `$()`, `<...>`). For long or complex bodies, write to a temp file and pass `--body-file /tmp/issue-body.md`; delete the file after the `gh` call. |
 | `pretooluse-inline-script-write-gate.ts`       | Blocks inline eval scripts across multiple runtimes that contain file-write API calls. Covered runtimes: `node`/`bun -e`/`--eval` (`writeFile`, `appendFile`, `createWriteStream`, `Bun.write`, and sync variants); `python`/`python3 -c` (`open` write/append modes, `Path.write_text/write_bytes`); `perl -e` (`open >, >>`); `ruby -e` (`File.write`, `IO.write`, `File.open` write mode); `deno eval` (`Deno.writeTextFile/Sync`, `Deno.writeFile/Sync`). Inline eval scripts bypass the native Write/Edit tool review path — use the Write or Edit tools instead.                                             |
 | `pretooluse-no-merge-conflict-comments.ts`     | Blocks `gh pr comment` and `gh pr review --comment` calls whose body consists only of merge-conflict or rebase-request noise. The project already has local remediation paths (stop-branch-conflicts, /rebase-onto-main) — low-signal public comments add notification noise without value.                                                                                                                                                                                                                                                                                                                        |
@@ -347,7 +348,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 126 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 127 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

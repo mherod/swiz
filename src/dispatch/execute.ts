@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto"
 import { merge, orderBy, unset } from "lodash-es"
 import { detectCurrentAgentFromHookPayload } from "../agent-paths.ts"
+import { enrichPayloadWithGuardianReview, type GuardianReviewContext } from "../guardian-review.ts"
 import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
 import { tryReplayPendingMutations } from "../issue-store-replay.ts"
@@ -85,6 +86,8 @@ export interface EnrichedDispatchPayload extends Record<string, unknown> {
   _transcriptSessionLinesKey?: string
   /** Epoch ms of the last user message for this session (daemon hot-cache fast path). */
   _lastUserMessageAt?: number
+  /** Trusted Codex escalation metadata derived from the current transcript tool call. */
+  _guardianReview?: GuardianReviewContext
   /**
    * Repository facts verified by dispatch for this event.
    *
@@ -258,6 +261,10 @@ async function enrichPayloadForHooks(opts: EnrichPayloadOptions): Promise<Enrich
   )
 
   const [usage, summary] = await Promise.all([usagePromise, summaryPromise])
+  const guardianReview = enrichPayloadWithGuardianReview(payload, summary)
+  if (guardianReview) {
+    log(`   guardian review requested: prior sandbox attempt ${guardianReview.priorSandboxAttempt}`)
+  }
   if (usage) {
     payload._currentSessionToolUsage = usage
     log(
