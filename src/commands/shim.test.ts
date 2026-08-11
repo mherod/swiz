@@ -9,6 +9,8 @@ import {
 
 const SHIM_PATH = resolve(import.meta.dir, "../../hooks/shim.sh")
 const tmp = useTempDir("swiz-shim-")
+const ZSH_PATH = Bun.which("zsh")
+const testWithZsh = ZSH_PATH ? test : test.skip
 
 async function runShell(
   shell: string,
@@ -30,10 +32,10 @@ async function runShell(
 }
 
 describe("shell shim runtime", () => {
-  test("git wrapper runs under zsh and still blocks an unsafe force push", async () => {
+  testWithZsh("git wrapper runs under zsh and still blocks an unsafe force push", async () => {
     const repo = await makeTempGitRepo(tmp, { suffix: "-zsh" })
     const status = await runShell(
-      "/bin/zsh",
+      ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; git -C "$2" status --short', "swiz", SHIM_PATH, repo],
       { cwd: repo, env: { SWIZ_SHIM: "strict" } }
     )
@@ -41,7 +43,7 @@ describe("shell shim runtime", () => {
     expect(status.stderr).not.toContain("bad substitution")
 
     const forcePush = await runShell(
-      "/bin/zsh",
+      ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; git push --force origin main', "swiz", SHIM_PATH],
       { cwd: repo, env: { SWIZ_SHIM: "strict" } }
     )
@@ -49,13 +51,13 @@ describe("shell shim runtime", () => {
     expect(forcePush.stderr).toContain("git push --force is blocked")
   })
 
-  test("allows read-only sed while blocking in-place edits", async () => {
+  testWithZsh("allows read-only sed while blocking in-place edits", async () => {
     const dir = await tmp.create("swiz-shim-sed-")
     const input = join(dir, "input.txt")
     await Bun.write(input, "first\nsecond\n")
 
     const readOnly = await runShell(
-      "/bin/zsh",
+      ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; sed -n "1p" "$2"', "swiz", SHIM_PATH, input],
       { cwd: dir, env: { SWIZ_SHIM: "strict" } }
     )
@@ -63,7 +65,7 @@ describe("shell shim runtime", () => {
     expect(readOnly.stdout).toBe("first\n")
 
     const inPlace = await runShell(
-      "/bin/zsh",
+      ZSH_PATH ?? "zsh",
       ["-f", "-c", 'source "$1"; sed -i "" "s/first/changed/" "$2"', "swiz", SHIM_PATH, input],
       { cwd: dir, env: { SWIZ_SHIM: "strict" } }
     )
