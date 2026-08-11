@@ -1,6 +1,7 @@
 import { z } from "zod"
 import type { JsonLike } from "./schemas.ts"
 import { tryParseJsonLine } from "./utils/jsonl.ts"
+import { escapeRegex } from "./utils/shell-patterns.ts"
 
 export type SandboxAttemptEvidence =
   | "not-attempted"
@@ -19,7 +20,19 @@ interface CodexToolCall {
   callId: string
   escalated: boolean
   lineIndex: number
+  outputAttributable: boolean
 }
+
+const jsonLikeSchema: z.ZodType<JsonLike> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonLikeSchema),
+    z.record(z.string(), jsonLikeSchema),
+  ])
+)
 
 const codexResponseItemSchema = z.looseObject({
   type: z.literal("response_item"),
@@ -31,11 +44,11 @@ const codexResponseItemSchema = z.looseObject({
       "custom_tool_call_output",
     ]),
     name: z.string().optional(),
-    input: z.any().optional(),
-    arguments: z.any().optional(),
+    input: jsonLikeSchema.optional(),
+    arguments: jsonLikeSchema.optional(),
     call_id: z.string().optional(),
     id: z.string().optional(),
-    output: z.any().optional(),
+    output: jsonLikeSchema.optional(),
   }),
 })
 
@@ -66,9 +79,9 @@ const ESCALATION_PROPERTY_RE =
 const PERMISSION_FAILURE_RE =
   /operation not permitted|permission denied|read-only file system|sandbox(?:ed)?\s+(?:denied|blocked|restriction)|network (?:is )?unreachable|could not resolve host|name or service not known/i
 const SUCCESS_RE =
-  /["']exit_code["']\s*:\s*0\b|\bexit\s*=\s*0\b|(?:^|\n)[^\n]*(?:push|upload|write|command|operation) succeeded\b/im
+  /["']exit_code["']\s*:\s*0\b|(?:^|\n|\\n)\s*exit\s*=\s*0\b|(?:^|\n)[^\n]*(?:push|upload|write|command|operation) succeeded\b/im
 const FAILURE_RE =
-  /["']exit_code["']\s*:\s*[1-9]\d*\b|\bexit\s*=\s*[1-9]\d*\b|process exited with code [1-9]\d*|script failed/i
+  /["']exit_code["']\s*:\s*[1-9]\d*\b|(?:^|\n|\\n)\s*exit\s*=\s*[1-9]\d*\b|process exited with code [1-9]\d*|script failed/i
 const TOOL_CALL_TYPES = new Set<CodexResponsePayload["type"]>(["function_call", "custom_tool_call"])
 
 function parseResponseItem(line: string): CodexResponseItem | null {
@@ -98,8 +111,12 @@ function isExecWrapper(name: string): boolean {
 
 function wrapperReferencesCommand(code: string, command: string): boolean {
   if (!command) return false
-  if (code.includes(JSON.stringify(command))) return true
-  return !command.includes("\n") && code.includes(command)
+  const serializedCommand = escapeRegex(JSON.stringify(command))
+  const commandProperty = new RegExp(
+    `(?:^|[{,]\\s*)(?:cmd|command|["']cmd["']|["']command["'])\\s*:\\s*${serializedCommand}(?=\\s*[,}])`,
+    "m"
+  )
+  return commandProperty.test(code)
 }
 
 function directMatchingToolCall(
@@ -115,6 +132,7 @@ function directMatchingToolCall(
     callId,
     escalated: input.sandbox_permissions === "require_escalated",
     lineIndex,
+    outputAttributable: true,
   }
 }
 
@@ -130,6 +148,8 @@ function wrapperMatchingToolCall(
     callId,
     escalated: ESCALATION_PROPERTY_RE.test(rawInput),
     lineIndex,
+    outputAttributable:
+      (rawInput.match(/\btools\.(?:functions\.)?exec_command\s*\(/g) ?? []).length === 1,
   }
 }
 
@@ -162,10 +182,18 @@ function extractOutputRecord(line: string): [string, string] | null {
     return null
   }
   try {
-    return [payload.call_id, JSON.stringify(payload.output ?? "")]
+    const output = payload.output ?? ""
+    return [payload.call_id, `${JSON.stringify(output)}\n${flattenOutputText(output)}`]
   } catch {
     return [payload.call_id, String(payload.output ?? "")]
   }
+}
+
+function flattenOutputText(value: JsonLike): string {
+  if (value === null) return ""
+  if (Array.isArray(value)) return value.map(flattenOutputText).join("\n")
+  if (typeof value === "object") return Object.values(value).map(flattenOutputText).join("\n")
+  return String(value)
 }
 
 function collectOutputText(lines: string[]): Map<string, string> {
@@ -180,7 +208,7 @@ function collectOutputText(lines: string[]): Map<string, string> {
 function classifyPriorSandboxAttempt(output: string | undefined): SandboxAttemptEvidence {
   if (!output) return "unknown"
   if (SUCCESS_RE.test(output)) return "succeeded"
-  if (PERMISSION_FAILURE_RE.test(output)) return "permission-failed"
+  if (PERMISSION_FAILURE_RE.test(output) && FAILURE_RE.test(output)) return "permission-failed"
   if (FAILURE_RE.test(output)) return "failed"
   return "unknown"
 }
@@ -202,7 +230,9 @@ export function detectGuardianReviewRequest(
   const previousSandboxed = matchingCalls
     .slice(0, -1)
     .reverse()
-    .find((call) => !call.escalated && call.lineIndex < current.lineIndex)
+    .find(
+      (call) => !call.escalated && call.outputAttributable && call.lineIndex < current.lineIndex
+    )
   const priorSandboxAttempt = previousSandboxed
     ? classifyPriorSandboxAttempt(collectOutputText(sessionLines).get(previousSandboxed.callId))
     : "not-attempted"

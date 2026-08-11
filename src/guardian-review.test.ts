@@ -16,13 +16,35 @@ function wrapperCall(callId: string, command: string, escalated: boolean): strin
   })
 }
 
-function wrapperOutput(callId: string, text: string): string {
+function wrapperOutput(callId: string, text: string | string[]): string {
+  const blocks = Array.isArray(text) ? text : [text]
   return JSON.stringify({
     type: "response_item",
     payload: {
       type: "custom_tool_call_output",
       call_id: callId,
-      output: [{ type: "input_text", text }],
+      output: blocks.map((block) => ({ type: "input_text", text: block })),
+    },
+  })
+}
+
+function multiCommandWrapperCall(
+  callId: string,
+  commands: Array<{ command: string; escalated?: boolean }>
+): string {
+  const calls = commands
+    .map(({ command, escalated }) => {
+      const sandbox = escalated ? ',sandbox_permissions:"require_escalated"' : ""
+      return `tools.exec_command({cmd:${JSON.stringify(command)}${sandbox}})`
+    })
+    .join(",")
+  return JSON.stringify({
+    type: "response_item",
+    payload: {
+      type: "custom_tool_call",
+      name: "exec",
+      call_id: callId,
+      input: `const results = await Promise.all([${calls}]); results.forEach(text)`,
     },
   })
 }
@@ -52,13 +74,57 @@ describe("guardian review transcript detection", () => {
   test("allows a narrow escalation after a concrete sandbox failure", () => {
     const lines = [
       wrapperCall("prior", COMMAND, false),
-      wrapperOutput("prior", "fatal: cannot create lock file: Operation not permitted\nexit=1"),
+      wrapperOutput("prior", [
+        "Script completed\nOutput:\n",
+        "fatal: cannot create lock file: Operation not permitted\n",
+        "exit=1",
+      ]),
       wrapperCall("current", COMMAND, true),
     ]
 
     expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe(
       "permission-failed"
     )
+  })
+
+  test("does not transfer a compound command permission failure to one contained command", () => {
+    const containedCommand = "git status --short"
+    const compoundCommand = `${containedCommand} && touch ~/.swiz-guardian-test`
+    const lines = [
+      wrapperCall("prior", compoundCommand, false),
+      wrapperOutput("prior", "touch: Operation not permitted\nexit=1"),
+      wrapperCall("current", containedCommand, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, containedCommand)?.priorSandboxAttempt).toBe(
+      "not-attempted"
+    )
+  })
+
+  test("does not transfer an ambiguous parallel wrapper failure to one command", () => {
+    const lines = [
+      multiCommandWrapperCall("prior", [
+        { command: COMMAND },
+        { command: "touch ~/.swiz-guardian-test" },
+      ]),
+      wrapperOutput("prior", "touch: Operation not permitted\nexit=1"),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe("not-attempted")
+  })
+
+  test("does not treat permission wording in successful output as a sandbox failure", () => {
+    const lines = [
+      wrapperCall("prior", COMMAND, false),
+      wrapperOutput(
+        "prior",
+        "Script completed\nOutput:\nOperation not permitted is documented here"
+      ),
+      wrapperCall("current", COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe("unknown")
   })
 
   test("does not reuse an older escalation for the current sandboxed retry", () => {

@@ -32,7 +32,7 @@ describe("guardian review dispatch enrichment", () => {
       },
     })
 
-    const { response } = await executeDispatch({
+    const request = {
       canonicalEvent: "preToolUse",
       hookEventName: "PreToolUse",
       payloadStr: JSON.stringify({
@@ -61,10 +61,15 @@ describe("guardian review dispatch enrichment", () => {
         resolvedAt: Date.now(),
       }),
       replayPendingMutations: async () => {},
-    })
+    } as const
 
-    const specific = getHookSpecificOutput(response)
-    expect(specific?.permissionDecision).toBe("deny")
-    expect(specific?.permissionDecisionReason).toContain("has not been attempted")
+    const first = await executeDispatch(request)
+    const second = await executeDispatch(request)
+
+    for (const { response } of [first, second]) {
+      const specific = getHookSpecificOutput(response)
+      expect(specific?.permissionDecision).toBe("deny")
+      expect(specific?.permissionDecisionReason).toContain("has not been attempted")
+    }
   })
 })
