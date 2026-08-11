@@ -4,7 +4,7 @@
  * PostToolUse hook: Verify that a git push actually landed on the remote.
  *
  * After any Bash tool call containing `git push`, checks that the local HEAD
- * SHA matches the remote tracking branch SHA. If they diverge — meaning the
+ * SHA matches the authoritative remote branch SHA. If they diverge — meaning the
  * push failed silently or was skipped — blocks with a hard error so the agent
  * cannot report push success and move on.
  *
@@ -27,7 +27,7 @@
  */
 
 import { formatDurationPrecise } from "../src/format-duration.ts"
-import { git } from "../src/git-helpers.ts"
+import { getRemoteTrackingHead, git } from "../src/git-helpers.ts"
 import {
   buildContextHookOutput,
   runSwizHookAsMain,
@@ -63,25 +63,20 @@ function getPushCommand(input: PostToolHookInput): string | null {
 }
 
 async function verifyWithRetries(localHead: string, cwd: string): Promise<SwizHookOutput> {
-  const getRemoteHead = async (): Promise<string> => {
-    await git(["fetch", "--quiet"], cwd)
-    return (await git(["rev-parse", "@{upstream}"], cwd)) ?? ""
-  }
-
   for (const delayMs of RETRY_DELAYS_MS) {
     await Bun.sleep(delayMs)
-    const refreshed = await getRemoteHead()
+    const refreshed = await getRemoteTrackingHead(cwd)
     if (refreshed === localHead) {
       return buildContextHookOutput(
         "PostToolUse",
-        `Push verified (after ${formatDurationPrecise(delayMs)} retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+        `Push verified (after ${formatDurationPrecise(delayMs)} retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote branch.`
       )
     }
   }
 
-  const finalRemote = await getRemoteHead()
+  const finalRemote = await getRemoteTrackingHead(cwd)
   return buildDenyPostToolUseOutput(
-    `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
+    `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match the remote branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
       `Checked after retrying for ~7 seconds. Possible causes:\n` +
       `  • The push was rejected (non-fast-forward, branch protection, hook failure)\n` +
       `  • A different branch/ref was pushed than HEAD\n\n` +
@@ -104,7 +99,7 @@ async function evaluate(input: PostToolHookInput): Promise<SwizHookOutput> {
   if (localHead === remoteHead) {
     return buildContextHookOutput(
       "PostToolUse",
-      `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+      `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote branch.`
     )
   }
 

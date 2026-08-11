@@ -38,6 +38,50 @@ export async function git(args: string[], cwd: string): Promise<string> {
   }
 }
 
+function remoteTrackingTarget(upstream: string): { remote: string; branch: string } | null {
+  const normalized = upstream.replace(/^refs\/remotes\//, "")
+  const separator = normalized.indexOf("/")
+  if (separator <= 0 || separator === normalized.length - 1) return null
+  return {
+    remote: normalized.slice(0, separator),
+    branch: normalized.slice(separator + 1),
+  }
+}
+
+/** Read the authoritative server SHA for the configured remote-tracking branch without fetching. */
+export async function getRemoteTrackingHead(cwd: string, upstream?: string): Promise<string> {
+  const trackingRef = upstream ?? (await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd))
+  const target = remoteTrackingTarget(trackingRef)
+  if (!target) return ""
+  const output = await git(
+    ["ls-remote", "--heads", target.remote, `refs/heads/${target.branch}`],
+    cwd
+  )
+  return output.split(/\s+/)[0] ?? ""
+}
+
+async function reconcileAheadWithRemote(
+  cwd: string,
+  upstream: string,
+  localAhead: number
+): Promise<number> {
+  if (localAhead <= 0) return localAhead
+  const [localHead, remoteHead] = await Promise.all([
+    git(["rev-parse", "HEAD"], cwd),
+    getRemoteTrackingHead(cwd, upstream),
+  ])
+  return localHead && remoteHead === localHead ? 0 : localAhead
+}
+
+/** Count commits absent from the server, tolerating a sandbox-stale local tracking ref. */
+export async function getUnpushedCommitCount(cwd: string): Promise<number> {
+  const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
+  if (!upstream) return 0
+  const localAhead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
+  if (Number.isNaN(localAhead)) return 0
+  return await reconcileAheadWithRemote(cwd, upstream, localAhead)
+}
+
 // ─── gh helpers ───────────────────────────────────────────────────────────────
 
 const GH_API_CACHE_DURATION: string = process.env.GH_API_CACHE_DURATION || "20s"
@@ -669,10 +713,14 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
   const stashOut = gitSpawnSyncLines(["stash", "list", "--format=%gd"], gitPaths.workTree)
   const stash = stashOut ? stashOut.split("\n").length : 0
   const { upstreamAbSeen, upstream, ...restCounts } = counts
+  const ahead = upstream
+    ? await reconcileAheadWithRemote(gitPaths.workTree, upstream, restCounts.ahead)
+    : restCounts.ahead
 
   return {
     branch,
     ...restCounts,
+    ahead,
     stash,
     changedFallback,
     upstream,

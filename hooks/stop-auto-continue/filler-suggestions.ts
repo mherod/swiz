@@ -9,7 +9,7 @@
  * Reusable by any hook that needs a fallback suggestion without AI.
  */
 
-import { git } from "../../src/git-helpers.ts"
+import { getUnpushedCommitCount, git } from "../../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../../src/repository-capability.ts"
 import { readSessionTasks } from "../../src/tasks/task-recovery.ts"
 
@@ -29,18 +29,17 @@ interface GitState {
 async function getGitState(cwd: string, input: object): Promise<GitState | null> {
   if (!(await isGitRepoForHookPayload(input, cwd))) return null
 
-  const [status, branch, unpushed] = await Promise.all([
+  const [status, branch, unpushedCount] = await Promise.all([
     git(["status", "--porcelain"], cwd).catch(() => ""),
     git(["branch", "--show-current"], cwd).catch(() => "main"),
-    git(["rev-list", "--count", "@{upstream}..HEAD"], cwd).catch(() => "0"),
+    getUnpushedCommitCount(cwd).catch(() => 0),
   ])
   const statusText = typeof status === "string" ? status : ""
   const branchText = typeof branch === "string" && branch.trim() ? branch : "main"
-  const unpushedText = typeof unpushed === "string" ? unpushed : "0"
 
   return {
     dirtyCount: statusText.split("\n").filter(Boolean).length,
-    unpushedCount: Number.parseInt(unpushedText.trim(), 10) || 0,
+    unpushedCount,
     branch: branchText.trim(),
   }
 }

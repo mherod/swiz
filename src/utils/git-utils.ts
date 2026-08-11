@@ -2,6 +2,8 @@
 
 import {
   detectForkTopology,
+  getRemoteTrackingHead,
+  getUnpushedCommitCount,
   git,
   hasGhCli,
   isDefaultBranch,
@@ -31,6 +33,7 @@ import { type GitContextMessageStatus, normalizeCommitSummary } from "./git-cont
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
 export { isDefaultBranch }
+export { getRemoteTrackingHead, getUnpushedCommitCount }
 
 const _defaultBranchCache = new Map<string, string>()
 
@@ -269,9 +272,10 @@ export async function getGitAheadBehind(
 ): Promise<{ ahead: number; behind: number; upstream: string } | null> {
   const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
   if (!upstream) return null
-  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
+  const localAhead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
   const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd), 10)
-  if (Number.isNaN(ahead) || Number.isNaN(behind)) return null
+  if (Number.isNaN(localAhead) || Number.isNaN(behind)) return null
+  const ahead = await getUnpushedCommitCount(cwd)
   return { ahead, behind, upstream }
 }
 
@@ -375,10 +379,16 @@ export function parseGitStatusV2Output(out: string): GitStatusV2 | null {
  */
 export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   const out = await git(["--no-optional-locks", "status", "--porcelain=v2", "--branch"], cwd)
-  return parseGitStatusV2Output(out)
+  const status = parseGitStatusV2Output(out)
+  if (!status?.upstream || status.ahead <= 0) return status
+  return {
+    ...status,
+    ahead: await getUnpushedCommitCount(cwd),
+  }
 }
 
 export async function getUnpushedCommitSummaries(cwd: string, limit = 3): Promise<string[]> {
+  if ((await getUnpushedCommitCount(cwd)) === 0) return []
   const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)))
   const out = await git(["log", `--max-count=${safeLimit}`, "--oneline", "@{upstream}..HEAD"], cwd)
   return out.split("\n").map(normalizeCommitSummary).filter(Boolean)

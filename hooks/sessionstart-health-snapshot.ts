@@ -3,7 +3,13 @@
 // SessionStart hook: Inject project health snapshot as additionalContext
 
 import { join } from "node:path"
-import { ghJsonViaDaemon as ghJson, git, hasGhCli, isGitHubRemote } from "../src/git-helpers.ts"
+import {
+  getUnpushedCommitCount,
+  ghJsonViaDaemon as ghJson,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+} from "../src/git-helpers.ts"
 import { getHomeDir } from "../src/home.ts"
 import { type GitRepoResolver, isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
@@ -54,7 +60,7 @@ async function collectGitStatus(cwd: string): Promise<string> {
   const branch = await git(["branch", "--show-current"], cwd)
   const porcelain = await git(["status", "--porcelain"], cwd)
   const uncommitted = porcelain ? porcelain.split("\n").length : 0
-  const ahead = (await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || "?"
+  const ahead = await getUnpushedCommitCount(cwd)
   return `Git: branch=${branch}, uncommitted=${uncommitted}, unpushed=${ahead}.`
 }
 

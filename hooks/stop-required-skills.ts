@@ -8,7 +8,7 @@
 // below instead of creating more one-off stop hooks.
 
 import { GATE_REQUIRED_SKILLS } from "../src/gate-required-skills.ts"
-import { git } from "../src/git-helpers.ts"
+import { getUnpushedCommitCount } from "../src/git-helpers.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import { runSwizHookAsMain, type SwizHookOutput, type SwizStopHook } from "../src/SwizHook.ts"
 import { type StopHookInput, stopHookInputSchema } from "../src/schemas.ts"
@@ -187,8 +187,8 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
       }
 
       // Signal 1: Unpushed commits
-      const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
-      if (!Number.isNaN(ahead) && ahead > 0) {
+      const ahead = await getUnpushedCommitCount(cwd)
+      if (ahead > 0) {
         if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${ahead} commits ahead`)
         ctx.ahead = ahead
         return true
