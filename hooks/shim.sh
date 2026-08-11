@@ -120,8 +120,18 @@ find() {
 # ── File editing (agents should use Edit/StrReplace tool) ────────────────────
 
 sed() {
-  _swiz_guard sed "Edit tool" \
-    "Use the Edit/StrReplace tool for file modifications. Sed produces unreviewed changes." "$@" && return 1
+  [[ -n "${SWIZ_BYPASS:-}" ]] && { command sed "$@"; return $?; }
+
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == "--" ]] && break
+    case "$arg" in
+      -i|--in-place|--in-place=*|-i*|-[^-]*i*)
+        _swiz_guard sed "Edit tool" \
+          "In-place sed edits are blocked. Use the Edit/StrReplace tool for reviewable changes." "$@" && return 1
+        ;;
+    esac
+  done
   command sed "$@"
 }
 
@@ -293,31 +303,36 @@ git() {
   set -- "${args[@]}"
 
   # Identify the git subcommand after global options such as `-C <dir>`.
-  local git_cmd="" git_cmd_index=0
-  local i=1 arg
-  while [[ $i -le $# ]]; do
-    arg="${!i}"
-    case "$arg" in
-      -C|-c|--git-dir|--work-tree|--namespace|--config-env)
-        i=$((i + 2))
+  # Iterate values directly: bash arrays are zero-based while zsh arrays are
+  # one-based, so indirect positional indexing is not portable between them.
+  local git_cmd=""
+  local arg
+  local skip_global_value=false
+  local git_cmd_args=()
+  for arg in "${args[@]}"; do
+    if [[ -z "$git_cmd" ]]; then
+      if $skip_global_value; then
+        skip_global_value=false
         continue
-        ;;
-      --git-dir=*|--work-tree=*|--namespace=*|--config-env=*|--exec-path=*|-*)
-        i=$((i + 1))
-        continue
-        ;;
-      *)
-        git_cmd="$arg"
-        git_cmd_index=$i
-        break
-        ;;
-    esac
+      fi
+      case "$arg" in
+        -C|-c|--git-dir|--work-tree|--namespace|--config-env)
+          skip_global_value=true
+          ;;
+        --git-dir=*|--work-tree=*|--namespace=*|--config-env=*|--exec-path=*|-*)
+          ;;
+        *)
+          git_cmd="$arg"
+          ;;
+      esac
+      continue
+    fi
+    git_cmd_args+=("$arg")
   done
 
   # Block --no-verify on commit and push
   if [[ "$git_cmd" == "commit" || "$git_cmd" == "push" ]]; then
-    for ((i = git_cmd_index + 1; i <= $#; i++)); do
-      arg="${!i}"
+    for arg in "${git_cmd_args[@]}"; do
       [[ "$arg" == "--" ]] && break
       if [[ "$arg" == "--no-verify" || "$arg" == --no-verify=* ]]; then
         printf 'swiz: git %s --no-verify is blocked.\n' "$git_cmd" >&2
@@ -330,8 +345,7 @@ git() {
 
   # Block unsafe force pushes while allowing lease-based safety flags.
   if [[ "$git_cmd" == "push" ]]; then
-    for ((i = git_cmd_index + 1; i <= $#; i++)); do
-      arg="${!i}"
+    for arg in "${git_cmd_args[@]}"; do
       [[ "$arg" == "--" ]] && break
       if [[ "$arg" == "--force" || ( "$arg" == -[^-]* && "${arg#-}" == *f* ) ]]; then
         printf 'swiz: git push --force is blocked.\n' >&2
@@ -344,8 +358,12 @@ git() {
   # Block dangerous git subcommands
   case "$git_cmd" in
     stash)
-      local stash_arg_index=$((git_cmd_index + 1))
-      case "${!stash_arg_index}" in
+      local stash_action=""
+      for arg in "${git_cmd_args[@]}"; do
+        stash_action="$arg"
+        break
+      done
+      case "$stash_action" in
         list|show)
           # Read-only inspection — allow
           ;;
@@ -371,49 +389,51 @@ git() {
 
   # Block git reset --hard
   if [[ "$git_cmd" == "reset" ]]; then
-    case "$*" in
-      *--hard*)
+    for arg in "${git_cmd_args[@]}"; do
+      if [[ "$arg" == "--hard" || "$arg" == --hard=* ]]; then
         printf 'swiz: Do not use `git reset --hard`. It destroys uncommitted changes.\n' >&2
         printf 'Use `git revert <hash>` or `git reset HEAD~1` (soft, keeps changes staged).\n' >&2
         return 1
-        ;;
-    esac
+      fi
+    done
   fi
 
   # Block git checkout -- <file> (discards changes)
   if [[ "$git_cmd" == "checkout" ]]; then
-    case "$*" in
-      *" -- "*)
+    for arg in "${git_cmd_args[@]}"; do
+      if [[ "$arg" == "--" ]]; then
         printf 'swiz: Do not use `git checkout -- <file>`. It discards file changes.\n' >&2
         printf 'Use the Edit tool to undo specific changes, or `git revert <hash>`.\n' >&2
         return 1
-        ;;
-    esac
+      fi
+    done
   fi
 
   # Block co-authored and AI-signed commits
   if [[ "$git_cmd" == "commit" ]]; then
     local commit_msg=""
     local message_value=""
-    for ((i = git_cmd_index + 1; i <= $#; i++)); do
-      arg="${!i}"
+    set -- "${git_cmd_args[@]}"
+    while [[ $# -gt 0 ]]; do
+      arg="$1"
+      shift
       [[ "$arg" == "--" ]] && break
       message_value=""
       case "$arg" in
         -m|--message)
-          i=$((i + 1))
-          [[ $i -le $# ]] && message_value="${!i}"
+          if [[ $# -gt 0 ]]; then
+            message_value="$1"
+            shift
+          fi
           ;;
         --message=*)
           message_value="${arg#--message=}"
           ;;
         -[^-]*m*)
-          if [[ "$arg" =~ ^-[^-]*m(.*)$ ]]; then
-            message_value="${BASH_REMATCH[1]}"
-            if [[ -z "$message_value" ]]; then
-              i=$((i + 1))
-              [[ $i -le $# ]] && message_value="${!i}"
-            fi
+          message_value="${arg#*m}"
+          if [[ -z "$message_value" && $# -gt 0 ]]; then
+            message_value="$1"
+            shift
           fi
           ;;
       esac
@@ -437,21 +457,7 @@ git() {
   fi
 
   # Delegate to chained wrapper or raw git
-  _swiz_run_git "$@"
-  local git_exit=$?
-
-  # Clean stale lock files when no other git processes are running
-  if command git rev-parse --git-dir > /dev/null 2>&1; then
-    local git_dir
-    git_dir=$(command git rev-parse --git-dir 2>/dev/null)
-    if [[ -n "$git_dir" && -f "$git_dir/index.lock" ]]; then
-      if ! pgrep -q git 2>/dev/null; then
-        command rm -f "$git_dir/index.lock" 2>/dev/null
-      fi
-    fi
-  fi
-
-  return $git_exit
+  _swiz_run_git "${args[@]}"
 }
 
 # ── GitHub CLI security ──────────────────────────────────────────────────────

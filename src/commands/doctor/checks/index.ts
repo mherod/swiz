@@ -11,6 +11,7 @@ import { invalidSkillEntriesCheck } from "./invalid-skill-entries.ts"
 import { manifestPathsCheck } from "./manifest-paths.ts"
 import { pluginCacheCheck } from "./plugin-cache.ts"
 import { scriptPermissionsCheck } from "./script-permissions.ts"
+import { shellShimCheck } from "./shell-shim.ts"
 import { skillConflictsCheck } from "./skill-conflicts.ts"
 import { swizSettingsCheck } from "./swiz-settings.ts"
 import { ttsBackendCheck } from "./tts-backend.ts"
@@ -26,6 +27,7 @@ export const DIAGNOSTIC_CHECKS: DiagnosticCheck[] = [
   manifestPathsCheck,
   configScriptsCheck,
   scriptPermissionsCheck,
+  shellShimCheck,
   agentConfigSyncCheck,
   gateRequiredSkillsCheck,
   skillConflictsCheck,
