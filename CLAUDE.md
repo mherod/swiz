@@ -122,15 +122,13 @@ alwaysApply: false
 - `CLAUDE.md` ≥3500 words HARD-BLOCKS commit (lefthook `memory` step); `wc -w` and trim/`/compact-memory` first. After `gh issue create`: `/refine-issue <number>`. Body files, not heredoc.
 - CI: `gh run view <run-id> --json conclusion,status,jobs`; never trust partial output. Check `.gitignore` before untracked `.lock`/local state.
 ## Standard Work Sequence
-- Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → confirm CI.
-- Push task stays `in_progress` until `gh run view --json` confirms. No sleeps, no `--force-with-lease`, no `TaskUpdate`/`TaskList` during push/CI, no stop after unpushed commit. `TaskOutput` timeout ≤120000ms.
+- Order: TaskCreate→in_progress → work → commit → TaskUpdate→completed → SHA → `/push` → `git log origin/main..HEAD` → `swiz push-wait` → `swiz ci-wait $SHA --timeout 300` → `gh run view --json`. Keep the push task `in_progress`; no sleeps, `--force-with-lease`, task calls during push/CI, or stopping with unpushed commits. `TaskOutput` ≤120000ms.
 - Close issues via `swiz issue resolve <number> --body "<text>"`; `Fixes #N` auto-closes on push. No `duplicate`/`wontfix` without evidence.
 ## Push and CI
 - Solo repo (`mherod/swiz`); push to `main`. Run `swiz settings show --project` before `/commit`/`/push`/`/rebase-and-merge-into-main`. `.swiz/config.json` authoritative for collab/trunk policy.
 - CI `paths-ignore`: `.claude/**`, `docs/**`; markdown triggers CI.
-- Pre-push: `/push` → `git log origin/main..HEAD` → branch+PR check → capture SHA → `git push` → `gh run list --commit "$SHA" --limit 15` → `gh run watch` → `gh run view --json conclusion,status,jobs`. Never `gh run view --commit <SHA>` — list then view-by-id. Use `swiz push-wait origin <branch>` during cooldown.
 - Pre-push: `bun test`; CI: `lint → typecheck → test`. On `proc.stdin.write` TypeError/`ReferenceError: Cannot access 'default' before initialization`, isolate and retry the failing test.
-- Verify post-push via `gh run view --json`; `in_progress` acceptable. Update tasks before stop.
+- **Post-push parity**: after server acceptance, `update_ref failed` means stale local metadata, not failed transport. DON'T retry/escalate the push or override its gate. Run normal `git fetch origin`; require `git rev-parse HEAD`, `git rev-parse origin/<branch>`, and `git ls-remote --heads origin <branch>` to match before completion. Verify CI via `gh run list --commit "$SHA" --limit 15`, then `gh run view <run-id> --json conclusion,status,jobs`; `in_progress` is acceptable.
 - `github.base_ref` empty on `push`; use only on `pull_request`/`pull_request_target`.
 - **Git security enforcement**: Synchronize `src/utils/shell-patterns.ts`, `hooks/pretooluse-banned-commands.ts`, `hooks/commitmsg-scrub-coauthors.ts`, `hooks/shim.sh`, and regression tests. Block `--no-verify`, `--trailer`, unsafe `git push --force`/`-f`, `gh --admin`, `gh --skip-status-check`, `Co-Authored-By`, and `Generated with Claude Code`; allow `--force-with-lease`, `--force-if-includes`, plus force-looking post-`--` refspecs.
 - DON'T: `TaskUpdate`/`TaskList` after push starts; stop with unpushed commits; push `main`/`master` without collab guard; run branch/collab/PR checks after push.
@@ -184,10 +182,9 @@ alwaysApply: false
 - `REMINDER_FRAGMENT` re-triggers memory enforcement; 30-min `CLAUDE.md` mtime cooldown.
 - Cache keys: `getCanonicalPathHash()` in `hook-utils.ts`; never duplicate.
 - CLI subprocess tests: absolute `indexPath`, temp `cwd`, `HOME: tempDir`. No `isolation: "worktree"` (corrupts `.git/config`). Secret fixtures: array join to avoid push protection.
-- DO: After every commit, `git log origin/main..HEAD --oneline` before stop; `/push` if unpushed. DON'T trust `git status` alone for unpushed detection.
 - DO: In subprocess tests hitting `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"`. Exempt: `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - DON'T: Treat first-run `pretooluse-repeated-lint-test` blocks as violations — make any Edit between runs.
-- DON'T: Declare commit/push success before reading tool output confirming it.
+- DON'T: Declare commit success before reading its tool output.
 - DO: Workflow tasks for multi-commit sessions; mark steps complete as they finish.
 - DO: Use `mergeActionPlanIntoTasks(planSteps, sessionId, cwd)` in hooks — auto-creates tasks before blocking (`blockStop`/`denyPreToolUse`).
 ## Agent Behavior
@@ -196,6 +193,7 @@ alwaysApply: false
 ## Output & Shell
 - Filter output with `tail` ≥10, or Read with offset/limit. Run `bun run typecheck`/`bun run lint` unfiltered first; pipe to `tail` only on diagnostic passes.
 - Use `bunx` (not `npx`); `sort -u` (not `awk '!seen[$0]++'` on macOS). Pass shell-sensitive content via `--body-file`, not `--body`; use repeated `git commit -m` flags for paragraphs, never literal `\n`.
+- Shell gates: explicit `if`/`case`, fail closed. DON'T use `predicate && fail || pass`; a denied/missing predicate falls through to “pass”. Use `rg`, not `grep`, in executable guidance.
 ## Issue Management
 - Close via `Fixes #N` (not CLI). Read all comments. File to correct repo; label dep bumps `maintenance`/`chore`. Merge updates into body — don't `gh issue comment` on own issues. Pick highest priority autonomously.
 ## Testing
