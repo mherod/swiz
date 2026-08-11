@@ -227,6 +227,45 @@ async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
   }
 }
 
+async function fixNoFrontmatter(entry: InvalidSkillEntry): Promise<boolean> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const file = Bun.file(skillPath)
+    const content = (await file.exists()) ? await file.text() : ""
+    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\n---\n\n`
+    await Bun.write(skillPath, stub + content.trimStart())
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function fixMissingFrontmatterFields(entry: InvalidSkillEntry): Promise<boolean> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const content = await Bun.file(skillPath).text()
+    if (!/^---/m.test(content)) {
+      return await fixNoFrontmatter(entry)
+    }
+    let updated = content
+    if (!parseFrontmatterField(updated, "name")) {
+      updated = updated.replace(/^---\s*\n/m, `---\nname: ${entry.name}\n`)
+    }
+    if (!parseFrontmatterField(updated, "description")) {
+      updated = updated.replace(
+        /^---\s*\n/m,
+        `---\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\n`
+      )
+    }
+    if (updated !== content) {
+      await Bun.write(skillPath, updated)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   nameFixed: InvalidSkillNameFixSuccess[]
   generated: InvalidSkillGenerateSuccess[]
@@ -239,12 +278,34 @@ export async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Prom
     const skillPath = join(entry.entryDir, "SKILL.md")
     switch (entry.kind) {
       case "missing_skill_md":
+      case "empty_skill_md":
         if (await generateSkillMd(entry)) generated.push({ name: entry.name, skillPath })
         else {
           failed.push({
             name: entry.name,
             originalDir: entry.entryDir,
             error: "could not create SKILL.md",
+          })
+        }
+        break
+      case "no_frontmatter":
+        if (await fixNoFrontmatter(entry)) generated.push({ name: entry.name, skillPath })
+        else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not add frontmatter to SKILL.md",
+          })
+        }
+        break
+      case "missing_frontmatter_fields":
+        if (await fixMissingFrontmatterFields(entry))
+          generated.push({ name: entry.name, skillPath })
+        else {
+          failed.push({
+            name: entry.name,
+            originalDir: entry.entryDir,
+            error: "could not fix missing frontmatter fields in SKILL.md",
           })
         }
         break

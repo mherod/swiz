@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 import { orderBy, uniq } from "lodash-es"
@@ -116,7 +116,6 @@ const AGENTS_ROOT_NON_SKILL_DIR_NAMES = new Set(["skills"])
 
 /** Return true when a directory entry should be scanned as a skill candidate. */
 export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?: string): boolean {
-  if (!entry.isDirectory() && !entry.isSymbolicLink()) return false
   if (entry.name.startsWith(".")) return false
   if (NON_SKILL_DIR_NAMES.has(entry.name)) return false
   if (
@@ -126,7 +125,16 @@ export function isSkillCandidateDir(entry: import("node:fs").Dirent, skillRoot?:
   ) {
     return false
   }
-  return true
+  if (entry.isDirectory()) return true
+  if (entry.isSymbolicLink()) {
+    if (!skillRoot) return true
+    try {
+      return statSync(join(skillRoot, entry.name)).isDirectory()
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 // ─── Skill existence (sync, cached) ─────────────────────────────────────────

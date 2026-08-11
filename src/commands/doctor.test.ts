@@ -712,13 +712,10 @@ describe("swiz doctor", () => {
     const skillsDir = join(home, ".claude", "skills")
     const skillName = `invalid-skill-${Date.now()}`
     const skillDir = join(skillsDir, skillName)
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(join(skillDir, "SKILL.md"), "")
+    await mkdir(join(skillDir, "SKILL.md"), { recursive: true })
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
-    // Empty SKILL.md can't be auto-fixed — but directory stays in place
-    expect(await Bun.file(join(skillDir, "SKILL.md")).exists()).toBe(true)
     expect(fixRun.stdout).toContain("could not fix")
   }, 60_000)
 
@@ -793,5 +790,27 @@ describe("swiz doctor", () => {
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).toContain("Invalid skill: stub-skill")
     expect(afterFix.stdout).toContain("description is the generated placeholder")
+  }, 60_000)
+
+  test("doctor --fix autofixes no_frontmatter and missing_frontmatter_fields", async () => {
+    const home = await createTempHome()
+    const noFmDir = join(home, ".claude", "skills", "no-fm-skill")
+    await mkdir(noFmDir, { recursive: true })
+    const noFmPath = join(noFmDir, "SKILL.md")
+    await writeFile(noFmPath, "# My Skill\nSome skill body here.\n")
+
+    const missingFieldDir = join(home, ".claude", "skills", "missing-field-skill")
+    await mkdir(missingFieldDir, { recursive: true })
+    const missingFieldPath = join(missingFieldDir, "SKILL.md")
+    await writeFile(missingFieldPath, "---\nname: missing-field-skill\n---\nBody content\n")
+
+    await runDoctor(home, ["--fix"])
+
+    const noFmContent = await Bun.file(noFmPath).text()
+    expect(noFmContent).toContain("name: no-fm-skill")
+    expect(noFmContent).toContain("# My Skill")
+
+    const missingFieldContent = await Bun.file(missingFieldPath).text()
+    expect(missingFieldContent).toContain("description:")
   }, 60_000)
 })
