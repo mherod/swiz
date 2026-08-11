@@ -2,7 +2,12 @@
 
 /** Steer Codex away from avoidable guardian reviews before an escalated shell call runs. */
 
-import { getGuardianReviewContext, type SandboxAttemptEvidence } from "../src/guardian-review.ts"
+import {
+  GIT_ADD_GUARDIAN_DENIAL_LIMIT,
+  GIT_ADD_GUARDIAN_DENIAL_MARKER,
+  getGuardianReviewContext,
+  type SandboxAttemptEvidence,
+} from "../src/guardian-review.ts"
 import {
   preToolUseAllow,
   preToolUseAllowWithContext,
@@ -36,15 +41,25 @@ function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-
   ].join("\n")
 }
 
-function gitAddAvoidanceMessage(): string {
+function gitAddAvoidanceMessage(recentDenialCount: number): string {
+  const denialNumber = Math.min(recentDenialCount + 1, GIT_ADD_GUARDIAN_DENIAL_LIMIT)
   return [
-    "Guardian review avoided: this `git add` retry only needs escalation because the sandbox cannot write Git's index lock.",
+    `${GIT_ADD_GUARDIAN_DENIAL_MARKER} only needs escalation because the sandbox cannot write Git's index lock.`,
     "",
-    'Do not retry `git add` with `sandbox_permissions: "require_escalated"`.',
-    "Use the non-escalating commit route only after checking `git status --short` and `git diff --check`:",
+    `Guardian denial ${denialNumber} of at most ${GIT_ADD_GUARDIAN_DENIAL_LIMIT} in the last minute.`,
+    "Retry permitted by guard: you may retry this same narrowly scoped `git add` after this denial.",
+    "After three guardian denials in one minute, this guard stands down so the next retry can reach the approval path.",
+    "Prefer the non-escalating commit route after checking `git status --short` and `git diff --check`:",
     '  - If every intended file is already tracked, no unrelated tracked changes would be included, and no intended file is untracked, run the normal commit workflow and then `git commit -a -m "<message>"`.',
     "  - `git commit -a` stages tracked modifications and deletions inside the already-approved commit path; the pre-commit hook validates the final index.",
-    "  - If any intended file is untracked or unrelated tracked changes exist, do not escalate. Report the sandbox boundary and leave the changes uncommitted.",
+    "  - If any intended file is untracked or unrelated tracked changes exist, do not use `git commit -a`; retry only the same narrowly scoped `git add`.",
+  ].join("\n")
+}
+
+function gitAddRetryContext(): string {
+  return [
+    "Guardian retry allowance reached: this narrowly scoped `git add` already received three guardian denials in the last minute.",
+    "The retry is permitted now. Keep the escalation limited to this `git add` and preserve the original sandbox index-lock failure in the justification.",
   ].join("\n")
 }
 
@@ -58,7 +73,14 @@ export function evaluateGuardianAwareness(input: unknown): SwizHookOutput {
   if (context.priorSandboxAttempt === "permission-failed") {
     const command = stripQuotedShellStrings(parsed.tool_input?.command ?? "")
     if (GIT_ADD_RE.test(command)) {
-      return preToolUseDeny(gitAddAvoidanceMessage())
+      if (context.recentGitAddGuardianDenialCount >= GIT_ADD_GUARDIAN_DENIAL_LIMIT) {
+        return preToolUseAllowWithContext(
+          "Guardian retry allowance reached for this `git add`.",
+          gitAddRetryContext(),
+          { rephrase: false }
+        )
+      }
+      return preToolUseDeny(gitAddAvoidanceMessage(context.recentGitAddGuardianDenialCount))
     }
 
     return preToolUseAllowWithContext(

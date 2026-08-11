@@ -10,6 +10,7 @@ import {
   INFRACTION_DENIAL_MARKER,
   INFRACTION_WINDOW_MS,
   lastSettledAttempt,
+  RETRY_ALLOWED_DENIAL_MARKER,
   resolveCurrentAttempt,
   standingWantedLevel,
 } from "./infractions.ts"
@@ -75,6 +76,17 @@ function infractionDeniedBashAttempt(id: string, command: string, ts?: string): 
   ]
 }
 
+function retryAllowedDeniedBashAttempt(id: string, command: string, ts?: string): string[] {
+  return [
+    toolUseLine({ id, name: "Bash", input: { command }, timestamp: ts }),
+    toolResultLine({
+      toolUseId: id,
+      text: `${RETRY_ALLOWED_DENIAL_MARKER}: retry this command.\n\n${DENY_FOOTER}`,
+      timestamp: ts,
+    }),
+  ]
+}
+
 describe("attemptKey", () => {
   it("keys shell calls on the normalised, capped command", () => {
     const key = attemptKey("Bash", { command: "git   commit  -m 'x'" })
@@ -129,15 +141,17 @@ function bk(
   key: string,
   timestampMs: number | null,
   isCooldown = false,
-  isInfractionDenial = false
+  isInfractionDenial = false,
+  isRetryAllowed = false
 ): {
   toolName: string
   key: string
   timestampMs: number | null
   isCooldown: boolean
   isInfractionDenial: boolean
+  isRetryAllowed: boolean
 } {
-  return { toolName: "Bash", key, timestampMs, isCooldown, isInfractionDenial }
+  return { toolName: "Bash", key, timestampMs, isCooldown, isInfractionDenial, isRetryAllowed }
 }
 
 describe("assessInfraction", () => {
@@ -181,6 +195,16 @@ describe("assessInfraction", () => {
     expect(assessInfraction(current, blocked, now).level).toBe("yellow")
   })
 
+  it("does not count denials that explicitly permit retrying the same action", () => {
+    const now = Date.now()
+    const current = { toolName: "Bash", key: "git add src/guardian-review.ts" }
+    const blocked = [
+      bk("git add src/guardian-review.ts", now - 1000, false, false, true),
+      bk("git add src/guardian-review.ts", now - 500, false, false, true),
+    ]
+    expect(assessInfraction(current, blocked, now).level).toBe("none")
+  })
+
   it("does not count denials of a different action", () => {
     const current = { toolName: "Bash", key: "git push" }
     const blocked = [
@@ -190,6 +214,7 @@ describe("assessInfraction", () => {
         timestampMs: Date.now(),
         isCooldown: false,
         isInfractionDenial: false,
+        isRetryAllowed: false,
       },
     ]
     expect(assessInfraction(current, blocked).level).toBe("none")
@@ -348,6 +373,18 @@ describe("evaluateInfraction — cooldown + de-escalation", () => {
   it("passes yellow through when the current call is a first retry", () => {
     const lines = [...deniedBashAttempt("a", "git push", ETS)]
     expect(evaluateInfraction(lines, bash("git push"), ENOW).level).toBe("yellow")
+  })
+
+  it("does not hard-block or cool down an explicitly permitted retry sequence", () => {
+    const lines = [
+      ...retryAllowedDeniedBashAttempt("a", "git add src/guardian-review.ts", ETS),
+      ...retryAllowedDeniedBashAttempt("b", "git add src/guardian-review.ts", ETS),
+      ...retryAllowedDeniedBashAttempt("c", "git add src/guardian-review.ts", ETS),
+    ]
+    expect(evaluateInfraction(lines, bash("git add src/guardian-review.ts"), ENOW).level).toBe(
+      "none"
+    )
+    expect(evaluateInfraction(lines, bash("bun test"), ENOW).level).toBe("none")
   })
 
   it("de-escalates to none once the cooldown has been served", () => {

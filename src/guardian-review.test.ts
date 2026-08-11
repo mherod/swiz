@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { detectGuardianReviewRequest, enrichPayloadWithGuardianReview } from "./guardian-review.ts"
+import {
+  detectGuardianReviewRequest,
+  enrichPayloadWithGuardianReview,
+  GIT_ADD_GUARDIAN_DENIAL_MARKER,
+} from "./guardian-review.ts"
 
 const COMMAND = "SWIZ_DIRECT=1 bun run index.ts push-wait origin main"
 const GIT_ADD_COMMAND = "git add -- hooks/shim.sh src/commands/shim.test.ts"
@@ -17,9 +21,10 @@ function wrapperCall(callId: string, command: string, escalated: boolean): strin
   })
 }
 
-function wrapperOutput(callId: string, text: string | string[]): string {
+function wrapperOutput(callId: string, text: string | string[], timestamp?: string): string {
   const blocks = Array.isArray(text) ? text : [text]
   return JSON.stringify({
+    ...(timestamp ? { timestamp } : {}),
     type: "response_item",
     payload: {
       type: "custom_tool_call_output",
@@ -27,6 +32,17 @@ function wrapperOutput(callId: string, text: string | string[]): string {
       output: blocks.map((block) => ({ type: "input_text", text: block })),
     },
   })
+}
+
+function guardianDeniedOutput(callId: string, timestamp: string): string {
+  return wrapperOutput(
+    callId,
+    [
+      "Script failed\nWall time: 0.3 seconds\nOutput:\n",
+      `Script error:\nCommand blocked by PreToolUse hook: ${GIT_ADD_GUARDIAN_DENIAL_MARKER} only needs escalation because the sandbox cannot write Git's index lock.`,
+    ],
+    timestamp
+  )
 }
 
 function multiCommandWrapperCall(
@@ -56,7 +72,27 @@ describe("guardian review transcript detection", () => {
       requested: true,
       source: "codex-transcript",
       priorSandboxAttempt: "not-attempted",
+      recentGitAddGuardianDenialCount: 0,
     })
+  })
+
+  test("counts only git add guardian denials from the last minute", () => {
+    const nowMs = Date.parse("2026-08-11T12:01:00.000Z")
+    const lines = [
+      guardianDeniedOutput("old", "2026-08-11T11:59:59.000Z"),
+      guardianDeniedOutput("recent-a", "2026-08-11T12:00:10.000Z"),
+      guardianDeniedOutput("recent-b", "2026-08-11T12:00:30.000Z"),
+      wrapperOutput(
+        "quoted",
+        `Search output mentioning ${GIT_ADD_GUARDIAN_DENIAL_MARKER} without being a denied tool call.`,
+        "2026-08-11T12:00:40.000Z"
+      ),
+      wrapperCall("current", GIT_ADD_COMMAND, true),
+    ]
+
+    expect(
+      detectGuardianReviewRequest(lines, GIT_ADD_COMMAND, nowMs)?.recentGitAddGuardianDenialCount
+    ).toBe(2)
   })
 
   test("treats successful work as sandbox success even when output contains an incidental denial", () => {

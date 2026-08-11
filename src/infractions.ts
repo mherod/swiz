@@ -43,6 +43,9 @@ export const COOLDOWN_MARKER = "cooling off after a hard block"
 /** Stable marker for a denial emitted by the retry-after-block detector itself. */
 export const INFRACTION_DENIAL_MARKER = "retry-after-block enforcement"
 
+/** Stable marker for a denial that explicitly authorises retrying the same call. */
+export const RETRY_ALLOWED_DENIAL_MARKER = "Retry permitted by guard"
+
 /**
  * Wanted level, GTA-style: rises with repeated bad behaviour, falls with good.
  *   - none     → ☆0  clear
@@ -78,6 +81,8 @@ interface ToolResultRecord {
   isCooldown: boolean
   /** True when the retry-after-block detector itself emitted the denial. */
   isInfractionDenial: boolean
+  /** True when the originating guard explicitly allowed retrying this call. */
+  isRetryAllowed: boolean
 }
 
 /** A tool_use whose result was a denial, reduced to a comparable key. */
@@ -89,6 +94,8 @@ interface BlockedAttempt {
   isCooldown: boolean
   /** True when the retry-after-block detector itself emitted the denial. */
   isInfractionDenial: boolean
+  /** True when the originating guard explicitly allowed retrying this call. */
+  isRetryAllowed: boolean
 }
 
 /** The most recent tool call that has a settled result, with how it resolved. */
@@ -195,6 +202,7 @@ function collectResults(lines: string[]): Map<string, ToolResultRecord> {
         denied: isDenialText(text),
         isCooldown: text.includes(COOLDOWN_MARKER),
         isInfractionDenial: text.includes(INFRACTION_DENIAL_MARKER),
+        isRetryAllowed: text.includes(RETRY_ALLOWED_DENIAL_MARKER),
       })
     }
   }
@@ -219,6 +227,7 @@ function blockedAttemptFromBlock(
     timestampMs: result.timestampMs ?? entryTimestampMs,
     isCooldown: result.isCooldown,
     isInfractionDenial: result.isInfractionDenial,
+    isRetryAllowed: result.isRetryAllowed,
   }
 }
 
@@ -281,12 +290,13 @@ export function assessInfraction(
 ): InfractionAssessment {
   if (!current.key) return wantedAssessment("none", 0, current.key, current.toolName)
 
-  // Cooldown holds are our own blocks, not the agent re-issuing a denied action —
-  // they must not inflate the retry count.
+  // Cooldown holds and explicitly permitted retries are not the agent ignoring a
+  // block, so neither may inflate the retry count.
   const priorDenialCount = blockedAttempts.filter(
     (attempt) =>
       !attempt.isCooldown &&
       !attempt.isInfractionDenial &&
+      !attempt.isRetryAllowed &&
       attempt.key === current.key &&
       (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
   ).length
@@ -310,6 +320,7 @@ function denialCountForKey(
     (attempt) =>
       !attempt.isCooldown &&
       !attempt.isInfractionDenial &&
+      !attempt.isRetryAllowed &&
       attempt.key === key &&
       (attempt.timestampMs === null || nowMs - attempt.timestampMs <= windowMs)
   ).length

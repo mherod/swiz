@@ -14,6 +14,7 @@ export interface GuardianReviewContext {
   requested: true
   source: "codex-transcript"
   priorSandboxAttempt: SandboxAttemptEvidence
+  recentGitAddGuardianDenialCount: number
 }
 
 interface CodexToolCall {
@@ -35,6 +36,7 @@ const jsonLikeSchema: z.ZodType<JsonLike> = z.lazy(() =>
 )
 
 const codexResponseItemSchema = z.looseObject({
+  timestamp: z.union([z.string(), z.number()]).optional(),
   type: z.literal("response_item"),
   payload: z.looseObject({
     type: z.enum([
@@ -68,6 +70,7 @@ const guardianReviewContextSchema = z.object({
     "failed",
     "unknown",
   ]),
+  recentGitAddGuardianDenialCount: z.int().nonnegative().default(0),
 })
 
 type CodexResponseItem = z.infer<typeof codexResponseItemSchema>
@@ -83,6 +86,10 @@ const SUCCESS_RE =
 const FAILURE_RE =
   /["']exit_code["']\s*:\s*[1-9]\d*\b|(?:^|\n|\\n)\s*exit\s*=\s*[1-9]\d*\b|process exited with code [1-9]\d*|script failed|(?:^|\n|\\n)\s*fatal:\s+/i
 const TOOL_CALL_TYPES = new Set<CodexResponsePayload["type"]>(["function_call", "custom_tool_call"])
+export const GIT_ADD_GUARDIAN_DENIAL_LIMIT = 3
+export const GIT_ADD_GUARDIAN_DENIAL_WINDOW_MS = 60_000
+export const GIT_ADD_GUARDIAN_DENIAL_MARKER = "Guardian review avoided: this `git add` retry"
+const GIT_ADD_GUARDIAN_DENIAL_OUTPUT_PREFIX = `Script error:\nCommand blocked by PreToolUse hook: ${GIT_ADD_GUARDIAN_DENIAL_MARKER}`
 
 function parseResponseItem(line: string): CodexResponseItem | null {
   const result = codexResponseItemSchema.safeParse(tryParseJsonLine(line))
@@ -172,8 +179,16 @@ function extractMatchingToolCall(
   return callId && extractCall ? extractCall(payload, callId, lineIndex, command) : null
 }
 
-function extractOutputRecord(line: string): [string, string] | null {
-  const payload = parseResponseItem(line)?.payload
+function parseTimestampMs(value: string | number | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value !== "string" || !value.trim()) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function extractOutputRecord(line: string): [string, string, number | null] | null {
+  const item = parseResponseItem(line)
+  const payload = item?.payload
   if (
     !payload ||
     (payload.type !== "function_call_output" && payload.type !== "custom_tool_call_output") ||
@@ -183,9 +198,13 @@ function extractOutputRecord(line: string): [string, string] | null {
   }
   try {
     const output = payload.output ?? ""
-    return [payload.call_id, `${JSON.stringify(output)}\n${flattenOutputText(output)}`]
+    return [
+      payload.call_id,
+      `${JSON.stringify(output)}\n${flattenOutputText(output)}`,
+      parseTimestampMs(item.timestamp),
+    ]
   } catch {
-    return [payload.call_id, String(payload.output ?? "")]
+    return [payload.call_id, String(payload.output ?? ""), parseTimestampMs(item.timestamp)]
   }
 }
 
@@ -200,9 +219,45 @@ function collectOutputText(lines: string[]): Map<string, string> {
   const outputs = new Map<string, string>()
   for (const line of lines) {
     const record = extractOutputRecord(line)
-    if (record) outputs.set(...record)
+    if (record) outputs.set(record[0], record[1])
   }
   return outputs
+}
+
+function isGitAddGuardianDenialOutput(payload: CodexResponsePayload): boolean {
+  const blocks = Array.isArray(payload.output) ? payload.output : [payload.output ?? ""]
+  return blocks.some((block) => {
+    const text =
+      block && typeof block === "object" && !Array.isArray(block) && typeof block.text === "string"
+        ? block.text
+        : flattenOutputText(block)
+    return text.startsWith(GIT_ADD_GUARDIAN_DENIAL_OUTPUT_PREFIX)
+  })
+}
+
+function countRecentGitAddGuardianDenials(lines: string[], nowMs: number): number {
+  let count = 0
+  for (const line of lines) {
+    const item = parseResponseItem(line)
+    const payload = item?.payload
+    if (
+      !payload ||
+      (payload.type !== "function_call_output" && payload.type !== "custom_tool_call_output") ||
+      !isGitAddGuardianDenialOutput(payload)
+    ) {
+      continue
+    }
+
+    const timestampMs = parseTimestampMs(item.timestamp)
+    if (
+      timestampMs !== null &&
+      timestampMs >= nowMs - GIT_ADD_GUARDIAN_DENIAL_WINDOW_MS &&
+      timestampMs <= nowMs
+    ) {
+      count++
+    }
+  }
+  return count
 }
 
 function classifyPriorSandboxAttempt(output: string | undefined): SandboxAttemptEvidence {
@@ -216,7 +271,8 @@ function classifyPriorSandboxAttempt(output: string | undefined): SandboxAttempt
 /** Correlate the current shell command with Codex's latest escalation-bearing tool call. */
 export function detectGuardianReviewRequest(
   sessionLines: string[],
-  command: string
+  command: string,
+  nowMs: number = Date.now()
 ): GuardianReviewContext | null {
   const matchingCalls: CodexToolCall[] = []
   for (let i = 0; i < sessionLines.length; i++) {
@@ -241,19 +297,21 @@ export function detectGuardianReviewRequest(
     requested: true,
     source: "codex-transcript",
     priorSandboxAttempt,
+    recentGitAddGuardianDenialCount: countRecentGitAddGuardianDenials(sessionLines, nowMs),
   }
 }
 
 export function enrichPayloadWithGuardianReview(
   payload: object,
-  summary: { sessionLines?: string[] } | null
+  summary: { sessionLines?: string[] } | null,
+  nowMs: number = Date.now()
 ): GuardianReviewContext | null {
   Reflect.deleteProperty(payload, "_guardianReview")
   const toolInput = execCommandInputSchema.safeParse(Reflect.get(payload, "tool_input"))
   const command = toolInput.success ? (toolInput.data.command ?? toolInput.data.cmd ?? "") : ""
   if (!command || !summary?.sessionLines) return null
 
-  const context = detectGuardianReviewRequest(summary.sessionLines, command)
+  const context = detectGuardianReviewRequest(summary.sessionLines, command, nowMs)
   if (context) Reflect.set(payload, "_guardianReview", context)
   return context
 }
