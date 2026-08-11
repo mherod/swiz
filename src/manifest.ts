@@ -369,8 +369,8 @@ export const bundledHookManifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
-      { hook: pretooluseGuardianAwareness },
       { hook: pretooluseNoMixedToolCalls },
+      { hook: pretooluseGuardianAwareness },
       { hook: pretooluseEnforceTaskupdate },
       { hook: pretooluseBannedCommands },
       { hook: pretooluseInlineScriptWriteGate },
