@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-// PreCommit hook: Validate staged files for merge conflict markers and focused tests.
+// PreCommit hook: Validate final staged snapshots, including those produced by commit -a.
 // Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
 // Uses the blocking strategy — returns blockStopObj to fail the commit.
 
@@ -10,6 +10,11 @@ import type { SwizHook, SwizHookOutput } from "../src/SwizHook.ts"
 import { runSwizHookAsMain } from "../src/SwizHook.ts"
 import { preCommitHookInputSchema } from "../src/schemas.ts"
 import { blockStopObj } from "../src/utils/hook-response.ts"
+import {
+  findStagedHomePathMatches,
+  formatStagedHomePathDenyReason,
+  resolveAbsoluteHomePath,
+} from "./pretooluse-no-home-paths.ts"
 
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
 const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/
@@ -100,6 +105,14 @@ export async function evaluatePrecommitStagedValidation(
 
     const stagedFiles = await getStagedFiles(cwd)
     if (stagedFiles.length === 0) return {}
+
+    const homePath = resolveAbsoluteHomePath(process.env.HOME)
+    if (homePath) {
+      const homePathMatches = await findStagedHomePathMatches(cwd, homePath)
+      if (homePathMatches.length > 0) {
+        return blockStopObj(formatStagedHomePathDenyReason(homePathMatches))
+      }
+    }
 
     const diff = await getStagedDiff(cwd)
     const findings = scanDiff(diff)

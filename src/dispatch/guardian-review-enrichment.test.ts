@@ -74,7 +74,7 @@ describe("guardian review dispatch enrichment", () => {
     }
   })
 
-  test("allows escalation after an output-only Git permission failure", async () => {
+  test("steers git add away from escalation after an output-only permission failure", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "swiz-guardian-project-"))
     const settingsHome = await mkdtemp(join(tmpdir(), "swiz-guardian-home-"))
     tempDirs.push(projectDir, settingsHome)
@@ -147,8 +147,8 @@ describe("guardian review dispatch enrichment", () => {
 
     const { response } = await executeDispatch(request)
     const specific = getHookSpecificOutput(response)
-    expect(specific?.permissionDecision).toBeUndefined()
-    expect(response.systemMessage).toContain("confirmed sandbox restriction")
-    expect(response.systemMessage).toContain("narrowly scoped")
+    expect(specific?.permissionDecision).toBe("deny")
+    expect(specific?.permissionDecisionReason).toContain("Do not retry `git add`")
+    expect(specific?.permissionDecisionReason).toContain("git commit -a")
   })
 })

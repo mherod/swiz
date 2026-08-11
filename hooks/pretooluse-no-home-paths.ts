@@ -24,7 +24,7 @@ interface HomePathGuardOptions {
   homeDir?: string | null
 }
 
-function resolveAbsoluteHomePath(homeDir: string | null | undefined): string | null {
+export function resolveAbsoluteHomePath(homeDir: string | null | undefined): string | null {
   const candidate = homeDir?.trim()
   if (!candidate || !isAbsolute(candidate)) return null
 
@@ -40,7 +40,7 @@ function splitNullTerminatedPaths(output: string): string[] {
   return output.split("\0").filter(Boolean)
 }
 
-async function findStagedHomePathMatches(cwd: string, homePath: string): Promise<string[]> {
+export async function findStagedHomePathMatches(cwd: string, homePath: string): Promise<string[]> {
   const stagedOutput = await git(
     ["diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"],
     cwd
@@ -54,7 +54,7 @@ async function findStagedHomePathMatches(cwd: string, homePath: string): Promise
     .sort()
 }
 
-function formatDenyReason(paths: string[]): string {
+export function formatStagedHomePathDenyReason(paths: string[]): string {
   const visible = paths.slice(0, 20)
   const hiddenCount = paths.length - visible.length
   const pathList = visible.map((path) => `  - ${path}`).join("\n")
@@ -104,7 +104,7 @@ async function evaluateCommitCommand(
 
   const cwd = parsed.cwd ?? process.cwd()
   const matches = await findStagedHomePathMatches(cwd, homePath)
-  return matches.length > 0 ? preToolUseDeny(formatDenyReason(matches)) : {}
+  return matches.length > 0 ? preToolUseDeny(formatStagedHomePathDenyReason(matches)) : {}
 }
 
 export async function evaluateNoHomePaths(

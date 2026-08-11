@@ -13,6 +13,9 @@ import {
 } from "../src/SwizHook.ts"
 import { shellHookInputSchema } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
+import { gitSubcommandRe, stripQuotedShellStrings } from "../src/utils/shell-patterns.ts"
+
+const GIT_ADD_RE = gitSubcommandRe("add\\b")
 
 function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-failed">): string {
   const preamble =
@@ -33,6 +36,18 @@ function avoidanceMessage(evidence: Exclude<SandboxAttemptEvidence, "permission-
   ].join("\n")
 }
 
+function gitAddAvoidanceMessage(): string {
+  return [
+    "Guardian review avoided: this `git add` retry only needs escalation because the sandbox cannot write Git's index lock.",
+    "",
+    'Do not retry `git add` with `sandbox_permissions: "require_escalated"`.',
+    "Use the non-escalating commit route only after checking `git status --short` and `git diff --check`:",
+    '  - If every intended file is already tracked, no unrelated tracked changes would be included, and no intended file is untracked, run the normal commit workflow and then `git commit -a -m "<message>"`.',
+    "  - `git commit -a` stages tracked modifications and deletions inside the already-approved commit path; the pre-commit hook validates the final index.",
+    "  - If any intended file is untracked or unrelated tracked changes exist, do not escalate. Report the sandbox boundary and leave the changes uncommitted.",
+  ].join("\n")
+}
+
 export function evaluateGuardianAwareness(input: unknown): SwizHookOutput {
   const parsed = shellHookInputSchema.parse(input)
   if (!isShellTool(parsed.tool_name ?? "")) return preToolUseAllow("")
@@ -41,6 +56,11 @@ export function evaluateGuardianAwareness(input: unknown): SwizHookOutput {
   if (!context) return preToolUseAllow("")
 
   if (context.priorSandboxAttempt === "permission-failed") {
+    const command = stripQuotedShellStrings(parsed.tool_input?.command ?? "")
+    if (GIT_ADD_RE.test(command)) {
+      return preToolUseDeny(gitAddAvoidanceMessage())
+    }
+
     return preToolUseAllowWithContext(
       "Guardian review follows a confirmed sandbox restriction.",
       "A sandboxed attempt failed because of a concrete permission or network restriction. Keep this escalation narrowly scoped to the blocked operation and preserve the failure in the justification."

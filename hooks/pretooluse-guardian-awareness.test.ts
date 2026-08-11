@@ -3,10 +3,13 @@ import type { GuardianReviewContext } from "../src/guardian-review.ts"
 import { getHookSpecificOutput } from "../src/utils/hook-specific-output.ts"
 import { evaluateGuardianAwareness } from "./pretooluse-guardian-awareness.ts"
 
-function evaluate(priorSandboxAttempt?: GuardianReviewContext["priorSandboxAttempt"]) {
+function evaluate(
+  priorSandboxAttempt?: GuardianReviewContext["priorSandboxAttempt"],
+  command = "git push origin main"
+) {
   return evaluateGuardianAwareness({
     tool_name: "Bash",
-    tool_input: { command: "git push origin main" },
+    tool_input: { command },
     ...(priorSandboxAttempt
       ? {
           _guardianReview: {
@@ -46,6 +49,17 @@ describe("pretooluse-guardian-awareness", () => {
     expect(specific?.permissionDecision).toBe("allow")
     expect(specific?.permissionDecisionReason).toContain("confirmed sandbox restriction")
     expect(specific?.additionalContext).toContain("narrowly scoped")
+  })
+
+  test("steers sandbox-blocked git add away from escalation", () => {
+    const specific = getHookSpecificOutput(
+      evaluate("permission-failed", "git add -- src/guardian-review.ts")
+    )
+    expect(specific?.permissionDecision).toBe("deny")
+    expect(specific?.permissionDecisionReason).toContain("Do not retry `git add`")
+    expect(specific?.permissionDecisionReason).toContain("git commit -a")
+    expect(specific?.permissionDecisionReason).toContain("already tracked")
+    expect(specific?.permissionDecisionReason).toContain("untracked")
   })
 
   test("does not treat an ordinary command failure as proof escalation is needed", () => {
