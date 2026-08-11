@@ -85,12 +85,10 @@ function classifyCommitCommand(rawCommand: string): CommitCommandDecision {
   return "scan"
 }
 
-async function evaluateParsedInput(
+async function evaluateCommitCommand(
   parsed: ReturnType<typeof shellHookInputSchema.parse>,
   options: HomePathGuardOptions
 ): Promise<SwizHookOutput> {
-  if (!isShellTool(parsed.tool_name ?? "")) return {}
-
   const decision = classifyCommitCommand(parsed.tool_input?.command ?? "")
   if (decision === "ignore") return {}
   if (decision === "stage-separately") {
@@ -115,7 +113,8 @@ export async function evaluateNoHomePaths(
 ): Promise<SwizHookOutput> {
   try {
     const parsed = shellHookInputSchema.parse(input)
-    return await evaluateParsedInput(parsed, options)
+    if (!isShellTool(parsed.tool_name ?? "")) return {}
+    return await evaluateCommitCommand(parsed, options)
   } catch {
     return {}
   }
