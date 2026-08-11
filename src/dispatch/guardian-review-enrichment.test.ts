@@ -8,6 +8,7 @@ import { getHookSpecificOutput } from "../utils/hook-specific-output.ts"
 import { executeDispatch } from "./execute.ts"
 
 const COMMAND = "git push origin main"
+const GIT_ADD_COMMAND = "git add -- hooks/shim.sh src/commands/shim.test.ts"
 
 describe("guardian review dispatch enrichment", () => {
   const tempDirs: string[] = []
@@ -71,5 +72,82 @@ describe("guardian review dispatch enrichment", () => {
       expect(specific?.permissionDecision).toBe("deny")
       expect(specific?.permissionDecisionReason).toContain("has not been attempted")
     }
+  })
+
+  test("allows escalation after an output-only Git permission failure", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "swiz-guardian-project-"))
+    const settingsHome = await mkdtemp(join(tmpdir(), "swiz-guardian-home-"))
+    tempDirs.push(projectDir, settingsHome)
+
+    const transcriptLines = [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "guardian-prior-call",
+          input: `const r = await tools.exec_command({cmd:${JSON.stringify(GIT_ADD_COMMAND)}}); text(r.output)`,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "guardian-prior-call",
+          output: [
+            {
+              type: "input_text",
+              text: "Script completed\nOutput:\nfatal: Unable to create '/repo/.git/index.lock': Operation not permitted\n",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "guardian-current-call",
+          input: `const r = await tools.exec_command({cmd:${JSON.stringify(GIT_ADD_COMMAND)},sandbox_permissions:"require_escalated"}); text(r.output)`,
+        },
+      }),
+    ].join("\n")
+
+    const request = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      payloadStr: JSON.stringify({
+        cwd: projectDir,
+        session_id: "guardian-dispatch-permission-test",
+        transcript_path: "/virtual/codex.jsonl",
+        tool_name: "Bash",
+        tool_input: { command: GIT_ADD_COMMAND },
+      }),
+      daemonContext: true,
+      settingsHomeOverride: settingsHome,
+      manifestProvider: async () => [
+        {
+          event: "preToolUse",
+          matcher: "Bash",
+          hooks: [{ hook: pretooluseGuardianAwareness }],
+        },
+      ],
+      transcriptSummaryProvider: async () => parseTranscriptSummary(transcriptLines),
+      repositoryCapabilityProvider: async () => ({
+        canonicalRoot: projectDir,
+        repoKey: "guardian-dispatch-permission-test",
+        isRepo: true,
+        repoSlug: null,
+        hasGhCli: true,
+        resolvedAt: Date.now(),
+      }),
+      replayPendingMutations: async () => {},
+    } as const
+
+    const { response } = await executeDispatch(request)
+    const specific = getHookSpecificOutput(response)
+    expect(specific?.permissionDecision).toBeUndefined()
+    expect(response.systemMessage).toContain("confirmed sandbox restriction")
+    expect(response.systemMessage).toContain("narrowly scoped")
   })
 })

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { detectGuardianReviewRequest, enrichPayloadWithGuardianReview } from "./guardian-review.ts"
 
 const COMMAND = "SWIZ_DIRECT=1 bun run index.ts push-wait origin main"
+const GIT_ADD_COMMAND = "git add -- hooks/shim.sh src/commands/shim.test.ts"
 
 function wrapperCall(callId: string, command: string, escalated: boolean): string {
   const sandbox = escalated ? ',sandbox_permissions:"require_escalated"' : ""
@@ -83,6 +84,21 @@ describe("guardian review transcript detection", () => {
     ]
 
     expect(detectGuardianReviewRequest(lines, COMMAND)?.priorSandboxAttempt).toBe(
+      "permission-failed"
+    )
+  })
+
+  test("recognizes an output-only Git permission failure", () => {
+    const lines = [
+      wrapperCall("prior", GIT_ADD_COMMAND, false),
+      wrapperOutput(
+        "prior",
+        "Script completed\nWall time: 0.5 seconds\nOutput:\nfatal: Unable to create '/repo/.git/index.lock': Operation not permitted\n"
+      ),
+      wrapperCall("current", GIT_ADD_COMMAND, true),
+    ]
+
+    expect(detectGuardianReviewRequest(lines, GIT_ADD_COMMAND)?.priorSandboxAttempt).toBe(
       "permission-failed"
     )
   })

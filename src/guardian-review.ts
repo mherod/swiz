@@ -81,7 +81,7 @@ const PERMISSION_FAILURE_RE =
 const SUCCESS_RE =
   /["']exit_code["']\s*:\s*0\b|(?:^|\n|\\n)\s*exit\s*=\s*0\b|(?:^|\n)[^\n]*(?:push|upload|write|command|operation) succeeded\b/im
 const FAILURE_RE =
-  /["']exit_code["']\s*:\s*[1-9]\d*\b|(?:^|\n|\\n)\s*exit\s*=\s*[1-9]\d*\b|process exited with code [1-9]\d*|script failed/i
+  /["']exit_code["']\s*:\s*[1-9]\d*\b|(?:^|\n|\\n)\s*exit\s*=\s*[1-9]\d*\b|process exited with code [1-9]\d*|script failed|(?:^|\n|\\n)\s*fatal:\s+/i
 const TOOL_CALL_TYPES = new Set<CodexResponsePayload["type"]>(["function_call", "custom_tool_call"])
 
 function parseResponseItem(line: string): CodexResponseItem | null {
