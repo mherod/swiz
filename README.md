@@ -144,7 +144,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 |------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `pretooluse-active-skills.ts`                  | Injects the skills invoked within the configured recency window before every tool call, keeping the active workflows present in tool context. |
 | `pretooluse-no-mixed-tool-calls.ts`            | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands.                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `pretooluse-banned-commands.ts`                | Blocks `grep` (use `rg`), file-writing `sed`/`awk` (use Edit; read-only usage is allowed), `rm` (use trash), `cd`, and raw `python`. Enforces Git/GitHub safety by blocking `--no-verify`, unsafe force pushes, commit attribution, `gh --admin`, and `gh --skip-status-check`; lease-based force pushes remain allowed. Also blocks shell redirects and heredocs that write files (use the Write/Edit tool instead), and blocks `gh issue create`/`gh issue edit --body` with shell-sensitive inline content (backticks, `$()`, `<...>`). For long or complex bodies, write to a temp file and pass `--body-file /tmp/issue-body.md`; delete the file after the `gh` call. |
+| `pretooluse-banned-commands.ts`                | Blocks `grep` (use `rg`), file-writing `sed`/`awk` (use Edit; read-only usage and stderr suppression are allowed), `rm` (use trash), `cd`, raw `python`, and raw mutating `git stash` commands. Enforces Git/GitHub safety by blocking `--no-verify`, unsafe force pushes, commit attribution, `gh --admin`, and `gh --skip-status-check`; lease-based force pushes remain allowed. A stash already proven disposable by `/prune-branches` can be removed through the OID-bound `swiz stash retire <full-oid>` workflow. The hook also blocks shell redirects and heredocs that write files (use the Write/Edit tool instead), and blocks `gh issue create`/`gh issue edit --body` with shell-sensitive inline content (backticks, `$()`, `<...>`). For long or complex bodies, write to a temp file and pass `--body-file /tmp/issue-body.md`; delete the file after the `gh` call. |
 | `pretooluse-inline-script-write-gate.ts`       | Blocks inline eval scripts across multiple runtimes that contain file-write API calls. Covered runtimes: `node`/`bun -e`/`--eval` (`writeFile`, `appendFile`, `createWriteStream`, `Bun.write`, and sync variants); `python`/`python3 -c` (`open` write/append modes, `Path.write_text/write_bytes`); `perl -e` (`open >, >>`); `ruby -e` (`File.write`, `IO.write`, `File.open` write mode); `deno eval` (`Deno.writeTextFile/Sync`, `Deno.writeFile/Sync`). Inline eval scripts bypass the native Write/Edit tool review path — use the Write or Edit tools instead.                                             |
 | `pretooluse-no-merge-conflict-comments.ts`     | Blocks `gh pr comment` and `gh pr review --comment` calls whose body consists only of merge-conflict or rebase-request noise. The project already has local remediation paths (stop-branch-conflicts, /rebase-onto-main) — low-signal public comments add notification noise without value.                                                                                                                                                                                                                                                                                                                        |
 | `pretooluse-no-cp.ts`                          | Blocks `cp` usage and redirects to `ditto` for reliable file and directory copying with metadata preservation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -638,6 +638,16 @@ swiz issue list                             # list open issues and pull requests
 | `list [<repo>]`      | List open issues and pull requests from store |
 | `--body, -b <text>` | Comment body (for `comment` and `resolve`)    |
 
+### `swiz stash`
+
+Retire one stash that `/prune-branches` has already inspected and classified as disposable. Raw mutating `git stash` commands remain blocked because they can rewrite the shared checkout or delete recovery state without preserving the evidence that justified the action.
+
+```bash
+swiz stash retire <full-oid>
+```
+
+The command resolves the current stash selector from the immutable full OID, verifies that selector immediately before mutation, drops exactly one entry, and confirms the OID is absent afterward. It refuses abbreviated, missing, or ambiguous OIDs.
+
 ### `swiz sentiment`
 
 Score text for approval/rejection sentiment using heuristic regex clusters. Useful for parsing hook feedback, user confirmations, or any text where positive/negative intent matters.
@@ -901,6 +911,7 @@ swiz/
 │       ├── hooks.ts          # Inspect hook configs across agents
 │       ├── skill.ts          # Read and expand skill definitions
 │       ├── tasks.ts          # Session-scoped task management
+│       ├── stash.ts          # OID-bound stash retirement
 │       ├── shim.ts           # Shell shim install/uninstall/status
 │       ├── transcript.ts     # Display session chat history with head/tail/auto-reply
 │       ├── continue.ts       # Resume session with AI-generated next step

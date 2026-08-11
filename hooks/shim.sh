@@ -350,8 +350,9 @@ git() {
           # Read-only inspection — allow
           ;;
         *)
-          printf 'swiz: Do not use `git stash`. Stashed changes are easy to lose.\n' >&2
+          printf 'swiz: Do not use raw `git stash` mutations. They can rewrite the shared checkout or mutate hidden Git recovery state, including deleting a recovery entry.\n' >&2
           printf 'Commit work-in-progress instead: git commit -m "wip: ..."\n' >&2
+          printf 'For a classified disposable stash, use: swiz stash retire <full-oid>\n' >&2
           return 1
           ;;
       esac

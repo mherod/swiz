@@ -16,6 +16,38 @@ async function runHook(command: string) {
   return { ...result, allow: result.decision === "allow" }
 }
 
+function summaryWithSkills(skills: string[]): Record<string, unknown> {
+  const sessionLines = skills.map((skill) =>
+    JSON.stringify({
+      timestamp: new Date(Date.now() - 1000).toISOString(),
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Skill", input: { skill } }] },
+    })
+  )
+  return {
+    toolNames: skills.map(() => "Skill"),
+    toolCallCount: skills.length,
+    bashCommands: [],
+    skillInvocations: skills,
+    sessionLines,
+    hasGitPush: false,
+    sessionDurationMs: 0,
+    successfulTestRuns: 0,
+    lastVerificationTime: null,
+    sessionScope: "trivial",
+  }
+}
+
+async function runHookWithSkills(command: string, skills: string[] = []) {
+  return await runHookInProcess(HOOK, {
+    tool_name: "Bash",
+    tool_input: { command },
+    cwd: process.cwd(),
+    transcript_path: "fake-transcript.jsonl",
+    _transcriptSummary: summaryWithSkills(skills),
+  })
+}
+
 describe("pretooluse-banned-commands", () => {
   describe("warn severity (allow with hint)", () => {
     test("grep gets a gentle nudge", async () => {
@@ -134,6 +166,27 @@ describe("pretooluse-banned-commands", () => {
     test("git stash drop is blocked", async () => {
       const result = await runHook("git stash drop")
       expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("recovery entry")
+      expect(result.reason).toContain("swiz stash retire <full-oid>")
+    })
+
+    test("supported stash retirement requires the prune-branches skill", async () => {
+      const result = await runHookWithSkills(`swiz stash retire ${"a".repeat(40)}`)
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("prune-branches")
+    })
+
+    test("supported stash retirement is allowed after the prune-branches skill", async () => {
+      const result = await runHookWithSkills(`swiz stash retire ${"a".repeat(40)}`, [
+        "prune-branches",
+      ])
+      expect(result.decision).not.toBe("deny")
+    })
+
+    test("prune-branches does not authorize raw git stash drop", async () => {
+      const result = await runHookWithSkills("git stash drop stash@{0}", ["prune-branches"])
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("swiz stash retire")
     })
 
     test("git stash list is allowed", async () => {
@@ -606,6 +659,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("sed -n read-only passes through", async () => {
       const result = await runHook("sed -n '1,10p' file.ts")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("sed -n with stderr suppressed to /dev/null passes through", async () => {
+      const result = await runHook("sed -n '1,10p' optional.ts 2>/dev/null")
       expect(result.decision).toBeUndefined()
     })
 

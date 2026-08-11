@@ -84,4 +84,19 @@ describe("shell shim Git and GitHub security", () => {
     expect(skipStatus.exitCode).toBe(1)
     expect(skipStatus.stderr).toContain("gh --skip-status-check is blocked")
   })
+
+  test("directs stash drops to OID-bound retirement", async () => {
+    const result = await runShim("git stash drop stash@{2}")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("recovery entry")
+    expect(result.stderr).toContain("swiz stash retire <full-oid>")
+  })
+
+  test("continues blocking worktree-mutating stash commands", async () => {
+    const result = await runShim("git stash push -u")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("shared checkout")
+  })
 })

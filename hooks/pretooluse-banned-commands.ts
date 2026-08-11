@@ -11,7 +11,12 @@ import {
   type SwizToolHook,
 } from "../src/SwizHook.ts"
 import { toolHookInputSchema } from "../src/schemas.ts"
-import { skillExistsForHookPayload } from "../src/skill-utils.ts"
+import {
+  formatSkillReferenceForAgent,
+  getRecentlyInvokedSkillsForCurrentSession,
+  resolveSkillRecencyOptions,
+  skillExistsForHookPayload,
+} from "../src/skill-utils.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { detectPackageManager } from "../src/utils/package-detection.ts"
 import {
@@ -28,7 +33,9 @@ import {
   SHELL_SEGMENT_BOUNDARY,
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
+  splitShellSegments,
   stripQuotedShellStrings,
+  tokenizeShellSegment,
 } from "../src/utils/shell-patterns.ts"
 import { extractReadFilePaths } from "../src/utils/transcript.ts"
 
@@ -61,7 +68,6 @@ const PERL_FILE_READ_RE = shellSegmentCommandRe(
 // Only block sed when it writes files in-place (-i/--in-place) or redirects output to a file.
 // Read-only sed (e.g. sed -n '...' file, sed '...' file | ...) is permitted.
 const SED_CMD_RE = shellSegmentCommandRe("sed(?:\\s|$)", "g")
-const SED_REDIRECT_RE = shellSegmentCommandRe("sed\\s[^|;&]*>\\s*\\S")
 const SED_VALUE_LONG_FLAGS = new Set(["--expression", "--file"])
 const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
@@ -267,7 +273,7 @@ function buildShellToolRules(payload: Record<string, unknown>): Rule[] {
         "Do not use `perl` to read files from the shell. Use the Read tool or Glob tool instead.\n\nIf you need a specific slice of a file, use Read with line ranges or read the file and filter it in a later step.",
     },
     {
-      match: (c) => hasSedInPlaceFlag(c) || SED_REDIRECT_RE.test(c),
+      match: hasSedInPlaceFlag,
       message:
         "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • Write tool: overwrite a file with entirely new content\n\nRead-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
     },
@@ -304,11 +310,12 @@ function buildGitRules(payload: Record<string, unknown>): Rule[] {
       useRawCommand: true,
       match: hasGitStashMutation,
       message: [
-        "Do not use `git stash`. It rewrites the shared checkout and can remove another session's uncommitted changes.",
+        "Do not use raw `git stash` mutations. Depending on the subcommand, they can rewrite the shared checkout or mutate hidden Git recovery state, including deleting a recovery entry.",
         '\nInstead:\n  • Stage only changes you own, then commit them: `git commit -m "wip: ..."`',
         ...(skillExistsForHookPayload("commit", payload)
           ? ["  • Use the /commit skill to preserve your current state"]
           : []),
+        "  • For a classified disposable stash, invoke the pruning workflow and run `swiz stash retire <full-oid>`",
         "  • Leave other sessions' dirty files intact and continue in the same checkout without moving, hiding, or cleaning their work",
       ].join("\n"),
     },
@@ -489,6 +496,55 @@ async function isRedirectExempt(
   return readPaths.has(target)
 }
 
+function swizCommandArgs(segment: string): string[] | null {
+  const tokens = tokenizeShellSegment(segment)
+  let index = 0
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index] ?? "")) index++
+  if (tokens[index] === "command") index++
+
+  if (tokens[index] === "swiz") return tokens.slice(index + 1)
+  if (tokens[index] !== "bun") return null
+
+  index++
+  if (tokens[index] === "run") index++
+  const entrypoint = tokens[index]
+  if (!entrypoint || (entrypoint !== "index.ts" && !entrypoint.endsWith("/index.ts"))) return null
+  return tokens.slice(index + 1)
+}
+
+export function hasSwizStashRetirement(command: string): boolean {
+  return splitShellSegments(command).some((segment) => {
+    const args = swizCommandArgs(segment)
+    return args?.[0] === "stash" && args[1] === "retire"
+  })
+}
+
+async function requirePruneBranchesForStashRetirement(
+  command: string,
+  payload: Record<string, unknown>,
+  cwd: string
+): Promise<SwizHookOutput | null> {
+  if (!hasSwizStashRetirement(command)) return null
+
+  const skillName = "prune-branches"
+  const skillRef = formatSkillReferenceForAgent(skillName)
+  try {
+    const { recencyOptions, windowText } = await resolveSkillRecencyOptions(cwd)
+    const invoked = await getRecentlyInvokedSkillsForCurrentSession(payload, recencyOptions)
+    if (invoked.includes(skillName)) return null
+    return preToolUseDeny(
+      `BLOCKED: \`swiz stash retire\` permanently removes one recovery entry and requires the ${skillRef} workflow.\n\n` +
+        `Invoke ${skillRef}, classify the stash by immutable OID, then retry. ` +
+        `Skills used recently (${windowText}): ${invoked.length > 0 ? invoked.map((skill) => `/${skill}`).join(", ") : "(none)"}.`
+    )
+  } catch {
+    return preToolUseDeny(
+      `BLOCKED: unable to verify that the ${skillRef} workflow is active. ` +
+        `Invoke ${skillRef}, then retry \`swiz stash retire <full-oid>\`.`
+    )
+  }
+}
+
 function parseHookInput(input: Record<string, any>): {
   command: string
   transcriptPath: string
@@ -512,6 +568,13 @@ export async function evaluatePretooluseBannedCommands(input: unknown): Promise<
 
   const { command, transcriptPath, cwd } = parseHookInput(parsed as Record<string, any>)
   const strippedCommand = stripQuotedShellStrings(command, { preserveQuotePairs: true })
+
+  const stashRetirementBlock = await requirePruneBranchesForStashRetirement(
+    command,
+    parsed as Record<string, unknown>,
+    cwd
+  )
+  if (stashRetirementBlock) return stashRetirementBlock
 
   if (CD_CMD_RE.test(strippedCommand)) {
     return preToolUseDeny(buildCdDenyMessage(cwd))
