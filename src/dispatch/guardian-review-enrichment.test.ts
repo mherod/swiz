@@ -122,6 +122,7 @@ describe("guardian review dispatch enrichment", () => {
         transcript_path: "/virtual/codex.jsonl",
         tool_name: "Bash",
         tool_input: { command: GIT_ADD_COMMAND },
+        _env: { CODEX_THREAD_ID: "guardian-dispatch-permission-test" },
       }),
       daemonContext: true,
       settingsHomeOverride: settingsHome,
