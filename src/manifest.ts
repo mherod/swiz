@@ -80,6 +80,7 @@ import pretooluseMeasureTestTime from "../hooks/pretooluse-measure-test-time.ts"
 import pretooluseNoCp from "../hooks/pretooluse-no-cp.ts"
 import pretoolUseNoDirectDeps from "../hooks/pretooluse-no-direct-deps.ts"
 import pretooluseNoGitChecks from "../hooks/pretooluse-no-git-checks.ts"
+import pretooluseNoHomePaths from "../hooks/pretooluse-no-home-paths.ts"
 import pretooluseNoIssueClose from "../hooks/pretooluse-no-issue-close.ts"
 import pretoolusNoLockfileEdit from "../hooks/pretooluse-no-lockfile-edit.ts"
 import pretooluseNoMergeConflictComments from "../hooks/pretooluse-no-merge-conflict-comments.ts"
@@ -380,6 +381,7 @@ export const bundledHookManifest: HookGroup[] = [
       { hook: pretooluseGitFlowIntegrationBaseGate },
       { hook: pretooluseNoNpm },
       { hook: pretooluseNoGitChecks },
+      { hook: pretooluseNoHomePaths },
       { hook: pretooluseBunTestConcurrent },
       { hook: pretoolUseProtectSandbox },
       { hook: pretoolusePprotectStrictMain },

@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**157 hooks. 17 event types. Every agent. Zero compromises.**
+**158 hooks. 17 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -97,7 +97,7 @@ The JSON must name a supported agent and contain only valid tool-name strings. M
 
 ## Bundled Hooks
 
-128 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+129 hook scripts across 9 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Five additional events — **SubagentStart**, **SubagentStop**, **TaskCreated**, **TaskCompleted**, and **SessionEnd** — are formally registered in the dispatch system. Claude supports all five; other agents retain their existing event surface. Task lifecycle events update a daemon-owned registry and feed unfinished background work into a non-blocking Stop advisory. For the full picture of which Claude lifecycle events swiz maps versus intentionally leaves reserved (and why), see [docs/lifecycle-event-coverage.md](docs/lifecycle-event-coverage.md).
 
@@ -136,7 +136,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Modular git workflow validation — detects uncommitted changes, unpushed commits, branch divergence. Blocks stop until git state is clean. Separated into independent validators (context, uncommitted-changes, remote-state, push-cooldown, background-push-detector, action-plan, evaluate) for testability and reusability. See [hook-extraction-pattern.md](docs/hook-extraction-pattern.md) for modular architecture details. |
 | `stop-personal-repo-issues.ts` | Blocks stop if there are unassigned issues on a personal repository. |
 
-### PreToolUse (80)
+### PreToolUse (81)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -152,6 +152,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-git-index-lock.ts`                 | Blocks git commands when `.git/index.lock` exists. Prevents wasting turns on operations that will fail because another git process is running or a stale lock was left behind.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `pretooluse-no-npm.ts`                         | Intercepts `npm` and `yarn` commands and redirects to the project's actual package manager. No more lock file corruption from the wrong tool.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `pretooluse-no-git-checks.ts`                  | Blocks `--no-git-checks` (and the `npm_config_no_git_checks=1` env-var equivalent) when used with `npm` or `pnpm`. These flags suppress the dirty-worktree / branch-sync checks around `publish` — fix the underlying state instead of bypassing the guard.                                                                                                                                                                                                                                                                                                                                                       |
+| `pretooluse-no-home-paths.ts`                  | Blocks `git commit` when any staged file snapshot contains the current user's absolute home-directory path. Reports affected files and requires portable paths plus re-staging. Also separates index mutations (`git add`/`rm`/`mv`) from commits so the hook always inspects the final staged snapshots rather than pre-command state.                                                                                                                                                                                                                                                            |
 | `pretooluse-bun-test-concurrent.ts`            | Requires bounded file-level workers (`--parallel=<1-8>`) for multi-file `bun test` runs and blocks `--concurrent`, which marks every test concurrent. Single-file runs stay focused without worker flags.                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `pretooluse-protect-sandbox.ts`                | Blocks Bash commands that attempt to disable the sandboxed-edits setting. The sandbox can only be disabled by the user at the terminal — agents cannot opt out.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pretooluse-protect-strict-main.ts`            | Blocks Bash commands that attempt to disable the strict-no-direct-main setting. The feature-branch enforcement can only be disabled by the user at the terminal — agents cannot opt out.                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -348,7 +349,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 127 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 128 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
