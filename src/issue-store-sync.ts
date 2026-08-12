@@ -1,6 +1,7 @@
 import { debugLog } from "./debug.ts"
 import { getRepoSlug } from "./git-helpers.ts"
 import type { GitHubCiRunRecord, GitHubClient, IssueStore } from "./issue-store.ts"
+import { mapSyncedPrBranchDetail } from "./pr-branch-detail.ts"
 import { getDefaultBranch } from "./utils/git-utils.ts"
 
 // ─── Upstream sync ─────────────────────────────────────────────────────────
@@ -497,18 +498,7 @@ async function syncBranchData(
         requestedReviewers?: Array<{ login: string }>
         mergeable?: string
       }
-      const reviewerLogins = (prData.requestedReviewers ?? []).map((r) => r.login).filter(Boolean)
-      const changesRequestedReviews = (reviews ?? [])
-        .filter((r) => r.state === "CHANGES_REQUESTED")
-        .map((r) => ({ login: r.user?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
-        .filter((r) => r.login)
-      const detail = {
-        reviewDecision: prData.reviewDecision ?? "",
-        requestedReviewers: reviewerLogins,
-        commentCount: comments?.length ?? 0,
-        changesRequestedReviews,
-        mergeable: prData.mergeable ?? "UNKNOWN",
-      }
+      const detail = mapSyncedPrBranchDetail(prData, comments, reviews)
       const newJson = JSON.stringify(detail)
       const existingJson = ctx.store.getPrBranchDetailRaw(ctx.repo, pr.headRefName)
       if (existingJson === newJson) return null

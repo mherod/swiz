@@ -7,9 +7,15 @@
 
 import { getDaemonPort } from "./commands/daemon/daemon-admin.ts"
 import type { IssueStoreReader } from "./issue-store.ts"
+import {
+  type GhPrBranchDetailSource,
+  mapGhPrBranchDetail,
+  type PrBranchDetail,
+} from "./pr-branch-detail.ts"
 
 const DAEMON_FALLBACK_PORT = getDaemonPort()
 const DAEMON_FALLBACK_TIMEOUT_MS = 2_000
+const DEFAULT_DAEMON_QUERY_TTL_MS = 300_000
 
 /** `gh ... --json` for `issue view` / `pr view` returns a one-element array; normalize to a single object. */
 function unwrapGhViewJson<T>(value: T | T[] | null | undefined): T | null {
@@ -26,13 +32,18 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
   ) {}
 
-  private async query<T>(args: string[]): Promise<T | null> {
+  /**
+   * Query the daemon using the caller's cache window without capping it.
+   * The five-minute default matches IssueStore, while explicit shorter fresh
+   * reads and longer stale-serve reads retain their requested semantics.
+   */
+  private async query<T>(args: string[], ttlMs = DEFAULT_DAEMON_QUERY_TTL_MS): Promise<T | null> {
     if (this.daemonAvailable === false) return null
     try {
       const resp = await this.fetchImpl(`http://127.0.0.1:${DAEMON_FALLBACK_PORT}/gh-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args, cwd: ".", ttlMs: 300_000 }),
+        body: JSON.stringify({ args, cwd: ".", ttlMs }),
         signal: AbortSignal.timeout(DAEMON_FALLBACK_TIMEOUT_MS),
       })
       if (!resp.ok) {
@@ -48,31 +59,40 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     }
   }
 
-  async listIssues<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
-    const result = await this.query<T[]>([
-      "issue",
-      "list",
-      "--repo",
-      repo,
-      "--state",
-      "open",
-      "--json",
-      "number,title,labels,author,assignees",
-    ])
+  async listIssues<T = unknown>(repo: string, ttlMs = DEFAULT_DAEMON_QUERY_TTL_MS): Promise<T[]> {
+    const result = await this.query<T[]>(
+      [
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--json",
+        "number,title,labels,author,assignees",
+      ],
+      ttlMs
+    )
     return result ?? []
   }
 
-  async listPullRequests<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
-    const result = await this.query<T[]>([
-      "pr",
-      "list",
-      "--repo",
-      repo,
-      "--state",
-      "open",
-      "--json",
-      "number,title,state,headRefName,baseRefName,author,reviewDecision,statusCheckRollup,mergeable,requestedReviewers,url,createdAt,updatedAt",
-    ])
+  async listPullRequests<T = unknown>(
+    repo: string,
+    ttlMs = DEFAULT_DAEMON_QUERY_TTL_MS
+  ): Promise<T[]> {
+    const result = await this.query<T[]>(
+      [
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--json",
+        "number,title,state,headRefName,baseRefName,author,reviewDecision,statusCheckRollup,mergeable,requestedReviewers,url,createdAt,updatedAt",
+      ],
+      ttlMs
+    )
     return result ?? []
   }
 
@@ -151,14 +171,8 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return runs ?? null
   }
 
-  async getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null> {
-    const raw = await this.query<{
-      reviewDecision?: string
-      requestedReviewers?: Array<{ login?: string }>
-      comments?: unknown[]
-      reviews?: Array<{ state?: string; author?: { login?: string }; body?: string }>
-      mergeable?: string
-    } | null>([
+  async getPrBranchDetail<T = PrBranchDetail>(repo: string, branch: string): Promise<T | null> {
+    const raw = await this.query<GhPrBranchDetailSource | null>([
       "pr",
       "view",
       branch,
@@ -169,19 +183,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     ])
     const fresh = unwrapGhViewJson(raw)
     if (!fresh) return null
-    const detail = {
-      reviewDecision: fresh.reviewDecision ?? "",
-      requestedReviewers: (fresh.requestedReviewers ?? [])
-        .map((r) => r.login)
-        .filter((l): l is string => typeof l === "string"),
-      commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
-      changesRequestedReviews: (fresh.reviews ?? [])
-        .filter((r) => r.state === "CHANGES_REQUESTED")
-        .map((r) => ({ login: r.author?.login ?? "", body: r.body?.slice(0, 500) ?? "" }))
-        .filter((r) => r.login),
-      mergeable: fresh.mergeable ?? "UNKNOWN",
-    }
-    return detail as T
+    return mapGhPrBranchDetail(fresh) as T
   }
 
   async listIssueComments<T = unknown>(repo: string, issueNumber: number): Promise<T[] | null> {
@@ -210,25 +212,22 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return ts ? new Date(ts).getTime() : null
   }
 
-  async listLabels<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
-    const result = await this.query<T[]>([
-      "label",
-      "list",
-      "--repo",
-      repo,
-      "--json",
-      "name,color,description",
-      "--limit",
-      "100",
-    ])
+  async listLabels<T = unknown>(repo: string, ttlMs = DEFAULT_DAEMON_QUERY_TTL_MS): Promise<T[]> {
+    const result = await this.query<T[]>(
+      ["label", "list", "--repo", repo, "--json", "name,color,description", "--limit", "100"],
+      ttlMs
+    )
     return result ?? []
   }
 
-  async listMilestones<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
-    const result = await this.query<T[]>([
-      "api",
-      `repos/${repo}/milestones?state=open&per_page=100`,
-    ])
+  async listMilestones<T = unknown>(
+    repo: string,
+    ttlMs = DEFAULT_DAEMON_QUERY_TTL_MS
+  ): Promise<T[]> {
+    const result = await this.query<T[]>(
+      ["api", `repos/${repo}/milestones?state=open&per_page=100`],
+      ttlMs
+    )
     return result ?? []
   }
 

@@ -7,6 +7,7 @@ import {
   type MainBranchScopeGateDeps,
 } from "../hooks/pretooluse-main-branch-scope-gate.ts"
 import { getIssueStore, resetIssueStore } from "./issue-store.ts"
+import type { PrBranchDetail } from "./pr-branch-detail.ts"
 import { hookOutputSchema } from "./schemas.ts"
 import { DEFAULT_SETTINGS, getEffectiveSwizSettings } from "./settings.ts"
 import { extractPrNumber, GH_PR_MERGE_RE } from "./utils/git-utils.ts"
@@ -85,6 +86,16 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
   const TEST_REPO = "mherod/swiz"
   let testStore: ReturnType<typeof getIssueStore>
   let tempDbDir: string
+
+  function prBranchDetail(
+    overrides: Pick<PrBranchDetail, "reviewDecision" | "mergeable" | "commentCount">
+  ): PrBranchDetail {
+    return {
+      requestedReviewers: [],
+      changesRequestedReviews: [],
+      ...overrides,
+    }
+  }
 
   function testDeps(): Partial<MainBranchScopeGateDeps> {
     return {
@@ -190,11 +201,15 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       },
     ])
 
-    testStore.upsertPrBranchDetail(TEST_REPO, headBranch, {
-      reviewDecision: "APPROVED",
-      mergeable: "CONFLICTING",
-      commentCount: 5,
-    })
+    testStore.upsertPrBranchDetail(
+      TEST_REPO,
+      headBranch,
+      prBranchDetail({
+        reviewDecision: "APPROVED",
+        mergeable: "CONFLICTING",
+        commentCount: 5,
+      })
+    )
 
     const result = await evaluatePretooluseMainBranchScopeGate(
       {
@@ -229,11 +244,15 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       },
     ])
 
-    testStore.upsertPrBranchDetail(TEST_REPO, headBranch, {
-      reviewDecision: "CHANGES_REQUESTED",
-      mergeable: "MERGEABLE",
-      commentCount: 2,
-    })
+    testStore.upsertPrBranchDetail(
+      TEST_REPO,
+      headBranch,
+      prBranchDetail({
+        reviewDecision: "CHANGES_REQUESTED",
+        mergeable: "MERGEABLE",
+        commentCount: 2,
+      })
+    )
 
     const result = await evaluatePretooluseMainBranchScopeGate(
       {
@@ -268,11 +287,15 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
       },
     ])
 
-    testStore.upsertPrBranchDetail(TEST_REPO, headBranch, {
-      reviewDecision: "APPROVED",
-      mergeable: "CONFLICTING",
-      commentCount: 1,
-    })
+    testStore.upsertPrBranchDetail(
+      TEST_REPO,
+      headBranch,
+      prBranchDetail({
+        reviewDecision: "APPROVED",
+        mergeable: "CONFLICTING",
+        commentCount: 1,
+      })
+    )
 
     const staleResult = await evaluatePretooluseMainBranchScopeGate(
       {
@@ -291,11 +314,15 @@ describe("evaluatePretooluseMainBranchScopeGate (Pull Request merge state transi
     expect(staleParsed.hookSpecificOutput?.permissionDecision).toBe("deny")
     expect(staleParsed.hookSpecificOutput?.permissionDecisionReason).toContain("CONFLICTING")
 
-    testStore.upsertPrBranchDetail(TEST_REPO, headBranch, {
-      reviewDecision: "APPROVED",
-      mergeable: "MERGEABLE",
-      commentCount: 1,
-    })
+    testStore.upsertPrBranchDetail(
+      TEST_REPO,
+      headBranch,
+      prBranchDetail({
+        reviewDecision: "APPROVED",
+        mergeable: "MERGEABLE",
+        commentCount: 1,
+      })
+    )
 
     const result = await evaluatePretooluseMainBranchScopeGate(
       {

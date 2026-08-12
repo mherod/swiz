@@ -17,6 +17,7 @@ import {
   git,
 } from "../src/git-helpers.ts"
 import { getIssueStoreReader } from "../src/issue-store.ts"
+import type { PrBranchDetail } from "../src/pr-branch-detail.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -254,10 +255,10 @@ async function getPrMergeability(
       Number(prNumber)
     )
     if (cachedPr?.headRefName) {
-      const detail = await reader.getPrBranchDetail<{
-        reviewDecision?: string
-        mergeable?: string
-      }>(repoSlug, cachedPr.headRefName)
+      const detail: PrBranchDetail | null = await reader.getPrBranchDetail(
+        repoSlug,
+        cachedPr.headRefName
+      )
       if (detail) {
         const reviewDecision = detail.reviewDecision ?? ""
         const mergeableStatus = detail.mergeable ?? "UNKNOWN"

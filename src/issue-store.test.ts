@@ -1990,7 +1990,10 @@ describe("IssueStoreReader", () => {
       ])
       store.upsertPrBranchDetail("test/repo", "feat/x", {
         reviewDecision: "REVIEW_REQUIRED",
+        requestedReviewers: [],
         commentCount: 2,
+        changesRequestedReviews: [],
+        mergeable: "UNKNOWN",
       })
 
       const pr = await reader.getPullRequest<{ title: string }>("test/repo", 10)
@@ -2003,7 +2006,7 @@ describe("IssueStoreReader", () => {
       expect(runs).toHaveLength(1)
       expect(runs![0]!.workflowName).toBe("CI")
 
-      const detail = await reader.getPrBranchDetail<{ commentCount: number }>("test/repo", "feat/x")
+      const detail = await reader.getPrBranchDetail("test/repo", "feat/x")
       expect(detail?.commentCount).toBe(2)
 
       store.upsertLabels("test/repo", [{ name: "bug", color: "d73a4a" }])
@@ -2195,13 +2198,7 @@ describe("DaemonBackedIssueStore", () => {
         hit: false,
       })) as unknown as typeof fetch
     const store = new DaemonBackedIssueStore(fetchMock)
-    const d = await store.getPrBranchDetail<{
-      reviewDecision: string
-      requestedReviewers: string[]
-      commentCount: number
-      changesRequestedReviews: Array<{ login: string; body: string }>
-      mergeable: string
-    }>("owner/repo", "feature/foo")
+    const d = await store.getPrBranchDetail("owner/repo", "feature/foo")
     expect(d).toEqual({
       reviewDecision: "APPROVED",
       requestedReviewers: ["alice"],

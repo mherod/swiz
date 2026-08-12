@@ -25,6 +25,7 @@ import {
   type RestFallbackStats,
   tryRestFallback as tryRestFallbackImpl,
 } from "./issue-store-rest-fallback.ts"
+import type { PrBranchDetail } from "./pr-branch-detail.ts"
 import type { RepositoryCapability } from "./repository-capability.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -122,8 +123,8 @@ export interface IssueStoreReader {
   getCiStatus<T = unknown>(repo: string, sha: string): Promise<T | null>
   /** Workflow runs for a branch, or `null` when unavailable (matches sync IssueStore TTL semantics). */
   getCiBranchRuns<T = unknown>(repo: string, branch: string): Promise<T[] | null>
-  /** PR review/comment summary for a branch head (shape matches `upsertPrBranchDetail`). */
-  getPrBranchDetail<T = unknown>(repo: string, branch: string): Promise<T | null>
+  /** Canonical PR review/comment summary for a branch head. */
+  getPrBranchDetail<T = PrBranchDetail>(repo: string, branch: string): Promise<T | null>
   /** Cached comments for an issue, ordered by creation time. Returns null when not yet synced. */
   listIssueComments<T = unknown>(repo: string, issueNumber: number): Promise<T[] | null>
   /** Timestamp (ms) of the most recent comment on an issue, or null when not yet synced. */
@@ -817,7 +818,11 @@ export class IssueStore {
   // ─── PR branch detail ──────────────────────────────────────────────────
 
   /** Get cached PR detail for a specific branch. Returns null if no fresh data. */
-  getPrBranchDetail<T = unknown>(repo: string, branch: string, ttlMs = DEFAULT_TTL_MS): T | null {
+  getPrBranchDetail<T = PrBranchDetail>(
+    repo: string,
+    branch: string,
+    ttlMs = DEFAULT_TTL_MS
+  ): T | null {
     const cutoff = Date.now() - ttlMs
     const row = this.db
       .query("SELECT data FROM pr_branch_detail WHERE repo = ? AND branch = ? AND synced_at > ?")
@@ -827,7 +832,7 @@ export class IssueStore {
   }
 
   /** Upsert PR detail for a branch (reviewDecision, commentCount, etc.). */
-  upsertPrBranchDetail<T>(repo: string, branch: string, detail: T): void {
+  upsertPrBranchDetail(repo: string, branch: string, detail: PrBranchDetail): void {
     this.db
       .query(
         "INSERT OR REPLACE INTO pr_branch_detail (repo, branch, data, synced_at) VALUES (?, ?, ?, ?)"
@@ -1315,7 +1320,7 @@ export class IssueStore {
         Promise.resolve(this.getCiStatus<T>(repo, sha)),
       getCiBranchRuns: <T = unknown>(repo: string, branch: string) =>
         Promise.resolve(this.getCiBranchRuns<T>(repo, branch)),
-      getPrBranchDetail: <T = unknown>(repo: string, branch: string) =>
+      getPrBranchDetail: <T = PrBranchDetail>(repo: string, branch: string) =>
         Promise.resolve(this.getPrBranchDetail<T>(repo, branch)),
       listIssueComments: <T = unknown>(repo: string, issueNumber: number) =>
         Promise.resolve(this.listIssueComments<T>(repo, issueNumber)),
@@ -1570,7 +1575,7 @@ function createNoOpStore(): IssueStore {
             _repo: string,
             _branch: string
           ): Promise<T[] | null> => null,
-          getPrBranchDetail: async <T = unknown>(
+          getPrBranchDetail: async <T = PrBranchDetail>(
             _repo: string,
             _branch: string
           ): Promise<T | null> => null,

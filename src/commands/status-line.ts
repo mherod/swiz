@@ -14,6 +14,7 @@ import {
 } from "../git-helpers.ts"
 import { complianceBaselineWantedLevel, standingWantedLevel } from "../infractions.ts"
 import { getIssueStoreReader } from "../issue-store.ts"
+import type { PrBranchDetail } from "../pr-branch-detail.ts"
 import {
   DEFAULT_SETTINGS,
   type EffectiveSwizSettings,
@@ -529,14 +530,6 @@ function joinGroups(groups: Array<string | null | undefined>): string {
 // the daemon's upstream sync). These helpers do NOT fetch from `gh` or upsert on
 // a miss — a cold/stale store simply yields empty results, and the status line
 // renders without the GitHub segment until the daemon's next sync fills it.
-
-interface PrBranchDetail {
-  reviewDecision: string
-  requestedReviewers: string[]
-  commentCount: number
-  changesRequestedReviews: Array<{ login: string; body: string }>
-  mergeable: string
-}
 
 /** 1 hour — serve stale data rather than showing nothing when API is down. */
 const STALE_TTL_MS = 60 * 60 * 1000

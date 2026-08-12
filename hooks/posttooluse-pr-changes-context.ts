@@ -17,6 +17,7 @@ import {
   isDefaultBranch,
   isGitHubRemote,
 } from "../src/git-helpers.ts"
+import type { PrBranchDetail } from "../src/pr-branch-detail.ts"
 import { isGitRepoForHookPayload } from "../src/repository-capability.ts"
 import {
   postToolUseAdditionalContext,
@@ -77,10 +78,10 @@ const posttoolusPrChangesContext: SwizShellHook = {
     let storedChangesRequested: Array<{ login: string; body: string }> | null = null
     try {
       const { getIssueStoreReader } = await import("../src/issue-store.ts")
-      const branchDetail = await getIssueStoreReader().getPrBranchDetail<{
-        reviewDecision?: string
-        changesRequestedReviews?: Array<{ login: string; body: string }>
-      }>(repo, branch)
+      const branchDetail: PrBranchDetail | null = await getIssueStoreReader().getPrBranchDetail(
+        repo,
+        branch
+      )
       if (branchDetail !== null && branchDetail.reviewDecision !== "CHANGES_REQUESTED") return {}
       if (branchDetail?.changesRequestedReviews) {
         storedChangesRequested = branchDetail.changesRequestedReviews
