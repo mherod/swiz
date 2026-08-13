@@ -52,6 +52,41 @@ interface RequiredStopSkillRule {
 
 const GIT_COMMIT_OR_PUSH_RE = /\bgit\s+(?:commit|push)\b/
 
+function debugRequiredSkills(message: string): void {
+  if (process.env.DEBUG_REQUIRED_SKILLS) console.error(message)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function parseTranscriptLine(line: string): unknown {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return null
+  }
+}
+
+function findLastSystemBoundary(lines: string[]): number {
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const entry = parseTranscriptLine(lines[index] ?? "")
+    if (isRecord(entry) && entry.type === "system") return index
+  }
+  return -1
+}
+
+function isSkillInvocation(block: unknown, skillName: string): boolean {
+  if (!isRecord(block) || block.type !== "tool_use" || block.name !== "Skill") return false
+  return isRecord(block.input) && block.input.skill === skillName
+}
+
+function entryInvokesSkill(entry: unknown, skillName: string): boolean {
+  if (!isRecord(entry) || entry.type !== "assistant" || !isRecord(entry.message)) return false
+  const content = entry.message.content
+  return Array.isArray(content) && content.some((block) => isSkillInvocation(block, skillName))
+}
+
 /**
  * Returns true if `skillName` was invoked this session AND no `git commit` or
  * `git push` bash command occurred after that invocation. When true the skill's
@@ -125,91 +160,56 @@ async function hasPreCompactionSkill(
   try {
     const text = await Bun.file(transcriptPath).text()
     const lines = text.split("\n").filter(Boolean)
-
-    let boundaryIdx = -1
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const entry = JSON.parse(lines[i] ?? "") as { type?: string }
-        if (entry?.type === "system") {
-          boundaryIdx = i
-          break
-        }
-      } catch {
-        /* skip malformed line */
-      }
-    }
+    const boundaryIdx = findLastSystemBoundary(lines)
     if (boundaryIdx <= 0) return false
-
-    for (let i = 0; i < boundaryIdx; i++) {
-      try {
-        const entry = JSON.parse(lines[i] ?? "") as {
-          type?: string
-          message?: {
-            content?: Array<{ type?: string; name?: string; input?: { skill?: string } }>
-          }
-        }
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (
-            block?.type === "tool_use" &&
-            block?.name === "Skill" &&
-            block?.input?.skill === skillName
-          ) {
-            return true
-          }
-        }
-      } catch {
-        /* skip malformed line */
-      }
-    }
-    return false
+    return lines
+      .slice(0, boundaryIdx)
+      .some((line) => entryInvokesSkill(parseTranscriptLine(line), skillName))
   } catch {
     return false
   }
+}
+
+async function countIncompleteSessionTasks(input: StopHookInput): Promise<number> {
+  if (!input.session_id) return 0
+  const tasks = await readTasks(input.session_id)
+  return tasks.filter((task) => isIncompleteTaskStatus(task.status)).length
+}
+
+async function isEndOfDayApplicable(ctx: RequiredStopSkillContext): Promise<boolean> {
+  const effectiveSettings = (ctx.input as Record<string, unknown>)._effectiveSettings
+  if (isRecord(effectiveSettings) && effectiveSettings.enforceEndOfDay === false) {
+    debugRequiredSkills("end-of-day: enforceEndOfDay is false")
+    return false
+  }
+  if (!(await isGitRepoForHookPayload(ctx.input, ctx.cwd))) {
+    debugRequiredSkills(`end-of-day: ${ctx.cwd} is not a git repo`)
+    return false
+  }
+
+  const ahead = await getUnpushedCommitCount(ctx.cwd)
+  if (ahead > 0) {
+    debugRequiredSkills(`end-of-day: ${ahead} commits ahead`)
+    ctx.ahead = ahead
+    return true
+  }
+
+  const incompleteCount = await countIncompleteSessionTasks(ctx.input)
+  if (incompleteCount > 0) {
+    debugRequiredSkills(`end-of-day: ${incompleteCount} incomplete tasks`)
+    ctx.incompleteCount = incompleteCount
+    return true
+  }
+
+  debugRequiredSkills("end-of-day: no signals fired")
+  return false
 }
 
 // Add future stop-gated skills here in the exact order they should block.
 const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   {
     skill: GATE_REQUIRED_SKILLS.endOfDay.name,
-    applies: async (ctx) => {
-      const { cwd, input } = ctx
-      const es = (input as any)._effectiveSettings
-      if (es?.enforceEndOfDay === false) {
-        if (process.env.DEBUG_REQUIRED_SKILLS) console.error("end-of-day: enforceEndOfDay is false")
-        return false
-      }
-      if (!(await isGitRepoForHookPayload(input, cwd))) {
-        if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${cwd} is not a git repo`)
-        return false
-      }
-
-      // Signal 1: Unpushed commits
-      const ahead = await getUnpushedCommitCount(cwd)
-      if (ahead > 0) {
-        if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`end-of-day: ${ahead} commits ahead`)
-        ctx.ahead = ahead
-        return true
-      }
-
-      // Signal 2: Incomplete tasks
-      const sessionId = (input as any).session_id
-      if (typeof sessionId === "string") {
-        const tasks = await readTasks(sessionId)
-        const incomplete = tasks.filter((t: any) => isIncompleteTaskStatus(t.status))
-        if (incomplete.length > 0) {
-          if (process.env.DEBUG_REQUIRED_SKILLS)
-            console.error(`end-of-day: ${incomplete.length} incomplete tasks`)
-          ctx.incompleteCount = incomplete.length
-          return true
-        }
-      }
-
-      if (process.env.DEBUG_REQUIRED_SKILLS) console.error("end-of-day: no signals fired")
-      return false
-    },
+    applies: isEndOfDayApplicable,
     blockedLine: (skillReference) =>
       `BLOCKED: session handoff incomplete and ${skillReference} has not been run.`,
     actionHeader: (skillReference) => `Run ${skillReference} to complete the session handoff:`,
@@ -266,6 +266,29 @@ const REQUIRED_STOP_SKILLS: readonly RequiredStopSkillRule[] = [
   },
 ]
 
+async function getAllCurrentSessionUsageEvents(
+  input: StopHookInput
+): Promise<CurrentSessionUsageEvent[] | undefined> {
+  const summarizedEvents = getCurrentSessionToolUsage(input as Record<string, any>)?.events
+  if (summarizedEvents || !input.transcript_path) return summarizedEvents
+
+  try {
+    const text = await Bun.file(input.transcript_path).text()
+    return collectCurrentSessionUsageEvents(extractSessionLines(text))
+  } catch {
+    return undefined
+  }
+}
+
+async function canBypassMissingSkill(
+  rule: RequiredStopSkillRule,
+  input: StopHookInput
+): Promise<boolean> {
+  if (!rule.bypassIfNoNewCommits) return false
+  const events = await getAllCurrentSessionUsageEvents(input)
+  return Boolean(events && noNewCommitsSinceSkillInvocation(rule.skill, events))
+}
+
 export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<SwizHookOutput> {
   const parsed = stopHookInputSchema.parse(input)
   const cwd = parsed.cwd ?? process.cwd()
@@ -277,7 +300,7 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
 
   for (const rule of REQUIRED_STOP_SKILLS) {
     if (rule.applies && !(await rule.applies(ctx))) {
-      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Rule ${rule.skill} does not apply`)
+      debugRequiredSkills(`Rule ${rule.skill} does not apply`)
       continue
     }
     const skillPath = resolveSkillFilePathForHookPayload(
@@ -286,40 +309,27 @@ export async function evaluateStopRequiredSkills(input: StopHookInput): Promise<
       cwd
     )
     if (!skillPath) {
-      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} does not exist`)
+      debugRequiredSkills(`Skill ${rule.skill} does not exist`)
       continue
     }
 
     invokedSkills ??= await getRecentlyInvokedSkillsForCurrentSession(parsed, recencyOptions)
-    if (process.env.DEBUG_REQUIRED_SKILLS)
-      console.error(`Invoked skills: ${invokedSkills.join(", ")}`)
+    debugRequiredSkills(`Invoked skills: ${invokedSkills.join(", ")}`)
     if (invokedSkills.includes(rule.skill)) {
-      if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Skill ${rule.skill} already invoked`)
+      debugRequiredSkills(`Skill ${rule.skill} already invoked`)
       continue
     }
 
-    if (rule.bypassIfNoNewCommits) {
-      let allEvents = getCurrentSessionToolUsage(parsed as Record<string, any>)?.events
-      if (!allEvents && parsed.transcript_path) {
-        try {
-          const text = await Bun.file(parsed.transcript_path).text()
-          allEvents = collectCurrentSessionUsageEvents(extractSessionLines(text))
-        } catch {
-          allEvents = undefined
-        }
-      }
-      if (allEvents && noNewCommitsSinceSkillInvocation(rule.skill, allEvents)) {
-        if (process.env.DEBUG_REQUIRED_SKILLS)
-          console.error(`Skill ${rule.skill} bypassed — no new commits since last invocation`)
-        continue
-      }
+    if (await canBypassMissingSkill(rule, parsed)) {
+      debugRequiredSkills(`Skill ${rule.skill} bypassed — no new commits since last invocation`)
+      continue
     }
 
     const skillReference = formatSkillReferenceForHookPayload(
       rule.skill,
       parsed as Record<string, unknown>
     )
-    if (process.env.DEBUG_REQUIRED_SKILLS) console.error(`Blocking on missing skill: ${rule.skill}`)
+    debugRequiredSkills(`Blocking on missing skill: ${rule.skill}`)
     const compactionReset = await hasPreCompactionSkill(parsed.transcript_path, rule.skill)
     return blockStopObj(
       buildMissingSkillReason(rule, {

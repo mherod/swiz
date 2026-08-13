@@ -10,112 +10,86 @@ import { isShellTool } from "../src/tool-matchers.ts"
 import { tokenize } from "../src/utils/inline-hook-helpers.ts"
 import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
-export function parseTestCommand(segment: string): { isTest: boolean; targets: string[] } {
-  const tokens = tokenize(segment)
-  if (tokens.length === 0) return { isTest: false, targets: [] }
+const BUN_TEST_SCRIPTS = new Set(["test", "test:bun", "test:vitest"])
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn"])
+const TEST_FLAGS_WITH_VALUES = new Set([
+  "-t",
+  "--timeout",
+  "-r",
+  "--reporter",
+  "-c",
+  "--config",
+  "--filter",
+  "--preload",
+  "--testNamePattern",
+  "-o",
+  "--outputFile",
+  "--workspace",
+])
+const REDIRECTIONS = new Set(["1>", "2>", ">", ">>", "<", "2>&1", "2>>", "&>", "1>>"])
+const SHELL_OPERATORS = new Set(["&&", "||", ";", "|", "&"])
 
-  let i = 0
-  // Skip environment variables set at the beginning, like `NODE_ENV=test PORT=3000 bun test`
-  while (i < tokens.length && tokens[i]!.includes("=")) {
-    i++
+function firstCommandIndex(tokens: string[]): number {
+  let index = 0
+  while (index < tokens.length && tokens[index]!.includes("=")) index++
+  return index
+}
+
+function packageTestTargetIndex(tokens: string[], commandIndex: number): number | null {
+  const subcommand = tokens[commandIndex + 1]
+  if (subcommand === "test") return commandIndex + 2
+  return subcommand === "run" && tokens[commandIndex + 2] === "test" ? commandIndex + 3 : null
+}
+
+function bunTestTargetIndex(tokens: string[], commandIndex: number): number | null {
+  const subcommand = tokens[commandIndex + 1]
+  if (subcommand === "test") return commandIndex + 2
+  if (subcommand === "run" && BUN_TEST_SCRIPTS.has(tokens[commandIndex + 2] ?? "")) {
+    return commandIndex + 3
   }
+  return null
+}
 
-  if (i >= tokens.length) return { isTest: false, targets: [] }
-
-  const cmd = tokens[i]
-  i++
-
-  let isTest = false
-
-  if (cmd === "bun") {
-    if (i < tokens.length && tokens[i] === "test") {
-      isTest = true
-      i++ // skip 'test'
-    } else if (i < tokens.length && tokens[i] === "run") {
-      if (
-        i + 1 < tokens.length &&
-        (tokens[i + 1] === "test" ||
-          tokens[i + 1] === "test:bun" ||
-          tokens[i + 1] === "test:vitest")
-      ) {
-        isTest = true
-        i += 2 // skip 'run' and 'test...'
-      }
-    }
-  } else if (cmd === "vitest") {
-    isTest = true
-    if (i < tokens.length && tokens[i] === "run") {
-      i++ // skip 'run'
-    }
-  } else if (cmd === "npm" || cmd === "pnpm" || cmd === "yarn") {
-    if (i < tokens.length && tokens[i] === "test") {
-      isTest = true
-      i++ // skip 'test'
-    } else if (i < tokens.length && tokens[i] === "run") {
-      if (i + 1 < tokens.length && tokens[i + 1] === "test") {
-        isTest = true
-        i += 2 // skip 'run' and 'test'
-      }
-    }
+function testTargetIndex(tokens: string[], commandIndex: number): number | null {
+  const command = tokens[commandIndex]
+  if (command === "bun") return bunTestTargetIndex(tokens, commandIndex)
+  if (command === "vitest") {
+    return tokens[commandIndex + 1] === "run" ? commandIndex + 2 : commandIndex + 1
   }
+  return command && PACKAGE_MANAGERS.has(command)
+    ? packageTestTargetIndex(tokens, commandIndex)
+    : null
+}
 
-  if (!isTest) {
-    return { isTest: false, targets: [] }
-  }
-
-  // Now extract targets
+function collectTargets(tokens: string[], startIndex: number): string[] {
   const targets: string[] = []
   let inDoubleDash = false
-  while (i < tokens.length) {
-    const token = tokens[i]!
-    i++
 
+  for (let index = startIndex; index < tokens.length; index++) {
+    const token = tokens[index]!
     if (token === "--") {
       inDoubleDash = true
-      continue
-    }
-
-    // Ignore flags/options if we haven't seen '--'
-    if (!inDoubleDash && token.startsWith("-")) {
+    } else if (!inDoubleDash && token.startsWith("-")) {
       const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
-      // Flags taking values in common test runners
-      if (
-        !token.includes("=") &&
-        [
-          "-t",
-          "--timeout",
-          "-r",
-          "--reporter",
-          "-c",
-          "--config",
-          "--filter",
-          "--preload",
-          "--testNamePattern",
-          "-o",
-          "--outputFile",
-          "--workspace",
-        ].includes(name)
-      ) {
-        i++ // skip value
-      }
-      continue
-    }
-
-    // Ignore redirections
-    if (["1>", "2>", ">", ">>", "<", "2>&1", "2>>", "&>", "1>>"].includes(token)) {
-      i++ // skip redirection target
-      continue
-    }
-
-    // Stop on other shell structures if encountered
-    if (["&&", "||", ";", "|", "&"].includes(token)) {
+      if (!token.includes("=") && TEST_FLAGS_WITH_VALUES.has(name)) index++
+    } else if (REDIRECTIONS.has(token)) {
+      index++
+    } else if (SHELL_OPERATORS.has(token)) {
       break
+    } else {
+      targets.push(token)
     }
-
-    targets.push(token)
   }
 
-  return { isTest: true, targets }
+  return targets
+}
+
+export function parseTestCommand(segment: string): { isTest: boolean; targets: string[] } {
+  const tokens = tokenize(segment)
+  const targetIndex = testTargetIndex(tokens, firstCommandIndex(tokens))
+  return targetIndex === null
+    ? { isTest: false, targets: [] }
+    : { isTest: true, targets: collectTargets(tokens, targetIndex) }
 }
 
 export function isFullTestSuiteRun(command: string): boolean {

@@ -21,6 +21,47 @@ import type { ShipChecklistResult, WorkflowStep } from "./types.ts"
 const SHIP_CHECKLIST_TASK_SUBJECT = "Complete ship checklist before stopping"
 const SHIP_CHECKLIST_COMPLETION_EVIDENCE = "note:ship checklist passed"
 
+async function isProjectAffiliated(sessionId: string, cwd: string): Promise<boolean> {
+  const { getSessionIdsForProject } = await import("../../src/tasks/task-resolver.ts")
+  const { projectKeyFromCwd } = await import("../../src/project-key.ts")
+  const projectKey = projectKeyFromCwd(cwd)
+  const projectSessionIds = await getSessionIdsForProject(projectKey)
+  return projectSessionIds.has(sessionId)
+}
+
+async function mergeChecklistStepsIntoTasks(
+  steps: WorkflowStep[],
+  sessionId: string,
+  cwd: string
+): Promise<void> {
+  const mergeIssueSteps = await isProjectAffiliated(sessionId, cwd)
+  for (const step of steps) {
+    if (step.kind === "issues" && !mergeIssueSteps) continue
+    await mergeActionPlanIntoTasks(step.planSteps, sessionId, cwd)
+  }
+}
+
+async function prepareBlockingChecklistTasks(
+  result: ShipChecklistResult,
+  sessionId: string,
+  cwd: string
+): Promise<void> {
+  await createSessionTask(
+    sessionId,
+    "stop-ship-checklist-task-created",
+    SHIP_CHECKLIST_TASK_SUBJECT,
+    "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes."
+  )
+  await mergeChecklistStepsIntoTasks(result.steps, sessionId, cwd)
+
+  if (result.steps.some((step) => step.kind === "issues")) {
+    await updateCooldown(sessionId, cwd)
+  }
+  if (result.steps.some((step) => step.kind === "git")) {
+    await markPushPrompted(sessionId)
+  }
+}
+
 /**
  * Evaluate all three ship checklist workflows in parallel and unify results.
  * Returns structured workflow steps if any are blocking, null otherwise.
@@ -85,46 +126,11 @@ export async function evaluateStopShipChecklist(input: StopHookInput): Promise<S
       return {}
     }
 
-    // Format the unified message
     const message = formatStopMessage(result.steps)
-
-    // Create or update session task
     const sessionId = input.session_id
     const cwd = input.cwd ?? process.cwd()
     if (sessionId) {
-      await createSessionTask(
-        sessionId,
-        "stop-ship-checklist-task-created",
-        SHIP_CHECKLIST_TASK_SUBJECT,
-        "Follow the action plan above to resolve all blocking issues, CI failures, and uncommitted changes."
-      )
-
-      // Issues steps (follow-up/backlog work) are only merged into the task buffer when this
-      // session is project-affiliated — i.e. the agent has already been working in this repo.
-      // Git and CI steps always merge because they represent current-session work.
-      let shouldMergeTasks = false
-      const { getSessionIdsForProject } = await import("../../src/tasks/task-resolver.ts")
-      const { projectKeyFromCwd } = await import("../../src/project-key.ts")
-      const projectKey = projectKeyFromCwd(cwd)
-      const projectSessionIds = await getSessionIdsForProject(projectKey)
-      shouldMergeTasks = projectSessionIds.has(sessionId)
-
-      for (const step of result.steps) {
-        if (step.kind === "issues" && !shouldMergeTasks) continue
-        await mergeActionPlanIntoTasks(step.planSteps, sessionId, cwd)
-      }
-
-      // Update cooldown for issues if present
-      const issuesStep = result.steps.find((s) => s.kind === "issues")
-      if (issuesStep) {
-        await updateCooldown(sessionId, cwd)
-      }
-
-      // Mark push as prompted if git is blocking
-      const gitStep = result.steps.find((s) => s.kind === "git")
-      if (gitStep) {
-        await markPushPrompted(sessionId)
-      }
+      await prepareBlockingChecklistTasks(result, sessionId, cwd)
     }
 
     return blockStopObj(message)

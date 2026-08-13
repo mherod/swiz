@@ -19,6 +19,41 @@ function formatList(items: string[], emptyLabel: string): string {
   return items.length > 0 ? items.join(", ") : emptyLabel
 }
 
+interface InjectedTerminal {
+  app?: string
+  name?: string
+}
+
+function formatInjectedTerminal(injected: InjectedTerminal | undefined): string | null {
+  if (!injected || typeof injected !== "object") return null
+  const terminal = String(injected.name ?? injected.app ?? "unknown")
+  return injected.app ? `${terminal} (${String(injected.app)})` : terminal
+}
+
+function formatDetectedAgent(agent: ReturnType<typeof detectCurrentAgent>): string {
+  return agent ? `${agent.name} (id=${agent.id})` : "none (no env/parent match)"
+}
+
+function formatPayloadValue(value: unknown): string {
+  return value === undefined || value === null ? "—" : String(value)
+}
+
+function formatTerminalLine(
+  injected: InjectedTerminal | undefined,
+  environment: ReturnType<typeof detectEnvironment>
+): string {
+  return (
+    formatInjectedTerminal(injected) ??
+    `${environment.terminal.name} (app=${environment.terminal.app})`
+  )
+}
+
+function formatShellLine(environment: ReturnType<typeof detectEnvironment>): string {
+  return environment.shell.path
+    ? `${environment.shell.name} — ${environment.shell.path}`
+    : environment.shell.name
+}
+
 export async function evaluateSessionstartEnvironmentDetects(
   input: unknown
 ): Promise<SwizHookOutput> {
@@ -26,7 +61,7 @@ export async function evaluateSessionstartEnvironmentDetects(
   const cwd = hookInput.cwd ?? process.cwd()
 
   const extended = hookInput as Record<string, unknown>
-  const injected = extended._terminal as { app?: string; name?: string } | undefined
+  const injected = extended._terminal as InjectedTerminal | undefined
 
   const processAgent = detectCurrentAgent()
   const [frameworks, stacks, ciProviders] = await Promise.all([
@@ -38,26 +73,19 @@ export async function evaluateSessionstartEnvironmentDetects(
   const frameworkList = [...frameworks].sort()
   const ciList = [...ciProviders].sort()
 
-  const terminalFromPayload =
-    injected && typeof injected === "object"
-      ? `${String(injected.name ?? injected.app ?? "unknown")}${injected.app ? ` (${String(injected.app)})` : ""}`
-      : null
-
   const env = detectEnvironment()
-  const terminalLine = terminalFromPayload ?? `${env.terminal.name} (app=${env.terminal.app})`
-  const shellLine = `${env.shell.name}${env.shell.path ? ` — ${env.shell.path}` : ""}`
 
   const lines: string[] = [
     "Environment detected for this session:",
-    `- Detected agent: ${processAgent ? `${processAgent.name} (id=${processAgent.id})` : "none (no env/parent match)"}`,
-    `- Payload: agent_type=${hookInput.agent_type ?? "—"}, model=${hookInput.model ?? "—"}, source=${hookInput.source ?? "—"}, matcher=${hookInput.matcher ?? "—"}, trigger=${hookInput.trigger ?? "—"}`,
-    `- Session: session_id=${hookInput.session_id ?? "—"}`,
+    `- Detected agent: ${formatDetectedAgent(processAgent)}`,
+    `- Payload: agent_type=${formatPayloadValue(hookInput.agent_type)}, model=${formatPayloadValue(hookInput.model)}, source=${formatPayloadValue(hookInput.source)}, matcher=${formatPayloadValue(hookInput.matcher)}, trigger=${formatPayloadValue(hookInput.trigger)}`,
+    `- Session: session_id=${formatPayloadValue(hookInput.session_id)}`,
     `- Working directory: ${cwd}`,
     `- Project stacks: ${formatList([...stacks], "none detected")}`,
     `- Frameworks / ecosystems: ${formatList(frameworkList, "none detected")}`,
     `- CI config signals: ${formatList(ciList, "none detected")}`,
-    `- Terminal: ${terminalLine}`,
-    `- Shell: ${shellLine}`,
+    `- Terminal: ${formatTerminalLine(injected, env)}`,
+    `- Shell: ${formatShellLine(env)}`,
     `- isRunningInAgent(): ${isRunningInAgent() ? "true" : "false"}`,
   ]
 

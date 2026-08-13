@@ -10,107 +10,79 @@ import { isShellTool } from "../src/tool-matchers.ts"
 import { tokenize } from "../src/utils/inline-hook-helpers.ts"
 import { splitShellSegments } from "../src/utils/shell-patterns.ts"
 
-export function parseLintCommand(segment: string): { isLint: boolean; targets: string[] } {
-  const tokens = tokenize(segment)
-  if (tokens.length === 0) return { isLint: false, targets: [] }
+const LINT_SCRIPTS = new Set(["lint", "lint:eslint", "lint:fix", "format"])
+const BIOME_LINT_COMMANDS = new Set(["check", "ci", "format"])
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"])
+const LINT_FLAGS_WITH_VALUES = new Set([
+  "-c",
+  "--config",
+  "--ignore-path",
+  "--ext",
+  "--format",
+  "--output-file",
+  "--rulesdir",
+  "--plugin",
+  "--parser",
+  "--parser-options",
+  "--env",
+])
+const REDIRECTIONS = new Set(["1>", "2>", ">", ">>", "<", "2>&1", "2>>", "&>", "1>>"])
+const SHELL_OPERATORS = new Set(["&&", "||", ";", "|", "&"])
 
-  let i = 0
-  // Skip environment variables set at the beginning, like `NODE_ENV=production eslint .`
-  while (i < tokens.length && tokens[i]!.includes("=")) {
-    i++
+function firstCommandIndex(tokens: string[]): number {
+  let index = 0
+  while (index < tokens.length && tokens[index]!.includes("=")) index++
+  return index
+}
+
+function packageLintTargetIndex(tokens: string[], commandIndex: number): number | null {
+  const subcommand = tokens[commandIndex + 1]
+  if (subcommand === "run" && LINT_SCRIPTS.has(tokens[commandIndex + 2] ?? "")) {
+    return commandIndex + 3
   }
+  return subcommand === "lint" ? commandIndex + 2 : null
+}
 
-  if (i >= tokens.length) return { isLint: false, targets: [] }
-
-  const cmd = tokens[i]
-  i++
-
-  let isLint = false
-
-  if (cmd === "biome") {
-    if (
-      i < tokens.length &&
-      (tokens[i] === "check" || tokens[i] === "ci" || tokens[i] === "format")
-    ) {
-      isLint = true
-      i++
-    }
-  } else if (cmd === "eslint") {
-    isLint = true
-  } else if (cmd === "npm" || cmd === "pnpm" || cmd === "yarn" || cmd === "bun") {
-    if (i < tokens.length && tokens[i] === "run") {
-      if (
-        i + 1 < tokens.length &&
-        (tokens[i + 1] === "lint" ||
-          tokens[i + 1] === "lint:eslint" ||
-          tokens[i + 1] === "lint:fix" ||
-          tokens[i + 1] === "format")
-      ) {
-        isLint = true
-        i += 2
-      }
-    } else if (i < tokens.length && tokens[i] === "lint") {
-      isLint = true
-      i++
-    }
+function lintTargetIndex(tokens: string[], commandIndex: number): number | null {
+  const command = tokens[commandIndex]
+  if (command === "eslint") return commandIndex + 1
+  if (command === "biome") {
+    return BIOME_LINT_COMMANDS.has(tokens[commandIndex + 1] ?? "") ? commandIndex + 2 : null
   }
+  return command && PACKAGE_MANAGERS.has(command)
+    ? packageLintTargetIndex(tokens, commandIndex)
+    : null
+}
 
-  if (!isLint) {
-    return { isLint: false, targets: [] }
-  }
-
-  // Now extract targets
+function collectTargets(tokens: string[], startIndex: number): string[] {
   const targets: string[] = []
   let inDoubleDash = false
-  while (i < tokens.length) {
-    const token = tokens[i]!
-    i++
 
+  for (let index = startIndex; index < tokens.length; index++) {
+    const token = tokens[index]!
     if (token === "--") {
       inDoubleDash = true
-      continue
-    }
-
-    // Ignore flags/options if we haven't seen '--'
-    if (!inDoubleDash && token.startsWith("-")) {
+    } else if (!inDoubleDash && token.startsWith("-")) {
       const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
-      // Flags taking values in eslint / biome
-      if (
-        !token.includes("=") &&
-        [
-          "-c",
-          "--config",
-          "--ignore-path",
-          "--ext",
-          "--format",
-          "--output-file",
-          "--rulesdir",
-          "--plugin",
-          "--parser",
-          "--parser-options",
-          "--env",
-        ].includes(name)
-      ) {
-        i++ // skip value
-      }
-      continue
-    }
-
-    // Ignore redirections
-    if (["1>", "2>", ">", ">>", "<", "2>&1", "2>>", "&>", "1>>"].includes(token)) {
-      i++ // skip redirection target
-      continue
-    }
-
-    // Stop on other shell structures if encountered
-    if (["&&", "||", ";", "|", "&"].includes(token)) {
+      if (!token.includes("=") && LINT_FLAGS_WITH_VALUES.has(name)) index++
+    } else if (REDIRECTIONS.has(token)) {
+      index++
+    } else if (SHELL_OPERATORS.has(token)) {
       break
+    } else {
+      targets.push(token)
     }
-
-    targets.push(token)
   }
 
-  return { isLint: true, targets }
+  return targets
+}
+
+export function parseLintCommand(segment: string): { isLint: boolean; targets: string[] } {
+  const tokens = tokenize(segment)
+  const targetIndex = lintTargetIndex(tokens, firstCommandIndex(tokens))
+  return targetIndex === null
+    ? { isLint: false, targets: [] }
+    : { isLint: true, targets: collectTargets(tokens, targetIndex) }
 }
 
 export function isFullLintSuiteRun(command: string): boolean {

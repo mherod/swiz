@@ -38,6 +38,7 @@ async function writeHash(hash: string): Promise<void> {
 }
 
 const INSTALL_TIMEOUT_MS = 10_000
+const DISPATCH_RE = /swiz dispatch (\S+)/
 
 async function runInstall(swizRoot: string): Promise<boolean> {
   const args = ["bun", join(swizRoot, "index.ts"), "install"]
@@ -52,6 +53,47 @@ async function runInstall(swizRoot: string): Promise<boolean> {
   return !result.timedOut && result.exitCode === 0
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function getSettingsHooks(settings: unknown): Record<string, unknown> {
+  if (settings === null) throw new TypeError("settings must not be null")
+  if (!isRecord(settings) || !isRecord(settings.hooks)) return {}
+  return settings.hooks
+}
+
+function getHookList(group: unknown): unknown[] {
+  if (!isRecord(group) || !Array.isArray(group.hooks)) return []
+  return group.hooks
+}
+
+function getDispatchEvent(hook: unknown): string | null {
+  if (!isRecord(hook) || typeof hook.command !== "string") return null
+  return DISPATCH_RE.exec(hook.command)?.[1] ?? null
+}
+
+function collectInstalledDispatchEvents(hooks: Record<string, unknown>): Set<string> {
+  const installed = new Set<string>()
+  for (const groups of Object.values(hooks)) {
+    if (!Array.isArray(groups)) continue
+    for (const group of groups) {
+      for (const hook of getHookList(group)) {
+        const event = getDispatchEvent(hook)
+        if (event) installed.add(event)
+      }
+    }
+  }
+  return installed
+}
+
+async function getMissingManifestEvents(installed: Set<string>): Promise<string[]> {
+  const { manifest } = await import("../src/manifest.ts")
+  return manifest
+    .filter((group) => !group.scheduled && !installed.has(group.event))
+    .map((group) => group.event)
+}
+
 /**
  * Check whether settings.json has all expected swiz dispatch entries.
  * Returns the list of missing canonical event names, or empty if all present.
@@ -59,33 +101,9 @@ async function runInstall(swizRoot: string): Promise<boolean> {
 async function findMissingDispatchEntries(): Promise<string[]> {
   const settingsPath = join(getHomeDir(), ".claude", "settings.json")
   try {
-    const settings = (await Bun.file(settingsPath).json()) as Record<string, unknown>
-    const hooks = ((settings.hooks as Record<string, unknown>) ?? {}) as Record<string, unknown>
-    const dispatchRe = /swiz dispatch (\S+)/
-    const installed = new Set<string>()
-
-    for (const [, groups] of Object.entries(hooks)) {
-      if (!Array.isArray(groups)) continue
-      for (const group of groups) {
-        const hookList = (group as Record<string, unknown>).hooks
-        if (!Array.isArray(hookList)) continue
-        for (const hook of hookList) {
-          const cmd = (hook as Record<string, unknown>).command
-          if (typeof cmd !== "string") continue
-          const m = dispatchRe.exec(cmd)
-          if (m?.[1]) installed.add(m[1])
-        }
-      }
-    }
-
-    // Scheduled events (preCommit, commitMsg, prePush) use lefthook, not settings.json
-    const { manifest } = await import("../src/manifest.ts")
-    const missing: string[] = []
-    for (const group of manifest) {
-      if (group.scheduled) continue
-      if (!installed.has(group.event)) missing.push(group.event)
-    }
-    return missing
+    const settings: unknown = await Bun.file(settingsPath).json()
+    const installed = collectInstalledDispatchEvents(getSettingsHooks(settings))
+    return await getMissingManifestEvents(installed)
   } catch {
     // Can't read settings — assume missing
     return ["unknown"]

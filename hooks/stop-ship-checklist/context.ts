@@ -15,6 +15,20 @@ import {
 } from "../../src/settings.ts"
 import type { ShipChecklistContext, WorkflowGates } from "./types.ts"
 
+function resolveWorkflowGates(
+  settings: ReturnType<typeof getEffectiveSwizSettings>
+): WorkflowGates {
+  return {
+    git: settings.gitStatusGate ?? true,
+    ci: settings.githubCiGate ?? false,
+    issues: settings.personalRepoIssuesGate ?? false,
+  }
+}
+
+function hasEnabledGate(gates: WorkflowGates): boolean {
+  return gates.git || gates.ci || gates.issues
+}
+
 /**
  * Resolve all settings and prerequisites for the ship checklist.
  * Returns null (fail-open) if any prerequisite fails or if all gates are disabled.
@@ -45,16 +59,10 @@ export async function resolveShipChecklistContext(
       return null
     }
 
-    const gates: WorkflowGates = {
-      git: effective.gitStatusGate ?? true,
-      ci: effective.githubCiGate ?? false,
-      issues: effective.personalRepoIssuesGate ?? false,
-    }
+    const gates = resolveWorkflowGates(effective)
 
     // Fail-open: if all gates are disabled, no evaluation needed
-    if (!gates.git && !gates.ci && !gates.issues) {
-      return null
-    }
+    if (!hasEnabledGate(gates)) return null
 
     return {
       cwd,
