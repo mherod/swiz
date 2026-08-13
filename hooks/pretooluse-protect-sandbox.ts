@@ -24,8 +24,10 @@ import { buildIssueGuidance, isSettingDisableCommand } from "../src/utils/inline
 import {
   buildProtectedTaskStorageDenyReason,
   isAllowedSharedSkillShellCommand,
+  isAllowedTrashMoveCommand,
   isCodexHomePath,
   isHiddenTopLevelHomePath,
+  isPathWithin,
   isProtectedTaskStoragePath,
   isSafeReadOnlyShellCommand,
   isSessionToolResultsPath,
@@ -64,15 +66,6 @@ const SHELL_QUOTED_FRAGMENT_RE = /'([^']*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)
 type BlockedShellPath =
   | { kind: "task-storage"; path: string }
   | { kind: "hidden-home"; path: string }
-
-function isWithin(parent: string, child: string): boolean {
-  const normalizedParent = parent.replace(/\\/g, "/")
-  const normalizedChild = child.replace(/\\/g, "/")
-  const normalizedPrefix = normalizedParent.endsWith("/")
-    ? normalizedParent
-    : `${normalizedParent}/`
-  return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedPrefix)
-}
 
 function isPathLikeFragment(value: string): boolean {
   return (
@@ -159,7 +152,7 @@ async function isHiddenHomePathInCommand(
   const normalizedResolved = resolved.replace(/\\/g, "/")
   const hiddenRoot = `${normalizedHome}/${normalizedResolved.slice(normalizedHome.length + 1).split("/")[0]}`
 
-  return !isWithin(hiddenRoot, normalizedCwd)
+  return !isPathWithin(hiddenRoot, normalizedCwd)
 }
 
 async function shouldBlockShellCommand(
@@ -208,6 +201,9 @@ async function shouldBlockShellCommand(
       if (
         await isHiddenHomePathInCommand(candidate, canonicalCwd, canonicalHomeDir, allowCodexHome)
       ) {
+        if (await isAllowedTrashMoveCommand(command, canonicalCwd, canonicalHomeDir)) {
+          continue
+        }
         if (
           resolvedCandidate &&
           (isSharedAgentsSkillPath(candidate, canonicalHomeDir) ||

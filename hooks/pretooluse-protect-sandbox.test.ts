@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
-import { homedir } from "node:os"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   neutralAgentEnvOverrides,
@@ -9,6 +10,7 @@ import {
 import { isSandboxDisableCommand, isTrunkModeDisableCommand } from "./pretooluse-protect-sandbox.ts"
 
 const HOOK = "hooks/pretooluse-protect-sandbox.ts"
+const BANNED_COMMANDS_HOOK = "hooks/pretooluse-banned-commands.ts"
 const TEST_HOME = homedir()
 
 async function runPinnedHomeBashHook(
@@ -211,6 +213,92 @@ describe("pretooluse-protect-sandbox (shell commands)", () => {
 
   test("allows reading a session tool-results file from a compound command", async () => {
     const result = await runPinnedHomeBashHook(`echo hi; git log -1; tail -25 ${toolResultsPath}`)
+    expect(result.decision).toBeUndefined()
+  })
+})
+
+describe("pretooluse-protect-sandbox (recoverable Trash moves #775)", () => {
+  let fixtureRoot = ""
+  let projectCwd = ""
+  let outsideTarget = ""
+
+  beforeAll(async () => {
+    fixtureRoot = await mkdtemp(join(tmpdir(), "swiz-trash-move-"))
+    projectCwd = join(fixtureRoot, "project")
+    outsideTarget = join(fixtureRoot, "outside-target.txt")
+    await mkdir(projectCwd)
+    await Bun.write(join(projectCwd, "disposable-file.txt"), "disposable")
+    await mkdir(join(projectCwd, "disposable-directory"))
+    await Bun.write(outsideTarget, "preserve")
+    await symlink(outsideTarget, join(projectCwd, "disposable-link"))
+  })
+
+  afterAll(async () => {
+    await rm(fixtureRoot, { recursive: true, force: true })
+  })
+
+  test("allows one existing file to move to the canonical Trash root", async () => {
+    const result = await runPinnedHomeBashHook("mv disposable-file.txt ~/.Trash/", {
+      cwd: projectCwd,
+    })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows one existing directory without deleting its contents", async () => {
+    const result = await runPinnedHomeBashHook("mv disposable-directory ~/.Trash/", {
+      cwd: projectCwd,
+    })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows a symlink without following its target outside the cwd", async () => {
+    const result = await runPinnedHomeBashHook("mv disposable-link ~/.Trash/", {
+      cwd: projectCwd,
+    })
+    expect(result.decision).toBeUndefined()
+    expect(await Bun.file(outsideTarget).text()).toBe("preserve")
+  })
+
+  test("blocks arbitrary and nested hidden-home destinations", async () => {
+    const arbitrary = await runPinnedHomeBashHook("mv disposable-file.txt ~/.config/", {
+      cwd: projectCwd,
+    })
+    const nestedTrash = await runPinnedHomeBashHook("mv disposable-file.txt ~/.Trash/renamed.txt", {
+      cwd: projectCwd,
+    })
+    expect(arbitrary.decision).toBe("deny")
+    expect(nestedTrash.decision).toBe("deny")
+  })
+
+  test("blocks missing, outside-cwd, multi-source, and chained moves", async () => {
+    const missing = await runPinnedHomeBashHook("mv missing.txt ~/.Trash/", { cwd: projectCwd })
+    const outside = await runPinnedHomeBashHook("mv ../outside-target.txt ~/.Trash/", {
+      cwd: projectCwd,
+    })
+    const multiple = await runPinnedHomeBashHook(
+      "mv disposable-file.txt disposable-link ~/.Trash/",
+      { cwd: projectCwd }
+    )
+    const chained = await runPinnedHomeBashHook("mv disposable-file.txt ~/.Trash/ && echo moved", {
+      cwd: projectCwd,
+    })
+    expect(missing.decision).toBe("deny")
+    expect(outside.decision).toBe("deny")
+    expect(multiple.decision).toBe("deny")
+    expect(chained.decision).toBe("deny")
+  })
+
+  test("allows the fallback printed by the destructive-command guard", async () => {
+    const denied = await runHookInProcess(BANNED_COMMANDS_HOOK, {
+      tool_name: "Bash",
+      tool_input: { command: "unlink disposable-link" },
+      cwd: projectCwd,
+    })
+    const fallbackTemplate = (denied.reason ?? "").match(/• (mv <path> ~\/\.Trash\/)/)?.[1]
+    expect(fallbackTemplate).toBe("mv <path> ~/.Trash/")
+
+    const fallback = fallbackTemplate?.replace("<path>", "disposable-link") ?? ""
+    const result = await runPinnedHomeBashHook(fallback, { cwd: projectCwd })
     expect(result.decision).toBeUndefined()
   })
 })

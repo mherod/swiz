@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises"
+import { lstat, realpath } from "node:fs/promises"
 import { basename, dirname, join as joinPath, resolve } from "node:path"
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import { expandHomeVars, getHomeDirOrNull } from "../src/home.ts"
@@ -219,6 +219,78 @@ export function isSafeReadOnlyShellCommand(command: string): boolean {
 
 function normalizeShellPathToken(token: string): string {
   return token.replace(/^[`"']+|[`"']+$/g, "")
+}
+
+export function isPathWithin(parent: string, child: string): boolean {
+  const normalizedParent = parent.replace(/\\/g, "/")
+  const normalizedChild = child.replace(/\\/g, "/")
+  const normalizedPrefix = normalizedParent.endsWith("/")
+    ? normalizedParent
+    : `${normalizedParent}/`
+  return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedPrefix)
+}
+
+const UNSAFE_TRASH_SOURCE_RE = /[*?[\]{}$`<>|;&()\n\r]/
+
+interface TrashMove {
+  source: string
+  destination: string
+}
+
+function parseTrashMove(command: string): TrashMove | null {
+  const segments = splitShellSegments(command.normalize("NFKC").trim())
+  if (segments.length !== 1) return null
+
+  const tokens = tokenizeShellSegment(segments[0] ?? "")
+  if (tokens.length !== 3 || tokens[0] !== "mv") return null
+
+  const source = normalizeShellPathToken(tokens[1] ?? "")
+  const destination = normalizeShellPathToken(tokens[2] ?? "")
+  if (!source || UNSAFE_TRASH_SOURCE_RE.test(source)) return null
+  return { source, destination }
+}
+
+function isMovableEntry(source: Awaited<ReturnType<typeof lstat>>): boolean {
+  return source.isFile() || source.isDirectory() || source.isSymbolicLink()
+}
+
+async function isExistingCwdEntry(source: string, cwd: string): Promise<boolean> {
+  const canonicalCwd = await resolveCanonical(cwd)
+  const absoluteSource = resolve(canonicalCwd, source)
+  const canonicalSource = joinPath(
+    await resolveCanonical(dirname(absoluteSource)),
+    basename(absoluteSource)
+  )
+  if (canonicalSource === canonicalCwd || !isPathWithin(canonicalCwd, canonicalSource)) return false
+
+  try {
+    return isMovableEntry(await lstat(absoluteSource))
+  } catch {
+    return false
+  }
+}
+
+async function isCanonicalTrashRoot(destination: string, homeDir: string): Promise<boolean> {
+  if (destination !== "~/.Trash" && destination !== "~/.Trash/") return false
+  const canonicalHome = await resolveCanonical(homeDir)
+  const expectedTrash = joinPath(canonicalHome, ".Trash")
+  return (await resolveCanonical(expectedTrash)) === expectedTrash
+}
+
+/**
+ * Return true only for a direct, single-source move from the dispatch cwd to
+ * the current user's canonical Trash root. The final source component is
+ * checked with lstat and deliberately not realpathed, so moving a symlink
+ * moves the link itself rather than granting access based on its target.
+ */
+export async function isAllowedTrashMoveCommand(
+  command: string,
+  cwd: string,
+  homeDir: string
+): Promise<boolean> {
+  const move = parseTrashMove(command)
+  if (!move || !(await isExistingCwdEntry(move.source, cwd))) return false
+  return await isCanonicalTrashRoot(move.destination, homeDir)
 }
 
 function tokenReferencesPath(token: string, path: string): boolean {
