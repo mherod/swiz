@@ -561,24 +561,20 @@ git() {
 gh() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command gh "$@"; return $?; }
 
-  local arg
-  for arg in "$@"; do
-    [[ "$arg" == "--" ]] && break
-    case "$arg" in
-      --admin|--admin=*)
-        printf 'swiz: gh --admin is blocked.\n' >&2
-        printf 'This flag bypasses repository protection rules and required checks.\n' >&2
-        printf 'Ensure PRs pass all required checks and obtain proper approvals.\n' >&2
-        return 1
-        ;;
-      --skip-status-check|--skip-status-check=*)
-        printf 'swiz: gh --skip-status-check is blocked.\n' >&2
-        printf 'This flag bypasses required CI/CD status checks.\n' >&2
-        printf 'Wait for every required check to pass before merging.\n' >&2
-        return 1
-        ;;
-    esac
-  done
+  case "$*" in
+    *--admin*)
+      echo "Error: gh --admin is blocked for security reasons" >&2
+      echo "This flag bypasses repository protection rules and required checks" >&2
+      echo "Please ensure PRs pass all required checks and obtain proper approvals" >&2
+      return 1
+      ;;
+    *--skip-status-check*)
+      echo "Error: gh --skip-status-check is blocked for security reasons" >&2
+      echo "This flag bypasses required CI/CD status checks" >&2
+      echo "Please wait for all required checks to pass before merging" >&2
+      return 1
+      ;;
+  esac
 
   _swiz_run_gh "$@"
 }
