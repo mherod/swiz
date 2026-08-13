@@ -17,6 +17,7 @@ async function runShim(command: string): Promise<{
   ].join("\n")
   const proc = Bun.spawn(["bash", "-c", script], {
     cwd: import.meta.dir,
+    env: { ...process.env, HOME: "/tmp" },
     stdout: "pipe",
     stderr: "pipe",
   })

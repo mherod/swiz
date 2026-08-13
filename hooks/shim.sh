@@ -12,6 +12,17 @@
 # Real cmd:  command grep ...
 # Uninstall: swiz shim uninstall
 
+# ── Unset pre-existing aliases for shimmed commands ────────────────────────────
+# Pre-existing aliases (e.g. alias grep='grep --color=auto') cause zsh/bash parse
+# errors when defining functions of the same name.
+builtin unalias \
+  cd grep egrep fgrep find cp perl sed awk vim vi nano emacs \
+  npm npx yarn pnpm bun node ts-node python python3 touch rm git gh \
+  _swiz_ensure_bun_path _swiz_detect_pm _swiz_detect_runtime _swiz_detect_runner \
+  _swiz_is_agent_process _swiz_is_agent_env _swiz_get_setting _swiz_guard \
+  _swiz_pm_guard _swiz_has_function _swiz_chain_existing _swiz_run_git _swiz_run_gh \
+  2>/dev/null || true
+
 # ── Dependency check ──────────────────────────────────────────────────────────
 # swiz hooks and the shim redirect commands to bun. The shim is sourced from
 # .zshenv before a login shell reaches .zprofile, so recover the standard Bun

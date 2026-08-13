@@ -122,6 +122,26 @@ describe("shell shim runtime", () => {
     expect(await Bun.file(lockPath).exists()).toBe(true)
     expect(await Bun.file(lockPath).text()).toBe("owned elsewhere\n")
   })
+
+  testWithZsh(
+    "sources cleanly even when pre-existing aliases exist for shimmed commands",
+    async () => {
+      const result = await runShell(
+        ZSH_PATH ?? "zsh",
+        [
+          "-f",
+          "-c",
+          'alias unalias="echo fake"; alias grep="grep --color=auto"; alias cd="cd -P"; alias git="hub"; source "$1"; grep --version >/dev/null 2>&1 || true',
+          "swiz",
+          SHIM_PATH,
+        ],
+        { env: { SWIZ_SHIM: "strict" } }
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stderr).not.toContain("defining function based on alias")
+      expect(result.stderr).not.toContain("parse error near")
+    }
+  )
 })
 
 describe("shell shim installation", () => {
