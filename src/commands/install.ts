@@ -34,6 +34,7 @@ import {
   uninstallMergeTool,
   uninstallStatusLine,
 } from "./install/optional-helpers.ts"
+import { ensureShimInstallation, getShimPath, uninstallShimInstallation } from "./shim.ts"
 
 // ─── Command Helpers ─────────────────────────────────────────────────────────
 
@@ -93,6 +94,37 @@ async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
   if (opts.mergeTool) await installMergeTool(opts.dryRun)
   if (opts.statusLine) await installStatusLine(opts.dryRun)
   if (opts.daemon) await installDaemonForCli(opts.daemonPort, opts.dryRun)
+}
+
+async function installShellShimStep(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (!shouldInstallHooks(args, opts)) return
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const result = await ensureShimInstallation({
+    home,
+    shell: process.env.SHELL ?? "",
+    shimPath: getShimPath(),
+    dryRun: opts.dryRun,
+  })
+  if (result.changedProfiles.length === 0) return
+  console.log(`  Shell shim:`)
+  for (const path of result.changedProfiles) {
+    console.log(`    ${GREEN}${opts.dryRun ? "+" : "✓"}${RESET} ${path}`)
+  }
+  console.log()
+}
+
+async function uninstallShellShimStep(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (!isFullUninstall(args, opts) && !hasAnyAgentFlag(args)) return
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const result = await uninstallShimInstallation({ home, dryRun: opts.dryRun })
+  if (result.changedProfiles.length === 0) return
+  console.log(`  Shell shim:`)
+  for (const path of result.changedProfiles) {
+    console.log(`    ${YELLOW}${opts.dryRun ? "-" : "✗"}${RESET} ${path}`)
+  }
+  console.log()
 }
 
 async function installSwizMcpServerStep(args: string[], opts: InstallRunOptions): Promise<void> {
@@ -336,6 +368,7 @@ export const installCommand: Command<InstallCommandOptions> = {
       console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
       await runOptionalUninstallSteps(args, opts)
       await uninstallSwizMcpServerStep(args, opts)
+      await uninstallShellShimStep(args, opts)
       await uninstallHooksForTargets(args, opts)
       if (isFullUninstall(args, opts)) await uninstallProjectHooks(opts.dryRun)
       if (!opts.dryRun && isFullUninstall(args, opts)) await pauseSessionstartSelfHeal()
@@ -349,6 +382,7 @@ export const installCommand: Command<InstallCommandOptions> = {
     await runOptionalInstallSteps(opts)
     await installProjectHooks(opts.dryRun)
     await installSwizMcpServerStep(args, opts)
+    await installShellShimStep(args, opts)
     if (await installHooksForTargets(args, opts)) return
     if (opts.dryRun) {
       console.log("  No changes written.\n")

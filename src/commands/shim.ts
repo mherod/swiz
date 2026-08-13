@@ -18,6 +18,7 @@ export interface ShimInstallationOptions {
   shell?: string
   shimPath?: string
   profileNames?: string[]
+  dryRun?: boolean
 }
 
 export interface ShimChangeResult {
@@ -227,7 +228,9 @@ export async function ensureShimInstallation(
     const previous = await readProfile(profile.path)
     const nextContent = withShimBlock(previous.content, shimBlock(profile, shimPath))
     if (previous.exists && previous.content === nextContent) continue
-    const backupPath = await writeProfileWithBackup(profile, previous, nextContent)
+    const backupPath = options.dryRun
+      ? null
+      : await writeProfileWithBackup(profile, previous, nextContent)
     changedProfiles.push(profile.path)
     if (backupPath) backupPaths.push(backupPath)
   }
@@ -236,7 +239,7 @@ export async function ensureShimInstallation(
 }
 
 export async function uninstallShimInstallation(
-  options: Pick<ShimInstallationOptions, "home"> = {}
+  options: Pick<ShimInstallationOptions, "home" | "dryRun"> = {}
 ): Promise<ShimChangeResult> {
   const home = options.home ?? getHomeDir()
   const changedProfiles: string[] = []
@@ -245,11 +248,9 @@ export async function uninstallShimInstallation(
   for (const profile of allProfiles(home)) {
     const previous = await readProfile(profile.path)
     if (!previous.exists || !hasShimBlock(previous.content)) continue
-    const backupPath = await writeProfileWithBackup(
-      profile,
-      previous,
-      removeShimBlock(previous.content)
-    )
+    const backupPath = options.dryRun
+      ? null
+      : await writeProfileWithBackup(profile, previous, removeShimBlock(previous.content))
     changedProfiles.push(profile.path)
     if (backupPath) backupPaths.push(backupPath)
   }

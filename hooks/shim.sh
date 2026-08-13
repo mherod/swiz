@@ -585,27 +585,6 @@ git() {
 
   # Delegate to chained wrapper or raw git
   _swiz_run_git "${args[@]}"
-  local git_exit_code=$?
-  
-  if [[ -d .git ]] || command git rev-parse --git-dir > /dev/null 2>&1; then
-    local git_dir
-    git_dir=$(command git rev-parse --git-dir 2>/dev/null)
-    if [[ -n "$git_dir" ]]; then
-      if [[ -f "$git_dir/index.lock" ]]; then
-        if ! command pgrep -q git 2> /dev/null; then
-          command rm -f "$git_dir/index.lock" 2> /dev/null
-        fi
-      fi
-      if [[ -d "$git_dir/refs/heads" ]]; then
-        command find "$git_dir/refs/heads" -maxdepth 1 -name "*.lock" -type f -exec rm -f {} \; 2> /dev/null
-      fi
-      if [[ -d "$git_dir/refs/remotes" ]]; then
-        command find "$git_dir/refs/remotes" -maxdepth 1 -name "*.lock" -type f -exec rm -f {} \; 2> /dev/null
-      fi
-    fi
-  fi
-  
-  return $git_exit_code
 }
 
 # ── GitHub CLI security ──────────────────────────────────────────────────────
