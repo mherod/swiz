@@ -122,6 +122,30 @@ _swiz_guard() {
   fi
 }
 
+# ── Navigation ────────────────────────────────────────────────────────────────
+
+cd() {
+  if [[ -n "${SWIZ_BYPASS:-}" ]]; then
+    builtin cd "$@"
+    return $?
+  fi
+
+  if _swiz_is_agent_env; then
+    if _swiz_is_agent_process; then
+      printf 'swiz: Do not use `cd`. Changing directory loses workspace context.\n' >&2
+      printf 'Instead, use absolute paths, tool directory flags (like -C or --prefix), or workspace filters.\n' >&2
+      return 1
+    else
+      printf 'swiz: Warning: `cd` loses workspace context for agents.\n' >&2
+      builtin cd "$@"
+      return $?
+    fi
+  else
+    builtin cd "$@"
+    return $?
+  fi
+}
+
 # ── Search tools ──────────────────────────────────────────────────────────────
 
 grep() {
@@ -149,6 +173,13 @@ find() {
 }
 
 # ── File editing (agents should use Edit/StrReplace tool) ────────────────────
+
+
+perl() {
+  _swiz_guard perl "Edit tool" \
+    "Do not use perl to read or modify files. Instead, use the Read or Edit tools for robust file operations." "$@" && return 1
+  command perl "$@"
+}
 
 sed() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command sed "$@"; return $?; }
