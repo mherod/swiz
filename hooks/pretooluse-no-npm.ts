@@ -7,6 +7,7 @@
  * executable as a standalone script for backwards compatibility and testing.
  */
 
+import { extractExecutableSubcommands } from "../src/command-utils.ts"
 import {
   preToolUseAllow,
   preToolUseDeny,
@@ -17,7 +18,7 @@ import {
 import type { ShellHookInput } from "../src/schemas.ts"
 import { isShellTool } from "../src/tool-matchers.ts"
 import { detectPackageManagerDetails, type PackageManager } from "../src/utils/package-detection.ts"
-import { SHELL_SEGMENT_BOUNDARY } from "../src/utils/shell-patterns.ts"
+import { splitShellSegments, tokenizeShellSegment } from "../src/utils/shell-patterns.ts"
 
 // Equivalent subcommands across package managers
 interface CmdMap {
@@ -134,11 +135,10 @@ function isImplausibleInvocation(
   return false
 }
 
-const PM_INVOKE_RE = new RegExp(
-  `${SHELL_SEGMENT_BOUNDARY}\\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\\s*(\\S*)(.*?)(?=[|;&]|$)`
-)
-
 const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx"])
+const PACKAGE_MANAGER_COMMANDS = new Set(["npm", "npx", "yarn", "pnpm", "pnpx", "bun", "bunx"])
+const SHELL_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/
+const MAX_SUBCOMMAND_DEPTH = 5
 
 interface ParsedInvocation {
   invoked: string
@@ -146,14 +146,40 @@ interface ParsedInvocation {
   rest: string
 }
 
-function parseInvocation(command: string): ParsedInvocation | null {
-  const m = command.match(PM_INVOKE_RE)
-  if (!m) return null
-  return {
-    invoked: (m[1] ?? "").toLowerCase(),
-    subcmd: m[2]?.toLowerCase() ?? "",
-    rest: m[3]?.trim() ?? "",
+function packageManagerTokenIndex(tokens: string[]): number | null {
+  let index = 0
+  while (SHELL_ASSIGNMENT_RE.test(tokens[index] ?? "")) index++
+  if (tokens[index] === "command") {
+    index++
+    while ((tokens[index] ?? "").startsWith("-")) index++
   }
+  return PACKAGE_MANAGER_COMMANDS.has(tokens[index] ?? "") ? index : null
+}
+
+function parseSegment(segment: string): ParsedInvocation | null {
+  const tokens = tokenizeShellSegment(segment)
+  const invokedIndex = packageManagerTokenIndex(tokens)
+  if (invokedIndex === null) return null
+
+  return {
+    invoked: tokens[invokedIndex]!.toLowerCase(),
+    subcmd: tokens[invokedIndex + 1]?.toLowerCase() ?? "",
+    rest: tokens.slice(invokedIndex + 2).join(" "),
+  }
+}
+
+function parseInvocations(command: string, depth = 0): ParsedInvocation[] {
+  if (depth > MAX_SUBCOMMAND_DEPTH) return []
+  const normalized = command.normalize("NFKC")
+  const invocations = extractExecutableSubcommands(normalized).flatMap((subcommand) =>
+    parseInvocations(subcommand, depth + 1)
+  )
+
+  for (const segment of splitShellSegments(normalized)) {
+    const parsed = parseSegment(segment)
+    if (parsed) invocations.push(parsed)
+  }
+  return invocations
 }
 
 function buildImplausibleDeny(parsed: ParsedInvocation, pm: PackageManager): SwizHookOutput {
@@ -194,18 +220,21 @@ async function evaluate(input: ShellHookInput) {
   if (!isShellTool(input.tool_name ?? "")) return {}
 
   const command: string = input.tool_input?.command ?? ""
-  const parsed = parseInvocation(command)
-  if (!parsed) return {}
+  const invocations = parseInvocations(command)
+  if (invocations.length === 0) return {}
 
   const detection = await detectPackageManagerDetails(resolveCwd(input))
   if (!detection) return {}
   const { packageManager: pm, signals } = detection
+  const implausible = invocations.find((parsed) =>
+    isImplausibleInvocation(parsed.invoked, pm, signals)
+  )
 
-  if (!isImplausibleInvocation(parsed.invoked, pm, signals)) {
-    return buildAcceptedInvocation(parsed, pm, signals)
+  if (!implausible) {
+    return buildAcceptedInvocation(invocations[0]!, pm, signals)
   }
 
-  return buildImplausibleDeny(parsed, pm)
+  return buildImplausibleDeny(implausible, pm)
 }
 
 const pretoolusNoNpm: SwizShellHook = {

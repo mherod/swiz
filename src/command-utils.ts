@@ -114,7 +114,7 @@ function maskSingleQuotedStrings(command: string): string {
   return command.replace(/'[^']*'/g, (match) => " ".repeat(match.length))
 }
 
-function extractExecutableSubcommands(command: string): string[] {
+export function extractExecutableSubcommands(command: string): string[] {
   const subcommands: string[] = []
   const executableText = maskSingleQuotedStrings(command)
   for (const match of executableText.matchAll(SHELL_SUBCOMMAND_RE)) {

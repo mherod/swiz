@@ -66,6 +66,53 @@ describe("pretooluse-no-npm (pnpm project)", () => {
     })
   })
 
+  describe("quoted package-manager text is ignored", () => {
+    test("single-quoted search patterns are inert", async () => {
+      const result = await runHook("rg 'foo|npm install|yarn test|bar' src")
+      expect(result.stdout).toBe("")
+    })
+
+    test("double-quoted documentation examples are inert", async () => {
+      const result = await runHook('grep "npm install && yarn test" README.md')
+      expect(result.stdout).toBe("")
+    })
+
+    test("quoted separators do not create executable segments", async () => {
+      const result = await runHook("printf '%s\\n' 'npm install; npx tsc || yarn test'")
+      expect(result.stdout).toBe("")
+    })
+
+    test("single-quoted command substitutions are inert", async () => {
+      const result = await runHook("echo '$(npm install)' '`yarn test`'")
+      expect(result.stdout).toBe("")
+    })
+  })
+
+  describe("real segmented invocations are blocked", () => {
+    test.each([";", "&&", "||", "|"])("after %s", async (separator) => {
+      const result = await runHook(`printf ready ${separator} npm install`)
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("npm")
+    })
+
+    test("an accepted first invocation does not hide a later incompatible one", async () => {
+      const result = await runHook("pnpm --version && npm install")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("npm")
+    })
+
+    test("command wrappers retain package-manager detection", async () => {
+      const result = await runHook("command npm install")
+      expect(result.decision).toBe("deny")
+    })
+
+    test("executable command substitutions retain package-manager detection", async () => {
+      const result = await runHook('echo "$(npm install)"')
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("npm")
+    })
+  })
+
   describe("pnpm commands are allowed", () => {
     test("pnpm install passes through", async () => {
       const result = await runHook("pnpm install")
