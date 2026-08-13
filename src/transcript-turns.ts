@@ -112,17 +112,22 @@ function collectUserTurns(entries: TranscriptEntry[]): Turn[] {
   return turns
 }
 
+function toConversationTurn(entry: TranscriptEntry): Turn | null {
+  if (entry.type !== "user" && entry.type !== "assistant") return null
+  if (!entry.message) return null
+  const text = extractText(entry.message.content).trim()
+  if (entry.type === "user" && isHookFeedbackContent(text)) return null
+  if (entry.type === "user" && isSuppressedUserMessage(text)) return null
+  if (!hasVisibleContent(entry, text)) return null
+  return { entry, role: entry.type }
+}
+
 function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
   if (userOnly) return collectUserTurns(entries)
   const turns: Turn[] = []
   for (const entry of entries) {
-    if (entry.type !== "user" && entry.type !== "assistant") continue
-    if (!entry.message) continue
-    const text = extractText(entry.message.content).trim()
-    if (entry.type === "user" && isHookFeedbackContent(text)) continue
-    if (entry.type === "user" && isSuppressedUserMessage(text)) continue
-    if (!hasVisibleContent(entry, text)) continue
-    turns.push({ entry, role: entry.type as "user" | "assistant" })
+    const turn = toConversationTurn(entry)
+    if (turn) turns.push(turn)
   }
   return turns
 }
@@ -193,14 +198,17 @@ function hasReachedTimeFloor(turns: Turn[], timeRange: TimeRange | undefined): b
   })
 }
 
-async function loadJsonlTurnsTail(
-  file: Bun.BunFile,
-  fileSize: number,
-  formatHint: JsonlTranscriptFormat,
-  userOnly: boolean,
-  tailCount: number,
+interface JsonlTailOptions {
+  file: Bun.BunFile
+  fileSize: number
+  formatHint: JsonlTranscriptFormat
+  userOnly: boolean
+  tailCount: number
   timeRange?: TimeRange
-): Promise<Turn[]> {
+}
+
+async function loadJsonlTurnsTail(options: JsonlTailOptions): Promise<Turn[]> {
+  const { file, fileSize, formatHint, userOnly, tailCount, timeRange } = options
   if (tailCount <= 0) return []
 
   let selectedTurns: Turn[] = []
@@ -274,14 +282,14 @@ async function loadWindowedJsonlTurns(
 
   const stat = await file.stat()
   if (parsed.tailCount !== undefined) {
-    return loadJsonlTurnsTail(
+    return loadJsonlTurnsTail({
       file,
-      stat.size,
+      fileSize: stat.size,
       formatHint,
-      parsed.userOnly,
-      parsed.tailCount,
-      timeRange
-    )
+      userOnly: parsed.userOnly,
+      tailCount: parsed.tailCount,
+      timeRange,
+    })
   }
   if (parsed.headCount !== undefined) {
     return loadJsonlTurnsForward(file, formatHint, parsed.userOnly, timeRange, parsed.headCount)

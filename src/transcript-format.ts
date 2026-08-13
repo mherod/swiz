@@ -41,27 +41,38 @@ function truncateLabel(value: string, max = TOOL_LABEL_MAX): string {
 }
 
 export function formatToolUse(name: string, input: NonNullable<ToolUseBlock["input"]>): string {
-  if (name === "Task" && input.subagent_type) {
-    const desc = typeof input.description === "string" ? truncateLabel(input.description) : ""
-    return `${input.subagent_type}(${desc})`
-  }
+  const taskLabel = formatTaskToolUse(name, input)
+  if (taskLabel) return taskLabel
   const param = TOOL_KEY_PARAM[name]
-  if (param && input[param] !== undefined) {
-    const val = String(input[param])
-    if (param === "command") {
-      const skill = extractSkillNamesFromShellSkillReadCommand(val)[0]
-      if (skill) return `skill(${skill})`
-      return `${name}(${val})`
-    }
-    if (param === "file_path") {
-      const skill = extractSkillNameFromSkillMdPathText(val)
-      if (skill) return `skill(${skill})`
-    }
-    return `${name}(${truncateLabel(val)})`
-  }
+  const parameterLabel = param ? formatToolParameter(name, param, input[param]) : null
+  if (parameterLabel) return parameterLabel
   const firstStr = Object.values(input).find((v) => typeof v === "string")
   if (firstStr) return `${name}(${truncateLabel(String(firstStr))})`
   return name
+}
+
+function formatTaskToolUse(name: string, input: NonNullable<ToolUseBlock["input"]>): string | null {
+  if (name !== "Task" || !input.subagent_type) return null
+  const desc = typeof input.description === "string" ? truncateLabel(input.description) : ""
+  return `${input.subagent_type}(${desc})`
+}
+
+function formatToolParameter(
+  name: string,
+  param: string,
+  value: NonNullable<ToolUseBlock["input"]>[string]
+): string | null {
+  if (value === undefined) return null
+  const text = String(value)
+  if (param === "command") {
+    const skill = extractSkillNamesFromShellSkillReadCommand(text)[0]
+    return skill ? `skill(${skill})` : `${name}(${text})`
+  }
+  if (param === "file_path") {
+    const skill = extractSkillNameFromSkillMdPathText(text)
+    if (skill) return `skill(${skill})`
+  }
+  return `${name}(${truncateLabel(text)})`
 }
 
 // ─── Slash-command / local-command tag parsing ───────────────────────────────
@@ -83,6 +94,121 @@ export interface PrettyUserMessage {
   kind?: "slash-command" | "command-output" | "command-error" | "skill-invocation"
 }
 
+type SkillInvocationPreamble = NonNullable<ReturnType<typeof extractSkillInvocationPreamble>>
+
+interface ParsedCommandTags {
+  tags: Record<string, string>
+  remainder: string
+  skill: SkillInvocationPreamble | null
+}
+
+function formatSkillInvocation(skill: SkillInvocationPreamble): PrettyUserMessage {
+  const slash = skill.name ? `/${skill.name}` : "(skill body)"
+  return {
+    text: skill.rest ? `${slash}\n${skill.rest}` : slash,
+    kind: "skill-invocation",
+  }
+}
+
+function parseCommandTags(raw: string): ParsedCommandTags | null {
+  const tags: Record<string, string> = {}
+  let remainder = ""
+  let lastEnd = 0
+  for (const match of raw.matchAll(new RegExp(COMMAND_TAG_RE.source, "gi"))) {
+    const index = match.index ?? 0
+    remainder += raw.slice(lastEnd, index)
+    lastEnd = index + match[0].length
+    const name = match[1]!.toLowerCase()
+    if (!(name in tags)) tags[name] = match[2]!.trim()
+  }
+  if (Object.keys(tags).length === 0) return null
+
+  remainder = (remainder + raw.slice(lastEnd)).trim()
+  const skill = extractSkillInvocationPreamble(remainder)
+  return { tags, remainder: skill?.rest ?? remainder, skill }
+}
+
+function renderCommandName(
+  tags: Record<string, string>,
+  remainder: string,
+  skill: SkillInvocationPreamble | null
+): PrettyUserMessage | undefined {
+  const commandName = tags["command-name"]
+  if (commandName === undefined) return undefined
+  const normalized = commandName.startsWith("/") ? commandName : `/${commandName}`
+  const args = tags["command-args"]
+  const label = args ? `${normalized} ${args}` : normalized
+  return {
+    text: remainder ? `${label}\n${remainder}` : label,
+    kind: skill ? "skill-invocation" : "slash-command",
+  }
+}
+
+interface TaggedValueOptions {
+  tag: string
+  prefix: string
+  kind: NonNullable<PrettyUserMessage["kind"]>
+  clean?: boolean
+}
+
+function renderTaggedValue(
+  tags: Record<string, string>,
+  remainder: string,
+  options: TaggedValueOptions
+): PrettyUserMessage | undefined {
+  const { tag, prefix, kind, clean = false } = options
+  if (!(tag in tags)) return undefined
+  const value = clean ? stripAnsiLike(tags[tag] ?? "") : (tags[tag] ?? "")
+  if (!value) return remainder ? { text: remainder } : { text: null }
+  const label = `${prefix}${value}`
+  return { text: remainder ? `${remainder}\n${label}` : label, kind }
+}
+
+function renderTaggedMessage(parsed: ParsedCommandTags): PrettyUserMessage | undefined {
+  const { tags, remainder, skill } = parsed
+  const commandName = renderCommandName(tags, remainder, skill)
+  if (commandName) return commandName
+
+  const bashInput = renderTaggedValue(tags, remainder, {
+    tag: "bash-input",
+    prefix: "$ ",
+    kind: "slash-command",
+  })
+  if (bashInput) return bashInput
+  const bashOutput = renderTaggedValue(tags, remainder, {
+    tag: "bash-stdout",
+    prefix: "↳ ",
+    kind: "command-output",
+    clean: true,
+  })
+  if (bashOutput) return bashOutput
+  const bashError = renderTaggedValue(tags, remainder, {
+    tag: "bash-stderr",
+    prefix: "✗ ",
+    kind: "command-error",
+    clean: true,
+  })
+  if (bashError) return bashError
+  if (skill) return formatSkillInvocation({ ...skill, rest: remainder })
+
+  const localOutput = renderTaggedValue(tags, remainder, {
+    tag: "local-command-stdout",
+    prefix: "↳ ",
+    kind: "command-output",
+    clean: true,
+  })
+  if (localOutput) return localOutput
+  const localError = renderTaggedValue(tags, remainder, {
+    tag: "local-command-stderr",
+    prefix: "✗ ",
+    kind: "command-error",
+    clean: true,
+  })
+  if (localError) return localError
+  if ("local-command-caveat" in tags) return remainder ? { text: remainder } : { text: null }
+  return undefined
+}
+
 /**
  * Convert raw user transcript text containing `<command-name>`,
  * `<command-args>`, `<local-command-stdout>`, or `<local-command-caveat>`
@@ -98,97 +224,11 @@ export function prettifyUserMessageText(raw: string): PrettyUserMessage | undefi
 
   if (!startsWithSystemTag && startsWithBareSkill) {
     const skill = extractSkillInvocationPreamble(raw)
-    if (skill) {
-      const slash = skill.name ? `/${skill.name}` : "(skill body)"
-      const label = skill.rest ? `${slash}\n${skill.rest}` : slash
-      return { text: label, kind: "skill-invocation" }
-    }
-    return undefined
+    return skill ? formatSkillInvocation(skill) : undefined
   }
 
-  const tags: Record<string, string> = {}
-  let remainder = ""
-  let lastEnd = 0
-  for (const match of raw.matchAll(new RegExp(COMMAND_TAG_RE.source, "gi"))) {
-    const index = match.index ?? 0
-    remainder += raw.slice(lastEnd, index)
-    lastEnd = index + match[0].length
-    const name = match[1]!.toLowerCase()
-    if (!(name in tags)) tags[name] = match[2]!.trim()
-  }
-  if (Object.keys(tags).length === 0) return undefined
-  remainder = (remainder + raw.slice(lastEnd)).trim()
-
-  const skill = extractSkillInvocationPreamble(remainder)
-  if (skill) remainder = skill.rest
-
-  if ("command-name" in tags) {
-    const cmdName = tags["command-name"]!
-    const normalized = cmdName.startsWith("/") ? cmdName : `/${cmdName}`
-    const args = tags["command-args"]
-    const label = args ? `${normalized} ${args}` : normalized
-    const kind: PrettyUserMessage["kind"] = skill ? "skill-invocation" : "slash-command"
-    return { text: remainder ? `${label}\n${remainder}` : label, kind }
-  }
-
-  if ("bash-input" in tags) {
-    const cmd = tags["bash-input"]!
-    if (!cmd) return remainder ? { text: remainder } : { text: null }
-    return {
-      text: remainder ? `${remainder}\n$ ${cmd}` : `$ ${cmd}`,
-      kind: "slash-command",
-    }
-  }
-
-  if ("bash-stdout" in tags) {
-    const cleaned = stripAnsiLike(tags["bash-stdout"] ?? "")
-    if (!cleaned) return remainder ? { text: remainder } : { text: null }
-    return {
-      text: remainder ? `${remainder}\n↳ ${cleaned}` : `↳ ${cleaned}`,
-      kind: "command-output",
-    }
-  }
-
-  if ("bash-stderr" in tags) {
-    const cleaned = stripAnsiLike(tags["bash-stderr"] ?? "")
-    if (!cleaned) return remainder ? { text: remainder } : { text: null }
-    return {
-      text: remainder ? `${remainder}\n✗ ${cleaned}` : `✗ ${cleaned}`,
-      kind: "command-error",
-    }
-  }
-
-  if (skill) {
-    const slash = skill.name ? `/${skill.name}` : "(skill body)"
-    return {
-      text: remainder ? `${slash}\n${remainder}` : slash,
-      kind: "skill-invocation",
-    }
-  }
-
-  if ("local-command-stdout" in tags) {
-    const cleaned = stripAnsiLike(tags["local-command-stdout"] ?? "")
-    if (!cleaned) return remainder ? { text: remainder } : { text: null }
-    return {
-      text: remainder ? `${remainder}\n↳ ${cleaned}` : `↳ ${cleaned}`,
-      kind: "command-output",
-    }
-  }
-
-  if ("local-command-stderr" in tags) {
-    const cleaned = stripAnsiLike(tags["local-command-stderr"] ?? "")
-    if (!cleaned) return remainder ? { text: remainder } : { text: null }
-    return {
-      text: remainder ? `${remainder}\n✗ ${cleaned}` : `✗ ${cleaned}`,
-      kind: "command-error",
-    }
-  }
-
-  if ("local-command-caveat" in tags) {
-    return remainder ? { text: remainder } : { text: null }
-  }
-
-  return undefined
+  const parsed = parseCommandTags(raw)
+  return parsed ? renderTaggedMessage(parsed) : undefined
 }
 
 // ─── Content block helpers ──────────────────────────────────────────────────

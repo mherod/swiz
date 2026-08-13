@@ -538,7 +538,18 @@ export async function findAntigravitySessions(
   home = home ?? getHomeDir()
   const sessions: Session[] = []
 
-  // 1. Check Antigravity CLI sessions (~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl)
+  await collectAntigravityCliSessions(home, targetDir, sessions, limit)
+  await collectLegacyAntigravitySessions(home, targetDir, sessions, limit)
+
+  return limitSessionList(sessions, limit)
+}
+
+async function collectAntigravityCliSessions(
+  home: string,
+  targetDir: string,
+  sessions: Session[],
+  limit?: number
+): Promise<void> {
   const cliBrainDir = join(home, ".gemini", "antigravity-cli", "brain")
   try {
     const cliEntries = await readdir(cliBrainDir, { withFileTypes: true })
@@ -567,8 +578,14 @@ export async function findAntigravitySessions(
       } catch {}
     }
   } catch {}
+}
 
-  // 2. Check legacy Antigravity protobuf sessions (~/.gemini/antigravity/conversations/*.pb)
+async function collectLegacyAntigravitySessions(
+  home: string,
+  targetDir: string,
+  sessions: Session[],
+  limit?: number
+): Promise<void> {
   const antigravityRoot = join(home, ".gemini", "antigravity")
   const conversationsDir = join(antigravityRoot, "conversations")
   const brainDir = join(antigravityRoot, "brain")
@@ -601,6 +618,4 @@ export async function findAntigravitySessions(
       } catch {}
     }
   } catch {}
-
-  return limitSessionList(sessions, limit)
 }

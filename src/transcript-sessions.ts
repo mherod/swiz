@@ -18,6 +18,22 @@ export { projectKeyFromCwd } from "./project-key.ts"
 
 export { findSessions } from "./transcript-sessions-discovery.ts"
 
+function findLatestSessionByMtime(sessions: Session[]): Session | null {
+  if (sessions.length === 0) return null
+  let latest = sessions[0]!
+  for (let i = 1; i < sessions.length; i++) {
+    if ((sessions[i]!.mtime ?? 0) > (latest.mtime ?? 0)) latest = sessions[i]!
+  }
+  return latest
+}
+
+function selectLatestProviderSession(providerArrays: Session[][]): Session[] {
+  const candidates = providerArrays
+    .map(findLatestSessionByMtime)
+    .filter((session): session is Session => session !== null)
+  return candidates.length > 0 ? [sortSessionsDeterministic(candidates)[0]!] : []
+}
+
 /**
  * Discover sessions across supported transcript providers (Claude, Gemini, Cursor, Antigravity, Codex).
  * Aggregates sessions from all available providers, sorted by mtime (most recent first) with
@@ -71,18 +87,7 @@ export async function findAllProviderSessions(
   ]
 
   // Fast path for limit === 1: pick latest from each provider, sort only those candidates
-  if (limit === 1) {
-    const candidates: Session[] = []
-    for (const arr of providerArrays) {
-      if (arr.length === 0) continue
-      let best = arr[0]!
-      for (let i = 1; i < arr.length; i++) {
-        if ((arr[i]!.mtime ?? 0) > (best.mtime ?? 0)) best = arr[i]!
-      }
-      candidates.push(best)
-    }
-    return candidates.length > 0 ? [sortSessionsDeterministic(candidates)[0]!] : []
-  }
+  if (limit === 1) return selectLatestProviderSession(providerArrays)
 
   const allSessions: Session[] = providerArrays.flat()
   const sorted = sortSessionsDeterministic(allSessions)

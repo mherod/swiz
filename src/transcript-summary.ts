@@ -192,13 +192,7 @@ function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSy
   for (let i = allLines.length - 1; i >= 0; i--) {
     const raw = allLines[i]
     if (!raw?.trim()) continue
-    const parsed = tryParseJsonLine(raw) as
-      | { type?: string; payload?: { type?: string } }
-      | undefined
-    const isCodexCompaction =
-      parsed?.type === "compacted" ||
-      (parsed?.type === "event_msg" && parsed.payload?.type === "context_compacted")
-    if (parsed?.type === "system" || isCodexCompaction) {
+    if (isSessionBoundary(raw)) {
       sessionStartIdx = i + 1
       break
     }
@@ -207,6 +201,14 @@ function filterSessionLines(allLines: string[]): { sessionLines: string[]; sawSy
     sessionLines: sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines,
     sawSystem: sessionStartIdx > 0,
   }
+}
+
+function isSessionBoundary(line: string): boolean {
+  const parsed = tryParseJsonLine(line) as
+    | { type?: string; payload?: { type?: string } }
+    | undefined
+  if (parsed?.type === "system" || parsed?.type === "compacted") return true
+  return parsed?.type === "event_msg" && parsed.payload?.type === "context_compacted"
 }
 
 export async function readCurrentSessionLines(transcriptPath: string): Promise<string[] | null> {
@@ -266,36 +268,32 @@ function parseCodexFunctionCallInput(
   }
 }
 
-function parseAssistantToolBlocks(line: string): ToolBlock[] {
-  const entry = tryParseJsonLine(line) as
-    | {
-        type?: string
-        message?: { content?: ToolBlock[] }
-        payload?: CodexFunctionCallPayload
-      }
-    | undefined
-  if (entry?.type === "assistant") {
-    const content = entry?.message?.content
-    return Array.isArray(content) ? content : []
-  }
+interface ParsedToolEntry {
+  type?: string
+  message?: { content?: ToolBlock[] }
+  payload?: CodexFunctionCallPayload
+}
 
+function extractCodexToolBlock(entry: ParsedToolEntry | undefined): ToolBlock[] {
   const payload = entry?.payload
-  if (
-    entry?.type === "response_item" &&
-    (payload?.type === "function_call" || payload?.type === "custom_tool_call") &&
-    payload.name
-  ) {
-    const rawInput = payload.type === "custom_tool_call" ? payload.input : payload.arguments
-    return [
-      {
-        type: "tool_use",
-        name: payload.name,
-        input: parseCodexFunctionCallInput(rawInput, payload.name),
-      },
-    ]
-  }
+  if (entry?.type !== "response_item" || !payload?.name) return []
+  if (payload.type !== "function_call" && payload.type !== "custom_tool_call") return []
 
-  return []
+  const rawInput = payload.type === "custom_tool_call" ? payload.input : payload.arguments
+  return [
+    {
+      type: "tool_use",
+      name: payload.name,
+      input: parseCodexFunctionCallInput(rawInput, payload.name),
+    },
+  ]
+}
+
+function parseAssistantToolBlocks(line: string): ToolBlock[] {
+  const entry = tryParseJsonLine(line) as ParsedToolEntry | undefined
+  if (entry?.type !== "assistant") return extractCodexToolBlock(entry)
+  const content = entry.message?.content
+  return Array.isArray(content) ? content : []
 }
 
 interface SummaryAccumulator {
@@ -453,46 +451,52 @@ function extractUserEntryText(entry: ParsedTranscriptEntry): string {
   return texts.join("\n")
 }
 
+function extractSlashPromptSkill(
+  content: string | UserMessageContentBlock[] | undefined
+): string[] {
+  const skill = extractSkillNameFromSlashPrompt(extractTextFromUserMessage(content))
+  return skill ? [skill] : []
+}
+
+function extractQueuedSkillExpansion(entry: ParsedTranscriptEntry): string[] {
+  return entry.operation === "enqueue" ? extractSlashPromptSkill(entry.content) : []
+}
+
+function extractAttachedSkillExpansion(entry: ParsedTranscriptEntry): string[] {
+  if (entry.attachment?.type !== "queued_command") return []
+  const skill = extractSkillNameFromSlashPrompt(entry.attachment.prompt)
+  return skill ? [skill] : []
+}
+
+function extractCodexUserSkillExpansion(entry: ParsedTranscriptEntry): string[] {
+  if (entry.payload?.type !== "message" || entry.payload.role !== "user") return []
+  return extractSkillNamesFromUserText(extractTextFromUserMessage(entry.payload.content))
+}
+
 function extractUserSkillExpansions(line: string): string[] {
   const entry = tryParseJsonLine(line) as ParsedTranscriptEntry | undefined
-  if (!entry) return []
-
-  // Newer Claude Code records user-typed slash commands as queue-operation
-  // entries with a leading-slash prompt in their content field.
-  if (entry.type === "queue-operation" && entry.operation === "enqueue") {
-    const text = extractTextFromUserMessage(entry.content)
-    const skill = extractSkillNameFromSlashPrompt(text)
-    return skill ? [skill] : []
+  switch (entry?.type) {
+    case "queue-operation":
+      return extractQueuedSkillExpansion(entry)
+    case "attachment":
+      return extractAttachedSkillExpansion(entry)
+    case "response_item":
+      return extractCodexUserSkillExpansion(entry)
+    case "user":
+    case "human":
+      // Covers activation banners and legacy command-name tags.
+      return extractSkillNamesFromUserText(extractUserEntryText(entry))
+    default:
+      return []
   }
-
-  // The same prompt is also persisted as an attachment of type queued_command.
-  if (entry.type === "attachment" && entry.attachment?.type === "queued_command") {
-    const skill = extractSkillNameFromSlashPrompt(entry.attachment.prompt)
-    return skill ? [skill] : []
-  }
-
-  if (entry.type === "response_item" && entry.payload?.type === "message") {
-    if (entry.payload.role !== "user") return []
-    const text = extractTextFromUserMessage(entry.payload.content)
-    return extractSkillNamesFromUserText(text)
-  }
-
-  // Skill content injected after the slash command resolves shows up in user
-  // messages with the activation banner and the legacy command-name tag (older
-  // Claude Code versions). Detect both so the gate works across formats.
-  if (entry.type === "user" || entry.type === "human") {
-    const text = extractUserEntryText(entry)
-    return extractSkillNamesFromUserText(text)
-  }
-
-  return []
 }
 
 export function collectSessionToolUsage(
   sessionLines: string[],
   acc: SummaryAccumulator = createEmptySummaryAccumulator()
 ): SummaryAccumulator {
-  for (const line of sessionLines) {
+  for (const rawLine of sessionLines) {
+    const line = rawLine ?? ""
     if (!line.trim()) continue
     for (const block of parseAssistantToolBlocks(line)) {
       processToolBlock(block, acc)
@@ -512,8 +516,8 @@ export function collectCurrentSessionUsageEvents(
 ): CurrentSessionUsageEvent[] {
   const events: CurrentSessionUsageEvent[] = []
   let turnIndex = 0
-  for (let i = 0; i < sessionLines.length; i++) {
-    const line = sessionLines[i] ?? ""
+  for (const rawLine of sessionLines) {
+    const line = rawLine ?? ""
     if (!line.trim()) continue
     const entry = tryParseJsonLine(line) as
       | { type?: string; payload?: { type?: string } }
@@ -521,20 +525,27 @@ export function collectCurrentSessionUsageEvents(
     // Treat each user/human message as a new turn so the turn-based recency
     // window means "last N user turns" rather than "last N raw JSONL lines"
     // (attachments, ai-title, and queue-operation entries shouldn't burn turns).
-    if (
-      entry?.type === "user" ||
-      entry?.type === "human" ||
-      (entry?.type === "event_msg" && entry.payload?.type === "user_message")
-    ) {
-      turnIndex++
-    }
-    const timestamp = extractTimestamp(line)
-    for (const block of parseAssistantToolBlocks(line)) {
-      events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
-    }
-    for (const skill of extractUserSkillExpansions(line)) {
-      events.push({ kind: "skill", value: skill, turnIndex, timestamp })
-    }
+    if (isUserTurnEntry(entry)) turnIndex++
+    events.push(...collectUsageEventsForLine(line, turnIndex))
+  }
+  return events
+}
+
+function isUserTurnEntry(
+  entry: { type?: string; payload?: { type?: string } } | undefined
+): boolean {
+  if (entry?.type === "user" || entry?.type === "human") return true
+  return entry?.type === "event_msg" && entry.payload?.type === "user_message"
+}
+
+function collectUsageEventsForLine(line: string, turnIndex: number): CurrentSessionUsageEvent[] {
+  const events: CurrentSessionUsageEvent[] = []
+  const timestamp = extractTimestamp(line)
+  for (const block of parseAssistantToolBlocks(line)) {
+    events.push(...collectToolUsageEventsFromBlock(block, turnIndex, timestamp))
+  }
+  for (const skill of extractUserSkillExpansions(line)) {
+    events.push({ kind: "skill", value: skill, turnIndex, timestamp })
   }
   return events
 }
@@ -716,41 +727,64 @@ export async function getRecentCurrentSessionUsage(
   options?: CurrentSessionUsageRecencyOptions
 ): Promise<RecentCurrentSessionUsage> {
   if (typeof source !== "string") {
-    const summary = getTranscriptSummary(source)
-    const registeredLines = getRegisteredDispatchSessionLines(source)
-    const transcriptPath = transcriptPathFromUsageSource(source)
-    const enrichedLines = registeredLines ?? summary?.sessionLines ?? null
-    const transcriptUsage =
-      transcriptPath && !enrichedLines
-        ? await tryReadRecentSessionUsage(transcriptPath, options)
-        : null
-    const summaryEvents = enrichedLines
-      ? filterRecentCurrentSessionUsageEvents(enrichedLines, options)
-      : []
-    const cachedUsage = getCurrentSessionToolUsage(source)
-    const cachedEvents = cachedUsage?.events
-      ? filterRecentUsageEvents(
-          cachedUsage.events,
-          cachedUsage.events.length > 0
-            ? Math.max(...cachedUsage.events.map((event) => event.turnIndex))
-            : 0,
-          options
-        )
-      : []
-    if (summaryEvents.length > 0 || transcriptUsage || cachedEvents.length > 0) {
-      // Merge transcript and daemon-cache events so both user-typed `/skill`
-      // expansions (visible only in the transcript) and agent-invoked tool calls
-      // captured by the daemon are surfaced to recency gates.
-      return usageFromEvents(
-        mergeUsageEvents(
-          mergeUsageEvents(summaryEvents, transcriptUsage?.events ?? []),
-          cachedEvents
-        )
-      )
-    }
+    const inputUsage = await getRecentUsageFromInput(source, options)
+    if (inputUsage) return inputUsage
   }
   const transcriptPath = transcriptPathFromUsageSource(source)
   return transcriptPath ? readRecentSessionUsage(transcriptPath, options) : usageFromEvents([])
+}
+
+function filterCachedUsageEvents(
+  source: Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): CurrentSessionUsageEvent[] {
+  const events = getCurrentSessionToolUsage(source)?.events
+  if (!events) return []
+  const lastTurnIndex = events.reduce((latest, event) => Math.max(latest, event.turnIndex), 0)
+  return filterRecentUsageEvents(events, lastTurnIndex, options)
+}
+
+function getEnrichedSessionLines(source: Record<string, any>): string[] | null {
+  const registeredLines = getRegisteredDispatchSessionLines(source)
+  if (registeredLines) return registeredLines
+  return getTranscriptSummary(source)?.sessionLines ?? null
+}
+
+function filterEnrichedUsageEvents(
+  enrichedLines: string[] | null,
+  options?: CurrentSessionUsageRecencyOptions
+): CurrentSessionUsageEvent[] {
+  return enrichedLines ? filterRecentCurrentSessionUsageEvents(enrichedLines, options) : []
+}
+
+async function readTranscriptUsageWithoutEnrichedLines(
+  transcriptPath: string,
+  enrichedLines: string[] | null,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<RecentCurrentSessionUsage | null> {
+  if (!transcriptPath || enrichedLines) return null
+  return tryReadRecentSessionUsage(transcriptPath, options)
+}
+
+async function getRecentUsageFromInput(
+  source: Record<string, any>,
+  options?: CurrentSessionUsageRecencyOptions
+): Promise<RecentCurrentSessionUsage | null> {
+  const enrichedLines = getEnrichedSessionLines(source)
+  const transcriptPath = transcriptPathFromUsageSource(source)
+  const transcriptUsage = await readTranscriptUsageWithoutEnrichedLines(
+    transcriptPath,
+    enrichedLines,
+    options
+  )
+  const summaryEvents = filterEnrichedUsageEvents(enrichedLines, options)
+  const cachedEvents = filterCachedUsageEvents(source, options)
+  if (summaryEvents.length === 0 && !transcriptUsage && cachedEvents.length === 0) return null
+
+  // Merge transcript and daemon-cache events so user-typed `/skill` expansions
+  // and agent-invoked tool calls are both surfaced to recency gates.
+  const transcriptEvents = mergeUsageEvents(summaryEvents, transcriptUsage?.events ?? [])
+  return usageFromEvents(mergeUsageEvents(transcriptEvents, cachedEvents))
 }
 
 function mergeUsageEvents(
