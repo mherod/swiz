@@ -57,6 +57,7 @@ describe("pretooluse-no-home-paths", () => {
   })
 
   it("blocks through the standalone hook stdin and stdout contract", async () => {
+    // PROCESS_CONTRACT_TEST: executes the hook entrypoint with JSON stdin and validates JSON stdout.
     await stage("receipt.json", `{"command":"${TEST_HOME}/bin/tool"}`)
     const hookPath = join(import.meta.dir, "pretooluse-no-home-paths.ts")
     const proc = Bun.spawn(["bun", hookPath], {
