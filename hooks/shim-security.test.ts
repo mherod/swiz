@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const SHIM_PATH = join(import.meta.dir, "shim.sh")
 
-async function runShim(command: string): Promise<{
+async function runShim(
+  command: string,
+  opts: { cwd?: string; env?: Record<string, string> } = {}
+): Promise<{
   exitCode: number
   stderr: string
   stdout: string
@@ -16,8 +21,8 @@ async function runShim(command: string): Promise<{
     command,
   ].join("\n")
   const proc = Bun.spawn(["bash", "-c", script], {
-    cwd: import.meta.dir,
-    env: { ...process.env, HOME: "/tmp" },
+    cwd: opts.cwd ?? import.meta.dir,
+    env: { ...process.env, HOME: "/tmp", ...opts.env },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -99,5 +104,50 @@ describe("shell shim Git and GitHub security", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("shared checkout")
+  })
+
+  test("blocks git commit when staged files contain absolute home directory path", async () => {
+    const tmpDir = await realpath(await mkdtemp(join(tmpdir(), "swiz-shim-home-test-")))
+    const mockHome = join(tmpDir, "home", "user")
+    await mkdir(mockHome, { recursive: true })
+    const repoDir = join(tmpDir, "repo")
+    await mkdir(repoDir, { recursive: true })
+
+    await Bun.spawn(["git", "init"], { cwd: repoDir }).exited
+    await Bun.write(join(repoDir, "bad.txt"), `config_dir = "${mockHome}/.config"\n`)
+    await Bun.spawn(["git", "add", "bad.txt"], { cwd: repoDir }).exited
+
+    const result = await runShim("git commit -m 'test'", {
+      cwd: repoDir,
+      env: { HOME: mockHome },
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("staged file content contains your absolute home directory")
+    expect(result.stderr).toContain("bad.txt")
+
+    await rm(tmpDir, { recursive: true, force: true })
+  })
+
+  test("allows git commit when staged files use relative home paths", async () => {
+    const tmpDir = await realpath(await mkdtemp(join(tmpdir(), "swiz-shim-home-test-")))
+    const mockHome = join(tmpDir, "home", "user")
+    await mkdir(mockHome, { recursive: true })
+    const repoDir = join(tmpDir, "repo")
+    await mkdir(repoDir, { recursive: true })
+
+    await Bun.spawn(["git", "init"], { cwd: repoDir }).exited
+    await Bun.write(join(repoDir, "good.txt"), `config_dir = "~/.config"\n`)
+    await Bun.spawn(["git", "add", "good.txt"], { cwd: repoDir }).exited
+
+    const result = await runShim("git commit -m 'test'", {
+      cwd: repoDir,
+      env: { HOME: mockHome },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("git:commit -m test")
+
+    await rm(tmpDir, { recursive: true, force: true })
   })
 })

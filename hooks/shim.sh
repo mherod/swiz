@@ -630,6 +630,30 @@ git() {
     done
   fi
 
+  # Block committing staged files containing absolute home directory path
+  if [[ "$git_cmd" == "commit" ]]; then
+    local home_path="${HOME:-}"
+    home_path="${home_path%/}"
+    if [[ -n "$home_path" && "$home_path" != "/" ]]; then
+      if command git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local staged_files
+        staged_files="$(command git diff --cached --name-only --diff-filter=ACMR 2>/dev/null)"
+        if [[ -n "$staged_files" ]]; then
+          local home_matches
+          home_matches="$(command git diff --cached --name-only --diff-filter=ACMR -z 2>/dev/null | command xargs -0 command git grep --cached -F -l -z -e "$home_path" -- 2>/dev/null | tr '\0' '\n' | command grep -v '^$')"
+          if [[ -n "$home_matches" ]]; then
+            printf 'swiz: BLOCKED: staged file content contains your absolute home directory.\n\n' >&2
+            printf 'Affected staged files:\n' >&2
+            echo "$home_matches" | command sed 's/^/  - /' >&2
+            printf '\nReplace the absolute path with `~`, `$HOME`, or a repository-relative path.\n' >&2
+            printf 'Then re-stage every affected file with `git add` and retry the commit.\n' >&2
+            return 1
+          fi
+        fi
+      fi
+    fi
+  fi
+
   # Block co-authored and AI-signed commits
   if [[ "$git_cmd" == "commit" ]]; then
     local commit_msg=""
