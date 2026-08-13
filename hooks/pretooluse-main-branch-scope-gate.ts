@@ -73,6 +73,10 @@ function mergeDeps(overrides: Partial<MainBranchScopeGateDeps> = {}): MainBranch
   return { ...DEFAULT_DEPS, ...overrides }
 }
 
+function isShellHookInput(input: ToolHookInput): boolean {
+  return Boolean(input.tool_name) && isShellTool(input.tool_name ?? "")
+}
+
 function buildRepoContext(isCollaborative: boolean, signals: string[]): string {
   return isCollaborative
     ? `a collaborative repository.\n\nCollaboration signals:\n${signals.map((s) => `  - ${s}`).join("\n")}`
@@ -236,52 +240,55 @@ async function getPrBaseBranch(
   }
 }
 
-/** Returns the PR's mergeable status and required review state. */
-async function getPrMergeability(
-  prNumber: string,
-  cwd: string,
-  deps: MainBranchScopeGateDeps
-): Promise<{ mergeable: boolean; statusContext: string }> {
-  const repoSlug = await deps.getRepoSlug(cwd)
-  if (!repoSlug) return { mergeable: false, statusContext: "Could not determine repository" }
+interface PrMergeability {
+  mergeable: boolean
+  statusContext: string
+}
 
-  // Cache fast-path: definite blocks (conflicts, CHANGES_REQUESTED) can be
-  // decided without a live API round-trip. Only the "looks good" path needs
-  // REST accuracy for branch-protection/required-CI checks via mergeStateStatus.
+function evaluateCachedMergeBlock(detail: PrBranchDetail | null): PrMergeability | null {
+  if (!detail) return null
+  const reviewDecision = detail.reviewDecision ?? ""
+  const mergeableStatus = detail.mergeable ?? "UNKNOWN"
+  if (mergeableStatus === "CONFLICTING") {
+    return {
+      mergeable: false,
+      statusContext: `CONFLICTING, review: ${reviewDecision || "none"}`,
+    }
+  }
+  if (reviewDecision === "CHANGES_REQUESTED") {
+    return {
+      mergeable: false,
+      statusContext: `${mergeableStatus}, review: changes requested`,
+    }
+  }
+  return null
+}
+
+async function getCachedMergeBlock(
+  repoSlug: string,
+  prNumber: string,
+  deps: MainBranchScopeGateDeps
+): Promise<PrMergeability | null> {
   try {
     const reader = deps.getIssueStoreReader()
     const cachedPr = await reader.getPullRequest<{ headRefName?: string }>(
       repoSlug,
       Number(prNumber)
     )
-    if (cachedPr?.headRefName) {
-      const detail: PrBranchDetail | null = await reader.getPrBranchDetail(
-        repoSlug,
-        cachedPr.headRefName
-      )
-      if (detail) {
-        const reviewDecision = detail.reviewDecision ?? ""
-        const mergeableStatus = detail.mergeable ?? "UNKNOWN"
-        if (mergeableStatus === "CONFLICTING") {
-          return {
-            mergeable: false,
-            statusContext: `CONFLICTING, review: ${reviewDecision || "none"}`,
-          }
-        }
-        if (reviewDecision === "CHANGES_REQUESTED") {
-          return {
-            mergeable: false,
-            statusContext: `${mergeableStatus}, review: changes requested`,
-          }
-        }
-      }
-    }
+    if (!cachedPr?.headRefName) return null
+    const detail = await reader.getPrBranchDetail(repoSlug, cachedPr.headRefName)
+    return evaluateCachedMergeBlock(detail)
   } catch {
-    // fall through to live API
+    return null
   }
+}
 
-  // `gh pr view` exposes the GraphQL merge-state fields used below. The REST
-  // pull response uses different names and does not include reviewDecision.
+async function getLiveMergeability(
+  repoSlug: string,
+  prNumber: string,
+  cwd: string,
+  deps: MainBranchScopeGateDeps
+): Promise<PrMergeability> {
   try {
     const result = await deps.ghJsonViaDaemon<{
       mergeStateStatus?: string
@@ -303,18 +310,72 @@ async function getPrMergeability(
     const mergeStateStatus = result?.mergeStateStatus ?? "UNKNOWN"
     const isMergeable = result?.mergeable === "MERGEABLE"
     const reviewDecision = result?.reviewDecision ?? "PENDING"
-
     const canMerge =
       isMergeable &&
       mergeStateStatus === "CLEAN" &&
       (reviewDecision === "APPROVED" || reviewDecision === "REVIEW_REQUIRED")
-
-    const statusContext = [mergeStateStatus, `review: ${reviewDecision}`].filter(Boolean).join(", ")
-
-    return { mergeable: canMerge, statusContext }
+    return {
+      mergeable: canMerge,
+      statusContext: `${mergeStateStatus}, review: ${reviewDecision}`,
+    }
   } catch {
     return { mergeable: false, statusContext: "Could not fetch PR status from GitHub" }
   }
+}
+
+/** Returns the PR's mergeable status and required review state. */
+async function getPrMergeability(
+  prNumber: string,
+  cwd: string,
+  deps: MainBranchScopeGateDeps
+): Promise<PrMergeability> {
+  const repoSlug = await deps.getRepoSlug(cwd)
+  if (!repoSlug) return { mergeable: false, statusContext: "Could not determine repository" }
+
+  // Cache fast-path: definite blocks (conflicts, CHANGES_REQUESTED) can be
+  // decided without a live API round-trip. Only the "looks good" path needs
+  // REST accuracy for branch-protection/required-CI checks via mergeStateStatus.
+  const cachedBlock = await getCachedMergeBlock(repoSlug, prNumber, deps)
+  if (cachedBlock) return cachedBlock
+
+  // `gh pr view` exposes the GraphQL merge-state fields used below. The REST
+  // pull response uses different names and does not include reviewDecision.
+  return await getLiveMergeability(repoSlug, prNumber, cwd, deps)
+}
+
+async function getMergePolicyContext(cwd: string, deps: MainBranchScopeGateDeps) {
+  const collaboration = await deps.detectProjectCollaborationPolicy(cwd)
+  if (!collaboration.repoOwner || !collaboration.repoName) return null
+  const globalSettings = await deps.readSwizSettings()
+  const effectiveSettings = deps.getEffectiveSwizSettings(
+    globalSettings,
+    null,
+    await deps.readProjectSettings(cwd)
+  )
+  return {
+    isCollaborative: collaboration.isCollaborative,
+    owner: collaboration.repoOwner,
+    repo: collaboration.repoName,
+    signals: collaboration.signals,
+    strictMode: effectiveSettings.strictNoDirectMain,
+  }
+}
+
+function getBaseBranchPolicyResult(
+  baseBranch: string,
+  defaultBranch: string
+): SwizHookOutput | null {
+  if (isIntegrationBranch(baseBranch)) {
+    return preToolUseAllow(
+      `Continue in promotion-merge mode: integration branch '${baseBranch}' is approved for direct promotion workflow merges.`
+    )
+  }
+  if (!isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
+    return preToolUseAllow(
+      `Continue in non-production merge mode: '${baseBranch}' is outside production branch policy.`
+    )
+  }
+  return null
 }
 
 async function handlePrMerge(
@@ -323,20 +384,9 @@ async function handlePrMerge(
   defaultBranch: string,
   deps: MainBranchScopeGateDeps
 ): Promise<SwizHookOutput | null> {
-  const collaboration = await deps.detectProjectCollaborationPolicy(cwd)
-  const owner = collaboration.repoOwner
-  const repo = collaboration.repoName
-  if (!owner || !repo) return null
-  const isCollaborative = collaboration.isCollaborative
-  const globalSettings = await deps.readSwizSettings()
-  const effectiveSettings = deps.getEffectiveSwizSettings(
-    globalSettings,
-    null,
-    await deps.readProjectSettings(cwd)
-  )
-  const strictMode = effectiveSettings.strictNoDirectMain
-
-  if (!isCollaborative && !strictMode) return null
+  const policy = await getMergePolicyContext(cwd, deps)
+  if (!policy) return null
+  if (!policy.isCollaborative && !policy.strictMode) return null
 
   const prNumber = extractPrNumber(command)
   if (!prNumber) return null
@@ -352,19 +402,8 @@ Please verify the PR number and your network connection, then try again.
 `)
   }
 
-  // Allow merges to integration branches — part of the dev→main promotion workflow
-  if (isIntegrationBranch(baseBranch)) {
-    return preToolUseAllow(
-      `Continue in promotion-merge mode: integration branch '${baseBranch}' is approved for direct promotion workflow merges.`
-    )
-  }
-
-  // Only block merges to production branches
-  if (!isProductionBranch(baseBranch) && baseBranch !== defaultBranch) {
-    return preToolUseAllow(
-      `Continue in non-production merge mode: '${baseBranch}' is outside production branch policy.`
-    )
-  }
+  const baseBranchResult = getBaseBranchPolicyResult(baseBranch, defaultBranch)
+  if (baseBranchResult) return baseBranchResult
 
   // If we are merging into a production branch, check if the PR is approved/ready.
   const prStatus = await getPrMergeability(prNumber, cwd, deps)
@@ -376,7 +415,7 @@ Please verify the PR number and your network connection, then try again.
   }
 
   const prRef = prNumber ? `PR #${prNumber}` : "this PR"
-  const repoContext = buildRepoContext(isCollaborative, collaboration.signals)
+  const repoContext = buildRepoContext(policy.isCollaborative, policy.signals)
 
   return preToolUseDeny(`
 Merging ${prRef} via \`gh pr merge\` is currently blocked in ${repoContext}
@@ -389,7 +428,7 @@ Allowed merge paths:
   2. Merge via the GitHub web UI after required reviews are approved
   3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber} --auto --squash
 
-Repository: ${owner}/${repo}
+Repository: ${policy.owner}/${policy.repo}
 `)
 }
 
@@ -504,7 +543,7 @@ export async function evaluatePretooluseMainBranchScopeGate(
 ): Promise<SwizHookOutput> {
   const deps = mergeDeps(depsOverride)
   const hookInput = toolHookInputSchema.parse(input) as ToolHookInput
-  if (!hookInput.tool_name || !isShellTool(hookInput.tool_name)) return {}
+  if (!isShellHookInput(hookInput)) return {}
 
   const { command, cwd } = getCommandAndCwd(hookInput)
   const prMergeMatch = isPullRequestMergeCommand(command)

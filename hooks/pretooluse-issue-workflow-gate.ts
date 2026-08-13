@@ -33,6 +33,10 @@ import {
 } from "../src/utils/branch-reference.ts"
 import { fetchSessionTasksFromDaemon } from "../src/utils/daemon-git-state.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
+import {
+  getRepositoryWorkflowHookContext,
+  parseAssistantContent,
+} from "./repository-workflow-hook-utils.ts"
 
 const WORKFLOW_SKILL = "work-on-issue"
 const PR_WORKFLOW_SKILL = "work-on-prs"
@@ -138,58 +142,64 @@ interface ScanResult {
   targetBranch: string | null
 }
 
+function createScanResult(): ScanResult {
+  return {
+    inWorkflow: false,
+    routedToPrs: false,
+    hasFetch: false,
+    hasGhActivity: false,
+    prHeadBranch: null,
+    targetBranch: null,
+  }
+}
+
 function extractBranch(text: string, re: RegExp): string | null {
   const match = re.exec(text)
   if (!match) return null
   return normalizeBranchReference(match[1] ?? "")
 }
 
+function updateSkillState(result: ScanResult, block: Record<string, any>): void {
+  if (block?.type !== "tool_use" || block.name !== "Skill") return
+  const input = block.input as Record<string, any> | null | undefined
+  const skillName = String(input?.skill ?? "").toLowerCase()
+  if (skillName === WORKFLOW_SKILL) result.inWorkflow = true
+  if (skillName === PR_WORKFLOW_SKILL) result.routedToPrs = true
+}
+
+function updateShellEvidence(result: ScanResult, block: Record<string, any>): void {
+  if (block?.type !== "tool_use" || !isShellTool(String(block.name ?? ""))) return
+  const command = String((block.input as Record<string, any>)?.command ?? "")
+  if (GIT_FETCH_RE.test(command)) result.hasFetch = true
+  if (GH_ACTIVITY_RE.test(command)) result.hasGhActivity = true
+}
+
+function updateBranchState(result: ScanResult, block: Record<string, any>): void {
+  if (block?.type !== "text" || typeof block.text !== "string") return
+  const prBranch = extractBranch(block.text, PR_HEAD_BRANCH_RE)
+  if (prBranch) result.prHeadBranch = prBranch
+  const targetBranch = extractBranch(block.text, TARGET_BRANCH_RE)
+  if (targetBranch) result.targetBranch = targetBranch
+}
+
+function updateScanResult(result: ScanResult, content: unknown[]): void {
+  for (const block of content) {
+    const candidate = block as Record<string, any>
+    updateSkillState(result, candidate)
+    updateShellEvidence(result, candidate)
+    updateBranchState(result, candidate)
+  }
+}
+
 function scanLines(lines: string[]): ScanResult {
-  let inWorkflow = false
-  let routedToPrs = false
-  let hasFetch = false
-  let hasGhActivity = false
-  let prHeadBranch: string | null = null
-  let targetBranch: string | null = null
+  const result = createScanResult()
 
   for (const line of linesAfterLatestUserMessage(lines)) {
-    if (!line.trim()) continue
-    let entry: Record<string, any>
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (entry?.type !== "assistant") continue
-    const content = entry.message?.content
-    if (!Array.isArray(content)) continue
-
-    for (const block of content) {
-      const b = block as Record<string, any>
-
-      if (b?.type === "tool_use" && b.name === "Skill") {
-        const inp = b.input as Record<string, any> | null | undefined
-        const skillName = String(inp?.skill ?? "").toLowerCase()
-        if (skillName === WORKFLOW_SKILL) inWorkflow = true
-        if (skillName === PR_WORKFLOW_SKILL) routedToPrs = true
-      }
-
-      if (b?.type === "tool_use" && isShellTool(String(b.name ?? ""))) {
-        const cmd = String((b.input as Record<string, any>)?.command ?? "")
-        if (GIT_FETCH_RE.test(cmd)) hasFetch = true
-        if (GH_ACTIVITY_RE.test(cmd)) hasGhActivity = true
-      }
-
-      if (b?.type === "text" && typeof b.text === "string") {
-        const prBranch = extractBranch(b.text, PR_HEAD_BRANCH_RE)
-        if (prBranch) prHeadBranch = prBranch
-        const tb = extractBranch(b.text, TARGET_BRANCH_RE)
-        if (tb) targetBranch = tb
-      }
-    }
+    const content = parseAssistantContent(line)
+    if (content) updateScanResult(result, content)
   }
 
-  return { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch }
+  return result
 }
 
 // ── Command classification ────────────────────────────────────────────────────
@@ -208,6 +218,111 @@ function isCheckoutToBranch(command: string, branch: string): boolean {
     GIT_CHECKOUT_PLAIN_RE.test(command) &&
     branchReferenceAliases(branch).some((b) => command.includes(b))
   )
+}
+
+interface WorkflowEvaluationContext {
+  command: string
+  cwd: string
+  isCodeChange: boolean
+  isShell: boolean
+  sessionId: string
+  toolName: string
+  transcriptPath: string
+}
+
+function getIssueWorkflowContext(
+  hookInput: ReturnType<typeof toolHookInputSchema.parse>
+): WorkflowEvaluationContext {
+  const baseContext = getRepositoryWorkflowHookContext(hookInput)
+  return {
+    ...baseContext,
+    isCodeChange: isCodeChangeTool(baseContext.toolName),
+    isShell: isShellTool(baseContext.toolName),
+    sessionId: String((hookInput as Record<string, unknown>).session_id ?? ""),
+  }
+}
+
+async function evaluateActiveTaskGate(
+  activeTaskGate: (typeof TASK_SKILL_GATES)[number] | null,
+  lines: string[],
+  cwd: string,
+  home?: string
+): Promise<SwizHookOutput | null> {
+  if (!activeTaskGate) return null
+  const resolvedHome = home ?? process.env.HOME ?? ""
+  const usedInTranscript = hasSkillInSessionLines(lines, activeTaskGate.skill)
+  if (usedInTranscript) return null
+  const usedRecently = resolvedHome
+    ? await hasSkillUsedInProjectRecently(activeTaskGate.skill, cwd, resolvedHome)
+    : false
+  if (usedRecently) return null
+  return preToolUseDeny(buildMissingSkillMessage(activeTaskGate))
+}
+
+function checkLinkedPrAlignment(
+  scan: ScanResult,
+  currentBranch: string,
+  command: string,
+  isShell: boolean
+): SwizHookOutput | null {
+  const prHeadBranch = scan.prHeadBranch
+  if (!prHeadBranch || branchReferencesAlign(currentBranch, prHeadBranch) || scan.routedToPrs) {
+    return null
+  }
+  if (isShell && isCheckoutToBranch(command, prHeadBranch)) return {}
+  return preToolUseDeny(buildLinkedPrDenyMessage(currentBranch, prHeadBranch))
+}
+
+function checkTargetBranchAlignment(
+  scan: ScanResult,
+  currentBranch: string,
+  command: string,
+  isShell: boolean
+): SwizHookOutput | null {
+  const targetBranch = scan.targetBranch
+  if (!targetBranch || branchReferencesAlign(currentBranch, targetBranch)) return null
+  if (isShell && isCheckoutToBranch(command, targetBranch)) return {}
+  return preToolUseDeny(buildBranchAlignDenyMessage(currentBranch, targetBranch))
+}
+
+async function shouldEvaluateWorkflow(
+  hookInput: ReturnType<typeof toolHookInputSchema.parse>,
+  context: WorkflowEvaluationContext
+): Promise<boolean> {
+  if (!context.isCodeChange && !context.isShell) return false
+  const isGitRepo = await isGitRepoForHookPayload(hookInput as Record<string, unknown>, context.cwd)
+  if (!isGitRepo) return false
+  return Boolean(context.transcriptPath)
+}
+
+async function resolveActiveTaskGate(
+  context: WorkflowEvaluationContext,
+  home?: string
+): Promise<(typeof TASK_SKILL_GATES)[number] | null> {
+  if (!context.sessionId) return null
+  return await findActiveTaskGate(context.sessionId, context.cwd, home)
+}
+
+function isNonBlockedShell(context: WorkflowEvaluationContext): boolean {
+  return context.isShell && !isBlockedBashCommand(context.command)
+}
+
+async function evaluateWorkflowState(
+  lines: string[],
+  context: WorkflowEvaluationContext
+): Promise<SwizHookOutput> {
+  const scan = scanLines(lines)
+  if (!scan.inWorkflow) return {}
+  if (!scan.hasFetch && !scan.hasGhActivity) {
+    return preToolUseDeny(buildPreflightDenyMessage(context.toolName))
+  }
+
+  const currentBranch = (await git(["branch", "--show-current"], context.cwd)).trim()
+  if (!currentBranch) return {}
+
+  const prResult = checkLinkedPrAlignment(scan, currentBranch, context.command, context.isShell)
+  if (prResult) return prResult
+  return checkTargetBranchAlignment(scan, currentBranch, context.command, context.isShell) ?? {}
 }
 
 // ── Denial messages ───────────────────────────────────────────────────────────
@@ -299,74 +414,24 @@ export async function evaluateIssueWorkflowGate(
   _home?: string
 ): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
-  const cwd = hookInput.cwd ?? process.cwd()
-  const toolName = hookInput.tool_name ?? ""
-  const transcriptPath = hookInput.transcript_path ?? ""
-  const sessionId = String((hookInput as Record<string, unknown>).session_id ?? "")
+  const context = getIssueWorkflowContext(hookInput)
 
-  const isCodeChange = isCodeChangeTool(toolName)
-  const isShell = isShellTool(toolName)
-
-  if (!isCodeChange && !isShell) return {}
-  if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
-  if (!transcriptPath) return {}
-
-  const command = String((hookInput.tool_input as Record<string, any>)?.command ?? "").normalize(
-    "NFKC"
-  )
-
-  let activeTaskGate: (typeof TASK_SKILL_GATES)[number] | null = null
-  if (sessionId) {
-    activeTaskGate = await findActiveTaskGate(sessionId, cwd, _home)
-  }
+  if (!(await shouldEvaluateWorkflow(hookInput, context))) return {}
+  const activeTaskGate = await resolveActiveTaskGate(context, _home)
 
   // Ordinary shell commands only need transcript evidence when an active task
   // subject requires a skill. This is the overwhelmingly common fast path.
-  if (isShell && !isBlockedBashCommand(command) && !activeTaskGate) return {}
+  if (isNonBlockedShell(context) && !activeTaskGate) return {}
 
-  const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
+  const lines = await resolveSessionLines(hookInput as Record<string, any>, context.transcriptPath)
 
   // Task-subject skill gate — blocks until the required skill is invoked.
-  if (activeTaskGate) {
-    const resolvedHome = _home ?? process.env.HOME ?? ""
-    const skillUsed =
-      hasSkillInSessionLines(lines, activeTaskGate.skill) ||
-      (resolvedHome
-        ? await hasSkillUsedInProjectRecently(activeTaskGate.skill, cwd, resolvedHome)
-        : false)
-    if (!skillUsed) {
-      return preToolUseDeny(buildMissingSkillMessage(activeTaskGate))
-    }
-  }
+  const taskGateResult = await evaluateActiveTaskGate(activeTaskGate, lines, context.cwd, _home)
+  if (taskGateResult) return taskGateResult
 
   // Non-blocked shell commands are exempt from workflow/preflight checks
-  if (isShell && !isBlockedBashCommand(command)) return {}
-
-  const { inWorkflow, routedToPrs, hasFetch, hasGhActivity, prHeadBranch, targetBranch } =
-    scanLines(lines)
-  if (!inWorkflow) return {}
-
-  // AC #1-2: Block until preflight or remote-ref sync evidence exists
-  if (!hasFetch && !hasGhActivity) {
-    return preToolUseDeny(buildPreflightDenyMessage(toolName))
-  }
-
-  const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
-  if (!currentBranch) return {}
-
-  // AC #3: Linked PR found — require PR branch checkout or routing to work-on-prs
-  if (prHeadBranch && !branchReferencesAlign(currentBranch, prHeadBranch) && !routedToPrs) {
-    if (isShell && isCheckoutToBranch(command, prHeadBranch)) return {}
-    return preToolUseDeny(buildLinkedPrDenyMessage(currentBranch, prHeadBranch))
-  }
-
-  // AC #4: Target branch declared — require checkout alignment
-  if (targetBranch && !branchReferencesAlign(currentBranch, targetBranch)) {
-    if (isShell && isCheckoutToBranch(command, targetBranch)) return {}
-    return preToolUseDeny(buildBranchAlignDenyMessage(currentBranch, targetBranch))
-  }
-
-  return {}
+  if (isNonBlockedShell(context)) return {}
+  return await evaluateWorkflowState(lines, context)
 }
 
 const issueWorkflowGate: SwizToolHook = {

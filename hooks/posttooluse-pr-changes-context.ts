@@ -37,6 +37,13 @@ import {
 } from "../src/utils/git-utils.ts"
 
 type Review = { state: string; user: { login: string }; body?: string }
+type ChangesRequestedReview = { login: string; body?: string }
+
+interface PrCheckoutContext {
+  branch: string
+  cwd: string
+  repo: string
+}
 
 function isCheckoutCommand(input: ShellHookInput): boolean {
   if (!input.tool_name || !isShellTool(input.tool_name)) return false
@@ -44,6 +51,90 @@ function isCheckoutCommand(input: ShellHookInput): boolean {
   return (
     GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command) || GH_PR_CHECKOUT_RE.test(command)
   )
+}
+
+async function resolvePrCheckoutContext(input: ShellHookInput): Promise<PrCheckoutContext | null> {
+  const cwd = input.cwd ?? process.cwd()
+  if (!(await isGitRepoForHookPayload(input, cwd)) || !(await isGitHubRemote(cwd)) || !hasGhCli()) {
+    return null
+  }
+
+  const branch = (await git(["branch", "--show-current"], cwd)).trim()
+  if (!branch) return null
+
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (isDefaultBranch(branch, defaultBranch)) return null
+
+  const repo = await getRepoNameWithOwner(cwd)
+  return repo ? { branch, cwd, repo } : null
+}
+
+async function getStoredChangesRequested(
+  repo: string,
+  branch: string
+): Promise<ChangesRequestedReview[] | null | undefined> {
+  try {
+    const { getIssueStoreReader } = await import("../src/issue-store.ts")
+    const branchDetail: PrBranchDetail | null = await getIssueStoreReader().getPrBranchDetail(
+      repo,
+      branch
+    )
+    if (branchDetail !== null && branchDetail.reviewDecision !== "CHANGES_REQUESTED") return null
+    return branchDetail?.changesRequestedReviews
+  } catch {
+    return undefined
+  }
+}
+
+async function resolveChangesRequested(
+  stored: ChangesRequestedReview[] | null | undefined,
+  repo: string,
+  prNumber: number,
+  cwd: string
+): Promise<ChangesRequestedReview[] | null> {
+  if (stored !== undefined) return stored
+
+  const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${prNumber}/reviews`], cwd)
+  if (!reviews) return null
+  return reviews
+    .filter((review) => review.state === "CHANGES_REQUESTED")
+    .map((review) => ({ login: review.user.login, body: review.body }))
+}
+
+function buildChangesRequestedContext(
+  input: ShellHookInput,
+  pr: { number: number; title: string },
+  changesRequested: ChangesRequestedReview[]
+): SwizHookOutput {
+  const reviewers = [...new Set(changesRequested.map((review) => review.login))].join(", ")
+  const skillInstalled = skillExistsForHookPayload(
+    "pr-comments-address",
+    input as Record<string, unknown>
+  )
+  const skillRef = formatSkillReferenceForAgent("pr-comments-address")
+
+  const lines: string[] = [
+    `PR #${pr.number} ("${pr.title}") has changes requested by ${reviewers}.`,
+    ``,
+    `Address all reviewer feedback before committing or pushing to this branch.`,
+  ]
+
+  if (skillInstalled) {
+    lines.push(``, `Run ${skillRef} to work through each comment systematically.`)
+  } else {
+    lines.push(``, `Review and address all feedback: gh pr view ${pr.number} --comments`)
+  }
+
+  const details = changesRequested
+    .slice(0, 3)
+    .map(
+      (review) =>
+        `- @${review.login}: ${review.body ? review.body.slice(0, 200) : "No comment provided"}`
+    )
+    .join("\n")
+  if (details) lines.push(``, `Requested changes:`, details)
+
+  return postToolUseAdditionalContext(lines.join("\n"))
 }
 
 const posttoolusPrChangesContext: SwizShellHook = {
@@ -57,89 +148,27 @@ const posttoolusPrChangesContext: SwizShellHook = {
     if (!parsed.success) return {}
     if (!isCheckoutCommand(parsed.data)) return {}
 
-    const cwd = parsed.data.cwd ?? process.cwd()
-    if (
-      !(await isGitRepoForHookPayload(parsed.data, cwd)) ||
-      !(await isGitHubRemote(cwd)) ||
-      !hasGhCli()
-    )
-      return {}
+    const context = await resolvePrCheckoutContext(parsed.data)
+    if (!context) return {}
 
-    const branch = (await git(["branch", "--show-current"], cwd)).trim()
-    if (!branch) return {}
-
-    const defaultBranch = await getDefaultBranch(cwd)
-    if (isDefaultBranch(branch, defaultBranch)) return {}
-
-    const repo = await getRepoNameWithOwner(cwd)
-    if (!repo) return {}
-
-    // IssueStore fast-path: use cached review data when available
-    let storedChangesRequested: Array<{ login: string; body: string }> | null = null
-    try {
-      const { getIssueStoreReader } = await import("../src/issue-store.ts")
-      const branchDetail: PrBranchDetail | null = await getIssueStoreReader().getPrBranchDetail(
-        repo,
-        branch
-      )
-      if (branchDetail !== null && branchDetail.reviewDecision !== "CHANGES_REQUESTED") return {}
-      if (branchDetail?.changesRequestedReviews) {
-        storedChangesRequested = branchDetail.changesRequestedReviews
-      }
-    } catch {
-      // Store unavailable — fall through to API
-    }
+    const storedChangesRequested = await getStoredChangesRequested(context.repo, context.branch)
+    if (storedChangesRequested === null) return {}
 
     const pr = await getOpenPrForBranch<{ number: number; title: string }>(
-      branch,
-      cwd,
+      context.branch,
+      context.cwd,
       "number,title"
     )
     if (!pr) return {}
 
-    let changesRequested: Array<{ login: string; body?: string }>
-    if (storedChangesRequested !== null) {
-      changesRequested = storedChangesRequested
-    } else {
-      const reviews = await ghJson<Review[]>(
-        ["api", `repos/${repo}/pulls/${pr.number}/reviews`],
-        cwd
-      )
-      if (!reviews) return {}
-      changesRequested = reviews
-        .filter((r) => r.state === "CHANGES_REQUESTED")
-        .map((r) => ({ login: r.user.login, body: r.body }))
-    }
-    if (changesRequested.length === 0) return {}
-
-    const reviewers = [...new Set(changesRequested.map((r) => r.login))].join(", ")
-    const skillInstalled = skillExistsForHookPayload(
-      "pr-comments-address",
-      input as Record<string, unknown>
+    const changesRequested = await resolveChangesRequested(
+      storedChangesRequested,
+      context.repo,
+      pr.number,
+      context.cwd
     )
-    const skillRef = formatSkillReferenceForAgent("pr-comments-address")
-
-    const lines: string[] = [
-      `PR #${pr.number} ("${pr.title}") has changes requested by ${reviewers}.`,
-      ``,
-      `Address all reviewer feedback before committing or pushing to this branch.`,
-    ]
-
-    if (skillInstalled) {
-      lines.push(``, `Run ${skillRef} to work through each comment systematically.`)
-    } else {
-      lines.push(``, `Review and address all feedback: gh pr view ${pr.number} --comments`)
-    }
-
-    const details = changesRequested
-      .slice(0, 3)
-      .map((r) => `- @${r.login}: ${r.body ? r.body.slice(0, 200) : "No comment provided"}`)
-      .join("\n")
-    if (details) {
-      lines.push(``, `Requested changes:`, details)
-    }
-
-    return postToolUseAdditionalContext(lines.join("\n"))
+    if (!changesRequested || changesRequested.length === 0) return {}
+    return buildChangesRequestedContext(input, pr, changesRequested)
   },
 }
 

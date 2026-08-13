@@ -35,40 +35,54 @@ import { formatActionPlan } from "../src/utils/inline-hook-helpers.ts"
 const GH_API_PR_COMMENTS_READ_RE = /\bgh\s+api\b[^\n]*\/pulls\/\d+\/(?:comments|reviews)\b/
 const SKILL_NAME = GATE_REQUIRED_SKILLS.prCommentsAddress.name
 
+interface PrCommentReadContext {
+  cwd: string
+  hookInput: ReturnType<typeof shellHookInputSchema.parse>
+}
+
+function getPrCommentReadContext(input: unknown): PrCommentReadContext | null {
+  const hookInput = shellHookInputSchema.parse(input)
+  if (!isShellTool((hookInput.tool_name as string) ?? "")) return null
+  const command = (hookInput.tool_input as Record<string, string>)?.command ?? ""
+  if (!GH_API_PR_COMMENTS_READ_RE.test(command)) return null
+  if (!skillExistsForHookPayload(SKILL_NAME, hookInput as Record<string, unknown>)) return null
+  return { cwd: hookInput.cwd ?? process.cwd(), hookInput }
+}
+
+async function findCurrentBranchPr(
+  context: PrCommentReadContext
+): Promise<{ number: number } | null> {
+  if (
+    !(await isGitRepoForHookPayload(context.hookInput as Record<string, unknown>, context.cwd)) ||
+    !(await isGitHubRemote(context.cwd)) ||
+    !hasGhCli()
+  ) {
+    return null
+  }
+
+  const branch = (await git(["branch", "--show-current"], context.cwd)).trim()
+  if (!branch) return null
+  const defaultBranch = await getDefaultBranch(context.cwd)
+  if (isDefaultBranch(branch, defaultBranch)) return null
+  return await getOpenPrForBranch<{ number: number }>(branch, context.cwd, "number")
+}
+
 const pretoolusePrCommentReadGate: SwizToolHook = {
   name: "pretooluse-pr-comment-read-gate",
   event: "preToolUse",
   timeout: 12,
 
   async run(input: unknown): Promise<SwizHookOutput> {
-    const hookInput = shellHookInputSchema.parse(input)
-    const cwd = hookInput.cwd ?? process.cwd()
-
-    if (!isShellTool((hookInput.tool_name as string) ?? "")) return {}
-    const command = (hookInput.tool_input as Record<string, string>)?.command ?? ""
-    if (!GH_API_PR_COMMENTS_READ_RE.test(command)) return {}
-
-    if (!skillExistsForHookPayload(SKILL_NAME, hookInput as Record<string, unknown>)) {
-      return {}
-    }
-    if (
-      !(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd)) ||
-      !(await isGitHubRemote(cwd)) ||
-      !hasGhCli()
-    )
-      return {}
-
-    const branch = (await git(["branch", "--show-current"], cwd)).trim()
-    if (!branch) return {}
-
-    const defaultBranch = await getDefaultBranch(cwd)
-    if (isDefaultBranch(branch, defaultBranch)) return {}
-
-    const pr = await getOpenPrForBranch<{ number: number }>(branch, cwd, "number")
+    const context = getPrCommentReadContext(input)
+    if (!context) return {}
+    const pr = await findCurrentBranchPr(context)
     if (!pr) return {}
 
     const recencyOptions = {}
-    const recentSkills = await getRecentlyInvokedSkillsForCurrentSession(hookInput, recencyOptions)
+    const recentSkills = await getRecentlyInvokedSkillsForCurrentSession(
+      context.hookInput,
+      recencyOptions
+    )
     if (recentSkills.includes(SKILL_NAME)) {
       return preToolUseAllow(
         `/pr-comments-address was recently invoked — reading PR #${pr.number} comments is permitted.`

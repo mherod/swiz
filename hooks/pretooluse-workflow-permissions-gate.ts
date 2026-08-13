@@ -24,6 +24,36 @@ import {
 import { isFileEditTool } from "../src/tool-matchers.ts"
 import { getDefaultBranch } from "../src/utils/git-utils.ts"
 
+interface WorkflowPermissionEdit {
+  cwd: string
+  filePath: string
+}
+
+function getFilePath(toolInput: Record<string, string | undefined> | undefined): string {
+  return (toolInput?.file_path ?? "").normalize("NFKC")
+}
+
+function getNewContent(toolInput: Record<string, string | undefined> | undefined): string {
+  return (toolInput?.new_string ?? toolInput?.content ?? "").normalize("NFKC")
+}
+
+function isWorkflowFile(filePath: string): boolean {
+  return /\.github\/workflows\/[^/]+\.ya?ml$/.test(filePath)
+}
+
+function getWorkflowPermissionEdit(rawInput: unknown): WorkflowPermissionEdit | null {
+  const input = rawInput as Record<string, any>
+  if (!isFileEditTool(String(input.tool_name ?? ""))) return null
+
+  const toolInput = input.tool_input as Record<string, string | undefined> | undefined
+  const filePath = getFilePath(toolInput)
+  if (!filePath || !isWorkflowFile(filePath)) return null
+
+  const newContent = getNewContent(toolInput)
+  if (!/^\s*permissions\s*:/m.test(newContent)) return null
+  return { cwd: (input.cwd as string | undefined) ?? process.cwd(), filePath }
+}
+
 const pretoolusWorkflowPermissionsGate: SwizHook = {
   name: "pretooluse-workflow-permissions-gate",
   event: "preToolUse",
@@ -31,29 +61,19 @@ const pretoolusWorkflowPermissionsGate: SwizHook = {
   timeout: 5,
 
   async run(rawInput) {
-    const input = rawInput as Record<string, any>
-    if (!isFileEditTool(String(input.tool_name ?? ""))) return {}
-
-    const toolInput = input.tool_input as Record<string, string | undefined> | undefined
-    const filePath: string = (toolInput?.file_path ?? "").normalize("NFKC")
-    if (!filePath) return {}
-    if (!/\.github\/workflows\/[^/]+\.ya?ml$/.test(filePath)) return {}
-
-    const newContent: string = (toolInput?.new_string ?? toolInput?.content ?? "").normalize("NFKC")
-    if (!/^\s*permissions\s*:/m.test(newContent)) return {}
-
-    const cwd = (input.cwd as string | undefined) ?? process.cwd()
-    const currentBranch = await git(["branch", "--show-current"], cwd)
+    const edit = getWorkflowPermissionEdit(rawInput)
+    if (!edit) return {}
+    const currentBranch = await git(["branch", "--show-current"], edit.cwd)
     if (!currentBranch) return {}
 
-    const defaultBranch = await getDefaultBranch(cwd)
+    const defaultBranch = await getDefaultBranch(edit.cwd)
     if (currentBranch === defaultBranch) {
       return preToolUseAllow(
         `Continue in default-branch workflow-permissions mode: permissions edits are approved only on '${defaultBranch}'.`
       )
     }
 
-    return preToolUseDeny(buildPermissionsBlockMsg(filePath, currentBranch, defaultBranch))
+    return preToolUseDeny(buildPermissionsBlockMsg(edit.filePath, currentBranch, defaultBranch))
   },
 }
 

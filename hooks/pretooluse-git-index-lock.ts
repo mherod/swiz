@@ -338,6 +338,59 @@ async function spawnForProcessInspection(
   }
 }
 
+async function findGitProcessIds(
+  deadlineMs: number,
+  runtime: ProcessInspectionRuntime
+): Promise<number[] | null> {
+  const timeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
+  if (timeoutMs === null) return null
+  const result = await spawnForProcessInspection(runtime, ["pgrep", "-f", "git"], timeoutMs)
+  if (result === null || result.timedOut) return null
+  if (result.exitCode !== 0) return []
+
+  return compact(
+    result.stdout
+      .trim()
+      .split("\n")
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0)
+  )
+}
+
+async function excludeAncestorProcesses(
+  gitPids: number[],
+  deadlineMs: number,
+  runtime: ProcessInspectionRuntime
+): Promise<number[] | null> {
+  const timeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
+  if (timeoutMs === null) return null
+  const result = await spawnForProcessInspection(runtime, ["ps", "-eo", "pid,ppid"], timeoutMs)
+  if (result === null || result.timedOut || result.exitCode !== 0) return null
+
+  const ancestors = walkAncestry(parseParentMap(result.stdout), runtime.ppid())
+  const currentPid = runtime.pid()
+  return gitPids.filter((pid) => pid !== currentPid && !ancestors.has(pid))
+}
+
+async function processesUseRepo(
+  pids: number[],
+  repoRoot: string,
+  deadlineMs: number,
+  runtime: ProcessInspectionRuntime
+): Promise<boolean> {
+  const timeoutMs = boundedTimeoutMs(deadlineMs, LSOF_TIMEOUT_MS, runtime)
+  if (timeoutMs === null) return true
+  const result = await spawnForProcessInspection(
+    runtime,
+    ["lsof", "-a", "-p", pids.join(","), "-d", "cwd", "-Fn"],
+    timeoutMs
+  )
+  if (result === null || result.timedOut) return true
+  if (lsofOutputUsesRepo(result.stdout, repoRoot)) return true
+  if (result.stdout.trim().length > 0 || result.exitCode === 0) return false
+  return result.stderr.trim().length > 0
+}
+
 /**
  * Inspect running Git processes without allowing subprocess work to exceed the
  * lock-release deadline. Candidate PIDs are checked in one lsof invocation so
@@ -348,48 +401,15 @@ export async function inspectGitProcessesForRepo(
   deadlineMs: number,
   runtime: ProcessInspectionRuntime = defaultRuntime
 ): Promise<boolean> {
-  const pgrepTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
-  if (pgrepTimeoutMs === null) return true
-  const pgrepResult = await spawnForProcessInspection(
-    runtime,
-    ["pgrep", "-f", "git"],
-    pgrepTimeoutMs
-  )
-  if (pgrepResult === null) return true
-  if (pgrepResult.timedOut) return true
-  if (pgrepResult.exitCode !== 0) return false
-
-  const gitPids = compact(
-    pgrepResult.stdout
-      .trim()
-      .split("\n")
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 0)
-  )
+  const gitPids = await findGitProcessIds(deadlineMs, runtime)
+  if (gitPids === null) return true
   if (gitPids.length === 0) return false
 
-  const psTimeoutMs = boundedTimeoutMs(deadlineMs, 3_000, runtime)
-  if (psTimeoutMs === null) return true
-  const psResult = await spawnForProcessInspection(runtime, ["ps", "-eo", "pid,ppid"], psTimeoutMs)
-  if (psResult === null) return true
-  if (psResult.timedOut || psResult.exitCode !== 0) return true
-
-  const ancestors = walkAncestry(parseParentMap(psResult.stdout), runtime.ppid())
-  const currentPid = runtime.pid()
-  const nonAncestorPids = gitPids.filter((pid) => pid !== currentPid && !ancestors.has(pid))
+  const nonAncestorPids = await excludeAncestorProcesses(gitPids, deadlineMs, runtime)
+  if (nonAncestorPids === null) return true
   if (nonAncestorPids.length === 0) return false
 
-  const lsofTimeoutMs = boundedTimeoutMs(deadlineMs, LSOF_TIMEOUT_MS, runtime)
-  if (lsofTimeoutMs === null) return true
-  const lsofResult = await spawnForProcessInspection(
-    runtime,
-    ["lsof", "-a", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"],
-    lsofTimeoutMs
-  )
-  if (lsofResult === null || lsofResult.timedOut) return true
-  if (lsofOutputUsesRepo(lsofResult.stdout, repoRoot)) return true
-  if (lsofResult.stdout.trim().length > 0 || lsofResult.exitCode === 0) return false
-  return lsofResult.stderr.trim().length > 0
+  return await processesUseRepo(nonAncestorPids, repoRoot, deadlineMs, runtime)
 }
 
 export async function evaluatePretooluseGitIndexLock(

@@ -60,34 +60,40 @@ export async function getReadyIssue(
   return readyIssues[0] ?? null
 }
 
-export async function evaluatePushAutosteerIssue(input: unknown): Promise<SwizHookOutput> {
-  if (!input || typeof input !== "object") return {}
-  const parsed = postToolUseHookInputSchema.parse(input)
+interface PushAutosteerContext {
+  cwd: string
+  sessionId: string
+}
 
+function parsePushAutosteerContext(input: unknown): PushAutosteerContext | null {
+  if (!input || typeof input !== "object") return null
+  const parsed = postToolUseHookInputSchema.parse(input)
   const toolName = typeof parsed.tool_name === "string" ? parsed.tool_name : ""
   const toolInput = parsed.tool_input as { command?: string } | undefined
   const command = String(toolInput?.command ?? "")
-  if (!isPushCommand(toolName, command)) return {}
+  if (!isPushCommand(toolName, command)) return null
 
-  const cwd = parsed.cwd ?? process.cwd()
+  const sessionId = parsed.session_id ?? ""
+  if (!sessionId) return null
+  return { cwd: parsed.cwd ?? process.cwd(), sessionId }
+}
+
+export async function evaluatePushAutosteerIssue(input: unknown): Promise<SwizHookOutput> {
+  const context = parsePushAutosteerContext(input)
+  if (!context) return {}
 
   // Verify the push actually landed
-  if (!(await verifyPushLanded(cwd))) return {}
-
-  // Check if we have no incomplete/pending tasks in the session
-  const sessionId = parsed.session_id ?? ""
-  if (!sessionId) return {}
-
-  if (await hasActiveTasks(sessionId)) return {}
+  if (!(await verifyPushLanded(context.cwd))) return {}
+  if (await hasActiveTasks(context.sessionId)) return {}
 
   // Read open and ready issues from the local IssueStore
-  const pick = await getReadyIssue(cwd)
+  const pick = await getReadyIssue(context.cwd)
   if (!pick) return {}
 
   const message = `Please look into the issue store for a new issue to work on. Ready issue available: #${pick.number} "${pick.title}".`
 
   // Enqueue steering message as asap so it's delivered immediately to the terminal
-  await scheduleAutoSteer(sessionId, message, "asap", cwd)
+  await scheduleAutoSteer(context.sessionId, message, "asap", context.cwd)
 
   return {}
 }

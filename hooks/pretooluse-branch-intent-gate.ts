@@ -22,6 +22,10 @@ import { skillAdvice } from "../src/skill-utils.ts"
 import { isCodeChangeTool, isShellTool } from "../src/tool-matchers.ts"
 import { linesAfterLatestUserMessage } from "../src/transcript-utils.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
+import {
+  getRepositoryWorkflowHookContext,
+  parseAssistantContent,
+} from "./repository-workflow-hook-utils.ts"
 
 // Skill names that activate this gate
 const WORKFLOW_SKILLS = new Set(["work-on-issue", "work-on-prs"])
@@ -76,33 +80,24 @@ function detectSkillInvocation(content: unknown[]): boolean {
 }
 
 function scanLines(lines: string[]): ScanResult {
-  let inWorkflow = false
-  let targetDeclared = false
-  let baseDeclared = false
+  const result: ScanResult = {
+    inWorkflow: false,
+    targetDeclared: false,
+    baseDeclared: false,
+  }
 
   for (const line of linesAfterLatestUserMessage(lines)) {
-    if (!line.trim()) continue
-    let entry: Record<string, any>
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (!entry || typeof entry !== "object") continue
-    if (entry.type !== "assistant") continue
-
-    const content = entry.message?.content
-    if (!Array.isArray(content)) continue
-
-    if (detectSkillInvocation(content)) inWorkflow = true
+    const content = parseAssistantContent(line)
+    if (!content) continue
+    if (detectSkillInvocation(content)) result.inWorkflow = true
 
     for (const text of extractTextBlocks(content)) {
-      if (TARGET_BRANCH_RE.test(text)) targetDeclared = true
-      if (INTEGRATION_BASE_RE.test(text)) baseDeclared = true
+      if (TARGET_BRANCH_RE.test(text)) result.targetDeclared = true
+      if (INTEGRATION_BASE_RE.test(text)) result.baseDeclared = true
     }
   }
 
-  return { inWorkflow, targetDeclared, baseDeclared }
+  return result
 }
 
 // ── Command classification ────────────────────────────────────────────────────
@@ -115,6 +110,21 @@ function isDiscoveryCommand(command: string): boolean {
 /** Returns true when a Bash command creates a new branch (implementation work). */
 function isBranchCreateCommand(command: string): boolean {
   return BRANCH_CREATE_RE.test(command)
+}
+
+function shellCommandNeedsBranchIntent(command: string): boolean {
+  if (isBranchCreateCommand(command)) return true
+  if (isDiscoveryCommand(command)) return false
+  return false
+}
+
+function toolNeedsBranchIntent(toolName: string, command: string): boolean {
+  if (isCodeChangeTool(toolName)) return true
+  return isShellTool(toolName) && shellCommandNeedsBranchIntent(command)
+}
+
+function branchIntentIsSatisfied(result: ScanResult): boolean {
+  return result.targetDeclared && result.baseDeclared
 }
 
 // ── Denial message ────────────────────────────────────────────────────────────
@@ -156,33 +166,18 @@ function buildDenyMessage(toolName: string): string {
 
 export async function evaluatePretoolusBranchIntentGate(input: unknown): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
-  const cwd = hookInput.cwd ?? process.cwd()
-  const toolName = hookInput.tool_name ?? ""
-  const transcriptPath = hookInput.transcript_path ?? ""
+  const { command, cwd, toolName, transcriptPath } = getRepositoryWorkflowHookContext(hookInput)
 
-  const isCodeChange = isCodeChangeTool(toolName)
-  const isShell = isShellTool(toolName)
-
-  if (!isCodeChange && !isShell) return {}
+  if (!toolNeedsBranchIntent(toolName, command)) return {}
 
   if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
-
-  // For shell tools, classify the command before doing expensive transcript I/O
-  const command = String((hookInput.tool_input as Record<string, any>)?.command ?? "").normalize(
-    "NFKC"
-  )
-  if (isShell) {
-    const branchCreate = isBranchCreateCommand(command)
-    if (!branchCreate && isDiscoveryCommand(command)) return {}
-    if (!branchCreate) return {}
-  }
 
   const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
   const { inWorkflow, targetDeclared, baseDeclared } = scanLines(lines)
 
   if (!inWorkflow) return {}
-  if (targetDeclared && baseDeclared) return {}
+  if (branchIntentIsSatisfied({ inWorkflow, targetDeclared, baseDeclared })) return {}
 
   return preToolUseDeny(buildDenyMessage(toolName))
 }

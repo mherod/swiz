@@ -26,6 +26,10 @@ import {
   normalizeBranchReference,
 } from "../src/utils/branch-reference.ts"
 import { resolveSessionLines } from "../src/utils/transcript.ts"
+import {
+  getRepositoryWorkflowHookContext,
+  parseAssistantContent,
+} from "./repository-workflow-hook-utils.ts"
 
 const WORKFLOW_SKILL = "work-on-prs"
 
@@ -74,34 +78,26 @@ function extractHeadBranchFromText(text: string): string | null {
   return normalizeBranchReference(match[1] ?? "")
 }
 
+function updateScanResult(result: ScanResult, content: unknown[]): void {
+  if (detectWorkflowSkill(content)) result.inWorkflow = true
+
+  for (const block of content) {
+    const candidate = block as Record<string, any>
+    if (candidate?.type !== "text" || typeof candidate.text !== "string") continue
+    const branch = extractHeadBranchFromText(candidate.text)
+    if (branch) result.prHeadBranch = branch
+  }
+}
+
 function scanLines(lines: string[]): ScanResult {
-  let inWorkflow = false
-  let prHeadBranch: string | null = null
+  const result: ScanResult = { inWorkflow: false, prHeadBranch: null }
 
   for (const line of linesAfterLatestUserMessage(lines)) {
-    if (!line.trim()) continue
-    let entry: Record<string, any>
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (entry?.type !== "assistant") continue
-    const content = entry.message?.content
-    if (!Array.isArray(content)) continue
-
-    if (detectWorkflowSkill(content)) inWorkflow = true
-
-    for (const block of content) {
-      const b = block as Record<string, any>
-      if (b?.type === "text" && typeof b.text === "string") {
-        const branch = extractHeadBranchFromText(b.text)
-        if (branch) prHeadBranch = branch
-      }
-    }
+    const content = parseAssistantContent(line)
+    if (content) updateScanResult(result, content)
   }
 
-  return { inWorkflow, prHeadBranch }
+  return result
 }
 
 // ── Command classification ────────────────────────────────────────────────────
@@ -122,6 +118,25 @@ function isCheckoutToPrHead(command: string, prHeadBranch: string): boolean {
     GIT_CHECKOUT_PLAIN_RE.test(command) &&
     branchReferenceAliases(prHeadBranch).some((branch) => command.includes(branch))
   )
+}
+
+function toolNeedsPrHeadAlignment(toolName: string, command: string): boolean {
+  if (isCodeChangeTool(toolName)) return true
+  return isShellTool(toolName) && isBlockedBashCommand(command)
+}
+
+function getDeclaredPrHead(result: ScanResult): string | null {
+  if (!result.inWorkflow) return null
+  return result.prHeadBranch
+}
+
+async function getMisalignedBranches(
+  cwd: string,
+  prHeadBranch: string
+): Promise<{ currentBranch: string; prHeadBranch: string } | null> {
+  const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+  if (!currentBranch || branchReferencesAlign(currentBranch, prHeadBranch)) return null
+  return { currentBranch, prHeadBranch }
 }
 
 // ── Denial message ────────────────────────────────────────────────────────────
@@ -162,37 +177,25 @@ export async function evaluatePretoolusePrHeadCheckoutGate(
   input: unknown
 ): Promise<SwizHookOutput> {
   const hookInput = toolHookInputSchema.parse(input)
-  const cwd = hookInput.cwd ?? process.cwd()
-  const toolName = hookInput.tool_name ?? ""
-  const transcriptPath = hookInput.transcript_path ?? ""
+  const { command, cwd, toolName, transcriptPath } = getRepositoryWorkflowHookContext(hookInput)
 
-  const isCodeChange = isCodeChangeTool(toolName)
-  const isShell = isShellTool(toolName)
-
-  if (!isCodeChange && !isShell) return {}
+  if (!toolNeedsPrHeadAlignment(toolName, command)) return {}
   if (!(await isGitRepoForHookPayload(hookInput as Record<string, unknown>, cwd))) return {}
   if (!transcriptPath) return {}
 
-  // For shell tools, quick-exit if the command is not in the blocked set
-  const command = String((hookInput.tool_input as Record<string, any>)?.command ?? "").normalize(
-    "NFKC"
-  )
-  if (isShell && !isBlockedBashCommand(command)) return {}
-
   const lines = await resolveSessionLines(hookInput as Record<string, any>, transcriptPath)
-  const { inWorkflow, prHeadBranch } = scanLines(lines)
-
-  if (!inWorkflow) return {}
+  const prHeadBranch = getDeclaredPrHead(scanLines(lines))
   if (!prHeadBranch) return {}
 
-  const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
-  if (!currentBranch) return {}
-  if (branchReferencesAlign(currentBranch, prHeadBranch)) return {}
+  const misalignment = await getMisalignedBranches(cwd, prHeadBranch)
+  if (!misalignment) return {}
 
   // Checkout/switch TO the PR head branch is always allowed
-  if (isShell && isCheckoutToPrHead(command, prHeadBranch)) return {}
+  if (isShellTool(toolName) && isCheckoutToPrHead(command, prHeadBranch)) return {}
 
-  return preToolUseDeny(buildDenyMessage(currentBranch, prHeadBranch, toolName))
+  return preToolUseDeny(
+    buildDenyMessage(misalignment.currentBranch, misalignment.prHeadBranch, toolName)
+  )
 }
 
 const pretoolusePrHeadCheckoutGate: SwizToolHook = {

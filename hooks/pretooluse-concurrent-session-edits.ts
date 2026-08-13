@@ -31,30 +31,32 @@ export function formatConcurrentEditContext(displayPath: string, ageMs: number):
   return buildConcurrentFileEditGuidance(displayPath, formatDuration(ageMs))
 }
 
-export async function evaluatePretooluseConcurrentSessionEdits(
-  input: FileEditHookInput,
-  nowMs = Date.now()
-): Promise<SwizHookOutput> {
+interface ConcurrentEditContext {
+  cwd: string
+  filePaths: string[]
+  sessionId: string
+}
+
+function getConcurrentEditContext(input: FileEditHookInput): ConcurrentEditContext | null {
   const parsed = fileEditHookInputSchema.parse(input)
-  if (!isFileEditTool(parsed.tool_name ?? "")) return {}
+  if (!isFileEditTool(parsed.tool_name ?? "")) return null
 
   const cwd = parsed.cwd ?? ""
   const sessionId = parsed.session_id ?? ""
   const filePaths = extractFileEditTargetPaths(parsed.tool_input ?? {}).map((filePath) =>
     resolve(cwd, filePath)
   )
-  if (filePaths.length === 0 || !cwd || !sessionId) return {}
+  if (filePaths.length === 0 || !cwd || !sessionId) return null
+  return { cwd, filePaths, sessionId }
+}
 
-  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
-    import("../src/issue-store.ts"),
-    import("../src/transcript-utils.ts"),
-  ])
-
-  const projectKey = projectKeyFromCwd(cwd)
-  if (!projectKey) return {}
-
-  const store = getIssueStore()
-  const since = nowMs - CONCURRENT_EDIT_WINDOW_MS
+function findLatestConcurrentEdit(
+  filePaths: string[],
+  projectKey: string,
+  sessionId: string,
+  since: number,
+  store: ReturnType<typeof import("../src/issue-store.ts").getIssueStore>
+): { filePath: string; updatedAt: number } | undefined {
   const pendingOverlaps = filePaths.flatMap((filePath) => {
     const latest = store.listOtherSessionEditors(projectKey, sessionId, filePath, since)[0]
     if (!latest) return []
@@ -63,11 +65,37 @@ export async function evaluatePretooluseConcurrentSessionEdits(
     return [{ filePath, updatedAt: latest.updated_at }]
   })
   pendingOverlaps.sort((a, b) => b.updatedAt - a.updatedAt)
-  const latest = pendingOverlaps[0]
+  return pendingOverlaps[0]
+}
+
+export async function evaluatePretooluseConcurrentSessionEdits(
+  input: FileEditHookInput,
+  nowMs = Date.now()
+): Promise<SwizHookOutput> {
+  const editContext = getConcurrentEditContext(input)
+  if (!editContext) return {}
+
+  const [{ getIssueStore }, { projectKeyFromCwd }] = await Promise.all([
+    import("../src/issue-store.ts"),
+    import("../src/transcript-utils.ts"),
+  ])
+
+  const projectKey = projectKeyFromCwd(editContext.cwd)
+  if (!projectKey) return {}
+
+  const store = getIssueStore()
+  const since = nowMs - CONCURRENT_EDIT_WINDOW_MS
+  const latest = findLatestConcurrentEdit(
+    editContext.filePaths,
+    projectKey,
+    editContext.sessionId,
+    since,
+    store
+  )
   if (!latest) return {}
 
   const context = formatConcurrentEditContext(
-    displayPathFor(cwd, latest.filePath),
+    displayPathFor(editContext.cwd, latest.filePath),
     Math.max(0, nowMs - latest.updatedAt)
   )
   return preToolUseAllowWithContext("Concurrent work is normal — continue your task", context, {
