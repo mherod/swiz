@@ -60,6 +60,7 @@ import {
 import { startDaemonWebServer } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import { installDaemonLaunchAgent, uninstallDaemonLaunchAgent } from "./install.ts"
+import { ensureShimInstallation } from "./shim.ts"
 import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./status-line.ts"
 
 const TRANSCRIPT_MEMORY_RETENTION_MS = 30 * 60 * 1000 // 30 mins
@@ -584,6 +585,12 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   // Re-register repos previously synced so the daemon resumes background sync
   // on startup without waiting for an active dispatch session.
   void caches.upstreamSyncRegistry.restoreKnownRepos()
+
+  // Self-heal the shell shim installation in the background
+  ensureShimInstallation().catch((err) => {
+    stderrLog("daemon startup", `[daemon] Failed to heal shim installation: ${err}`)
+  })
+
   const pruneTranscriptMemory = createPruner(
     state,
     caches,

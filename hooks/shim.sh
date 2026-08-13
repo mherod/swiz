@@ -722,3 +722,11 @@ gh() {
 
   _swiz_run_gh "$@"
 }
+
+# ── Daemon health ────────────────────────────────────────────────────────────
+# If the daemon's launch agent plist is missing, try to heal it in the background.
+if [[ ! -f "$HOME/Library/LaunchAgents/com.swiz.daemon.plist" ]]; then
+  if command -v swiz >/dev/null 2>&1; then
+    (command swiz daemon --install >/dev/null 2>&1 &)
+  fi
+fi
