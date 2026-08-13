@@ -33,6 +33,74 @@ async function runShell(
 }
 
 describe("shell shim runtime", () => {
+  async function runPackageManagerGuard(cwd: string, invoked: string, args: string[] = []) {
+    return await runShell(
+      ZSH_PATH ?? "zsh",
+      [
+        "-f",
+        "-c",
+        'source "$1"; invoked="$2"; shift 2; _swiz_pm_guard "$invoked" "$@"; guard_exit=$?; [[ "$guard_exit" -eq 1 ]]',
+        "swiz",
+        SHIM_PATH,
+        invoked,
+        ...args,
+      ],
+      { cwd, env: { SWIZ_SHIM: "strict" } }
+    )
+  }
+
+  testWithZsh("respects an explicit npm package manager below a pnpm project", async () => {
+    const parent = await tmp.create("swiz-shim-pm-parent-")
+    const project = join(parent, "project")
+    await mkdir(project)
+    await Bun.write(join(parent, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+    await Bun.write(
+      join(project, "package.json"),
+      JSON.stringify({ name: "npm-project", packageManager: "npm@11.5.1" })
+    )
+
+    const result = await runPackageManagerGuard(project, "npm")
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).not.toContain("Do not use `npm`")
+  })
+
+  testWithZsh("allows npm when npm and pnpm lockfiles are both present", async () => {
+    const project = await tmp.create("swiz-shim-pm-mixed-")
+    await Bun.write(join(project, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+    await Bun.write(join(project, "package-lock.json"), "{}\n")
+
+    const result = await runPackageManagerGuard(project, "npm")
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).not.toContain("Do not use `npm`")
+  })
+
+  testWithZsh("classifies npm --prefix commands from their target project", async () => {
+    const parent = await tmp.create("swiz-shim-pm-prefix-")
+    const project = join(parent, "project")
+    await mkdir(project)
+    await Bun.write(join(parent, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+    await Bun.write(join(project, "package-lock.json"), "{}\n")
+
+    const result = await runPackageManagerGuard(parent, "npm", ["--prefix", project, "test"])
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).not.toContain("Do not use `npm`")
+  })
+
+  testWithZsh("still blocks npm in an unambiguous pnpm project", async () => {
+    const project = await tmp.create("swiz-shim-pm-pnpm-")
+    await Bun.write(join(project, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+
+    const result = await runPackageManagerGuard(project, "npm")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain(
+      "swiz: Do not use `npm`. Project signals indicate `pnpm` is the expected package manager."
+    )
+  })
+
   testWithZsh("finds Bun before login PATH setup runs", async () => {
     const home = await tmp.create("swiz-shim-home-bun-path-")
     const bunInstall = join(home, ".bun")

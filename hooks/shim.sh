@@ -18,7 +18,8 @@
 builtin unalias \
   cd grep egrep fgrep find cp perl sed awk vim vi nano emacs \
   npm npx yarn pnpm bun node ts-node python python3 touch rm git gh \
-  _swiz_ensure_bun_path _swiz_detect_pm _swiz_detect_runtime _swiz_detect_runner \
+  _swiz_ensure_bun_path _swiz_declared_pm _swiz_package_dir _swiz_detect_pm \
+  _swiz_detect_runtime _swiz_detect_runner \
   _swiz_is_agent_process _swiz_is_agent_env _swiz_get_setting _swiz_guard \
   _swiz_pm_guard _swiz_has_function _swiz_chain_existing _swiz_run_git _swiz_run_gh \
   2>/dev/null || true
@@ -53,16 +54,76 @@ if ! _swiz_ensure_bun_path; then
 fi
 
 # ── Project convention detection ──────────────────────────────────────────────
-# Walk up from CWD to find the lockfile that identifies the project's PM.
-# Called per-command (fast — just stat checks).
+# Prefer an explicit packageManager declaration, then walk up from CWD for
+# lockfile signals. Conflicting npm and non-npm lockfiles are ambiguous, so the
+# shell shim fails open and leaves the canonical hook detector to decide.
+
+_swiz_declared_pm() {
+  local package_json="$1/package.json"
+  [[ -f "$package_json" ]] || return 0
+
+  command bun -e '
+    const supported = new Set(["bun", "pnpm", "yarn", "npm"])
+    try {
+      const packageJson = await Bun.file(Bun.argv.at(-1)).json()
+      const value = typeof packageJson.packageManager === "string"
+        ? packageJson.packageManager.split("@")[0]
+        : ""
+      if (supported.has(value)) process.stdout.write(value)
+    } catch {}
+  ' "$package_json" 2>/dev/null
+}
+
+_swiz_package_dir() {
+  local dir="$PWD"
+  local arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    shift
+    case "$arg" in
+      --)
+        break
+        ;;
+      --prefix)
+        [[ $# -gt 0 ]] && dir="$1"
+        break
+        ;;
+      --prefix=*)
+        dir="${arg#--prefix=}"
+        break
+        ;;
+    esac
+  done
+
+  case "$dir" in
+    /*) ;;
+    *) dir="$PWD/$dir" ;;
+  esac
+  echo "$dir"
+}
 
 _swiz_detect_pm() {
-  local dir="$PWD"
+  local dir="${1:-$PWD}"
   while true; do
-    [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]] && { echo "bun"; return; }
-    [[ -f "$dir/pnpm-lock.yaml" || -f "$dir/shrinkwrap.yaml" ]] && { echo "pnpm"; return; }
-    [[ -f "$dir/yarn.lock" || -f "$dir/.pnp.cjs" || -f "$dir/.pnp.js" ]] && { echo "yarn"; return; }
-    [[ -f "$dir/package-lock.json" || -f "$dir/npm-shrinkwrap.json" ]] && { echo "npm"; return; }
+    local declared
+    declared="$(_swiz_declared_pm "$dir")"
+    [[ -n "$declared" ]] && { echo "$declared"; return; }
+
+    local has_bun=0 has_pnpm=0 has_yarn=0 has_npm=0
+    [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]] && has_bun=1
+    [[ -f "$dir/pnpm-lock.yaml" || -f "$dir/shrinkwrap.yaml" ]] && has_pnpm=1
+    [[ -f "$dir/yarn.lock" || -f "$dir/.pnp.cjs" || -f "$dir/.pnp.js" ]] && has_yarn=1
+    [[ -f "$dir/package-lock.json" || -f "$dir/npm-shrinkwrap.json" ]] && has_npm=1
+
+    if (( has_npm == 1 && (has_bun == 1 || has_pnpm == 1 || has_yarn == 1) )); then
+      echo ""
+      return
+    fi
+
+    (( has_bun == 1 )) && { echo "bun"; return; }
+    (( has_pnpm == 1 )) && { echo "pnpm"; return; }
+    (( has_yarn == 1 )) && { echo "yarn"; return; }
+    (( has_npm == 1 )) && { echo "npm"; return; }
     local parent
     parent="$(command dirname "$dir")"
     [[ "$parent" == "$dir" ]] && break
@@ -78,8 +139,9 @@ _swiz_detect_runtime() {
 }
 
 _swiz_detect_runner() {
-  local pm
-  pm="$(_swiz_detect_pm)"
+  local pm target_dir
+  target_dir="$(_swiz_package_dir "$@")"
+  pm="$(_swiz_detect_pm "$target_dir")"
   case "$pm" in
     bun)  echo "bunx" ;;
     pnpm) echo "pnpm dlx" ;;
@@ -271,8 +333,9 @@ emacs() {
 
 _swiz_pm_guard() {
   local invoked="$1"; shift
-  local pm
-  pm="$(_swiz_detect_pm)"
+  local pm target_dir
+  target_dir="$(_swiz_package_dir "$@")"
+  pm="$(_swiz_detect_pm "$target_dir")"
 
   # No lockfile found — can't enforce, allow
   [[ -z "$pm" ]] && return 1
@@ -280,7 +343,7 @@ _swiz_pm_guard() {
   [[ "$invoked" == "$pm" ]] && return 1
 
   _swiz_guard "$invoked" "$pm" \
-    "This project uses \`$pm\` (detected from lockfile). Use \`$pm\` instead." "$@"
+    "Project signals indicate \`$pm\` is the expected package manager. Use \`$pm\` instead." "$@"
 }
 
 npm() {
@@ -290,7 +353,7 @@ npm() {
 
 npx() {
   local runner
-  runner="$(_swiz_detect_runner)"
+  runner="$(_swiz_detect_runner "$@")"
   [[ "$runner" == "npx" ]] && { command npx "$@"; return $?; }
   _swiz_guard npx "$runner" \
     "This project uses \`$runner\` instead of npx." "$@" && return 1
