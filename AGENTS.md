@@ -78,6 +78,7 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — parse with `stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, or `sessionHookInputSchema`, or annotate directly; **DO NOT** cast stdin with `as { ... }`.
 - Hook schemas (`hooks/schemas.ts`, `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `stopHookOutputSchema`, `taskUpdateInputSchema` — module doc = stdout fields by event. Settings (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
+- **DO**: Inspect runtime type predicate definitions (e.g. `isCurrentSessionUsageEvent` in `src/transcript-summary.ts`) before constructing mock test event objects to ensure correct property types (e.g. `timestamp` ISO string).
 - **Hook cooldowns**: `cooldownSeconds` skips re-runs within the window (per hook+cwd).
 - **Auto-steer**: `scheduleAutoSteer(sessionId, message, trigger?, cwd?)` (`hook-utils.ts`); pass `cwd`, branch on return (allow vs deny PreToolUse), `store.consumeOne()`. `requiredSettings: ["autoSteer"]`. Triggers: `next_turn`, `after_commit`, `after_all_tasks_complete`, `on_session_stop`.
 - **DO**: Memory-threshold checkpoints use `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode.
@@ -150,6 +151,7 @@ alwaysApply: false
 - Don't stop after step 3; stop hook requires origin current.
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI. **DON'T** pass `TaskOutput` timeout > 120000ms; 300000 always fails.
+- **DO**: Await active background tasks (`manage_task`) before triggering concurrent `git commit` or `git push` commands to prevent `.git/index.lock` collisions.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
 - **DON'T** close as `duplicate`/`wontfix` without file+line evidence per acceptance criterion.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
@@ -201,8 +203,8 @@ alwaysApply: false
 - Use `console.error` (not `console.log`) in CI/hook scripts. Use `debugLog` from `./debug.ts` elsewhere. `console.*` is blocked except where allowlisted in `src/debug-logging.test.ts` with a justification.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
-- DO NOT use top-level `await` in `src/` files — ESLint `no-restricted-syntax` rule blocks it. Use lazy async initialization with cached results instead: `let cache: T | null = null; async function load(): Promise<T> { if (cache !== null) return cache; cache = await fetch(); return cache; }`. Hooks in `hooks/` are exempt since they run as main modules.
-- DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
+- DO NOT use top-level `await` in `src/` files (ESLint `no-restricted-syntax` rule). Use lazy async initialization with cached results. Hooks in `hooks/` are exempt.
+- DO NOT embed ESC (0x1b) in regex literals (Biome `no-control-regex` rule). Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts`.
 - When parsing bun test output, check `/\bRan \d+ tests? across \d+ files?\./`; if absent, emit "unknown number of". Strip ANSI before matching.
 - **DO**: Rename declarations and all usages in one edit — splits in PreToolUse hooks cause deadlocks. **DON'T** add unrequested renames; change only what was asked for.
 - **DO**: When removing utility functions, grep usages and remove atomically. Removing only the definition leaves broken imports.
@@ -222,7 +224,7 @@ alwaysApply: false
 - **DON'T**: End with permission questions — authority is delegated. Execute; state what you're doing.
 - Test Biome rule changes with `biome check .` (not `biome check src/`); add overrides for directories with valid console usage.
 - Bun test reporter: `--reporter=dots`. Multi-file runs use bounded isolated workers (`--parallel=<1-8>`); never use `--concurrent`, which marks every test concurrent. Run once without pipe — piped re-runs trigger repeated-test hook.
-- **DO**: In `src/commands/daemon/ci-routes.test.ts` and `src/commands/daemon/issue-routes.test.ts`, use per-test cleanup ownership or `afterAll` for shared registries and temporary repositories. **DON'T** drain module-level cleanup arrays or delete shared temporary `cwd` paths in `afterEach`; multi-file execution can resolve a webhook count as `0` instead of `1` or make `Bun.spawn(["git", ...])` fail with `ENOENT`.
+- **DO**: In `ci-routes.test.ts` and `issue-routes.test.ts`, use per-test cleanup or `afterAll` for registries/repos. **DON'T** delete shared temporary `cwd` paths in `afterEach`.
 - **DO**: Edit a file between `bun run format` and `bun run lint` — hook detects no file changes on consecutive runs.
 - No `cd` in Bash; use absolute paths, `git -C`, `pnpm --prefix`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file` blocked; `sed -n` pipelines allowed. Use Read `offset`/`limit`.
