@@ -175,6 +175,12 @@ find() {
 # ── File editing (agents should use Edit/StrReplace tool) ────────────────────
 
 
+cp() {
+  _swiz_guard cp ditto \
+    "Use \`ditto <source> <destination>\` instead (preserves metadata and handles directories cleanly)." "$@" && return 1
+  command cp "$@"
+}
+
 perl() {
   _swiz_guard perl "Edit tool" \
     "Do not use perl to read or modify files. Instead, use the Read or Edit tools for robust file operations." "$@" && return 1
