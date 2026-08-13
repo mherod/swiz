@@ -1,0 +1,2295 @@
+{
+  "schemaVersion": 1,
+  "umbrellaIssue": 778,
+  "originalWarningCount": 258,
+  "warningCount": 248,
+  "rules": [
+    {
+      "ruleId": "@typescript-eslint/no-restricted-types",
+      "warningCount": 31
+    },
+    {
+      "ruleId": "complexity",
+      "warningCount": 171
+    },
+    {
+      "ruleId": "max-depth",
+      "warningCount": 28
+    },
+    {
+      "ruleId": "max-lines-per-function",
+      "warningCount": 8
+    },
+    {
+      "ruleId": "max-params",
+      "warningCount": 10
+    }
+  ],
+  "owners": [
+    {
+      "issue": 780,
+      "name": "hook-task",
+      "warningCount": 16,
+      "files": [
+        {
+          "path": "hooks/posttooluse-task-count-context.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 73,
+              "column": 8,
+              "message": "Function 'applyMutationOverlay' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 97,
+              "column": 8,
+              "message": "Async function 'evaluatePosttooluseTaskCountContext' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-no-phantom-task-completion.test.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "max-params",
+              "line": 30,
+              "column": 1,
+              "message": "Async function 'runHook' has too many parameters (6). Maximum allowed is 5."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-no-phantom-task-completion.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 154,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseNoPhantomTaskCompletion' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-task-governance.ts",
+          "warningCount": 11,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 785,
+              "column": 1,
+              "message": "Function 'checkDuplicateSubjectResolution' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 860,
+              "column": 1,
+              "message": "Async function 'runTaskStateChecks' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 860,
+              "column": 1,
+              "message": "Async function 'runTaskStateChecks' has too many parameters (8). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 996,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseRequireTasks' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1189,
+              "column": 1,
+              "message": "Async function 'handleTaskCompletion' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1515,
+              "column": 1,
+              "message": "Async function 'evaluateUpdatePlanGovernance' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1609,
+              "column": 1,
+              "message": "Async function 'checkNativeTaskUpdateCompletion' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1784,
+              "column": 8,
+              "message": "Async function 'evaluateNativeTaskUpdatePath' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1865,
+              "column": 8,
+              "message": "Async function 'evaluateBlockedToolPath' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1921,
+              "column": 1,
+              "message": "Async function 'evaluatePretooluseTaskGovernance' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 2003,
+              "column": 1,
+              "message": "Async function 'buildTraceContext' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/stop-incomplete-tasks.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 31,
+              "column": 8,
+              "message": "Async function 'evaluateStopIncompleteTasksHook' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 781,
+      "name": "hook-repository",
+      "warningCount": 15,
+      "files": [
+        {
+          "path": "hooks/posttooluse-pr-changes-context.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 55,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 21. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/posttooluse-push-autosteer-issue.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 63,
+              "column": 8,
+              "message": "Async function 'evaluatePushAutosteerIssue' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-branch-intent-gate.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 78,
+              "column": 1,
+              "message": "Function 'scanLines' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 157,
+              "column": 8,
+              "message": "Async function 'evaluatePretoolusBranchIntentGate' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-concurrent-session-edits.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 34,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseConcurrentSessionEdits' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-git-index-lock.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 346,
+              "column": 8,
+              "message": "Async function 'inspectGitProcessesForRepo' has a complexity of 18. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-issue-workflow-gate.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 147,
+              "column": 1,
+              "message": "Function 'scanLines' has a complexity of 29. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 297,
+              "column": 8,
+              "message": "Async function 'evaluateIssueWorkflowGate' has a complexity of 36. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-main-branch-scope-gate.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 240,
+              "column": 1,
+              "message": "Async function 'getPrMergeability' has a complexity of 20. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 320,
+              "column": 1,
+              "message": "Async function 'handlePrMerge' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 501,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseMainBranchScopeGate' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-pr-comment-read-gate.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 43,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 16. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-pr-head-checkout-gate.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 77,
+              "column": 1,
+              "message": "Function 'scanLines' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 161,
+              "column": 8,
+              "message": "Async function 'evaluatePretoolusePrHeadCheckoutGate' has a complexity of 18. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-workflow-permissions-gate.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 33,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 782,
+      "name": "hook-lifecycle",
+      "warningCount": 18,
+      "files": [
+        {
+          "path": "hooks/posttooluse-measure-lint-time.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 13,
+              "column": 8,
+              "message": "Async function 'evaluate' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 40,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 43,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            }
+          ]
+        },
+        {
+          "path": "hooks/posttooluse-measure-test-time.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 13,
+              "column": 8,
+              "message": "Async function 'evaluate' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 40,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 43,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-measure-lint-time.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 13,
+              "column": 8,
+              "message": "Function 'parseLintCommand' has a complexity of 34. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-measure-test-time.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 13,
+              "column": 8,
+              "message": "Function 'parseTestCommand' has a complexity of 36. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/sessionstart-environment-detects.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 22,
+              "column": 8,
+              "message": "Async function 'evaluateSessionstartEnvironmentDetects' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/sessionstart-self-heal.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 59,
+              "column": 1,
+              "message": "Async function 'findMissingDispatchEntries' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 74,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 76,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            }
+          ]
+        },
+        {
+          "path": "hooks/stop-required-skills.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 120,
+              "column": 1,
+              "message": "Async function 'hasPreCompactionSkill' has a complexity of 25. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 155,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 177,
+              "column": 5,
+              "message": "Async method 'applies' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 269,
+              "column": 8,
+              "message": "Async function 'evaluateStopRequiredSkills' has a complexity of 21. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/stop-ship-checklist/context.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 22,
+              "column": 8,
+              "message": "Async function 'resolveShipChecklistContext' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/stop-ship-checklist/evaluate.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 79,
+              "column": 8,
+              "message": "Async function 'evaluateStopShipChecklist' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 783,
+      "name": "hook-safety",
+      "warningCount": 20,
+      "files": [
+        {
+          "path": "hooks/permissionrequest-infraction-record.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 32,
+              "column": 8,
+              "message": "Function 'evaluatePermissionrequestInfractionRecord' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-apply-rsc-gate.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 63,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-banned-commands.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 577,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseBannedCommands' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-infraction-escalation.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 70,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseInfractionEscalation' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-inline-script-write-gate.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 20,
+              "column": 8,
+              "message": "Function 'parseQuotedBody' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-offensive-language.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 100,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseOffensiveLanguage' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-protect-sandbox.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 80,
+              "column": 1,
+              "message": "Function 'extractQuotedShellFragments' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 99,
+              "column": 1,
+              "message": "Async function 'normalizeShellPath' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 158,
+              "column": 1,
+              "message": "Async function 'shouldBlockShellCommand' has a complexity of 28. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 275,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 19. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-require-convert-to-kotlin.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 40,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 20. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-sandbox-guidance-consolidation.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 55,
+              "column": 3,
+              "message": "Method 'run' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-sandboxed-edits.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 220,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 19. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-skill-invocation-gate.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 140,
+              "column": 1,
+              "message": "Function 'classifyRequiredSkill' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 384,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-stuck-state.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 85,
+              "column": 1,
+              "message": "Function 'collectResults' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 225,
+              "column": 8,
+              "message": "Function 'parseStuckStateEvents' has a complexity of 18. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-ts-quality.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 405,
+              "column": 3,
+              "message": "Method 'run' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/pretooluse-update-memory-enforcement.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 290,
+              "column": 8,
+              "message": "Async function 'evaluatePretooluseUpdateMemoryEnforcement' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "hooks/sandbox-path-utils.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 131,
+              "column": 1,
+              "message": "Function 'isSafeAwkCommand' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 784,
+      "name": "command-runtime",
+      "warningCount": 26,
+      "files": [
+        {
+          "path": "src/commands/daemon.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 469,
+              "column": 8,
+              "message": "Async function 'hydratePersistedSessionToolState' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/cache/file-watcher-registry.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 144,
+              "column": 3,
+              "message": "Method 'shouldIgnore' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/cache/transcript-monitor.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 146,
+              "column": 3,
+              "message": "Async method 'checkProject' has a complexity of 34. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/compliance-routes.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 128,
+              "column": 8,
+              "message": "Async function 'handleComplianceRecord' has a complexity of 16. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/dispatch-routes.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 150,
+              "column": 1,
+              "message": "Function 'extractHookAllowMessage' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 263,
+              "column": 1,
+              "message": "Async function 'updateParsedPayloadMetrics' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 563,
+              "column": 1,
+              "message": "Async function 'prepareDaemonDispatchPayload' has a complexity of 15. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 628,
+              "column": 8,
+              "message": "Async function 'handleDispatchRoute' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/session-data.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 158,
+              "column": 3,
+              "message": "Static method 'extractMessages' has a complexity of 18. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/utils.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "max-params",
+              "line": 225,
+              "column": 8,
+              "message": "Async function 'persistSessionToolCall' has too many parameters (6). Maximum allowed is 5."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/daemon/worker-runtime.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 34,
+              "column": 1,
+              "message": "Function 'parseDispatchPayloadInThread' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/doctor.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 184,
+              "column": 1,
+              "message": "Async function 'handleAutoFixes' has a complexity of 24. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/doctor/checks/agent-config-sync.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 65,
+              "column": 8,
+              "message": "Async function 'checkAgentConfigSync' has a complexity of 16. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/doctor/cleanup.ts",
+          "warningCount": 11,
+          "warnings": [
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 223,
+              "column": 1,
+              "message": "Async function 'findOldTaskFiles' has too many lines (123). Maximum allowed is 110."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 268,
+              "column": 3,
+              "message": "Function 'oldTaskFromStatOnly' has too many parameters (6). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 363,
+              "column": 8,
+              "message": "Async function 'truncateJsonlFile' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 425,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 431,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 436,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 437,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 439,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 634,
+              "column": 1,
+              "message": "Async function 'getRealSessionMtime' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 677,
+              "column": 1,
+              "message": "Async function 'appendOrphanTasks' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 973,
+              "column": 1,
+              "message": "Function 'printCleanupResult' has too many parameters (6). Maximum allowed is 5."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/doctor/fix.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 269,
+              "column": 8,
+              "message": "Async function 'fixInvalidSkillEntries' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 640,
+              "column": 8,
+              "message": "Async function 'fixSkillConflicts' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 785,
+      "name": "command-operator",
+      "warningCount": 21,
+      "files": [
+        {
+          "path": "src/commands/manage.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 174,
+              "column": 1,
+              "message": "Function 'consumeManageValueFlag' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 268,
+              "column": 8,
+              "message": "Function 'parseManageArgs' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 500,
+              "column": 1,
+              "message": "Async function 'mergeMcpServers' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 666,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 16. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/mcp.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 364,
+              "column": 1,
+              "message": "Function 'hasQuantifier' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 383,
+              "column": 1,
+              "message": "Function 'hasUnsafeNestedQuantifier' has a complexity of 20. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 613,
+              "column": 1,
+              "message": "Async function 'serve' has too many lines (269). Maximum allowed is 110."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 747,
+              "column": 8,
+              "message": "Async arrow function has a complexity of 19. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/settings.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 563,
+              "column": 1,
+              "message": "Function 'buildProjectPolicyInfo' has a complexity of 18. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/skill.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "max-params",
+              "line": 156,
+              "column": 1,
+              "message": "Async function 'convertSupplementaryEntry' has too many parameters (6). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 704,
+              "column": 1,
+              "message": "Async function 'exportCommand' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/status-line.ts",
+          "warningCount": 8,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 378,
+              "column": 1,
+              "message": "Function 'classifyLatestRuns' has a complexity of 17. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 410,
+              "column": 8,
+              "message": "Function 'summarizeGitHubCiRuns' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 754,
+              "column": 1,
+              "message": "Function 'assembleSnapshot' has too many parameters (9). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1011,
+              "column": 8,
+              "message": "Function 'formatTaskCountSegment' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1109,
+              "column": 1,
+              "message": "Function 'buildLine3' has a complexity of 20. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 1109,
+              "column": 1,
+              "message": "Function 'buildLine3' has too many parameters (8). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1164,
+              "column": 8,
+              "message": "Function 'renderStatusLineFromSnapshot' has a complexity of 17. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 1224,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 24. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/status.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 363,
+              "column": 1,
+              "message": "Async function 'getProjectHealth' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 447,
+              "column": 1,
+              "message": "Function 'renderHealthPanel' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 786,
+      "name": "command-other",
+      "warningCount": 16,
+      "files": [
+        {
+          "path": "src/commands/dispatch-bootstrap.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 244,
+              "column": 8,
+              "message": "Async function 'runThinDispatch' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/dispatch.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 484,
+              "column": 1,
+              "message": "Async function 'runDispatch' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 642,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 29. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/install.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 356,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/issue.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 87,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/issue/operations.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "max-params",
+              "line": 92,
+              "column": 1,
+              "message": "Async function 'handleCloseFailure' has too many parameters (6). Maximum allowed is 5."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 138,
+              "column": 8,
+              "message": "Async function 'commentOnIssue' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/issue/sync-display.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 104,
+              "column": 8,
+              "message": "Async function 'handleSync' has a complexity of 27. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/reflect.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 387,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/shim.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 300,
+              "column": 1,
+              "message": "Async function 'install' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/stash.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 46,
+              "column": 8,
+              "message": "Async function 'retireStashByOid' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/tasks.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 476,
+              "column": 1,
+              "message": "Async function 'runRepairTasks' has a complexity of 30. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 476,
+              "column": 1,
+              "message": "Async function 'runRepairTasks' has too many lines (112). Maximum allowed is 110."
+            }
+          ]
+        },
+        {
+          "path": "src/commands/transcript.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 65,
+              "column": 1,
+              "message": "Async function 'runAutoReplyMode' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 164,
+              "column": 1,
+              "message": "Function 'turnToAutoReplyMessage' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 349,
+              "column": 3,
+              "message": "Async method 'run' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 787,
+      "name": "dispatch",
+      "warningCount": 16,
+      "files": [
+        {
+          "path": "src/dispatch/blockingStrategy.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 231,
+              "column": 8,
+              "message": "Function 'processBlockingResults' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 298,
+              "column": 8,
+              "message": "Function 'processAggregatedStopResults' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 350,
+              "column": 3,
+              "message": "Async method 'execute' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 412,
+              "column": 7,
+              "message": "Async method 'processResults' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/contextStrategy.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 20,
+              "column": 7,
+              "message": "Async method 'processResults' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/engine.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 412,
+              "column": 8,
+              "message": "Async function 'runHook' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 907,
+              "column": 8,
+              "message": "Async function 'launchAsyncHooks' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/execute.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 238,
+              "column": 1,
+              "message": "Async function 'enrichPayloadForHooks' has a complexity of 15. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 772,
+              "column": 1,
+              "message": "Async function 'performDispatch' has a complexity of 21. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 772,
+              "column": 1,
+              "message": "Async function 'performDispatch' has too many lines (131). Maximum allowed is 110."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/incoming-inspect.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 98,
+              "column": 1,
+              "message": "Async function 'computeStats' has a complexity of 18. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 188,
+              "column": 1,
+              "message": "Async function 'main' has a complexity of 37. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 188,
+              "column": 1,
+              "message": "Async function 'main' has too many lines (118). Maximum allowed is 110."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/payload-normalize.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 22,
+              "column": 8,
+              "message": "Function 'normalizeAgentHookPayload' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 65,
+              "column": 1,
+              "message": "Function 'normalizeCursorShellCommandShape' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/dispatch/stop-response.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 85,
+              "column": 8,
+              "message": "Function 'normalizeStopDispatchResponseInPlace' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 788,
+      "name": "tasks",
+      "warningCount": 12,
+      "files": [
+        {
+          "path": "src/tasks/task-recovery.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 298,
+              "column": 8,
+              "message": "Async function 'applyCacheAuditWriteThrough' has a complexity of 14. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/tasks/task-resolver.ts",
+          "warningCount": 4,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 47,
+              "column": 1,
+              "message": "Async function 'getAllProjectSessionIds' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 115,
+              "column": 1,
+              "message": "Async function 'scanTranscriptsForCwd' has a complexity of 21. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 140,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 146,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            }
+          ]
+        },
+        {
+          "path": "src/tasks/task-service.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 159,
+              "column": 8,
+              "message": "Async function 'mergeIntoTasks' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/tasks/task-state-cache.ts",
+          "warningCount": 6,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 494,
+              "column": 3,
+              "message": "Method 'applyTaskUpdate' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 511,
+              "column": 13,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 581,
+              "column": 3,
+              "message": "Method 'applyTaskListSnapshot' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 604,
+              "column": 13,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 652,
+              "column": 3,
+              "message": "Method 'applyTaskAuditSnapshot' has a complexity of 15. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 686,
+              "column": 13,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 789,
+      "name": "transcript-parsers",
+      "warningCount": 16,
+      "files": [
+        {
+          "path": "src/transcript-analysis-parse-part1.ts",
+          "warningCount": 11,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 103,
+              "column": 8,
+              "message": "Function 'parseJunieEvents' has a complexity of 114. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 103,
+              "column": 8,
+              "message": "Function 'parseJunieEvents' has too many lines (330). Maximum allowed is 110."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 149,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 152,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 153,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 156,
+              "column": 15,
+              "message": "Blocks are nested too deeply (7). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 166,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 177,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 178,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 208,
+              "column": 13,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 509,
+              "column": 1,
+              "message": "Function 'parseCodexToolInput' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/transcript-analysis-parse-part2.ts",
+          "warningCount": 5,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 277,
+              "column": 8,
+              "message": "Function 'parseAntigravityJsonlEntries' has a complexity of 27. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 310,
+              "column": 11,
+              "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 320,
+              "column": 13,
+              "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "max-depth",
+              "line": 321,
+              "column": 15,
+              "message": "Blocks are nested too deeply (7). Maximum allowed is 4."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 382,
+              "column": 1,
+              "message": "Function 'autoDetectTranscriptFormat' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 790,
+      "name": "transcript-runtime",
+      "warningCount": 11,
+      "files": [
+        {
+          "path": "src/transcript-format.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 43,
+              "column": 8,
+              "message": "Function 'formatToolUse' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 94,
+              "column": 8,
+              "message": "Function 'prettifyUserMessageText' has a complexity of 47. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/transcript-sessions-discovery.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 533,
+              "column": 8,
+              "message": "Async function 'findAntigravitySessions' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/transcript-sessions.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 39,
+              "column": 8,
+              "message": "Async function 'findAllProviderSessions' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/transcript-summary.ts",
+          "warningCount": 5,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 190,
+              "column": 1,
+              "message": "Function 'filterSessionLines' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 269,
+              "column": 1,
+              "message": "Function 'parseAssistantToolBlocks' has a complexity of 15. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 456,
+              "column": 1,
+              "message": "Function 'extractUserSkillExpansions' has a complexity of 15. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 510,
+              "column": 8,
+              "message": "Function 'collectCurrentSessionUsageEvents' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 714,
+              "column": 8,
+              "message": "Async function 'getRecentCurrentSessionUsage' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/transcript-turns.ts",
+          "warningCount": 2,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 115,
+              "column": 1,
+              "message": "Function 'collectTurns' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "max-params",
+              "line": 196,
+              "column": 1,
+              "message": "Async function 'loadJsonlTurnsTail' has too many parameters (6). Maximum allowed is 5."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 791,
+      "name": "typed-schemas",
+      "warningCount": 15,
+      "files": [
+        {
+          "path": "src/active-skills-context.ts",
+          "warningCount": 6,
+          "warnings": [
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 15,
+              "column": 41,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 17,
+              "column": 33,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 18,
+              "column": 28,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 20,
+              "column": 24,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 21,
+              "column": 45,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 45,
+              "column": 1,
+              "message": "Function 'activeSkillsCacheKey' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/repository-capability.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 67,
+              "column": 40,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            }
+          ]
+        },
+        {
+          "path": "src/schemas.ts",
+          "warningCount": 8,
+          "warnings": [
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 502,
+              "column": 89,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 514,
+              "column": 31,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 515,
+              "column": 20,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 580,
+              "column": 43,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 601,
+              "column": 43,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 612,
+              "column": 42,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 633,
+              "column": 43,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 652,
+              "column": 43,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 792,
+      "name": "infractions",
+      "warningCount": 17,
+      "files": [
+        {
+          "path": "src/infractions.ts",
+          "warningCount": 17,
+          "warnings": [
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 122,
+              "column": 34,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 129,
+              "column": 33,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 133,
+              "column": 42,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 143,
+              "column": 48,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 156,
+              "column": 68,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 164,
+              "column": 10,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 165,
+              "column": 8,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 166,
+              "column": 10,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 167,
+              "column": 17,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 168,
+              "column": 13,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 169,
+              "column": 15,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 170,
+              "column": 26,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 174,
+              "column": 10,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 175,
+              "column": 15,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 176,
+              "column": 25,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 239,
+              "column": 8,
+              "message": "Function 'lastSettledAttempt' has a complexity of 12. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 404,
+              "column": 31,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 793,
+      "name": "skill-utils",
+      "warningCount": 0,
+      "files": []
+    },
+    {
+      "issue": 794,
+      "name": "core-state",
+      "warningCount": 12,
+      "files": [
+        {
+          "path": "src/auto-steer-store.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 275,
+              "column": 3,
+              "message": "Method 'enqueue' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/auto-steer/pr-review-tracker.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 49,
+              "column": 8,
+              "message": "Function 'trackPrReviewTransitions' has a complexity of 26. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/collaboration-policy.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 293,
+              "column": 8,
+              "message": "Async function 'detectProjectCollaborationPolicy' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/hook-log.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 227,
+              "column": 3,
+              "message": "Method 'recordAggregates' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/issue-store-rest-fallback.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 495,
+              "column": 8,
+              "message": "Async function 'tryRestFallback' has a complexity of 20. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/issue-store-sync.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 90,
+              "column": 1,
+              "message": "Function 'describeChanges' has a complexity of 25. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 276,
+              "column": 1,
+              "message": "Function 'syncCiRuns' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 573,
+              "column": 8,
+              "message": "Async function 'syncUpstreamState' has a complexity of 29. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/issue-store.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 372,
+              "column": 3,
+              "message": "Method 'migrate' has too many lines (168). Maximum allowed is 110."
+            }
+          ]
+        },
+        {
+          "path": "src/settings/persistence.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 170,
+              "column": 1,
+              "message": "Function 'normalizeStatusLineSegments' has a complexity of 13. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 320,
+              "column": 1,
+              "message": "Function 'normalizeProjectSettings' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 392,
+              "column": 29,
+              "message": "Arrow function has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "issue": 795,
+      "name": "core-utilities",
+      "warningCount": 17,
+      "files": [
+        {
+          "path": "index.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "max-lines-per-function",
+              "line": 74,
+              "column": 1,
+              "message": "Async function 'runGeneralCli' has too many lines (113). Maximum allowed is 110."
+            }
+          ]
+        },
+        {
+          "path": "src/action-plan.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 47,
+              "column": 8,
+              "message": "Function 'formatActionPlan' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/agent-paths.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "@typescript-eslint/no-restricted-types",
+              "line": 110,
+              "column": 35,
+              "message": "Don't use `unknown` as a type.  Validate with Zod at the boundary and use z.infer<typeof schema> or a concrete type instead of `unknown`."
+            }
+          ]
+        },
+        {
+          "path": "src/detect-frameworks.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 232,
+              "column": 1,
+              "message": "Async function 'detectProjectStackInner' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/speech.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 19,
+              "column": 8,
+              "message": "Async function 'narrateSession' has a complexity of 28. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/tools.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 105,
+              "column": 3,
+              "message": "Async method 'execute' has a complexity of 17. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/auto-steer-helpers.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 499,
+              "column": 8,
+              "message": "Async function 'scheduleAutoSteer' has a complexity of 12. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/daemon-git-state.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 54,
+              "column": 8,
+              "message": "Async function 'fetchGitStatusFromDaemon' has a complexity of 11. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 88,
+              "column": 8,
+              "message": "Async function 'fetchLastUserMessageFromDaemon' has a complexity of 14. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 118,
+              "column": 8,
+              "message": "Async function 'fetchSessionTasksFromDaemon' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/hook-output-agent-compat.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 96,
+              "column": 1,
+              "message": "Function 'translateHookOutputToolNames' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/humanise.ts",
+          "warningCount": 3,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 295,
+              "column": 8,
+              "message": "Async function 'getLastTranscriptMessage' has a complexity of 20. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 365,
+              "column": 8,
+              "message": "Async function 'humaniseText' has a complexity of 16. Maximum allowed is 10."
+            },
+            {
+              "ruleId": "complexity",
+              "line": 403,
+              "column": 1,
+              "message": "Async function 'humaniseTextUncached' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/inline-hook-helpers.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 138,
+              "column": 8,
+              "message": "Function 'tokenize' has a complexity of 15. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/jsonl.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 328,
+              "column": 8,
+              "message": "Async function 'readJsonlTailTextFromFile' has a complexity of 11. Maximum allowed is 10."
+            }
+          ]
+        },
+        {
+          "path": "src/utils/test-utils.ts",
+          "warningCount": 1,
+          "warnings": [
+            {
+              "ruleId": "complexity",
+              "line": 32,
+              "column": 8,
+              "message": "Async function 'runCommandInProcess' has a complexity of 13. Maximum allowed is 10."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
