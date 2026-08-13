@@ -10,6 +10,7 @@ import {
 import {
   buildSkillAgentToolEnvironmentFooter,
   clearSkillCache,
+  clearSkillRecencyMemoCache,
   extractMandatedSkillTools,
   extractReferencedToolsFromSkillText,
   extractStepsFromSkill,
@@ -18,6 +19,7 @@ import {
   formatSkillReferenceForAgent,
   getAgentsSkillDir,
   getSkillToolAvailabilityWarning,
+  isAnySkillRecentlyActive,
   isSkillCandidateDir,
   parseFrontmatterField,
   resolveSkillRecencyOptions,
@@ -1091,5 +1093,77 @@ describe("filterQualitySteps", () => {
     }
     expect(filtered.length).toBeGreaterThan(0)
     expect(filtered.length).toBeLessThan(allSteps.length)
+  })
+})
+
+// ─── Skill Recency Memoization & Fail-Closed Tests ─────────────────────────
+
+describe("isAnySkillRecentlyActive memoization & fail-closed governance", () => {
+  test("memoizes active result for consecutive calls within TTL", async () => {
+    clearSkillRecencyMemoCache()
+    const fakeCwd = await createTempDir()
+    const payload = {
+      sessionId: "session-memo-1",
+      tool_name: "Bash",
+      _currentSessionToolUsage: {
+        toolNames: ["Bash"],
+        skillInvocations: ["commit"],
+        events: [
+          {
+            kind: "skill",
+            value: "commit",
+            turnIndex: 1,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
+    }
+
+    const first = await isAnySkillRecentlyActive(payload, fakeCwd)
+    expect(first).toBe(true)
+
+    // Second call with same payload within TTL uses memoized result
+    const second = await isAnySkillRecentlyActive(payload, fakeCwd)
+    expect(second).toBe(true)
+  })
+
+  test("invalidates memoization when payload fingerprint changes", async () => {
+    clearSkillRecencyMemoCache()
+    const fakeCwd = await createTempDir()
+    const payload1 = {
+      sessionId: "session-memo-2",
+      tool_name: "Bash",
+      _registeredSessionLines: ["line1"],
+    }
+    const payload2 = {
+      sessionId: "session-memo-2",
+      tool_name: "Edit",
+      _registeredSessionLines: ["line1", "line2"],
+    }
+
+    await isAnySkillRecentlyActive(payload1, fakeCwd)
+    const result2 = await isAnySkillRecentlyActive(payload2, fakeCwd)
+    expect(typeof result2).toBe("boolean")
+  })
+
+  test("fails closed (returns false) on invalid source or error", async () => {
+    clearSkillRecencyMemoCache()
+    const resultNull = await isAnySkillRecentlyActive(null as any, "/invalid/cwd")
+    expect(resultNull).toBe(false)
+
+    const resultUndefined = await isAnySkillRecentlyActive(undefined as any, "/invalid/cwd")
+    expect(resultUndefined).toBe(false)
+  })
+
+  test("clearSkillRecencyMemoCache resets caches cleanly", async () => {
+    const fakeCwd = await createTempDir()
+    const payload = {
+      sessionId: "session-memo-clear",
+      _currentSessionToolUsage: { events: [] },
+    }
+    await isAnySkillRecentlyActive(payload, fakeCwd)
+    clearSkillRecencyMemoCache()
+    const res = await isAnySkillRecentlyActive(payload, fakeCwd)
+    expect(res).toBe(false)
   })
 })

@@ -146,9 +146,10 @@ export interface ResolvedSkillFile {
   path: string
 }
 
-/** Clear the internal skill existence cache. Primarily for testing. */
+/** Clear internal skill existence and recency caches. Primarily for testing. */
 export function clearSkillCache(): void {
   _skillCache.clear()
+  clearSkillRecencyMemoCache()
 }
 
 function resolveSkillFilePathFromDirs(name: string, dirs: string[]): string | null {
@@ -515,6 +516,30 @@ export function formatSkillFileReadFallback(skillFiles: readonly ResolvedSkillFi
 
 export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions }
 
+interface RecencyOptionsMemoEntry {
+  result: { recencyOptions: CurrentSessionUsageRecencyOptions; windowText: string }
+  timestamp: number
+}
+
+interface SkillRecencyMemoEntry {
+  active: boolean
+  skills: string[]
+  fingerprint: string
+  timestamp: number
+}
+
+const recencyOptionsCache = new Map<string, RecencyOptionsMemoEntry>()
+const skillRecencyMemoCache = new Map<string, SkillRecencyMemoEntry>()
+const RECENCY_OPTIONS_MEMO_TTL_MS = 5_000
+const SKILL_RECENCY_MEMO_TTL_MS = 3_000
+const MAX_MEMO_ENTRIES = 50
+
+/** Clear internal skill recency memoization caches. Primarily for testing. */
+export function clearSkillRecencyMemoCache(): void {
+  recencyOptionsCache.clear()
+  skillRecencyMemoCache.clear()
+}
+
 /**
  * Resolve the project-configurable skill-recency window (turns + max age) and its
  * human-readable text in one call. Replaces the per-gate `resolveNumericSetting`
@@ -523,6 +548,12 @@ export { formatCurrentSessionUsageWindow, type CurrentSessionUsageRecencyOptions
 export async function resolveSkillRecencyOptions(
   cwd: string
 ): Promise<{ recencyOptions: CurrentSessionUsageRecencyOptions; windowText: string }> {
+  const now = Date.now()
+  const cached = recencyOptionsCache.get(cwd)
+  if (cached && now - cached.timestamp < RECENCY_OPTIONS_MEMO_TTL_MS) {
+    return cached.result
+  }
+
   const [maxTurns, maxAgeMinutes] = await Promise.all([
     resolveNumericSetting(cwd, "skillRecencyMaxTurns", DEFAULT_SKILL_RECENCY_MAX_TURNS),
     resolveNumericSetting(cwd, "skillRecencyMaxAgeMinutes", DEFAULT_SKILL_RECENCY_MAX_AGE_MINUTES),
@@ -531,10 +562,57 @@ export async function resolveSkillRecencyOptions(
     maxTurns,
     maxAgeMs: maxAgeMinutes * 60 * 1000,
   }
-  return { recencyOptions, windowText: formatCurrentSessionUsageWindow(recencyOptions) }
+  const result = { recencyOptions, windowText: formatCurrentSessionUsageWindow(recencyOptions) }
+
+  if (recencyOptionsCache.size >= MAX_MEMO_ENTRIES) {
+    for (const [k, entry] of recencyOptionsCache.entries()) {
+      if (now - entry.timestamp >= RECENCY_OPTIONS_MEMO_TTL_MS) {
+        recencyOptionsCache.delete(k)
+      }
+    }
+    if (recencyOptionsCache.size >= MAX_MEMO_ENTRIES) recencyOptionsCache.clear()
+  }
+  recencyOptionsCache.set(cwd, { result, timestamp: now })
+
+  return result
 }
 
 type CurrentSessionUsageSource = Parameters<typeof getRecentSkillsUsedForCurrentSession>[0]
+
+function computeUsageSourceKey(
+  source: CurrentSessionUsageSource,
+  cwd: string
+): { cacheKey: string; fingerprint: string } | null {
+  if (typeof source === "string") {
+    return source ? { cacheKey: `${source}:${cwd}`, fingerprint: source } : null
+  }
+  if (!source || typeof source !== "object") return null
+
+  const keyBase =
+    typeof source.sessionId === "string"
+      ? source.sessionId
+      : typeof source.session_id === "string"
+        ? source.session_id
+        : typeof source.sessionPrefix === "string"
+          ? source.sessionPrefix
+          : typeof source.transcriptPath === "string"
+            ? source.transcriptPath
+            : typeof source.transcript_path === "string"
+              ? source.transcript_path
+              : null
+  if (!keyBase) return null
+
+  const usageObj = source._currentSessionToolUsage as { events?: unknown[] } | undefined
+  const linesArr = source._registeredSessionLines as unknown[] | undefined
+  const usageEventsCount = Array.isArray(usageObj?.events) ? usageObj.events.length : 0
+  const sessionLinesCount = Array.isArray(linesArr) ? linesArr.length : 0
+  const toolName = (source.tool_name ?? source.toolName ?? "") as string
+
+  return {
+    cacheKey: `${keyBase}:${cwd}`,
+    fingerprint: `${keyBase}:${usageEventsCount}:${sessionLinesCount}:${toolName}`,
+  }
+}
 
 export async function getRecentlyInvokedSkillsForCurrentSession(
   source: CurrentSessionUsageSource,
@@ -561,9 +639,44 @@ export async function isAnySkillRecentlyActive(
   cwd: string
 ): Promise<boolean> {
   try {
+    const keyInfo = computeUsageSourceKey(source, cwd)
+    const now = Date.now()
+
+    if (keyInfo) {
+      const cached = skillRecencyMemoCache.get(keyInfo.cacheKey)
+      if (
+        cached &&
+        cached.fingerprint === keyInfo.fingerprint &&
+        now - cached.timestamp < SKILL_RECENCY_MEMO_TTL_MS
+      ) {
+        return cached.active
+      }
+    }
+
     const { recencyOptions } = await resolveSkillRecencyOptions(cwd)
     const skills = await getRecentlyInvokedSkillsForCurrentSession(source, recencyOptions)
-    return skills.length > 0
+    const active = skills.length > 0
+
+    if (keyInfo) {
+      if (skillRecencyMemoCache.size >= MAX_MEMO_ENTRIES) {
+        for (const [k, entry] of skillRecencyMemoCache.entries()) {
+          if (now - entry.timestamp >= SKILL_RECENCY_MEMO_TTL_MS) {
+            skillRecencyMemoCache.delete(k)
+          }
+        }
+        if (skillRecencyMemoCache.size >= MAX_MEMO_ENTRIES) {
+          skillRecencyMemoCache.clear()
+        }
+      }
+      skillRecencyMemoCache.set(keyInfo.cacheKey, {
+        active,
+        skills,
+        fingerprint: keyInfo.fingerprint,
+        timestamp: now,
+      })
+    }
+
+    return active
   } catch {
     return false
   }
