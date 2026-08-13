@@ -34,6 +34,8 @@ import {
 } from "./transcript-summary.ts"
 import { stripQuotes } from "./utils/quoted-string.ts"
 
+type HookPayload = Parameters<typeof detectCurrentAgentFromHookPayload>[0]
+
 /** Resolve the standard cross-agent user skill directory. */
 export function getAgentsSkillDir(homeDir: string = getHomeDir()): string {
   return join(homeDir, ".agents", "skills")
@@ -174,7 +176,7 @@ export function resolveSkillFilePath(name: string, cwd?: string): string | null 
  */
 export function resolveSkillFilePathForHookPayload(
   name: string,
-  payload: Record<string, unknown>,
+  payload: HookPayload,
   cwd?: string
 ): string | null {
   const agent = detectCurrentAgentFromHookPayload(payload) ?? detectCurrentAgent()
@@ -217,7 +219,7 @@ export function skillExists(name: string): boolean {
  */
 export function skillExistsForHookPayload(
   name: string,
-  payload: Record<string, unknown>,
+  payload: HookPayload,
   cwd?: string
 ): boolean {
   const agent = detectCurrentAgentFromHookPayload(payload)
@@ -230,7 +232,7 @@ export function skillExistsForHookPayload(
 
 export { agentHasTaskToolsForHookPayload }
 
-export function skillGateAgentIdForHookPayload(payload: Record<string, unknown>): string {
+export function skillGateAgentIdForHookPayload(payload: HookPayload): string {
   return detectCurrentAgentFromHookPayload(payload)?.id ?? detectCurrentAgent()?.id ?? "unknown"
 }
 
@@ -494,7 +496,7 @@ function formatSkillReference(skillName: string, agentId: string | undefined): s
 /** Format a skill invocation reference using the hook caller rather than daemon process state. */
 export function formatSkillReferenceForHookPayload(
   skillName: string,
-  payload: Record<string, unknown>
+  payload: HookPayload
 ): string {
   const agent = detectCurrentAgentFromHookPayload(payload) ?? detectCurrentAgent()
   return formatSkillReference(skillName, agent?.id)
@@ -579,6 +581,29 @@ export async function resolveSkillRecencyOptions(
 
 type CurrentSessionUsageSource = Parameters<typeof getRecentSkillsUsedForCurrentSession>[0]
 
+function firstString(
+  values: readonly CurrentSessionUsageSource[keyof CurrentSessionUsageSource][]
+): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value) return value
+  }
+  return null
+}
+
+function countArrayProperty(
+  source: Exclude<CurrentSessionUsageSource, string>,
+  property: "_registeredSessionLines"
+): number {
+  const value = source[property]
+  return Array.isArray(value) ? value.length : 0
+}
+
+function countUsageEvents(source: Exclude<CurrentSessionUsageSource, string>): number {
+  const usage = source._currentSessionToolUsage
+  if (!usage || typeof usage !== "object" || !("events" in usage)) return 0
+  return Array.isArray(usage.events) ? usage.events.length : 0
+}
+
 function computeUsageSourceKey(
   source: CurrentSessionUsageSource,
   cwd: string
@@ -588,24 +613,17 @@ function computeUsageSourceKey(
   }
   if (!source || typeof source !== "object") return null
 
-  const keyBase =
-    typeof source.sessionId === "string"
-      ? source.sessionId
-      : typeof source.session_id === "string"
-        ? source.session_id
-        : typeof source.sessionPrefix === "string"
-          ? source.sessionPrefix
-          : typeof source.transcriptPath === "string"
-            ? source.transcriptPath
-            : typeof source.transcript_path === "string"
-              ? source.transcript_path
-              : null
+  const keyBase = firstString([
+    source.sessionId,
+    source.session_id,
+    source.sessionPrefix,
+    source.transcriptPath,
+    source.transcript_path,
+  ])
   if (!keyBase) return null
 
-  const usageObj = source._currentSessionToolUsage as { events?: unknown[] } | undefined
-  const linesArr = source._registeredSessionLines as unknown[] | undefined
-  const usageEventsCount = Array.isArray(usageObj?.events) ? usageObj.events.length : 0
-  const sessionLinesCount = Array.isArray(linesArr) ? linesArr.length : 0
+  const usageEventsCount = countUsageEvents(source)
+  const sessionLinesCount = countArrayProperty(source, "_registeredSessionLines")
   const toolName = (source.tool_name ?? source.toolName ?? "") as string
 
   return {
@@ -658,16 +676,7 @@ export async function isAnySkillRecentlyActive(
     const active = skills.length > 0
 
     if (keyInfo) {
-      if (skillRecencyMemoCache.size >= MAX_MEMO_ENTRIES) {
-        for (const [k, entry] of skillRecencyMemoCache.entries()) {
-          if (now - entry.timestamp >= SKILL_RECENCY_MEMO_TTL_MS) {
-            skillRecencyMemoCache.delete(k)
-          }
-        }
-        if (skillRecencyMemoCache.size >= MAX_MEMO_ENTRIES) {
-          skillRecencyMemoCache.clear()
-        }
-      }
+      pruneSkillRecencyMemoCache(now)
       skillRecencyMemoCache.set(keyInfo.cacheKey, {
         active,
         skills,
@@ -680,6 +689,16 @@ export async function isAnySkillRecentlyActive(
   } catch {
     return false
   }
+}
+
+function pruneSkillRecencyMemoCache(now: number): void {
+  if (skillRecencyMemoCache.size < MAX_MEMO_ENTRIES) return
+  for (const [key, entry] of skillRecencyMemoCache.entries()) {
+    if (now - entry.timestamp >= SKILL_RECENCY_MEMO_TTL_MS) {
+      skillRecencyMemoCache.delete(key)
+    }
+  }
+  if (skillRecencyMemoCache.size >= MAX_MEMO_ENTRIES) skillRecencyMemoCache.clear()
 }
 
 export async function wasSkillRecentlyInvokedInCurrentSession(
@@ -748,14 +767,25 @@ export async function hasSkillUsedInProjectRecently(
   for (const f of files) {
     if (!f.endsWith(".jsonl")) continue
     const filePath = join(projectDir, f)
-    try {
-      const { mtimeMs } = await stat(filePath)
-      if (now - mtimeMs > maxAgeMs) continue
-      const text = await Bun.file(filePath).text()
-      if (hasSkillInSessionLines(text.split("\n"), skillName)) return true
-    } catch {}
+    if (await recentTranscriptContainsSkill(filePath, skillName, now, maxAgeMs)) return true
   }
   return false
+}
+
+async function recentTranscriptContainsSkill(
+  filePath: string,
+  skillName: string,
+  now: number,
+  maxAgeMs: number
+): Promise<boolean> {
+  try {
+    const { mtimeMs } = await stat(filePath)
+    if (now - mtimeMs > maxAgeMs) return false
+    const text = await Bun.file(filePath).text()
+    return hasSkillInSessionLines(text.split("\n"), skillName)
+  } catch {
+    return false
+  }
 }
 
 export async function wasToolRecentlyUsedInCurrentSession(
